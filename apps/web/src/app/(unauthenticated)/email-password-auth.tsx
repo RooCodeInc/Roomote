@@ -201,8 +201,7 @@ export function EmailPasswordAuth({
           <p>
             Need an account? Forgot your password?
             <br />
-            Ask your admin. They can create a password reset link in Settings
-            &gt; Users.
+            Ask your admin.
           </p>
           {accountLinkHelpText ? (
             <Streamdown className="mt-2 [&_a]:font-medium [&_a]:underline [&_a]:underline-offset-2 [&_h1]:text-sm! [&_h2]:text-sm! [&_h3]:text-sm! [&_img]:hidden [&_p]:m-0">

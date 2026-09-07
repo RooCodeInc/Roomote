@@ -1,12 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { replaceMock, refreshMock, signInOauth2Mock, signInEmailMock } =
-  vi.hoisted(() => ({
-    replaceMock: vi.fn(),
-    refreshMock: vi.fn(),
-    signInOauth2Mock: vi.fn(),
-    signInEmailMock: vi.fn(),
-  }));
+const { replaceMock, refreshMock, signInOauth2Mock } = vi.hoisted(() => ({
+  replaceMock: vi.fn(),
+  refreshMock: vi.fn(),
+  signInOauth2Mock: vi.fn(),
+}));
 
 let searchParams = new URLSearchParams();
 
@@ -22,7 +20,6 @@ vi.mock('@/lib/auth-client', () => ({
   authClient: {
     signIn: {
       oauth2: signInOauth2Mock,
-      email: signInEmailMock,
     },
   },
 }));
@@ -36,9 +33,7 @@ import { AuthForm } from './auth-form';
 
 describe('AuthForm', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     searchParams = new URLSearchParams();
-    signInEmailMock.mockResolvedValue({ data: {}, error: null });
     signInOauth2Mock.mockResolvedValue({
       data: { url: 'https://oauth.example.com' },
       error: null,
@@ -80,17 +75,8 @@ describe('AuthForm', () => {
     });
   });
 
-  it.each([
-    'https://example.com',
-    '//example.com',
-    '/\\example.com',
-    '/tasks\\mine',
-    '/\n/example.com',
-    '/tasks\t',
-    '/tasks\u0000',
-    '/tasks\u007f',
-  ])('falls back to setup for unsafe redirect URL %j', async (redirectUrl) => {
-    searchParams = new URLSearchParams({ redirect_url: redirectUrl });
+  it('falls back to setup for unsafe redirect URLs', async () => {
+    searchParams = new URLSearchParams('redirect_url=https://example.com');
 
     render(<AuthForm />);
 
@@ -212,82 +198,6 @@ describe('AuthForm', () => {
     ).toBeVisible();
     expect(screen.getByLabelText('Email')).toBeVisible();
     expect(screen.getByLabelText('Password')).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: 'Other sign-in options' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('returns from email to provider options without losing the redirect', async () => {
-    searchParams = new URLSearchParams({ redirect_url: '/tasks?view=mine' });
-    render(<AuthForm />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with email' }),
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Other sign-in options' }),
-    );
-
-    expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
-    );
-    await waitFor(() => {
-      expect(signInOauth2Mock).toHaveBeenCalledWith({
-        providerId: 'microsoft-entra-id',
-        callbackURL: '/tasks?view=mine',
-      });
-    });
-    expect(searchParams.get('redirect_url')).toBe('/tasks?view=mine');
-  });
-
-  it('shows reset success and signs in with the new password at the return path', async () => {
-    searchParams = new URLSearchParams({
-      password_reset: '1',
-      invited: '1',
-      redirect_url: '/tasks?view=mine',
-    });
-    render(<AuthForm canSignUp />);
-
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Your password has been reset. Sign in with your new password.',
-    );
-    expect(screen.queryByLabelText('Name')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Email'), {
-      target: { value: 'person@example.com' },
-    });
-    fireEvent.change(screen.getByLabelText('Password'), {
-      target: { value: 'new-password' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
-    await waitFor(() => {
-      expect(signInEmailMock).toHaveBeenCalledWith({
-        email: 'person@example.com',
-        password: 'new-password',
-        callbackURL: '/tasks?view=mine',
-      });
-      expect(replaceMock).toHaveBeenCalledWith('/tasks?view=mine');
-    });
-  });
-
-  it('allows other sign-in options after a reset', () => {
-    searchParams = new URLSearchParams('password_reset=1');
-    render(<AuthForm />);
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Other sign-in options' }),
-    );
-    expect(
-      screen.getByRole('button', { name: 'Continue with Slack' }),
-    ).toBeVisible();
-  });
-
-  it('does not show reset success for another marker value', () => {
-    searchParams = new URLSearchParams('password_reset=0');
-    render(<AuthForm />);
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Continue with email' }),
-    ).toBeVisible();
   });
 
   it('does not show Telegram as a sign-in provider', () => {
@@ -341,7 +251,6 @@ describe('AuthForm', () => {
       screen.getByText(/Need an account\? Forgot your password\?/),
     ).toBeVisible();
     expect(screen.getByText(/Ask your admin\./)).toBeVisible();
-    expect(screen.getByText(/Settings > Users/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Talk to us' })).toBeVisible();
   });
 

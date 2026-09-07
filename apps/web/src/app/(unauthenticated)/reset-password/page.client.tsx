@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { authClient } from '@/lib/auth-client';
-import { getSafeRedirectUrl } from '@/lib/auth-redirect';
 import {
   Alert,
   AlertCircle,
@@ -28,12 +27,6 @@ export function ResetPasswordPageClient() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   const error = searchParams.get('error');
-  const redirectUrl = getSafeRedirectUrl(searchParams.get('redirect_url'), '');
-  const signInParams = new URLSearchParams();
-  if (redirectUrl) {
-    signInParams.set('redirect_url', redirectUrl);
-  }
-  const signInUrl = `/sign-in${redirectUrl ? `?${signInParams}` : ''}`;
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -73,11 +66,7 @@ export function ResetPasswordPageClient() {
         return;
       }
 
-      const successParams = new URLSearchParams({ password_reset: '1' });
-      if (redirectUrl) {
-        successParams.set('redirect_url', redirectUrl);
-      }
-      router.replace(`/sign-in?${successParams}`);
+      router.replace('/sign-in?password_reset=1');
       router.refresh();
     } catch (resetError) {
       setErrorMessage(
@@ -107,11 +96,11 @@ export function ResetPasswordPageClient() {
                 <AlertCircle />
                 <AlertDescription>
                   This reset link is invalid or expired. Ask an admin to create
-                  a new password reset link in Settings &gt; Users.
+                  a new password reset link.
                 </AlertDescription>
               </Alert>
               <Button asChild variant="outline" className="w-full">
-                <Link href={signInUrl}>Back to sign in</Link>
+                <Link href="/sign-in">Back to sign in</Link>
               </Button>
             </div>
           ) : (
