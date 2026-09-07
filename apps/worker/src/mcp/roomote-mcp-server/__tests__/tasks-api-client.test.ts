@@ -11,7 +11,6 @@ import {
   submitAutomationWorkItems,
   createEnvironment,
   updateEnvironment,
-  submitTaskSuggestions,
   getTaskGoal,
   updateTaskGoal,
   getSessionMessages,
@@ -680,50 +679,6 @@ describe('launchTask', () => {
     await expect(launchTask(config, { prompt: 'b' })).rejects.toThrow(
       'Failed to launch task: 403 Forbidden',
     );
-  });
-});
-
-describe('submitTaskSuggestions', () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it('should POST task suggestions with only user-visible fields', async () => {
-    const mockResponse = {
-      success: true,
-      suggestionCount: 1,
-    };
-
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockResponse,
-    });
-
-    const result = await submitTaskSuggestions(config, 'task-123', {
-      suggestions: [
-        {
-          title: 'Fix cron retries',
-          brief: 'Retry metadata is dropped when rebuilding the payload.',
-        },
-      ],
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.suggestionCount).toBe(1);
-
-    const fetchCall = vi.mocked(fetch).mock.calls[0];
-    expect(fetchCall?.[0]).toBe(
-      'https://test-api.example.com/api/mcp/tasks/task-123/task_suggestions',
-    );
-    expect(fetchCall?.[1]?.method).toBe('POST');
-
-    const body = JSON.parse(fetchCall?.[1]?.body as string);
-    expect(body).toEqual({
-      suggestions: [
-        {
-          title: 'Fix cron retries',
-          brief: 'Retry metadata is dropped when rebuilding the payload.',
-        },
-      ],
-    });
   });
 });
 

@@ -33,7 +33,6 @@ import {
   SESSION_WAKEUP_SCHEDULE_GRAMMAR,
   SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
-  FAST_EXECUTION,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -270,16 +269,11 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
+  description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered.",
   args: {
     message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
-    suggestions: z.array(z.object({
-      title: z.string().min(1).max(140),
-      brief: z.string().min(1).max(2000),
-      environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
-    })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),
 }

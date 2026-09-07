@@ -10,7 +10,6 @@ import {
   CHAT_CHANNELS_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   CHAT_REACTION_EMOJI_TOOL_NAME,
-  FAST_EXECUTION,
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
@@ -237,16 +236,6 @@ const chatReplyArgsSchema = z.object({
   message: z.string().trim().min(1).optional(),
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
-  suggestions: z
-    .array(
-      z.object({
-        title: z.string().trim().min(1).max(140),
-        brief: z.string().trim().min(1).max(2000),
-        environmentId: z.string().trim().min(1).optional(),
-      }),
-    )
-    .max(10)
-    .optional(),
 });
 
 const chatReactionArgsSchema = z.object({
@@ -1610,7 +1599,7 @@ export async function answerFastAgentQuestion({
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
   /** The settling delegated task ran for a custom automation; its closeout is
-   * the run's report and may carry launchable suggestions. */
+   * the run's report. */
   automationReport?: boolean;
   /** Child-selected images to carry through when the parent model omits the
    * optional attachment argument while composing the child update. */
@@ -3730,39 +3719,6 @@ export async function answerFastAgentQuestion({
             // a run that resumes this turn finishes it from that record (see
             // findRecordedCloseout) instead of failing closed.
             if (
-              args.suggestions?.length &&
-              (args.purpose !== 'closeout' ||
-                !platformEvent ||
-                (platformEventKind !== 'automation' && !automationReport) ||
-                !['slack', 'discord', 'teams', 'telegram'].includes(
-                  conversation.surface,
-                ))
-            ) {
-              return {
-                success: false,
-                error:
-                  'Launchable suggestions are available only on chat automation closeouts.',
-              };
-            }
-            const validSuggestionEnvironmentIds = new Set([
-              ALL_REPOSITORIES,
-              FAST_EXECUTION,
-              ...availableEnvironments.map((environment) => environment.id),
-            ]);
-            if (
-              args.suggestions?.some(
-                (suggestion) =>
-                  suggestion.environmentId &&
-                  !validSuggestionEnvironmentIds.has(suggestion.environmentId),
-              )
-            ) {
-              return {
-                success: false,
-                error:
-                  'A suggested task selected an environment that was not found.',
-              };
-            }
-            if (
               platformEventHandling === 'present_only' &&
               args.purpose !== 'closeout'
             ) {
@@ -3797,7 +3753,6 @@ export async function answerFastAgentQuestion({
               args.purpose,
               message,
               signatureImageArtifactIds,
-              args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
               replyTextTracker.consumeUnconsumed();
@@ -3821,9 +3776,6 @@ export async function answerFastAgentQuestion({
                 message,
                 ...(requestedImageArtifactIds.length
                   ? { imageArtifactIds: requestedImageArtifactIds }
-                  : {}),
-                ...(args.suggestions?.length
-                  ? { suggestions: args.suggestions }
                   : {}),
               },
               false,

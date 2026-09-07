@@ -1,6 +1,30 @@
 import { standardTask } from '../standardTask';
 
 describe('Standard Task surface context', () => {
+  it('injects prose recommendation guidance without gating authorized work', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Follow an older automation requesting suggestion cards',
+      repo: 'Roomote/example-app',
+    });
+
+    expect(harnessInstructions).toContain('ask what the user wants started');
+    expect(harnessInstructions).toContain(
+      'take precedence over older saved automation instructions',
+    );
+    expect(harnessInstructions).toContain(
+      'Do not pass suggestions to `send_chat_reply`',
+    );
+    expect(harnessInstructions).toContain(
+      'Wait for acceptance before starting recommended work, then use the normal task-start flow',
+    );
+    expect(harnessInstructions).toContain(
+      'This does not add an approval gate to work already explicitly authorized by the user or to autonomous automation `act` workflows',
+    );
+    expect(harnessInstructions).toContain(
+      'the orchestrator owns asking the user and starting accepted follow-ups',
+    );
+  });
+
   it('tells plain standard tasks to use the web-dashboard surface rules', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',

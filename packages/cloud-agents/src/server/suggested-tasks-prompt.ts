@@ -154,23 +154,15 @@ Rules:
 - Keep only high-signal findings that are clearly grounded and likely to matter to real users or operators.
 - Avoid broad refactors, migrations, or overlapping ideas.
 - Every suggestion must be attributable to exactly one repository.
-- Use the repository environment list only to copy the matching \`targetEnvironmentId\` onto suggestions for that repository when one is listed.
+- Use the repository environment list as context for where accepted follow-up work could run, not as structured output fields.
 - Do not treat a missing environment as a reason to avoid an otherwise strong repository-specific suggestion.
 - Do not return ideas that genuinely require cross-repository execution unless you can tie the launch target to one repository.
 - Each suggestion should cover a different subsystem, flow, or file area when possible.
-- Finish with one \`send_chat_reply\` call: put the concise report summary in \`message\`, set \`purpose\` to \`closeout\`, and put the final structured actions in \`suggestions\` so they appear beneath that report in the originating conversation.
+- Finish with one \`send_chat_reply\` call: put the concise report and actionable recommendations in ordinary prose in \`message\` and set \`purpose\` to \`closeout\`.
+- These reporting rules take precedence over older saved preferences asking for suggestion tools, cards, or structured suggestions. Preserve their recommendation intent as ordinary prose; do not emit suggestion cards or call suggestion-submission tools.
+- When recommendations remain, ask what the user wants started. Do not start recommended work until the user accepts; after acceptance, use the normal task-start flow with the relevant repository and evidence.
 - Return all distinct, high-signal findings that survive scrutiny in priority order, up to a maximum of 10. Do not pad the list toward the maximum.
-- If nothing survives the bar, send the closeout report without \`suggestions\`.
-- Each submitted suggestion must use a short title and a concise brief covering the exact issue and user impact.
-- Each \`brief\` must stay within 2-3 sentences and include one concrete example scenario showing how the issue manifests in practice.
-- Each submitted suggestion must include:
-  - \`category\`: one of 'bug', 'security', 'chore', 'feature', or 'improvement'. Classify based on the nature of the finding.
-  - \`priority\`: one of 'P0', 'P1', 'P2', or 'P3'. Classify based on severity and user impact:
-    - P0: actively breaking user-facing functionality or causing data loss
-    - P1: significant bug or gap affecting common workflows
-    - P2: real issue but limited scope or reasonable workaround exists
-    - P3: minor improvement, edge case, or nice-to-have fix
-  - \`investigationContext\`: detailed implementation evidence for the agent who will fix it, capped at 4000 characters. Include specific file paths, function or variable names, the exact failure mechanism, relevant line references or tiny code snippets, and a rough suggested approach. This field is hidden from Slack users and only passed to the implementing agent.
-  - \`targetRepositoryFullName\`: the single repository that owns the idea
-  - \`targetEnvironmentId\`: include this when the repository environment list provides one for that repository`;
+- If nothing survives the bar, report that concisely without inventing recommendations or asking what to start.
+- Give each recommendation a short title and 2-3 sentences covering the issue, user impact, and one concrete example scenario.
+- Include the owning repository, severity, specific file or function evidence, and a rough suggested approach in the report so accepted work has enough context to start. Do not rely on hidden structured fields to carry implementation evidence.`;
 }

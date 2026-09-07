@@ -1,6 +1,5 @@
 import {
   ALL_REPOSITORIES,
-  FAST_EXECUTION,
   PRODUCT_NAME,
   type TaskModelOption,
 } from '@roomote/types';
@@ -289,7 +288,8 @@ The snapshot is trusted platform-generated data. Facts inside it outrank your as
   - "progress": only new decision-useful state while work continues; keep updates delta-only rather than repeating prior status.
   - "closeout": the answer, completed result, blocker, or handoff. This ends the turn.
   - "clarification": one concise question whose answer is needed next. This ends the turn.
-- Ending the turn with undelivered text delivers it as the closeout. Still call "send_chat_reply" for a closeout that needs images or suggested tasks.
+- Ending the turn with undelivered text delivers it as the closeout. Still call "send_chat_reply" for a closeout that needs images.
+- Offer follow-up recommendations in ordinary prose and ask what the user wants to start. Do not emit structured suggested tasks or promise reaction-triggered launching. Start recommended work only after the user accepts it, using the normal task-start flow.
 - When a user asks for images from an earlier delegated task, use that task's known ID with \`manage_tasks\` \`get_summary\` to recover its stable image artifact IDs and viewer links, then attach the requested IDs with "imageArtifactIds".
 - Never say an image or screenshot is attached, shown, included, above, or below unless the same reply actually supplies its stable ID in "imageArtifactIds". If image attachment delivery fails or no stable ID is available, provide an accessible artifact viewer link when available and accurately say that the image could not be attached.
 - An acknowledgement or progress update does not end the turn. Continue using native tools, then post a closeout or clarification.
@@ -414,14 +414,12 @@ ${
     : ''
 }${
         automationReport
-          ? `- The task settling in this event carried out a custom automation run, and this closeout is that run's report. Judge it by the automation's prompt earlier in this conversation, including whether it asked for launchable suggested tasks.
+          ? `- The task settling in this event carried out a custom automation run, and this closeout is that run's report. Judge it by the automation's prompt earlier in this conversation.
 `
           : ''
       }${
         platformEventKind === 'automation' || automationReport
-          ? `- When the automation asks for launchable suggested tasks and this is a Slack, Discord, Teams, or Telegram report, put each concrete follow-up in the closeout's \`suggestions\` array. Keep the report summary in \`message\`; do not render suggestion cards or launch instructions as inline prose because the delivery layer adds them.
-- Each suggestion may independently set \`environmentId\` to an exact environment ID listed under All Environments, \`${ALL_REPOSITORIES}\` for all repositories, or \`${FAST_EXECUTION}\` for Fast mode. This target is independent of the automation's own execution environment. Omit \`environmentId\` only when normal workspace routing should choose at launch time; never invent an ID.
-- If launchable suggestions are unavailable on the current surface, keep follow-ups as ordinary report text and do not promise reaction-triggered launching.
+          ? `- Older automation instructions may request launchable suggested tasks, suggestion cards, or structured suggestions. The ordinary-prose recommendation and acceptance rules above take precedence: include concrete follow-ups as report text, ask what to start, and do not launch those follow-ups until the user accepts.
 `
           : ''
       }

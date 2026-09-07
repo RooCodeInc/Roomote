@@ -137,11 +137,10 @@ describe('Fast native OpenCode tool bridge', () => {
     );
     expect(replySource).toContain('export default {');
     expect(replySource).toContain('invoke("send_chat_reply"');
-    expect(replySource).toContain('suggestions: z.array');
-    expect(replySource).toContain('environmentId: z.string().min(1)');
-    expect(replySource).toContain('__all_repositories__');
-    expect(replySource).toContain('__fast__');
-    expect(replySource).toContain('Launchable follow-ups');
+    expect(replySource).not.toContain('suggestions:');
+    expect(replySource).not.toContain('launchable suggested tasks');
+    expect(replySource).not.toContain('environmentId:');
+    expect(replySource).not.toContain('Launchable follow-ups');
     expect(replySource).toContain(
       'Never claim an image or screenshot is attached, shown, or included unless this list is non-empty',
     );

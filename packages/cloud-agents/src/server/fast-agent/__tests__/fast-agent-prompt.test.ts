@@ -125,7 +125,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain('unless the prompt names a different one');
   });
 
-  it('offers suggestions on an automation task-settled report only', () => {
+  it('overrides legacy suggestion instructions on an automation task-settled report', () => {
     const settlePrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
@@ -139,9 +139,16 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(settlePrompt).toContain("this closeout is that run's report");
-    expect(settlePrompt).toContain('`suggestions` array');
+    expect(settlePrompt).toContain('acceptance rules above take precedence');
+    expect(settlePrompt).not.toContain('`suggestions` array');
     expect(settlePrompt).not.toContain('Execute the automation prompt now');
     expect(plainSettlePrompt).not.toContain('`suggestions` array');
+    expect(plainSettlePrompt).toContain(
+      'Offer follow-up recommendations in ordinary prose',
+    );
+    expect(plainSettlePrompt).toContain(
+      'Start recommended work only after the user accepts it',
+    );
   });
 
   it('omits the release identifier when no version is resolved', () => {
@@ -822,11 +829,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('fast mode on a stored automation conversation');
     expect(prompt).toContain('Automation Platform Event');
     expect(prompt).toContain('Execute the automation prompt now');
-    expect(prompt).toContain("closeout's `suggestions` array");
-    expect(prompt).toContain('Each suggestion may independently set');
+    expect(prompt).not.toContain("closeout's `suggestions` array");
+    expect(prompt).toContain('acceptance rules above take precedence');
     expect(prompt).toContain('`__all_repositories__`');
-    expect(prompt).toContain('`__fast__`');
-    expect(prompt).toContain('do not promise reaction-triggered launching');
+    expect(prompt).toContain('or promise reaction-triggered launching');
     expect(prompt).not.toContain('<slack_modern_markdown>');
   });
 

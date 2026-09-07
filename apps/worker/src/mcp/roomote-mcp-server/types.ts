@@ -257,12 +257,6 @@ export interface UpdateTaskModelSelectionResponse {
   error?: string;
 }
 
-export interface SubmitTaskSuggestionsResponse {
-  success: boolean;
-  suggestionCount?: number;
-  error?: string;
-}
-
 export interface SubmitAutomationWorkItemsResponse {
   success: boolean;
   workItemCount?: number;

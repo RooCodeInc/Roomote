@@ -70,28 +70,13 @@ describe('buildSuggestedTasksPrompt', () => {
       'Every suggestion must be attributable to exactly one repository.',
     );
     expect(prompt).toContain(
-      'Each `brief` must stay within 2-3 sentences and include one concrete example scenario showing how the issue manifests in practice.',
+      'Give each recommendation a short title and 2-3 sentences covering the issue, user impact, and one concrete example scenario.',
     );
     expect(prompt).toContain(
-      "`priority`: one of 'P0', 'P1', 'P2', or 'P3'. Classify based on severity and user impact:",
+      'Include the owning repository, severity, specific file or function evidence, and a rough suggested approach in the report',
     );
     expect(prompt).toContain(
-      'P0: actively breaking user-facing functionality or causing data loss',
-    );
-    expect(prompt).toContain(
-      '`investigationContext`: detailed implementation evidence for the agent who will fix it, capped at 4000 characters.',
-    );
-    expect(prompt).toContain(
-      'This field is hidden from Slack users and only passed to the implementing agent.',
-    );
-    expect(prompt).toContain(
-      '`targetRepositoryFullName`: the single repository that owns the idea',
-    );
-    expect(prompt).toContain(
-      '`targetEnvironmentId`: include this when the repository environment list provides one for that repository',
-    );
-    expect(prompt).toContain(
-      'Use the repository environment list only to copy the matching `targetEnvironmentId` onto suggestions for that repository when one is listed.',
+      'Use the repository environment list as context for where accepted follow-up work could run, not as structured output fields.',
     );
     expect(prompt).not.toContain('environment-backed execution relevance');
     expect(prompt).not.toContain(
@@ -278,12 +263,42 @@ describe('buildSuggestedTasksPrompt', () => {
     expect(prompt).toContain('observability and operational improvements');
     expect(prompt).toContain('Finish with one `send_chat_reply` call');
     expect(prompt).toContain(
-      'put the final structured actions in `suggestions`',
+      'put the concise report and actionable recommendations in ordinary prose in `message`',
     );
     expect(prompt).not.toContain(
       'Submit suggestions only with the submit_task_suggestions tool',
     );
     expect(prompt).toContain('Do not pad the list toward the maximum');
+    expect(prompt).toContain('ask what the user wants started');
+    expect(prompt).toContain(
+      'after acceptance, use the normal task-start flow',
+    );
+    expect(prompt).not.toContain('in `suggestions`');
+    expect(prompt).not.toContain('`investigationContext`');
+    expect(prompt).toContain(
+      'without inventing recommendations or asking what to start',
+    );
+  });
+
+  it('keeps saved suggestion preferences but overrides their emission instructions', () => {
+    const savedInstructions =
+      'Call submit_task_suggestions to post launchable suggestion cards.';
+    const prompt = buildSuggestedTasksPrompt({
+      repositoryFullNames: ['acme/web'],
+      setupGuidance: null,
+      suggesterInstructions: savedInstructions,
+    });
+
+    expect(prompt).toContain(savedInstructions);
+    expect(prompt).toContain(
+      'These reporting rules take precedence over older saved preferences',
+    );
+    expect(prompt).toContain(
+      'Preserve their recommendation intent as ordinary prose',
+    );
+    expect(prompt).toContain(
+      'Do not start recommended work until the user accepts',
+    );
   });
 
   it('preserves the template interpolation slots in source', () => {
