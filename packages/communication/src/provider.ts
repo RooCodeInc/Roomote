@@ -41,6 +41,8 @@ export type CommunicationPostMessageInput = {
   idempotencyKey?: string;
   text?: string;
   blocks?: unknown[];
+  /** Alternate blocks a provider may use after a recoverable content rejection. */
+  fallbackBlocks?: unknown[];
   images?: Array<{ url: string; altText: string; contentType?: string }>;
   serviceUrl?: string;
   textFormat?: 'plain' | 'markdown' | 'xml';
