@@ -151,6 +151,34 @@ describe('PromptInput', () => {
     expect(textarea).toHaveFocus();
   });
 
+  it('reports unsupported files in a mixed selection', () => {
+    const onError = vi.fn();
+    const prompt = (
+      <PromptInput accept=".txt" onSubmit={() => {}} onError={onError}>
+        <AttachmentCount />
+      </PromptInput>
+    );
+    const { container } = render(prompt);
+
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: {
+        files: [
+          new File(['notes'], 'notes.txt', { type: 'text/plain' }),
+          new File(['unsupported'], 'attachment.bin', {
+            type: 'application/octet-stream',
+          }),
+        ],
+      },
+    });
+
+    expect(screen.getByTestId('attachment-count')).toHaveTextContent('1');
+    expect(onError).toHaveBeenCalledWith({
+      code: 'accept',
+      message:
+        'Some files were not added because their types are not supported.',
+    });
+  });
+
   it('accepts attachments that match extension-based filters', () => {
     const { container } = render(
       <PromptInput accept=".md,.pdf" onSubmit={() => {}}>

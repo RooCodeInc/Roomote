@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { toast } from 'sonner';
 import { BasicTooltip, SendHorizontal } from '@/components/system';
 
 import {
@@ -162,6 +163,7 @@ export function TaskPromptInput({
       <PromptInputRoot
         key={promptKey}
         onSubmit={onSubmit}
+        onError={(error) => toast.error(error.message)}
         clearOnSubmit={false}
         accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}
         multiple

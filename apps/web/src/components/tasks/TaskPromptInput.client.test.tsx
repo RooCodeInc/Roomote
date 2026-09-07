@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toast } from 'sonner';
 import {
   createEvent,
   fireEvent,
@@ -47,6 +48,30 @@ function KeyboardPrompt({
 }
 
 describe('TaskPromptInput', () => {
+  it('reports rejected attachments without clearing the prompt', () => {
+    const errorToast = vi.spyOn(toast, 'error').mockReturnValue(0);
+    try {
+      const { container } = renderPromptInput();
+      fireEvent.change(container.querySelector('input[type="file"]')!, {
+        target: {
+          files: [
+            new File(['unsupported'], 'attachment.bin', {
+              type: 'application/octet-stream',
+            }),
+          ],
+        },
+      });
+
+      expect(errorToast).toHaveBeenCalledWith(
+        'No files match the accepted types.',
+      );
+      expect(screen.getByRole('textbox')).toHaveValue('Fix the login bug');
+      expect(screen.queryByText('attachment.bin')).not.toBeInTheDocument();
+    } finally {
+      errorToast.mockRestore();
+    }
+  });
+
   it('explains why the send button is disabled when hovering it', async () => {
     const reason = 'Create an environment before starting a task.';
 
