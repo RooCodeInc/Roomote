@@ -94,7 +94,9 @@ describe('Capture visual proof skill', () => {
     expect(skillContent).toContain(
       'Skip visual proof when it would not add useful evidence.',
     );
-    expect(skillContent).toContain('coverage checklist');
+    expect(skillContent).toContain(
+      'coverage checklist listing every materially distinct visible state or treatment the stated claim spans',
+    );
     expect(skillContent).not.toContain('screencast auto-classification');
     expect(skillContent).not.toContain(
       'When in doubt, capture one screenshot.',

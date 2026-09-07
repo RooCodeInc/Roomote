@@ -36,7 +36,7 @@ You capture visual proof of a shipped change yourself. Decide whether browser pr
           <action>State the shipped change and the claim to prove in one or two sentences.</action>
           <action>Use your judgment to choose screenshots, video, both, or no visual proof according to what best demonstrates the work. Screenshots suit stable appearance; video is useful for motion and interactions and need not be explicitly requested. Skip visual proof when it would not add useful evidence.</action>
           <action>When browser proof is not applicable, skip capture and return the proof result immediately with one short `Other evidence note` naming the strongest non-visual evidence already in context.</action>
-          <action>Report the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`. For capture, keep a short coverage checklist of the states needed to support your claim.</action>
+          <action>Report the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`. For capture, keep a short coverage checklist listing every materially distinct visible state or treatment the stated claim spans.</action>
         </actions>
       </step>
     </steps>
