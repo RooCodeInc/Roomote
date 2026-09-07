@@ -560,13 +560,14 @@ async function launchTaskSuggestionTaskFromReaction({
   let announceMessageTs: string | undefined;
   let announceChannelId = channelId;
   let taskRun: { id: number | null; taskId: string | null } | null = null;
-  const originSessionId = await resolveSuggestionOriginSessionId(
-    workItem.sourceTaskId,
-  );
-  const originThread = originSessionId
-    ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
-    : null;
   try {
+    const originSessionId = await resolveSuggestionOriginSessionId(
+      workItem.sourceTaskId,
+      suggestionCard.metadata?.originSessionId,
+    );
+    const originThread = originSessionId
+      ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
+      : null;
     announceChannelId = originThread?.channelId ?? channelId;
     announceMessageTs = await slack.postMessage({
       channel: announceChannelId,

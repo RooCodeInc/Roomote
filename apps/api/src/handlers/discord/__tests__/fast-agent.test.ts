@@ -10,6 +10,13 @@ const mocks = vi.hoisted(() => ({
   recordProviderMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
   createConversationArtifact: vi.fn(),
+  resolveSuggestionConversation: vi.fn(),
+  resolveChannel: vi.fn(),
+  getSession: vi.fn(),
+}));
+
+vi.mock('../../tasks/suggestion-launch.js', () => ({
+  resolveSuggestionFastConversation: mocks.resolveSuggestionConversation,
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -30,9 +37,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
-  getOrCreateFastAgentSession: vi
-    .fn()
-    .mockResolvedValue({ id: 'fast-session-1' }),
+  getOrCreateFastAgentSession: mocks.getSession,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -69,7 +74,21 @@ vi.mock('../thread-context.js', () => ({
 }));
 
 vi.mock('../task-launch.js', () => ({
-  discordMetadataForChannel: vi.fn(),
+  discordMetadataForChannel: ({
+    channel,
+    messageId,
+  }: {
+    channel: { channelId: string; parentChannelId?: string };
+    messageId: string;
+  }) => ({
+    communicationProvider: 'discord',
+    communicationChannelId: channel.parentChannelId ?? channel.channelId,
+    communicationThreadId: channel.parentChannelId
+      ? channel.channelId
+      : undefined,
+    communicationMessageId: messageId,
+  }),
+  resolveDiscordChannelContext: mocks.resolveChannel,
   resolveDiscordWorkspace: mocks.resolveWorkspace,
 }));
 
@@ -109,6 +128,7 @@ describe('processDiscordFastAgentMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
+    mocks.getSession.mockResolvedValue({ id: 'fast-session-1' });
     mocks.admitHumanFollowUp.mockResolvedValue({
       kind: 'turn',
       turnLock: mocks.releaseLock,
@@ -127,6 +147,134 @@ describe('processDiscordFastAgentMessage', () => {
       launchResult: { taskId: 'task-1' },
       taskUrl: 'https://roomote.example.com/task/task-1',
     });
+  });
+
+  it('accepts a suggestion on its original conversation and sends replies and delegated work to the canonical target', async () => {
+    const conversation = {
+      surface: 'discord',
+      workspaceId: 'guild-1',
+      conversationId: 'original-report-event',
+      sessionId: 'origin-session',
+      replyTarget: { channelId: 'report-channel', threadId: 'report-thread' },
+    };
+    const channel = {
+      channelId: 'report-thread',
+      parentChannelId: 'report-channel',
+      channelType: 11,
+      channelName: 'Report',
+      guildId: 'guild-1',
+      isThread: true,
+      isDirectMessage: false,
+    };
+    mocks.resolveSuggestionConversation.mockResolvedValueOnce(conversation);
+    mocks.resolveChannel.mockResolvedValueOnce(channel);
+    mocks.fetchHistory.mockResolvedValueOnce([
+      {
+        id: 'history-1',
+        user: 'author',
+        username: 'Author',
+        text: 'Original report',
+      },
+    ]);
+    const onAccepted = vi.fn();
+    const provider = { editMessage: vi.fn().mockResolvedValue(undefined) };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+      const reply = await adapter.postReply({ message: 'Working on it' });
+      await adapter.replaceReply(reply, { message: 'Updated' });
+      await adapter.launchTask({
+        prompt: 'Fix errors',
+        environmentId: ALL_REPOSITORIES,
+        parentSessionId: 'fast-session-1',
+        postKickoff: async () => {},
+      });
+      return null;
+    });
+    await expect(
+      processDiscordFastAgentMessage({
+        eventId: 'new-interaction',
+        originSessionId: 'origin-session',
+        question: 'Investigate errors',
+        sender: { id: 'clicker', username: 'Matt' },
+        senderUserId: 'acting-user',
+        provider: provider as never,
+        applicationId: 'app-1',
+        channel: {
+          ...channel,
+          channelId: 'card-thread',
+          parentChannelId: 'card-channel',
+        },
+        metadata: {
+          communicationChannelId: 'card-channel',
+          communicationThreadId: 'card-thread',
+        } as never,
+        conversationId: 'card-thread',
+        anchorMessageId: 'clicked-card',
+        interaction: {
+          interaction: { id: 'new-interaction', token: 'token' } as never,
+          interactionDeferred: true,
+        },
+        onAccepted,
+      }),
+    ).resolves.toBe(true);
+
+    expect(onAccepted).toHaveBeenCalledWith(expect.any(Function));
+    expect(mocks.resolveSuggestionConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'acting-user',
+        originSessionId: 'origin-session',
+        conversation: expect.objectContaining({
+          conversationId: 'card-thread',
+        }),
+      }),
+    );
+    expect(mocks.acquireLock).toHaveBeenCalledWith({
+      conversation,
+      maxWaitMs: 0,
+    });
+    expect(mocks.getSession).toHaveBeenCalledWith({
+      userId: 'acting-user',
+      conversation,
+    });
+    expect(mocks.fetchHistory).toHaveBeenCalledWith({
+      provider,
+      channelId: 'report-thread',
+      parentChannelId: 'report-channel',
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'acting-user',
+        conversation,
+        threadContext: [expect.objectContaining({ text: 'Original report' })],
+      }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ channel }),
+    );
+    expect(mocks.reply.mock.calls[0]![0]).not.toHaveProperty('interaction');
+    expect(mocks.reply.mock.calls[0]![0]).not.toHaveProperty(
+      'replyToMessageId',
+    );
+    expect(provider.editMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: 'report-thread' }),
+    );
+    expect(mocks.startTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel,
+        launchOwnerUserId: 'acting-user',
+        requesterDiscordUserId: 'clicker',
+        metadata: expect.objectContaining({
+          communicationChannelId: 'report-channel',
+          communicationThreadId: 'report-thread',
+        }),
+        queuedMessage: expect.objectContaining({
+          channel: 'report-channel',
+          threadTs: 'report-thread',
+          userId: 'acting-user',
+        }),
+        fastAgentParent: { sessionId: 'fast-session-1', conversation },
+      }),
+    );
+    expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
   it('creates artifacts against the canonical Fast conversation', async () => {

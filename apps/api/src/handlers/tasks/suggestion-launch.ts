@@ -1,10 +1,19 @@
 import {
+  fastAgentConversationRepository,
+  getOrCreateFastAgentSession,
+} from '@roomote/cloud-agents/server';
+import {
   db,
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
   getSessionForTask,
+  eq,
+  sessions,
 } from '@roomote/db/server';
-import { isDeploymentReadOnlyError } from '@roomote/types';
+import {
+  isDeploymentReadOnlyError,
+  type FastAgentConversation,
+} from '@roomote/types';
 
 import { resolveFastAgentEntryMode } from '../fast-agent-entry.js';
 import { cancelOrphanedWorkItemRunBestEffort } from './orphaned-work-item-run.js';
@@ -181,13 +190,24 @@ export async function launchClaimedSuggestedTask(input: {
 }
 
 /**
- * The Session that owns the task which produced a suggestion, so a launch
- * lands next to that scan instead of opening a new Session. Null when the
- * suggestion has no source task or that task has no Session.
+ * Fast reports can produce suggestions without a source task. Their tracked
+ * cards retain the canonical Session; older task-backed cards resolve via the
+ * task instead. Neither path derives ownership from message timestamps.
  */
 export async function resolveSuggestionOriginSessionId(
   sourceTaskId: string | null | undefined,
+  originSessionId?: unknown,
 ): Promise<string | null> {
+  if (typeof originSessionId === 'string' && originSessionId.trim()) {
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.id, originSessionId),
+      columns: { id: true },
+    });
+    if (!session) {
+      throw new Error('The suggestion origin Session is no longer available.');
+    }
+    return session.id;
+  }
   if (!sourceTaskId) {
     return null;
   }
@@ -200,4 +220,37 @@ export async function resolveSuggestionOriginSessionId(
     );
     return null;
   }
+}
+
+export async function resolveSuggestionFastConversation(input: {
+  userId: string;
+  originSessionId?: string | null;
+  conversation: FastAgentConversation;
+}): Promise<FastAgentConversation> {
+  if (!input.originSessionId) {
+    return input.conversation;
+  }
+  const session = await db.query.sessions.findFirst({
+    where: eq(sessions.id, input.originSessionId),
+    columns: { id: true, fastConversationId: true },
+  });
+  if (!session) {
+    throw new Error('The suggestion origin Session is no longer available.');
+  }
+  // Look up the origin before creating by the clicked card's identity: the
+  // original conversation also owns the reply destination and existing owner.
+  if (session.fastConversationId) {
+    const existing = await fastAgentConversationRepository.findById({
+      id: session.fastConversationId,
+    });
+    if (existing) {
+      return existing.conversation;
+    }
+  }
+  const created = await getOrCreateFastAgentSession({
+    userId: input.userId,
+    conversation: input.conversation,
+    sessionId: session.id,
+  });
+  return created.conversation;
 }

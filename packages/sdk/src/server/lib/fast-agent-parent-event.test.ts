@@ -257,6 +257,8 @@ const parent = {
   },
 };
 
+const originSessionId = '22222222-2222-4222-8222-222222222222';
+
 const event = {
   type: 'artifact_published' as const,
   taskId: 'task-1',
@@ -274,6 +276,7 @@ const event = {
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.findWakeupSession.mockResolvedValue({ id: originSessionId });
     mocks.releaseTurnLock.signal = new AbortController().signal;
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
     mocks.acquireRootBindingLock.mockResolvedValue(
@@ -913,6 +916,59 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
+  it.each([true, false])(
+    'requires the canonical Session for Slack suggestions (found: %s)',
+    async (found) => {
+      const fastConversationId = '33333333-3333-4333-8333-333333333333';
+      mocks.findSession.mockResolvedValueOnce({
+        id: fastConversationId,
+        userId: 'u1',
+        conversation: parent.conversation,
+        messages: [],
+      });
+      mocks.findWakeupSession.mockResolvedValueOnce(
+        found ? { id: originSessionId } : null,
+      );
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Report',
+          suggestions: [
+            { title: 'Investigate', brief: 'Trace the regression.' },
+          ],
+        }),
+      );
+      const delivery = deliverFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-canonical',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find regressions.',
+          trigger: 'schedule',
+          rootMessageId: '100.001',
+        },
+      });
+      if (found) {
+        await delivery;
+        expect(mocks.postSlackSuggestions).toHaveBeenCalledWith(
+          expect.objectContaining({ originSessionId }),
+        );
+      } else {
+        await expect(delivery).rejects.toThrow(
+          'Fast suggestion origin Session was not found.',
+        );
+        expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
+      }
+      expect(mocks.findWakeupSession).toHaveBeenCalledWith(
+        expect.any(Object),
+        fastConversationId,
+      );
+      expect(mocks.bindConversation).not.toHaveBeenCalled();
+    },
+  );
+
   it('posts structured suggestions beneath a Fast Slack automation report', async () => {
     const suggestions = [
       {
@@ -952,6 +1008,7 @@ describe('deliverFastAgentParentEvent', () => {
       true,
     );
     expect(mocks.postSlackSuggestions).toHaveBeenCalledWith({
+      originSessionId,
       slack: expect.any(Object),
       channelId: 'C123',
       threadTs: '100.001',
@@ -1008,6 +1065,7 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(mocks.postDiscordSuggestions).toHaveBeenCalledWith({
+      originSessionId,
       provider: expect.any(Object),
       channelId: 'channel-1',
       threadId: 'thread-1',
@@ -1198,6 +1256,7 @@ describe('deliverFastAgentParentEvent', () => {
       true,
     );
     expect(mocks.postSlackSuggestions).toHaveBeenCalledWith({
+      originSessionId,
       slack: expect.any(Object),
       channelId: 'C123',
       threadTs: '101.001',
@@ -1252,6 +1311,7 @@ describe('deliverFastAgentParentEvent', () => {
       true,
     );
     expect(mocks.postDiscordSuggestions).toHaveBeenCalledWith({
+      originSessionId,
       provider: expect.any(Object),
       channelId: 'channel-1',
       threadId: 'thread-1',
@@ -1765,11 +1825,16 @@ describe('deliverFastAgentParentEvent', () => {
 
       expect(postSuggestions).toHaveBeenCalledWith(
         expect.objectContaining({
+          originSessionId,
           channelId,
           eventId: `${surface}-occurrence-1`,
           createdByUserId: 'u1',
           suggestions,
         }),
+      );
+      expect(mocks.findWakeupSession).toHaveBeenCalledWith(
+        expect.any(Object),
+        parent.sessionId,
       );
       expect(mocks.recordProviderMessage).toHaveBeenCalledWith({
         sessionId: parent.sessionId,

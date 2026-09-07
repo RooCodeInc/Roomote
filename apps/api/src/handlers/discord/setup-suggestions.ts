@@ -55,6 +55,7 @@ type DiscordSuggestionLaunchClaim = {
   usesRouterLaunch: boolean;
   /** The scan or onboarding task that produced the suggestion. */
   sourceTaskId: string | null;
+  originSessionId?: unknown;
   launchClaimedAt: Date;
 };
 
@@ -229,6 +230,7 @@ export async function claimDiscordSuggestionLaunch(input: {
       : {}),
     usesRouterLaunch: routed,
     sourceTaskId: claimed.sourceTaskId,
+    originSessionId: trackedCard.metadata?.originSessionId,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }
