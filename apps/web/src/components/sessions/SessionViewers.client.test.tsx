@@ -1,5 +1,14 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { SessionViewerAvatars } from './SessionViewers';
+import { useSessionViewers } from '@/hooks/useSessionViewers';
+import { SessionViewerAvatars, SessionViewers } from './SessionViewers';
+
+vi.mock('@/hooks/useSessionViewers', () => ({
+  useSessionViewers: vi.fn(),
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ userId: '0' }),
+}));
 
 const viewers = Array.from({ length: 5 }, (_, index) => ({
   id: String(index),
@@ -7,6 +16,35 @@ const viewers = Array.from({ length: 5 }, (_, index) => ({
   email: `viewer${index}@example.com`,
   imageUrl: '',
 }));
+
+it.each([
+  ['self only', [0], []],
+  ['self and others', [1, 0, 2], [1, 2]],
+  ['others only', [1, 2], [1, 2]],
+] as const)('shows only other viewers for %s', (_, present, expected) => {
+  const presence = present.map((index) => viewers[index]!);
+  vi.mocked(useSessionViewers).mockReturnValue(presence);
+
+  render(<SessionViewers sessionId="canonical-session-id" />);
+
+  expect(useSessionViewers).toHaveBeenCalledWith('canonical-session-id');
+  expect(
+    screen.queryByLabelText('Viewer 0 is viewing'),
+  ).not.toBeInTheDocument();
+  if (expected.length === 0) {
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
+  } else {
+    expect(
+      within(screen.getByRole('group')).getAllByLabelText(/is viewing$/),
+    ).toHaveLength(expected.length);
+    for (const index of expected) {
+      expect(
+        screen.getByLabelText(`Viewer ${index} is viewing`),
+      ).toBeInTheDocument();
+    }
+  }
+  expect(presence.map((viewer) => viewer.id)).toEqual(present.map(String));
+});
 
 it('hides an empty group and renders every viewer, including above three', () => {
   const { rerender } = render(<SessionViewerAvatars viewers={[]} />);
