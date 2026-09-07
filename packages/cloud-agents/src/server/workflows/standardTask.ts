@@ -454,7 +454,6 @@ ${buildGitHubMessageInstructions()}`
   <task_context>
     <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : repo}</repository>
     <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel) : 'Single repository workspace.'}</workspace_context>
-    <visual_proof_context>Screencast auto-classification is disabled for this task.</visual_proof_context>
   </task_context>
 
   ${taskSurfaceContext}
