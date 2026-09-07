@@ -5,14 +5,14 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
-const SOURCE_PATH = join(SCRIPT_DIRECTORY, 'task-robot-icons.source.jpg');
+const SOURCE_PATH = join(SCRIPT_DIRECTORY, 'task-robot-icons.source.png');
 const OUTPUT_DIRECTORY = join(SCRIPT_DIRECTORY, '..', 'public', 'task-robots');
-const SOURCE_GRID_SIZE = 11;
-const ICON_COUNT = 100;
+const SOURCE_GRID_SIZE = 5;
+const ICON_COUNT = 25;
 const OUTPUT_SIZE = 96;
-const DRAWING_SIZE = 76;
+const DRAWING_SIZE = 70;
 const DRAWING_PADDING = 2;
-const BACKGROUND = { r: 213, g: 241, b: 68 };
+const BACKGROUND = { r: 213, g: 237, b: 65 };
 const FOREGROUND_DISTANCE_SQUARED = 50 ** 2;
 
 async function findDrawingMetrics(image, name) {
@@ -154,7 +154,7 @@ for (let index = 0; index < ICON_COUNT; index += 1) {
         ),
       },
     ])
-    .png({ compressionLevel: 9 })
+    .png({ compressionLevel: 9, palette: true, colours: 256, dither: 0 })
     .toFile(join(OUTPUT_DIRECTORY, name));
 }
 

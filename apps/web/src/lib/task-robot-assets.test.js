@@ -6,17 +6,17 @@ import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 
 const ASSET_DIRECTORY = join(process.cwd(), 'public', 'task-robots');
-const BACKGROUND = { r: 213, g: 241, b: 68 };
+const BACKGROUND = { r: 213, g: 237, b: 65 };
 const FOREGROUND_DISTANCE_SQUARED = 50 ** 2;
 
 describe('generated task robot assets', () => {
-  it('contains 100 centered 96px robot drawings', async () => {
+  it('contains 25 centered 96px robot drawings', async () => {
     const files = (await readdir(ASSET_DIRECTORY))
       .filter((file) => file.endsWith('.png'))
       .sort();
-    expect(files).toHaveLength(100);
+    expect(files).toHaveLength(25);
     expect(files[0]).toBe('robot-001.png');
-    expect(files.at(-1)).toBe('robot-100.png');
+    expect(files.at(-1)).toBe('robot-025.png');
 
     for (const file of files) {
       const { data, info } = await sharp(join(ASSET_DIRECTORY, file))

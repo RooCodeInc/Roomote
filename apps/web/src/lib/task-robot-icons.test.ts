@@ -3,7 +3,7 @@ import {
   resolveTaskRobotIconId,
 } from './task-robot-icons';
 
-const taskIds = Array.from({ length: 101 }, (_, index) => `task-${index + 1}`);
+const taskIds = Array.from({ length: 26 }, (_, index) => `task-${index + 1}`);
 
 describe('task robot icon assignment', () => {
   it('is deterministic for the same task and session', () => {
@@ -16,7 +16,7 @@ describe('task robot icon assignment', () => {
     expect(resolveTaskRobotIconId(input)).toBe(resolveTaskRobotIconId(input));
   });
 
-  it('keeps all first 100 tasks in a session unique', () => {
+  it('keeps all first 25 tasks in a session unique', () => {
     const assignments = taskIds.slice(0, TASK_ROBOT_ICON_COUNT).map((taskId) =>
       resolveTaskRobotIconId({
         taskId,
@@ -64,19 +64,19 @@ describe('task robot icon assignment', () => {
     );
   });
 
-  it('reuses the seeded permutation after 100 tasks', () => {
+  it('reuses the seeded permutation after 25 tasks', () => {
     const first = resolveTaskRobotIconId({
       taskId: taskIds[0]!,
       sessionId: 'session-a',
       orderedTaskIds: taskIds,
     });
-    const oneHundredAndFirst = resolveTaskRobotIconId({
-      taskId: taskIds[100]!,
+    const twentySixth = resolveTaskRobotIconId({
+      taskId: taskIds[25]!,
       sessionId: 'session-a',
       orderedTaskIds: taskIds,
     });
 
-    expect(oneHundredAndFirst).toBe(first);
+    expect(twentySixth).toBe(first);
   });
 
   it('provides a stable hash fallback when the task list is partial', () => {

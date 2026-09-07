@@ -1,4 +1,4 @@
-export const TASK_ROBOT_ICON_COUNT = 100;
+export const TASK_ROBOT_ICON_COUNT = 25;
 
 type TaskRobotIconId = `robot-${string}`;
 
@@ -59,7 +59,7 @@ export function resolveTaskRobotIconId({
     ? [...new Set(orderedTaskIds)].indexOf(taskId)
     : -1;
   // Session task queries are ordered by attachment time and grow as a stable
-  // prefix. The 101st task intentionally reuses the first seeded icon.
+  // prefix. The 26th task intentionally reuses the first seeded icon.
   const slot =
     orderedIndex >= 0
       ? orderedIndex % TASK_ROBOT_ICON_COUNT
