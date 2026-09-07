@@ -165,9 +165,7 @@ function WakingUpMessage() {
       <MessageContent>
         <div className="flex items-center gap-2 text-sm">
           <Sun className="size-4 shrink-0 text-muted-foreground" />
-          <Shimmer direction="rl" duration={1}>
-            Waking up
-          </Shimmer>
+          <Shimmer>Waking up</Shimmer>
         </div>
       </MessageContent>
     </Message>
