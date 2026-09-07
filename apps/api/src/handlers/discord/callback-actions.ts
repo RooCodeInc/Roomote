@@ -353,8 +353,13 @@ async function launchClaimedDiscordSuggestion(input: {
             : {}),
       },
       launch: async (launchMode) => {
+        const originSessionId = await resolveSuggestionOriginSessionId(
+          suggestion.sourceTaskId,
+          suggestion.originSessionId,
+        );
         if (launchMode === 'fast') {
           const fastStart = await startDiscordFastAgentResponse({
+            ...(originSessionId ? { originSessionId } : {}),
             eventId: input.triggerId,
             question: promptText,
             sender: input.sender,
@@ -433,10 +438,6 @@ async function launchClaimedDiscordSuggestion(input: {
           channel: launchChannel,
           messageId: input.triggerId,
         });
-        const originSessionId = await resolveSuggestionOriginSessionId(
-          suggestion.sourceTaskId,
-          suggestion.originSessionId,
-        );
         let launchedRunId: number | null = null;
         const pinned = await launchPinnedFastSessionTask({
           userId: input.senderUserId,

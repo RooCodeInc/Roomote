@@ -28,6 +28,7 @@ const {
   continueFastAgentSurfaceReplyMock,
   getOrCreateFastAgentSessionMock,
   fastAbortMock,
+  resolveSuggestionFastConversationMock,
 } = vi.hoisted(() => ({
   answerCallbackMock: vi.fn(),
   apiLoggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -46,6 +47,12 @@ const {
   continueFastAgentSurfaceReplyMock: vi.fn(),
   getOrCreateFastAgentSessionMock: vi.fn(),
   fastAbortMock: vi.fn(),
+  resolveSuggestionFastConversationMock: vi.fn(),
+}));
+
+vi.mock('../../tasks/suggestion-launch.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof suggestionLaunch>()),
+  resolveSuggestionFastConversation: resolveSuggestionFastConversationMock,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -210,6 +217,9 @@ beforeEach(() => {
     workspaceDisplayName: 'App',
   });
   getOrCreateFastAgentSessionMock.mockResolvedValue({ id: 'session-1' });
+  resolveSuggestionFastConversationMock.mockImplementation(
+    async ({ conversation }) => conversation,
+  );
   fastAbortMock.mockResolvedValue(undefined);
   // Admission fires before the turn runs; the default turn then completes.
   continueFastAgentSurfaceReplyMock.mockImplementation(
@@ -300,7 +310,10 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     );
   });
 
-  it('lets Fast decide for router-backed suggestions instead of launching directly', async () => {
+  it('keeps the taskless router card origin when dispatching to Fast', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
     claimTelegramSuggestionLaunchMock.mockResolvedValue({
       id: WORK_ITEM_ID,
       title: 'Fix the flaky test',
@@ -308,11 +321,24 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
       investigationContext: null,
       targetRepositoryFullName: null,
       usesRouterLaunch: true,
+      sourceTaskId: null,
+      originSessionId: 'session-card',
       launchClaimedAt: CLAIMED_AT,
     });
 
     await handleTelegramCallbackQuery(buildSuggestionQuery());
 
+    expect(resolveOrigin).toHaveBeenCalledWith(null, 'session-card');
+    expect(resolveSuggestionFastConversationMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      originSessionId: 'session-origin',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '555',
+        conversationId: '555:user:user-1',
+        replyTarget: { channelId: '555' },
+      },
+    });
     expect(continueFastAgentSurfaceReplyMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: 'session-1',
@@ -325,6 +351,103 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
       expect.anything(),
       { id: WORK_ITEM_ID, taskId: null, claimedAt: CLAIMED_AT },
     );
+  });
+
+  it('admits the Fast turn on the original conversation and canonical reply target, not the clicked topic', async () => {
+    vi.spyOn(
+      suggestionLaunch,
+      'resolveSuggestionOriginSessionId',
+    ).mockResolvedValueOnce('session-origin');
+    claimTelegramSuggestionLaunchMock.mockResolvedValueOnce({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      targetRepositoryFullName: '__fast__',
+      launchTarget: '__fast__',
+      sourceTaskId: null,
+      originSessionId: 'session-origin',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    const canonicalConversation = {
+      surface: 'telegram' as const,
+      workspaceId: '555',
+      conversationId: '11:user:report-owner',
+      replyTarget: { channelId: '555', threadId: '11' },
+    };
+    resolveSuggestionFastConversationMock.mockResolvedValueOnce(
+      canonicalConversation,
+    );
+    getOrCreateFastAgentSessionMock.mockImplementationOnce(async (input) => {
+      expect(input).toEqual({
+        userId: 'user-1',
+        conversation: canonicalConversation,
+      });
+      return { id: 'fast-origin', conversation: canonicalConversation };
+    });
+    continueFastAgentSurfaceReplyMock.mockImplementationOnce(
+      ({ sessionId, userId, onAccepted }) => {
+        expect(sessionId).toBe('fast-origin');
+        expect(userId).toBe('user-1');
+        expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
+        onAccepted(fastAbortMock);
+        return new Promise<boolean>(() => {});
+      },
+    );
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery(44));
+
+    expect(resolveSuggestionFastConversationMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      originSessionId: 'session-origin',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '555',
+        conversationId: '44:user:user-1',
+        replyTarget: { channelId: '555', threadId: '44' },
+      },
+    });
+    expect(continueFastAgentSurfaceReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'fast-origin',
+        userId: 'user-1',
+        currentMessageId: '100',
+      }),
+    );
+    expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: WORK_ITEM_ID, taskId: null, claimedAt: CLAIMED_AT },
+    );
+    expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
+    expect(fastAbortMock).not.toHaveBeenCalled();
+    expect(launchPinnedMock).not.toHaveBeenCalled();
+    expect(launchTelegramTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the fenced claim if taskless origin resolution fails before Fast dispatch', async () => {
+    vi.spyOn(
+      suggestionLaunch,
+      'resolveSuggestionOriginSessionId',
+    ).mockRejectedValueOnce(new Error('Origin unavailable'));
+    claimTelegramSuggestionLaunchMock.mockResolvedValueOnce({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      usesRouterLaunch: true,
+      sourceTaskId: null,
+      originSessionId: 'session-origin',
+      launchClaimedAt: CLAIMED_AT,
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery(44));
+
+    expect(continueFastAgentSurfaceReplyMock).not.toHaveBeenCalled();
+    expect(resolveSuggestionFastConversationMock).not.toHaveBeenCalled();
+    expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledTimes(1);
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
+      id: WORK_ITEM_ID,
+      claimedAt: CLAIMED_AT,
+    });
   });
 
   it('launches directly in the environment saved on the suggestion', async () => {
