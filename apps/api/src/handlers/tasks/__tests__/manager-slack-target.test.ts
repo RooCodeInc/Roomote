@@ -216,5 +216,29 @@ describe.each(['work items', 'scheduled suggestions'] as const)(
         .values({ managerSlackChannelId: 'CMANAGER' });
       await deliver('CMANAGER', 'token-a');
     });
+
+    it('uses the oldest mapping from the first active installation', async () => {
+      await installation('token-inactive', false);
+      const a = await installation('token-a');
+      const b = await installation('token-b');
+      await db.insert(slackInstallationChannels).values([
+        {
+          slackInstallationId: a.id,
+          channelId: 'CNEW',
+          createdAt: new Date('2026-02-01'),
+        },
+        {
+          slackInstallationId: b.id,
+          channelId: 'COTHER',
+          createdAt: new Date('2025-01-01'),
+        },
+        {
+          slackInstallationId: a.id,
+          channelId: 'COLD',
+          createdAt: new Date('2026-01-01'),
+        },
+      ]);
+      await deliver('COLD', 'token-a');
+    });
   },
 );
