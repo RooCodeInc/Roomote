@@ -1122,9 +1122,14 @@ describe('submitTaskSuggestions', () => {
     },
   );
 
-  it.each([0, 1])(
-    'reuses the report root and original channel after %i cards were delivered',
-    async (deliveredCards) => {
+  it.each([
+    { deliveredCards: 0, configuredChannel: 'C-CHANGED' },
+    { deliveredCards: 1, configuredChannel: 'C-CHANGED' },
+    { deliveredCards: 0, configuredChannel: undefined },
+    { deliveredCards: 1, configuredChannel: undefined },
+  ])(
+    'reuses the report root after $deliveredCards cards with configured channel $configuredChannel',
+    async ({ deliveredCards, configuredChannel }) => {
       const app = createApp({
         runId: 1,
         userId: null,
@@ -1159,8 +1164,9 @@ describe('submitTaskSuggestions', () => {
         metadata: { sourceTaskId: 'task-1', slackTeamId: 'T1' },
       });
       vi.mocked(getAutomationRuntime).mockResolvedValue({
-        slackChannelId: 'C-CHANGED',
+        slackChannelId: configuredChannel,
       } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
+      slackInstallationChannelRows = [];
       mockPostMessage.mockClear();
 
       expect((await submit()).status).toBe(200);
