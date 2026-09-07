@@ -6,16 +6,13 @@ import {
   desc,
   environments,
   eq,
+  fastAgentParentEvents,
   sql,
-  taskMessages,
   tasks,
 } from '@roomote/db/server';
 import {
-  ACP_ENVELOPE_EVENT_TYPES,
-  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  getFastAgentParentFromPayload,
   getLinkedEnvironmentIdFromPayload,
-  getTextFromContentBlocks,
-  resolveAcpTranscriptVisibility,
 } from '@roomote/types';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { Env } from '@roomote/env';
@@ -71,41 +68,37 @@ export async function getTaskSummary(
 
     const latestRuns = await getLatestTaskRunsByTaskIds([task.id]);
     const latestRun = latestRuns[task.id] ?? null;
+    const parent = getFastAgentParentFromPayload(latestRun?.payload);
     const linkedEnvironmentId = getLinkedEnvironmentIdFromPayload(
       latestRun?.payload,
     );
-    const [linkedEnvironment, artifacts, latestAssistantMessage] =
-      await Promise.all([
-        linkedEnvironmentId
-          ? db.query.environments.findFirst({
-              where: eq(environments.id, linkedEnvironmentId),
-              columns: { id: true, name: true },
-            })
-          : null,
-        listArtifactsByTask({ taskId: task.id, auth: {} }),
-        db.query.taskMessages.findFirst({
-          where: and(
-            eq(taskMessages.taskId, task.id),
-            eq(taskMessages.protocol, ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL),
-            eq(
-              taskMessages.eventType,
-              ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+    const [linkedEnvironment, artifacts, latestReport] = await Promise.all([
+      linkedEnvironmentId
+        ? db.query.environments.findFirst({
+            where: eq(environments.id, linkedEnvironmentId),
+            columns: { id: true, name: true },
+          })
+        : null,
+      listArtifactsByTask({ taskId: task.id, auth: {} }),
+      parent
+        ? db.query.fastAgentParentEvents.findFirst({
+            where: and(
+              eq(fastAgentParentEvents.conversationId, parent.sessionId),
+              sql`${fastAgentParentEvents.event} ->> 'type' = 'child_message'`,
+              sql`${fastAgentParentEvents.event} ->> 'taskId' = ${task.id}`,
             ),
-            sql`coalesce(${taskMessages.metadata} ->> 'visibleInTranscript', 'true') <> 'false'`,
-          ),
-          orderBy: [
-            desc(taskMessages.ts),
-            desc(taskMessages.createdAt),
-            desc(taskMessages.id),
-          ],
-          columns: { eventType: true, contentBlocks: true, metadata: true },
-        }),
-      ]);
-    // Capture the last visible agent narrative, not a newly generated summary.
+            orderBy: [
+              desc(fastAgentParentEvents.createdAt),
+              desc(fastAgentParentEvents.id),
+            ],
+            columns: { event: true },
+          })
+        : null,
+    ]);
+    // reportToParentSession durably stores the task's literal response here.
     const summary =
-      latestAssistantMessage &&
-      resolveAcpTranscriptVisibility(latestAssistantMessage)
-        ? getTextFromContentBlocks(latestAssistantMessage.contentBlocks)?.trim()
+      typeof latestReport?.event.message === 'string'
+        ? latestReport.event.message
         : null;
     const imageArtifacts = artifacts
       .filter((artifact) => artifact.contentType.startsWith('image/'))
@@ -125,7 +118,7 @@ export async function getTaskSummary(
     return c.json({
       id: task.id,
       title: task.title,
-      summary: summary ? redactSecrets(summary) : null,
+      summary: summary?.trim() ? redactSecrets(summary) : null,
       mode: task.mode,
       completed: task.state === 'completed',
       state: task.state,

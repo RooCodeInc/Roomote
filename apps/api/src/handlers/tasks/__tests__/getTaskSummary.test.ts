@@ -9,7 +9,7 @@ const {
   andMock,
   eqMock,
   mockEnvironmentFindFirst,
-  mockMessageFindFirst,
+  mockReportFindFirst,
   mockGetLatestTaskRunsByTaskIds,
   mockListArtifactsByTask,
   mockSelect,
@@ -21,7 +21,7 @@ const {
   andMock: vi.fn((...args) => ({ type: 'and', args })),
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   mockEnvironmentFindFirst: vi.fn(),
-  mockMessageFindFirst: vi.fn(),
+  mockReportFindFirst: vi.fn(),
   mockGetLatestTaskRunsByTaskIds: vi.fn(),
   mockListArtifactsByTask: vi.fn(),
   mockSelect: vi.fn(),
@@ -67,7 +67,7 @@ vi.mock('@roomote/db/server', () => ({
       environments: {
         findFirst: mockEnvironmentFindFirst,
       },
-      taskMessages: { findFirst: mockMessageFindFirst },
+      fastAgentParentEvents: { findFirst: mockReportFindFirst },
     },
   },
   environments: {
@@ -75,14 +75,11 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: eqMock,
   tasks: { id: 'tasks.id', orgId: 'tasks.orgId' },
-  taskMessages: {
-    taskId: 'taskMessages.taskId',
-    protocol: 'taskMessages.protocol',
-    eventType: 'taskMessages.eventType',
-    metadata: 'taskMessages.metadata',
-    ts: 'taskMessages.ts',
-    createdAt: 'taskMessages.createdAt',
-    id: 'taskMessages.id',
+  fastAgentParentEvents: {
+    conversationId: 'fastAgentParentEvents.conversationId',
+    event: 'fastAgentParentEvents.event',
+    createdAt: 'fastAgentParentEvents.createdAt',
+    id: 'fastAgentParentEvents.id',
   },
 }));
 
@@ -144,6 +141,15 @@ describe('getTaskSummary', () => {
         environmentSetupState: 'failed',
         payload: {
           environmentDefinitionId: 'env-123',
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'web',
+              workspaceId: 'user-1',
+              conversationId: '11111111-1111-4111-8111-111111111111',
+              replyTarget: {},
+            },
+          },
         },
       },
     });
@@ -152,7 +158,7 @@ describe('getTaskSummary', () => {
       name: 'Onboarding Sandbox',
     });
     mockListArtifactsByTask.mockResolvedValue([]);
-    mockMessageFindFirst.mockResolvedValue(undefined);
+    mockReportFindFirst.mockResolvedValue(undefined);
   });
 
   it('returns the latest task run error in the summary payload', async () => {
@@ -170,16 +176,11 @@ describe('getTaskSummary', () => {
     });
   });
 
-  it('includes the stored assistant narrative, with secrets redacted, in the result', async () => {
-    mockMessageFindFirst.mockResolvedValueOnce({
-      eventType: 'roomote_runtime.assistant_message',
-      contentBlocks: [
-        {
-          type: 'text',
-          text: 'Fixed the retry race.\nTests pass. token=secret-value',
-        },
-      ],
-      metadata: null,
+  it('includes the actual task report, with secrets redacted, in the result', async () => {
+    mockReportFindFirst.mockResolvedValueOnce({
+      event: {
+        message: 'Fixed the retry race.\nTests pass. token=secret-value',
+      },
     });
     const response = await createApp(authContext).request(
       'http://localhost/tasks/task-1/summary',
@@ -187,54 +188,18 @@ describe('getTaskSummary', () => {
     const body = await response.json();
     expect(body.summary).toContain('Fixed the retry race.\nTests pass.');
     expect(body.summary).not.toContain('secret-value');
-    expect(mockMessageFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          type: 'and',
-          args: expect.arrayContaining([
-            { type: 'eq', args: ['taskMessages.taskId', 'task-1'] },
-            {
-              type: 'eq',
-              args: [
-                'taskMessages.eventType',
-                'roomote_runtime.assistant_message',
-              ],
-            },
-            {
-              strings: [
-                'coalesce(',
-                " ->> 'visibleInTranscript', 'true') <> 'false'",
-              ],
-              values: ['taskMessages.metadata'],
-            },
-          ]),
-        },
-        orderBy: [
-          { desc: 'taskMessages.ts' },
-          { desc: 'taskMessages.createdAt' },
-          { desc: 'taskMessages.id' },
-        ],
-      }),
-    );
   });
 
-  it.each([
-    {
-      contentBlocks: [{ type: 'text', text: 'private narrative' }],
-      metadata: { visibleInTranscript: false },
+  it.each([null, '', '  ', 123])(
+    'returns null for missing or invalid report text',
+    async (message) => {
+      mockReportFindFirst.mockResolvedValueOnce({ event: { message } });
+      const response = await createApp(authContext).request(
+        'http://localhost/tasks/task-1/summary',
+      );
+      await expect(response.json()).resolves.toMatchObject({ summary: null });
     },
-    { contentBlocks: [{ type: 'text', text: '  ' }], metadata: null },
-    { contentBlocks: [], metadata: null },
-  ])('returns null for hidden or missing narrative', async (message) => {
-    mockMessageFindFirst.mockResolvedValueOnce({
-      eventType: 'roomote_runtime.assistant_message',
-      ...message,
-    });
-    const response = await createApp(authContext).request(
-      'http://localhost/tasks/task-1/summary',
-    );
-    await expect(response.json()).resolves.toMatchObject({ summary: null });
-  });
+  );
 
   it('adds the hidden-task-history condition to the summary query', async () => {
     const response = await createApp(authContext).request(
@@ -304,7 +269,7 @@ describe('getTaskSummary', () => {
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: 'Task not found' });
     expect(mockListArtifactsByTask).not.toHaveBeenCalled();
-    expect(mockMessageFindFirst).not.toHaveBeenCalled();
+    expect(mockReportFindFirst).not.toHaveBeenCalled();
   });
 
   it('includes the linked environment id and name from the latest task run payload', async () => {
@@ -364,7 +329,9 @@ describe('getTaskSummary', () => {
     await expect(response.json()).resolves.toMatchObject({
       linkedEnvironmentId: null,
       linkedEnvironmentName: null,
+      summary: null,
     });
     expect(mockEnvironmentFindFirst).not.toHaveBeenCalled();
+    expect(mockReportFindFirst).not.toHaveBeenCalled();
   });
 });
