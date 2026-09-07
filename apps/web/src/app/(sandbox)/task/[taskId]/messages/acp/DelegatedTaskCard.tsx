@@ -48,7 +48,7 @@ export function DelegatedTaskCard({
       <TaskRobotIcon taskId={taskId} />
       <span className="min-w-0 flex-1">
         <span className="block text-xs text-muted-foreground group-hover:text-accent-foreground">
-          Started coding task
+          Coding agent
         </span>
         {isPending ? (
           <Skeleton className="mt-1 h-4 w-2/3" />

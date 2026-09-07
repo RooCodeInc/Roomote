@@ -18,9 +18,12 @@ import {
   ExternalLink,
   Skeleton,
 } from '@/components/system';
-import { WorkspaceBadge } from '@/components/sandbox';
 import { FramedSurface } from '@/components/layout';
-import { TaskRobotIcon } from '@/components/tasks/TaskRobotIcon';
+import {
+  TaskHeaderContent,
+  TaskHeaderMetadata,
+  TaskTitle,
+} from '../../task/[taskId]/TaskHeader';
 
 import { ArtifactLinkProvider } from '../../task/[taskId]/hooks/ArtifactLinkProvider';
 import { HistoricalSandboxProvider } from '../../task/[taskId]/hooks/HistoricalSandboxProvider';
@@ -288,6 +291,10 @@ export function NestedTaskSidePanel({
   const title = session.task?.title?.trim() || 'Task';
   const environmentId = session.taskRun?.payload?.environmentId;
   const repo = session.taskRun?.payload?.repo;
+  const model = session.task?.model ?? null;
+  const pullRequests = session.taskRun?.pullRequests ?? [];
+  const prRepo = session.taskRun?.prRepo;
+  const prNumber = session.taskRun?.prNumber;
 
   return (
     <FramedSurface
@@ -299,14 +306,6 @@ export function NestedTaskSidePanel({
         onClose={onClose}
         actions={
           <>
-            {environmentId || repo ? (
-              <WorkspaceBadge
-                environmentId={environmentId}
-                repo={repo}
-                className="max-w-32 text-xs text-muted-foreground"
-                iconClassName="text-muted-foreground"
-              />
-            ) : null}
             <BasicTooltip content="Go to task">
               <Button asChild variant="ghost" size="icon" className="size-8">
                 <Link href={`/task/${taskId}`} aria-label="Go to task">
@@ -317,48 +316,56 @@ export function NestedTaskSidePanel({
           </>
         }
         titleAdornment={
-          tasks.length > 1 ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  className="relative -left-2 flex h-7 w-full min-w-0 justify-start gap-1.5 px-2 text-sm hover:text-accent-foreground"
-                >
-                  <TaskRobotIcon taskId={taskId} />
-                  <span className="shrink-0 font-semibold">Task:</span>
-                  <span className="min-w-0 flex-1 truncate text-left font-medium">
-                    {title}
-                  </span>
-                  <ChevronDown className="size-3.5 shrink-0" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="max-h-80">
-                <DropdownMenuLabel>Tasks in this session</DropdownMenuLabel>
-                {tasks.map((task) => (
-                  <DropdownMenuItem
-                    key={task.taskId}
-                    className="cursor-pointer text-xs"
-                    onClick={() => onSelectTask?.(task.taskId)}
+          <TaskHeaderContent taskId={taskId} showIcon={false}>
+            {tasks.length > 1 ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="relative -left-2 flex h-7 w-full min-w-0 justify-start gap-1.5 px-2 text-sm hover:text-accent-foreground"
                   >
-                    <span className="max-w-72 truncate">{task.title}</span>
-                    {task.taskId === taskId ? (
-                      <span className="ml-auto text-muted-foreground">
-                        &bull;
-                      </span>
-                    ) : null}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <h2 className="truncate text-sm font-medium whitespace-nowrap">
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <TaskRobotIcon taskId={taskId} />
-                <span className="font-semibold">Task:</span>
-                <span className="truncate">{title}</span>
-              </span>
-            </h2>
-          )
+                    <TaskTitle
+                      taskId={taskId}
+                      title={title}
+                      prefix="Task:"
+                      className="flex-1 text-left font-medium"
+                    />
+                    <ChevronDown className="size-3.5 shrink-0" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-80">
+                  <DropdownMenuLabel>Tasks in this session</DropdownMenuLabel>
+                  {tasks.map((task) => (
+                    <DropdownMenuItem
+                      key={task.taskId}
+                      className="cursor-pointer text-xs"
+                      onClick={() => onSelectTask?.(task.taskId)}
+                    >
+                      <span className="max-w-72 truncate">{task.title}</span>
+                      {task.taskId === taskId ? (
+                        <span className="ml-auto text-muted-foreground">
+                          &bull;
+                        </span>
+                      ) : null}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <h2 className="truncate text-sm font-medium whitespace-nowrap">
+                <TaskTitle taskId={taskId} title={title} prefix="Task:" />
+              </h2>
+            )}
+            <TaskHeaderMetadata
+              model={model}
+              environmentId={environmentId}
+              repo={repo}
+              pullRequests={pullRequests}
+              prRepo={prRepo}
+              prNumber={prNumber}
+              className="pl-7"
+            />
+          </TaskHeaderContent>
         }
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">

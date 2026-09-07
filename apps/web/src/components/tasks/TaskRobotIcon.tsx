@@ -57,7 +57,7 @@ export function TaskRobotIcon({
   return (
     <Avatar
       imageUrl={getTaskRobotIconPath(iconId)}
-      size="sm"
+      size="xs"
       alt=""
       data-task-robot-icon={iconId}
     />

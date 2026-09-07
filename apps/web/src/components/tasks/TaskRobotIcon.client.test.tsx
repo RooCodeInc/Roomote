@@ -12,13 +12,13 @@ vi.mock('@/components/system', () => ({
 import { TaskRobotIcon } from './TaskRobotIcon';
 
 describe('TaskRobotIcon', () => {
-  it('renders its assigned asset through the shared small Avatar', () => {
+  it('renders its assigned asset through the shared extra-small Avatar', () => {
     render(<TaskRobotIcon taskId="task-1" />);
 
     expect(avatarSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         imageUrl: expect.stringMatching(/^\/task-robots\/robot-\d{3}\.png$/),
-        size: 'sm',
+        size: 'xs',
         alt: '',
       }),
     );
