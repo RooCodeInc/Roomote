@@ -3,6 +3,7 @@ import {
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationConnectionScope,
   getMcpIntegrationDefaultDisabledTools,
+  getMcpIntegrationOauthResource,
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopes,
   isMcpConnectionNotionConfig,
@@ -54,6 +55,9 @@ describe('monday.com OAuth', () => {
       serverMode: 'upstream_proxy',
     });
     expect(getMcpIntegrationConnectionScope('monday')).toBe('user');
+    expect(getMcpIntegrationOauthResource('monday')).toBe(
+      'https://mcp.monday.com/mcp',
+    );
     expect(getMcpIntegrationOauthScopeMode('monday')).toBe('read-only');
     expect(getMcpIntegrationOauthScopes('monday')).toEqual(
       MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
