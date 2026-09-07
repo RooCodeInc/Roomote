@@ -47,7 +47,10 @@ describe('Fast automation suggestions', () => {
         thread_ts: '100.001',
         client_msg_id: expect.any(String),
         metadata: expect.objectContaining({
-          event_payload: expect.objectContaining({ schemaVersion: 1 }),
+          event_payload: expect.objectContaining({
+            schemaVersion: 1,
+            sourceTaskId: null,
+          }),
         }),
       }),
     );

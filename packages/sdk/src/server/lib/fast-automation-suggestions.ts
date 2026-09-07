@@ -18,6 +18,7 @@ import {
   workItems,
 } from '@roomote/db/server';
 import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+export { requireFastSuggestionOriginSessionId } from './fast-suggestion-origin';
 import {
   buildTaskSuggestionMessageMetadata,
   type SlackNotifier,
@@ -320,7 +321,7 @@ export async function postFastAutomationSuggestionsToSlack(params: {
       text,
       blocks: [{ type: 'markdown', text }],
       metadata: buildTaskSuggestionMessageMetadata({
-        sourceTaskId: params.eventId,
+        sourceTaskId: null,
         suggestionId: suggestion.id,
       }),
     });

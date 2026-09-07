@@ -957,7 +957,7 @@ describe('deliverFastAgentParentEvent', () => {
         );
       } else {
         await expect(delivery).rejects.toThrow(
-          'Fast automation origin Session was not found.',
+          'Fast suggestion origin Session was not found.',
         );
         expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
       }

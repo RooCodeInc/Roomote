@@ -209,6 +209,7 @@ export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
+export { requireFastSuggestionOriginSessionId } from './lib/fast-suggestion-origin';
 
 export {
   buildFastAgentParentEventKey,
