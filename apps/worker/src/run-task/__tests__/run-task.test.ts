@@ -143,6 +143,10 @@ vi.mock('@roomote/auth/client', () => ({
   validateToken: vi.fn(),
 }));
 
+vi.mock('../../monitoring/worker-release-metadata', () => ({
+  resolveWorkerReleaseMetadata: vi.fn(() => ({})),
+}));
+
 vi.mock('@roomote/cloud-agents', () => ({
   PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS: [
     'capture-visual-proof',
@@ -286,8 +290,10 @@ vi.mock('../actor-mismatch-notice', () => ({
   createActorMismatchSkipNotifier: vi.fn(() => actorMismatchSkipNotifierMock),
 }));
 
+import { buildRoomoteSystemPrompt } from '@roomote/cloud-agents';
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
+import { resolveWorkerReleaseMetadata } from '../../monitoring/worker-release-metadata';
 import type { HarnessManagerCallbacks } from '../../sandbox-server/lib/harness-manager';
 import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
@@ -379,7 +385,18 @@ describe('runTask', () => {
     syncRuntimeGitAuthorMock.mockResolvedValue(undefined);
   });
 
-  it('delivers the Roomote system prompt through OpenCode developer instructions', async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('delivers the Roomote system prompt with worker release identity rather than task environment identity', async () => {
+    vi.stubEnv('ROOMOTE_RELEASE_APP_ENV', 'preview');
+    vi.stubEnv('R_APP_ENV', 'development');
+    vi.stubEnv('GITHUB_SHA', 'task-repository-commit');
+    vi.mocked(resolveWorkerReleaseMetadata).mockReturnValueOnce({
+      workerCommit: 'worker-release-commit',
+    });
+
     await runTask({
       taskRun: {
         id: 150,
@@ -389,7 +406,11 @@ describe('runTask', () => {
         payload: {},
         result: null,
       } as never,
-      envVars: {},
+      envVars: {
+        GITHUB_SHA: 'task-environment-commit',
+        R_APP_ENV: 'production',
+        ROOMOTE_RELEASE_APP_ENV: 'production',
+      },
       workspacePath: '/tmp/workspace',
       prompt: '',
       harnessInstructions: undefined,
@@ -416,6 +437,14 @@ describe('runTask', () => {
       } as never,
     });
 
+    expect(resolveWorkerReleaseMetadata).toHaveBeenCalledWith();
+    expect(buildRoomoteSystemPrompt).toHaveBeenCalledWith(
+      '0.40.2',
+      expect.objectContaining({
+        commitSha: 'worker-release-commit',
+        appEnv: 'preview',
+      }),
+    );
     expect(createHarnessMock.mock.calls[0]?.[0]).toEqual(
       expect.not.objectContaining({
         systemPromptContent: expect.anything(),
