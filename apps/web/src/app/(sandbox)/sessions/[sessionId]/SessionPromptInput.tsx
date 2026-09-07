@@ -33,6 +33,7 @@ import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
+import { SessionWakeups } from './SessionWakeups';
 
 export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
@@ -209,6 +210,7 @@ export function SessionPromptInput({
 
   return (
     <div className="mx-auto w-full max-w-4xl">
+      <SessionWakeups key={sessionId} sessionId={sessionId} />
       <PromptInputRoot
         key={`composer-${resetKey}`}
         onSubmit={handleSubmit}
