@@ -20,6 +20,7 @@ import { db } from '../../db';
 import {
   demoSeedEnvironmentName,
   demoSeedFastSession,
+  demoSeedPendingInputFastSession,
   demoSeedRepositories,
   demoSeedPullRequests,
   demoSeedTasks,
@@ -28,6 +29,10 @@ import {
 } from '../seed-demo-data';
 
 const demoTaskIds = demoSeedTasks.map(({ id }) => id);
+const demoFastConversationIds = [
+  demoSeedFastSession.conversationId,
+  demoSeedPendingInputFastSession.conversationId,
+];
 
 // The deployment settings row is a shared singleton in the test database, so
 // the assertions below ignore it and cleanup only removes it when this suite
@@ -41,10 +46,10 @@ function withoutSettings(labels: string[]) {
 async function cleanup() {
   await db
     .delete(sessions)
-    .where(eq(sessions.fastConversationId, demoSeedFastSession.conversationId));
+    .where(inArray(sessions.fastConversationId, demoFastConversationIds));
   await db
     .delete(fastAgentConversations)
-    .where(eq(fastAgentConversations.id, demoSeedFastSession.conversationId));
+    .where(inArray(fastAgentConversations.id, demoFastConversationIds));
   await db
     .delete(taskPullRequests)
     .where(inArray(taskPullRequests.taskId, demoTaskIds));
@@ -99,6 +104,8 @@ describe('seedDemoData', () => {
       // environment + repositories + tasks + task runs + PRs
       6 +
         demoSeedFastSession.messages.length +
+        3 +
+        demoSeedPendingInputFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
         demoSeedPullRequests.length,
@@ -169,6 +176,37 @@ describe('seedDemoData', () => {
       sessionId: demoSeedFastSession.sessionId,
       userId: demoSeedUserId,
       role: 'owner',
+    });
+
+    const pendingInputSession = await db.query.sessions.findFirst({
+      where: eq(
+        sessions.fastConversationId,
+        demoSeedPendingInputFastSession.conversationId,
+      ),
+    });
+    expect(pendingInputSession).toMatchObject({
+      id: demoSeedPendingInputFastSession.sessionId,
+      title: demoSeedPendingInputFastSession.title,
+      fastConversationId: demoSeedPendingInputFastSession.conversationId,
+      cachedStatus: 'needs_input',
+    });
+
+    const pendingInputMessages = await db.query.fastAgentMessages.findMany({
+      where: eq(
+        fastAgentMessages.conversationId,
+        demoSeedPendingInputFastSession.conversationId,
+      ),
+      orderBy: (message, { asc }) => [asc(message.turnSeq)],
+    });
+    expect(pendingInputMessages).toHaveLength(
+      demoSeedPendingInputFastSession.messages.length,
+    );
+    expect(pendingInputMessages.at(-1)).toMatchObject({
+      eventType: 'roomote_runtime.request_user_input',
+      payload: {
+        requestId: 'rui:demo-fast-session-pending-input',
+        status: 'pending',
+      },
     });
 
     const installation = await db.query.githubInstallations.findFirst({
@@ -321,6 +359,8 @@ describe('seedDemoData', () => {
     expect(withoutSettings(summary.skipped)).toHaveLength(
       6 +
         demoSeedFastSession.messages.length +
+        3 +
+        demoSeedPendingInputFastSession.messages.length +
         demoSeedRepositories.length +
         demoSeedTasks.length * 2 +
         demoSeedPullRequests.length,
