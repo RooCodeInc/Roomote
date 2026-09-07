@@ -7,6 +7,7 @@ const {
   mockScheduleNotifyPullRequestTerminalStatus,
   mockScheduleSourceControlPullRequestFactSync,
   mockFindActiveGitHubPrReviewTask,
+  mockGetPrOriginFastAgentParent,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetGitLabAutomationTargets: vi.fn(),
@@ -16,10 +17,12 @@ const {
   mockScheduleNotifyPullRequestTerminalStatus: vi.fn(),
   mockScheduleSourceControlPullRequestFactSync: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
+  mockGetPrOriginFastAgentParent: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+  getPrOriginFastAgentParent: mockGetPrOriginFastAgentParent,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -86,6 +89,7 @@ function makePayload(
       id: 999,
       iid: 42,
       title: 'Update backend',
+      body: null,
       url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
       source_branch: 'feature/test',
       target_branch: 'main',
@@ -103,6 +107,8 @@ describe('handleGitLabMergeRequest', () => {
     mockRepositoriesFindFirst.mockReset();
     mockScheduleNotifyPullRequestTerminalStatus.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
+    mockGetPrOriginFastAgentParent.mockReset();
+    mockGetPrOriginFastAgentParent.mockResolvedValue(null);
 
     mockRepositoriesFindFirst.mockResolvedValue({
       id: 'repo-row-1',
@@ -177,6 +183,17 @@ describe('handleGitLabMergeRequest', () => {
       { task: { payload: Record<string, unknown> } },
     ];
     expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('restores tracked draft status when a merge request is reopened', async () => {
+    await handleGitLabMergeRequest(makePayload('reopen', { draft: true }));
+
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'gitlab',
+      'acme/backend',
+      42,
+      'draft',
+    );
   });
 
   it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
@@ -258,6 +275,41 @@ describe('handleGitLabMergeRequest', () => {
     );
   });
 
+  it('attaches the review to the Fast session whose task opened the MR', async () => {
+    const fastParent = {
+      sessionId: '22222222-2222-4222-8222-222222222222',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
+      },
+    };
+    mockGetPrOriginFastAgentParent.mockResolvedValue(fastParent);
+
+    await handleGitLabMergeRequest(makePayload('open'));
+
+    expect(mockGetPrOriginFastAgentParent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repository: 'acme/backend',
+        prNumber: 42,
+        branchName: 'feature/test',
+        sourceControlProvider: 'gitlab',
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentParent: fastParent,
+            fastAgentSessionId: fastParent.sessionId,
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
   it('enqueues sync reviews only when GitLab marks an update as code-related', async () => {
     await expect(
       handleGitLabMergeRequest(makePayload('update')),
@@ -333,6 +385,9 @@ describe('handleGitLabMergeRequest', () => {
       42,
       'merged',
     );
+    expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetBranch: 'main' }),
+    );
     expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
       provider: 'gitlab',
       repositoryFullName: 'acme/backend',
@@ -340,6 +395,7 @@ describe('handleGitLabMergeRequest', () => {
         number: 42,
         externalId: 999,
         title: 'Update backend',
+        body: null,
         url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
         authorLogin: null,
         state: 'merged',

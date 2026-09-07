@@ -23,6 +23,7 @@ const {
   mockDrainSlackMessagesToResumeRun,
   mockRecordComputeProviderUsage,
   mockFinishRun,
+  mockMaybeEnqueueBrainMemoryForCompletedRun,
   mockWithSandboxServerRpcClient,
   mockMarkTaskStartParallelCountEndedAt,
   mockSyncTaskStateFromRuns,
@@ -60,6 +61,7 @@ const {
     mockDrainSlackMessagesToResumeRun: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
     mockFinishRun: vi.fn() as AnyMock,
+    mockMaybeEnqueueBrainMemoryForCompletedRun: vi.fn() as AnyMock,
     mockWithSandboxServerRpcClient: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
     mockSyncTaskStateFromRuns: vi.fn() as AnyMock,
@@ -151,6 +153,8 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   finishRun: mockFinishRun,
+  maybeEnqueueBrainMemoryForCompletedRun:
+    mockMaybeEnqueueBrainMemoryForCompletedRun,
   recordComputeProviderUsage: mockRecordComputeProviderUsage,
   withSandboxServerRpcClient: mockWithSandboxServerRpcClient,
 }));
@@ -271,7 +275,10 @@ describe('snapshotJob', () => {
         runId: 123,
         source: 'snapshot_queue',
         eventType: 'completed',
-        details: expect.objectContaining({ snapshotId: 'snap_success_1' }),
+        details: expect.objectContaining({
+          snapshotId: 'snap_success_1',
+          snapshotExpiresAt: null,
+        }),
       }),
     );
     expect(mockAttachEnvironmentSnapshot).toHaveBeenCalledWith(
@@ -281,6 +288,7 @@ describe('snapshotJob', () => {
         provider: 'modal',
         snapshotId: 'snap_success_1',
         snapshotStatus: 'ready',
+        snapshotExpiresAt: null,
       }),
     );
     expect(mockCreateComputeProviderMutationEventRecorder).toHaveBeenCalledWith(
@@ -315,6 +323,10 @@ describe('snapshotJob', () => {
         snapshotFailedAt: null,
         status: RunStatus.Completed,
       }),
+    );
+    expect(mockMaybeEnqueueBrainMemoryForCompletedRun).toHaveBeenCalledWith(
+      expect.anything(),
+      123,
     );
     expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
       runId: 123,
@@ -680,6 +692,10 @@ describe('snapshotJob', () => {
       status: RunStatus.Completed,
       error: expect.stringContaining('cannot be resumed'),
     });
+    expect(mockMaybeEnqueueBrainMemoryForCompletedRun).toHaveBeenCalledWith(
+      expect.anything(),
+      123,
+    );
   });
 
   it('leaves the run recoverable when the sandbox is only mid-snapshot', async () => {

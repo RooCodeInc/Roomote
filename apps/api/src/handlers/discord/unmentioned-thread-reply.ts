@@ -44,7 +44,7 @@ function mentionsDiscordUserOtherThanBotWithoutMentioningBot(
 function mentionsDiscordUserOtherThanBotOrUser(
   text: string,
   botUserId: string | undefined,
-  discordUserId: string,
+  discordUserId: string | null | undefined,
 ): boolean {
   return getMentionedDiscordUserIds(text).some(
     (userId) => userId !== botUserId && userId !== discordUserId,
@@ -66,7 +66,6 @@ function isHumanAuthoredHistoryMessage(
 function toSharedHistoryMessages(
   threadMessages: DiscordThreadHistoryMessage[],
   botUserId: string,
-  senderDiscordUserId: string,
 ): UnmentionedThreadHistoryMessage[] {
   return threadMessages.map((message) => {
     const isBot = message.botId === botUserId;
@@ -79,7 +78,7 @@ function toSharedHistoryMessages(
       mentionsSomebodyElse: mentionsDiscordUserOtherThanBotOrUser(
         message.text,
         botUserId,
-        senderDiscordUserId,
+        message.user,
       ),
     };
   });
@@ -104,6 +103,8 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   ownedThreadUserId: string | null | undefined;
   /** True when the reply targets an automation report root. */
   isAutomationReportThread?: boolean;
+  /** True when the thread is an open Fast conversation. */
+  isOpenConversationThread?: boolean;
   fetchThreadMessages: () => Promise<DiscordThreadHistoryMessage[] | null>;
 }): Promise<boolean> {
   const { message, botUserId } = params;
@@ -171,11 +172,8 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
       params.ownedThreadUserId === params.mappedUserId,
     isThreadRootAuthor,
     isAutomationReportThread: params.isAutomationReportThread,
-    threadMessages: toSharedHistoryMessages(
-      threadMessages,
-      botUserId,
-      senderDiscordUserId,
-    ),
+    isOpenConversationThread: params.isOpenConversationThread,
+    threadMessages: toSharedHistoryMessages(threadMessages, botUserId),
     compareMessageIds: compareBigIntMessageIds,
   });
 

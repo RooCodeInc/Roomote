@@ -7,6 +7,14 @@ import type {
   TaskMessageRole,
 } from '@roomote/types';
 
+/** Artifact backing an inline transcript image, when the server knows it. */
+export interface AcpUiMessageImageArtifact {
+  url: string;
+  owner: { taskId: string } | { sessionId: string };
+  path: string;
+  version: number;
+}
+
 interface AcpUiMessageBase {
   id: string;
   ts: number;
@@ -21,6 +29,7 @@ interface AcpUiMessageBase {
   updateType: AcpEventType;
   text?: string;
   images?: string[];
+  imageArtifacts?: AcpUiMessageImageArtifact[];
   toolCallId?: string;
   previousTs?: number;
   userId?: string;
@@ -55,6 +64,8 @@ export interface AcpTodoSectionUiMessage extends AcpUiMessageBase {
 export interface AcpOtherUiMessage extends AcpUiMessageBase {
   kind: Exclude<AcpMessageKind, 'tool_call' | 'tool_result' | 'plan'>;
   data: Record<string, unknown>;
+  /** Source chunks before reasoning-only display normalization. */
+  rawText?: string;
 }
 
 export type AcpUiMessage =

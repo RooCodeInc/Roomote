@@ -11,6 +11,7 @@ const {
   descMock,
   eqMock,
   mockGetImageUrisFromContentBlocks,
+  mockGetFastSessionMessagesForUser,
   mockGetTextFromContentBlocks,
   mockLogHandlerError,
   mockResolveAcpTranscriptVisibility,
@@ -30,6 +31,7 @@ const {
   mockGetImageUrisFromContentBlocks: vi.fn(() => [
     'https://example.com/image.png',
   ]),
+  mockGetFastSessionMessagesForUser: vi.fn(),
   mockGetTextFromContentBlocks: vi.fn(() => 'Hello from transcript'),
   mockLogHandlerError: vi.fn(),
   mockResolveAcpTranscriptVisibility: vi.fn(() => true),
@@ -45,6 +47,10 @@ const {
 
 vi.mock('../helpers', () => ({
   visibleTaskHistoryCondition,
+}));
+
+vi.mock('../fastSessionCommunication', () => ({
+  getFastSessionMessagesForUser: mockGetFastSessionMessagesForUser,
 }));
 
 vi.mock('../../utils', () => ({
@@ -112,6 +118,8 @@ describe('getTaskMessages', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSelect.mockReset();
+    mockGetFastSessionMessagesForUser.mockResolvedValue(null);
 
     taskSelectFromMock.mockReturnValue({
       where: taskSelectWhereMock,
@@ -170,6 +178,54 @@ describe('getTaskMessages', () => {
         },
       ],
     });
+    expect(mockGetFastSessionMessagesForUser).not.toHaveBeenCalled();
+  });
+
+  it('uses message id as a deterministic ordering tie-breaker', async () => {
+    await createApp(authContext).request(
+      'http://localhost/tasks/task-1/messages?order=desc',
+    );
+
+    expect(descMock).toHaveBeenCalledWith('taskMessages.id');
+  });
+
+  it('returns linked subagent identity through the existing transcript serialization', async () => {
+    selectOrderByMock.mockResolvedValueOnce([
+      {
+        id: 'message-child-1',
+        taskId: 'task-1',
+        ts: 124n,
+        eventType: 'roomote_runtime.tool_call',
+        role: 'assistant',
+        contentBlocks: [],
+        metadata: {
+          sessionId: 'session-child',
+          parentSessionId: 'session-parent',
+          agentType: 'proof-runner',
+          isSubagent: true,
+        },
+        payload: { kind: 'execute' },
+        createdAt: new Date('2026-04-21T12:00:01Z'),
+      },
+    ]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/messages',
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      messages: [
+        {
+          taskId: 'task-1',
+          metadata: {
+            sessionId: 'session-child',
+            parentSessionId: 'session-parent',
+            agentType: 'proof-runner',
+            isSubagent: true,
+          },
+        },
+      ],
+    });
   });
 
   it('adds the hidden-task-history condition to the task lookup', async () => {
@@ -182,6 +238,20 @@ describe('getTaskMessages', () => {
     expect(andMock.mock.calls[0]).toContain(visibleTaskHistoryCondition);
   });
 
+  it('omits transcript-hidden task messages from MCP responses', async () => {
+    mockResolveAcpTranscriptVisibility.mockReturnValueOnce(false);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/messages',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      messages: [],
+      returned: 0,
+    });
+  });
+
   it('returns 404 when the task is hidden from task history', async () => {
     taskSelectLimitMock.mockResolvedValueOnce([]);
 
@@ -191,5 +261,49 @@ describe('getTaskMessages', () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: 'Task not found' });
+  });
+
+  it('falls back to a Fast session when no task matches', async () => {
+    taskSelectLimitMock.mockResolvedValueOnce([]);
+    mockGetFastSessionMessagesForUser.mockResolvedValueOnce([
+      {
+        id: 'fast-message-1',
+        taskId: 'fast-session-1',
+        text: 'Fast response',
+      },
+    ]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/fast-session-1/messages',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      returned: 1,
+      messages: [{ taskId: 'fast-session-1', text: 'Fast response' }],
+    });
+    expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
+      sessionId: 'fast-session-1',
+      userId: 'user-1',
+      limit: undefined,
+      order: 'asc',
+    });
+  });
+
+  it('forwards explicit descending order to Fast session fallback', async () => {
+    taskSelectLimitMock.mockResolvedValueOnce([]);
+    mockGetFastSessionMessagesForUser.mockResolvedValueOnce([]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/fast-session-1/messages?order=desc',
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
+      sessionId: 'fast-session-1',
+      userId: 'user-1',
+      limit: undefined,
+      order: 'desc',
+    });
   });
 });

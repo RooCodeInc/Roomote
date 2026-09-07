@@ -1,4 +1,45 @@
-import { resolveStandardTaskSurface } from '../cloud-agent-workflow';
+import {
+  resolveAggregateSourceControl,
+  resolveStandardTaskSurface,
+} from '../cloud-agent-workflow';
+
+describe('resolveAggregateSourceControl', () => {
+  it('preserves stamped provider and host for a homogeneous aggregate workspace', () => {
+    expect(
+      resolveAggregateSourceControl({
+        sourceControlProvider: 'gitea',
+        sourceControlHost: 'gitea.example.com',
+      }),
+    ).toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
+  });
+
+  it('fails closed for a mixed aggregate workspace', () => {
+    expect(
+      resolveAggregateSourceControl({
+        sourceControlProvider: 'gitlab',
+        repositoryProviders: {
+          'group/api': 'gitlab',
+          'shared/app': 'gitea',
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('fails closed when a selected aggregate mapping is incomplete', () => {
+    expect(
+      resolveAggregateSourceControl({
+        sourceControlProvider: 'gitea',
+        selectedRepositories: ['shared/api', 'shared/web'],
+        repositoryProviders: {
+          'shared/api': 'gitea',
+        },
+      }),
+    ).toBeUndefined();
+  });
+});
 
 describe('resolveStandardTaskSurface', () => {
   it('prefers Slack channel payload bindings', () => {

@@ -1,8 +1,12 @@
-const { mockCompletePendingGitHubInstallation, mockSendUserDirectMessage } =
-  vi.hoisted(() => ({
-    mockCompletePendingGitHubInstallation: vi.fn(),
-    mockSendUserDirectMessage: vi.fn(),
-  }));
+const {
+  mockCompletePendingGitHubInstallation,
+  mockSendUserDirectMessage,
+  mockRequestBrainBackfill,
+} = vi.hoisted(() => ({
+  mockCompletePendingGitHubInstallation: vi.fn(),
+  mockSendUserDirectMessage: vi.fn(),
+  mockRequestBrainBackfill: vi.fn(async () => undefined),
+}));
 
 vi.mock('@roomote/github', () => ({
   completePendingGitHubInstallation: mockCompletePendingGitHubInstallation,
@@ -10,6 +14,10 @@ vi.mock('@roomote/github', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   sendUserDirectMessageBestEffort: mockSendUserDirectMessage,
+}));
+
+vi.mock('@roomote/sdk/server/request-instance-ping', () => ({
+  requestBrainBackfill: mockRequestBrainBackfill,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -58,6 +66,19 @@ describe('handleInstallationCreated', () => {
 
     expect(response).toEqual({ status: 'ok' });
     expect(mockSendUserDirectMessage).not.toHaveBeenCalled();
+  });
+
+  it('kicks the Memory backfill for pending and direct installs alike', async () => {
+    mockCompletePendingGitHubInstallation.mockResolvedValue({
+      success: false,
+      error: 'no pending installation',
+    });
+
+    await handleInstallationCreated(payload);
+
+    expect(mockRequestBrainBackfill).toHaveBeenCalledWith(
+      'github-installation-created',
+    );
   });
 
   it('still acks the webhook when completion throws', async () => {

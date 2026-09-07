@@ -6,6 +6,7 @@ import {
   taskRuns,
   tasks,
   eq,
+  desc,
   and,
   inArray,
   isNull,
@@ -35,6 +36,7 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getDiscordReactionTargetFromTaskPayload,
+  getFastAgentParentFromPayload,
 } from '@roomote/types';
 
 /** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
@@ -120,6 +122,33 @@ type SlackTarget = {
   slackThreadTs: string;
   slackChannelId: string;
 };
+
+type SlackReplyTarget = {
+  channelId: string;
+  threadId: string;
+};
+
+function resolveSlackReplyTarget(payload: unknown): SlackReplyTarget | null {
+  if (getCommunicationProviderFromTaskPayload(payload) !== 'slack') {
+    return null;
+  }
+
+  const channelId = getCommunicationChannelFromTaskPayload(payload);
+  const threadId = getCommunicationThreadIdFromTaskPayload(payload);
+
+  return channelId && threadId ? { channelId, threadId } : null;
+}
+
+function getSlackTarget(taskId: string, payload: unknown): SlackTarget | null {
+  const replyTarget = resolveSlackReplyTarget(payload);
+  if (!replyTarget) return null;
+
+  return {
+    taskId,
+    slackChannelId: replyTarget.channelId,
+    slackThreadTs: replyTarget.threadId,
+  };
+}
 
 type TeamsTarget = {
   channelId: string;
@@ -282,7 +311,8 @@ async function deliverSlackTerminalStatus({
     status === 'closed' ? SLACK_PR_CLOSED_REACTION_EMOJI : completionEmoji;
 
   for (const target of slackTargets) {
-    if (notifiedThreads.has(target.slackThreadTs)) {
+    const threadKey = `${target.slackChannelId}:${target.slackThreadTs}`;
+    if (notifiedThreads.has(threadKey)) {
       continue;
     }
 
@@ -308,20 +338,39 @@ async function deliverSlackTerminalStatus({
         footerStyle: 'reply-only',
       });
 
-      await Promise.all([
-        notifier.addReaction({
-          channel: target.slackChannelId,
-          timestamp: target.slackThreadTs,
-          name: terminalReaction,
-        }),
-        notifier.removeReaction({
-          channel: target.slackChannelId,
-          timestamp: target.slackThreadTs,
-          name: ackEmoji,
-        }),
-      ]);
+      // The status post completes user-visible delivery for this pass.
+      // Record it before best-effort reaction cleanup so duplicate task/run
+      // bindings cannot repost the same lifecycle message when cleanup fails.
+      notifiedThreads.add(threadKey);
 
-      notifiedThreads.add(target.slackThreadTs);
+      const [terminalReactionResult, ackRemovalResult] =
+        await Promise.allSettled([
+          notifier.addReaction({
+            channel: target.slackChannelId,
+            timestamp: target.slackThreadTs,
+            name: terminalReaction,
+          }),
+          notifier.removeReaction({
+            channel: target.slackChannelId,
+            timestamp: target.slackThreadTs,
+            name: ackEmoji,
+          }),
+        ]);
+
+      if (
+        terminalReactionResult.status === 'rejected' ||
+        !terminalReactionResult.value
+      ) {
+        console.warn(
+          `[notifyPullRequestTerminalStatus] Failed to add ${status} reaction to Slack thread ${target.slackThreadTs}`,
+        );
+      }
+
+      if (ackRemovalResult.status === 'rejected' || !ackRemovalResult.value) {
+        console.warn(
+          `[notifyPullRequestTerminalStatus] Failed to remove acknowledgement reaction from Slack thread ${target.slackThreadTs}`,
+        );
+      }
 
       console.log(
         `[notifyPullRequestTerminalStatus] Sent ${status} notification to Slack thread ${target.slackThreadTs} for PR ${repository}#${prNumber}`,
@@ -670,8 +719,9 @@ async function deliverLinearTerminalStatus({
 }
 
 /**
- * Notifies Slack, Teams, Telegram, Discord, and Linear conversations linked to a PR
- * when that PR becomes terminal (merged or closed).
+ * Notifies non-Fast Slack, Teams, Telegram, Discord, and Linear conversations
+ * linked to a PR when that PR becomes terminal (merged or closed). Fast child
+ * tasks receive the status through their parent-session platform event instead.
  *
  * Resolves the GitHub installation gate (when provided) and provider-scoped
  * task-PR links once, then fans out delivery per surface: Slack sticky-footer
@@ -768,16 +818,38 @@ export async function notifyPullRequestTerminalStatus({
       }),
       db.query.taskRuns.findMany({
         where: inArray(taskRuns.taskId, taskIds),
+        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
         columns: {
+          taskId: true,
           payload: true,
         },
       }),
     ]);
 
+    // The latest run owns the task's current routing mode. Fast child tasks
+    // receive this lifecycle event through their parent session, so exclude
+    // every direct surface binding for those tasks.
+    const latestRunByTaskId = new Map<string, (typeof linkedRuns)[number]>();
+    for (const run of linkedRuns) {
+      if (!latestRunByTaskId.has(run.taskId)) {
+        latestRunByTaskId.set(run.taskId, run);
+      }
+    }
+    const fastParentTaskIds = new Set(
+      [...latestRunByTaskId.values()]
+        .filter((run) => getFastAgentParentFromPayload(run.payload) !== null)
+        .map((run) => run.taskId),
+    );
+    const directDeliveryTasks = linkedTasks.filter(
+      (task) => !fastParentTaskIds.has(task.id),
+    );
+    const directDeliveryRuns = linkedRuns.filter(
+      (run) => !fastParentTaskIds.has(run.taskId),
+    );
     const slackTargets: SlackTarget[] = [];
     const linearSessionIds: string[] = [];
 
-    for (const task of linkedTasks) {
+    for (const task of directDeliveryTasks) {
       if (task.slackThreadTs && task.slackChannelId) {
         slackTargets.push({
           taskId: task.id,
@@ -791,15 +863,21 @@ export async function notifyPullRequestTerminalStatus({
       }
     }
 
-    const teamsTargets = linkedRuns
+    slackTargets.push(
+      ...directDeliveryRuns
+        .map((run) => getSlackTarget(run.taskId, run.payload))
+        .filter((target): target is SlackTarget => target !== null),
+    );
+
+    const teamsTargets = directDeliveryRuns
       .map((run) => getTeamsTarget(run.payload))
       .filter((target): target is TeamsTarget => target !== null);
 
-    const telegramTargets = linkedRuns
+    const telegramTargets = directDeliveryRuns
       .map((run) => getTelegramTarget(run.payload))
       .filter((target): target is TelegramTarget => target !== null);
 
-    const discordTargets = linkedRuns
+    const discordTargets = directDeliveryRuns
       .map((run) => getDiscordTarget(run.payload))
       .filter((target): target is DiscordTarget => target !== null);
 

@@ -9,7 +9,6 @@ const {
   mockSelect,
   mockFindMany,
   mockCreateComputeProviderClient,
-  mockGetComputeProviderCapabilities,
   mockGetCommandOutput,
   mockLogHandlerError,
   visibleTaskHistoryCondition,
@@ -23,7 +22,6 @@ const {
   mockSelect: vi.fn(),
   mockFindMany: vi.fn(),
   mockCreateComputeProviderClient: vi.fn(),
-  mockGetComputeProviderCapabilities: vi.fn(),
   mockGetCommandOutput: vi.fn(),
   mockLogHandlerError: vi.fn(),
   visibleTaskHistoryCondition: { type: 'visibleTaskHistoryCondition' },
@@ -45,7 +43,6 @@ vi.mock('../../utils', () => ({
 
 vi.mock('@roomote/compute-providers', () => ({
   createComputeProviderClient: mockCreateComputeProviderClient,
-  getComputeProviderCapabilities: mockGetComputeProviderCapabilities,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -106,34 +103,6 @@ describe('getTaskComputeLogs', () => {
     mockSelect.mockReturnValue({
       from: selectFromMock,
     });
-    mockGetComputeProviderCapabilities.mockImplementation((provider) => {
-      switch (provider) {
-        case 'modal':
-          return {
-            supportsCreateInstance: true,
-            supportsDestroyInstance: true,
-            supportsCommandExecution: true,
-            supportsCommandOutputStreaming: false,
-            supportsCommandOutputLookup: false,
-            supportsSnapshots: true,
-            supportsResume: true,
-            supportsFileWrite: true,
-          };
-        case 'daytona':
-          return {
-            supportsCreateInstance: true,
-            supportsDestroyInstance: true,
-            supportsCommandExecution: true,
-            supportsCommandOutputStreaming: true,
-            supportsCommandOutputLookup: true,
-            supportsSnapshots: true,
-            supportsResume: true,
-            supportsFileWrite: true,
-          };
-        default:
-          throw new Error(`Unexpected provider: ${String(provider)}`);
-      }
-    });
     mockCreateComputeProviderClient.mockReturnValue({
       getCommandOutput: mockGetCommandOutput,
     });
@@ -149,6 +118,7 @@ describe('getTaskComputeLogs', () => {
         vendor: 'daytona',
         machineId: 'sandbox-1',
         sandboxCmdId: 'cmd-1',
+        log: null,
       },
       {
         id: 102,
@@ -156,6 +126,7 @@ describe('getTaskComputeLogs', () => {
         vendor: 'daytona',
         machineId: null,
         sandboxCmdId: 'cmd-2',
+        log: null,
       },
       {
         id: 103,
@@ -163,6 +134,7 @@ describe('getTaskComputeLogs', () => {
         vendor: 'daytona',
         machineId: 'sandbox-3',
         sandboxCmdId: 'cmd-3',
+        log: null,
       },
       {
         id: 104,
@@ -170,6 +142,7 @@ describe('getTaskComputeLogs', () => {
         vendor: 'modal',
         machineId: 'modal-1',
         sandboxCmdId: 'cmd-4',
+        log: 'stale central output',
       },
       {
         id: 105,
@@ -177,6 +150,7 @@ describe('getTaskComputeLogs', () => {
         vendor: 'legacy-sandbox',
         machineId: 'legacy-1',
         sandboxCmdId: 'cmd-5',
+        log: null,
       },
     ]);
     mockGetCommandOutput
@@ -259,6 +233,67 @@ describe('getTaskComputeLogs', () => {
       instanceId: 'sandbox-3',
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('returns centrally retained Roomote output without provider identifiers', async () => {
+    const output = [
+      '[2026-09-02T12:00:00.000Z] [command] worker run 201 started',
+      '[2026-09-02T12:00:01.000Z] [stdout] ready',
+      '[2026-09-02T12:00:02.000Z] [stderr] test failed',
+      '[2026-09-02T12:00:03.000Z] [command] worker exited with code 1',
+      '',
+    ].join('\n');
+    mockFindMany.mockResolvedValue([
+      {
+        id: 201,
+        status: 'failed',
+        vendor: 'roomote',
+        machineId: null,
+        sandboxCmdId: null,
+        log: output,
+      },
+      {
+        id: 202,
+        status: 'failed',
+        vendor: 'roomote',
+        machineId: 'roomote-2',
+        sandboxCmdId: null,
+        log: '   ',
+      },
+    ]);
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/compute_logs',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      taskId: 'task-1',
+      returned: 2,
+      taskRuns: [
+        {
+          id: 201,
+          status: 'failed',
+          vendor: 'roomote',
+          machineId: null,
+          sandboxCmdId: null,
+          output,
+          skippedReason: null,
+          error: null,
+        },
+        {
+          id: 202,
+          status: 'failed',
+          vendor: 'roomote',
+          machineId: 'roomote-2',
+          sandboxCmdId: null,
+          output: null,
+          skippedReason: 'no_retained_output:roomote',
+          error: null,
+        },
+      ],
+    });
+    expect(mockCreateComputeProviderClient).not.toHaveBeenCalled();
   });
 
   it('returns 404 when the task is not visible in the org', async () => {

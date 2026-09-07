@@ -13,16 +13,39 @@ import {
   getReasoningEffortLabel,
   getRecommendedModelPresets,
   getSetupModelProvider,
+  ROOMOTE_TRIAL_MODEL_PRESET_ID,
   getSetupProviderTaskModelPrefix,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
   resolveSetupModelProviderIdFromModel,
   SETUP_MODEL_PROVIDER_CATALOG,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   type ReasoningEffort,
   type SetupModelProviderDescriptor,
 } from './index';
 
 describe('normalizeDeploymentModelConfig', () => {
+  it('normalizes every role through the canonical descriptor', () => {
+    const input = Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        return [
+          [descriptor.modelConfigKey, `  openai/${role}  `],
+          [descriptor.reasoningConfigKey, 'high'],
+        ];
+      }),
+    );
+
+    const normalized = normalizeDeploymentModelConfig(input);
+
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(normalized[descriptor.modelConfigKey]).toBe(`openai/${role}`);
+      expect(normalized[descriptor.reasoningConfigKey]).toBe('high');
+    }
+  });
+
   it('normalizes a fully populated config and trims whitespace', () => {
     expect(
       normalizeDeploymentModelConfig({
@@ -41,12 +64,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: 'openai/gpt-5.4',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: 'anthropic/claude-sonnet-4',
       roomoteVisionModel: 'openai/gpt-5.5',
       roomoteCodeReviewModel: 'openai/gpt-5.5',
       roomoteExploreModel: 'openai/gpt-5.4-mini',
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -80,12 +105,14 @@ describe('normalizeDeploymentModelConfig', () => {
       normalizeDeploymentModelConfig({ roomoteModel: 'openai/gpt-5.4' }),
     ).toEqual({
       roomoteModel: 'openai/gpt-5.4',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -112,12 +139,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: null,
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -153,12 +182,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: DEFAULT_TASK_MODEL_ID,
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -178,12 +209,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: 'openai/gpt-5.4',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: 'anthropic/claude-opus-4.7',
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -204,12 +237,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: 'openai/gpt-5.4',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: 'high',
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: 'xhigh',
@@ -236,38 +271,80 @@ describe('normalizeDeploymentModelConfig', () => {
 });
 
 describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
+  const userSelectableProviders = SETUP_MODEL_PROVIDER_CATALOG.filter(
+    (provider) => !('hidden' in provider && provider.hidden),
+  );
+
   it('exposes the supported setup providers for the onboarding UI', () => {
-    expect(SETUP_MODEL_PROVIDER_CATALOG.map((provider) => provider.id)).toEqual(
-      [
-        'openrouter',
-        'vercel',
-        'requesty',
-        'baseten',
-        'togetherai',
-        'cloudflare-ai-gateway',
-        'cloudflare-workers-ai',
-        'openai',
-        'azure',
-        'azure-cognitive-services',
-        'anthropic',
-        'moonshotai',
-        'kimi-for-coding',
-        'minimax',
-        'opencode',
-        'opencode-go',
-        'amazon-bedrock',
-        'google',
-        'xai',
-        'zai',
-        'zai-coding-plan',
-        'github-copilot',
-        'openai-compatible',
-        'litellm',
-        'ollama',
-        'vllm',
-        'chatgpt',
-        'xai-subscription',
-      ],
+    expect(userSelectableProviders.map((provider) => provider.id)).toEqual([
+      'openrouter',
+      'vercel',
+      'requesty',
+      'baseten',
+      'togetherai',
+      'cloudflare-ai-gateway',
+      'cloudflare-workers-ai',
+      'openai',
+      'azure',
+      'azure-cognitive-services',
+      'anthropic',
+      'moonshotai',
+      'kimi-for-coding',
+      'minimax',
+      'opencode',
+      'opencode-go',
+      'amazon-bedrock',
+      'google',
+      'xai',
+      'zai',
+      'zai-coding-plan',
+      'github-copilot',
+      'openai-compatible',
+      'litellm',
+      'ollama',
+      'vllm',
+      'chatgpt',
+      'xai-subscription',
+    ]);
+  });
+
+  it('keeps Roomote inference hidden and maps its curated models to roomote IDs', () => {
+    expect(getSetupModelProvider('roomote')).toMatchObject({
+      id: 'roomote',
+      hidden: true,
+      envVarName: 'R_TRIAL_OPENROUTER_API_KEY',
+      defaultRoomoteModel: 'roomote/openai/gpt-5.6-luna',
+    });
+    expect(
+      getSetupModelProvider('roomote').suggestedTaskModels.every((model) =>
+        model.id.startsWith('roomote/'),
+      ),
+    ).toBe(true);
+  });
+
+  it('derives the Roomote Trial preset from OpenRouter Efficient with Roomote model IDs', () => {
+    const openRouterEfficient = getRecommendedModelPresets(
+      getSetupModelProvider('openrouter'),
+    ).find((preset) => preset.id === 'efficient');
+    const roomoteTrial = getRecommendedModelPresets(
+      getSetupModelProvider('roomote'),
+    ).find((preset) => preset.id === ROOMOTE_TRIAL_MODEL_PRESET_ID);
+
+    expect(roomoteTrial).toMatchObject({
+      id: ROOMOTE_TRIAL_MODEL_PRESET_ID,
+      label: 'Roomote Trial',
+      default: true,
+    });
+    expect(roomoteTrial?.roles).toEqual(
+      Object.fromEntries(
+        Object.entries(openRouterEfficient!.roles).map(([role, config]) => [
+          role,
+          {
+            ...config,
+            modelId: config.modelId.replace(/^openrouter\//u, 'roomote/'),
+          },
+        ]),
+      ),
     );
   });
 
@@ -336,16 +413,52 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
-  it('recommends Kimi K3 only from supported providers', () => {
-    const kimiK3ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+  it('recommends Claude Fable 5.1 from every supported provider', () => {
+    const fable51ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Kimi K3',
+          (suggestion) => suggestion.displayName === 'Claude Fable 5.1',
         );
 
         return model ? [{ providerId: provider.id, modelId: model.id }] : [];
       },
     );
+
+    expect(fable51ByProvider).toEqual([
+      {
+        providerId: 'roomote',
+        modelId: 'roomote/anthropic/claude-fable-5.1',
+      },
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/anthropic/claude-fable-5.1',
+      },
+      {
+        providerId: 'vercel',
+        modelId: 'vercel/anthropic/claude-fable-5.1',
+      },
+      { providerId: 'requesty', modelId: 'requesty/claude-fable-5-1' },
+      { providerId: 'anthropic', modelId: 'anthropic/claude-fable-5-1' },
+      { providerId: 'opencode', modelId: 'opencode/claude-fable-5-1' },
+      {
+        providerId: 'amazon-bedrock',
+        modelId: 'bedrock-mantle/anthropic.claude-fable-5-1',
+      },
+      {
+        providerId: 'github-copilot',
+        modelId: 'github-copilot/claude-fable-5.1',
+      },
+    ]);
+  });
+
+  it('recommends Kimi K3 only from supported providers', () => {
+    const kimiK3ByProvider = userSelectableProviders.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'Kimi K3',
+      );
+
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
 
     expect(kimiK3ByProvider).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/moonshotai/kimi-k3' },
@@ -366,15 +479,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it('recommends Qwen3.8 Max only from supported providers', () => {
-    const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Qwen3.8 Max',
-        );
+    const providersByModel = userSelectableProviders.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'Qwen3.8 Max',
+      );
 
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
 
     expect(providersByModel).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/qwen/qwen3.8-max' },
@@ -399,7 +510,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it('recommends GLM 5.3 where available and retains GLM 5.2 elsewhere', () => {
-    const glm53ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+    const glm53ByProvider = userSelectableProviders.flatMap((provider) => {
       const model = provider.suggestedTaskModels.find(
         (suggestion) => suggestion.displayName === 'GLM 5.3',
       );
@@ -408,7 +519,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
 
     expect(glm53ByProvider).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.3' },
+      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.3' },
+      { providerId: 'requesty', modelId: 'requesty/glm-5.3' },
       { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3' },
+      { providerId: 'zai', modelId: 'zai/glm-5.3' },
       {
         providerId: 'zai-coding-plan',
         modelId: 'zai-coding-plan/glm-5.3',
@@ -420,9 +535,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('zai'))
         .roomoteModel,
-    ).toBe('zai/glm-5.2');
+    ).toBe('zai/glm-5.3');
     expect(
-      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+      userSelectableProviders.flatMap((provider) => {
         const model = provider.suggestedTaskModels.find(
           (suggestion) => suggestion.displayName === 'GLM 5.2',
         );
@@ -430,17 +545,50 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         return model ? [{ providerId: provider.id, modelId: model.id }] : [];
       }),
     ).toEqual([
-      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.2' },
-      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.2' },
-      { providerId: 'requesty', modelId: 'requesty/glm-5.2' },
       { providerId: 'baseten', modelId: 'baseten/zai-org/GLM-5.2' },
       { providerId: 'togetherai', modelId: 'togetherai/zai-org/GLM-5.2' },
       { providerId: 'opencode', modelId: 'opencode/glm-5.2' },
-      { providerId: 'zai', modelId: 'zai/glm-5.2' },
+    ]);
+  });
+
+  it('recommends GLM 5.3 Flash from every supported provider', () => {
+    const glm53FlashByProvider = userSelectableProviders.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'GLM 5.3 Flash',
+      );
+
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
+
+    expect(glm53FlashByProvider).toEqual([
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/z-ai/glm-5.3-flash',
+      },
+      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.3-flash' },
+      { providerId: 'requesty', modelId: 'requesty/glm-5.3-flash' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3-flash' },
+      { providerId: 'zai', modelId: 'zai/glm-5.3-flash' },
+      {
+        providerId: 'zai-coding-plan',
+        modelId: 'zai-coding-plan/glm-5.3-flash',
+      },
     ]);
   });
 
   it.each([
+    {
+      displayName: 'GPT-6 Astra',
+      modelId: 'gpt-6-astra',
+      providerIds: [
+        'openrouter',
+        'vercel',
+        'openai',
+        'opencode',
+        'github-copilot',
+        'chatgpt',
+      ],
+    },
     {
       displayName: 'GPT 5.6 Sol',
       modelId: 'gpt-5.6-sol',
@@ -455,18 +603,16 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     },
   ])(
     'recommends $displayName only from providers that support it',
-    ({ displayName, modelId }) => {
-      const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-        (provider) => {
-          const model = provider.suggestedTaskModels.find(
-            (suggestion) => suggestion.displayName === displayName,
-          );
+    ({ displayName, modelId, providerIds }) => {
+      const providersByModel = userSelectableProviders.flatMap((provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === displayName,
+        );
 
-          return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-        },
-      );
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      });
 
-      expect(providersByModel).toEqual([
+      const providerCandidates = [
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
         { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
         { providerId: 'requesty', modelId: `requesty/${modelId}@eu` },
@@ -495,15 +641,23 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         },
         { providerId: 'github-copilot', modelId: `github-copilot/${modelId}` },
         { providerId: 'chatgpt', modelId: `openai/${modelId}` },
-      ]);
+      ];
+
+      expect(providersByModel).toEqual(
+        providerIds
+          ? providerCandidates.filter(({ providerId }) =>
+              providerIds.includes(providerId),
+            )
+          : providerCandidates,
+      );
     },
   );
 
-  it('recommends Gemini 3.7 Flash from every provider that offered 3.6', () => {
-    const geminiFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+  it('recommends Gemini 3.8 Flash from every provider that offered 3.7', () => {
+    const geminiFlashByProvider = userSelectableProviders.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Gemini 3.7 Flash',
+          (suggestion) => suggestion.displayName === 'Gemini 3.8 Flash',
         );
 
         return model ? [{ providerId: provider.id, modelId: model.id }] : [];
@@ -513,17 +667,20 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(geminiFlashByProvider).toEqual([
       {
         providerId: 'openrouter',
-        modelId: 'openrouter/google/gemini-3.7-flash',
+        modelId: 'openrouter/google/gemini-3.8-flash',
       },
-      { providerId: 'vercel', modelId: 'vercel/google/gemini-3.7-flash' },
-      { providerId: 'requesty', modelId: 'requesty/gemini-3.7-flash' },
-      { providerId: 'opencode', modelId: 'opencode/gemini-3.7-flash' },
-      { providerId: 'google', modelId: 'google/gemini-3.7-flash' },
+      { providerId: 'vercel', modelId: 'vercel/google/gemini-3.8-flash' },
+      {
+        providerId: 'requesty',
+        modelId: 'requesty/vertex/gemini-3.8-flash',
+      },
+      { providerId: 'opencode', modelId: 'opencode/gemini-3.8-flash' },
+      { providerId: 'google', modelId: 'google/gemini-3.8-flash' },
     ]);
   });
 
   it("uses each provider's DeepSeek V4 Flash 0731 model slug", () => {
-    const deepSeekFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+    const deepSeekFlashByProvider = userSelectableProviders.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
           (suggestion) => suggestion.displayName === 'DeepSeek V4 Flash 0731',
@@ -562,7 +719,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   });
 
   it("uses each provider's DeepSeek V4 Pro 0813 model slug", () => {
-    const deepSeekProByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+    const deepSeekProByProvider = userSelectableProviders.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
           (suggestion) => suggestion.displayName === 'DeepSeek V4 Pro 0813',
@@ -646,7 +803,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(googleProvider).toMatchObject({
       label: 'Google Gemini',
       envVarName: 'GEMINI_API_KEY',
-      defaultRoomoteModel: 'google/gemini-3.7-flash',
+      defaultRoomoteModel: 'google/gemini-3.8-flash',
     });
   });
 
@@ -852,15 +1009,16 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'REQUESTY_API_KEY',
       defaultRoomoteModel: 'requesty/claude-sonnet-5',
       recommendedRoleModels: {
-        helper: 'requesty/gemini-3.7-flash',
+        helper: 'requesty/vertex/gemini-3.8-flash',
         codeReview: 'requesty/claude-sonnet-5',
-        explore: 'requesty/gemini-3.7-flash',
+        explore: 'requesty/vertex/gemini-3.8-flash',
         planning: 'requesty/claude-opus-5',
       },
     });
     expect(
       requestyProvider?.suggestedTaskModels.map((model) => model.id),
     ).toEqual([
+      'requesty/claude-fable-5-1',
       'requesty/claude-fable-5',
       'requesty/claude-haiku-4-5',
       'requesty/claude-opus-5',
@@ -868,9 +1026,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
-      'requesty/gemini-3.7-flash',
+      'requesty/vertex/gemini-3.8-flash',
       'requesty/deepseek-v4-flash-0731',
-      'requesty/glm-5.2',
+      'requesty/glm-5.3-flash',
+      'requesty/glm-5.3',
       'requesty/kimi-k3',
       'requesty/grok-4.6',
     ]);
@@ -995,12 +1154,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
 
       expect(buildRecommendedDeploymentModelConfig(provider)).toEqual({
         roomoteModel: 'openai/gpt-5.6-sol',
+        roomoteOrchestrationModel: null,
         roomoteSmallModel: 'openai/gpt-5.6-luna',
         roomoteVisionModel: 'openai/gpt-5.6-sol',
         roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
         roomoteExploreModel: 'openai/gpt-5.6-luna',
         roomotePlanningModel: 'openai/gpt-5.6-sol',
         roomoteModelReasoningEffort: 'medium',
+        roomoteOrchestrationModelReasoningEffort: null,
         roomoteSmallModelReasoningEffort: 'low',
         roomoteVisionModelReasoningEffort: 'low',
         roomoteCodeReviewModelReasoningEffort: 'high',
@@ -1011,12 +1172,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
         buildRecommendedDeploymentModelConfig(provider, 'luna-max'),
       ).toEqual({
         roomoteModel: 'openai/gpt-5.6-luna',
+        roomoteOrchestrationModel: null,
         roomoteSmallModel: 'openai/gpt-5.6-luna',
         roomoteVisionModel: 'openai/gpt-5.6-sol',
         roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
         roomoteExploreModel: 'openai/gpt-5.6-luna',
         roomotePlanningModel: 'openai/gpt-5.6-sol',
         roomoteModelReasoningEffort: 'max',
+        roomoteOrchestrationModelReasoningEffort: null,
         roomoteSmallModelReasoningEffort: 'low',
         roomoteVisionModelReasoningEffort: 'low',
         roomoteCodeReviewModelReasoningEffort: 'high',
@@ -1026,17 +1189,44 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     },
   );
 
+  it('builds the openrouter Efficient preset on the inexpensive model for every role', () => {
+    // Reasoning efforts stay null so the shared per-role defaults apply.
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('openrouter'),
+        'efficient',
+      ),
+    ).toEqual({
+      roomoteModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteOrchestrationModel: null,
+      roomoteSmallModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteVisionModel: null,
+      roomoteCodeReviewModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteExploreModel: 'openrouter/openai/gpt-5.6-luna',
+      roomotePlanningModel: 'openrouter/openai/gpt-5.6-luna',
+      roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
+      roomoteSmallModelReasoningEffort: null,
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
+    });
+  });
+
   it('maps the provider default to coding and recommended models to their roles', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
     ).toEqual({
       roomoteModel: 'anthropic/claude-sonnet-5',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: 'anthropic/claude-haiku-4-5',
       roomoteVisionModel: null,
       roomoteCodeReviewModel: 'anthropic/claude-sonnet-5',
       roomoteExploreModel: 'anthropic/claude-haiku-4-5',
       roomotePlanningModel: 'anthropic/claude-opus-5',
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: 'medium',
@@ -1105,12 +1295,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       ),
     ).toEqual({
       roomoteModel: 'github-copilot/gpt-5.6-luna',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: 'medium',
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -1133,15 +1325,15 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('google')),
     ).toEqual({
       ...createEmptyDeploymentModelConfig(),
-      roomoteModel: 'google/gemini-3.7-flash',
+      roomoteModel: 'google/gemini-3.8-flash',
     });
   });
 
   it.each([
     ['balanced', DEFAULT_TASK_MODEL_ID],
-    ['quick-turnaround', 'openrouter/google/gemini-3.7-flash'],
+    ['quick-turnaround', 'openrouter/google/gemini-3.8-flash'],
   ])(
-    'recommends Gemini 3.7 Flash in the %s OpenRouter preset',
+    'recommends Gemini 3.8 Flash in the %s OpenRouter preset',
     (presetId, codingModel) => {
       expect(
         buildRecommendedDeploymentModelConfig(
@@ -1150,8 +1342,8 @@ describe('buildRecommendedDeploymentModelConfig', () => {
         ),
       ).toMatchObject({
         roomoteModel: codingModel,
-        roomoteSmallModel: 'openrouter/google/gemini-3.7-flash',
-        roomoteExploreModel: 'openrouter/google/gemini-3.7-flash',
+        roomoteSmallModel: 'openrouter/google/gemini-3.8-flash',
+        roomoteExploreModel: 'openrouter/google/gemini-3.8-flash',
       });
     },
   );
@@ -1163,12 +1355,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       ),
     ).toEqual({
       roomoteModel: 'moonshotai/kimi-k2.7-code',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: 'moonshotai/kimi-k3',
       roomoteCodeReviewModel: 'moonshotai/kimi-k3',
       roomoteExploreModel: null,
       roomotePlanningModel: 'moonshotai/kimi-k3',
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -1184,12 +1378,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       ),
     ).toEqual({
       roomoteModel: 'kimi-for-coding/k3',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: 'kimi-for-coding/k2p7',
       roomoteVisionModel: 'kimi-for-coding/k3',
       roomoteCodeReviewModel: 'kimi-for-coding/k3',
       roomoteExploreModel: 'kimi-for-coding/k2p7',
       roomotePlanningModel: 'kimi-for-coding/k3',
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -1434,6 +1630,29 @@ describe('reasoning effort labels', () => {
 });
 
 describe('buildSetupModelStatus', () => {
+  it('connects Roomote inference only through the stored key, never the env variable', () => {
+    const envOnly = buildSetupModelStatus({
+      runtimeEnv: { R_TRIAL_OPENROUTER_API_KEY: 'sk-trial' },
+      persistedEnvVarNames: [],
+    });
+    // Hidden and unconnected: the env value alone must not surface the
+    // provider, or deleting the stored key could not disable the trial.
+    expect(
+      envOnly.providers.find((provider) => provider.id === 'roomote'),
+    ).toBeUndefined();
+
+    const stored = buildSetupModelStatus({
+      runtimeEnv: {},
+      persistedEnvVarNames: ['R_TRIAL_OPENROUTER_API_KEY'],
+    });
+    expect(
+      stored.providers.find((provider) => provider.id === 'roomote'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
+    });
+  });
+
   it('treats runtime env as the highest-precedence satisfied setup source', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
@@ -1515,6 +1734,45 @@ describe('buildSetupModelStatus', () => {
 
     expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
     expect(status.setupSatisfied).toBe(true);
+  });
+
+  it('treats Roomote inference as a distinct hosting-managed provider', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {},
+      persistedModelConfig: {
+        roomoteModel: 'roomote/openai/gpt-5.6-luna',
+        roomoteSmallModel: null,
+        roomoteVisionModel: null,
+      },
+      persistedEnvVarNames: ['R_TRIAL_OPENROUTER_API_KEY'],
+    });
+
+    expect(status.setupSatisfied).toBe(true);
+    expect(
+      status.providers.find((provider) => provider.id === 'roomote'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
+    });
+    expect(
+      status.providers.find((provider) => provider.id === 'openrouter'),
+    ).toMatchObject({ runtimeApiKeySatisfied: false });
+  });
+
+  it('keeps OpenRouter separate from the hosting-managed Roomote key', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_TRIAL_OPENROUTER_API_KEY: 'sk-trial',
+      },
+      persistedEnvVarNames: [],
+    });
+
+    expect(
+      status.providers.find((provider) => provider.id === 'openrouter'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: false,
+    });
   });
 
   it('resolves the vercel provider from a runtime AI Gateway model id', () => {

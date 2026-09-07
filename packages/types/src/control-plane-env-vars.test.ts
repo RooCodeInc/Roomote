@@ -27,6 +27,7 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'DATABASE_URL',
       'S3_SECRET_ACCESS_KEY',
       'R_LICENSE_KEY',
+      'R_TRIAL_OPENROUTER_API_KEY',
       'R_ELEVENLABS_API_KEY',
       'R_ELEVENLABS_VOICE_ID',
     ]) {
@@ -65,6 +66,12 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(false);
     }
+  });
+
+  it('allows the sandbox OpenRouter key in deployment environment variables', () => {
+    expect(CONTROL_PLANE_ENV_VAR_NAMES.has('SANDBOX_OPENROUTER_API_KEY')).toBe(
+      false,
+    );
   });
 
   it('includes disabled-provider credentials', () => {

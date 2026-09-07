@@ -32,7 +32,7 @@ variable "domain" {
 }
 
 variable "preview_domain" {
-  description = "Preview proxy hostname. Defaults to preview.<domain>."
+  description = "Preview proxy hostname. Defaults to domain for flat preview hostnames."
   type        = string
   default     = ""
 }
@@ -74,7 +74,7 @@ variable "image_namespace" {
 }
 
 variable "manage_dns" {
-  description = "Create DigitalOcean A records for domain, preview_domain, and *.preview_domain."
+  description = "Create DigitalOcean A records for domain, an optional separate preview_domain, and *.preview_domain."
   type        = bool
   default     = false
 }

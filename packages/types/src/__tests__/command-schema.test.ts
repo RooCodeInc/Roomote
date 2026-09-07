@@ -463,6 +463,67 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
+  it.each([
+    {
+      label: 'top-level env',
+      config: {
+        env: { SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
+      },
+    },
+    {
+      label: 'repository command env',
+      config: {
+        repositories: [
+          {
+            repository: 'owner/repo',
+            commands: [
+              {
+                name: 'start',
+                run: 'pnpm dev',
+                env: {
+                  SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored',
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      label: 'Docker project env',
+      config: {
+        docker_projects: [
+          {
+            name: 'app',
+            repository: 'owner/repo',
+            type: 'compose',
+            files: ['compose.yml'],
+            env: { SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
+          },
+        ],
+      },
+    },
+    {
+      label: 'MCP process env',
+      config: {
+        mcpServers: {
+          local: {
+            command: 'node',
+            env: { SANDBOX_OPENROUTER_API_KEY: 'must-not-be-stored' },
+          },
+        },
+      },
+    },
+  ])('rejects the sandbox OpenRouter key in $label', ({ config }) => {
+    const result = environmentConfigSchema.safeParse({
+      name: 'Env',
+      repositories: [{ repository: 'owner/repo' }],
+      ...config,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('keeps legacy duplicate repository entries parseable on read', () => {
     const result = environmentConfigSchema.safeParse({
       name: 'Env',

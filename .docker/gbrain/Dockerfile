@@ -4,12 +4,15 @@
 # tracking master. Install comes from the GitHub repo, NOT npm: an unrelated
 # npm package shadows the name.
 #
-# v1 runs PGLite-on-volume (verified in the M0 spike; a single long-lived
-# serve process is exactly our topology, and gbrain locks the brain to one
-# process anyway). Postgres + pgvector is the at-scale upgrade path.
+# Postgres + pgvector backs both the HTTP server and gbrain's durable job
+# worker. The worker is required for Roomote-scheduled maintenance cycles.
 FROM oven/bun:1.3.14
 
-ARG GBRAIN_REF=ac402f5
+ARG GBRAIN_REF=f49ca569232dbc0d8e0783d84606115e3bfe5ab1
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates git postgresql-client \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN bun install -g "github:garrytan/gbrain#${GBRAIN_REF}"
 
@@ -27,7 +30,8 @@ RUN set -e; \
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Brain data, minted tokens, and config live on the volume.
+# Generated tokens, local service config, and the Markdown corpus live on the
+# volume. Postgres remains gbrain's query index and durable job backend.
 VOLUME /data
 ENV GBRAIN_DATA_DIR=/data
 

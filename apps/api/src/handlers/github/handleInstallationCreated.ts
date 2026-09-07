@@ -1,5 +1,6 @@
 import { completePendingGitHubInstallation } from '@roomote/github';
 import { sendUserDirectMessageBestEffort } from '@roomote/sdk/server';
+import { requestBrainBackfill } from '@roomote/sdk/server/request-instance-ping';
 import { Env } from '@roomote/env';
 
 import type { WebhookResponse } from '../../types';
@@ -19,6 +20,12 @@ export async function handleInstallationCreated(
     const result = await completePendingGitHubInstallation(
       payload.installation.id,
     );
+
+    // The webhook is the universal completion point for new installations
+    // (pending-approval and direct installs alike): repositories just became
+    // reachable, so start Memory ingestion now rather than waiting out the
+    // 15-minute schedules.
+    void requestBrainBackfill('github-installation-created');
 
     if (result.success) {
       // The requester was waiting on a GitHub org owner's approval; let them

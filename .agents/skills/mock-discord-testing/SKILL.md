@@ -1,6 +1,6 @@
 ---
 name: mock-discord-testing
-description: Run Roomote Discord integration flows through the checked-in mock Discord REST harness and synthetic Gateway envelopes instead of a real Discord bot. Use when testing Discord task entry, follow-up queueing to active jobs, slash commands (`/new`, `/link`, `/help`), button interactions, outbound Discord posts, task threads and forum posts, message chunking, `DISCORD_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
+description: Run Roomote Discord integration flows through the checked-in mock Discord REST harness and synthetic Gateway envelopes instead of a real Discord bot. Use when testing Discord task entry, follow-up queueing to active jobs, slash commands (`/new`, `/goal`, `/link`, `/help`), button interactions, outbound Discord posts, task threads and forum posts, message chunking, `DISCORD_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
 ---
 
 # Mock Discord Testing

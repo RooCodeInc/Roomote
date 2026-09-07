@@ -8,6 +8,7 @@ import {
   customAutomationsJob,
   dependabotTriageJob,
   managerStatsJob,
+  providerUsageLimitJob,
   securityAuditorJob,
   sentryTriageJob,
   suggesterJob,
@@ -33,6 +34,8 @@ import {
   prReviewNotificationDispatchJob,
   brainOutboxDrainJob,
   brainCollectorsJob,
+  brainMaintenanceJob,
+  sessionsReconcileJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -53,6 +56,7 @@ const RETIRED_JOB_SCHEDULER_NAMES = [
   'SecurityAuditor',
   'CodeQualityAuditor',
   'CiFailureTriage',
+  'ProviderUsageLimitCheck',
 ] as const;
 
 type ScheduledJob = Job<unknown, void, string>;
@@ -65,6 +69,7 @@ const AUTOMATION_JOBS: Record<
   suggester: suggesterJob,
   announcer: announcerJob,
   manager_stats: managerStatsJob,
+  provider_usage_limit: providerUsageLimitJob,
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
   codeql_triage: codeqlTriageJob,
@@ -101,8 +106,8 @@ async function createJobs(queue: Queue): Promise<void> {
     { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
   );
 
-  // Automation jobs tick hourly (manager_stats hourly on its posting days)
-  // and due-gate themselves against automations.enabled/schedule/lastRunAt.
+  // Automation jobs tick at their minimum supported cadence and due-gate
+  // themselves against automations.enabled/schedule/lastRunAt.
   await queue.upsertJobScheduler(
     'conflict_resolver' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
@@ -122,6 +127,11 @@ async function createJobs(queue: Queue): Promise<void> {
     'manager_stats' satisfies ScheduledAutomationJobName,
     // The runner applies the configured deployment timezone and local-Friday
     // gate. Tick continuously so UTC date boundaries cannot exclude eastern zones.
+    { every: 60 * 60 * 1000 },
+  );
+
+  await queue.upsertJobScheduler(
+    'provider_usage_limit' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 },
   );
 
@@ -172,7 +182,9 @@ async function createJobs(queue: Queue): Promise<void> {
 
   await queue.upsertJobScheduler(
     ScheduledJobName.PrReviewNotificationDispatch,
-    { every: 10 * 1000 },
+    // Terminal Roomote summaries wake the durable drain immediately. This
+    // minute-level repair cadence is only for delayed and recovered work.
+    { every: 60 * 1000 },
   );
 
   await queue.upsertJobScheduler(
@@ -207,12 +219,25 @@ async function createJobs(queue: Queue): Promise<void> {
     { every: 15 * 60 * 1000 },
   );
 
+  await queue.upsertJobScheduler(
+    ScheduledJobName.BrainMaintenance,
+    // 07:00 UTC daily. Roomote owns the schedule; gbrain's durable worker
+    // owns the built-in cycle and prevents overlapping work internally.
+    { pattern: '0 7 * * *' },
+  );
+
+  await queue.upsertJobScheduler(ScheduledJobName.SessionsReconcile, {
+    every: 60 * 1000,
+  });
+
   const schedulers = await queue.getJobSchedulers();
   console.log('[createJobs] getJobSchedulers ->', schedulers);
 }
 
 const runJobs = async (job: ScheduledJob): Promise<void> => {
-  console.log(`[runJobs] processing job ${job.id} of type ${job.name}`);
+  if (job.name !== ScheduledJobName.PrReviewNotificationDispatch) {
+    console.log(`[runJobs] processing job ${job.id} of type ${job.name}`);
+  }
 
   if (isAutomationJobName(job.name)) {
     await AUTOMATION_JOBS[job.name]();
@@ -244,6 +269,10 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return brainOutboxDrainJob();
     case ScheduledJobName.BrainCollectors:
       return brainCollectorsJob();
+    case ScheduledJobName.BrainMaintenance:
+      return brainMaintenanceJob();
+    case ScheduledJobName.SessionsReconcile:
+      return sessionsReconcileJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;
@@ -284,9 +313,13 @@ export async function startScheduler() {
     autorun: true,
   });
 
-  worker.on('completed', (job) =>
-    console.log(`[Worker#on(completed)] job ${job.id} completed successfully`),
-  );
+  worker.on('completed', (job) => {
+    if (job.name !== ScheduledJobName.PrReviewNotificationDispatch) {
+      console.log(
+        `[Worker#on(completed)] job ${job.id} completed successfully`,
+      );
+    }
+  });
 
   worker.on('failed', (job, err) =>
     console.error(`[Worker#on(failed)] job ${job?.id} failed:`, err),
@@ -297,10 +330,6 @@ export async function startScheduler() {
   );
 
   const queueEvents = new QueueEvents(QUEUE_NAME, { connection });
-
-  queueEvents.on('completed', ({ jobId }) =>
-    console.log(`[QueueEvents#on(completed)] job ${jobId} completed`),
-  );
 
   queueEvents.on('failed', ({ jobId, failedReason }) =>
     console.error(

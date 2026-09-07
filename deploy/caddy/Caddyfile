@@ -33,6 +33,16 @@
 		}
 	}
 
+	# Webhook URLs are public integration contracts. Route them directly to the
+	# API rather than relying on the web container's compatibility proxy.
+	@api_webhooks {
+		path /api/webhooks /api/webhooks/*
+	}
+
+	handle @api_webhooks {
+		import roomote_proxy api:3001
+	}
+
 	@local_sandbox path_regexp local_sandbox ^/_roomote-sandbox/([a-z0-9]+)(/.*)$
 
 	handle @local_sandbox {

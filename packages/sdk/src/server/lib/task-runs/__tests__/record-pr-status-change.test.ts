@@ -1,6 +1,7 @@
 const mockFindManyTaskPullRequests = vi.fn();
 const mockFindFirstTaskRun = vi.fn();
 const mockRecordTaskMessageEnvelope = vi.fn();
+const mockNotifyFastAgentParent = vi.fn();
 const mockRedisSet = vi.fn();
 const mockRedisDel = vi.fn();
 
@@ -12,6 +13,7 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    desc: vi.fn((column: unknown) => ({ desc: column })),
     db: {
       query: {
         taskPullRequests: {
@@ -38,11 +40,17 @@ vi.mock('../record-task-message-envelope', () => ({
     mockRecordTaskMessageEnvelope(...args),
 }));
 
+vi.mock('../notify-fast-agent-parent-on-pull-request-status-changed', () => ({
+  notifyFastAgentParentOnPullRequestStatusChanged: (...args: unknown[]) =>
+    mockNotifyFastAgentParent(...args),
+}));
+
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
 } from '@roomote/types';
+import { desc, taskRuns } from '@roomote/db/server';
 
 import {
   formatPrStatusChangeTaskHistoryText,
@@ -143,8 +151,13 @@ describe('recordPrStatusChangeInTaskHistory', () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
-    mockFindFirstTaskRun.mockResolvedValue({ id: 99 });
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 99,
+      taskId: 'task-1',
+      payload: {},
+    });
     mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
+    mockNotifyFastAgentParent.mockResolvedValue(undefined);
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
   });
@@ -158,6 +171,7 @@ describe('recordPrStatusChangeInTaskHistory', () => {
     prNumber: 42,
     prTitle: 'Fix auth',
     prUrl: 'https://github.com/owner/repo/pull/42',
+    targetBranch: 'develop',
     status: 'merged' as const,
     actorLogin: 'matt',
     sourceControlProvider: 'github' as const,
@@ -194,8 +208,8 @@ describe('recordPrStatusChangeInTaskHistory', () => {
       { taskId: 'task-2' },
     ]);
     mockFindFirstTaskRun
-      .mockResolvedValueOnce({ id: 11 })
-      .mockResolvedValueOnce({ id: 22 });
+      .mockResolvedValueOnce({ id: 11, taskId: 'task-1', payload: {} })
+      .mockResolvedValueOnce({ id: 22, taskId: 'task-2', payload: {} });
 
     await expect(
       recordPrStatusChangeInTaskHistory({
@@ -210,6 +224,22 @@ describe('recordPrStatusChangeInTaskHistory', () => {
     const expectedTs = Date.parse('2026-07-12T15:30:00.123Z');
 
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(desc)).toHaveBeenNthCalledWith(1, taskRuns.createdAt);
+    expect(vi.mocked(desc)).toHaveBeenNthCalledWith(2, taskRuns.id);
+    expect(mockNotifyFastAgentParent).toHaveBeenNthCalledWith(1, {
+      run: { id: 11, taskId: 'task-1', payload: {} },
+      pullRequest: {
+        provider: 'github',
+        repository: 'owner/repo',
+        number: 42,
+        title: 'Fix auth',
+        url: 'https://github.com/owner/repo/pull/42',
+        targetBranch: 'develop',
+        status: 'closed',
+      },
+      actorLogin: 'alice',
+    });
     expect(mockRecordTaskMessageEnvelope).toHaveBeenNthCalledWith(1, {
       runId: 11,
       taskId: 'task-1',
@@ -230,6 +260,7 @@ describe('recordPrStatusChangeInTaskHistory', () => {
           repository: 'owner/repo',
           prNumber: 42,
           prUrl: 'https://github.com/owner/repo/pull/42',
+          targetBranch: 'develop',
           actorLogin: 'alice',
         },
         visibleInTranscript: true,

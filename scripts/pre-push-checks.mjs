@@ -44,8 +44,6 @@ async function main() {
       'exec',
       'turbo',
       'lint',
-      '--filter=@roomote/web',
-      '--filter=@roomote/worker',
       '--log-order',
       'grouped',
       '--output-logs',

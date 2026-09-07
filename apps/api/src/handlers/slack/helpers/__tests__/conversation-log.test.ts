@@ -22,6 +22,9 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/slack', () => ({
+  getSlackTaskRunWorkspacePredicate: vi.fn((slackTeamId: string) => ({
+    workspaceTeamId: slackTeamId,
+  })),
   getLatestSlackBotReply: getLatestSlackBotReplyMock,
 }));
 
@@ -74,7 +77,12 @@ describe('findRoomoteOwnedSlackThread', () => {
     getLatestSlackBotReplyMock.mockResolvedValue(null);
   });
 
-  it.each([['ci_failure_triage'], ['sentry_triage'], ['announcer']])(
+  it.each([
+    ['ci_failure_triage'],
+    ['sentry_triage'],
+    ['announcer'],
+    ['platform_issue_alerts'],
+  ])(
     'treats a task-bound %s report thread as an automation report thread',
     async (automationKey) => {
       taskRunRowsMock.mockResolvedValue([
@@ -104,6 +112,85 @@ describe('findRoomoteOwnedSlackThread', () => {
     });
 
     await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toBeNull();
+  });
+
+  it('resolves a tracked report alias without replacing the task source thread', async () => {
+    taskRunRowsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { initiatorUserId: 'user-1', actingUserId: null },
+      ]);
+    findBackgroundAutomationSlackThreadMock.mockResolvedValue({
+      automationKey: 'platform_issue_alerts',
+      metadata: { sourceTaskId: 'task-source' },
+    });
+
+    await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toMatchObject({
+      taskId: 'task-source',
+      trackedAliasTaskId: 'task-source',
+      userId: 'user-1',
+      isAutomationReportThread: true,
+    });
+    expect(whereMock).toHaveBeenNthCalledWith(2, {
+      conditions: [
+        { left: 'tasks.id', right: 'task-source' },
+        { left: 'tasks.slackThreadTs', right: '100.000' },
+        { isNull: 'tasks.deletedAt' },
+      ],
+    });
+  });
+
+  it('rejects a tracked report alias posted by another Slack workspace', async () => {
+    taskRunRowsMock.mockResolvedValueOnce([]);
+    findBackgroundAutomationSlackThreadMock.mockResolvedValue({
+      automationKey: 'platform_issue_alerts',
+      metadata: { sourceTaskId: 'task-source', slackTeamId: 'T2' },
+    });
+
+    await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toBeNull();
+    expect(taskRunRowsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a tracked report alias posted by the inbound Slack workspace', async () => {
+    taskRunRowsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { initiatorUserId: 'user-1', actingUserId: null },
+      ]);
+    findBackgroundAutomationSlackThreadMock.mockResolvedValue({
+      automationKey: 'platform_issue_alerts',
+      metadata: { sourceTaskId: 'task-source', slackTeamId: 'T1' },
+    });
+
+    await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toMatchObject({
+      taskId: 'task-source',
+      trackedAliasTaskId: 'task-source',
+      isAutomationReportThread: true,
+    });
+    expect(whereMock).toHaveBeenNthCalledWith(2, {
+      conditions: [
+        { left: 'tasks.id', right: 'task-source' },
+        { isNull: 'tasks.deletedAt' },
+      ],
+    });
+  });
+
+  it('falls back to tracked bot ownership when the alias source task is gone', async () => {
+    taskRunRowsMock.mockResolvedValue([]);
+    findBackgroundAutomationSlackThreadMock.mockResolvedValue({
+      automationKey: 'platform_issue_alerts',
+      metadata: { sourceTaskId: 'task-deleted', slackTeamId: 'T1' },
+    });
+    getLatestSlackBotReplyMock.mockResolvedValue({
+      ts: '100.100',
+      text: 'Platform issue reported',
+    });
+
+    await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toMatchObject({
+      taskId: null,
+      trackedAliasTaskId: null,
+    });
+    expect(getLatestSlackBotReplyMock).toHaveBeenCalledWith('C1', '100.000');
   });
 
   it('does not treat soft-deleted task bindings as thread ownership', async () => {

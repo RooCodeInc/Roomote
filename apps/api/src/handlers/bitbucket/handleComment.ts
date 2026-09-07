@@ -1,21 +1,14 @@
-import {
-  buildMentionRequestBlock,
-  buildUntrustedContentPolicy,
-  enqueueTask,
-  escapeTaskContextText,
-  getTaskUrl,
-} from '@roomote/cloud-agents/server';
-import {
-  findActiveGitHubPrReviewTask,
-  findReusableGitHubPrFollowUpOwner,
-} from '@roomote/db/server';
 import { createBitbucketPullRequestComment } from '@roomote/bitbucket';
 import {
-  type TaskPayload,
-  TaskPayloadKind,
-  PRODUCT_NAME,
-  isActivelyRunningTask,
-} from '@roomote/types';
+  startSourceControlFastSessionTurn,
+  type SourceControlFastDiscussion,
+} from '@roomote/sdk/server';
+import {
+  buildSourceControlPullRequestMentionContext,
+  resolveSourceControlPullRequestActiveTasks,
+  SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
+} from '../shared/source-control-mention';
+import { PRODUCT_NAME } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
@@ -24,10 +17,6 @@ import {
   buildSourceControlEnvironmentRequiredMessage,
 } from '../source-control-account-linking';
 import {
-  sendMessageToTask,
-  steerMessageToTask,
-} from '../tasks/sendMessageToTask';
-import {
   getBitbucketAutomationTargets,
   getBitbucketUsername,
   isRoomoteBitbucketUsername,
@@ -35,7 +24,6 @@ import {
 import {
   getBitbucketCommentBody,
   getBitbucketPullRequestBaseRef,
-  getBitbucketPullRequestBaseSha,
   getBitbucketPullRequestHeadRef,
   getBitbucketPullRequestHeadSha,
   getBitbucketPullRequestNumber,
@@ -44,11 +32,6 @@ import {
 } from './types';
 
 const BITBUCKET_MENTION_HANDLE = '@roomote';
-
-type BitbucketPrMentionReplyKind =
-  | 'active_follow_up'
-  | 'active_review'
-  | 'review_started';
 
 function isBitbucketMention(commentBody: string): boolean {
   return commentBody.toLowerCase().includes(BITBUCKET_MENTION_HANDLE);
@@ -81,108 +64,15 @@ async function postMentionResponseComment({
   }
 }
 
-function tryBuildTaskLink({
-  taskId,
-  campaign,
-}: {
-  taskId: string;
-  campaign: string;
-}): string | null {
-  try {
-    return getTaskUrl({
-      taskId,
-      utm: { source: 'bitbucket-comment', campaign },
-    });
-  } catch (error) {
-    console.warn(
-      `[handleBitbucketComment] failed to build task link for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    return null;
-  }
-}
-
-function formatBitbucketPrMentionReply(
-  kind: BitbucketPrMentionReplyKind,
-  link: string | null,
-): string {
-  const replyCopy = (() => {
-    switch (kind) {
-      case 'active_follow_up':
-        return {
-          intro:
-            "I'm on it. I routed this request into the existing task for this pull request so follow-up work stays on one Roomote thread, and I'll keep updates here.",
-          fallback:
-            'I could not generate the task link for this comment, but the follow-up was delivered.',
-        };
-      case 'active_review':
-        return {
-          intro:
-            'I found a pull request review already running for this request, and I will keep updates here.',
-          fallback:
-            'I could not generate the task link for this comment, but the review is already in progress.',
-        };
-      case 'review_started':
-        return {
-          intro:
-            'I started a pull request review task for this request, and I will keep updates here.',
-          fallback:
-            'I could not generate the task link for this comment, but the review task is already running.',
-        };
-    }
-  })();
-
-  if (!link) {
-    return `${replyCopy.intro} ${replyCopy.fallback}`;
-  }
-
-  return `${replyCopy.intro} [See task](${link})`;
-}
-
 function buildReviewerGateMissComment(): string {
   return `I saw the mention, but I could not start work on this pull request with the current ${PRODUCT_NAME} Bitbucket setup.`;
 }
 
-function buildTaskStartFailedComment(): string {
-  return 'I saw the mention, but Roomote could not queue a review task for this pull request. Please try again in a moment. If it keeps failing, an administrator should check the deployment logs.';
-}
-
-function buildExistingTaskFollowUpMessage({
-  repoFullName,
-  pullRequestNumber,
-  pullRequestTitle,
-  headRef,
-  commenter,
-  commentBody,
-}: {
-  repoFullName: string;
-  pullRequestNumber: number;
-  pullRequestTitle: string;
-  headRef?: string;
-  commenter: string;
-  commentBody: string;
-}): string {
-  const lines = [
-    `${commenter} mentioned Roomote in a comment on Bitbucket pull request #${pullRequestNumber} (${escapeTaskContextText(pullRequestTitle)}) in ${repoFullName}.`,
-    '',
-    'Please act on this comment as a follow-up to your existing work on this pull request.',
-  ];
-
-  if (headRef) {
-    lines.push(`The pull request source branch is \`${headRef}\`.`);
-  }
-
-  lines.push(
-    '',
-    'Mention comment (the request to act on):',
-    buildMentionRequestBlock(commentBody),
-    '',
-    buildUntrustedContentPolicy(),
-  );
-
-  return lines.join('\n');
-}
-
+/**
+ * Every @roomote comment on a pull request enters that pull request's Fast
+ * Session. The Session reads the discussion, replies as a comment, and
+ * delegates work on the source branch when the request needs a task.
+ */
 export async function handleBitbucketComment(
   payload: BitbucketPullRequestCommentWebhook,
   eventName: string,
@@ -218,7 +108,8 @@ export async function handleBitbucketComment(
   const headRef = getBitbucketPullRequestHeadRef(pullRequest);
   const headSha = getBitbucketPullRequestHeadSha(pullRequest);
   const baseRef = getBitbucketPullRequestBaseRef(pullRequest);
-  const baseSha = getBitbucketPullRequestBaseSha(pullRequest);
+  const prUrl = getBitbucketPullRequestUrl(payload);
+  const webhookHost = toHostFromUrl(prUrl);
 
   const mentionResponseTarget = {
     repositoryFullName: repoFullName,
@@ -233,7 +124,7 @@ export async function handleBitbucketComment(
       commentAuthor: payload.comment.user,
     },
     // The PR web URL carries the instance host, matching repositories.host.
-    webhookHost: toHostFromUrl(getBitbucketPullRequestUrl(payload)),
+    webhookHost,
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });
@@ -277,163 +168,58 @@ export async function handleBitbucketComment(
     };
   }
 
-  const activeOwner = await findReusableGitHubPrFollowUpOwner({
-    repoFullName,
+  const discussion: SourceControlFastDiscussion = {
+    provider: 'bitbucket',
+    host: target.repo.host ?? webhookHost ?? 'bitbucket.org',
+    repositoryFullName: repoFullName,
+    kind: 'pull',
+    number: prNumber,
+  };
+  const activeTasks = await resolveSourceControlPullRequestActiveTasks({
+    provider: 'bitbucket',
+    repositoryFullName: repoFullName,
     prNumber,
     branchName: headRef ?? '',
-    sourceControlProvider: 'bitbucket',
+    headSha: headSha ?? '',
+    host: discussion.host,
   });
 
-  if (activeOwner?.taskId) {
-    const followUpMessage = buildExistingTaskFollowUpMessage({
-      repoFullName,
-      pullRequestNumber: prNumber,
-      pullRequestTitle: pullRequest.title,
-      headRef,
+  const started = await startSourceControlFastSessionTurn({
+    discussion,
+    userId: target.userId,
+    senderDisplayName:
+      payload.comment.user?.display_name ??
+      payload.actor?.display_name ??
+      commenter,
+    question: commentBody,
+    agentContext: buildSourceControlPullRequestMentionContext({
+      providerLabel: 'Bitbucket',
+      pullRequestLabel: 'Pull request',
+      repositoryFullName: repoFullName,
+      number: prNumber,
+      title: pullRequest.title,
+      body: pullRequest.description ?? null,
+      headRef: headRef ?? null,
+      baseRef: baseRef ?? null,
+      authorLogin: getBitbucketUsername(pullRequest.author) ?? null,
       commenter,
       commentBody,
-    });
-    const delivery = isActivelyRunningTask(
-      activeOwner.status,
-      activeOwner.taskPhase,
-    )
-      ? await steerMessageToTask({
-          taskId: activeOwner.taskId,
-          userId: target.userId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-        })
-      : await sendMessageToTask({
-          taskId: activeOwner.taskId,
-          userId: target.userId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-        });
+    }),
+    currentMessageId: `bitbucket:comment:${payload.comment.id ?? `${prNumber}:${Date.now()}`}`,
+    activeTasks,
+  });
 
-    if (delivery.success) {
-      await postMentionResponseComment({
-        ...mentionResponseTarget,
-        body: formatBitbucketPrMentionReply(
-          'active_follow_up',
-          tryBuildTaskLink({
-            taskId: activeOwner.taskId,
-            campaign: 'bitbucket.pr.mention.active-owner',
-          }),
-        ),
-      });
-
-      return { status: 'ok', message: 'active_pr_owner_routed' };
-    }
-
-    console.warn(
-      `[handleBitbucketComment] failed to deliver PR mention to reusable task ${activeOwner.taskId}: ${delivery.error}`,
-    );
-  }
-
-  if (headSha) {
-    const activeReview = await findActiveGitHubPrReviewTask({
-      repoFullName,
-      prNumber,
-      headSha,
-      sourceControlProvider: 'bitbucket',
-    });
-
-    if (activeReview?.taskId) {
-      await postMentionResponseComment({
-        ...mentionResponseTarget,
-        body: formatBitbucketPrMentionReply(
-          'active_review',
-          tryBuildTaskLink({
-            taskId: activeReview.taskId,
-            campaign: 'bitbucket.pr.mention.review.active',
-          }),
-        ),
-      });
-
-      return { status: 'ok', message: 'active_pr_review_linked' };
-    }
-  }
-
-  const prUrl = getBitbucketPullRequestUrl(payload);
-  const reviewPayload = {
-    repo: repoFullName,
-    sourceControlProvider: 'bitbucket',
-    // Pin repository resolution to the webhook repository's host so
-    // same-name repositories on other hosts cannot be picked up. Legacy
-    // rows without a recorded host omit the field.
-    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
-    prNumber,
-    prTitle: pullRequest.title,
-    prUrl,
-    headSha,
-    branchName: headRef,
-    ...(headRef ? { branch: headRef } : {}),
-    ...(headSha ? { sha: headSha } : {}),
-    targetBranch: baseRef,
-  } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>;
-
-  try {
-    const launch = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.GithubPrReview,
-        payload: reviewPayload,
-      },
-      initiator: { kind: 'user', userId: target.userId },
-      workflow: 'pr_review',
-      surface: 'bitbucket',
-      trigger: 'message',
-      prLinkage: {
-        provider: 'bitbucket',
-        ...(target.repo.host ? { host: target.repo.host } : {}),
-        repositoryId: target.repo.id,
-        repository: repoFullName,
-        prNumber,
-        prUrl,
-        prTitle: pullRequest.title,
-        prSha: headSha || null,
-        prBaseRef: baseRef ?? null,
-        prBaseSha: baseSha ?? null,
-      },
-    });
-
+  if (started.status !== 'queued') {
     await postMentionResponseComment({
       ...mentionResponseTarget,
-      body: formatBitbucketPrMentionReply(
-        'review_started',
-        tryBuildTaskLink({
-          taskId: launch.taskId,
-          campaign: 'bitbucket.pr.mention.review',
-        }),
-      ),
+      body: SOURCE_CONTROL_FAST_UNAVAILABLE_MESSAGE,
     });
-
-    return { status: 'ok', metadata: { ids: [launch.id] } };
-  } catch (error) {
-    const failure =
-      error instanceof Error
-        ? {
-            name: error.name,
-            message: error.message,
-            stack: error.stack,
-          }
-        : { name: 'unknown_error', message: String(error) };
-    console.error('[handleBitbucketComment] failed to enqueue PR review task', {
-      repository: repoFullName,
-      pullRequestNumber: prNumber,
-      repositoryId: target.repo.id,
-      userId: target.userId,
-      sourceControlHost: target.repo.host ?? null,
-      error: failure,
-    });
-
-    await postMentionResponseComment({
-      ...mentionResponseTarget,
-      body: buildTaskStartFailedComment(),
-    });
-
-    return {
-      status: 'error',
-      message: `review_start_failed:${failure.message}`,
-    };
+    return { status: 'error', message: 'fast_unavailable' };
   }
+
+  return {
+    status: 'ok',
+    message: 'fast_session_queued',
+    metadata: { fastConversationId: started.fastConversationId },
+  };
 }

@@ -53,7 +53,33 @@ export type AcpLiveEventType =
 /** All known Roomote runtime event types — envelope (persisted) + live-only (streamed). */
 export type AcpEventType = AcpEnvelopeEventType | AcpLiveEventType;
 
+/** Restore separation between bold reasoning headings concatenated by a provider. */
+export function normalizeAcpReasoningText(text: string): string {
+  return text.replace(/[^\r\n]+/g, (line) => {
+    if (!line.startsWith('**') || !line.endsWith('**')) {
+      return line;
+    }
+
+    const headings = line.slice(2, -2).split('****');
+    if (
+      headings.length < 2 ||
+      headings.some((heading) => heading.length === 0 || heading.includes('**'))
+    ) {
+      return line;
+    }
+
+    return `**${headings.join('**\n\n**')}**`;
+  });
+}
+
 export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
+
+/**
+ * Canonical transcript-only record of a trusted setup-card action. These
+ * messages are visible as user choices but are never submitted to the model
+ * or mirrored into Fast Agent compatibility history.
+ */
+export const SETUP_RECEIPT_INPUT_KIND = 'setup_receipt' as const;
 
 export interface AcpLogicalEventIdParts {
   sessionId: string | null | undefined;
@@ -149,6 +175,8 @@ export interface AcpRequestUserInputQuestion {
   isOther: boolean;
   isSecret: boolean;
   options?: AcpRequestUserInputQuestionOption[];
+  /** Multiple-choice questions default to one selection when absent. */
+  multiple?: boolean;
 }
 
 export type AcpRequestUserInputAnswers = Record<
@@ -157,6 +185,43 @@ export type AcpRequestUserInputAnswers = Record<
     answers: string[];
   }
 >;
+
+export function getAcpRequestUserInputValidationError(
+  questions: AcpRequestUserInputQuestion[],
+  answers: AcpRequestUserInputAnswers,
+  resolution: 'submitted' | 'cancelled' = 'submitted',
+): string | null {
+  const questionIds = new Set(questions.map((question) => question.id));
+  if (Object.keys(answers).some((questionId) => !questionIds.has(questionId))) {
+    return 'One or more answers do not belong to this request.';
+  }
+  if (resolution === 'cancelled') return null;
+
+  for (const question of questions) {
+    const submitted = answers[question.id]?.answers ?? [];
+    if (new Set(submitted).size !== submitted.length) {
+      return 'Duplicate answers are not allowed.';
+    }
+    if (submitted.length === 0) {
+      return 'Answer every question before submitting.';
+    }
+    if (!question.multiple && submitted.length > 1) {
+      return 'This question accepts a single answer.';
+    }
+    if (question.options?.length) {
+      const optionLabels = new Set(
+        question.options.map((option) => option.label),
+      );
+      const customAnswerCount = submitted.filter(
+        (answer) => !optionLabels.has(answer),
+      ).length;
+      if (customAnswerCount > (question.isOther ? 1 : 0)) {
+        return 'One or more selections are not valid options.';
+      }
+    }
+  }
+  return null;
+}
 
 export interface AcpRequestUserInputRequestParams {
   sessionId: string;
@@ -168,6 +233,7 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
+  preset?: 'setup_starter_tasks';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -244,7 +310,7 @@ function parseAcpRequestUserInputQuestionOption(
   return { label, description };
 }
 
-function parseAcpRequestUserInputQuestion(
+export function parseAcpRequestUserInputQuestion(
   value: unknown,
 ): AcpRequestUserInputQuestion | null {
   const record = asRecordOrNull(value);
@@ -272,6 +338,7 @@ function parseAcpRequestUserInputQuestion(
     isOther: record?.isOther === true,
     isSecret: record?.isSecret === true,
     ...(options ? { options } : {}),
+    ...(record?.multiple === true ? { multiple: true } : {}),
   };
 }
 
@@ -337,6 +404,8 @@ export function parseAcpRequestUserInputPayload(
 ): AcpRequestUserInputPayload | null {
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
+  const preset =
+    payload?.preset === 'setup_starter_tasks' ? payload.preset : undefined;
 
   if (!requestId || !request) {
     return null;
@@ -346,6 +415,7 @@ export function parseAcpRequestUserInputPayload(
     requestId,
     ...request,
     status: 'pending',
+    ...(preset ? { preset } : {}),
   };
 }
 
@@ -813,6 +883,29 @@ export function extractVisibleAcpPromptText(text: string): string {
 }
 
 /**
+ * Extract the user-configured prompt from a trusted custom automation event.
+ * Returns undefined for every other platform event or malformed envelope so
+ * callers never need to expose the raw event as a fallback.
+ */
+export function extractAutomationTriggeredPromptText(
+  text: string,
+): string | undefined {
+  const match = /^<platform_event>(.*)<\/platform_event>$/su.exec(text.trim());
+  if (!match?.[1]) return undefined;
+
+  try {
+    const event = asRecord(JSON.parse(match[1]));
+    return event?.type === 'automation_triggered' &&
+      typeof event.prompt === 'string' &&
+      event.prompt.trim().length > 0
+      ? event.prompt
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Resolve transcript visibility for Roomote runtime envelopes.
  *
  * Newer envelopes rely on an explicit metadata flag written by the server.
@@ -863,6 +956,26 @@ export type AcpToolCallPayloadKind =
   | 'subagent'
   | string
   | null;
+
+/** Stable machine-level tool facts. User-facing labels and icons belong to UI clients. */
+export const ACP_TOOL_KINDS = {
+  execute: 'execute',
+  read: 'read',
+  search: 'search',
+  list: 'list',
+  edit: 'edit',
+  subagent: 'subagent',
+  task: 'task',
+  communication: 'communication',
+  memory: 'memory',
+  artifact: 'artifact',
+  widget: 'widget',
+  mcp: 'mcp',
+  tool: 'tool',
+} as const;
+
+export type KnownAcpToolKind =
+  (typeof ACP_TOOL_KINDS)[keyof typeof ACP_TOOL_KINDS];
 
 export interface AcpSessionUpdate extends Record<string, unknown> {
   sessionUpdate: string;
@@ -962,6 +1075,8 @@ export interface AcpToolCallPayload {
   isExecute: boolean;
   isRead: boolean;
   isMcp: boolean;
+  /** Trusted Roomote-native tool output persisted by the Fast runtime. */
+  isRoomoteNativeTool?: boolean;
   mcpServerName: string | null;
   mcpToolName: string | null;
   command: string | null;
@@ -985,7 +1100,10 @@ export interface AcpToolResultPayload {
   kind: AcpToolCallPayloadKind;
   title: string | null;
   isExecute: boolean;
+  isRead?: boolean;
   isMcp: boolean;
+  /** Trusted Roomote-native tool output persisted by the Fast runtime. */
+  isRoomoteNativeTool?: boolean;
   mcpServerName: string | null;
   mcpToolName: string | null;
   command: string | null;
@@ -1093,10 +1211,53 @@ export function normalizePlanPayload(
   return { entries };
 }
 
+// Name of the on-demand integration call tool (FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool;
+// the catalog module imports this one, so the literal lives here).
+const ON_DEMAND_INTEGRATION_CALL_TOOL_NAME = 'call_integration_tool';
+
+/**
+ * `call_integration_tool` is transport, not what the agent did. When a tool
+ * call is that wrapper, present the integration and tool it invoked, exactly
+ * as a directly mounted MCP call would have been shown.
+ */
+function unwrapOnDemandIntegrationCall(
+  update: Record<string, unknown>,
+): AcpMcpInvocation | null {
+  const candidates = [
+    asStringOrNull(update.mcpToolName),
+    asStringOrNull(update.toolName),
+    update.isMcp === false && asStringOrNull(update.toolName)?.trim()
+      ? null
+      : asStringOrNull(update.title),
+  ];
+  const isWrapper = candidates.some(
+    (name) =>
+      name === ON_DEMAND_INTEGRATION_CALL_TOOL_NAME ||
+      name?.endsWith(`_${ON_DEMAND_INTEGRATION_CALL_TOOL_NAME}`),
+  );
+  if (!isWrapper) {
+    return null;
+  }
+  const rawInput = asRecordOrNull(update.rawInput);
+  // Fast records native tool arguments under `arguments`; sandbox ACP events
+  // carry the tool input directly.
+  const args = asRecordOrNull(rawInput?.arguments) ?? rawInput;
+  const integrationId = asStringOrNull(args?.integrationId);
+  const toolName = asStringOrNull(args?.toolName);
+  if (!integrationId || !toolName) {
+    return null;
+  }
+  return { mcpServerName: integrationId, mcpToolName: toolName };
+}
+
 export function extractAcpMcpInvocation(
   update: Record<string, unknown>,
   options: ExtractAcpMcpInvocationOptions = {},
 ): AcpMcpInvocation | null {
+  const unwrapped = unwrapOnDemandIntegrationCall(update);
+  if (unwrapped) {
+    return unwrapped;
+  }
   const kind = asStringOrNull(update.kind);
   const mcpServerName = asStringOrNull(update.mcpServerName);
   const mcpToolName = asStringOrNull(update.mcpToolName);
@@ -1106,6 +1267,15 @@ export function extractAcpMcpInvocation(
       mcpServerName: mcpServerName ?? null,
       mcpToolName: mcpToolName ?? null,
     };
+  }
+
+  // Native arguments and display titles are not MCP identity metadata.
+  if (
+    update.isMcp === false &&
+    asStringOrNull(update.toolName)?.trim() &&
+    !asStringOrNull(update.serverName)
+  ) {
+    return null;
   }
 
   const rawInput = asRecordOrNull(update.rawInput);
@@ -1401,7 +1571,7 @@ function isSlackThreadActivityOnlyBlock(text: string): boolean {
 /**
  * Extract slack_message content from:
  *   thread_activity* thread_context? thread_activity*
- *   replying_to? slack_turn_policy? slack_message
+ *   replying_to? slack_turn_policy? slack_message_context? slack_message
  *
  * Implemented as the original recursive descent with per-(pos, phase) memoization,
  * executed on an explicit heap stack so thousands of sequential activity blocks
@@ -1467,15 +1637,41 @@ function parseSlackRestFrom(text: string, index: number): string | null {
         afterPolicyOpen + 1,
         closeMarker,
         (_close, afterClose) =>
-          extractSlackMessageAt(text, afterClose) !== null,
+          extractSlackMessageAfterOptionalContext(text, afterClose) !== null,
       );
       if (found !== null) {
-        return extractSlackMessageAt(text, found.afterClose);
+        return extractSlackMessageAfterOptionalContext(text, found.afterClose);
       }
     }
 
-    return extractSlackMessageAt(text, at);
+    return extractSlackMessageAfterOptionalContext(text, at);
   }
+}
+
+function extractSlackMessageAfterOptionalContext(
+  text: string,
+  index: number,
+): string | null {
+  const afterContextOpen = matchOpenTag(
+    text,
+    index,
+    'slack_message_context',
+    false,
+  );
+  if (afterContextOpen !== null && text[afterContextOpen] === '\n') {
+    const closeMarker = '\n</slack_message_context>';
+    const found = findStructuralClose(
+      text,
+      afterContextOpen + 1,
+      closeMarker,
+      (_close, afterClose) => extractSlackMessageAt(text, afterClose) !== null,
+    );
+    if (found !== null) {
+      return extractSlackMessageAt(text, found.afterClose);
+    }
+  }
+
+  return extractSlackMessageAt(text, index);
 }
 
 function parseSlackTranscriptFrom(text: string, start: number): string | null {

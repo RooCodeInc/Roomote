@@ -3,6 +3,7 @@ import {
   buildAutomationRootSummaryText,
   buildAutomationSettingsContextText,
   buildAutomationSettingsMessage,
+  buildCustomAutomationSlackMessage,
   degradeSlackMrkdwnToMarkdown,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
@@ -37,30 +38,112 @@ describe('manager slack helpers', () => {
     );
   });
 
-  it('wraps automation text in a section and context footer', () => {
-    expect(
-      buildAutomationSettingsMessage('  Hello managers  ', 'suggest-ideas'),
-    ).toEqual({
-      text: 'Hello managers',
+  it('wraps automation text in a structured result container', () => {
+    const message = buildAutomationSettingsMessage(
+      '  Hello managers  ',
+      'suggest-ideas',
+    );
+
+    expect(message.text).toBe('Hello managers');
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        type: 'container',
+        width: 'full',
+        title: {
+          type: 'plain_text',
+          text: 'Suggest Ideas',
+          emoji: false,
+        },
+        icon: {
+          type: 'image',
+          image_url: 'https://app.example.com/automation-icons/lightbulb.png',
+          alt_text: 'Suggest Ideas automation icon',
+        },
+        child_blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'Hello managers' },
+          },
+          expect.objectContaining({
+            type: 'actions',
+            elements: [
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: 'https://app.example.com/automations#suggest-ideas',
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it('uses the standard automation chrome for custom automation reports', () => {
+    const message = buildCustomAutomationSlackMessage({
+      automationId: 'automation-1',
+      automationName: 'Weekly scan',
+      text: 'Found two regressions.',
+      sessionId: 'session-1',
+    });
+
+    expect(message).toEqual({
+      text: 'Found two regressions.',
       blocks: [
         {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: 'Hello managers',
-          },
-        },
-        {
           type: 'context',
+          block_id: 'roomote_automation_result_header',
           elements: [
             {
-              type: 'mrkdwn',
-              text: 'Configure the Suggest Ideas automation in <https://app.example.com/automations#suggest-ideas|automation settings>.',
+              type: 'image',
+              image_url: 'https://app.example.com/automation-icons/zap.png',
+              alt_text: 'Weekly scan automation icon',
             },
+            {
+              type: 'plain_text',
+              text: 'Weekly scan',
+              emoji: false,
+            },
+          ],
+        },
+        { type: 'markdown', text: 'Found two regressions.' },
+        {
+          type: 'actions',
+          block_id: 'roomote_automation_result_actions',
+          elements: [
+            expect.objectContaining({
+              action_id: 'late_bound_automation_view_session',
+              text: expect.objectContaining({ text: 'Follow' }),
+              url: expect.stringMatching(
+                /\/sessions\/session-1\?utm_source=slack&utm_medium=link&utm_campaign=slack\.fast_reply$/,
+              ),
+            }),
+            expect.objectContaining({
+              action_id: 'late_bound_automation_configure',
+              url: 'https://app.example.com/automations#custom-automation-automation-1',
+            }),
           ],
         },
       ],
     });
+  });
+
+  it('preserves custom automation Markdown without entity escaping', () => {
+    const text = [
+      '## Report',
+      '- [Finding](<https://x.com/example/status/1>)',
+      '',
+      '| Item | Result |',
+      '| --- | --- |',
+      '| Link | **Found** |',
+    ].join('\n');
+
+    expect(
+      buildCustomAutomationSlackMessage({
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        text,
+      }).blocks,
+    ).toContainEqual({ type: 'markdown', text });
   });
 
   it('joins a generated summary with an optional action footer', () => {
@@ -73,15 +156,18 @@ describe('manager slack helpers', () => {
   });
 
   it('wraps a generated root summary in the standard automation message chrome', () => {
-    expect(
-      buildAutomationRootSummaryMessage({
-        summaryText: '  - Do the important thing  ',
-        actionFooterText: '  React on a thread item to start it.  ',
-        automationSettingsHash: 'suggest-ideas',
-      }),
-    ).toEqual({
-      text: '- Do the important thing\n\nReact on a thread item to start it.',
-      blocks: [
+    const message = buildAutomationRootSummaryMessage({
+      summaryText: '  - Do the important thing  ',
+      actionFooterText: '  React on a thread item to start it.  ',
+      automationSettingsHash: 'suggest-ideas',
+    });
+    expect(message.text).toBe(
+      '- Do the important thing\n\nReact on a thread item to start it.',
+    );
+    expect(message.blocks[0]).toMatchObject({
+      type: 'container',
+      title: { text: 'Suggest Ideas' },
+      child_blocks: [
         {
           type: 'section',
           text: {
@@ -89,15 +175,7 @@ describe('manager slack helpers', () => {
             text: '- Do the important thing\n\nReact on a thread item to start it.',
           },
         },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: 'Configure the Suggest Ideas automation in <https://app.example.com/automations#suggest-ideas|automation settings>.',
-            },
-          ],
-        },
+        { type: 'actions' },
       ],
     });
   });

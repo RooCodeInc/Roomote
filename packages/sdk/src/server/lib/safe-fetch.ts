@@ -4,8 +4,7 @@ import { isIP } from 'node:net';
 import { Agent, fetch as undiciFetch } from 'undici';
 
 /**
- * SSRF-guarded outbound fetch for operator-supplied URLs (custom MCP servers
- * and their OAuth discovery chains).
+ * SSRF-guarded outbound fetch for operator- or remote-content-supplied URLs.
  *
  * Historically the control plane never fetched arbitrary operator URLs (see
  * the assumption documented in lib/mcp/oauth.ts), so no guard existed. Custom
@@ -23,9 +22,9 @@ import { Agent, fetch as undiciFetch } from 'undici';
  * - Pinning: the undici Agent connects to the vetted address itself, so a
  *   second resolution cannot rebind the hostname to an internal address
  *   between check and connect (DNS-rebinding TOCTOU).
- * - Redirects are refused by default: a redirect is a server-controlled URL
- *   and following it would restart the whole problem with credentials
- *   attached.
+ * - Redirects are refused by default. The explicit HEAD-only redirect helper
+ *   re-runs every URL and address guard on each hop without forwarding
+ *   credentials or a request body.
  *
  * Self-hosted deployments that intentionally run MCP servers on private
  * networks can allow specific ranges via R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS
@@ -345,6 +344,14 @@ export interface SafeFetchOptions {
   body?: string;
 }
 
+export interface SafeHeadFollowingRedirectsOptions {
+  allowedPrivateCidrs?: string;
+  lookup?: DnsLookupFn;
+  signal?: AbortSignal;
+  maxRedirects?: number;
+  requireHttps?: boolean;
+}
+
 interface GuardedAgentConfig {
   allowedPrivateCidrs: string | undefined;
   lookup?: DnsLookupFn;
@@ -486,14 +493,10 @@ export function createGuardedFetch(allowedPrivateCidrs?: string) {
     });
 }
 
-/**
- * Fetch an operator-supplied URL with SSRF guards. Redirects are refused:
- * callers that legitimately need to follow one must re-validate the target
- * through this function themselves.
- */
-export async function safeFetch(
+/** One guarded request. Public helpers below decide redirect policy. */
+async function safeFetchOnce(
   target: string | URL,
-  options: SafeFetchOptions = {},
+  options: SafeFetchOptions,
 ): Promise<Response> {
   const url = assertEgressUrlAllowed(target, options.allowedPrivateCidrs);
 
@@ -527,12 +530,67 @@ export async function safeFetch(
     throw error;
   }
 
+  return response as unknown as Response;
+}
+
+export async function safeHeadFollowingRedirects(
+  target: string | URL,
+  options: SafeHeadFollowingRedirectsOptions = {},
+): Promise<Response> {
+  const maxRedirects = options.maxRedirects ?? 3;
+  if (!Number.isInteger(maxRedirects) || maxRedirects < 0) {
+    throw new SafeFetchViolationError(
+      'maxRedirects must be a non-negative integer.',
+    );
+  }
+
+  let url = validateEgressUrl(target);
+  for (let redirects = 0; ; redirects++) {
+    if (options.requireHttps && url.protocol !== 'https:') {
+      throw new SafeFetchViolationError(
+        `'${url.toString()}' must use https, including redirect targets.`,
+      );
+    }
+
+    const response = await safeFetchOnce(url, {
+      allowedPrivateCidrs: options.allowedPrivateCidrs,
+      lookup: options.lookup,
+      signal: options.signal,
+      method: 'HEAD',
+    });
+    if (response.status < 300 || response.status >= 400) {
+      return response;
+    }
+
+    await response.body?.cancel();
+    const location = response.headers.get('location');
+    if (!location) {
+      throw new SafeFetchViolationError(
+        `'${url.toString()}' answered with a redirect without a Location header.`,
+      );
+    }
+    if (redirects >= maxRedirects) {
+      throw new SafeFetchViolationError(
+        `'${url.toString()}' exceeded the ${maxRedirects}-redirect limit.`,
+      );
+    }
+    url = validateEgressUrl(new URL(location, url));
+  }
+}
+
+/** Fetch an operator-supplied URL with SSRF guards and refuse redirects. */
+export async function safeFetch(
+  target: string | URL,
+  options: SafeFetchOptions = {},
+): Promise<Response> {
+  const url = validateEgressUrl(target);
+  const response = await safeFetchOnce(url, options);
   if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel();
     throw new SafeFetchViolationError(
       `'${url.toString()}' answered with a redirect (${response.status}), ` +
         `which is refused for operator-supplied URLs.`,
     );
   }
-
-  return response as unknown as Response;
+  return response;
 }

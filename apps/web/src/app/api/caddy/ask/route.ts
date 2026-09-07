@@ -6,6 +6,14 @@ import { Env } from '@/lib/server';
 const PREVIEW_SUBDOMAIN_LABEL_PATTERN =
   /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i;
 
+// Every preview subdomain starts with a 13-char base36 taskId (see
+// buildPreviewProxyUrl in @roomote/types). Requiring that prefix keeps
+// on-demand TLS issuance scoped to hostnames that can belong to a task —
+// with flat preview hostnames the preview domain is the app domain itself,
+// so approving arbitrary labels would let scanner probes of first-level
+// subdomains burn the Let's Encrypt per-domain rate limit.
+const PREVIEW_TASK_ID_PREFIX_PATTERN = /^[0-9a-z]{13}-/;
+
 function normalizeHostname(value: string | null | undefined): string | null {
   const rawValue = value?.trim();
 
@@ -22,7 +30,12 @@ function normalizeHostname(value: string | null | undefined): string | null {
   }
 }
 
-async function getPreviewHostname(): Promise<string | null> {
+interface PreviewHostConfig {
+  previewHostname: string | null;
+  subdomainSuffix: string | null;
+}
+
+async function getPreviewHostConfig(): Promise<PreviewHostConfig> {
   const resolvedPreviewRuntimeConfig =
     await resolveEffectivePreviewRuntimeConfig({
       runtimeEnv: process.env,
@@ -30,15 +43,21 @@ async function getPreviewHostname(): Promise<string | null> {
       defaultPreviewDomains: Env.PREVIEW_DOMAINS,
     });
 
-  return normalizeHostname(
-    resolvedPreviewRuntimeConfig.effective.roomotePreviewDomain ??
-      resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl,
-  );
+  return {
+    previewHostname: normalizeHostname(
+      resolvedPreviewRuntimeConfig.effective.roomotePreviewDomain ??
+        resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl,
+    ),
+    subdomainSuffix:
+      resolvedPreviewRuntimeConfig.effective.previewProxySubdomainSuffix ??
+      null,
+  };
 }
 
 export function isAllowedCaddyPreviewDomain(
   domain: string | null | undefined,
   previewHostname: string | null,
+  subdomainSuffix?: string | null,
 ): boolean {
   const normalizedDomain = normalizeHostname(domain);
 
@@ -58,14 +77,22 @@ export function isAllowedCaddyPreviewDomain(
 
   const previewLabel = normalizedDomain.slice(0, -suffix.length);
 
+  if (
+    previewLabel.includes('.') ||
+    !PREVIEW_SUBDOMAIN_LABEL_PATTERN.test(previewLabel) ||
+    !PREVIEW_TASK_ID_PREFIX_PATTERN.test(previewLabel)
+  ) {
+    return false;
+  }
+
   return (
-    !previewLabel.includes('.') &&
-    PREVIEW_SUBDOMAIN_LABEL_PATTERN.test(previewLabel)
+    !subdomainSuffix ||
+    previewLabel.endsWith(`-${subdomainSuffix.toLowerCase()}`)
   );
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const previewHostname = await getPreviewHostname();
+  const { previewHostname, subdomainSuffix } = await getPreviewHostConfig();
 
   if (!previewHostname) {
     return new NextResponse('Preview domain is not configured', {
@@ -79,7 +106,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return new NextResponse('Missing domain', { status: 400 });
   }
 
-  if (!isAllowedCaddyPreviewDomain(domain, previewHostname)) {
+  if (!isAllowedCaddyPreviewDomain(domain, previewHostname, subdomainSuffix)) {
     return new NextResponse('Forbidden', { status: 403 });
   }
 

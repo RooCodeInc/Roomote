@@ -287,4 +287,21 @@ describe('startPolling', () => {
     });
     expect(options.state.communicationMessageIntervals?.discord).toBeDefined();
   });
+
+  it('passes the bootstrap source-control expiry to the refresh loop', () => {
+    const expiresAt = new Date('2030-01-01T01:00:00.000Z');
+    const options = createListenerOptions({
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: { repo: 'owner/repo', description: 'Use bootstrap token' },
+    });
+    options.sourceControlTokenExpiresAt = expiresAt;
+
+    startPolling(options);
+
+    expect(mockCreateGitHubTokenRefreshInterval).toHaveBeenCalledWith({
+      runId: 42,
+      logger: options.logger,
+      initialExpiresAt: expiresAt,
+    });
+  });
 });

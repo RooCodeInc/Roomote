@@ -4,17 +4,20 @@ import {
   taskRuns,
   eq,
   and,
-  gt,
   inArray,
   isNull,
   isNotNull,
   desc,
+  isSnapshotResumableCondition,
 } from '@roomote/db/server';
-import { RunStatus, SANDBOX_SNAPSHOT_EXPIRY_MS } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { slackDebug } from './logging';
 import type { SlackTaskRunLookupScope } from './find-active-slack-task-run';
-import { getSlackTaskRunWorkspacePredicate } from './slack-task-run-workspace-scope';
+import {
+  getSlackTaskRunWorkspacePredicate,
+  getSlackTrackedAliasTaskPredicate,
+} from './slack-task-run-workspace-scope';
 
 /**
  * Find the most recent completed/idle run for a Slack thread that has a
@@ -37,9 +40,6 @@ export async function findCompletedSlackTaskRunWithSnapshot(
     `[findCompletedSlackTaskRunWithSnapshot] Searching for completed task run with snapshot for thread ${slackThreadTs}`,
   );
 
-  // Only consider snapshots that haven't expired yet (7-day TTL).
-  const snapshotCutoff = new Date(Date.now() - SANDBOX_SNAPSHOT_EXPIRY_MS);
-
   const [completedRun] = await db
     .select({
       id: taskRuns.id,
@@ -55,17 +55,25 @@ export async function findCompletedSlackTaskRunWithSnapshot(
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(tasks.slackThreadTs, slackThreadTs),
+        ...(scope.trackedAlias ? [] : [eq(tasks.slackThreadTs, slackThreadTs)]),
         ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
         ...(scope.slackTeamId
           ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
+          : []),
+        ...(scope.trackedAlias
+          ? [
+              getSlackTrackedAliasTaskPredicate({
+                taskId: scope.taskId,
+                ...scope.trackedAlias,
+              }),
+            ]
           : []),
         inArray(taskRuns.status, [RunStatus.Completed, RunStatus.Idle]),
         isNotNull(taskRuns.snapshotId),
         isNull(taskRuns.snapshotFailedAt),
         isNull(taskRuns.canceledAt),
         isNull(tasks.deletedAt),
-        gt(taskRuns.snapshotCreatedAt, snapshotCutoff),
+        isSnapshotResumableCondition(taskRuns),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))

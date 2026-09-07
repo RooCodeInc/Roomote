@@ -3,6 +3,7 @@
 import { getModelProviderLabel, getTaskModelDisplayName } from '@roomote/types';
 
 import type { AnalyticsCostBreakdownRow } from '@/types';
+import { formatCurrency } from '@/lib/formatters';
 
 function getTitle(rawValue: string, displayValue: string) {
   return rawValue === displayValue ? undefined : rawValue;
@@ -50,7 +51,7 @@ export function CostBreakdownTable({
                   {modelLabel}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
-                  ${row.totalCost.toFixed(2)}
+                  {formatCurrency(Number(row.totalCost.toFixed(2)))}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
                   {row.costShare.toFixed(1)}%
@@ -59,7 +60,7 @@ export function CostBreakdownTable({
                   {row.taskCount}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
-                  ${row.averageCostPerTask.toFixed(2)}
+                  {formatCurrency(Number(row.averageCostPerTask.toFixed(2)))}
                 </td>
               </tr>
             );

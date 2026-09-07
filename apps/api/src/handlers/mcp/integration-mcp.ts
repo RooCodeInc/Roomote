@@ -11,6 +11,7 @@ import { getValidAccessToken } from '@roomote/sdk/server';
 import {
   getMcpIntegrationUpstreamUrl,
   getMcpIntegrationConnectionScope,
+  getAllowedIntegrationMcpToolNames,
   isMcpConnectionXConfig,
   type McpIntegration,
 } from '@roomote/types';
@@ -76,9 +77,7 @@ async function resolveUpstreamAccessToken(
   };
 }
 
-async function resolveDeploymentDisabledToolNames(
-  mcpId: string,
-): Promise<string[] | null> {
+async function resolveDeploymentToolPolicy(mcpId: string) {
   const enablement = await db.query.deploymentMcpEnablements.findFirst({
     where: and(
       eq(deploymentMcpEnablements.mcpId, mcpId),
@@ -89,7 +88,10 @@ async function resolveDeploymentDisabledToolNames(
     },
   });
 
-  return enablement?.disabledTools ?? null;
+  return {
+    disabledToolNames: enablement?.disabledTools ?? null,
+    allowedToolNames: getAllowedIntegrationMcpToolNames(mcpId) ?? null,
+  };
 }
 
 export function createIntegrationMcpProxy(
@@ -128,7 +130,7 @@ export function createIntegrationMcpProxy(
           : await resolveActingUserId(auth);
 
       let accessToken: string | null;
-      let disabledToolNames: string[] | null = null;
+      let toolPolicy: Awaited<ReturnType<typeof resolveDeploymentToolPolicy>>;
       try {
         const resolvedConnection = await resolveUpstreamAccessToken(
           integration.id,
@@ -136,9 +138,7 @@ export function createIntegrationMcpProxy(
           actingUserId,
         );
         accessToken = resolvedConnection.accessToken;
-        disabledToolNames = await resolveDeploymentDisabledToolNames(
-          integration.id,
-        );
+        toolPolicy = await resolveDeploymentToolPolicy(integration.id);
       } catch (error) {
         if (error instanceof McpProxyError) {
           throw error;
@@ -163,7 +163,7 @@ export function createIntegrationMcpProxy(
 
       return {
         authHeader: accessToken,
-        disabledToolNames,
+        ...toolPolicy,
       };
     },
   });

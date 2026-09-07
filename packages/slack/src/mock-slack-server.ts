@@ -39,7 +39,12 @@ export type MockSlackUser = {
   name: string;
   displayName?: string;
   realName?: string;
+  title?: string;
   email?: string;
+  deleted?: boolean;
+  isBot?: boolean;
+  isAppUser?: boolean;
+  updated?: number;
 };
 
 export type MockSlackChannel = {
@@ -83,6 +88,12 @@ export type MockSlackState = {
   channels: MockSlackChannel[];
   users: MockSlackUser[];
   messages?: MockSlackStoredMessage[];
+  agentSessions?: Array<{
+    channel: string;
+    threadTs: string;
+    status: string;
+    title?: string;
+  }>;
   /**
    * Bearer tokens accepted by app-config endpoints (`apps.manifest.create`).
    * Slack app configuration tokens live in a different token space than bot
@@ -94,6 +105,10 @@ export type MockSlackState = {
   manifestCredentials?: MockSlackManifestCredentials;
   /** Apps created through `apps.manifest.create`, oldest first. */
   createdManifests?: MockSlackCreatedManifest[];
+  /** Manifest replacements applied through `apps.manifest.update`. */
+  updatedManifests?: MockSlackCreatedManifest[];
+  /** Controls whether manifest updates report that OAuth approval is needed. */
+  manifestPermissionsUpdated?: boolean;
 };
 
 export type MockSlackRoomoteTarget = {
@@ -210,6 +225,23 @@ function maybeParseSlackFormValue(value: string): unknown {
   }
 
   return value;
+}
+
+function parseManifestRecord(value: unknown): JsonRecord | null {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as JsonRecord)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : null;
 }
 
 function parseRequestBody(
@@ -450,7 +482,7 @@ export class MockSlackServer {
     // App-config endpoints authenticate with configuration tokens instead of
     // bot tokens, so they skip the bot check and validate in their handler.
     if (
-      url.pathname !== '/api/apps.manifest.create' &&
+      !url.pathname.startsWith('/api/apps.manifest.') &&
       !this.isAuthorized(request)
     ) {
       json(response, 401, { ok: false, error: 'invalid_auth' });
@@ -706,6 +738,100 @@ export class MockSlackServer {
         return;
       }
 
+      case 'POST apps.manifest.export': {
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const appId =
+          typeof jsonBody.app_id === 'string' ? jsonBody.app_id : '';
+        const app = (this.state.createdManifests ?? []).find(
+          (entry) => entry.appId === appId,
+        );
+
+        if (!app) {
+          json(response, 200, { ok: false, error: 'app_not_found' });
+          return;
+        }
+
+        json(response, 200, { ok: true, manifest: app.manifest });
+        return;
+      }
+
+      case 'POST apps.manifest.validate': {
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const manifest = parseManifestRecord(jsonBody.manifest);
+        if (!manifest) {
+          json(response, 200, {
+            ok: false,
+            error: 'invalid_manifest',
+            errors: [
+              {
+                message: 'manifest must be a JSON object',
+                pointer: '/manifest',
+              },
+            ],
+          });
+          return;
+        }
+
+        json(response, 200, { ok: true, errors: [] });
+        return;
+      }
+
+      case 'POST apps.manifest.update': {
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const appId =
+          typeof jsonBody.app_id === 'string' ? jsonBody.app_id : '';
+        const manifest = parseManifestRecord(jsonBody.manifest);
+        const manifests = this.state.createdManifests ?? [];
+        const appIndex = manifests.findIndex((entry) => entry.appId === appId);
+
+        if (appIndex < 0) {
+          json(response, 200, { ok: false, error: 'app_not_found' });
+          return;
+        }
+
+        if (!manifest) {
+          json(response, 200, {
+            ok: false,
+            error: 'invalid_manifest',
+            errors: [
+              {
+                message: 'manifest must be a JSON object',
+                pointer: '/manifest',
+              },
+            ],
+          });
+          return;
+        }
+
+        const updatedManifest = { appId, manifest };
+        this.state.createdManifests = manifests.map((entry, index) =>
+          index === appIndex ? updatedManifest : entry,
+        );
+        this.state.updatedManifests = [
+          ...(this.state.updatedManifests ?? []),
+          updatedManifest,
+        ];
+
+        json(response, 200, {
+          ok: true,
+          app_id: appId,
+          permissions_updated: this.state.manifestPermissionsUpdated ?? false,
+        });
+        return;
+      }
+
       case 'POST apps.manifest.delete': {
         // Real Slack reports Web API failures as HTTP 200 with `ok: false`.
         if (!this.isConfigTokenAuthorized(request)) {
@@ -785,6 +911,68 @@ export class MockSlackServer {
           ok: true,
           message_ts: message.ts,
         });
+        return;
+      }
+
+      case 'POST chat.startStream': {
+        const ts = this.nextTs();
+        const message = this.storeOutgoingMessage({
+          ts,
+          payload: {
+            channel: jsonBody.channel,
+            thread_ts: jsonBody.thread_ts,
+            text: String(jsonBody.markdown_text ?? ''),
+          },
+          ephemeral: false,
+        });
+        // Slack starts (or resumes) the thread's agent session with each stream.
+        const threadTs = String(jsonBody.thread_ts ?? '');
+        const sessions = (this.state.agentSessions ??= []);
+        const session = sessions.find(
+          (entry) =>
+            entry.channel === message.channel && entry.threadTs === threadTs,
+        );
+        if (session) {
+          session.status = 'processing';
+        } else {
+          sessions.push({
+            channel: message.channel,
+            threadTs,
+            status: 'processing',
+          });
+        }
+        json(response, 200, { ok: true, channel: message.channel, ts });
+        return;
+      }
+
+      case 'POST chat.appendStream':
+      case 'POST chat.stopStream': {
+        const channel = String(jsonBody.channel ?? '');
+        const ts = String(jsonBody.ts ?? '');
+        const message = (this.state.messages ?? []).find(
+          (entry) => entry.channel === channel && entry.ts === ts,
+        );
+
+        if (!message) {
+          json(response, 200, { ok: false, error: 'message_not_found' });
+          return;
+        }
+
+        message.text += String(jsonBody.markdown_text ?? '');
+        if (Array.isArray(jsonBody.blocks)) {
+          message.blocks = [...(message.blocks ?? []), ...jsonBody.blocks];
+        }
+        if (path === 'chat.stopStream') {
+          const session = this.state.agentSessions?.find(
+            (entry) =>
+              entry.channel === channel && entry.threadTs === message.thread_ts,
+          );
+          if (session) {
+            // Finishing a message clears Working unless the caller opts to keep it.
+            session.status = String(jsonBody.session_status ?? 'active');
+          }
+        }
+        json(response, 200, { ok: true, channel, ts });
         return;
       }
 
@@ -891,7 +1079,40 @@ export class MockSlackServer {
         return;
       }
 
+      case 'POST agents.sessions.setStatus':
+      case 'POST agents.sessions.rename': {
+        const channel = String(jsonBody.channel_id ?? '');
+        const threadTs = String(jsonBody.thread_ts ?? '');
+        const sessions = (this.state.agentSessions ??= []);
+        let session = sessions.find(
+          (entry) => entry.channel === channel && entry.threadTs === threadTs,
+        );
+        if (!session) {
+          if (path === 'agents.sessions.rename') {
+            json(response, 200, { ok: false, error: 'session_not_found' });
+            return;
+          }
+          session = { channel, threadTs, status: String(jsonBody.status) };
+          sessions.push(session);
+        }
+        if (path === 'agents.sessions.setStatus') {
+          session.status = String(jsonBody.status);
+        } else {
+          session.title = String(jsonBody.title);
+        }
+        json(response, 200, { ok: true, title: session.title });
+        return;
+      }
       case 'POST reactions.add':
+      case 'POST agents.sessions.setTitle':
+      case 'POST assistant.threads.setStatus':
+      case 'POST assistant.threads.setTitle':
+      case 'POST assistant.threads.setSuggestedPrompts': {
+        // Assistant thread presentation calls are accepted and ignored so the
+        // Fast session activity adapter does not retry a 404 for minutes.
+        json(response, 200, { ok: true });
+        return;
+      }
       case 'POST reactions.remove': {
         const channel = String(jsonBody.channel ?? '');
         const timestamp = String(jsonBody.timestamp ?? '');
@@ -932,11 +1153,53 @@ export class MockSlackServer {
             id: user.id,
             name: user.name,
             real_name: user.realName ?? user.displayName ?? user.name,
+            deleted: user.deleted ?? false,
+            is_bot: user.isBot ?? false,
+            is_app_user: user.isAppUser ?? false,
+            updated: user.updated ?? 0,
             profile: {
               display_name: user.displayName ?? user.name,
               real_name: user.realName ?? user.displayName ?? user.name,
+              title: user.title ?? '',
               ...(user.email ? { email: user.email } : {}),
             },
+          },
+        });
+        return;
+      }
+
+      case 'GET users.list': {
+        const limit = Math.max(
+          1,
+          Number.parseInt(url.searchParams.get('limit') ?? '100', 10) || 100,
+        );
+        const offset = Math.max(
+          0,
+          Number.parseInt(url.searchParams.get('cursor') ?? '0', 10) || 0,
+        );
+        const page = this.state.users.slice(offset, offset + limit);
+        const nextOffset = offset + page.length;
+
+        json(response, 200, {
+          ok: true,
+          members: page.map((user) => ({
+            id: user.id,
+            name: user.name,
+            real_name: user.realName ?? user.displayName ?? user.name,
+            deleted: user.deleted ?? false,
+            is_bot: user.isBot ?? false,
+            is_app_user: user.isAppUser ?? false,
+            updated: user.updated ?? 0,
+            profile: {
+              display_name: user.displayName ?? user.name,
+              real_name: user.realName ?? user.displayName ?? user.name,
+              title: user.title ?? '',
+              ...(user.email ? { email: user.email } : {}),
+            },
+          })),
+          response_metadata: {
+            next_cursor:
+              nextOffset < this.state.users.length ? String(nextOffset) : '',
           },
         });
         return;
@@ -949,6 +1212,13 @@ export class MockSlackServer {
       }
 
       default:
+        if (method === 'POST' && /^[a-z]+\.[a-zA-Z.]+$/.test(path)) {
+          // Slack answers an unknown Web API method with HTTP 200 and
+          // ok:false, which the WebClient surfaces immediately; a 404 would
+          // make it retry with backoff for minutes and hold turn locks.
+          json(response, 200, { ok: false, error: 'unknown_method' });
+          return;
+        }
         text(response, 404, `Unhandled mock Slack route: ${method} ${path}`);
     }
   }

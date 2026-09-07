@@ -94,7 +94,7 @@ vi.mock('@/components/system', () => ({
 }));
 
 vi.mock('../hooks/SandboxProvider', () => ({
-  useSandboxClient: useSandboxClientMock,
+  useOptionalSandboxClient: useSandboxClientMock,
 }));
 
 vi.mock('../hooks/use-preview-pane', () => ({
@@ -573,6 +573,7 @@ describe('PreviewSidePanel', () => {
     expect(
       screen.getByText(/Environment services are still starting/),
     ).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite');
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Dismiss preview starting notice' }),
@@ -631,5 +632,44 @@ describe('PreviewSidePanel', () => {
     expect(
       screen.queryByText(/Environment services are still starting/),
     ).not.toBeInTheDocument();
+  });
+
+  it('announces a timed-out preview and provides guarded retry feedback', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+
+    render(
+      <PreviewSidePanel
+        taskRun={{ id: 123, taskId: 'task-1' } as never}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const iframe = screen.getByTitle('Live Preview');
+    const reloadMock = vi.fn();
+    Object.defineProperty(iframe, 'contentWindow', {
+      configurable: true,
+      value: {
+        postMessage: vi.fn(),
+        location: { reload: reloadMock },
+      },
+    });
+
+    fireEvent.load(iframe);
+    act(() => {
+      vi.advanceTimersByTime(300_001);
+    });
+    fireEvent.load(iframe);
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      "The preview hasn't reported loading",
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    const retryButton = screen.getByRole('button', { name: /retrying/i });
+    expect(retryButton).toBeDisabled();
+    expect(retryButton).toHaveAttribute('aria-busy', 'true');
+    expect(reloadMock).toHaveBeenCalled();
   });
 });

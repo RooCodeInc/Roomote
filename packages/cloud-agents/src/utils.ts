@@ -99,25 +99,52 @@ export function stripLeadingSlackProductMention(text: string): string {
 
 function buildSlackWrapperOpenTag(
   tagName: string,
-  attributes?: { ts?: string },
+  attributes?: {
+    ts?: string;
+    senderSlackId?: string;
+    senderName?: string;
+    senderGithub?: string;
+  },
 ): string {
-  const ts = attributes?.ts?.trim();
+  const serializedAttributes = [
+    ['ts', attributes?.ts],
+    ['sender_slack_id', attributes?.senderSlackId],
+    ['sender_name', attributes?.senderName],
+    ['sender_github', attributes?.senderGithub],
+  ]
+    .flatMap(([name, value]) => {
+      const normalizedValue = value?.trim();
+      return normalizedValue
+        ? [`${name}="${escapeSlackAttributeValue(normalizedValue)}"`]
+        : [];
+    })
+    .join(' ');
 
-  if (!ts) {
+  if (!serializedAttributes) {
     return `<${tagName}>`;
   }
 
-  return `<${tagName} ts="${escapeSlackAttributeValue(ts)}">`;
+  return `<${tagName} ${serializedAttributes}>`;
 }
 
 export function wrapSlackMessage(
   text: string,
-  options?: { ts?: string },
+  options?: {
+    ts?: string;
+    senderSlackId?: string;
+    senderName?: string;
+    senderGithub?: string;
+    agentContext?: string;
+  },
 ): string {
   const normalizedText = escapeSlackMessageContent(text.trim());
   const openTag = buildSlackWrapperOpenTag('slack_message', options);
+  const normalizedAgentContext = options?.agentContext?.trim();
+  const contextBlock = normalizedAgentContext
+    ? `<slack_message_context>\n${escapeSlackMessageContent(normalizedAgentContext)}\n</slack_message_context>\n\n`
+    : '';
 
-  return `${openTag}\n${normalizedText}\n</slack_message>`;
+  return `${contextBlock}${openTag}\n${normalizedText}\n</slack_message>`;
 }
 
 export function wrapSlackTurnPolicy({

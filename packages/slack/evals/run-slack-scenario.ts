@@ -11,10 +11,26 @@
  * .claude/skills/mock-slack-testing/SKILL.md).
  *
  * Usage:
- *   pnpm --filter @roomote/slack eval:scenario -- \
+ *   pnpm --filter @roomote/slack eval:scenario \
  *     --scenario evals/scenarios/slack-fast-answer.json \
  *     --webhook http://localhost:13101/api/webhooks/slack \
  *     --target roomote@local-dev --episode 1 --out /tmp/slack-eval-bundles
+ *
+ * Validate a scenario without Slack or API prerequisites:
+ *   pnpm --filter @roomote/slack eval:scenario \
+ *     --scenario evals/scenarios/slack-fast-answer.json --validate-only
+ *
+ * Replay the Fast conversation continuity scenario:
+ *   pnpm --filter @roomote/slack eval:scenario \
+ *     --scenario evals/scenarios/slack-fast-conversation-continuity.json \
+ *     --webhook http://localhost:13101/api/webhooks/slack \
+ *     --target roomote@local-dev --episode 1 --out /tmp/slack-eval-bundles
+ *
+ * Replay requires a local API on port 13101 started with
+ * SLACK_API_BASE_URL=http://127.0.0.1:3012/api/, the same existing
+ * R_SLACK_SIGNING_SECRET available to the API and this command, and existing
+ * TROOMOTE/UGRACE Slack installation and user-mapping fixtures. This runner
+ * does not create or modify those prerequisites.
  */
 
 import { parseArgs } from 'node:util';
@@ -52,6 +68,7 @@ const { values } = parseArgs({
     target: { type: 'string', default: 'roomote@local-dev' },
     episode: { type: 'string', default: '1' },
     out: { type: 'string', default: '/tmp/slack-eval-bundles' },
+    'validate-only': { type: 'boolean', default: false },
   },
 });
 
@@ -63,6 +80,14 @@ if (!values.scenario) {
 const scenario = scenarioSchema.parse(
   JSON.parse(await readFile(values.scenario, 'utf-8')),
 );
+
+if (values['validate-only']) {
+  console.log(
+    `validated ${scenario.name}: ${scenario.events.length} events, ${scenario.criteria.length} criteria`,
+  );
+  process.exit(0);
+}
+
 const episode = Number.parseInt(values.episode!, 10) || 1;
 
 // Substitute run-unique tokens so episodes never collide on Slack event

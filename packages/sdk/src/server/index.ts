@@ -12,7 +12,10 @@ export {
   optionalAuthProcedure,
 } from './trpc';
 
-export { finishRun } from './lib/task-runs/finish-run';
+export {
+  finishRun,
+  maybeEnqueueBrainMemoryForCompletedRun,
+} from './lib/task-runs/finish-run';
 export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
@@ -51,13 +54,37 @@ export {
 } from './lib/task-runs/record-task-message-envelope';
 export { ensureSnapshotResumeGitHubFollowUpFallback } from './lib/task-runs/ensure-snapshot-resume-github-follow-up-fallback';
 export {
+  ACTIVE_PR_REVIEW_FOLLOW_UP_ATTEMPTS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_DEBOUNCE_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_DEDUPLICATION_TTL_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_JOB_OPTIONS,
   ACTIVE_PR_REVIEW_FOLLOW_UP_QUEUE_NAME,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_DELAY_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_RETRY_WINDOW_MS,
+  ACTIVE_PR_REVIEW_FOLLOW_UP_SETTLEMENT_WINDOW_MS,
   activePrReviewFollowUpRequestSchema,
   enqueueActivePrReviewFollowUp,
   type ActivePrReviewFollowUpRequest,
 } from './lib/task-runs/active-pr-review-follow-up';
+export {
+  acquireGithubPrReviewLifecycleLock,
+  completeGithubPrReviewCheckFromSummary,
+  GITHUB_PR_REVIEW_CHECK_NAME,
+  publishGithubPrReviewCheck,
+  reconcileGithubPrReviewCheckForRun,
+  transferGithubPrReviewCheckToRun,
+} from './lib/task-runs/github-pr-review-check';
+export {
+  PULL_REQUEST_MERGEABILITY_CHECK_QUEUE_NAME,
+  PULL_REQUEST_MERGEABILITY_INITIAL_DELAY_MS,
+  PULL_REQUEST_MERGEABILITY_RETRY_DELAY_MS,
+  buildPullRequestConflictMessage,
+  enqueuePullRequestMergeabilityCheck,
+  pullRequestMergeabilityCheckRequestSchema,
+  type PullRequestMergeabilityCheckRequest,
+} from './lib/task-runs/pull-request-mergeability-check';
 export * from './lib/manager-slack';
+export * from './lib/automation-result-metadata';
 export * from './automations';
 export * from './lib/manager-stats';
 export {
@@ -81,6 +108,16 @@ export {
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
 export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  createFastAgentConversationArtifact,
+  createFastAgentSessionArtifact,
+  createSessionArtifact,
+} from './lib/artifacts/create-session-artifact';
+export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
+export {
+  notifyFastAgentParentOnArtifact,
+  type FastArtifactNotificationResult,
+} from './lib/artifacts/notify-fast-agent-parent';
 
 export {
   SLACK_ACCOUNT_LINK_EDUCATION_DELAY_MS,
@@ -171,6 +208,39 @@ export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/te
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
+export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
+export { requireFastSuggestionOriginSessionId } from './lib/fast-automation-suggestions';
+
+export {
+  buildFastAgentParentEventKey,
+  drainFastAgentParentEvents,
+  enqueueFastAgentParentEvent,
+  FastAgentParentBusyError,
+  FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
+  recoverPendingFastAgentParentEvents,
+  wakeFastAgentParentEventAt,
+  wakeFastAgentParentEventNow,
+  type FastAgentParentEventQueueRequest,
+} from './lib/fast-agent-parent-event-queue';
+export {
+  SESSION_WAKEUP_FIRE_JOB_NAME,
+  SESSION_WAKEUP_QUEUE_NAME,
+  SESSION_WAKEUP_RECOVERY_LOOKAHEAD_MS,
+  fireSessionWakeup,
+  recoverPendingSessionWakeups,
+  type FireSessionWakeupResult,
+  type SessionWakeupFireJob,
+} from './lib/session-wakeups';
+export {
+  admitFastAgentHumanFollowUp,
+  persistFastAgentInlineHumanTurn,
+  type FastAgentDurableTurn,
+  type FastAgentHumanFollowUpAdmission,
+} from './lib/fast-agent-human-follow-up';
+export {
+  resolveFastAgentSessionImages,
+  type FastAgentReplyImage,
+} from './lib/fast-agent-session-images';
 
 export {
   getCommunicationProviderAdapter,
@@ -190,6 +260,8 @@ export {
 export {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
+  hasUserDirectMessageIdentity,
+  sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,
@@ -216,7 +288,14 @@ export {
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   PR_REVIEW_NOTIFICATION_QUEUE_NAME,
   PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS,
+  buildPrReviewNotificationPostInput,
+  beginCanonicalPrReviewAutoDispatch,
+  beginCanonicalPrReviewPrompt,
+  beginCanonicalPrReviewWebPrompt,
+  beginCanonicalPrReviewWebAutoDispatch,
+  completeCanonicalPrReviewAutoDispatch,
   consumePendingPrReviewActivity,
+  dispatchCanonicalPrReviewAutoFollowUp,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,
   enqueuePrReviewNotificationInputSchema,
@@ -224,11 +303,14 @@ export {
   finalizePrReviewNotificationRequest,
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
+  releaseCanonicalPrReviewWebAutoDispatch,
   hasPrReviewNotificationThreadContext,
   migrateLegacyPrReviewNotificationRequest,
+  prepareCanonicalPrReviewNotificationRequest,
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   requeuePendingPrReviewActivity,
+  retrySupersededPrReviewAction,
   resolvePrReviewNotificationRoute,
   schedulePrReviewNotificationJob,
   startPrReviewNotificationCycle,
@@ -240,15 +322,29 @@ export {
   type StartPrReviewNotificationCycleInput,
 } from './lib/task-runs/pr-review-notification';
 export {
+  createPrReviewNotificationTelemetry,
   gatherPrReviewTriageContext,
+  PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
+  getTaskPrReviewOfferStatus,
+  updateFastAgentPrReviewOfferStatus,
+  updateTaskPrReviewOfferStatus,
   triagePrReviewActivity,
   type PreparedPrReviewNotification,
   type PrReviewTriageContext,
 } from './lib/task-runs/pr-review-notification-delivery';
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
+export * from './lib/fast-agent-surface-reply';
+export * from './lib/linear-fast-session';
+export * from './lib/linear-fast-session-turn';
+export * from './lib/source-control-fast-delivery';
+export * from './lib/source-control-fast-session';
+export * from './lib/fast-agent-slack-reply-stream';
+export * from './lib/fast-agent-provider-message';
+export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
+export * from './lib/task-runs/notify-fast-agent-parent-on-pull-request-conflict';
 
 export {
   formatPrStatusChangeTaskHistoryText,
@@ -268,6 +364,10 @@ export {
 } from './lib/slack-conversation-log';
 
 export { updateTaskPrStatus } from './lib/pull-requests/update-task-pr-status';
+export {
+  markRoomotePullRequestReadyAfterCleanReview,
+  type MarkRoomotePullRequestReadyResult,
+} from './lib/pull-requests/mark-roomote-pull-request-ready';
 export {
   manageSourceControlIssueForTaskRun,
   sourceControlIssueInputSchema,
@@ -317,6 +417,16 @@ export {
   upsertSourceControlPullRequestFactFromWebhook,
 } from './lib/pull-requests/source-control-pull-request-facts';
 export { type PullRequestFactSnapshot } from './lib/pull-requests/pull-request-facts-store';
+export {
+  enrichPullRequestFacts,
+  STORED_CHANGED_FILE_CAP,
+} from './lib/pull-requests/pull-request-facts-enrichment';
+export {
+  readSourceControlPullRequestEnrichment,
+  totalPullRequestLineChanges,
+  type PullRequestEnrichment,
+  type PullRequestReviewSummary,
+} from './lib/pull-requests/source-control-pull-request-enrichment';
 
 export * from './lib/auth';
 export * from './lib/safe-fetch';
@@ -335,6 +445,8 @@ export {
   updateAuthStatus,
   getValidAccessToken,
 } from './lib/mcp/data';
+
+export { resolveUserMcpServerConfigs } from './routers/mcp-connections';
 
 export {
   discoverOAuthEndpoints,
@@ -368,10 +480,15 @@ export {
 } from './lib/mcp/linear-connections';
 
 export {
+  requestBrainBackfill,
   requestInstancePing,
   requestLicenseUsageSync,
   resetInstancePingQueueForTests,
 } from './lib/request-instance-ping';
 export * from './lib/brain-clients';
+export * from './lib/brain-corpus';
+export * from './lib/brain-mcp';
 export * from './lib/brain-github';
+export * from './lib/brain-linear';
 export * from './lib/brain-inference';
+export * from './lib/brain-source-availability';

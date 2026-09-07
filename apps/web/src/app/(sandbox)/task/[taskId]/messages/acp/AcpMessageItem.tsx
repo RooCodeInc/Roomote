@@ -8,11 +8,15 @@ import { AcpTodoSectionMessage } from './AcpTodoSectionMessage';
 import { AcpTextMessage } from './AcpTextMessage';
 import { AcpToolMessage } from './AcpToolMessage';
 import { AcpUnknownMessage } from './AcpUnknownMessage';
+import { DelegatedTaskCard } from './DelegatedTaskCard';
+import { getDelegatedTaskDetails } from './delegated-task';
+import { resolveToolPresentationPolicy } from './tool-presentation-policy';
 
 interface AcpMessageItemProps {
   msg: AcpUiMessage;
   onSuppress?: (messageId: string) => void;
   showSubagentPayload?: boolean;
+  onOpenDelegatedTask?: (taskId: string) => void;
   children?: ReactNode;
 }
 
@@ -20,6 +24,7 @@ function AcpMessageItemBase({
   msg,
   onSuppress,
   showSubagentPayload = false,
+  onOpenDelegatedTask,
   children,
 }: AcpMessageItemProps) {
   switch (msg.kind) {
@@ -31,6 +36,22 @@ function AcpMessageItemBase({
       return <AcpTodoSectionMessage msg={msg} />;
     case 'tool_call':
     case 'tool_result': {
+      const delegatedTask = getDelegatedTaskDetails(msg);
+      const policy = resolveToolPresentationPolicy(msg, {
+        delegatedTaskCardsEnabled: Boolean(onOpenDelegatedTask),
+        showInternalMessages: showSubagentPayload,
+      });
+
+      if (
+        policy.renderAs === 'delegated-task-card' &&
+        delegatedTask &&
+        onOpenDelegatedTask
+      ) {
+        return (
+          <DelegatedTaskCard {...delegatedTask} onOpen={onOpenDelegatedTask} />
+        );
+      }
+
       return msg.data.kind === 'execute' ? (
         <AcpCommandOutputMessage
           msg={msg}

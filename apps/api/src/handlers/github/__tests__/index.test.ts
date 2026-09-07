@@ -11,10 +11,18 @@ const {
   mockHandlePrReadyForReview,
   mockHandlePrReopen,
   mockHandlePrSynchronize,
+  mockHandleCheckRunRerequested,
   mockHandlePushConflictCheck,
+  mockHandleMergeAnnouncerPush,
+  mockGetInstallationOctokit,
+  mockQueueBaseBranchMergeabilityCheck,
+  mockQueueTrackedPullRequestMergeabilityCheck,
   mockIsRepoSkipped,
   mockQueuePrReviewActivityNotification,
   mockQueuePrReviewSummaryNotification,
+  mockQueuePrCiFailureNotification,
+  mockRetirePendingPrReviewActionsForPullRequest,
+  mockGetCurrentGitHubPrHeadSha,
   mockRecordWebhook,
   mockResolveConfiguredGitHubAppSlug,
   mockResolveGitHubRoomoteMentionEnabled,
@@ -44,10 +52,18 @@ const {
   mockHandlePrReadyForReview: vi.fn(),
   mockHandlePrReopen: vi.fn(),
   mockHandlePrSynchronize: vi.fn(),
+  mockHandleCheckRunRerequested: vi.fn(),
   mockHandlePushConflictCheck: vi.fn(),
+  mockHandleMergeAnnouncerPush: vi.fn(),
+  mockGetInstallationOctokit: vi.fn(),
+  mockQueueBaseBranchMergeabilityCheck: vi.fn(),
+  mockQueueTrackedPullRequestMergeabilityCheck: vi.fn(),
   mockIsRepoSkipped: vi.fn(),
   mockQueuePrReviewActivityNotification: vi.fn(),
   mockQueuePrReviewSummaryNotification: vi.fn(),
+  mockQueuePrCiFailureNotification: vi.fn(),
+  mockRetirePendingPrReviewActionsForPullRequest: vi.fn(),
+  mockGetCurrentGitHubPrHeadSha: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveConfiguredGitHubAppSlug: vi.fn(),
   mockResolveGitHubRoomoteMentionEnabled: vi.fn(),
@@ -104,16 +120,20 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/github', () => ({
+  getInstallationOctokit: mockGetInstallationOctokit,
   isRepoSkipped: mockIsRepoSkipped,
   resolveConfiguredGitHubAppSlug: mockResolveConfiguredGitHubAppSlug,
   resolveGitHubRoomoteMentionEnabled: mockResolveGitHubRoomoteMentionEnabled,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  handleMergeAnnouncerPush: mockHandleMergeAnnouncerPush,
   updateTaskPrStatus: mockUpdateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook:
     mockUpsertGitHubPullRequestFactFromWebhook,
   recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
+  retirePendingPrReviewActionsForPullRequest:
+    mockRetirePendingPrReviewActionsForPullRequest,
 }));
 
 vi.mock('../../logging', () => ({
@@ -163,8 +183,22 @@ vi.mock('../handlePrSynchronize', () => ({
   handlePrSynchronize: mockHandlePrSynchronize,
 }));
 
+vi.mock('../handleCheckRunRerequested', () => ({
+  handleCheckRunRerequested: mockHandleCheckRunRerequested,
+}));
+
+vi.mock('../currentPrHead', () => ({
+  getCurrentGitHubPrHeadSha: mockGetCurrentGitHubPrHeadSha,
+}));
+
 vi.mock('../handlePushConflictCheck', () => ({
   handlePushConflictCheck: mockHandlePushConflictCheck,
+}));
+
+vi.mock('../queuePullRequestMergeabilityCheck', () => ({
+  queueBaseBranchMergeabilityCheck: mockQueueBaseBranchMergeabilityCheck,
+  queueTrackedPullRequestMergeabilityCheck:
+    mockQueueTrackedPullRequestMergeabilityCheck,
 }));
 
 vi.mock('../handleWorkflowRunCompleted', () => ({
@@ -179,6 +213,42 @@ vi.mock('../notifyPrReviewActivity', () => ({
   queuePrReviewActivityNotification: mockQueuePrReviewActivityNotification,
   queuePrReviewSummaryNotification: mockQueuePrReviewSummaryNotification,
 }));
+
+vi.mock('../notifyPrCiFailure', () => ({
+  queuePrCiFailureNotification: mockQueuePrCiFailureNotification,
+}));
+
+function makePullRequestPayload(
+  action: 'opened' | 'reopened' | 'synchronize' | 'closed',
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    action,
+    installation: { id: 1 },
+    repository: { id: 10, full_name: 'test-org/test-repo' },
+    pull_request: {
+      id: 100,
+      number: 42,
+      title: 'Test PR',
+      body: null,
+      labels: [],
+      html_url: 'https://github.com/test-org/test-repo/pull/42',
+      state: action === 'closed' ? 'closed' : 'open',
+      draft: false,
+      merged: false,
+      merged_at: null,
+      closed_at: action === 'closed' ? '2026-08-06T12:00:00Z' : null,
+      created_at: '2026-08-06T11:00:00Z',
+      updated_at: '2026-08-06T12:00:00Z',
+      user: { login: 'author' },
+      merged_by: null,
+      head: { ref: 'feature', sha: 'new-head' },
+      base: { ref: 'develop', sha: 'base-head' },
+      ...overrides,
+    },
+    sender: { login: 'actor' },
+  };
+}
 
 describe('github webhook router', () => {
   let app: Hono;
@@ -197,16 +267,22 @@ describe('github webhook router', () => {
     mockHandlePrReadyForReview.mockReset();
     mockHandlePrReopen.mockReset();
     mockHandlePrSynchronize.mockReset();
+    mockHandleCheckRunRerequested.mockReset();
     mockHandlePushConflictCheck.mockReset();
+    mockHandleMergeAnnouncerPush.mockReset();
     mockIsRepoSkipped.mockReset();
     mockQueuePrReviewActivityNotification.mockReset();
     mockQueuePrReviewSummaryNotification.mockReset();
+    mockQueuePrCiFailureNotification.mockReset();
+    mockRetirePendingPrReviewActionsForPullRequest.mockReset();
+    mockGetCurrentGitHubPrHeadSha.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveConfiguredGitHubAppSlug.mockReset();
     mockResolveGitHubRoomoteMentionEnabled.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockUpsertGitHubPullRequestFactFromWebhook.mockReset();
+    mockRecordPrStatusChangeInTaskHistory.mockReset();
     mockIsFromKnownInstallation.mockReset();
     mockVerify.mockReset();
     mockVerifyAndReceive.mockReset();
@@ -217,9 +293,16 @@ describe('github webhook router', () => {
     mockResolveDeploymentEnvVar.mockResolvedValue('test-secret');
     mockIsFromKnownInstallation.mockResolvedValue(true);
     mockVerify.mockResolvedValue(true);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
+    mockHandlePushConflictCheck.mockResolvedValue({ status: 'ok' });
+    mockHandlePrSynchronize.mockResolvedValue({ status: 'ok' });
+    mockHandleCheckRunRerequested.mockResolvedValue({ status: 'ok' });
+    mockGetCurrentGitHubPrHeadSha.mockResolvedValue('live-head');
+    mockRetirePendingPrReviewActionsForPullRequest.mockResolvedValue(undefined);
+    mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -255,6 +338,216 @@ describe('github webhook router', () => {
     const { github } = await import('../index');
     app = new Hono();
     app.route('/api/webhooks/github', github);
+  });
+
+  it('restores tracked draft status when a pull request is reopened', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    const payload = makePullRequestPayload('reopened', { draft: true });
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-reopened-draft',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'github',
+      'test-org/test-repo',
+      42,
+      'draft',
+    );
+    expect(mockHandlePrReopen).toHaveBeenCalledWith(payload);
+  });
+
+  it('waits for terminal status persistence before notifying linked tasks', async () => {
+    let resolveStatusUpdate: (() => void) | undefined;
+    mockUpdateTaskPrStatus.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveStatusUpdate = resolve;
+        }),
+    );
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    mockHandlePrMerge.mockResolvedValue({ status: 'ok' });
+    const payload = makePullRequestPayload('closed');
+
+    const responsePromise = app.request(
+      'http://localhost/api/webhooks/github',
+      {
+        method: 'POST',
+        headers: {
+          'x-github-delivery': 'delivery-closed-ordering',
+          'x-github-event': 'pull_request',
+          'x-hub-signature-256': 'sha256=test',
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+
+    await vi.waitFor(() => expect(resolveStatusUpdate).toBeTypeOf('function'));
+    expect(mockHandlePrMerge).not.toHaveBeenCalled();
+
+    resolveStatusUpdate?.();
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrMerge).toHaveBeenCalledWith(payload);
+  });
+
+  it('does not notify linked tasks when terminal status persistence fails', async () => {
+    mockUpdateTaskPrStatus.mockRejectedValue(new Error('database unavailable'));
+    const payload = makePullRequestPayload('closed');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-closed-persistence-failure',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockHandlePrMerge).not.toHaveBeenCalled();
+    expect(mockRecordPrStatusChangeInTaskHistory).not.toHaveBeenCalled();
+  });
+
+  it('forwards pull request descriptions and labels from webhook payloads', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      pull_request: {
+        id: 100,
+        number: 42,
+        title: 'Test PR',
+        body: 'Why: the old path raced.',
+        labels: [{ name: 'bug' }, { name: 'p1' }],
+        html_url: 'https://github.com/test-org/test-repo/pull/42',
+        state: 'open',
+        draft: false,
+        merged_at: null,
+        closed_at: null,
+        created_at: '2026-08-06T11:00:00Z',
+        updated_at: '2026-08-06T12:00:00Z',
+        user: { login: 'author' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-pr-fact-fields',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpsertGitHubPullRequestFactFromWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({
+          body: 'Why: the old path raced.',
+          labels: ['bug', 'p1'],
+        }),
+      }),
+    );
+  });
+
+  it('keeps omitted webhook labels unknown instead of clearing stored labels', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      pull_request: {
+        id: 100,
+        number: 42,
+        title: 'Test PR',
+        body: null,
+        html_url: 'https://github.com/test-org/test-repo/pull/42',
+        state: 'open',
+        draft: false,
+        merged_at: null,
+        closed_at: null,
+        created_at: '2026-08-06T11:00:00Z',
+        updated_at: '2026-08-06T12:00:00Z',
+        user: { login: 'author' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-pr-fact-unknown-labels',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpsertGitHubPullRequestFactFromWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({
+          body: null,
+          labels: null,
+        }),
+      }),
+    );
+  });
+
+  it('forwards an explicit empty webhook label list as a clear', async () => {
+    mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+    mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      pull_request: {
+        id: 100,
+        number: 42,
+        title: 'Test PR',
+        body: null,
+        labels: [],
+        html_url: 'https://github.com/test-org/test-repo/pull/42',
+        state: 'open',
+        draft: false,
+        merged_at: null,
+        closed_at: null,
+        created_at: '2026-08-06T11:00:00Z',
+        updated_at: '2026-08-06T12:00:00Z',
+        user: { login: 'author' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-pr-fact-clear-labels',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpsertGitHubPullRequestFactFromWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({ labels: [] }),
+      }),
+    );
   });
 
   it('routes submitted pull request reviews through handlePrComment', async () => {
@@ -349,6 +642,157 @@ describe('github webhook router', () => {
     expect(mockHandlePrComment).toHaveBeenCalledTimes(1);
   });
 
+  it('queues completed check runs before recording the webhook', async () => {
+    const payload = {
+      action: 'completed',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      check_run: {
+        id: 9001,
+        name: 'CI / Tests',
+        conclusion: 'failure',
+        pull_requests: [{ number: 42 }],
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-check-1',
+        'x-github-event': 'check_run',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockQueuePrCiFailureNotification).toHaveBeenCalledWith(payload);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-check-1',
+      'check_run.completed',
+      payload,
+      expect.any(Function),
+    );
+    expect(
+      mockQueuePrCiFailureNotification.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
+  });
+
+  it('records and dispatches rerequested check runs through the review handler', async () => {
+    const payload = {
+      action: 'rerequested',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      sender: { id: 20, login: 'reviewer' },
+      check_run: {
+        id: 9001,
+        name: 'Roomote code review',
+        head_sha: 'live-head',
+        app: { slug: 'roomote' },
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-rerequest-1',
+        'x-github-event': 'check_run',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-rerequest-1',
+      'check_run.rerequested',
+      payload,
+      expect.any(Function),
+    );
+    expect(mockHandleCheckRunRerequested).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrCiFailureNotification).not.toHaveBeenCalled();
+  });
+
+  it('retires review actions for older heads using the live PR head on synchronize', async () => {
+    const payload = makePullRequestPayload('synchronize');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-sync-1',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrSynchronize).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(
+        mockRetirePendingPrReviewActionsForPullRequest,
+      ).toHaveBeenCalledWith({
+        sourceControlProvider: 'github',
+        repository: 'test-org/test-repo',
+        prNumber: 42,
+        currentHeadSha: 'live-head',
+      });
+    });
+    expect(mockGetCurrentGitHubPrHeadSha).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'test-org/test-repo',
+      prNumber: 42,
+    });
+  });
+
+  it('skips retiring review actions when the live PR head cannot be resolved', async () => {
+    mockGetCurrentGitHubPrHeadSha.mockResolvedValue(null);
+    const payload = makePullRequestPayload('synchronize');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-sync-2',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrSynchronize).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(mockGetCurrentGitHubPrHeadSha).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      mockRetirePendingPrReviewActionsForPullRequest,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('still handles a synchronized PR when retiring review actions fails', async () => {
+    mockRetirePendingPrReviewActionsForPullRequest.mockRejectedValue(
+      new Error('db unavailable'),
+    );
+    const payload = makePullRequestPayload('synchronize');
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-sync-3',
+        'x-github-event': 'pull_request',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandlePrSynchronize).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(mockRetirePendingPrReviewActionsForPullRequest).toHaveBeenCalled();
+    });
+    expect(mockRecordWebhook).toHaveBeenCalledTimes(1);
+  });
+
   it('routes plain issue comments through handleGitHubIssueComment', async () => {
     const payload = {
       action: 'created',
@@ -434,7 +878,7 @@ describe('github webhook router', () => {
     expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
   });
 
-  it('notifies linked tasks about PR comments in skipped repositories without handling mentions', async () => {
+  it('still routes PR comments in skipped repositories to mention handling', async () => {
     mockIsRepoSkipped.mockReturnValue(true);
     const payload = {
       action: 'created',
@@ -473,7 +917,80 @@ describe('github webhook router', () => {
       payload,
       'delivery-skipped-pr-comment',
     );
+    // The skip list suppresses unsolicited automations only; the mention
+    // handler decides whether this comment addressed the app.
+    expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
+  });
+
+  it('still routes plain issue comments in skipped repositories to mention handling', async () => {
+    mockIsRepoSkipped.mockReturnValue(true);
+    const payload = {
+      action: 'created',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      issue: { number: 43 },
+      comment: {
+        id: 9,
+        body: '@roomote can you take a look?',
+        user: { login: 'alice' },
+      },
+      sender: { login: 'alice' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-skipped-issue-comment',
+        'x-github-event': 'issue_comment',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandleGitHubIssueComment).toHaveBeenCalledWith(payload);
     expect(mockHandlePrComment).not.toHaveBeenCalled();
+    expect(mockQueuePrReviewActivityNotification).not.toHaveBeenCalled();
+  });
+
+  it('handles body mentions but skips Triage Issues for opened issues in skipped repositories', async () => {
+    mockIsRepoSkipped.mockReturnValue(true);
+    mockHandleGitHubIssueComment.mockResolvedValue({
+      status: 'ok',
+      message: 'fast_session_queued',
+    });
+    const payload = {
+      action: 'opened',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      issue: {
+        number: 44,
+        title: 'Flaky retry',
+        body: '@roomote please investigate',
+        user: { login: 'alice' },
+      },
+      sender: { login: 'alice' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-skipped-issue-opened',
+        'x-github-event': 'issues',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandleGitHubIssueComment).toHaveBeenCalledWith({
+      installation: payload.installation,
+      repository: payload.repository,
+      sender: payload.sender,
+      issue: payload.issue,
+      mentionBody: '@roomote please investigate',
+    });
+    expect(mockHandleGitHubIssueFixer).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -504,7 +1021,7 @@ describe('github webhook router', () => {
       },
     },
   ])(
-    'notifies linked tasks for $event callbacks in skipped repositories without handling mentions',
+    'notifies linked tasks and still handles mentions for $event callbacks in skipped repositories',
     async ({ event, action, delivery, activity }) => {
       mockIsRepoSkipped.mockReturnValue(true);
       const payload = {
@@ -536,7 +1053,7 @@ describe('github webhook router', () => {
       expect(
         mockQueuePrReviewActivityNotification.mock.invocationCallOrder[0],
       ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
-      expect(mockHandlePrComment).not.toHaveBeenCalled();
+      expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
     },
   );
 
@@ -593,7 +1110,7 @@ describe('github webhook router', () => {
       },
       comment: {
         id: 7,
-        body: '<!-- roomote-review-summary sha=abc -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->',
         user: { login: 'roomote[bot]' },
       },
       sender: { login: 'roomote[bot]' },
@@ -638,7 +1155,7 @@ describe('github webhook router', () => {
       },
       comment: {
         id: 7,
-        body: '<!-- roomote-review-summary sha=abc -->',
+        body: '<!-- roomote-review-summary sha=abc1234 -->',
         user: { login: 'roomote[bot]' },
       },
       sender: { login: 'roomote[bot]' },
@@ -708,6 +1225,7 @@ describe('github webhook router', () => {
           updated_at: '2026-08-06T12:00:00Z',
           user: { login: 'author' },
           merged_by: merged ? { login: 'merger' } : null,
+          base: { ref: 'develop' },
         },
         sender: { login: merged ? 'merger' : 'closer' },
       };
@@ -736,6 +1254,7 @@ describe('github webhook router', () => {
         expect.objectContaining({
           repository: 'test-org/test-repo',
           prNumber: 42,
+          targetBranch: 'develop',
           status,
         }),
       );
@@ -753,7 +1272,16 @@ describe('github webhook router', () => {
         'x-github-event': 'push',
         'x-hub-signature-256': 'sha256=test',
       },
-      body: JSON.stringify({ ref: 'refs/heads/main' }),
+      body: JSON.stringify({
+        ref: 'refs/heads/main',
+        repository: {
+          id: 10,
+          full_name: 'test-org/test-repo',
+          html_url: 'https://github.com/test-org/test-repo',
+        },
+        pusher: { name: 'actor' },
+        commits: [{ id: 'abc', message: 'Ship change' }],
+      }),
     });
 
     expect(response.status).toBe(200);
@@ -762,6 +1290,13 @@ describe('github webhook router', () => {
     );
     expect(webhooksConstructorParams).toEqual([{ secret: 'db-only-secret' }]);
     expect(mockHandlePushConflictCheck).toHaveBeenCalled();
+    expect(mockHandleMergeAnnouncerPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'github',
+        ref: 'refs/heads/main',
+        pusher: 'actor',
+      }),
+    );
   });
 
   it('refreshes GitHub mention settings before dispatching handlers', async () => {
@@ -784,6 +1319,48 @@ describe('github webhook router', () => {
     expect(
       mockResolveGitHubRoomoteMentionEnabled.mock.invocationCallOrder[0],
     ).toBeLessThan(mockVerifyAndReceive.mock.invocationCallOrder[0]!);
+  });
+
+  it('returns Merge announcer failures to webhook audit recording', async () => {
+    let handlerResult: unknown;
+    mockHandleMergeAnnouncerPush.mockResolvedValue({
+      status: 'error',
+      message: 'delivery failed',
+    });
+    mockRecordWebhook.mockImplementation(
+      async (
+        _deliveryId: string,
+        _event: string,
+        _payload: unknown,
+        handler: () => Promise<unknown>,
+      ) => {
+        handlerResult = await handler();
+      },
+    );
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-announcer-failure',
+        'x-github-event': 'push',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify({
+        ref: 'refs/heads/main',
+        repository: {
+          id: 10,
+          full_name: 'test-org/test-repo',
+          html_url: 'https://github.com/test-org/test-repo',
+        },
+        commits: [{ id: 'abc', message: 'Ship change' }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handlerResult).toEqual({
+      status: 'error',
+      message: 'delivery failed',
+    });
   });
 
   it('returns 401 without an installation lookup when the signature is invalid', async () => {

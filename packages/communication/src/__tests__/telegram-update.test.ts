@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getNewTelegramMessageReactions,
   getTelegramNewTaskCommand,
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
@@ -92,6 +93,20 @@ describe('Telegram update helpers', () => {
           old_reaction: [{ type: 'emoji', emoji: '👍' }],
         }),
     ).toBe(false);
+    expect(reaction && getNewTelegramMessageReactions(reaction)).toEqual([
+      { name: '👍' },
+    ]);
+    expect(
+      reaction &&
+        getNewTelegramMessageReactions({
+          ...reaction,
+          old_reaction: [{ type: 'emoji', emoji: '👍' }],
+          new_reaction: [
+            { type: 'emoji', emoji: '👍' },
+            { type: 'custom_emoji', custom_emoji_id: 'custom-1' },
+          ],
+        }),
+    ).toEqual([{ name: 'custom_emoji:custom-1', id: 'custom-1' }]);
   });
 
   it('parses Telegram messages into queued communication messages', () => {

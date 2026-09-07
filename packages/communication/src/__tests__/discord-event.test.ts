@@ -342,6 +342,25 @@ describe('Discord Gateway event normalization', () => {
     expect(isDiscordTaskEntryEvent(event)).toBe(true);
     expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
   });
+
+  it('does not treat removed fast interactions as task entry', () => {
+    const event = parse({
+      op: 0,
+      t: 'INTERACTION_CREATE',
+      d: {
+        id: 'interaction-fast',
+        application_id: 'application-1',
+        type: 2,
+        token: 'token',
+        channel_id: 'channel-1',
+        user: { id: 'user-1', username: 'matt' },
+        data: { name: 'FAST' },
+      },
+    });
+
+    expect(isDiscordTaskEntryEvent(event)).toBe(false);
+    expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
+  });
 });
 
 describe('component interaction envelopes', () => {

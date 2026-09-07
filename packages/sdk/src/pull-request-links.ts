@@ -175,7 +175,11 @@ export function parsePRsFromGhPrCheckoutToolResult({
     return [];
   }
 
-  const repo = parseRepoFromCommand(command) ?? fallbackRepository ?? null;
+  const fallbackRepo =
+    fallbackRepository && /^[^/\s]+\/[^/\s]+$/.test(fallbackRepository)
+      ? fallbackRepository
+      : null;
+  const repo = parseRepoFromCommand(command) ?? fallbackRepo;
   const prNumberMatch = command.match(GH_PR_CHECKOUT_NUMBER_REGEX);
   const prNumber = Number.parseInt(prNumberMatch?.[1] ?? '', 10);
   const normalizedOutput = stripAnsiSequences(output);

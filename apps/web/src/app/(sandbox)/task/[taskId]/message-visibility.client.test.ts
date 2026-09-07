@@ -179,16 +179,31 @@ describe('message visibility helpers', () => {
     ).toBe(false);
   });
 
-  it('hides internal post_to_channel calls from the Roomote server', () => {
+  it('treats only effect-free Roomote lifecycle calls as internal debug rows', () => {
     expect(
       isInternalDebugToolCallMessage(
-        mcpToolCallMessage('post_to_channel', 'roomote'),
+        mcpToolCallMessage('ignore_event', 'roomote'),
       ),
     ).toBe(true);
     expect(
       isInternalDebugToolCallMessage(
-        mcpToolResultMessage('post_to_channel', 'roomote'),
+        mcpToolResultMessage('ignore_event', 'roomote'),
       ),
     ).toBe(true);
+    // Outbound communication is the task's visible output, not plumbing.
+    for (const toolName of [
+      'send_chat_reply',
+      'post_to_channel',
+      'send_chat_reaction_emoji',
+    ]) {
+      expect(
+        isInternalDebugToolCallMessage(mcpToolCallMessage(toolName, 'roomote')),
+      ).toBe(false);
+      expect(
+        isInternalDebugToolCallMessage(
+          mcpToolResultMessage(toolName, 'roomote'),
+        ),
+      ).toBe(false);
+    }
   });
 });

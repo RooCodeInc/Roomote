@@ -436,7 +436,7 @@ export async function restoreTaskRunSnapshotCommand(
       };
     }
 
-    if (!isSnapshotResumable(sourceRun.snapshotCreatedAt)) {
+    if (!isSnapshotResumable(sourceRun.snapshotCreatedAt, sourceRun.vendor)) {
       return {
         success: false,
         error: EXPIRED_SNAPSHOT_RESUME_ERROR,

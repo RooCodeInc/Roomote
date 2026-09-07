@@ -13,6 +13,10 @@ not Office documents, PDFs, or presentations. Microsoft Teams currently
 supports image attachments only. Slack can also describe one supported video
 attachment per message.
 
+Attachments sent to Fast stay available as conversation context. When Fast
+delegates work or follows up with a coding task, it can forward the relevant
+supported attachments with the instruction.
+
 Use attachments when the file itself is the fastest way to show the problem: a
 bug report export, a config file, a markdown handoff, a spreadsheet, or a PDF
 from a customer.
@@ -56,6 +60,12 @@ task as attachment context. Images are passed through as image inputs so
 Roomote can inspect them directly. `.svg` files are normally read as text
 markup, but Discord treats an SVG reported with the `image/svg+xml` content type
 as an image input.
+
+Images never change which model handles your request. When the active model
+accepts image input, it sees the image itself. When it does not, Roomote keeps
+that model in charge and has the configured vision model (or, failing that,
+the helper or coding model) describe the image on request, the same way a
+coding task delegates visual inspection to a hidden subagent.
 
 That means you can ask things like:
 

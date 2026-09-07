@@ -1,0 +1,1 @@
+ALTER TABLE "fast_agent_conversations" ADD COLUMN "current_reply_service_url" text;

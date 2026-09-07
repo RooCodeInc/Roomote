@@ -2,10 +2,14 @@
 
 import type { ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Button, ExternalLink } from '@/components/system';
+import {
+  ArrowLeftFromLine,
+  ArrowRightToLine,
+  Button,
+  ExternalLink,
+} from '@/components/system';
 
 import { getSetupDocsPath, getSetupDocsStep } from './setup-docs';
-import { ArrowLeftToLine, ArrowRightToLine } from 'lucide-react';
 
 export function SetupDocs({
   isOpen,
@@ -21,9 +25,7 @@ export function SetupDocs({
     getSetupDocsStep(searchParams?.get('step') ?? null),
     {
       authProvider: searchParams?.get('authProvider'),
-      computeProvider: searchParams?.get('computeProvider'),
       modelProvider: searchParams?.get('modelProvider'),
-      sourceControlProvider: searchParams?.get('sourceControlProvider'),
     },
   );
 
@@ -71,7 +73,7 @@ export function SetupDocs({
             onClick={() => onOpenChange(true)}
             className="rounded-full hover:bg-foreground hover:text-accent-bright-foreground gap-0"
           >
-            <ArrowLeftToLine className="mr-1" />
+            <ArrowLeftFromLine className="mr-1" />
             <span className="animate-[squish-out_0.5s_1_6000ms_forwards] mr-1">
               Need help?
             </span>

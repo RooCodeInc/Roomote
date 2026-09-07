@@ -25,21 +25,28 @@
   },
   "replay": [
     {
-      "kind": "message",
+      "kind": "interaction",
       "payload": {
         "id": "600000000000000001",
+        "application_id": "200000000000000001",
+        "type": 2,
+        "token": "mock-new-interaction-token",
         "channel_id": "500000000000000001",
-        "content": "!fast what file handles Discord events?",
-        "author": {
+        "user": {
           "id": "111000111000111001",
           "username": "grace_mock",
           "global_name": "Grace"
         },
-        "mentions": [],
-        "attachments": [],
-        "channel": {
-          "id": "500000000000000001",
-          "type": 1
+        "data": {
+          "name": "new",
+          "type": 1,
+          "options": [
+            {
+              "name": "request",
+              "type": 3,
+              "value": "inspect the Discord events handler"
+            }
+          ]
         }
       }
     }

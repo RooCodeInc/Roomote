@@ -27,11 +27,31 @@ export function setConfiguredGitHubAppSlugCache(
 /**
  * The deployment's GitHub App slug: the configured value when one has been
  * resolved (see `resolveConfiguredGitHubAppSlug`), otherwise the process-env
- * value with its hosted-product default. An expired cache entry is still
- * preferred over the default — the configured slug only changes when an
+ * value with its schema default. An expired cache entry is still preferred
+ * over the default — the configured slug only changes when an
  * operator re-runs the GitHub App setup, and the stale value beats
  * misclassifying the deployment's own bot login.
  */
 export function getEffectiveGitHubAppSlug(): string {
   return configuredAppSlugCache?.value ?? Env.R_GITHUB_APP_SLUG;
+}
+
+export function parseAdditionalGitHubAppSlugs(
+  value: string | null | undefined,
+): string[] {
+  return [
+    ...new Set(
+      (value ?? '')
+        .split(',')
+        .map((slug) => slug.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+/** GitHub App slugs this deployment explicitly trusts as Roomote-managed. */
+export function getEffectiveGitHubAppSlugs(): string[] {
+  return parseAdditionalGitHubAppSlugs(
+    [getEffectiveGitHubAppSlug(), Env.R_GITHUB_ADDITIONAL_APP_SLUGS].join(','),
+  );
 }

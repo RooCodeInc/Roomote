@@ -1,6 +1,4 @@
-import type { FeatureFlagConfigMap, MetadataBooleanDescriptor } from './types';
-
-export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {};
+import type { MetadataBooleanDescriptor } from './types';
 
 /**
  * Non-feature-flag boolean deployment metadata that is still actively read in

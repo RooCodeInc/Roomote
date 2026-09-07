@@ -8,6 +8,7 @@ import {
   checkAddressAllowed,
   parseCidrList,
   safeFetch,
+  safeHeadFollowingRedirects,
   validateEgressUrl,
   type DnsLookupFn,
 } from '../safe-fetch';
@@ -138,7 +139,22 @@ describe('safeFetch', () => {
         return;
       }
 
+      if (req.url === '/safe-redirect') {
+        res.statusCode = 302;
+        res.setHeader('location', `http://redirected.example:${port}/final`);
+        res.end();
+        return;
+      }
+
+      if (req.url === '/blocked-redirect') {
+        res.statusCode = 302;
+        res.setHeader('location', 'http://127.0.0.2/internal');
+        res.end();
+        return;
+      }
+
       res.setHeader('content-type', 'application/json');
+      res.setHeader('x-request-host', req.headers.host ?? '');
       res.end(JSON.stringify({ ok: true, host: req.headers.host }));
     });
 
@@ -190,5 +206,43 @@ describe('safeFetch', () => {
         allowedPrivateCidrs: '127.0.0.0/8',
       }),
     ).rejects.toThrow(/redirect/);
+  });
+
+  it('revalidates and follows a bounded redirect chain when requested', async () => {
+    const response = await safeHeadFollowingRedirects(
+      `http://redirect.example:${port}/safe-redirect`,
+      {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        maxRedirects: 1,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-request-host')).toBe(
+      `redirected.example:${port}`,
+    );
+  });
+
+  it('rejects non-HTTPS initial and redirect URLs when HTTPS is required', async () => {
+    await expect(
+      safeHeadFollowingRedirects(`http://redirect.example:${port}/`, {
+        lookup: lookupTo127,
+        allowedPrivateCidrs: '127.0.0.0/8',
+        requireHttps: true,
+      }),
+    ).rejects.toThrow(/must use https/);
+  });
+
+  it('reapplies address guards to redirect targets', async () => {
+    await expect(
+      safeHeadFollowingRedirects(
+        `http://redirect.example:${port}/blocked-redirect`,
+        {
+          lookup: lookupTo127,
+          allowedPrivateCidrs: '127.0.0.1/32',
+        },
+      ),
+    ).rejects.toThrow(SafeFetchViolationError);
   });
 });

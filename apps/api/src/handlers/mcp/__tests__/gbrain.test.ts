@@ -2,21 +2,24 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { Hono } from 'hono';
-import type { RunTokenContext } from '@roomote/types';
+import {
+  BRAIN_MCP_READ_INSTRUCTIONS,
+  type RunTokenContext,
+} from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-const { mockResolveConnection, mockResolveBrainProvider } = vi.hoisted(() => ({
-  mockResolveConnection: vi.fn(),
-  mockResolveBrainProvider: vi.fn(),
-}));
+const { mockResolveConnection, mockIsBrainEmbeddingAvailable } = vi.hoisted(
+  () => ({
+    mockResolveConnection: vi.fn(),
+    mockIsBrainEmbeddingAvailable: vi.fn(),
+  }),
+);
 
 vi.mock('@roomote/sdk/server', () => ({
   resolveBrainConnection: mockResolveConnection,
-  resolveBrainInferenceProvider: mockResolveBrainProvider,
+  isBrainEmbeddingAvailable: mockIsBrainEmbeddingAvailable,
 }));
-
-import { BRAIN_MCP_INSTRUCTIONS } from '@roomote/types';
 
 import { createGbrainMcpProxy, GBRAIN_READ_TOOL_NAMES } from '../gbrain';
 
@@ -70,16 +73,9 @@ describe('createGbrainMcpProxy', () => {
     upstreamRequests = [];
     mockResolveConnection.mockReset();
     // A Brain is only offered to agents when it can actually embed, so the
-    // default for these cases is "a provider is configured".
-    mockResolveBrainProvider.mockReset();
-    mockResolveBrainProvider.mockResolvedValue({
-      providerId: 'openrouter',
-      apiKey: 'sk-or-test',
-      models: {
-        embedding: 'openai/text-embedding-3-small',
-        chat: 'openai/gpt-5.6-luna',
-      },
-    });
+    // default for these cases is "an embedder is available".
+    mockIsBrainEmbeddingAvailable.mockReset();
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
   });
 
   afterEach(async () => {
@@ -119,18 +115,35 @@ describe('createGbrainMcpProxy', () => {
     expect(mockResolveConnection).toHaveBeenCalledWith('agent');
   });
 
-  it('hides the Brain from agents when no model provider is configured', async () => {
+  it('hides the Brain from agents when it cannot embed', async () => {
     mockResolveConnection.mockResolvedValue({
       baseUrl: 'http://brain.test',
       token: 'agent-token',
     });
-    mockResolveBrainProvider.mockResolvedValue(null);
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(false);
 
     const response = await postMcp(createApp(), toolCall('query'));
 
     // Worse than absent: a Brain that cannot embed still answers keyword
     // queries, so retrieval would look real while missing everything semantic.
     expect(response.status).toBe(404);
+  });
+
+  it('serves agents on an embedder-only deployment with no provider key', async () => {
+    // The trial / Anthropic-only case: a self-run embedder is configured and
+    // no OpenAI/OpenRouter key exists. The drain ingests such a Brain, so the
+    // read path must let agents query it too.
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: await startUpstream(),
+      token: 'agent-token',
+    });
+    mockIsBrainEmbeddingAvailable.mockResolvedValue(true);
+
+    const response = await postMcp(createApp(), toolCall('query'));
+
+    expect(response.status).toBe(200);
+    expect(upstreamRequests).toHaveLength(1);
+    expect(upstreamRequests[0]?.authorization).toBe('Bearer agent-token');
   });
 
   it.each(['remember', 'forget'])(
@@ -171,7 +184,13 @@ describe('createGbrainMcpProxy', () => {
   });
 
   it('allows browsing so "what do you know?" is answerable', () => {
-    for (const tool of ['list_pages', 'get_page', 'search', 'query']) {
+    for (const tool of [
+      'list_pages',
+      'get_page',
+      'search',
+      'query',
+      'entity',
+    ]) {
       expect(GBRAIN_READ_TOOL_NAMES).toContain(tool);
     }
   });
@@ -192,16 +211,11 @@ describe('createGbrainMcpProxy', () => {
   );
 });
 
-describe('allowlist and instructions stay in step', () => {
-  it('names every exposed tool in the agent instructions, and exposes every named one', () => {
-    // A tool exposed but unexplained is chosen from gbrain's own description,
-    // which is written for a different product; a tool explained but not
-    // exposed sends the agent at something that 403s.
-    const named = GBRAIN_READ_TOOL_NAMES.filter((tool) =>
-      BRAIN_MCP_INSTRUCTIONS.includes(`\`${tool}\``),
-    );
-
-    expect(named).toEqual([...GBRAIN_READ_TOOL_NAMES]);
+describe('Brain agent allowlist', () => {
+  it('keeps the specialized read instructions aligned with exposed tools', () => {
+    for (const tool of GBRAIN_READ_TOOL_NAMES) {
+      expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(`\`${tool}\``);
+    }
   });
 
   it('exposes no write or admin surface', () => {

@@ -1,0 +1,1 @@
+ALTER TABLE "fast_agent_conversations" ADD COLUMN "opencode_session_id" text;

@@ -4,6 +4,7 @@ import type {
   TaskArtifactType,
   TaskModelOption,
   TaskGoal,
+  RoomoteTranscriptMessagesResponse,
 } from '@roomote/types';
 
 export interface ArtifactConfig {
@@ -56,6 +57,7 @@ export interface TaskSearchResponse {
 export interface TaskSummaryResponse {
   id: string;
   title: string | null;
+  summary?: string | null;
   mode: string | null;
   completed: boolean;
   repositoryName: string | null;
@@ -67,6 +69,14 @@ export interface TaskSummaryResponse {
   environmentSetupState: string | null;
   linkedEnvironmentId: string | null;
   linkedEnvironmentName: string | null;
+  imageArtifacts?: Array<{
+    id: string;
+    path: string;
+    version: number;
+    artifactType: string;
+    contentType: string;
+    viewUrl: string;
+  }>;
 }
 
 export interface TaskComputeLog {
@@ -123,6 +133,8 @@ export interface LaunchTaskResponse {
   success: boolean;
   runId?: number;
   taskId?: string;
+  /** The Session that owns the launched task. */
+  sessionId?: string;
   error?: string;
 }
 
@@ -222,22 +234,7 @@ export interface CommunicationChannelMessagesResponse {
   messages: CommunicationLookupMessage[];
 }
 
-export interface TaskMessage {
-  id: string;
-  taskId: string;
-  ts: number;
-  eventType: string;
-  role: 'user' | 'assistant' | 'system' | 'tool' | null;
-  text: string | null;
-  images: string[];
-  metadata: Record<string, unknown> | null;
-  visibleInTranscript?: boolean;
-}
-
-export interface TaskMessagesResponse {
-  messages: TaskMessage[];
-  returned: number;
-}
+export type TaskMessagesResponse = RoomoteTranscriptMessagesResponse;
 
 export interface SendMessageResponse {
   success: boolean;

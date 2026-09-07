@@ -1,9 +1,13 @@
 import type { UserAuthSuccess } from '@/types';
-import { getArtifactVersionsByPath } from '@/lib/server';
+import {
+  getArtifactVersionsByPath,
+  getArtifactVersionsBySessionPath,
+} from '@/lib/server';
+import { findAccessibleSession } from '@/lib/server/sessions';
 
 export async function getArtifactVersionsCommand(
   auth: UserAuthSuccess,
-  input: { taskId: string; path: string },
+  input: { taskId?: string; sessionId?: string; path: string },
 ): Promise<
   {
     id: string;
@@ -12,9 +16,22 @@ export async function getArtifactVersionsCommand(
     createdAt: Date;
   }[]
 > {
-  return getArtifactVersionsByPath({
-    taskId: input.taskId,
-    path: input.path,
-    auth: { userId: auth.userId, isAdmin: auth.isAdmin },
-  });
+  const artifactAuth = { userId: auth.userId, isAdmin: auth.isAdmin };
+  if (
+    input.sessionId &&
+    !(await findAccessibleSession(artifactAuth, input.sessionId))
+  ) {
+    return [];
+  }
+  return input.taskId
+    ? getArtifactVersionsByPath({
+        taskId: input.taskId,
+        path: input.path,
+        auth: artifactAuth,
+      })
+    : getArtifactVersionsBySessionPath({
+        sessionId: input.sessionId!,
+        path: input.path,
+        auth: artifactAuth,
+      });
 }

@@ -1,7 +1,17 @@
+import { redactBrainTextFragments } from '@roomote/communication/redact-brain-text';
+
 import { getRoomoteConfig } from './config.js';
 import { saveTaskMemory } from './tasks-api-client.js';
 import { successResult, errorResult, catchError } from './tool-result.js';
 import type { ToolResult } from './types.js';
+
+type TaskMemoryInput = {
+  outcome: string;
+  decisions?: string[];
+  rationale?: string;
+  reusableFacts?: string[];
+  unresolvedQuestions?: string[];
+};
 
 function currentRunId(): number | null {
   const runId = Number(process.env.ROOMOTE_TASK_RUN_ID);
@@ -14,13 +24,9 @@ function currentRunId(): number | null {
  * server-chosen slug after redaction. The agent never holds a Brain write
  * credential and cannot reach any page but its own task's.
  */
-export async function handleSaveTaskMemory(input: {
-  outcome: string;
-  decisions?: string[];
-  rationale?: string;
-  reusableFacts?: string[];
-  unresolvedQuestions?: string[];
-}): Promise<ToolResult> {
+export async function handleSaveTaskMemory(
+  input: TaskMemoryInput,
+): Promise<ToolResult> {
   const runId = currentRunId();
 
   if (!runId) {
@@ -35,11 +41,46 @@ export async function handleSaveTaskMemory(input: {
     }
 
     const result = await saveTaskMemory(config, runId, input);
+    const fragments = [
+      input.outcome,
+      ...(input.rationale !== undefined ? [input.rationale] : []),
+      ...(input.decisions ?? []),
+      ...(input.reusableFacts ?? []),
+      ...(input.unresolvedQuestions ?? []),
+    ];
+    const redactedFragments = redactBrainTextFragments(fragments);
+    let fragmentIndex = 0;
+    const takeFragment = () => redactedFragments[fragmentIndex++]!;
+    const outcome = takeFragment();
+    const rationale =
+      input.rationale !== undefined ? takeFragment() : undefined;
+    const decisions = input.decisions?.map(() => takeFragment());
+    const reusableFacts = input.reusableFacts?.map(() => takeFragment());
+    const unresolvedQuestions = input.unresolvedQuestions?.map(() =>
+      takeFragment(),
+    );
+    const memory = {
+      outcome,
+      ...(input.decisions !== undefined ? { decisions } : {}),
+      ...(input.rationale !== undefined ? { rationale } : {}),
+      ...(input.reusableFacts !== undefined ? { reusableFacts } : {}),
+      ...(input.unresolvedQuestions !== undefined
+        ? { unresolvedQuestions }
+        : {}),
+    };
 
     return successResult(
       result.saved
-        ? { saved: true, note: 'Recorded for the shared Brain.' }
-        : { saved: false, reason: result.reason ?? 'Not saved.' },
+        ? {
+            saved: true,
+            note: 'Recorded for the shared Brain.',
+            memory,
+          }
+        : {
+            saved: false,
+            reason: result.reason ?? 'Not saved.',
+            memory,
+          },
     );
   } catch (error) {
     return catchError(error);

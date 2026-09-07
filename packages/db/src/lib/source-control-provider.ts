@@ -29,6 +29,11 @@ type RepositoryProviderRow = {
   sourceControlProvider: SourceControlProvider;
 };
 
+export type RepositorySourceControl = {
+  provider: SourceControlProvider;
+  host?: string;
+};
+
 function selectRepositoryRows(
   rows: RepositoryProviderRow[],
   repositoryOrder: string[],
@@ -123,6 +128,32 @@ async function resolveProvidersByFullNames(
   return toRepositoryProviderMap(rows, fullNames, sourceControlHost);
 }
 
+/** Resolve the provider and host for one exact repository, or fail closed. */
+export async function resolveRepositorySourceControl(
+  dbOrTx: DatabaseOrTransaction,
+  fullName: string,
+  sourceControlHost?: string,
+): Promise<RepositorySourceControl | undefined> {
+  const rows = await dbOrTx
+    .select({
+      fullName: repositories.fullName,
+      host: repositories.host,
+      isActive: repositories.isActive,
+      sourceControlProvider: repositories.sourceControlProvider,
+    })
+    .from(repositories)
+    .where(eq(repositories.fullName, fullName));
+  const selected = selectRepositoryRows(rows, [fullName], sourceControlHost);
+  const repository = selected?.[0];
+
+  return repository
+    ? {
+        provider: repository.sourceControlProvider,
+        ...(repository.host ? { host: repository.host } : {}),
+      }
+    : undefined;
+}
+
 async function resolveEnvironmentProviders(
   dbOrTx: DatabaseOrTransaction,
   environmentId: string,
@@ -159,10 +190,18 @@ async function resolveEnvironmentProviders(
       asc(environmentRepositoryMappings.id),
     );
 
-  return toRepositoryProviderMap(
-    rows,
-    environment.config.repositories.map((repository) => repository.repository),
-  );
+  const repositoryNames = [
+    ...new Set(
+      environment.config.repositories.map(
+        (repository) => repository.repository,
+      ),
+    ),
+  ];
+  const providers = toRepositoryProviderMap(rows, repositoryNames);
+
+  return Object.keys(providers).length === repositoryNames.length
+    ? providers
+    : {};
 }
 
 async function resolveAllRepositoriesProviders(
@@ -179,10 +218,12 @@ async function resolveAllRepositoriesProviders(
     .where(eq(repositories.isActive, true))
     .orderBy(asc(repositories.createdAt), asc(repositories.id));
 
-  return toRepositoryProviderMap(
-    rows,
-    rows.map((row) => row.fullName),
-  );
+  const repositoryNames = [...new Set(rows.map((row) => row.fullName))];
+  const providers = toRepositoryProviderMap(rows, repositoryNames);
+
+  return Object.keys(providers).length === repositoryNames.length
+    ? providers
+    : {};
 }
 
 /** Resolve repository full names to providers in workspace order. */

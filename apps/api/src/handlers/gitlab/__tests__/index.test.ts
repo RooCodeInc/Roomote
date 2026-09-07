@@ -5,6 +5,7 @@ const {
   mockHandleGitLabNote,
   mockHandleGitLabIssue,
   mockHandleGitLabPipeline,
+  mockHandleMergeAnnouncerPush,
   mockRecordWebhook,
   mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
@@ -12,12 +13,17 @@ const {
   mockHandleGitLabNote: vi.fn(),
   mockHandleGitLabIssue: vi.fn(),
   mockHandleGitLabPipeline: vi.fn(),
+  mockHandleMergeAnnouncerPush: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  handleMergeAnnouncerPush: mockHandleMergeAnnouncerPush,
 }));
 
 vi.mock('../../logging', () => ({
@@ -56,6 +62,7 @@ describe('gitlab webhook router', () => {
     mockHandleGitLabNote.mockReset();
     mockHandleGitLabIssue.mockReset();
     mockHandleGitLabPipeline.mockReset();
+    mockHandleMergeAnnouncerPush.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     // Secrets resolve through encrypted deployment env vars, matching
@@ -67,6 +74,7 @@ describe('gitlab webhook router', () => {
     mockHandleGitLabNote.mockResolvedValue({ status: 'ok' });
     mockHandleGitLabIssue.mockResolvedValue({ status: 'ok' });
     mockHandleGitLabPipeline.mockResolvedValue({ status: 'ok' });
+    mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -127,6 +135,48 @@ describe('gitlab webhook router', () => {
         project: expect.objectContaining({
           path_with_namespace: 'acme/backend',
         }),
+      }),
+    );
+  });
+
+  it('records and routes normalized push webhooks', async () => {
+    const payload = {
+      object_kind: 'push',
+      ref: 'refs/heads/main',
+      after: 'abc',
+      user_username: 'alice',
+      project: {
+        id: 123,
+        path_with_namespace: 'acme/backend',
+        web_url: 'https://gitlab.com/acme/backend',
+      },
+      commits: [{ id: 'abc', message: 'Ship backend' }],
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/gitlab', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gitlab-event': 'Push Hook',
+        'x-gitlab-token': 'gitlab-secret',
+        'x-gitlab-event-uuid': 'push-event-uuid',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'push-event-uuid',
+      'push',
+      expect.anything(),
+      expect.any(Function),
+      { provider: 'gitlab' },
+    );
+    expect(mockHandleMergeAnnouncerPush).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'gitlab',
+        ref: 'refs/heads/main',
+        pusher: 'alice',
       }),
     );
   });

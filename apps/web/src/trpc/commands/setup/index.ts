@@ -9,14 +9,19 @@ import {
   asc,
   eq,
   inArray,
+  invalidateBrainEnabledCache,
   sql,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
   TaskPayloadKind,
   type EnvironmentConfig,
   normalizeSetupNewState,
 } from '@roomote/types';
-import { requestInstancePing } from '@roomote/sdk/server/request-instance-ping';
+import {
+  requestBrainBackfill,
+  requestInstancePing,
+} from '@roomote/sdk/server/request-instance-ping';
 import {
   captureActivationEnvironmentSaved,
   captureActivationSetupCompleted,
@@ -417,15 +422,22 @@ export async function completeSetupCommand(
     anonymousAnalyticsEnabled?: boolean;
     productUpdatesEnabled?: boolean;
   },
+  options?: {
+    requireIncomplete?: boolean;
+    validateBeforeCompletion?: (tx: DatabaseOrTransaction) => Promise<boolean>;
+  },
 ) {
   assertAdmin(auth);
   const { userId } = auth;
 
   const now = new Date();
 
-  await db.transaction(async (tx) => {
+  const completion = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('setup-complete'))`,
+    );
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('setup-recommendation-dispatch'))`,
     );
 
     // Persist the StepInvoke anonymous-analytics choice alongside setup
@@ -433,15 +445,44 @@ export async function completeSetupCommand(
     // enabled when the field is absent).
     const existingSettings = await tx.query.deploymentSettings.findFirst({
       where: eq(deploymentSettings.id, 'default'),
-      columns: { metadata: true, setupNewState: true },
+      columns: {
+        metadata: true,
+        setupNewState: true,
+        setupCompletedAt: true,
+        brainEnabled: true,
+      },
     });
+    if (
+      options?.requireIncomplete &&
+      existingSettings?.setupCompletedAt != null
+    ) {
+      return {
+        state: 'already_completed' as const,
+        defaultedBrainEnabled: false,
+      };
+    }
+    if (
+      options?.validateBeforeCompletion &&
+      !(await options.validateBeforeCompletion(tx))
+    ) {
+      return { state: 'not_ready' as const, defaultedBrainEnabled: false };
+    }
     const recommendationsWereReviewed =
       normalizeSetupNewState(existingSettings?.setupNewState ?? {})
         .automationRecommendations?.status === 'ready';
     let metadataUpdate: Record<string, unknown> | undefined;
-    const anonymousAnalyticsEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED)
+    const cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
+    const anonymousAnalyticsEnabled = cloudEnabled
       ? true
       : input?.anonymousAnalyticsEnabled;
+    // Setup completion is the shared creation boundary. Default only unfinished
+    // Cloud deployments so existing instances and explicit choices stay intact.
+    const brainEnabledDefault =
+      cloudEnabled &&
+      existingSettings?.setupCompletedAt == null &&
+      existingSettings?.brainEnabled == null
+        ? true
+        : undefined;
     if (anonymousAnalyticsEnabled !== undefined) {
       const existingMetadata =
         existingSettings?.metadata &&
@@ -462,6 +503,9 @@ export async function completeSetupCommand(
           id: 'default',
           setupCompletedAt: now,
           ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
+          ...(brainEnabledDefault === undefined
+            ? {}
+            : { brainEnabled: brainEnabledDefault }),
         })
         .onConflictDoUpdate({
           target: deploymentSettings.id,
@@ -469,6 +513,13 @@ export async function completeSetupCommand(
             setupCompletedAt: now,
             updatedAt: now,
             ...(metadataUpdate ? { metadata: metadataUpdate } : {}),
+            // Evaluate under the conflict row lock so a concurrent explicit
+            // Memory choice wins over this setup default.
+            ...(brainEnabledDefault === undefined
+              ? {}
+              : {
+                  brainEnabled: sql`coalesce(${deploymentSettings.brainEnabled}, ${brainEnabledDefault})`,
+                }),
           },
         }),
       // The first admin going through /setup should not also need /onboarding,
@@ -482,7 +533,20 @@ export async function completeSetupCommand(
     if (!recommendationsWereReviewed) {
       await ensureManagedReviewerEnabledByDefaultInTx(tx, auth);
     }
+
+    return {
+      state: 'completed' as const,
+      defaultedBrainEnabled: brainEnabledDefault === true,
+    };
   });
+
+  if (completion.state !== 'completed') {
+    return { success: true as const, completionState: completion.state };
+  }
+
+  if (completion.defaultedBrainEnabled) {
+    invalidateBrainEnabledCache();
+  }
 
   // Setup completion should not wait for the GitHub-backed recommendation scan.
   queueMicrotask(() => {
@@ -497,6 +561,12 @@ export async function completeSetupCommand(
   // next daily tick.
   void requestInstancePing('setup-completed');
 
+  // Sources typically get connected during setup, and no toggle fires
+  // afterwards — kick the initial Memory backfill now so a fresh deployment's
+  // brain starts filling the moment setup finishes. No-ops harmlessly when
+  // Memory is off; the jobs hold their checkpoints.
+  void requestBrainBackfill('setup-completed');
+
   if (
     (input?.productUpdatesEnabled ?? true) &&
     !(auth.cloudEnabled && auth.isAdmin)
@@ -504,7 +574,7 @@ export async function completeSetupCommand(
     void subscribeToProductUpdates(auth.primaryEmail, 'setup');
   }
 
-  return { success: true as const };
+  return { success: true as const, completionState: 'completed' as const };
 }
 
 // --- Queries ---

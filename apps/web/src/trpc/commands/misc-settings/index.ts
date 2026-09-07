@@ -20,7 +20,6 @@ import {
   ANONYMOUS_ANALYTICS_METADATA_KEY,
   isAnonymousAnalyticsEnabledFromMetadata,
 } from '@roomote/feature-flags';
-import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
 import {
   normalizeTimeZone,
@@ -646,8 +645,6 @@ export async function setAnonymousAnalyticsCommand(
       .set({ metadata: nextMetadata, updatedAt: new Date() })
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
   }
-
-  await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
 
   return getMiscSettingsCommand(auth);
 }

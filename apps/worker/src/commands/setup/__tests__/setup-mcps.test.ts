@@ -843,7 +843,7 @@ describe('resolveBuiltInMcpServers', () => {
     );
   });
 
-  it('skips user Notion MCP when it points at the raw upstream URL', () => {
+  it('skips Notion MCP when it points at the hosted MCP instead of the native proxy', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const parsed = {
@@ -867,7 +867,7 @@ describe('resolveBuiltInMcpServers', () => {
 
     expect(parsed.mcpServers).not.toHaveProperty('notion');
     expect(warnSpy).toHaveBeenCalledWith(
-      '[resolveBuiltInMcpServers] Skipping Notion MCP: raw upstream URL is not allowed (https://mcp.notion.com/mcp)',
+      "[resolveBuiltInMcpServers] Skipping Notion MCP: expected proxy path '/api/mcp/notion' but received 'https://mcp.notion.com/mcp'",
     );
   });
 

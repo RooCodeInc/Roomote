@@ -33,6 +33,159 @@ describe('handleManageCustomAutomations', () => {
     expect(request.method).toBe('GET');
   });
 
+  it('returns compact model-facing results from the unchanged API payload', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          automations: [
+            {
+              id: 'automation-1',
+              name: 'Daily report',
+              prompt: 'Large private prompt',
+              enabled: true,
+              scheduleMode: 'daily',
+              cronExpression: null,
+              model: null,
+              environmentId: 'environment-1',
+              target: {},
+              createdByUser: { email: 'admin@example.com' },
+              lastError: 'previous failure',
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleManageCustomAutomations(
+      { action: 'list' },
+      config,
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual({
+      automations: [
+        {
+          id: 'automation-1',
+          name: 'Daily report',
+          enabled: true,
+          schedule: 'daily',
+          model: null,
+          environmentId: 'environment-1',
+          lastError: 'previous failure',
+        },
+      ],
+    });
+  });
+
+  it('inspects one prompt without returning unrelated automation fields', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          automation: {
+            id: 'automation-1',
+            name: 'Daily report',
+            prompt: 'Inspect this stored prompt.',
+            enabled: true,
+            lastError: 'previous failure',
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleManageCustomAutomations(
+      { action: 'inspect', automationId: 'automation/1' },
+      config,
+    );
+
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.example.com/api/mcp/custom-automations/automation%2F1',
+    );
+    expect(request.method).toBe('GET');
+    expect(request.body).toBeUndefined();
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual({
+      automation: {
+        id: 'automation-1',
+        name: 'Daily report',
+        prompt: 'Inspect this stored prompt.',
+      },
+    });
+  });
+
+  it('preserves structured schedule clarification on an ambiguous write', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 'ambiguous',
+          clarification: 'What time should this run?',
+          resolution: {
+            status: 'ambiguous',
+            cronExpression: null,
+            summary: 'Needs a time',
+            clarification: 'What time should this run?',
+            timeZone: 'UTC',
+            nextRunAt: null,
+            inferenceUsage: { tokens: 500 },
+          },
+        }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleManageCustomAutomations(
+      {
+        action: 'create',
+        name: 'Daily report',
+        prompt: 'Report.',
+        schedule: 'daily-ish',
+        environmentId: 'environment-1',
+      },
+      config,
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual({
+      success: false,
+      error: 'Custom automation request failed (409)',
+      httpStatus: 409,
+      resolutionStatus: 'ambiguous',
+      clarification: 'What time should this run?',
+      resolution: {
+        status: 'ambiguous',
+        cronExpression: null,
+        summary: 'Needs a time',
+        clarification: 'What time should this run?',
+        timeZone: 'UTC',
+        nextRunAt: null,
+      },
+    });
+  });
+
+  it('preserves failed run-now outcomes and errors', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          outcome: 'failed',
+          error: 'Automation is disabled.',
+          automation: { prompt: 'large' },
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const result = await handleManageCustomAutomations(
+      { action: 'run_now', automationId: 'automation-1' },
+      config,
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual({
+      success: false,
+      error: 'Automation is disabled.',
+      httpStatus: 400,
+      outcome: 'failed',
+    });
+  });
+
   it('sends only fields supplied for an update', async () => {
     await handleManageCustomAutomations(
       {

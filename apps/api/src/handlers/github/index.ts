@@ -8,7 +8,9 @@ import {
   resolveGitHubRoomoteMentionEnabled,
 } from '@roomote/github';
 import {
+  handleMergeAnnouncerPush,
   recordPrStatusChangeInTaskHistory,
+  retirePendingPrReviewActionsForPullRequest,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
 } from '@roomote/sdk/server';
@@ -23,6 +25,9 @@ import { handlePrOpen } from './handlePrOpen';
 import { handlePrReadyForReview } from './handlePrReadyForReview';
 import { handlePrReopen } from './handlePrReopen';
 import { handlePrSynchronize } from './handlePrSynchronize';
+import { handleCheckRunRerequested } from './handleCheckRunRerequested';
+import { getCurrentGitHubPrHeadSha } from './currentPrHead';
+import type { WebhookPullRequestSynchronize } from './types';
 import { handlePrComment } from './handlePrComment';
 import { handleGitHubIssueComment } from './handleGitHubIssueComment';
 import { handleGitHubIssueFixer } from './handleGitHubIssueFixer';
@@ -35,10 +40,15 @@ import {
   queuePrReviewActivityNotification,
   queuePrReviewSummaryNotification,
 } from './notifyPrReviewActivity';
+import { queuePrCiFailureNotification } from './notifyPrCiFailure';
 
 // Conflict Resolution:
 import { handlePushConflictCheck } from './handlePushConflictCheck';
 import { handleWorkflowRunCompleted } from './handleWorkflowRunCompleted';
+import {
+  queueBaseBranchMergeabilityCheck,
+  queueTrackedPullRequestMergeabilityCheck,
+} from './queuePullRequestMergeabilityCheck';
 
 // Repository metadata sync:
 import { handleRepositoryEdited } from './handleRepositoryEdited';
@@ -47,6 +57,10 @@ import { handleInstallationRepositoriesChange } from './handleInstallationReposi
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
+import {
+  enrichGitHubMergeAnnouncerEvent,
+  normalizeGitHubPush,
+} from '../merge-announcer-push';
 
 /**
  * Fire-and-forget PR status update. Logs errors but never throws.
@@ -55,8 +69,8 @@ function syncPrStatus(
   repo: string,
   prNumber: number,
   status: PullRequestStatus,
-): void {
-  updateTaskPrStatus('github', repo, prNumber, status).catch((error) =>
+): Promise<void> {
+  return updateTaskPrStatus('github', repo, prNumber, status).catch((error) =>
     console.warn(
       `[syncPrStatus] Failed to update PR status for ${repo}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
@@ -65,11 +79,25 @@ function syncPrStatus(
   );
 }
 
+function mapGitHubLabels(
+  labels: readonly { name?: string | null }[] | null | undefined,
+): string[] | null {
+  if (!labels) {
+    return null;
+  }
+
+  return labels
+    .map((label) => label.name)
+    .filter((name): name is string => Boolean(name));
+}
+
 function syncPullRequestFact(params: {
   githubRepoId: number;
   repositoryFullName: string;
   pullRequest: {
     authorLogin: string | null;
+    body: string | null;
+    labels: string[] | null;
     closedAt: string | null;
     createdAt: string;
     draft: boolean;
@@ -95,6 +123,8 @@ function syncPullRequestFact(params: {
     repositoryFullName: params.repositoryFullName,
     pullRequest: {
       authorLogin: params.pullRequest.authorLogin,
+      body: params.pullRequest.body,
+      labels: params.pullRequest.labels,
       closedAt: params.pullRequest.closedAt,
       createdAt: params.pullRequest.createdAt,
       externalPullRequestId: params.pullRequest.externalPullRequestId,
@@ -112,6 +142,49 @@ function syncPullRequestFact(params: {
       }`,
     ),
   );
+}
+
+/**
+ * Retires review offers whose controls belong to an older head once a PR
+ * receives a new commit. The live head is resolved from GitHub rather than
+ * trusted from the payload, so a late or redelivered `synchronize` for an
+ * older commit cannot dismiss offers for the actual current head. Runs
+ * best-effort in the background: the offers are cosmetic, and failing here
+ * must not block fact sync, mergeability checks, or review-on-commit.
+ */
+function retireStalePrReviewActions(
+  payload: WebhookPullRequestSynchronize,
+): void {
+  const repository = payload.repository.full_name;
+  const prNumber = payload.pull_request.number;
+  const installationId = payload.installation?.id;
+  if (!installationId) return;
+
+  void (async () => {
+    const currentHeadSha = await getCurrentGitHubPrHeadSha({
+      installationId,
+      repository,
+      prNumber,
+    });
+    if (!currentHeadSha) {
+      apiLogger.warn(
+        `[retireStalePrReviewActions] Skipping ${repository}#${prNumber}: live head unavailable`,
+      );
+      return;
+    }
+    await retirePendingPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber,
+      currentHeadSha,
+    });
+  })().catch((error) => {
+    apiLogger.error(
+      `[retireStalePrReviewActions] Failed for ${repository}#${prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 }
 
 // Resolve through the deployment env resolver so a secret saved into
@@ -191,22 +264,12 @@ github.post('/', async (c) => {
         `${name}.${payload.action}`,
         payload,
         async () => {
+          // Mentions are not subject to the automated skip list: a person
+          // addressing this app by name gets a response even in repositories
+          // where unsolicited automations are suppressed. The handlers return
+          // `no_mention` for everything else.
           if (!payload.issue.pull_request) {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping comment webhook for ${payload.repository.full_name}`,
-              };
-            }
-
             return handleGitHubIssueComment(payload);
-          }
-
-          if (isRepoSkipped(payload.repository.full_name)) {
-            return {
-              status: 'ok' as const,
-              message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-            };
           }
 
           return handlePrComment(payload);
@@ -240,13 +303,6 @@ github.post('/', async (c) => {
 
     webhooks.on('issues.opened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping issue webhook for ${payload.repository.full_name}`,
-          };
-        }
-
         const mentionResult = await handleGitHubIssueComment({
           installation: payload.installation,
           repository: payload.repository,
@@ -254,6 +310,12 @@ github.post('/', async (c) => {
           issue: payload.issue,
           mentionBody: payload.issue.body ?? '',
         });
+
+        // Triage Issues is unsolicited automation, so the skip list applies
+        // to it but not to the body mention above.
+        if (isRepoSkipped(payload.repository.full_name)) {
+          return mentionResult;
+        }
 
         // Always run Triage Issues when enabled (immediate, like Review Code).
         // Mentions and Triage Issues are independent: a mention still starts a
@@ -283,7 +345,7 @@ github.post('/', async (c) => {
 
     webhooks.on('pull_request.opened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
+        await syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
           payload.pull_request.draft ? 'draft' : 'open',
@@ -293,6 +355,8 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -305,6 +369,7 @@ github.post('/', async (c) => {
             url: payload.pull_request.html_url,
           },
         });
+        await queueTrackedPullRequestMergeabilityCheck(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
@@ -319,16 +384,18 @@ github.post('/', async (c) => {
 
     webhooks.on('pull_request.reopened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
+        await syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
-          'open',
+          payload.pull_request.draft ? 'draft' : 'open',
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -341,6 +408,7 @@ github.post('/', async (c) => {
             url: payload.pull_request.html_url,
           },
         });
+        await queueTrackedPullRequestMergeabilityCheck(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
@@ -360,6 +428,8 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -372,6 +442,8 @@ github.post('/', async (c) => {
             url: payload.pull_request.html_url,
           },
         });
+        await queueTrackedPullRequestMergeabilityCheck(payload);
+        retireStalePrReviewActions(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
@@ -384,18 +456,37 @@ github.post('/', async (c) => {
       }),
     );
 
+    webhooks.on('pull_request.edited', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+        if (!payload.changes.base) {
+          return { status: 'ok' as const };
+        }
+
+        await queueTrackedPullRequestMergeabilityCheck(payload, {
+          updateBaseRef: true,
+        });
+        return { status: 'ok' as const };
+      }),
+    );
+
     webhooks.on('pull_request.ready_for_review', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
+        // Awaited so the mergeability check below sees the row as 'open';
+        // conflicts accrued while the PR was a draft surface at this
+        // transition.
+        await syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
           'open',
         );
+        await queueTrackedPullRequestMergeabilityCheck(payload);
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -432,6 +523,8 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -458,16 +551,7 @@ github.post('/', async (c) => {
           id,
           `${name}.${payload.action}`,
           payload,
-          async () => {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping automated review handling for ${payload.repository.full_name}`,
-              };
-            }
-
-            return handlePrComment(payload);
-          },
+          async () => handlePrComment(payload),
         );
       },
     );
@@ -481,22 +565,28 @@ github.post('/', async (c) => {
           id,
           `${name}.${payload.action}`,
           payload,
-          async () => {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-              };
-            }
-
-            return handlePrComment(payload);
-          },
+          async () => handlePrComment(payload),
         );
       },
     );
 
     webhooks.on('push', ({ id, name, payload }) =>
-      recordWebhook(id, name, payload, () => handlePushConflictCheck(payload)),
+      recordWebhook(id, name, payload, async () => {
+        const mergeAnnouncerEvent = normalizeGitHubPush(payload);
+        const [result, , mergeAnnouncerResult] = await Promise.all([
+          handlePushConflictCheck(payload),
+          queueBaseBranchMergeabilityCheck(payload),
+          mergeAnnouncerEvent
+            ? enrichGitHubMergeAnnouncerEvent(
+                payload,
+                mergeAnnouncerEvent,
+              ).then(handleMergeAnnouncerPush)
+            : Promise.resolve({ status: 'ok' as const }),
+        ]);
+        return mergeAnnouncerResult.status === 'error'
+          ? mergeAnnouncerResult
+          : result;
+      }),
     );
 
     webhooks.on('repository.edited', ({ id, name, payload }) =>
@@ -538,11 +628,29 @@ github.post('/', async (c) => {
       }),
     );
 
+    webhooks.on('check_run.completed', async ({ id, name, payload }) => {
+      await queuePrCiFailureNotification(payload);
+
+      return recordWebhook(
+        id,
+        `${name}.${payload.action}`,
+        payload,
+        async () => ({ status: 'ok' as const }),
+      );
+    });
+
+    webhooks.on('check_run.rerequested', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+        handleCheckRunRerequested(payload),
+      ),
+    );
+
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
         const status = payload.pull_request.merged ? 'merged' : 'closed';
 
-        syncPrStatus(
+        await updateTaskPrStatus(
+          'github',
           payload.repository.full_name,
           payload.pull_request.number,
           status,
@@ -552,6 +660,8 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: mapGitHubLabels(payload.pull_request.labels),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -574,6 +684,7 @@ github.post('/', async (c) => {
             prNumber: payload.pull_request.number,
             prTitle: payload.pull_request.title,
             prUrl: payload.pull_request.html_url,
+            targetBranch: payload.pull_request.base.ref,
             status,
             actorLogin:
               (payload.pull_request.merged

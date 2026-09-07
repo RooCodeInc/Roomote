@@ -93,6 +93,30 @@ function NeonIcon({
   );
 }
 
+function RipplingIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 18"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M2.878 4.99C2.878 3.01 1.875 1.374 0 0h4.358a6.26 6.26 0 0 1 2.467 4.99 6.26 6.26 0 0 1-2.467 4.99c1.415.59 2.22 2.03 2.22 4.091v3.927H2.632v-3.927c0-1.963-.937-3.337-2.631-4.09 1.875-1.375 2.878-3.01 2.878-4.99Zm8.552 0c0-1.98-1.003-3.616-2.878-4.99h4.359a6.26 6.26 0 0 1 2.466 4.99 6.26 6.26 0 0 1-2.466 4.99c1.414.59 2.22 2.03 2.22 4.091v3.927h-3.947v-3.927c0-1.963-.938-3.337-2.632-4.09 1.875-1.375 2.878-3.01 2.878-4.99Zm8.554 0c0-1.98-1.003-3.616-2.878-4.99h4.358A6.26 6.26 0 0 1 23.93 4.99a6.26 6.26 0 0 1-2.467 4.99c1.415.59 2.22 2.03 2.22 4.091v3.927h-3.947v-3.927c0-1.963-.937-3.337-2.631-4.09 1.875-1.375 2.878-3.01 2.878-4.99Z" />
+    </svg>
+  );
+}
+
 function MondayIcon({
   name,
   className,
@@ -542,6 +566,16 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
   if (icon === 'neon') {
     return (
       <NeonIcon name={name} className={className} isDecorative={isDecorative} />
+    );
+  }
+
+  if (icon === 'rippling') {
+    return (
+      <RipplingIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
     );
   }
 

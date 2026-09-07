@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useState, type KeyboardEvent } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import {
+  ArrowLeft,
   ArrowLeftFromLine,
+  BasicTooltip,
   Button,
   Dialog,
   DialogContent,
@@ -13,12 +16,14 @@ import {
   DialogTitle,
   Input,
 } from '@/components/system';
-import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
+import { WorkspaceHeader } from '@/components/layout';
+import { TaskHeaderContent, TaskHeaderMetadata, TaskTitle } from './TaskHeader';
 
 import { useTRPC } from '@/trpc/client';
 import { useSandboxLayout } from '../../use-sandbox-layout';
 
 import { type TaskSession } from './hooks';
+import { TaskSessionReadTracker } from './TaskSessionReadTracker';
 
 interface HeaderProps {
   session: TaskSession;
@@ -30,43 +35,29 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
   const queryClient = useQueryClient();
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [titleDraft, setTitleDraft] = useState(task?.title ?? '');
+  const { data: parentSession } = useQuery(
+    trpc.sessions.forTask.queryOptions({ taskId }),
+  );
+  const iconSessionId =
+    parentSession?.sessionId ?? taskRun?.payload?.fastAgentSessionId ?? null;
+  const { data: iconSession } = useQuery(
+    trpc.sessions.byId.queryOptions(
+      { sessionId: iconSessionId ?? '' },
+      { enabled: Boolean(iconSessionId) },
+    ),
+  );
 
   const environmentId = taskRun?.payload?.environmentId;
   const repo = taskRun?.payload?.repo;
   const prRepo = taskRun?.prRepo;
   const prNumber = taskRun?.prNumber;
   const pullRequests = taskRun?.pullRequests ?? [];
-
-  const badges = [
-    (environmentId || repo) && (
-      <WorkspaceBadge
-        key="workspace"
-        environmentId={environmentId}
-        repo={repo}
-        iconClassName="text-muted-foreground"
-      />
-    ),
-    ...(pullRequests.length > 0
-      ? pullRequests.map((pullRequest) => (
-          <PullRequestBadge
-            key={`pr:${pullRequest.repository}:${pullRequest.prNumber}`}
-            repo={pullRequest.repository}
-            prNumber={pullRequest.prNumber}
-            url={pullRequest.prUrl}
-            iconClassName="text-muted-foreground"
-          />
-        ))
-      : prRepo && prNumber
-        ? [
-            <PullRequestBadge
-              key="pr"
-              repo={prRepo}
-              prNumber={prNumber}
-              iconClassName="text-muted-foreground"
-            />,
-          ]
-        : []),
-  ].filter(Boolean);
+  const model = task?.model ?? null;
+  const sessionHref = parentSession
+    ? `/sessions/${parentSession.sessionId}?task=${taskId}`
+    : taskRun?.payload?.fastAgentSessionId
+      ? `/sessions/${taskRun.payload.fastAgentSessionId}`
+      : null;
 
   const updateTaskTitle = useMutation(trpc.tasks.updateTitle.mutationOptions());
 
@@ -142,34 +133,67 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
       void queryClient.invalidateQueries({
         queryKey: trpc.tasks.list.queryKey(),
       });
+      void queryClient.invalidateQueries({
+        queryKey: trpc.tasks.search.queryKey(),
+      });
     }
   };
 
   const title = task?.title || 'Untitled task';
-
   return (
-    <div className="flex shrink-0 items-center overflow-hidden py-3 border-b-2 border-card @container">
-      <div className="relative flex flex-col @[600px]:flex-row min-w-0 max-w-4xl mx-auto flex-1 px-4 @[600px]:items-center gap-2 @[600px]:gap-4">
-        <h1
-          role="button"
-          tabIndex={0}
-          onClick={handleOpenRenameDialog}
-          onKeyDown={handleTitleKeyDown}
-          aria-label="Edit task title"
-          title="Edit task title"
-          className={`-ml-3 min-w-0 max-w-full cursor-pointer overflow-hidden rounded-md border border-transparent px-2 py-1 text-sm font-medium text-ellipsis whitespace-nowrap hover:border-border hover:bg-muted/40 focus-visible:border-border focus-visible:bg-muted/40 focus-visible:outline-none @[600px]:flex-[0_1_auto] ${!isSidebarVisible ? 'pr-8' : ''}`}
-        >
-          {title}
-        </h1>
-        {badges.length > 0 && (
-          <div className="flex min-w-0 shrink-0 items-center gap-4 overflow-hidden text-xs text-muted-foreground">
-            {badges.map((badge, index) => (
-              <span key={index} className="contents">
-                {badge}
-              </span>
-            ))}
-          </div>
-        )}
+    <>
+      {parentSession ? (
+        <TaskSessionReadTracker sessionId={parentSession.sessionId} />
+      ) : null}
+      <WorkspaceHeader contentClassName="!flex-col !items-stretch !gap-1">
+        <div className="flex min-w-0 items-start">
+          {sessionHref ? (
+            <BasicTooltip content="Back to session">
+              <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                className="size-5 shrink-0 hover:scale-120 hover:text-accent-foreground mt-1"
+              >
+                <Link href={sessionHref} aria-label="Back to session">
+                  <ArrowLeft className="size-3.5" />
+                </Link>
+              </Button>
+            </BasicTooltip>
+          ) : null}
+          <TaskHeaderContent
+            taskId={taskId}
+            sessionId={iconSessionId}
+            orderedTaskIds={iconSession?.tasks.map((item) => item.taskId)}
+            showIcon={false}
+          >
+            <h1
+              role="button"
+              tabIndex={0}
+              onClick={handleOpenRenameDialog}
+              onKeyDown={handleTitleKeyDown}
+              aria-label="Edit task title"
+              title="Edit task title"
+              className={`flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap hover:border-border hover:bg-muted/40 focus-visible:border-border focus-visible:bg-muted/40 focus-visible:outline-none @[600px]:flex-[0_1_auto] ${!isSidebarVisible ? 'pr-8' : ''}`}
+            >
+              <TaskTitle
+                taskId={taskId}
+                title={title}
+                sessionId={iconSessionId}
+                orderedTaskIds={iconSession?.tasks.map((item) => item.taskId)}
+              />
+            </h1>
+            <TaskHeaderMetadata
+              model={model}
+              environmentId={environmentId}
+              repo={repo}
+              pullRequests={pullRequests}
+              prRepo={prRepo}
+              prNumber={prNumber}
+              className="pl-9"
+            />
+          </TaskHeaderContent>
+        </div>
         {!isSidebarVisible && (
           <Button
             variant="ghost"
@@ -179,7 +203,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
             <ArrowLeftFromLine className="size-4" />
           </Button>
         )}
-      </div>
+      </WorkspaceHeader>
       <Dialog open={isRenameDialogOpen} onOpenChange={setIsRenameDialogOpen}>
         <DialogContent size="sm">
           <DialogHeader>
@@ -215,6 +239,6 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
           </form>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 };

@@ -1,8 +1,15 @@
 import {
   createCustomAutomation,
+  and,
+  db,
   deleteCustomAutomation,
+  desc,
+  eq,
+  fastAgentConversations,
+  getDeploymentTaskModelOptions,
   getCustomAutomationById,
   listCustomAutomations,
+  inArray,
   updateCustomAutomation,
   type CustomAutomation,
 } from '@roomote/db/server';
@@ -16,12 +23,14 @@ import {
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
+  getCommunicationAutomationTargetKind,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
   type BackgroundAutomationProvider,
-  type BackgroundAutomationTargetKind,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
+  type ReasoningEffort,
 } from '@roomote/types';
 import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
@@ -38,6 +47,8 @@ export type CustomAutomationListItem = {
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression: string | null;
   model: string | null;
+  reasoningEffort: ReasoningEffort | null;
+  executionMode: 'sandbox_task' | 'fast';
   environmentId: string | null;
   target: OptionalAutomationTarget;
   lastRunAt: Date | null;
@@ -48,7 +59,33 @@ export type CustomAutomationListItem = {
   createdByName: string | null;
   createdAt: Date;
   updatedAt: Date;
+  latestFastResult: string | null;
 };
+
+function latestAssistantText(
+  messages: Record<string, unknown>[],
+): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== 'assistant') continue;
+    if (typeof message.content === 'string') return message.content;
+    if (Array.isArray(message.content)) {
+      const text = message.content
+        .map((part) =>
+          part &&
+          typeof part === 'object' &&
+          'text' in part &&
+          typeof part.text === 'string'
+            ? part.text
+            : '',
+        )
+        .filter(Boolean)
+        .join('\n');
+      if (text) return text;
+    }
+  }
+  return null;
+}
 
 export type CustomAutomationWriteInput = {
   name: string;
@@ -58,18 +95,20 @@ export type CustomAutomationWriteInput = {
   cronExpression?: string | null;
   /** Provider/model launch override, or null for the deployment default. */
   model?: string | null;
+  /** Reasoning override for the selected model, or null for its default. */
+  reasoningEffort?: ReasoningEffort | null;
   environmentId: string;
   /** Omitted when the automation has no report destination. */
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram';
   targetMode?: 'channel' | 'direct_message';
   targetChannelId?: string;
-  targetServiceUrl?: string | null;
 };
 
 function toListItem(
   row: CustomAutomation & {
     createdByUser?: { name: string; email: string } | null;
   },
+  latestFastResult: string | null = null,
 ): CustomAutomationListItem {
   const scheduleMode =
     row.scheduleMode === 'cron'
@@ -86,7 +125,14 @@ function toListItem(
     scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
-    environmentId: row.allRepositories ? ALL_REPOSITORIES : row.environmentId,
+    reasoningEffort: row.reasoningEffort,
+    executionMode: row.executionMode,
+    environmentId:
+      row.executionMode === 'fast'
+        ? FAST_EXECUTION
+        : row.allRepositories
+          ? ALL_REPOSITORIES
+          : row.environmentId,
     target: row.target,
     lastRunAt: row.lastRunAt,
     lastSucceededAt: row.lastSucceededAt,
@@ -96,6 +142,7 @@ function toListItem(
     createdByName: row.createdByUser?.name || row.createdByUser?.email || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    latestFastResult,
   };
 }
 
@@ -116,38 +163,15 @@ function buildTarget(
     );
   }
 
-  const targetKindByProvider: Record<
-    NonNullable<CustomAutomationWriteInput['targetProvider']>,
-    BackgroundAutomationTargetKind
-  > = {
-    slack: 'slack_channel',
-    discord: 'discord_channel',
-    teams: 'teams_channel',
-    telegram: 'telegram_chat',
-  };
-  const userTargetKindByProvider: Record<
-    NonNullable<CustomAutomationWriteInput['targetProvider']>,
-    BackgroundAutomationTargetKind
-  > = {
-    slack: 'slack_user',
-    discord: 'discord_user',
-    teams: 'teams_user',
-    telegram: 'telegram_user',
-  };
-
   const provider = input.targetProvider as BackgroundAutomationProvider;
   const target: AutomationTarget = {
     provider,
-    targetKind: directMessage
-      ? userTargetKindByProvider[input.targetProvider]
-      : targetKindByProvider[input.targetProvider],
+    targetKind: getCommunicationAutomationTargetKind(
+      input.targetProvider,
+      directMessage ? 'direct_message' : 'channel',
+    ),
     externalRef,
   };
-
-  const serviceUrl = input.targetServiceUrl?.trim();
-  if (!directMessage && serviceUrl) {
-    target.metadata = { serviceUrl };
-  }
 
   return target;
 }
@@ -172,12 +196,64 @@ async function assertDestinationConnected(
   }
 }
 
+async function assertAutomationModelSelection(
+  model: string | null | undefined,
+  reasoningEffort: ReasoningEffort | null | undefined,
+): Promise<void> {
+  if (!model) {
+    if (reasoningEffort) {
+      throw new Error('Reasoning effort requires a model override.');
+    }
+    return;
+  }
+
+  const { models } = await getDeploymentTaskModelOptions();
+  const option = models.find((candidate) => candidate.id === model);
+  if (!option) {
+    throw new Error(`Model "${model}" is not enabled for new tasks.`);
+  }
+  if (reasoningEffort && option.metadata?.supportsReasoning === false) {
+    throw new Error(
+      `Model "${model}" does not support configurable reasoning effort.`,
+    );
+  }
+}
+
 export async function listCustomAutomationsCommand(
   auth: UserAuthSuccess,
 ): Promise<CustomAutomationListItem[]> {
   assertAdmin(auth);
   const rows = await listCustomAutomations();
-  return rows.map(toListItem);
+  const automationIds = rows.map((row) => row.id);
+  const conversations = automationIds.length
+    ? await db
+        .selectDistinctOn([fastAgentConversations.workspaceId], {
+          workspaceId: fastAgentConversations.workspaceId,
+          compatibilityMessages: fastAgentConversations.compatibilityMessages,
+        })
+        .from(fastAgentConversations)
+        .where(
+          and(
+            eq(fastAgentConversations.surface, 'automation'),
+            inArray(fastAgentConversations.workspaceId, automationIds),
+          ),
+        )
+        .orderBy(
+          fastAgentConversations.workspaceId,
+          desc(fastAgentConversations.createdAt),
+        )
+    : [];
+  const latestByAutomation = new Map<string, string | null>();
+  for (const conversation of conversations) {
+    if (latestByAutomation.has(conversation.workspaceId)) continue;
+    latestByAutomation.set(
+      conversation.workspaceId,
+      latestAssistantText(conversation.compatibilityMessages),
+    );
+  }
+  return rows.map((row) =>
+    toListItem(row, latestByAutomation.get(row.id) ?? null),
+  );
 }
 
 export async function createCustomAutomationCommand(
@@ -196,6 +272,7 @@ export async function createCustomAutomationCommand(
   if (input.targetProvider) {
     await assertDestinationConnected(input.targetProvider);
   }
+  await assertAutomationModelSelection(input.model, input.reasoningEffort);
 
   const created = await createCustomAutomation({
     name: input.name,
@@ -204,6 +281,7 @@ export async function createCustomAutomationCommand(
     scheduleMode: input.scheduleMode,
     cronExpression,
     model: input.model ?? null,
+    reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input, auth.userId),
     createdByUserId: auth.userId,
@@ -233,6 +311,7 @@ export async function updateCustomAutomationCommand(
   if (input.targetProvider) {
     await assertDestinationConnected(input.targetProvider);
   }
+  await assertAutomationModelSelection(input.model, input.reasoningEffort);
 
   const existing = await getCustomAutomationById(input.id);
   if (!existing) {
@@ -246,6 +325,7 @@ export async function updateCustomAutomationCommand(
     scheduleMode: input.scheduleMode,
     cronExpression,
     model: input.model ?? null,
+    reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
     target: buildTarget(input, existing.createdByUserId ?? auth.userId),
   });

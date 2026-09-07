@@ -2,7 +2,10 @@ import { COMMS_PROVIDER_ENV_VAR_NAMES } from './setup-auth-config';
 import { COMPUTE_PROVIDER_ENV_VAR_NAMES } from './setup-compute-config';
 import { SETUP_SOURCE_CONTROL_PROVIDER_CATALOG } from './setup-source-control-config';
 import { OPENCODE_AUTH_CONTENT_ENV_VAR_NAME } from './chatgpt-subscription';
-import { DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES } from './model-provider-config';
+import {
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+} from './model-provider-config';
 
 /**
  * Per-repo source-control access tokens. A task legitimately receives the
@@ -148,19 +151,19 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...MEDIA_PROVIDER_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+    // Hosting-managed Roomote inference is served only through the inference
+    // gateway, never configured through the generic environment editor.
+    ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ],
 );
 
 /**
- * Env var names Roomote manages itself (not through the generic
- * environment-variables editor) but that the agent harness legitimately
- * needs, so they are intentionally NOT in `CONTROL_PLANE_ENV_VAR_NAMES` (the
- * job env-injection denylist strips control-plane names from the sandbox).
+ * Env var names Roomote manages itself rather than through the generic
+ * environment-variables editor.
  *
  * Currently this covers `OPENCODE_AUTH_CONTENT`, the JSON blob Roomote
- * injects to authenticate ChatGPT subscription requests inside the opencode
- * harness. Operators must not set it by hand because Roomote refreshes and
- * rewrites it on every task launch.
+ * generates for control-plane OpenCode helpers. Operators must not set it by
+ * hand, and task sandboxes never receive it.
  */
 export const ROOMOTE_MANAGED_ENV_VAR_NAMES: ReadonlySet<string> =
   new Set<string>([OPENCODE_AUTH_CONTENT_ENV_VAR_NAME]);

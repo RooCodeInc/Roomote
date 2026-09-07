@@ -1,10 +1,146 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { Search } from '@/components/system';
 
-import { ToolHeader } from './tool';
+import { Tool, ToolHeader } from './tool';
+
+vi.mock('@/components/system', async (importOriginal) => {
+  const system = await importOriginal<typeof import('@/components/system')>();
+
+  return {
+    ...system,
+    Spinner: () => <div data-testid="spinner" />,
+  };
+});
 
 describe('ToolHeader', () => {
+  it.each(['input-streaming', 'input-available'] as const)(
+    'keeps the spinner and accessible %s status without redundant visible text',
+    (state) => {
+      render(
+        <ToolHeader
+          action="Sending"
+          object="message to task"
+          icon={Search}
+          iconElement={<span data-testid="task-icon" />}
+          state={state}
+          collapsible={false}
+        />,
+      );
+
+      expect(screen.getByTestId('task-icon')).toBeInTheDocument();
+      expect(screen.getByTestId('spinner')).toBeInTheDocument();
+      expect(screen.getByText('Sending')).toBeInTheDocument();
+      expect(screen.getByText('message to task')).toBeInTheDocument();
+      expect(screen.getByText('Running')).toHaveClass('sr-only');
+      expect(screen.getByText('Running')).toHaveAttribute(
+        'aria-live',
+        'polite',
+      );
+    },
+  );
+
+  it('announces running and success accessibly while failures stay visible', () => {
+    const { rerender } = render(
+      <ToolHeader
+        action="Using"
+        object="Search"
+        icon={Search}
+        state="input-available"
+        collapsible={false}
+      />,
+    );
+
+    expect(screen.getByText('Running')).toHaveClass('sr-only');
+    expect(screen.getByTestId('spinner')).toBeInTheDocument();
+
+    rerender(
+      <ToolHeader
+        action="Used"
+        object="Search"
+        icon={Search}
+        state="output-available"
+        collapsible={false}
+      />,
+    );
+    expect(screen.getByText('Completed')).toHaveClass('sr-only');
+    expect(screen.queryByTestId('spinner')).not.toBeInTheDocument();
+
+    rerender(
+      <ToolHeader
+        action="Used"
+        object="Search"
+        icon={Search}
+        state="output-error"
+        collapsible={false}
+      />,
+    );
+    expect(screen.getByText('Failed')).not.toHaveClass('sr-only');
+  });
+
+  it('exposes expansion state only for interactive headers', () => {
+    const { rerender } = render(
+      <Tool>
+        <ToolHeader
+          action="Used"
+          object="Search"
+          icon={Search}
+          state="output-available"
+        />
+      </Tool>,
+    );
+
+    const trigger = screen.getByRole('button', {
+      name: 'Used Search Completed',
+    });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+    rerender(
+      <Tool>
+        <ToolHeader
+          action="Used"
+          object="Search"
+          icon={Search}
+          state="output-available"
+          collapsible={false}
+        />
+      </Tool>,
+    );
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('keeps a custom icon action separate from the expansion trigger', () => {
+    const onIconClick = vi.fn();
+    render(
+      <Tool>
+        <ToolHeader
+          action="Sent"
+          object="message to task"
+          icon={Search}
+          iconElement={<span data-testid="task-icon" />}
+          iconAction={{ label: 'Focus task prompt', onClick: onIconClick }}
+          state="output-available"
+        />
+      </Tool>,
+    );
+
+    const iconButton = screen.getByRole('button', {
+      name: 'Focus task prompt',
+    });
+    const expansionTrigger = screen.getByRole('button', {
+      name: 'Sent message to task Completed',
+    });
+
+    fireEvent.click(iconButton);
+    expect(onIconClick).toHaveBeenCalledOnce();
+    expect(expansionTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(expansionTrigger);
+    expect(expansionTrigger).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('keeps long action-only labels truncatable inside the header row', () => {
     const action =
       'Read /tmp/roomote-tool-header-regression-path-with-a-very-long-file-name.txt';

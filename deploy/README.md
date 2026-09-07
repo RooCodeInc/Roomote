@@ -5,7 +5,7 @@ shape (`/opt/roomote`, `compose/docker-compose.prod.yml`, Caddy,
 `roomote-compose.service`):
 
 - **Self-serve one-command install** — a user runs [`install.sh`](install.sh)
-  on their own server via `curl -fsSL https://get.roomote.dev | bash` and
+  on their own server via `curl -fsSL https://get.roomote.dev | sudo bash` and
   finishes setup in the browser. The [`host/roomote`](host/roomote) CLI is
   installed alongside it for day-2 operations (`status`, `logs`, `upgrade`,
   `backup`, `restore`). See the One-Command Install section in
@@ -105,6 +105,14 @@ worker images in lockstep. The worker repository defaults to
 `ghcr.io/roocodeinc/roomote-worker` and can be overridden with
 `ROOMOTE_WORKER_IMAGE_REPO` (for forks or registry mirrors). Explicit values
 always win over the derived default.
+
+The optional Memory service follows the same release convention. With the
+`brain` Compose profile enabled and `GBRAIN_IMAGE` unset, production Compose
+pulls `${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/roomote-gbrain:${ROOMOTE_VERSION}`;
+official installs therefore use
+`ghcr.io/roocodeinc/roomote-gbrain:<matching-v*-release-tag>`. Set
+`GBRAIN_IMAGE` only to pin a complete custom image reference. Installer reruns
+and upgrades preserve that explicit override.
 
 The file must include the required production values from
 `.env.production.example`, especially:
@@ -243,23 +251,26 @@ upgrade expand window and will be removed once the N-1 window passes.
 
 ## DNS
 
-The app domain, preview domain, and wildcard preview domain must resolve to the
-droplet:
+The app domain and wildcard preview domain must resolve to the droplet. A
+separate preview domain is only needed when opting out of flat preview
+hostnames:
 
 ```text
 <domain>                 A  <droplet-ip>
-<preview-domain>         A  <droplet-ip>
-*.<preview-domain>       A  <droplet-ip>
+*.<domain>               A  <droplet-ip>
+<preview-domain>         A  <droplet-ip>  # dedicated preview namespace only
+*.<preview-domain>       A  <droplet-ip>  # dedicated preview namespace only
 ```
 
 To let Terraform create these records in DigitalOcean DNS, pass
-`--manage-dns --dns-zone <zone>`. The app and preview domains must be inside
-that zone.
+`--manage-dns --dns-zone <zone>`. The app domain and any explicit preview
+domain must be inside that zone.
 
 Caddy serves web and worker-facing API traffic on the app domain. The app
-domain routes the reserved `/_roomote-api/*` prefix to the API container after
-stripping that prefix, routes the configured artifact bucket path to MinIO for
-presigned S3 requests, and sends other app-domain paths to the web container.
+domain routes public `/api/webhooks/*` requests directly to the API, routes the
+reserved `/_roomote-api/*` prefix to the API after stripping that prefix,
+routes the configured artifact bucket path to MinIO for presigned S3 requests,
+and sends other app-domain paths to the web container.
 
 ## Create A Deployment
 
@@ -281,7 +292,6 @@ With DigitalOcean DNS management:
 deploy/scripts/roomote-deploy create \
   --customer matt-test \
   --domain matt-test.roomote.dev \
-  --preview-domain preview.matt-test.roomote.dev \
   --provider digitalocean \
   --region nyc3 \
   --version v0.1.0 \

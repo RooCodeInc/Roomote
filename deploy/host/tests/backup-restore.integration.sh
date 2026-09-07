@@ -50,7 +50,7 @@ name: roomote-backup-ci
 
 services:
   postgres:
-    image: postgres:17.5
+    image: pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -58,10 +58,11 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d roomote']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d roomote']
       interval: 1s
       timeout: 5s
       retries: 30
+      start_period: 120s
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes
@@ -102,7 +103,7 @@ write_fixture "$source_root" 'source-encryption-key-that-must-survive'
 printf 'correct horse battery staple\n' >"$passphrase_file"
 chmod 600 "$passphrase_file"
 
-compose_at "$source_root" up -d --wait --wait-timeout 120
+compose_at "$source_root" up -d --wait --wait-timeout 180
 compose_at "$source_root" exec -T postgres \
   psql -U postgres -d roomote -v ON_ERROR_STOP=1 \
   -c "CREATE TABLE recovery_probe (value text NOT NULL); INSERT INTO recovery_probe VALUES ('database-survived');"
@@ -125,6 +126,10 @@ openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
   tar -xzf - --no-same-owner -C "$inspection_dir"
 grep -q '"formatVersion": 1' "$inspection_dir/manifest.json"
 grep -q '"mode": "local-minio"' "$inspection_dir/manifest.json"
+# The Brain profile is not enabled in this fixture: the manifest must say so
+# explicitly, and the bundle must not carry a Brain snapshot.
+grep -A2 '"brain"' "$inspection_dir/manifest.json" | grep -q '"included": false'
+test ! -f "$inspection_dir/gbrain-data.tar"
 grep -q '"included": true' "$inspection_dir/manifest.json"
 test -s "$inspection_dir/postgres.sql"
 test -s "$inspection_dir/minio-data.tar"

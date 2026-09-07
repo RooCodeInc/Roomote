@@ -9,8 +9,8 @@ const TELEGRAM_MESSAGE_ID_REGEX = /^\d+$/;
 
 type ChatReplySatisfactionTool =
   | 'send_chat_reply'
-  | 'send_chat_reaction_emoji'
-  | 'add_reaction_to_slack_message';
+  | 'report_to_parent_session'
+  | 'send_chat_reaction_emoji';
 
 export type ChatReplyPurpose =
   | 'ack'
@@ -40,7 +40,7 @@ interface ChatReplySatisfactionState {
   lastNonSlackWorkAfterSatisfactionAtMs?: number;
   terminalSatisfiedTurnMessageTs?: string;
   terminalSatisfiedAtMs?: number;
-  terminalSatisfactionTool?: 'send_chat_reply';
+  terminalSatisfactionTool?: 'send_chat_reply' | 'report_to_parent_session';
   lastNonSlackWorkAfterTerminalAtMs?: number;
   lastSilenceReminderAtMs?: number;
   /** Failed chat delivery attempts since the last successful post this turn. */
@@ -60,6 +60,12 @@ interface ChatReplySatisfactionState {
 
 function trimString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isLifecycleTextTool(
+  tool: ChatReplySatisfactionTool,
+): tool is 'send_chat_reply' | 'report_to_parent_session' {
+  return tool === 'send_chat_reply' || tool === 'report_to_parent_session';
 }
 
 function isSlackMessageTs(value: unknown): boolean {
@@ -175,7 +181,21 @@ export function recordChatTurnStart(input: {
  * as terminal even without a structured non-retryable verdict. Keeps a task
  * whose channel fails with an unclassified error from retrying forever.
  */
-const MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL = 5;
+export const MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL = 3;
+
+export function hasTerminalChatReplyDeliveryFailure(
+  input: {
+    stateFilePath?: string;
+  } = {},
+): boolean {
+  const stateFilePath = getStateFilePath(input.stateFilePath);
+  if (!stateFilePath) {
+    return false;
+  }
+
+  const terminalAtMs = readState(stateFilePath).terminalDeliveryFailureAtMs;
+  return typeof terminalAtMs === 'number' && Number.isFinite(terminalAtMs);
+}
 
 /**
  * Records a failed chat delivery attempt. When the failure is non-retryable,
@@ -263,9 +283,7 @@ export function recordChatReplySatisfaction(input: {
   const currentTurnMessageTs = trimString(existingState.currentTurnMessageTs);
   const currentTurnReactionsAllowed =
     existingState.currentTurnReactionsAllowed !== false;
-  const isCurrentTurnReactionTool =
-    input.tool === 'send_chat_reaction_emoji' ||
-    input.tool === 'add_reaction_to_slack_message';
+  const isCurrentTurnReactionTool = input.tool === 'send_chat_reaction_emoji';
   const satisfiesCurrentTurn =
     currentTurnMessageTs &&
     (isCurrentTurnReactionTool
@@ -278,14 +296,15 @@ export function recordChatReplySatisfaction(input: {
     ...existingState,
     messageTs,
     tool: input.tool,
-    replyPurpose:
-      input.tool === 'send_chat_reply' ? input.replyPurpose : undefined,
+    replyPurpose: isLifecycleTextTool(input.tool)
+      ? input.replyPurpose
+      : undefined,
     recordedAtMs: nowMs,
     // A successful post proves the channel is deliverable again. Reactions
     // do not: they go through reactions.add, not chat.postMessage, so a
     // reaction succeeding must not re-arm closeout enforcement against a
     // posting path that is still broken.
-    ...(input.tool === 'send_chat_reply'
+    ...(isLifecycleTextTool(input.tool)
       ? {
           deliveryFailureCount: undefined,
           lastDeliveryFailureAtMs: undefined,
@@ -301,14 +320,14 @@ export function recordChatReplySatisfaction(input: {
       : {}),
     // A clarification reply is a terminal handoff like a closeout: the turn
     // ends waiting on the user's answer, so ending after one is not silence.
-    ...(input.tool === 'send_chat_reply' &&
+    ...(isLifecycleTextTool(input.tool) &&
     (input.replyPurpose === 'closeout' ||
       input.replyPurpose === 'clarification') &&
     satisfiesCurrentTurn
       ? {
           terminalSatisfiedTurnMessageTs: currentTurnMessageTs,
           terminalSatisfiedAtMs: nowMs,
-          terminalSatisfactionTool: 'send_chat_reply' as const,
+          terminalSatisfactionTool: input.tool,
           lastNonSlackWorkAfterTerminalAtMs: undefined,
         }
       : {}),

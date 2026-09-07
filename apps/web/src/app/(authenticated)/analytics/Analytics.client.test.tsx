@@ -90,14 +90,14 @@ vi.mock('./AnalyticsShell', () => ({
   AnalyticsShellDownloadAction: () => null,
   getAnalyticsHref: (object: 'tasks' | 'pullRequests' | 'costs') => {
     if (object === 'costs') {
-      return '/analytics/costs';
+      return '/analytics';
     }
 
     if (object === 'pullRequests') {
       return '/analytics?object=pullRequests';
     }
 
-    return '/analytics';
+    return '/analytics?object=tasks';
   },
 }));
 
@@ -140,22 +140,47 @@ describe('Analytics', () => {
     });
   });
 
-  it('treats unknown analytics objects as invalid on the generic /analytics page', () => {
-    state.searchParams = new URLSearchParams('object=unknown');
+  it.each(['unknown', 'sessions'])(
+    'uses Costs for unsupported %s analytics objects on the generic /analytics page',
+    (object) => {
+      state.searchParams = new URLSearchParams({
+        object,
+        viewBy: 'status',
+        status: 'active',
+      });
 
+      render(<Analytics />);
+
+      expect(screen.getByTestId('active-item')).toHaveTextContent('costs');
+      expect(
+        screen.getByRole('heading', { name: 'Costs' }),
+      ).toBeInTheDocument();
+      expect(hooks.useAnalyticsOverview).toHaveBeenCalledWith(
+        expect.objectContaining({
+          object: 'costs',
+          viewBy: 'taskType',
+          filters: {},
+        }),
+        { enabled: true },
+      );
+    },
+  );
+
+  it('uses Costs as the default /analytics view', () => {
     render(<Analytics />);
 
-    expect(screen.getByTestId('active-item')).toHaveTextContent('tasks');
-    expect(screen.getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
+    expect(screen.getByTestId('active-item')).toHaveTextContent('costs');
+    expect(screen.getByRole('heading', { name: 'Costs' })).toBeInTheDocument();
   });
 
-  it('opens Costs on its dedicated analytics page from generic analytics', () => {
+  it('opens the canonical Costs URL from Tasks analytics', () => {
+    state.searchParams = new URLSearchParams('object=tasks');
     render(<Analytics />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Costs' }));
 
-    expect(state.push).toHaveBeenCalledWith('/analytics/costs');
-    expect(state.replace).not.toHaveBeenCalled();
+    expect(state.replace).toHaveBeenCalledWith('/analytics', { scroll: false });
+    expect(state.push).not.toHaveBeenCalled();
   });
 
   it('loads costs through the combined analytics overview query', () => {

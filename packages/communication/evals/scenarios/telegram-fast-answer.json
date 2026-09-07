@@ -1,6 +1,6 @@
 {
   "name": "telegram-fast-answer",
-  "description": "A linked user asks a !fast question in a private chat; Roomote should answer inline in the same chat without launching a task run.",
+  "description": "A linked user asks a question in a private chat; Roomote should answer inline in the same chat without launching a task run.",
   "criteria": [
     "The bot posted at least one message in chat 111000111 answering the question.",
     "The bot reply references the Telegram webhook handler (apps/api handlers) or otherwise plausibly answers the question.",
@@ -32,7 +32,7 @@
             "first_name": "Grace",
             "username": "grace_mock"
           },
-          "text": "!fast what file handles Telegram webhooks?"
+          "text": "what file handles Telegram webhooks?"
         }
       }
     }

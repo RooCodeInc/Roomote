@@ -69,6 +69,10 @@ function normalizeTaskPath(pathname: string): string | null {
   return ['/task/[taskId]', ...restSegments].join('/');
 }
 
+function normalizeSessionPath(pathname: string): string | null {
+  return /^\/sessions\/[^/]+$/.test(pathname) ? '/sessions/[sessionId]' : null;
+}
+
 /** @public */
 export interface NormalizedPath {
   path: string;
@@ -81,7 +85,8 @@ export function normalizePath(
 ): NormalizedPath {
   const pathname = rawPathname.split('?')[0] ?? '/';
 
-  let path: string | null = normalizeTaskPath(pathname);
+  let path: string | null =
+    normalizeTaskPath(pathname) ?? normalizeSessionPath(pathname);
 
   if (path === null) {
     for (const matcher of DYNAMIC_ROUTE_MATCHERS) {

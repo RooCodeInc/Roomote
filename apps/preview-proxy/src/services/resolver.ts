@@ -3,7 +3,7 @@ import {
   environmentConfigSchema,
   type EnvironmentConfig,
   LEGACY_SANDBOX_GUI_NAMED_PORT_NAME,
-  SANDBOX_SNAPSHOT_EXPIRY_MS,
+  isSnapshotResumable,
   slugToPortKey,
 } from '@roomote/types';
 import {
@@ -82,17 +82,6 @@ export interface ResolvedRequest {
    */
   authBypassHeaderName?: string;
   requestedPortKey?: string;
-}
-
-/**
- * Check if a snapshot is still valid (within the 7-day expiry window).
- */
-function isSnapshotValid(snapshotCreatedAt: Date | null): boolean {
-  if (!snapshotCreatedAt) {
-    return false;
-  }
-
-  return Date.now() - snapshotCreatedAt.getTime() < SANDBOX_SNAPSHOT_EXPIRY_MS;
 }
 
 function resolveRuntimeEnvironmentConfig(
@@ -304,7 +293,7 @@ export async function resolveRequest(
       // No active task run found - check if this run can be auto-resumed
       const canAutoResume =
         taskRun.snapshotId != null &&
-        isSnapshotValid(taskRun.snapshotCreatedAt);
+        isSnapshotResumable(taskRun.snapshotCreatedAt, taskRun.vendor);
 
       if (canAutoResume) {
         logger.info(

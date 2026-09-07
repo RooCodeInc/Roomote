@@ -1,6 +1,4 @@
-export { useTask } from './useTask';
-export { useTasks } from './useTasks';
-export { useTaskPagination } from './useTaskPagination';
+export { useInfiniteTasks } from './useInfiniteTasks';
 export { useDeleteTasks } from './useDeleteTasks';
 export { useTaskPins } from './useTaskPins';
 export {

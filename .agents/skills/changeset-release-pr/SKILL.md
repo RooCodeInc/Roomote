@@ -1,16 +1,17 @@
 ---
 name: changeset-release-pr
-description: 'Prepare the next Roomote release PR: review what merged to develop, fill missing release notes, ensure meaningful user-facing features are documented, confirm patch/minor/major when unspecified, run the product version script, and open the final release PR. Use when asked to prep, cut, or write notes for a release.'
+description: 'Prepare Roomote releases: cut the normal release PR from develop, or ship an urgent patch directly from latest main and synchronize its version back to develop. Use when asked to prep, cut, hotfix, or write notes for a release.'
 ---
 
 # Changeset Release PR
 
-Use this skill to prepare the single release PR that cuts the next Roomote
-version. The deliverable is a normal PR against `develop` containing the root
-version bump, final `CHANGELOG.md` entry, any public documentation updates needed
-for the release's meaningful user-facing features, and deletion of every
+By default, use this skill to prepare the single release PR that cuts the next
+Roomote version. The deliverable is a normal PR against `develop` containing the
+root version bump, final `CHANGELOG.md` entry, any public documentation updates
+needed for the release's meaningful user-facing features, and deletion of every
 consumed pending changeset. Merging it makes CI open the frozen Promote PR to
-`main`.
+`main`. For an urgent patch that cannot wait for that path, use the clearly
+separated direct-to-main hotfix workflow below.
 
 ## How releases work here
 
@@ -34,17 +35,25 @@ Full details: `.changeset/README.md` and `CONTRIBUTING.md#product-releases`.
 
 ### 1. Establish the last release reference point
 
-Cross-check three signals; they should normally agree:
+Fetch the release-bearing refs and tags before checking any boundary signal, then
+cross-check all four signals; they should normally agree:
 
 ```bash
+git fetch --tags origin \
+  refs/heads/main:refs/remotes/origin/main \
+  refs/heads/develop:refs/remotes/origin/develop
 git tag --sort=-creatordate | head -5
 node -p "require('./package.json').version"
 head -10 CHANGELOG.md
+gh release view v<version> --json tagName,isDraft,isPrerelease,publishedAt
 ```
 
-Use the `v<version>` tag as the diff base when it exists. If the root version is
-ahead of the newest tag because a release PR merged but its Promote PR has not
-shipped yet, use the version-bump commit on `develop` as the next diff base:
+Use the exact newest published `v<version>` tag as the diff base. Verify that its
+GitHub Release is published and that the tag is reachable from `origin/main`; a
+local-only tag or an unmerged Promote candidate is not a release boundary. If
+the root version is ahead of the newest published tag because a release PR
+merged but its Promote PR has not shipped yet, use the version-bump commit on
+`develop` as the next diff base:
 
 ```bash
 node scripts/release/find-version-commit.mjs <version> origin/develop
@@ -65,6 +74,9 @@ git fetch origin develop
 git log v<last>..origin/develop --oneline --first-parent
 ```
 
+Here `v<last>` is the exact published tag established in step 1, never an
+earlier version-bump commit for the same release.
+
 For anything ambiguous, read the PR body with `gh pr view <number>` to identify
 the user-facing or operator-facing impact.
 
@@ -76,12 +88,13 @@ of every returned issue with
 `gh issue view <issue-url> --json author,authorAssociation,url`. Classify PR
 authors and issue reporters as external only when they are not bots and are not
 code owners. Also require an issue reporter's `authorAssociation` to be outside
-`OWNER`, `MEMBER`, and `COLLABORATOR`. Read the applicable `CODEOWNERS` file and
-resolve its individual GitHub-owner entries and organization-team entries before
-classifying them; if this repository has no `CODEOWNERS` file, no author or
-reporter is excluded on that basis, but the issue-author association check still
-applies. Do not treat someone as external merely because another person merged
-the PR or implemented the fix.
+`OWNER`, `MEMBER`, and `COLLABORATOR`. Read `.github/CODEOWNERS` directly rather
+than inferring its presence from recursive discovery or glob results, and resolve
+its individual GitHub-owner entries and organization-team entries before
+classifying them. If `.github/CODEOWNERS` does not exist, no author or reporter
+is excluded on that basis, but the issue-author association check still applies.
+Do not treat someone as external merely because another person merged the PR or
+implemented the fix.
 
 - Treat GitHub App and bot accounts as bots; never add contributor thanks for
   them.
@@ -254,11 +267,20 @@ Then verify:
   created missing changesets normally leave no final diff because they are
   created and consumed in the same working tree.
 
-Run the release-script tests and the repository's appropriate static checks
-before opening the PR. When `apps/docs` changed, also run
-`mise exec -- pnpm --filter @roomote/docs check`.
+Do not manually rerun the release-script tests, docs validation, repository
+lint/format, type checks, Knip, or the pre-push script while preparing the PR.
+The PR workflows run the full versions of those checks for changes targeting
+`develop`; allow the ordinary push hook to run exactly once as the local static
+gate instead of invoking it separately. Do not merge the release PR until the
+**CI** workflow and, when `apps/docs` changed, the **Docs** workflow succeed.
+Treat that as a release-process gate even when repository rules do not require
+status checks.
 
 ### 10. Open the release PR
+
+Read `.github/CODEOWNERS` directly again and use its current entries as the
+source of truth for release PR ownership and reviewer handling; do not infer
+reviewers from PR authorship or a recursive file search.
 
 Commit the generated release artifacts on a feature branch and open a PR against
 `develop` titled **Release Roomote X.Y.Z**. The PR body should include:
@@ -270,6 +292,179 @@ Commit the generated release artifacts on a feature branch and open a PR against
 - validation performed
 - a note that squash-merging the PR cuts the release and automatically opens
   the frozen **Promote vX.Y.Z to production** PR against `main`
+
+## Emergency direct-to-main hotfix path
+
+Use this path only for an urgent production patch that cannot wait for the
+normal `develop` release flow above. The normal workflow remains the default.
+This exception produces two PRs:
+
+1. a complete patch and generated release artifacts targeting `main`
+2. a companion PR targeting `develop` that changes only root `package.json` and
+   `CHANGELOG.md`
+
+The production PR must merge first. Do not merge the companion until the tag,
+images, and GitHub Release have all shipped successfully.
+
+### A. Establish the release state
+
+Fetch both branches and tags, then branch from the exact latest `main` tip:
+
+```bash
+git fetch --tags origin \
+  refs/heads/main:refs/remotes/origin/main \
+  refs/heads/develop:refs/remotes/origin/develop
+git switch --create hotfix/<concise-name> origin/main
+git tag --sort=-version:refname | head -5
+node -p "require('./package.json').version"
+head -20 CHANGELOG.md
+```
+
+Before continuing, verify:
+
+- `HEAD` is exactly `origin/main`.
+- The newest shipped `vX.Y.Z` tag, root version, and top changelog section agree.
+- `main` has no pending non-README changeset that `pnpm run version` would
+  accidentally consume with the hotfix.
+- No newer unshipped Promote PR or release candidate conflicts with the patch
+  version. Resolve release ordering rather than guessing.
+- The fix is a patch and every required prerequisite is already on `main` or is
+  explicitly included because it is safe to ship with the fix.
+- The patch preserves the schema N-1 rollback guarantee and does not require an
+  incompatible migration, destructive schema change, or coordinated rollout
+  that makes direct release unsafe.
+
+### B. Apply the complete fix
+
+Identify the exact merged fix on `develop`, including tests, docs, and required
+supporting changes. Read its source PR and compare its merge commit to `main`;
+do not copy only the most obvious runtime file. Cherry-pick the smallest complete
+commit set, usually the squash commit:
+
+```bash
+git cherry-pick <develop-fix-sha>
+git diff --stat origin/main...HEAD
+git diff --name-status origin/main...HEAD
+git diff <develop-fix-sha>^..<develop-fix-sha> -- <expected-fix-paths>
+git diff origin/main...HEAD -- <expected-fix-paths>
+```
+
+Account for every intentional difference caused by prerequisites or conflict
+resolution. Exclude unrelated features, pending `develop` changesets, and
+release artifacts from another version.
+
+When the fix depends on an external service or production-like integration,
+repeat the smallest safe live check that proves the original symptom is fixed.
+Record the environment and observable result without exposing secrets or private
+data. If a live check is irrelevant or unavailable, say why and rely on focused
+deterministic tests.
+
+### C. Generate and validate the patch release
+
+Add one hotfix-specific patch changeset using the same format as step 8. Commit
+the complete fix and changeset separately when useful for auditability, then
+consume the changeset through the repository-owned command:
+
+```bash
+pnpm run version
+```
+
+Never run `changeset version`, and never hand-edit the generated version or
+changelog heading. Polish the generated top changelog summary and highlights as
+described in step 9, then commit root `package.json` and `CHANGELOG.md` as the
+version commit.
+
+Verify that:
+
+- the root version is exactly one patch above the shipped `main` version
+- the top `CHANGELOG.md` section contains the complete hotfix note
+- the hotfix changeset was consumed and no non-README `.changeset/*.md` remains
+- no workspace package version changed
+- `origin/main...HEAD` contains only the complete fix plus root `package.json`
+  and `CHANGELOG.md`
+
+Preserve the changeset commit in branch history even though the version commit
+deletes its file. Do not manually rerun the release-script tests, focused product
+tests and type checks covered by the repository suite, formatting, Knip, or the
+pre-push script. The hotfix PR workflows run their full versions for changes
+targeting `main`; allow the ordinary push hook to run exactly once as the local
+static gate instead of invoking it separately. Do not merge the production
+hotfix PR until the **CI** workflow and, when `apps/docs` changed, the **Docs**
+workflow succeed. Treat that as a release-process gate even when repository
+rules do not require status checks.
+
+Repeat any relevant live check after final conflict resolution or release edits;
+CI cannot replace external-service or production-like evidence. Failed or
+unavailable release-specific or live checks are release blockers unless a
+maintainer explicitly accepts and records the risk.
+
+### D. Open the production hotfix PR
+
+Open the hotfix PR against `main`. Include the source fix PR/commit and
+prerequisites, previous and next versions, exact patch scope and intentional
+differences, all validation and live-check results, rollback instructions, and a
+link to the companion PR once available. Require a **merge commit**; never squash
+or rebase this PR.
+
+Rollback guidance must distinguish two states:
+
+- Before the tag is consumed externally, revert the hotfix merge commit if that
+  is still operationally safe.
+- After publication, redeploy the previous immutable `vX.Y.Z`; never move,
+  delete, or reuse a published tag. Describe data or schema cleanup separately
+  and preserve the N-1 rollback contract.
+
+### E. Prepare the companion develop sync
+
+After the production branch is final, create a branch from latest
+`origin/develop` and bring over only the generated product version and changelog:
+
+```bash
+git switch --create chore/sync-<version>-on-develop origin/develop
+git restore --source <hotfix-tip> -- package.json CHANGELOG.md
+git diff --name-only origin/develop
+git diff --exit-code <hotfix-tip> -- package.json CHANGELOG.md
+git diff --exit-code origin/develop -- .changeset
+```
+
+Do not cherry-pick the runtime fix; it should already be on `develop`. Do not run
+`pnpm run version` on this branch because that would consume unrelated pending
+`develop` changesets. The first diff must list exactly `package.json` and
+`CHANGELOG.md`; the other two must be empty. If `develop` independently changed
+either release artifact, reconcile deliberately without touching pending
+changesets and stop if the companion cannot remain a truthful two-file sync.
+
+Open the companion PR against `develop`. It must be squash-merged only after all
+production gates below succeed. Merging it early can make
+`.github/workflows/release.yml` freeze the moving `develop` tip as
+`release/vX.Y.Z` and open an incorrect Promote PR.
+
+### F. Enforce merge and release order
+
+Do not collapse or reorder these gates:
+
+1. Merge the production hotfix PR into `main` with a merge commit.
+2. Wait for **Tag Product Release** to succeed for that `main` merge.
+3. Verify the remote annotated tag exists and resolves to the released tree with
+   `git ls-remote --tags origin refs/tags/vX.Y.Z` and, after fetching,
+   `git rev-parse 'vX.Y.Z^{}'`.
+4. Wait for the tag-triggered **Publish GHCR Images** workflow to succeed,
+   including image publication and GitHub Release creation. Verify the GitHub
+   Release and immutable image tags; tag creation alone is not completion.
+5. Only then squash-merge the companion PR into `develop`.
+
+After the tag exists, the `develop` Release workflow sees an already shipped
+version and exits without creating a candidate. If a production gate fails,
+leave the companion open while the release is repaired or rolled back.
+
+PRs [#1840](https://github.com/RooCodeInc/Roomote/pull/1840) and
+[#1841](https://github.com/RooCodeInc/Roomote/pull/1841) demonstrate this
+two-branch workflow. Their Notion-specific live checks are an optional example,
+not a requirement for unrelated hotfixes.
+
+End the hotfix path by reporting both PR URLs, released version, source fix and
+prerequisite commits, exact file scope, live-check result or reason omitted,
+validation results, current merge-order gate, and rollback risks.
 
 ## Guardrails
 

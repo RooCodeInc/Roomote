@@ -275,4 +275,55 @@ describe('recordTaskInferenceUsage', () => {
       ]),
     );
   });
+
+  it('upserts Fast usage by event key with user and surface attribution', async () => {
+    const user = await userFactory.create();
+    const eventKey = 'non-task:fast_agent:session-1:message-1';
+
+    await recordLlmUsage({
+      source: 'fast_agent',
+      eventKey,
+      userId: user.id,
+      harnessSessionId: 'session-1',
+      messageId: 'message-1',
+      providerId: 'openrouter',
+      modelId: 'openai/gpt-5.4',
+      inputTokens: 100,
+      outputTokens: 20,
+      costMicroUsd: 500,
+      costSource: 'opencode_message',
+      details: { surface: 'fast_agent' },
+    });
+    await recordLlmUsage({
+      source: 'fast_agent',
+      eventKey,
+      userId: user.id,
+      harnessSessionId: 'session-1',
+      messageId: 'message-1',
+      providerId: 'openrouter',
+      modelId: 'openai/gpt-5.4',
+      inputTokens: 200,
+      outputTokens: 40,
+      costMicroUsd: 900,
+      costSource: 'opencode_message',
+      details: { surface: 'fast_agent' },
+    });
+
+    const rows = await db
+      .select()
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.eventKey, eventKey));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      source: 'fast_agent',
+      userId: user.id,
+      harnessSessionId: 'session-1',
+      messageId: 'message-1',
+      inputTokens: 200,
+      outputTokens: 40,
+      costMicroUsd: 900,
+      details: { surface: 'fast_agent' },
+    });
+  });
 });

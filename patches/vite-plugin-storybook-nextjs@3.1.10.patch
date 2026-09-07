@@ -1,0 +1,52 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index bdb9d7f0a94537982da08ac839bc48c063833232..7c5ae5832446e12baa4711f6c1b2862e2aceefc5 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -23,7 +23,7 @@ var nextServerConfig = require('next/dist/server/config.js');
+ var constants_js = require('next/dist/shared/lib/constants.js');
+ var MagicString = require('magic-string');
+ var path = require('path');
+-var imageSize = require('image-size');
++var probeImageSize = require('image-size');
+ 
+ var _documentCurrentScript = typeof document !== 'undefined' ? document.currentScript : null;
+ function _interopDefault (e) { return e && e.__esModule ? e : { default: e }; }
+@@ -4833,7 +4833,11 @@ function vitePluginNextImage(nextConfigResolver, options = {}) {
+ 					`;
+           }
+           const imageData = await fs3__default.default.promises.readFile(imagePath);
+-          const { width, height } = imageSize.imageSize(imageData);
++          const dimensions = probeImageSize.sync(imageData);
++          if (!dimensions) {
++            throw new TypeError(`Unsupported image file ${imagePath}`);
++          }
++          const { width, height } = dimensions;
+           return tsDedent.dedent`
+ 						import src from "${imagePath}?ignore";
+ 						export default {
+diff --git a/dist/index.js b/dist/index.js
+index 61192f8f44dcd580bdd22b918b6cc16210a6e8f5..634e51590e578c55005df2b6295cd57f86405969 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -21,7 +21,7 @@ import nextServerConfig from 'next/dist/server/config.js';
+ import { PHASE_DEVELOPMENT_SERVER, PHASE_TEST, PHASE_PRODUCTION_BUILD } from 'next/dist/shared/lib/constants.js';
+ import MagicString from 'magic-string';
+ import { win32 as win32$1, posix as posix$1, isAbsolute as isAbsolute$1, resolve as resolve$1 } from 'path';
+-import { imageSize } from 'image-size';
++import probeImageSize from 'image-size';
+ 
+ var __create = Object.create;
+ var __defProp = Object.defineProperty;
+@@ -4800,7 +4800,11 @@ function vitePluginNextImage(nextConfigResolver, options = {}) {
+ 					`;
+           }
+           const imageData = await fs3.promises.readFile(imagePath);
+-          const { width, height } = imageSize(imageData);
++          const dimensions = probeImageSize.sync(imageData);
++          if (!dimensions) {
++            throw new TypeError(`Unsupported image file ${imagePath}`);
++          }
++          const { width, height } = dimensions;
+           return dedent`
+ 						import src from "${imagePath}?ignore";
+ 						export default {

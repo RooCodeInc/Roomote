@@ -28,6 +28,7 @@ import {
   getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
+  type BootstrapAuthConfigEntryStep,
   type BootstrapStep,
 } from './bootstrapFlow';
 import { useSetupFlow } from './hooks';
@@ -71,6 +72,8 @@ export function SetupBootstrapFlow() {
   bootstrapStepRef.current = bootstrapStep;
   const [pendingAuthProvider, setPendingAuthProvider] =
     useState<CommunicationProviderChoice | null>(null);
+  const [authConfigEntryStep, setAuthConfigEntryStep] =
+    useState<BootstrapAuthConfigEntryStep>('auth-provider');
   const pendingSetupAuthProvider =
     pendingAuthProvider === 'telegram' || pendingAuthProvider === 'discord'
       ? null
@@ -241,6 +244,7 @@ export function SetupBootstrapFlow() {
           {bootstrapStep === 'email-account' && (
             <StepBootstrapAccount
               onUseProviderSignIn={(provider) => {
+                setAuthConfigEntryStep('email-account');
                 setPendingAuthProvider(provider);
                 setBootstrapStepWithTransition(
                   getNextBootstrapStep(bootstrapStatus.authSetup, provider),
@@ -262,6 +266,7 @@ export function SetupBootstrapFlow() {
                 if (provider === 'telegram' || provider === 'discord') {
                   return;
                 }
+                setAuthConfigEntryStep('auth-provider');
                 setPendingAuthProvider(provider);
                 setBootstrapStepWithTransition('auth-env-vars');
               }}
@@ -273,7 +278,10 @@ export function SetupBootstrapFlow() {
               authSetup={bootstrapStatus.authSetup}
               selectedProviderId={bootstrapAuthProvider}
               onContinue={() => undefined}
-              onBack={() => setBootstrapStepWithTransition('auth-provider')}
+              onBack={() => {
+                setPendingAuthProvider(null);
+                setBootstrapStepWithTransition(authConfigEntryStep);
+              }}
               bootstrapMode={true}
               setupToken={setupToken}
             />

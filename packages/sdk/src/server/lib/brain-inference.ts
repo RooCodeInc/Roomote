@@ -112,6 +112,34 @@ export async function resolveBrainInferenceProvider(): Promise<ResolvedBrainInfe
   return resolved;
 }
 
+/**
+ * Whether this deployment has a way to embed Brain pages at all — the
+ * readiness bar for running collectors and draining the memory outbox.
+ *
+ * Provider-agnostic by design. A dedicated embedder is the normal path:
+ * `R_BRAIN_EMBEDDINGS_UPSTREAM_URL` points embeddings at a self-run model
+ * (the shared Modal endpoint for every hosting-managed tenant; the local
+ * Infinity service for the self-host compose local-inference profile), so no
+ * model-provider key is involved in embedding at all. Only when no embedder
+ * is configured does this fall back to requiring an embeddings-capable
+ * provider key (the direct self-host path, where OpenAI/OpenRouter does the
+ * embedding).
+ *
+ * Synthesis is deliberately NOT part of this gate: it rides the deployment's
+ * helper model through the inference gateway and therefore works with whatever
+ * provider runs the deployment's tasks — Anthropic, OpenAI, OpenRouter, or a
+ * minted trial key alike. Gating on an OpenAI/OpenRouter key would have locked
+ * every Anthropic-only or trial tenant out of Memory even though both halves
+ * of its inference are actually available.
+ */
+export async function isBrainEmbeddingAvailable(): Promise<boolean> {
+  if (Env.R_BRAIN_EMBEDDINGS_UPSTREAM_URL?.trim()) {
+    return true;
+  }
+
+  return Boolean(await resolveBrainInferenceProvider());
+}
+
 async function readBrainInferenceProvider(): Promise<ResolvedBrainInference | null> {
   for (const providerId of BRAIN_PROVIDER_PREFERENCE) {
     const apiKey = await resolveModelProviderEnvValue(
@@ -169,6 +197,54 @@ export function mapBrainModelName(
   }
 
   return resolved.providerId === 'openrouter' ? row.openrouter : row.openai;
+}
+
+export type BrainModelSummary = {
+  /** In the serving provider's own naming, as the gateway will forward it. */
+  synthesisModel: string;
+  synthesisSource: 'default' | 'override';
+  embeddingModel: string;
+  /** Known for the stock embedding models; null for an operator's own. */
+  embeddingDimensions: number | null;
+};
+
+/**
+ * The models the Brain is effectively running, for display. Mirrors
+ * `mapBrainModelName`: the synthesis model is whatever the override or the
+ * translation table produces at forward time, while the embedding model is
+ * whatever the container was told at init (`R_BRAIN_EMBEDDING_MODEL`, else
+ * the stock default), which is why the Settings page presents it as fixed.
+ */
+export function describeBrainModels(
+  providerId: BrainInferenceProviderId,
+): BrainModelSummary {
+  // Truthiness on the trimmed value, exactly like `mapBrainModelName`: a
+  // whitespace-only override falls through to the default in both places.
+  const override = Env.R_BRAIN_MODEL?.trim();
+  const chat = MODEL_TRANSLATIONS.find((entry) => entry.kind === 'chat')!;
+  const stockEmbedding = MODEL_TRANSLATIONS.find(
+    (entry) => entry.kind === 'embedding',
+  )!;
+  const embeddingModel =
+    Env.R_BRAIN_EMBEDDING_MODEL?.trim() ||
+    (providerId === 'openrouter'
+      ? stockEmbedding.openrouter
+      : stockEmbedding.openai);
+  const embeddingDimensions =
+    Env.R_BRAIN_EMBEDDING_DIMENSIONS ??
+    (embeddingModel.includes('text-embedding-3-large')
+      ? 3072
+      : embeddingModel.includes('text-embedding-3-small')
+        ? 1536
+        : null);
+
+  return {
+    synthesisModel:
+      override || (providerId === 'openrouter' ? chat.openrouter : chat.openai),
+    synthesisSource: override ? 'override' : 'default',
+    embeddingModel,
+    embeddingDimensions,
+  };
 }
 
 /**

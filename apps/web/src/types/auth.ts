@@ -1,4 +1,3 @@
-import type { FeatureFlagValues } from '@roomote/feature-flags';
 import type { ManagedDeploymentAccess } from '@roomote/types';
 
 /**
@@ -21,7 +20,6 @@ export type AuthorizedUser = {
   name: string | null;
   primaryEmail: string | null;
   isAdmin: boolean;
-  featureFlags: FeatureFlagValues;
   /**
    * Whether anonymous analytics is active for this deployment (admin
    * setting enabled AND the environment allows telemetry). Drives whether
@@ -30,6 +28,13 @@ export type AuthorizedUser = {
   anonymousAnalyticsEnabled: boolean;
   /** Whether this deployment uses Roomote Cloud-only behavior. */
   cloudEnabled: boolean;
+  /**
+   * Whether this deployment has enabled the Brain (a brain-specific provider
+   * key in Settings or the environment). Gates the Settings nav entry: a
+   * deployment without a Brain should not see a page for one. Optional like
+   * `managedAccess`, so test fixtures and older payloads read as "no Brain".
+   */
+  brainConfigured?: boolean;
   /** When this user accepted optional Cloud cookies, serialized as epoch ms. */
   cookieConsentedAt: number | null;
   managedAccess?: ManagedDeploymentAccess;

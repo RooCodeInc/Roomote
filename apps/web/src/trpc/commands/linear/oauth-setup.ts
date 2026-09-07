@@ -13,6 +13,7 @@ import { LINEAR_ORG_CONNECTION_ROLE } from '@roomote/sdk/server';
 import { Env } from '@/lib/server/env';
 import { assertCuratedIntegrationsEnabled } from '@/lib/server/curated-integrations';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
+import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
 import type { UserAuthSuccess } from '@/types';
 
 import {
@@ -169,14 +170,33 @@ export async function getLinearOauthSetupCommand(auth: UserAuthSuccess) {
 
 export async function removeLinearOauthSetupCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
+  const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
+  const removedSetup = Object.values(LINEAR_OAUTH_ENV_FIELDS).some((name) =>
+    persistedEnvVarNames.includes(name),
+  );
 
-  await db.transaction(async (tx) => {
+  const removedConnection = await db.transaction(async (tx) => {
     await deleteDeploymentEnvironmentVariables(
       tx,
       Object.values(LINEAR_OAUTH_ENV_FIELDS),
     );
-    await clearLinearDeploymentConnection(tx, auth.userId);
+    return clearLinearDeploymentConnection(tx, auth.userId);
   });
+
+  if (removedSetup || removedConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_disabled',
+      'linear',
+      auth.userId,
+    );
+  }
+  if (removedConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_removed',
+      'linear',
+      auth.userId,
+    );
+  }
 
   return { success: true as const };
 }
@@ -250,6 +270,19 @@ export async function saveLinearOauthSetupCommand(
       );
     }
   });
+
+  if (requiresReconnect) {
+    captureIntegrationLifecycleEvent(
+      'integration_removed',
+      'linear',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_disabled',
+      'linear',
+      auth.userId,
+    );
+  }
 
   return { success: true as const, requiresReconnect };
 }

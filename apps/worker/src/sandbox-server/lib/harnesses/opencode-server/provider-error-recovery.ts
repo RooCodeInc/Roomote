@@ -1,14 +1,18 @@
-import { asFiniteNumber, asRecord, asString } from '@roomote/types';
+import {
+  asFiniteNumber,
+  asRecord,
+  asString,
+  buildInferenceProviderRecoveryPrompt,
+  resolveInferenceProviderRetryDelayMs,
+} from '@roomote/types';
 
-const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES = 3;
+const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES = 6;
 const DEFAULT_OPENCODE_POLICY_REFUSAL_MAX_RETRIES = 2;
-export const DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS = 1_000;
-export const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS = 30_000;
+export const DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS = 5_000;
+export const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS = 60_000;
 
-const OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT = [
-  'Continue. The previous model request failed due to a provider error and was automatically retried.',
-  'Resume from where you left off without restating the provider error.',
-].join(' ');
+const OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT =
+  buildInferenceProviderRecoveryPrompt();
 
 const OPENCODE_POLICY_REFUSAL_RETRY_PROMPT_TEXT = [
   'Continue the legitimate task. The previous model request was declined by the provider safety policy.',
@@ -161,8 +165,9 @@ export function isOpenCodeTerminalProviderError(error: unknown): boolean {
 /**
  * Provider session errors are recoverable by default because they normally
  * invalidate one model turn, not the OpenCode session or Roomote task. Keep a
- * small bounded retry budget, while explicit auth/configuration failures fail
- * immediately instead of burning requests that cannot succeed.
+ * bounded retry budget with enough backoff for transient overloads to clear,
+ * while explicit auth/configuration failures fail immediately instead of
+ * burning requests that cannot succeed.
  */
 export function getOpenCodeProviderErrorRecovery(
   error: unknown,
@@ -193,17 +198,14 @@ export function resolveOpenCodeProviderErrorRetryDelayMs(options: {
   baseDelayMs?: number;
   maxDelayMs?: number;
 }): number {
-  const baseDelayMs = Math.max(
-    1_000,
-    options.baseDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS,
-  );
-  const maxDelayMs = Math.max(
-    baseDelayMs,
-    options.maxDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS,
-  );
-  const attemptNumber = Math.max(1, options.attemptNumber);
-
-  return Math.min(baseDelayMs * 2 ** (attemptNumber - 1), maxDelayMs);
+  return resolveInferenceProviderRetryDelayMs({
+    attemptNumber: options.attemptNumber,
+    rateLimited: false,
+    baseDelayMs:
+      options.baseDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS,
+    maxDelayMs:
+      options.maxDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS,
+  });
 }
 
 const ERROR_SUMMARY_MAX_CHARS = 280;

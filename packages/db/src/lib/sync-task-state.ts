@@ -3,6 +3,7 @@ import { RunStatus, type TaskState } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import { taskRuns, tasks } from '../schema';
+import { touchSessionForTask } from './sessions';
 
 /**
  * Run statuses that keep the owning task 'active': the sandbox is still (or
@@ -134,4 +135,6 @@ export async function syncTaskStateFromRuns(
     .update(tasks)
     .set({ state: nextState, updatedAt: new Date() })
     .where(and(eq(tasks.id, taskId), ne(tasks.state, nextState)));
+
+  await touchSessionForTask(tx, taskId, Math.floor(Date.now() / 1000));
 }

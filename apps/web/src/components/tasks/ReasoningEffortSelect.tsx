@@ -16,6 +16,8 @@ import {
   SelectValue,
 } from '@/components/system';
 
+const EMPTY_OPTION_VALUE = '__reasoning-effort-select-empty__';
+
 /**
  * Reasoning-level picker shared by the admin model settings page and the
  * in-task model switcher. Shows the effective level (explicit value or the
@@ -29,6 +31,7 @@ export function ReasoningEffortSelect({
   ariaLabel,
   className = 'w-36 shrink-0',
   size,
+  emptyOptionLabel,
 }: {
   value: ReasoningEffort | null;
   defaultEffort: ReasoningEffort;
@@ -37,12 +40,22 @@ export function ReasoningEffortSelect({
   ariaLabel: string;
   className?: string;
   size?: 'sm' | 'default';
+  /** Optional label for a null/no-override selection. */
+  emptyOptionLabel?: string;
 }) {
   return (
     <Select
-      value={value ?? defaultEffort}
+      value={
+        emptyOptionLabel && value === null
+          ? EMPTY_OPTION_VALUE
+          : (value ?? defaultEffort)
+      }
       onValueChange={(nextValue) =>
-        onChange(normalizeOptionalReasoningEffort(nextValue))
+        onChange(
+          nextValue === EMPTY_OPTION_VALUE
+            ? null
+            : normalizeOptionalReasoningEffort(nextValue),
+        )
       }
       disabled={disabled}
     >
@@ -52,6 +65,11 @@ export function ReasoningEffortSelect({
       <SelectContent align="end">
         <SelectGroup>
           <SelectLabel className="mt-0">Reasoning Level</SelectLabel>
+          {emptyOptionLabel ? (
+            <SelectItem value={EMPTY_OPTION_VALUE}>
+              {emptyOptionLabel}
+            </SelectItem>
+          ) : null}
           {REASONING_EFFORT_OPTIONS.map((option) => (
             <SelectItem key={option.value} value={option.value}>
               {option.label}

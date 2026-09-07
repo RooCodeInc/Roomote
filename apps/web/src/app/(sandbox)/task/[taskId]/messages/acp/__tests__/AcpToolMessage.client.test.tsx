@@ -7,9 +7,21 @@ import {
 } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { Bot, Eye, Search, SquarePen, Wrench } from '@/components/system';
+import {
+  AlertCircle,
+  BookOpenText,
+  Bot,
+  FileIcon,
+  List,
+  Search,
+  SquarePen,
+  Wrench,
+} from '@/components/system';
+import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
+import { resolveTaskRobotIconId } from '@/lib/task-robot-icons';
 
 import { AcpToolMessage } from '../AcpToolMessage';
+import { mcpIntegrationIconFor } from '../tool-icons';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
 
 const toolHeaderSpy = vi.fn();
@@ -46,9 +58,23 @@ vi.mock('@/components/ai-elements', () => ({
     state?: string;
     params?: unknown;
     collapsible?: boolean;
+    iconElement?: ReactNode;
+    iconAction?: { label: string; onClick: () => void };
   }) => {
     toolHeaderSpy(props);
-    return <div>{props.action}</div>;
+    return (
+      <div>
+        {props.iconAction ? (
+          <button type="button" onClick={props.iconAction.onClick}>
+            {props.iconElement}
+            {props.iconAction.label}
+          </button>
+        ) : (
+          props.iconElement
+        )}
+        {props.action}
+      </div>
+    );
   },
   ToolContent: ({ children }: { children?: ReactNode }) => (
     <div>{children}</div>
@@ -139,12 +165,103 @@ describe('AcpToolMessage', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([
+    ['read', 'Read', 'file'],
+    ['apply_patch', 'Edited', ''],
+    ['skill', 'Loaded', 'skill'],
+  ])(
+    'renders semantic %s headers instead of result prose',
+    (toolName, action, object) => {
+      render(
+        <AcpToolMessage
+          msg={buildResultMessage(toolName, {
+            toolName,
+            title: 'Success. Updated the following files: D private/path',
+          })}
+        />,
+      );
+      expect(toolHeaderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ action, object, state: 'output-available' }),
+      );
+    },
+  );
+
+  it('renders failure language even when a failed patch is still partial', () => {
+    render(
+      <AcpToolMessage
+        msg={{
+          ...buildResultMessage('apply_patch', {
+            toolName: 'apply_patch',
+            status: 'failed',
+          }),
+          partial: true,
+        }}
+      />,
+    );
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Failed to Edit',
+        object: '',
+        state: 'output-error',
+      }),
+    );
+  });
+
   it('uses SquarePen for edit tool calls', () => {
     render(<AcpToolMessage msg={buildMessage('edit')} />);
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         icon: SquarePen,
+      }),
+    );
+  });
+
+  it('keeps the resolved tool icon while the header renders running progress', () => {
+    render(
+      <AcpToolMessage msg={buildMessage('edit', { status: 'in_progress' })} />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: SquarePen,
+        state: 'input-available',
+      }),
+    );
+  });
+
+  it('keeps a known MCP brand icon while the header renders running progress', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('mcp', {
+          status: 'in_progress',
+          isMcp: true,
+          mcpServerName: 'sentry',
+          mcpToolName: 'search_issues',
+          serverName: 'sentry',
+          toolName: 'search_issues',
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: mcpIntegrationIconFor('sentry'),
+        state: 'input-available',
+      }),
+    );
+  });
+
+  it('keeps failure presentation ahead of partial progress', () => {
+    const msg = buildMessage('edit', { status: 'failed' });
+    msg.partial = true;
+
+    render(<AcpToolMessage msg={msg} />);
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: AlertCircle,
+        state: 'output-error',
       }),
     );
   });
@@ -156,6 +273,22 @@ describe('AcpToolMessage', () => {
       expect.objectContaining({
         icon: Bot,
         collapsible: false,
+      }),
+    );
+  });
+
+  it('renders requests for user input as human guidance with the List icon', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('tool', { toolName: 'request_user_input' })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Asked for',
+        object: 'human guidance',
+        icon: List,
       }),
     );
   });
@@ -323,30 +456,107 @@ describe('AcpToolMessage', () => {
     );
   });
 
-  it('renders Roomote Slack lifecycle tools as compact title-only rows', () => {
+  it.each([
+    ['send_chat_reply', 'Sent', 'chat reply'],
+    ['send_task_message', 'Sent', 'message to task'],
+    ['report_to_parent_session', 'Sent', 'report to Session'],
+    ['receive_task_report', 'Received', 'task report'],
+    ['inspect_images', 'Inspected', 'Images'],
+  ])('renders %s as an expandable receipt', (toolName, action, object) => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('mcp', {
-          title: 'send_chat_reply',
+          title: toolName,
           isMcp: true,
           mcpServerName: 'roomote',
-          mcpToolName: 'send_chat_reply',
+          mcpToolName: toolName,
           serverName: 'roomote',
-          toolName: 'send_chat_reply',
+          toolName,
+          rawInput: { arguments: { message: 'Brief Slack update.' } },
           output: '{"success":true,"summary":"Brief Slack update."}',
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action,
+        object,
+        collapsible: true,
+      }),
+    );
+  });
+
+  it('renders effect-free Roomote lifecycle tools without provider attribution', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'ignore_event',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'ignore_event',
+          serverName: 'roomote',
+          toolName: 'ignore_event',
+          output: '{"success":true,"ignored":true}',
         })}
       />,
     );
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'Used',
-        object: 'Send Chat Reply',
-        suffix: 'Roomote',
+        action: 'Completed',
+        object: 'Ignore Event call',
+        suffix: undefined,
         collapsible: false,
       }),
     );
     expect(toolDetailsSpy).not.toHaveBeenCalled();
+  });
+
+  it('renders Memory tools with natural wording and the Open Book icon', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'query',
+          isMcp: true,
+          mcpServerName: 'gbrain',
+          mcpToolName: 'query',
+          serverName: 'gbrain',
+          toolName: 'query',
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Searched',
+        object: 'my memory',
+        suffix: undefined,
+        icon: BookOpenText,
+      }),
+    );
+  });
+
+  it('uses the known MCP integration’s brand icon', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'search_issues',
+          isMcp: true,
+          mcpServerName: 'sentry',
+          mcpToolName: 'search_issues',
+          serverName: 'sentry',
+          toolName: 'search_issues',
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: mcpIntegrationIconFor('sentry'),
+        suffix: 'Sentry',
+      }),
+    );
   });
 
   it('keeps Wrench as the fallback icon for unknown tool kinds', () => {
@@ -359,12 +569,229 @@ describe('AcpToolMessage', () => {
     );
   });
 
+  it('shows the referenced task robot for task-message activity', () => {
+    const msg = buildResultMessage('task', {
+      toolName: 'send_task_message',
+      output: JSON.stringify({ success: true, taskId: 'child-42' }),
+    });
+    (
+      msg.data as AcpToolResultUiMessage['data'] & {
+        rawInput: Record<string, unknown>;
+      }
+    ).rawInput = {
+      arguments: { taskId: 'child-42', message: 'Check the tests' },
+    };
+
+    render(<AcpToolMessage msg={msg} />);
+
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
+  });
+
+  it('opens and focuses a task from its Roomote MCP activity icon', () => {
+    const openTask = vi.fn();
+    const msg = buildMessage('mcp', {
+      isMcp: true,
+      mcpServerName: 'roomote',
+      mcpToolName: 'manage_tasks',
+      toolName: 'manage_tasks',
+      rawInput: {
+        arguments: {
+          action: 'get_messages',
+          taskId: 'child-42',
+        },
+      },
+    } as never);
+
+    render(
+      <TaskRobotIconProvider
+        sessionId="session-1"
+        orderedTaskIds={['child-42']}
+        onOpenTask={openTask}
+      >
+        <AcpToolMessage msg={msg} />
+      </TaskRobotIconProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Focus task prompt' }));
+    expect(openTask).toHaveBeenCalledWith('child-42');
+  });
+
+  it('keeps the normal icon for Session-targeted Roomote MCP activity', () => {
+    const msg = buildMessage('mcp', {
+      isMcp: true,
+      mcpServerName: 'roomote',
+      mcpToolName: 'manage_tasks',
+      toolName: 'manage_tasks',
+      rawInput: {
+        arguments: {
+          action: 'send_message',
+          sessionId: 'session-1',
+        },
+      },
+    } as never);
+
+    render(
+      <TaskRobotIconProvider
+        sessionId="session-1"
+        orderedTaskIds={['child-42']}
+      >
+        <AcpToolMessage msg={msg} />
+      </TaskRobotIconProvider>,
+    );
+
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not replace generic tool icons with task robots', () => {
+    render(<AcpToolMessage msg={buildMessage('edit')} />);
+
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).not.toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ icon: SquarePen, iconElement: undefined }),
+    );
+  });
+
+  it('shares outgoing, incoming, and parent-report identity in a task scope', () => {
+    const openTask = vi.fn();
+    const outgoing = buildResultMessage('task', {
+      toolName: 'send_task_message',
+      output: JSON.stringify({ result: { taskId: 'child-42' } }),
+    });
+    const incoming = buildResultMessage('task', {
+      toolName: 'receive_task_report',
+      ...{ rawInput: { taskId: 'child-42' } },
+    });
+    const report = buildResultMessage('mcp', {
+      isMcp: true,
+      serverName: 'roomote',
+      toolName: 'report_to_parent_session',
+    });
+    const { container } = render(
+      <TaskRobotIconProvider
+        sessionId="session-1"
+        orderedTaskIds={['other', 'child-42']}
+        currentTaskId="child-42"
+        onOpenTask={openTask}
+      >
+        <AcpToolMessage msg={outgoing} />
+        <AcpToolMessage msg={incoming} />
+        <AcpToolMessage msg={report} />
+      </TaskRobotIconProvider>,
+    );
+    const expected = resolveTaskRobotIconId({
+      sessionId: 'session-1',
+      taskId: 'child-42',
+      orderedTaskIds: ['other', 'child-42'],
+    });
+    expect(
+      container.querySelectorAll(`[data-task-robot-icon="${expected}"]`),
+    ).toHaveLength(3);
+    for (const button of screen.getAllByRole('button', {
+      name: 'Focus task prompt',
+    }))
+      fireEvent.click(button);
+    expect(openTask.mock.calls).toEqual([
+      ['child-42'],
+      ['child-42'],
+      ['child-42'],
+    ]);
+  });
+
+  it('renders a stable nonclickable invader when an eligible identity is unknown', () => {
+    const openTask = vi.fn();
+    const { container, rerender } = render(
+      <TaskRobotIconProvider
+        sessionId="session-1"
+        orderedTaskIds={['sole-child']}
+        onOpenTask={openTask}
+      >
+        <AcpToolMessage
+          msg={buildResultMessage('task', { toolName: 'receive_task_report' })}
+        />
+      </TaskRobotIconProvider>,
+    );
+    const iconId = container
+      .querySelector('[data-task-robot-icon]')
+      ?.getAttribute('data-task-robot-icon');
+    expect(iconId).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Focus task prompt' }),
+    ).not.toBeInTheDocument();
+    rerender(
+      <AcpToolMessage
+        msg={buildResultMessage('task', {
+          toolName: 'report_to_parent_session',
+        })}
+      />,
+    );
+    expect(container.querySelector('[data-task-robot-icon]')).toHaveAttribute(
+      'data-task-robot-icon',
+      iconId,
+    );
+    expect(openTask).not.toHaveBeenCalled();
+  });
+
+  it.each(['in_progress', 'failed'] as const)(
+    'preserves %s state for eligible task tools',
+    (status) => {
+      const msg = buildResultMessage('task', {
+        toolName: 'receive_task_report',
+        status,
+        ...{ rawInput: { taskId: 'child-42' } },
+      });
+      const { container } = render(<AcpToolMessage msg={msg} />);
+      expect(toolHeaderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: status === 'failed' ? 'output-error' : 'input-available',
+          ...(status === 'failed'
+            ? {
+                icon: AlertCircle,
+                iconElement: undefined,
+                iconAction: undefined,
+              }
+            : {}),
+        }),
+      );
+      expect(container.querySelectorAll('[data-task-robot-icon]')).toHaveLength(
+        status === 'failed' ? 0 : 1,
+      );
+    },
+  );
+
+  it('preserves a foreign integration icon for a same-named receipt', () => {
+    const { container } = render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          toolName: 'receive_task_report',
+          isMcp: true,
+          serverName: 'linear',
+          ...{ rawInput: { taskId: 'child-42' } },
+        })}
+      />,
+    );
+    expect(
+      container.querySelector('[data-task-robot-icon]'),
+    ).not.toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: mcpIntegrationIconFor('linear'),
+        iconElement: undefined,
+      }),
+    );
+  });
+
   it('hides expanded details for read tool calls', () => {
     render(<AcpToolMessage msg={buildMessage('read')} />);
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        icon: Eye,
+        icon: FileIcon,
         collapsible: false,
       }),
     );
@@ -406,8 +833,8 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'Used',
-        object: 'Manage Artifacts',
+        action: 'Completed',
+        object: 'Manage Artifacts call',
         collapsible: false,
       }),
     );
@@ -443,8 +870,8 @@ describe('AcpToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'Used',
-        object: 'Show Widget',
+        action: 'Completed',
+        object: 'Show Widget call',
         collapsible: false,
       }),
     );
@@ -538,6 +965,12 @@ describe('AcpToolMessage', () => {
     expect(screen.getByRole('img', { name: 'Visual proof' })).toHaveAttribute(
       'src',
       '/api/artifacts/art-1/raw?sig=fresh',
+    );
+    expect(screen.getByRole('img', { name: 'Visual proof' })).toHaveClass(
+      'h-auto',
+      'max-h-[200px]',
+      'w-auto',
+      'max-w-[min(100%,40rem)]',
     );
     // The subagent row keeps its collapsible prompt/details alongside the
     // always-visible preview.

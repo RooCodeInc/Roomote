@@ -1,12 +1,17 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const { useSandboxLayoutMock, useTRPCMock, updateTitleMutationMock } =
-  vi.hoisted(() => ({
-    useSandboxLayoutMock: vi.fn(),
-    useTRPCMock: vi.fn(),
-    updateTitleMutationMock: vi.fn(async () => undefined),
-  }));
+const {
+  useSandboxLayoutMock,
+  useTRPCMock,
+  updateTitleMutationMock,
+  parentSessionQueryMock,
+} = vi.hoisted(() => ({
+  useSandboxLayoutMock: vi.fn(),
+  useTRPCMock: vi.fn(),
+  updateTitleMutationMock: vi.fn(async () => undefined),
+  parentSessionQueryMock: vi.fn(),
+}));
 
 vi.mock('../../use-sandbox-layout', () => ({
   useSandboxLayout: useSandboxLayoutMock,
@@ -14,6 +19,10 @@ vi.mock('../../use-sandbox-layout', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: useTRPCMock,
+}));
+
+vi.mock('./TaskSessionReadTracker', () => ({
+  TaskSessionReadTracker: () => null,
 }));
 
 vi.mock('@/components/sandbox', () => ({
@@ -66,16 +75,22 @@ function renderHeader(
     ...sessionOverride,
   } as Parameters<typeof Header>[0]['session'];
 
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <Header session={session} />
     </QueryClientProvider>,
   );
+
+  return { ...result, queryClient };
 }
 
 describe('Header', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    parentSessionQueryMock.mockResolvedValue({
+      sessionId: 'session-1',
+      title: 'Parent Session',
+    });
 
     useSandboxLayoutMock.mockReturnValue({
       isSidebarVisible: true,
@@ -91,6 +106,30 @@ describe('Header', () => {
           ],
         },
       },
+      sessions: {
+        forTask: {
+          queryOptions: (
+            _input: { taskId: string },
+            options?: { enabled?: boolean },
+          ) => ({
+            queryKey: ['sessions.forTask'],
+            queryFn: parentSessionQueryMock,
+            enabled: options?.enabled,
+          }),
+        },
+        byId: {
+          queryOptions: (
+            _input: { sessionId: string },
+            options?: { enabled?: boolean },
+          ) => ({
+            queryKey: ['sessions.byId'],
+            queryFn: async () => ({
+              tasks: [{ taskId: 'task-123' }, { taskId: 'task-456' }],
+            }),
+            enabled: options?.enabled,
+          }),
+        },
+      },
       tasks: {
         updateTitle: {
           mutationOptions: () => ({
@@ -100,6 +139,9 @@ describe('Header', () => {
         list: {
           queryKey: () => ['tasks.list'],
         },
+        search: {
+          queryKey: () => ['tasks.search'],
+        },
       },
     });
   });
@@ -108,6 +150,9 @@ describe('Header', () => {
     renderHeader();
 
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
   });
 
   it('keeps the header clean when the task uses OpenCode', () => {
@@ -135,5 +180,81 @@ describe('Header', () => {
     });
 
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
+  });
+
+  it('replaces breadcrumbs with a back-to-session control', async () => {
+    renderHeader();
+
+    expect(
+      await screen.findByRole('link', { name: 'Back to session' }),
+    ).toHaveAttribute('href', '/sessions/session-1?task=task-123');
+    expect(screen.queryByText('Parent Session')).not.toBeInTheDocument();
+    expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
+    expect(parentSessionQueryMock).toHaveBeenCalled();
+  });
+
+  it('links to the Fast session when the task has no unified session', async () => {
+    parentSessionQueryMock.mockResolvedValue(null);
+
+    renderHeader({
+      taskRun: {
+        payload: {
+          environmentId: 'env-1',
+          fastAgentSessionId: '00000000-0000-4000-8000-000000000001',
+        },
+        harness: 'opencode-server',
+      } as never,
+    });
+
+    expect(
+      await screen.findByRole('link', { name: 'Back to session' }),
+    ).toHaveAttribute('href', '/sessions/00000000-0000-4000-8000-000000000001');
+  });
+
+  it('renders environment and pull request badges together', async () => {
+    renderHeader({
+      taskRun: {
+        payload: { environmentId: 'env-1' },
+        pullRequests: [
+          {
+            repository: 'RooCodeInc/Roomote',
+            prNumber: 42,
+            prUrl: 'https://github.com/RooCodeInc/Roomote/pull/42',
+          },
+        ],
+      } as never,
+    });
+
+    expect(
+      await screen.findByText('RooCodeInc/Roomote#42'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
+  });
+
+  it('refreshes task lists after renaming a task', async () => {
+    const { queryClient } = renderHeader();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit task title' }));
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Renamed task' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(updateTitleMutationMock).toHaveBeenCalledWith(
+        {
+          taskId: 'task-123',
+          title: 'Renamed task',
+        },
+        expect.any(Object),
+      );
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['tasks.list'],
+      });
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['tasks.search'],
+      });
+    });
   });
 });

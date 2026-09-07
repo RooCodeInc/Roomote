@@ -36,6 +36,7 @@ const BITBUCKET_WEBHOOK_EVENTS = [
   'pullrequest:rejected',
   'pullrequest:comment_created',
   'pullrequest:comment_updated',
+  'repo:push',
   // CI Failure Triage: Bitbucket Pipelines posts commit statuses; failures are
   // filtered in the webhook handler.
   'repo:commit_status_created',
@@ -1323,4 +1324,135 @@ export async function createTaskRunBitbucketCredentials(
     })),
     expiresAt: auth.expiresAt,
   };
+}
+
+const bitbucketPullRequestDetailsSchema = z
+  .object({
+    id: z.number(),
+    title: z.string(),
+    description: z.string().nullable().optional(),
+    source: z
+      .object({
+        branch: z
+          .object({ name: z.string().optional() })
+          .passthrough()
+          .optional(),
+        commit: z
+          .object({ hash: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+    destination: z
+      .object({
+        branch: z
+          .object({ name: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+    links: z
+      .object({
+        html: z
+          .object({ href: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export type BitbucketPullRequestDetails = z.infer<
+  typeof bitbucketPullRequestDetailsSchema
+>;
+
+/** Fetches a pull request by repository full name and number. */
+export async function getBitbucketPullRequest({
+  repositoryFullName,
+  pullRequestNumber,
+  token,
+  username,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  token?: string;
+  username?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<BitbucketPullRequestDetails> {
+  const auth = await resolveAuthIdentity({
+    token,
+    username,
+    baseUrl,
+    apiBaseUrl,
+    fetchImpl,
+  });
+  const { workspace, repo } =
+    splitBitbucketRepositoryFullName(repositoryFullName);
+  const { data } = await requestBitbucketJson({
+    apiBaseUrl: auth.apiBaseUrl,
+    fetchImpl,
+    path: `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests/${pullRequestNumber}`,
+    username: auth.username,
+    token: auth.token,
+    authScheme: auth.authScheme,
+    schema: bitbucketPullRequestDetailsSchema,
+  });
+
+  return data;
+}
+
+/** Replaces the body of an existing pull request comment. */
+export async function updateBitbucketPullRequestComment({
+  repositoryFullName,
+  pullRequestNumber,
+  commentId,
+  body,
+  token,
+  username,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  commentId: number;
+  body: string;
+  token?: string;
+  username?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const auth = await resolveAuthIdentity({
+    token,
+    username,
+    baseUrl,
+    apiBaseUrl,
+    fetchImpl,
+  });
+  const { workspace, repo } =
+    splitBitbucketRepositoryFullName(repositoryFullName);
+  await requestBitbucketJson({
+    apiBaseUrl: auth.apiBaseUrl,
+    fetchImpl,
+    method: 'PUT',
+    path: `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests/${pullRequestNumber}/comments/${commentId}`,
+    username: auth.username,
+    token: auth.token,
+    authScheme: auth.authScheme,
+    body: { content: { raw: body } },
+    schema: bitbucketCommentSchema,
+  });
 }

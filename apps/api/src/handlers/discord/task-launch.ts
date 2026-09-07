@@ -1,6 +1,8 @@
 import {
   ALL_REPOSITORIES,
+  buildFastAgentChildTaskMetadata,
   TaskPayloadKind,
+  type FastAgentParent,
   type QueuedCommunicationMessage,
   type TaskInitiator,
   type TaskSpec,
@@ -21,10 +23,7 @@ import type { DiscordEventCommunicationMetadata } from '@roomote/communication/d
 import { getRedis } from '@roomote/redis';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
-import {
-  replaceOrPostDiscordMessage,
-  type DiscordMessageToReplace,
-} from './replies.js';
+import {} from './replies.js';
 import {
   discordTaskAcknowledgementText,
   discordTaskButtons,
@@ -236,9 +235,7 @@ async function rememberPendingTaskThread(
   );
 }
 
-export async function forgetPendingTaskThread(
-  sourceEventId: string,
-): Promise<void> {
+async function forgetPendingTaskThread(sourceEventId: string): Promise<void> {
   await getRedis().del(pendingTaskThreadKey(sourceEventId));
 }
 
@@ -282,7 +279,7 @@ async function alignProvisionalTaskThreadName(input: {
  * thread — or when the triggering message is already gone. Those callers keep
  * the detached task thread that the launch creates.
  */
-export async function reserveDiscordAnchoredThread(input: {
+async function reserveDiscordAnchoredThread(input: {
   provider: DiscordCommunicationProvider;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
@@ -363,18 +360,16 @@ export async function launchDiscordTask(input: {
   workspace: DiscordWorkspaceSelection;
   /** `/new` in an existing task thread creates a sibling, never a second run in-place. */
   forceNewThread?: boolean;
-  /**
-   * An already-posted message to turn into the acknowledgement instead of
-   * posting a new one — a routing card sitting in the task thread becomes the
-   * started message rather than being followed by an identical one. Only pass
-   * a message that lives where the acknowledgement would have gone.
-   */
-  replaceMessage?: DiscordMessageToReplace;
-  /**
-   * Router free-form kickoff sentence (Slack parity). When set and normalizable,
-   * it becomes the Discord acknowledgement text instead of the static template.
-   */
-  kickoffMessage?: string | null;
+  /** Exact deployment-enabled model selected by the Fast orchestrator. */
+  model?: string;
+  fastAgentSessionId?: string;
+  fastAgentParent?: FastAgentParent;
+  /** Post the Fast model-authored kickoff before enqueueing and suppress the
+   * generic Discord task acknowledgement. */
+  beforeEnqueueKickoff?: (task: {
+    taskId: string;
+    taskUrl?: string;
+  }) => Promise<void>;
   /**
    * True only when a pre-enqueue MESSAGE_CREATE 👀 reaction succeeded on the
    * origin message. Worker onStart cleanup keys off this so failed soft-acks
@@ -448,10 +443,18 @@ export async function launchDiscordTask(input: {
         ...(input.agentPromptText?.trim()
           ? { agentPromptText: input.agentPromptText.trim() }
           : {}),
+        ...(input.model
+          ? { harnessModelOverrides: { 'opencode-server': input.model } }
+          : {}),
         ...(input.queuedMessage.images?.length
           ? { images: input.queuedMessage.images }
           : {}),
         communicationProvider: 'discord',
+        ...(input.fastAgentParent
+          ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
+          : input.fastAgentSessionId
+            ? { fastAgentSessionId: input.fastAgentSessionId }
+            : {}),
         communicationChannelId,
         ...(input.metadata.communicationGuildId
           ? { communicationGuildId: input.metadata.communicationGuildId }
@@ -485,7 +488,9 @@ export async function launchDiscordTask(input: {
   }
 
   const titleThreadId = createdThread?.channelId;
+  const beforeEnqueueKickoff = input.beforeEnqueueKickoff;
 
+  let taskUrl: string | undefined;
   const launchResult = await enqueueTask(
     {
       task,
@@ -552,10 +557,24 @@ export async function launchDiscordTask(input: {
             },
           }
         : {}),
+      ...(beforeEnqueueKickoff
+        ? {
+            beforeEnqueue: async (taskRun: { taskId: string }) => {
+              taskUrl = getTaskUrl({
+                taskId: taskRun.taskId,
+                utm: { source: 'discord', campaign: 'discord.thread_start' },
+              });
+              await beforeEnqueueKickoff({
+                taskId: taskRun.taskId,
+                ...(taskUrl ? { taskUrl } : {}),
+              });
+            },
+          }
+        : {}),
     },
   );
 
-  const taskUrl = getTaskUrl({
+  taskUrl ??= getTaskUrl({
     taskId: launchResult.taskId,
     utm: { source: 'discord', campaign: 'discord.thread_start' },
   });
@@ -563,18 +582,13 @@ export async function launchDiscordTask(input: {
     text: discordTaskAcknowledgementText({
       workspaceDisplayName: input.workspace.workspaceDisplayName,
       taskUrl,
-      ...(input.kickoffMessage ? { kickoffMessage: input.kickoffMessage } : {}),
     }),
     buttons: discordTaskButtons({ runId: launchResult.id, taskUrl }),
   };
   // Replacing already falls back to posting when the original message cannot
   // be edited, so the task is acknowledged either way.
-  const acknowledgement = input.replaceMessage
-    ? await replaceOrPostDiscordMessage({
-        provider: input.provider,
-        replace: input.replaceMessage,
-        ...acknowledgementMessage,
-      })
+  const acknowledgement = beforeEnqueueKickoff
+    ? null
     : await input.provider.postMessage({
         channelId: communicationChannelId,
         ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
@@ -585,7 +599,7 @@ export async function launchDiscordTask(input: {
   // acknowledgement message so terminal/cancel reactions have a valid target.
   // Do not pin 👀 here: intake eyes are MESSAGE_CREATE-only, and post-enqueue
   // eyes race worker onStart cleanup (which can already have run).
-  if (!originReaction && acknowledgement.messageId) {
+  if (!originReaction && acknowledgement?.messageId) {
     reactionTarget = {
       channelId: communicationThreadId ?? communicationChannelId,
       messageId: acknowledgement.messageId,

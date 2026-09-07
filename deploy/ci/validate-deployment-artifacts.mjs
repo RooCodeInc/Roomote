@@ -15,6 +15,10 @@ import YAML from 'yaml';
 const root = resolve(import.meta.dirname, '../..');
 const read = (path) => readFileSync(join(root, path), 'utf8');
 const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
+const installer = read('deploy/install.sh');
+const deployer = read('deploy/scripts/deploy.sh');
+const upgradeCompatibility = read('deploy/ci/upgrade-compatibility.sh');
+const productionEnvExample = read('.env.production.example');
 
 function fail(message) {
   throw new Error(message);
@@ -23,6 +27,102 @@ function fail(message) {
 function assert(condition, message) {
   if (!condition) fail(message);
 }
+
+assert(
+  installer.includes('--no-setup-url') &&
+    installer.includes("print_setup_url='false'") &&
+    installer.includes('sudo roomote setup-url'),
+  'installer: automated installs must be able to suppress the tokenized setup URL',
+);
+
+assert(
+  installer.includes('preview_domain="$domain"') &&
+    installer.includes(
+      'preview_subdomain_suffix="${saved_preview_subdomain_suffix:-preview}"',
+    ),
+  'installer: new installs must default to flat preview hostnames with a suffix',
+);
+assert(
+  installer.includes(
+    'read_saved_env_value "$install_root/.env" ROOMOTE_PREVIEW_DOMAIN',
+  ) &&
+    installer.includes(
+      'read_saved_env_value "$install_root/.env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+    ),
+  'installer: reruns must preserve existing preview hostname settings',
+);
+assert(
+  installer.includes(
+    'set_env_value PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"',
+  ),
+  'installer: preview suffix must be persisted for Compose services',
+);
+assert(
+  productionEnvExample.includes(
+    'ROOMOTE_APP_DOMAIN=roomote.example.com\nROOMOTE_PREVIEW_DOMAIN=roomote.example.com\nPREVIEW_PROXY_SUBDOMAIN_SUFFIX=preview',
+  ),
+  'production env example: new installs must default to flat preview hostnames',
+);
+assert(
+  deployer.includes('preview_domain="$domain"') &&
+    deployer.includes(
+      'configured_preview_subdomain_suffix="$(read_env_value "$env_file" PREVIEW_PROXY_SUBDOMAIN_SUFFIX)"',
+    ) &&
+    deployer.includes(
+      'preview_subdomain_suffix="$configured_preview_subdomain_suffix"',
+    ) &&
+    deployer.includes(
+      'set_env_value "$tmp_env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"',
+    ),
+  'DigitalOcean deployer: flat previews must preserve custom suffixes and default to preview',
+);
+assert(
+  deployer.includes('read_tfvars_value "$tfvars_file" domain') &&
+    deployer.includes('read_tfvars_value "$tfvars_file" preview_domain'),
+  'DigitalOcean deployer: reruns must preserve the preview layout, not a stale preview domain',
+);
+const digitalOceanTerraform = read('deploy/providers/digitalocean/main.tf');
+assert(
+  digitalOceanTerraform.includes(
+    'preview_domain = var.preview_domain != "" ? var.preview_domain : var.domain',
+  ) &&
+    digitalOceanTerraform.includes(
+      'count  = var.manage_dns && local.preview_domain != var.domain ? 1 : 0',
+    ),
+  'DigitalOcean Terraform: flat previews must not duplicate the app DNS record',
+);
+assert(
+  digitalOceanTerraform.includes('local.preview_domain == var.dns_zone') &&
+    digitalOceanTerraform.includes('var.domain == var.dns_zone'),
+  'DigitalOcean Terraform: zone-apex domains must map to "@"/"*" record names',
+);
+assert(
+  upgradeCompatibility.includes('COMPOSE_PROFILES=local-postgres,brain') &&
+    upgradeCompatibility.includes('bullmq gbrain preview-proxy'),
+  'upgrade compatibility: the Brain profile must boot gbrain explicitly',
+);
+assert(
+  upgradeCompatibility.includes(
+    'postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-0}"',
+  ) &&
+    upgradeCompatibility.includes(
+      'postgres_endpoint="$(compose port postgres 5432)"',
+    ) &&
+    upgradeCompatibility.includes("'' | *[!0-9]*)") &&
+    upgradeCompatibility.includes(
+      'DATABASE_URL="postgres://postgres:roomote-postgres-password@127.0.0.1:$postgres_port/roomote"',
+    ),
+  'upgrade compatibility: Docker must allocate the default host Postgres port',
+);
+assert(
+  upgradeCompatibility.includes('trap finish EXIT') &&
+    upgradeCompatibility.includes('compose ps --all') &&
+    upgradeCompatibility.includes('Required service logs:') &&
+    upgradeCompatibility.includes(
+      'postgres redis minio minio-init docker-proxy db-migrate api web controller bullmq gbrain preview-proxy',
+    ),
+  'upgrade compatibility: startup failures must report Compose state and service logs',
+);
 
 function commandText(command) {
   if (Array.isArray(command)) return command.join(' ');
@@ -51,6 +151,7 @@ const composeEnv = {
   DEFAULT_COMPUTE_PROVIDER: 'docker',
   DOCKER_WORKER_IMAGE: 'roomote-worker:deployment-ci',
   ENCRYPTION_KEY: 'deployment-ci-encryption-key',
+  GBRAIN_IMAGE: '',
   IMAGE_NAMESPACE: 'roomote',
   IMAGE_REGISTRY: 'localhost',
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
@@ -60,12 +161,13 @@ const composeEnv = {
   R_DISCORD_GATEWAY_SECRET: 'deployment-ci-discord-gateway-secret',
   PREVIEW_AUTH_PRIVATE_KEY: 'deployment-ci-preview-private-key',
   PREVIEW_AUTH_PUBLIC_KEY: 'deployment-ci-preview-public-key',
+  PREVIEW_PROXY_SUBDOMAIN_SUFFIX: 'preview',
   REDIS_URL: 'redis://redis:6379',
   ROOMOTE_APP_DOMAIN: 'roomote.localhost',
   ROOMOTE_CADDY_LOCAL_CERTS: 'local_certs',
   ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET: '',
   R_APP_URL: 'http://roomote.localhost',
-  ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.localhost',
+  ROOMOTE_PREVIEW_DOMAIN: 'roomote.localhost',
   ROOMOTE_VERSION: 'deployment-ci',
   S3_ACCESS_KEY_ID: 'roomote',
   S3_SECRET_ACCESS_KEY: 'deployment-ci-minio-password',
@@ -152,6 +254,50 @@ function validateComposeShape(shape) {
       }
     }
 
+    if (['self-host-production', 'installer-production'].includes(shape.name)) {
+      for (const serviceName of ['web', 'api', 'controller', 'preview-proxy']) {
+        const service = config.services[serviceName];
+        if (!service) continue;
+        assert(
+          service.environment?.PREVIEW_PROXY_SUBDOMAIN_SUFFIX ===
+            composeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
+          `${shape.name}: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
+        );
+      }
+    }
+
+    if (shape.name === 'installer-production') {
+      const expectedGbrainImage = `${composeEnv.IMAGE_REGISTRY}/${composeEnv.IMAGE_NAMESPACE}/roomote-gbrain:${composeEnv.ROOMOTE_VERSION}`;
+      assert(
+        config.services.gbrain?.image === expectedGbrainImage,
+        `installer-production: gbrain must default to matching release image ${expectedGbrainImage}`,
+      );
+
+      const overrideImage = 'registry.example/roomote/gbrain:operator-pinned';
+      const overrideConfig = JSON.parse(
+        execFileSync('docker', args, {
+          cwd: root,
+          env: { ...composeEnv, GBRAIN_IMAGE: overrideImage },
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+      assert(
+        overrideConfig.services.gbrain?.image === overrideImage,
+        'installer-production: explicit GBRAIN_IMAGE must override the matching release default',
+      );
+      assert(
+        config.services.gbrain?.healthcheck?.test?.length,
+        'installer-production: gbrain must have a healthcheck for upgrade validation',
+      );
+      assert(
+        config.services.gbrain?.depends_on?.postgres?.condition ===
+          'service_healthy' &&
+          config.services.gbrain?.depends_on?.postgres?.required === false,
+        'installer-production: gbrain must wait for optional local Postgres health',
+      );
+    }
+
     if (
       'ROOMOTE_CADDY_LOCAL_CERTS' in (config.services.caddy?.environment ?? {})
     ) {
@@ -208,6 +354,33 @@ assert(
 assert(
   'R_DISCORD_GATEWAY_SECRET' in railway.services.bullmq.env,
   'railway: bullmq must receive R_DISCORD_GATEWAY_SECRET',
+);
+assert(
+  railway.services.gbrain?.volume === '/data' &&
+    JSON.stringify(railway.services.gbrain?.backup_schedules) ===
+      JSON.stringify(['DAILY', 'WEEKLY']),
+  'railway: gbrain must retain daily and weekly volume backups',
+);
+
+const gbrainEntrypoint = read('.docker/gbrain/entrypoint.sh');
+assert(
+  gbrainEntrypoint.includes(
+    'gbrain config set agent.use_gateway_loop true >/dev/null',
+  ),
+  'gbrain: Roomote gateway models require the gateway-native agent loop',
+);
+const gbrainResetIndex = gbrainEntrypoint.indexOf(
+  'write_storage_layout "$STORAGE_LAYOUT_RESETTING"',
+);
+const gbrainCutoverCompleteIndex = gbrainEntrypoint.indexOf(
+  'write_storage_layout "$STORAGE_LAYOUT_VERSION"',
+);
+const gbrainInitIndex = gbrainEntrypoint.indexOf('\n    gbrain init');
+assert(
+  gbrainResetIndex >= 0 &&
+    gbrainCutoverCompleteIndex > gbrainResetIndex &&
+    gbrainCutoverCompleteIndex < gbrainInitIndex,
+  'gbrain: filesystem cutover must be recorded before fallible initialization',
 );
 
 const render = YAML.parse(read('render.yaml'));
@@ -281,6 +454,16 @@ assert(
 );
 const caddyfile = read('deploy/caddy/Caddyfile');
 assert(
+  caddyfile.includes('path /api/webhooks /api/webhooks/*'),
+  'caddy: app domain must route public webhooks directly to the API',
+);
+assert(
+  caddyfile.includes(
+    'handle @api_webhooks {\n\t\timport roomote_proxy api:3001',
+  ),
+  'caddy: public webhooks must bypass the web application',
+);
+assert(
   caddyfile.includes(
     'path_regexp local_sandbox ^/_roomote-sandbox/([a-z0-9]+)(/.*)$',
   ),
@@ -344,7 +527,7 @@ function validateCaddyfile(mode, contents, environment) {
 
 const caddyEnvironment = {
   ROOMOTE_APP_DOMAIN: 'roomote.example.test',
-  ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.example.test',
+  ROOMOTE_PREVIEW_DOMAIN: 'roomote.example.test',
   S3_BUCKET_ARTIFACTS: 'roomote-artifacts',
 };
 validateCaddyfile('acme', acmeCaddyfile, {
@@ -494,8 +677,10 @@ for (const script of [
   'deploy/scripts/upgrade.sh',
   'deploy/ci/deployment-smoke.sh',
   'deploy/ci/upgrade-compatibility.sh',
+  'deploy/host/tests/backup-brain-probe.sh',
   'deploy/host/tests/backup-restore.integration.sh',
   'deploy/host/tests/upgrade-failed-pull.sh',
+  '.docker/gbrain/entrypoint.sh',
 ]) {
   execFileSync('bash', ['-n', join(root, script)], { stdio: 'pipe' });
 }

@@ -37,6 +37,8 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
         ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: undefined,
         ROOMOTE_COMMUNICATION_PROVIDER: undefined,
         ROOMOTE_SLACK_CHANNEL: undefined,
+        ROOMOTE_FAST_AGENT_CHILD: undefined,
+        ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: undefined,
         ...options.env,
       },
     });
@@ -80,6 +82,26 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stderr).toBe('');
   });
 
+  it('skips enforcement when a PR-review child has no parent report tool', () => {
+    const stateFilePath = writeState({
+      startedAtMs: Date.now() - 8 * 60_000,
+    });
+
+    const result = runHook({
+      env: {
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+        ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: 'false',
+        ROOMOTE_SLACK_HOOK_DEBUG: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('decision="allow"');
+    expect(result.stderr).toContain('reason="parent_session_report_disabled"');
+  });
+
   it('skips Slack silence enforcement for non-parent subagent threads', () => {
     const stateFilePath = writeState({
       parentThreadId: 'thread-parent',
@@ -109,8 +131,8 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
   it.each([
     'mcp__roomote__send_chat_reply',
     'roomote_send_chat_reply',
+    'mcp__roomote__report_to_parent_session',
     'mcp__roomote__send_chat_reaction_emoji',
-    'roomote_add_reaction_to_slack_message',
     'roomote_reply_to_slack_thread',
   ])('denies %s from non-parent subagent threads', (toolName) => {
     const stateFilePath = writeState({
@@ -402,33 +424,6 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stdout).toBe('');
   });
 
-  it.each(['roomote_add_reaction_to_slack_message'])(
-    'rejects %s from late-bound automation tasks',
-    (toolName) => {
-      const stateFilePath = writeState({
-        startedAtMs: Date.now(),
-        currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
-      });
-
-      const result = runHook({
-        input: {
-          hook_event_name: 'PreToolUse',
-          tool_name: toolName,
-        },
-        env: {
-          ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
-        },
-      });
-
-      expect(result.status).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({
-        decision: 'block',
-        permissionDecision: 'deny',
-      });
-    },
-  );
-
   it('allows tool_search before the current Slack turn has been acknowledged', () => {
     const stateFilePath = writeState({
       currentTurnMessageTs: 'user-111.222',
@@ -646,26 +641,6 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
-  });
-
-  it('allows PreToolUse for Slack reaction tools after seven minutes of Slack silence', () => {
-    const stateFilePath = writeState({
-      recordedAtMs: Date.now() - 7 * 60_000 - 1_000,
-      messageTs: 'bot-111.222',
-    });
-
-    const result = runHook({
-      input: {
-        hook_event_name: 'PreToolUse',
-        tool_name: 'mcp__roomote__add_reaction_to_slack_message',
-      },
-      env: {
-        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
-      },
-    });
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe('');
   });
 
   it('allows PreToolUse for the current-turn Slack reaction shortcut after seven minutes of Slack silence', () => {

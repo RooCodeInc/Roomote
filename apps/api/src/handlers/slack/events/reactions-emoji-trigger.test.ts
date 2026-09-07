@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getConfiguration: vi.fn(),
   handleMessage: vi.fn(),
+  routeFastReaction: vi.fn(),
 }));
 
 vi.mock('../../call-roomote-via-emoji.js', () => ({
@@ -13,6 +14,10 @@ vi.mock('./message-entry.js', () => ({
   handleMessageOrAppMentionEvent: mocks.handleMessage,
 }));
 
+vi.mock('./fast-agent-reaction.js', () => ({
+  maybeRouteFastAgentReaction: mocks.routeFastReaction,
+}));
+
 import {
   handleReactionAddedEvent,
   maybeCallRoomoteViaEmoji,
@@ -21,6 +26,7 @@ import {
 describe('Slack emoji trigger', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.routeFastReaction.mockResolvedValue(false);
   });
 
   it('turns a configured reaction into an app mention in the target thread', async () => {
@@ -90,6 +96,26 @@ describe('Slack emoji trigger', () => {
     ).resolves.toBe(false);
   });
 
+  it('ignores reactions authored by the Roomote bot before Fast routing', async () => {
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE' },
+        slack: {},
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'UROOMOTE',
+        reaction: 'eyes',
+        item: { type: 'message', channel: 'C1', ts: '1' },
+        event_ts: '2',
+      },
+    });
+
+    expect(mocks.getConfiguration).not.toHaveBeenCalled();
+    expect(mocks.routeFastReaction).not.toHaveBeenCalled();
+  });
+
   it('gives the configured trigger precedence over thumbs-up suggestion actions', async () => {
     mocks.getConfiguration.mockResolvedValue({
       emoji: 'thumbsup',
@@ -118,6 +144,7 @@ describe('Slack emoji trigger', () => {
     });
 
     expect(mocks.handleMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.routeFastReaction).not.toHaveBeenCalled();
     expect(mocks.handleMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({

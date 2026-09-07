@@ -164,6 +164,8 @@ describe('syncSourceControlPullRequestFacts', () => {
         title: 'Merged MR',
         htmlUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
         authorLogin: 'gitlab-user',
+        body: null,
+        labels: [],
         state: 'merged',
         createdAtRemote: new Date('2026-06-30T00:00:00Z'),
         updatedAtRemote: new Date('2026-07-10T00:00:00Z'),
@@ -348,6 +350,8 @@ describe('syncSourceControlPullRequestFacts', () => {
 describe('upsertSourceControlPullRequestFactFromWebhook', () => {
   const snapshot = {
     authorLogin: 'gitea-user',
+    body: null,
+    labels: [],
     closedAt: '2026-07-10T00:00:00Z',
     createdAt: '2026-07-01T00:00:00Z',
     externalPullRequestId: 900,

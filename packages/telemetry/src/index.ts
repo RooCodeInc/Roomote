@@ -126,6 +126,7 @@ export type ActivationAutomation =
   | 'review_code'
   | 'conflict_resolver'
   | 'manager_stats'
+  | 'provider_usage_limit'
   | 'sentry_triage'
   | 'dependabot_triage'
   | 'codeql_triage'
@@ -133,6 +134,7 @@ export type ActivationAutomation =
   | 'security_auditor'
   | 'code_quality_auditor'
   | 'ci_failure_triage'
+  | 'merge_announcer'
   | 'suggester'
   | 'announcer'
   | 'platform_issue_alerts';
@@ -181,14 +183,14 @@ export interface PingEvent {
 
 export interface PingEventsRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
   sentAt: string;
   events: PingEvent[];
 }
 
 export interface PingInstanceReportRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
   cloud: boolean;
   sentAt: string;
   report: Record<string, unknown>;
@@ -196,7 +198,7 @@ export interface PingInstanceReportRequest {
 
 export interface PingVersionCheckRequest {
   instanceId: string;
-  appVersion?: string;
+  appVersion: string;
 }
 
 export interface PingVersionCheckResponse {

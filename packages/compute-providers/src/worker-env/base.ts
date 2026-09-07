@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   isTaskModelIdDisabled,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
@@ -18,6 +19,10 @@ const BLOCKED_WORKER_ENV_KEYS = new Set([
   'DASHBOARD_PASSWORD',
   'SETUP_TOKEN',
   'MODAL_TOKEN_SECRET',
+  // The hosting-managed Roomote inference key is gateway-served. Block it so
+  // no env passthrough can ever ship it into a sandbox.
+  'R_TRIAL_OPENROUTER_API_KEY',
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
 ]);
 
@@ -126,11 +131,16 @@ export function buildBaseWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
+  environmentId,
 }: BuildWorkerEnvOptions): Record<string, string> {
   const previewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
 
   return {
     AUTH_TOKEN: authToken,
+    // Deployment identity metadata, independent of the worker's operational env.
+    ...(Env.R_APP_ENV !== undefined && {
+      ROOMOTE_RELEASE_APP_ENV: Env.R_APP_ENV,
+    }),
     // Intentionally reads process.env.APP_ENV (not the resolved `appEnv`)
     // so we only forward an explicit APP_ENV setting. resolveAppEnv() may
     // derive a value from other env vars that reflect the *controller's*
@@ -176,5 +186,10 @@ export function buildBaseWorkerEnv({
     }),
     ...buildOperatorModelProviderEnv(),
     ...filterWorkerExtraEnv(extraEnv),
+    ...(environmentId &&
+      process.env[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME] && {
+        [SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME]:
+          process.env[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
+      }),
   };
 }

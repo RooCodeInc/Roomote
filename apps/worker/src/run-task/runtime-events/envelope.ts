@@ -36,6 +36,10 @@ export function fromRuntimeEnvelope(
 ): CallbackEvent[] {
   const payload = asRecord(envelope.payload) ?? {};
 
+  if (envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) {
+    return [{ type: 'turn_started', ts: envelope.ts }];
+  }
+
   if (envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought) {
     const text =
       getTextFromBlocks(envelope.contentBlocks) ?? asString(payload.text) ?? '';

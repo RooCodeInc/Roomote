@@ -27,6 +27,8 @@ export const gitLabMergeRequestSchema = z.object({
   target_branch: z.string().optional(),
   draft: z.boolean().optional(),
   work_in_progress: z.boolean().optional(),
+  state: z.string().optional(),
+  sha: z.string().optional(),
 });
 const gitLabMergeRequestListSchema = z.array(gitLabMergeRequestSchema);
 
@@ -37,8 +39,16 @@ export const giteaPullRequestSchema = z
     title: z.string().optional(),
     html_url: z.string().url().optional(),
     draft: z.boolean().optional(),
-    head: z.object({ ref: z.string().optional() }).optional(),
+    state: z.string().optional(),
+    head: z
+      .object({ ref: z.string().optional(), sha: z.string().optional() })
+      .optional(),
     base: z.object({ ref: z.string().optional() }).optional(),
+    assignees: z
+      .array(
+        z.object({ login: z.string().nullable().optional() }).passthrough(),
+      )
+      .optional(),
   })
   .passthrough();
 const giteaPullRequestListSchema = z.array(giteaPullRequestSchema);
@@ -49,6 +59,7 @@ export const bitbucketPullRequestSchema = z
     title: z.string().optional(),
     description: z.string().nullable().optional(),
     draft: z.boolean().optional(),
+    state: z.string().optional(),
     links: z
       .object({
         html: z.object({ href: z.string().url().optional() }).optional(),
@@ -57,6 +68,7 @@ export const bitbucketPullRequestSchema = z
     source: z
       .object({
         branch: z.object({ name: z.string().optional() }).optional(),
+        commit: z.object({ hash: z.string().optional() }).optional(),
       })
       .optional(),
     destination: z
@@ -76,7 +88,11 @@ export const adoPullRequestSchema = z
     pullRequestId: z.number().int(),
     title: z.string(),
     isDraft: z.boolean().optional(),
+    status: z.string().optional(),
     targetRefName: z.string().optional(),
+    lastMergeSourceCommit: z
+      .object({ commitId: z.string().optional() })
+      .optional(),
   })
   .passthrough();
 const adoPullRequestListSchema = z.object({

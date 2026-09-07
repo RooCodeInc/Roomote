@@ -1,17 +1,21 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ALL_REPOSITORIES,
+  FAST_EXECUTION,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
 import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
+import { buildCreatorFilterValue } from '@/lib/task-creator-filter';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
@@ -29,6 +33,7 @@ import {
   Label,
   Play,
   Plus,
+  RotateCcwClock,
   Select,
   SelectContent,
   SelectItem,
@@ -42,8 +47,18 @@ import {
 } from '@/components/system';
 
 import { ModelSelect } from '@/components/tasks/ModelSelect';
+import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 
-import { SlackChannelSelect } from './SlackChannelSelect';
+import {
+  AutomationDestinationPicker,
+  type AutomationDestinationProvider,
+} from './AutomationDestinationPicker';
+
+type ConnectedDestinationProvider = Exclude<
+  AutomationDestinationProvider,
+  'none'
+>;
 
 type CustomAutomationFormState = {
   name: string;
@@ -54,16 +69,11 @@ type CustomAutomationFormState = {
   cronExpression: string;
   /** Provider/model launch override; empty string means deployment default. */
   model: string;
+  reasoningEffort: ReasoningEffort | null;
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
-  targetServiceUrl: string;
 };
-
-type AutomationDestinationProvider = Exclude<
-  CustomAutomationFormState['targetProvider'],
-  'none'
->;
 
 const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
@@ -73,10 +83,10 @@ const EMPTY_FORM: CustomAutomationFormState = {
   environmentId: '',
   cronExpression: '',
   model: '',
+  reasoningEffort: null,
   targetProvider: 'slack',
   targetMode: 'channel',
   targetChannelId: '',
-  targetServiceUrl: '',
 };
 
 const SCHEDULE_OPTIONS: Array<{
@@ -92,7 +102,7 @@ const SCHEDULE_OPTIONS: Array<{
 ];
 
 const DESTINATION_OPTIONS: Array<{
-  value: AutomationDestinationProvider;
+  value: ConnectedDestinationProvider;
   label: string;
   capability:
     | 'slackConnected'
@@ -143,6 +153,9 @@ function CustomAutomationRunButton({
               },
             });
             break;
+          case 'queued':
+            toast.success(`${automation.name} was queued to run.`);
+            break;
           case 'completed':
             toast.success(`${automation.name} ran successfully.`);
             break;
@@ -183,14 +196,12 @@ function targetFromRow(row: CustomAutomationListItem): {
   provider: CustomAutomationFormState['targetProvider'];
   mode: CustomAutomationFormState['targetMode'];
   channelId: string;
-  serviceUrl: string;
 } {
   if (!row.target.provider || !row.target.externalRef) {
     return {
       provider: 'none',
       mode: 'channel',
       channelId: '',
-      serviceUrl: '',
     };
   }
 
@@ -200,10 +211,6 @@ function targetFromRow(row: CustomAutomationListItem): {
     row.target.provider === 'telegram'
       ? row.target.provider
       : 'slack';
-  const serviceUrl =
-    typeof row.target.metadata?.serviceUrl === 'string'
-      ? row.target.metadata.serviceUrl
-      : '';
   return {
     provider,
     mode: isBackgroundAutomationUserTargetKind(row.target.targetKind)
@@ -212,13 +219,12 @@ function targetFromRow(row: CustomAutomationListItem): {
     channelId: isBackgroundAutomationUserTargetKind(row.target.targetKind)
       ? ''
       : (row.target.externalRef ?? ''),
-    serviceUrl,
   };
 }
 
 function formFromRow(
   row: CustomAutomationListItem,
-  connectedProviders: readonly AutomationDestinationProvider[] | null,
+  connectedProviders: readonly ConnectedDestinationProvider[] | null,
 ): CustomAutomationFormState {
   const target = targetFromRow(row);
   const targetIsConnected =
@@ -233,10 +239,10 @@ function formFromRow(
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
     model: row.model ?? '',
+    reasoningEffort: row.reasoningEffort,
     targetProvider: targetIsConnected ? target.provider : 'none',
     targetMode: target.mode,
     targetChannelId: targetIsConnected ? target.channelId : '',
-    targetServiceUrl: targetIsConnected ? target.serviceUrl : '',
   };
 }
 
@@ -250,6 +256,7 @@ function writeInputFromRow(row: CustomAutomationListItem) {
     scheduleMode: row.scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
+    reasoningEffort: row.reasoningEffort,
     environmentId: row.environmentId ?? '',
     ...(target.provider !== 'none'
       ? {
@@ -259,11 +266,6 @@ function writeInputFromRow(row: CustomAutomationListItem) {
             ? { targetChannelId: target.channelId }
             : {}),
         }
-      : {}),
-    ...(target.provider === 'teams' &&
-    target.mode === 'channel' &&
-    target.serviceUrl
-      ? { targetServiceUrl: target.serviceUrl }
       : {}),
   };
 }
@@ -292,6 +294,7 @@ export function CustomAutomationsSection() {
   );
   const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
   const miscSettingsQuery = useQuery(trpc.miscSettings.get.queryOptions());
+  const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -326,17 +329,10 @@ export function CustomAutomationsSection() {
   );
   capabilitiesLoadedRef.current = capabilitiesLoaded;
   connectedDestinationProvidersRef.current = connectedDestinationProviders;
-  const visibleDestinationOptions = capabilitiesLoaded
-    ? connectedDestinationOptions
-    : DESTINATION_OPTIONS.filter(
-        (option) => option.value === form.targetProvider,
-      );
-  const selectedDestinationLabel =
-    DESTINATION_OPTIONS.find((option) => option.value === form.targetProvider)
-      ?.label ?? 'Provider';
 
   const environmentOptions = useMemo(
     () => [
+      { id: FAST_EXECUTION, name: 'Let Roomote decide' },
       { id: ALL_REPOSITORIES, name: 'All repositories' },
       ...(environmentsQuery.data ?? []).map((environment) => ({
         id: environment.id,
@@ -485,6 +481,12 @@ export function CustomAutomationsSection() {
     updateMutation.isPending ||
     deleteMutation.isPending ||
     toggleMutation.isPending;
+  const selectedModel = taskModelsQuery.data?.models.find(
+    (model) => model.id === form.model,
+  );
+  const selectedModelSupportsReasoning = Boolean(
+    selectedModel && selectedModel.metadata?.supportsReasoning !== false,
+  );
 
   const closeEditor = () => {
     setIsCreating(false);
@@ -563,7 +565,6 @@ export function CustomAutomationsSection() {
             targetProvider: 'none',
             targetMode: 'channel',
             targetChannelId: '',
-            targetServiceUrl: '',
           },
     );
   }, [capabilitiesLoaded, connectedDestinationProviders]);
@@ -600,6 +601,7 @@ export function CustomAutomationsSection() {
       cronExpression:
         form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
       model: form.model || null,
+      reasoningEffort: form.model ? form.reasoningEffort : null,
       environmentId: form.environmentId,
       ...(form.targetProvider !== 'none'
         ? {
@@ -609,11 +611,6 @@ export function CustomAutomationsSection() {
               ? { targetChannelId: form.targetChannelId }
               : {}),
           }
-        : {}),
-      ...(form.targetProvider === 'teams' &&
-      form.targetMode === 'channel' &&
-      form.targetServiceUrl.trim()
-        ? { targetServiceUrl: form.targetServiceUrl.trim() }
         : {}),
     };
 
@@ -743,7 +740,9 @@ export function CustomAutomationsSection() {
 
         <div className="flex flex-col gap-4 sm:flex-row">
           <div className="space-y-2 sm:w-52">
-            <Label htmlFor="custom-automation-environment">Environment</Label>
+            <Label htmlFor="custom-automation-environment">
+              Preferred environment
+            </Label>
             <Select
               value={form.environmentId || undefined}
               disabled={busy || environmentOptions.length === 0}
@@ -770,188 +769,78 @@ export function CustomAutomationsSection() {
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label>Model</Label>
+          <div className="min-w-0 flex-1 space-y-2">
+            <Label>Delegated task model</Label>
             <ModelSelect
               size="default"
               ariaLabel="Automation model"
               value={form.model}
-              emptyOptionLabel="Default coding model"
+              emptyOptionLabel="Default delegated task model"
+              className="w-full"
               disabled={busy}
-              onValueChange={(value) =>
-                setForm((current) => ({ ...current, model: value }))
+              onValueChange={(value) => {
+                const nextModel = taskModelsQuery.data?.models.find(
+                  (model) => model.id === value,
+                );
+                const supportsReasoning = Boolean(
+                  nextModel && nextModel.metadata?.supportsReasoning !== false,
+                );
+                setForm((current) => ({
+                  ...current,
+                  model: value,
+                  reasoningEffort: supportsReasoning
+                    ? current.reasoningEffort
+                    : null,
+                }));
+              }}
+            />
+          </div>
+
+          <div className="space-y-2 sm:w-40">
+            <Label>Effort</Label>
+            <ReasoningEffortSelect
+              value={form.reasoningEffort}
+              defaultEffort="medium"
+              emptyOptionLabel="Model default"
+              ariaLabel="Automation effort"
+              className="w-full"
+              size="default"
+              disabled={busy || !selectedModelSupportsReasoning}
+              onChange={(reasoningEffort) =>
+                setForm((current) => ({ ...current, reasoningEffort }))
               }
             />
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="custom-automation-destination">Destination</Label>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <Select
-              value={form.targetProvider}
-              disabled={busy}
-              onValueChange={(value) =>
-                setForm((current) => ({
-                  ...current,
-                  targetProvider:
-                    value as CustomAutomationFormState['targetProvider'],
-                  targetMode: 'channel',
-                  targetChannelId:
-                    value === 'slack'
-                      ? managerSlackChannelId
-                      : value === 'discord'
-                        ? managerDiscordChannelId
-                        : '',
-                  targetServiceUrl: '',
-                }))
-              }
-            >
-              <SelectTrigger
-                id="custom-automation-destination"
-                aria-label="Destination provider"
-                className="w-full sm:w-52"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {visibleDestinationOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {form.targetProvider === 'none' ? (
-              <p className="self-center text-sm text-muted-foreground">
-                Results appear only in the task view.
-              </p>
-            ) : (
-              <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-                <Select
-                  value={form.targetMode}
-                  disabled={busy}
-                  onValueChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetMode:
-                        value as CustomAutomationFormState['targetMode'],
-                      targetChannelId:
-                        value === 'channel'
-                          ? current.targetProvider === 'slack'
-                            ? managerSlackChannelId
-                            : current.targetProvider === 'discord'
-                              ? managerDiscordChannelId
-                              : ''
-                          : '',
-                      targetServiceUrl:
-                        value === 'channel' ? current.targetServiceUrl : '',
-                    }))
-                  }
-                >
-                  <SelectTrigger
-                    aria-label={`${selectedDestinationLabel} destination type`}
-                    className="w-full sm:w-36"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="channel">Channel</SelectItem>
-                    <SelectItem value="direct_message">DM me</SelectItem>
-                  </SelectContent>
-                </Select>
-                {form.targetMode === 'direct_message' ? (
-                  <p className="self-center text-sm text-muted-foreground">
-                    Results are sent privately to your linked{' '}
-                    {selectedDestinationLabel} account.
-                  </p>
-                ) : form.targetProvider === 'slack' ? (
-                  <SlackChannelSelect
-                    id="custom-automation-destination-channel"
-                    className="flex-1"
-                    value={form.targetChannelId || null}
-                    options={slackOptions}
-                    disabled={busy}
-                    onChange={(value) =>
-                      setForm((current) => ({
-                        ...current,
-                        targetChannelId: value ?? '',
-                      }))
-                    }
-                  />
-                ) : form.targetProvider === 'discord' ? (
-                  <Select
-                    value={form.targetChannelId || undefined}
-                    disabled={busy}
-                    onValueChange={(value) =>
-                      setForm((current) => ({
-                        ...current,
-                        targetChannelId: value,
-                      }))
-                    }
-                  >
-                    <SelectTrigger
-                      aria-label="Destination channel"
-                      className="flex-1"
-                    >
-                      <SelectValue placeholder="Select Discord channel" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {discordOptions.map((channel) => (
-                        <SelectItem key={channel.id} value={channel.id}>
-                          {channel.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    aria-label="Destination channel"
-                    className="flex-1"
-                    value={form.targetChannelId}
-                    disabled={busy}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        targetChannelId: event.target.value,
-                      }))
-                    }
-                    placeholder={
-                      form.targetProvider === 'teams'
-                        ? 'Teams conversation ID'
-                        : 'Telegram chat ID'
-                    }
-                  />
-                )}
-              </div>
-            )}
-            {form.targetProvider === 'teams' &&
-            form.targetMode === 'channel' ? (
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <Label
-                  htmlFor="custom-automation-service-url"
-                  className="shrink-0"
-                >
-                  Service URL
-                </Label>
-                <Input
-                  id="custom-automation-service-url"
-                  className="flex-1"
-                  value={form.targetServiceUrl}
-                  disabled={busy}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetServiceUrl: event.target.value,
-                    }))
-                  }
-                  placeholder="Optional"
-                />
-              </div>
-            ) : null}
-          </div>
+          <AutomationDestinationPicker
+            id="custom-automation-destination"
+            value={{
+              provider: form.targetProvider,
+              mode: form.targetMode,
+              channelId: form.targetChannelId,
+            }}
+            availableProviders={connectedDestinationProviders}
+            slackOptions={slackOptions}
+            discordOptions={discordOptions}
+            defaultSlackChannelId={managerSlackChannelId}
+            defaultDiscordChannelId={managerDiscordChannelId}
+            disabled={busy}
+            onChange={(destination) =>
+              setForm((current) => ({
+                ...current,
+                targetProvider: destination.provider,
+                targetMode: destination.mode,
+                targetChannelId: destination.channelId,
+              }))
+            }
+          />
+          <p className="text-sm text-muted-foreground">
+            {form.targetProvider === 'none'
+              ? 'Each run is a Session in the web app and does not post to chat.'
+              : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
+          </p>
         </div>
 
         <div className="flex items-center justify-between gap-3">
@@ -1076,9 +965,11 @@ export function CustomAutomationsSection() {
             <div className="divide-y divide-background">
               {rows.map((row) => {
                 const environmentName =
-                  environmentOptions.find(
-                    (environment) => environment.id === row.environmentId,
-                  )?.name ?? 'Environment missing';
+                  row.executionMode === 'fast'
+                    ? null
+                    : (environmentOptions.find(
+                        (environment) => environment.id === row.environmentId,
+                      )?.name ?? 'Environment missing');
                 const target = targetFromRow(row);
                 const destinationName =
                   DESTINATION_OPTIONS.find(
@@ -1100,6 +991,12 @@ export function CustomAutomationsSection() {
                               (option) => option.id === target.channelId,
                             )?.label ?? target.channelId)
                           : target.channelId;
+                const historyFilter = buildCreatorFilterValue({
+                  initiatorKind: 'automation',
+                  initiatorUserId: null,
+                  initiatorAutomation: 'custom_automation',
+                  actorExternalId: row.id,
+                });
 
                 return (
                   <div
@@ -1123,7 +1020,10 @@ export function CustomAutomationsSection() {
                       <p className="text-sm font-semibold">{row.name}</p>
                       <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
                         <span>
-                          {cadenceLabel(row)}, in {environmentName} →
+                          {cadenceLabel(row)}
+                          {environmentName
+                            ? `, in ${environmentName}`
+                            : ''} →
                         </span>
                         {target.provider !== 'none' ? (
                           <BrandIcon
@@ -1153,8 +1053,25 @@ export function CustomAutomationsSection() {
                           </>
                         ) : null}
                       </p>
+                      {row.latestFastResult ? (
+                        <p className="line-clamp-2 text-xs text-muted-foreground">
+                          {row.latestFastResult}
+                        </p>
+                      ) : null}
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
+                      {historyFilter ? (
+                        <BasicTooltip content="View previous runs">
+                          <Button asChild size="icon" variant="ghost">
+                            <Link
+                              href={`/tasks?userId=${encodeURIComponent(historyFilter)}`}
+                              aria-label={`View previous runs for ${row.name}`}
+                            >
+                              <RotateCcwClock />
+                            </Link>
+                          </Button>
+                        </BasicTooltip>
+                      ) : null}
                       <CustomAutomationRunButton
                         automation={row}
                         disabled={busy}

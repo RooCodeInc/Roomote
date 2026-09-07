@@ -280,6 +280,34 @@ describe('createWorkerFetchWithRetry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('retries the Slack task card render on transport failure', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      maxAttempts: 2,
+      baseDelayMs: 0,
+    });
+
+    const response = await workerFetch(
+      'https://api.octomote.dev/trpc/taskRuns.renderSlackLiveTaskCard?batch=1',
+      {
+        method: 'POST',
+        body: '{"0":{"json":{"runId":42,"status":"complete"}}}',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('retries retryable non-JSON callback persistence responses', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

@@ -551,7 +551,8 @@ describe('BaseController.dequeueTaskRun', () => {
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 81,
       status: RunStatus.Failed,
-      error: 'This deployment is read-only. New task launches are paused.',
+      error:
+        'New tasks are paused due to a billing issue. Please check billing.',
       errorCode: TaskRunErrorCode.DeploymentReadOnly,
     });
     expect(mockDbTransaction).not.toHaveBeenCalled();

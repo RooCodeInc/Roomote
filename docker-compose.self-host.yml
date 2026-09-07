@@ -97,6 +97,7 @@ x-roomote-env: &roomote-env
   R_LINEAR_CLIENT_SECRET: ${R_LINEAR_CLIENT_SECRET:-}
   R_LINEAR_WEBHOOK_SECRET: ${R_LINEAR_WEBHOOK_SECRET:-}
   R_GITHUB_APP_SLUG: ${R_GITHUB_APP_SLUG:-}
+  R_GITHUB_ADDITIONAL_APP_SLUGS: ${R_GITHUB_ADDITIONAL_APP_SLUGS:-}
   SETUP_TOKEN: ${SETUP_TOKEN:-}
   DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
   BL_API_KEY: ${BL_API_KEY:-}
@@ -212,6 +213,9 @@ services:
     container_name: roomote-controller
     image: *roomote-app-image
     command: ['controller']
+    environment:
+      <<: *roomote-env
+      SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
     # Spawns and reaches task worker containers on the worker network.
     networks: [default, worker]
     stop_grace_period: 7m
@@ -289,8 +293,12 @@ services:
     container_name: roomote-gbrain
     build: .docker/gbrain
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks: [default]
     environment:
+      GBRAIN_DATABASE_URL: postgres://postgres:password@postgres:5432/roomote_development
       GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}
       # The Brain holds no provider key. It calls back into this deployment,
       # which injects whichever provider key an admin configured in Settings,

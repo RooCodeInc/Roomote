@@ -1,10 +1,11 @@
 import {
+  addReactionToChatMessage,
   getChatChannelMessages,
-  addReactionToSlackMessage,
   clearSlackReplyQuote,
   getChatMessageContext,
   postToChannel,
   replyToSlackThread,
+  suppressSlackReplyQuote,
   trackSlackReplyQuote,
 } from '../slack-api-client.js';
 import { ChatDeliveryError } from '../chat-delivery-error.js';
@@ -318,9 +319,30 @@ describe('reply quote helpers', () => {
       }),
     );
   });
+
+  it('posts quote suppression requests through the Slack MCP API', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, quoteId: 'suppression-1' }),
+    });
+
+    const result = await suppressSlackReplyQuote(config, { runId: 42 });
+
+    expect(result).toEqual({ success: true, quoteId: 'suppression-1' });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/slack/suppress_reply_quote',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-token',
+        }),
+        body: JSON.stringify({ runId: 42 }),
+      }),
+    );
+  });
 });
 
-describe('addReactionToSlackMessage', () => {
+describe('addReactionToChatMessage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
@@ -336,7 +358,7 @@ describe('addReactionToSlackMessage', () => {
       }),
     });
 
-    const result = await addReactionToSlackMessage(config, {
+    const result = await addReactionToChatMessage(config, {
       channel: '#eng',
       messageTs: '111.222',
       name: 'eyes',
@@ -374,13 +396,13 @@ describe('addReactionToSlackMessage', () => {
     });
 
     await expect(
-      addReactionToSlackMessage(config, {
+      addReactionToChatMessage(config, {
         channel: 'C123',
         messageTs: '111.222',
         name: 'eyes',
       }),
     ).rejects.toThrow(
-      'Failed to add Slack reaction: 502 Slack reactions.add failed for channel C123 at 111.222.',
+      'Failed to add chat reaction: 502 Slack reactions.add failed for channel C123 at 111.222.',
     );
   });
 });

@@ -12,7 +12,6 @@ export function buildE2bWorkerEnv({
   templateId,
 }: BuildWorkerEnvOptions & {
   deploymentSlug?: string;
-  environmentId?: string;
   templateId: string;
 }): Record<string, string> {
   return {
@@ -20,6 +19,7 @@ export function buildE2bWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
+      environmentId,
     }),
     ...buildWorkerContextEnv({
       provider: 'e2b',

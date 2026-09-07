@@ -1,4 +1,1 @@
-export {
-  buildAutomationRootFooterBlocks,
-  refreshAutomationRootFooter,
-} from '@roomote/slack';
+export { refreshAutomationRootFooter } from '@roomote/slack';

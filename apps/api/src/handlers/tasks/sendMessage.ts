@@ -2,11 +2,12 @@ import type { Context } from 'hono';
 import { isEnvVarRequestFulfillmentClientMessageId } from '@roomote/types';
 
 import type { Variables } from '../../types';
-import type { McpAuth } from '../mcp/middleware';
+import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
 import {
   type SendMessageSenderMode,
   sendMessageToTask,
 } from './sendMessageToTask';
+import { sendMessageToFastSessionForUser } from './fastSessionCommunication';
 
 type PublicSendMessageSenderMode = Extract<
   SendMessageSenderMode,
@@ -81,7 +82,11 @@ function parseOptionalControlString(
 export async function sendMessage(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
-  const auth = c.get('mcpAuth');
+  const requestAuth = c.get('mcpAuth');
+  const auth = {
+    ...requestAuth,
+    userId: await resolveMcpTaskOrSessionUserId(requestAuth),
+  };
 
   if (!auth.userId) {
     return c.json({ error: 'User context required' }, 403);
@@ -123,7 +128,7 @@ export async function sendMessage(
     return c.json({ error: 'senderMode is invalid' }, 400);
   }
 
-  const result = await sendMessageToTask({
+  let result = await sendMessageToTask({
     taskId,
     userId: auth.userId,
     authContext: auth.authContext,
@@ -134,8 +139,24 @@ export async function sendMessage(
     senderMode,
   });
 
+  if (!result.success && result.status === 404) {
+    result = await sendMessageToFastSessionForUser({
+      sessionId: taskId,
+      userId: auth.userId,
+      message: body.message,
+      images: body.images,
+    });
+  }
+
   if (result.success) {
-    return c.json(result);
+    return c.json({
+      ...result,
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: taskId },
+        text: body.message,
+      },
+    });
   }
 
   const { status, ...errorBody } = result;

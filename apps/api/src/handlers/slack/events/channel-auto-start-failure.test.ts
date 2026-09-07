@@ -13,8 +13,9 @@ const mocks = vi.hoisted(() => ({
   startTask: vi.fn(),
   processAttachments: vi.fn(),
   recordInboundMessage: vi.fn(),
-  postRoutingDebug: vi.fn(),
   automationLaunchIdentity: vi.fn(),
+  processFastAgentMessage: vi.fn(),
+  liveTaskLauncher: vi.fn(() => vi.fn()),
   logWarn: vi.fn(),
 }));
 
@@ -47,6 +48,7 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  createFastAgentSlackLiveTaskLauncher: mocks.liveTaskLauncher,
   startAutoRoutedSlackTask: mocks.startTask,
 }));
 
@@ -57,16 +59,17 @@ vi.mock('../../shared/channel-launch-gate.js', async (importOriginal) => ({
   evaluateChannelLaunchGate: mocks.evaluateGate,
 }));
 
+vi.mock('./fast-agent.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fast-agent.js')>()),
+  processFastAgentMessage: mocks.processFastAgentMessage,
+}));
+
 vi.mock('../helpers/attachments.js', () => ({
   processSlackAttachments: mocks.processAttachments,
 }));
 
 vi.mock('../helpers/launch-identity.js', () => ({
   getSlackAutomationLaunchIdentity: mocks.automationLaunchIdentity,
-}));
-
-vi.mock('../helpers/channel-auto-start-routing-debug.js', () => ({
-  postChannelAutoStartRoutingDebug: mocks.postRoutingDebug,
 }));
 
 vi.mock('../helpers/conversation-log.js', async (importOriginal) => ({
@@ -112,7 +115,6 @@ async function runHandler(
     },
     teamId: 'T123',
     ackEmoji: 'eyes',
-    channelAutoStartLaunchMode: 'always_start',
     ...(launchCriteria ? { launchCriteria } : {}),
   });
 }
@@ -134,11 +136,17 @@ describe('Slack channel auto-start failures', () => {
       videoDescriptions: [],
     });
     mocks.recordInboundMessage.mockResolvedValue(undefined);
-    mocks.postRoutingDebug.mockResolvedValue(undefined);
     mocks.automationLaunchIdentity.mockResolvedValue({
       launchUserId: 'installer-1',
       slackUserId: 'UBOT',
     });
+    // Bot-authored coverage below exercises the direct-task fallback unless a
+    // test opts into an accepted Fast turn explicitly.
+    mocks.processFastAgentMessage.mockImplementation(
+      async ({ onRejected }: { onRejected?: () => void }) => {
+        onRejected?.();
+      },
+    );
     postMessage.mockResolvedValue({ ts: 'reply-1' });
     vi.mocked(slack.addReaction).mockResolvedValue(undefined);
     vi.mocked(slack.getChannelName).mockResolvedValue('forge');
@@ -159,24 +167,6 @@ describe('Slack channel auto-start failures', () => {
 
     expect(postMessage).not.toHaveBeenCalled();
     expect(mocks.startTask).not.toHaveBeenCalled();
-  });
-
-  it('stays silent when criteria skip diagnostics cannot be posted', async () => {
-    mocks.evaluateGate.mockResolvedValue({
-      shouldLaunch: false,
-      skipReason: 'criteria_not_met',
-      debug: { llmDecision: 'skip', reason: 'not actionable' },
-    });
-    mocks.postRoutingDebug.mockRejectedValue(new Error('debug post failed'));
-
-    await expect(runHandler('Only actionable requests')).resolves.toBe(true);
-    await flushBackgroundWork();
-
-    expect(postMessage).not.toHaveBeenCalled();
-    expect(mocks.startTask).not.toHaveBeenCalled();
-    expect(mocks.logWarn).toHaveBeenCalledWith(
-      expect.stringContaining('debug post failed'),
-    );
   });
 
   it('replies when the launch classifier fails', async () => {
@@ -216,29 +206,6 @@ describe('Slack channel auto-start failures', () => {
     errorSpy.mockRestore();
   });
 
-  it('still replies when startup and routing diagnostics both fail', async () => {
-    const errorSpy = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-    mocks.evaluateGate.mockResolvedValue({
-      shouldLaunch: true,
-      debug: { llmDecision: 'launch', reason: 'actionable' },
-    });
-    mocks.startTask.mockRejectedValue(new Error('task queue unavailable'));
-    mocks.postRoutingDebug.mockRejectedValue(new Error('debug post failed'));
-
-    await expect(runHandler('Only actionable requests')).resolves.toBe(true);
-    await flushBackgroundWork();
-
-    expect(postMessage).toHaveBeenCalledWith({
-      channel: 'C123',
-      thread_ts: '111.000',
-      text: FAILURE_MESSAGE,
-      blocks: [{ type: 'markdown', text: FAILURE_MESSAGE }],
-    });
-    errorSpy.mockRestore();
-  });
-
   it('stays silent when the classifier fails on a bot-authored message', async () => {
     mocks.evaluateGate.mockResolvedValue({
       shouldLaunch: false,
@@ -253,6 +220,37 @@ describe('Slack channel auto-start failures', () => {
 
     expect(postMessage).not.toHaveBeenCalled();
     expect(mocks.startTask).not.toHaveBeenCalled();
+  });
+
+  it('routes a bot-authored message to Fast under the automation identity when the turn is accepted', async () => {
+    mocks.processFastAgentMessage.mockImplementation(
+      async ({ onAccepted }: { onAccepted?: (abort: () => void) => void }) => {
+        onAccepted?.(() => {});
+      },
+    );
+
+    await expect(runHandler(undefined, { isBotAuthored: true })).resolves.toBe(
+      true,
+    );
+    await flushBackgroundWork();
+
+    expect(mocks.processFastAgentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'installer-1',
+        event: expect.objectContaining({ user: 'UBOT' }),
+      }),
+    );
+    expect(mocks.liveTaskLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          actor: { externalId: 'U123' },
+        },
+      }),
+    );
+    expect(mocks.startTask).not.toHaveBeenCalled();
+    expect(postMessage).not.toHaveBeenCalled();
   });
 
   it('stays silent when task startup throws for a bot-authored message', async () => {

@@ -6,12 +6,12 @@ import {
   deploymentSettings,
   eq,
   invites,
+  isBrainEnabled,
   recordLicenseUsageObservation,
   users,
 } from '@roomote/db/server';
 import type { UserRole } from '@roomote/types';
 import {
-  evaluateFeatureFlagsFromMetadata,
   isAnonymousAnalyticsEnabledFromMetadata,
   normalizeMetadataRecord,
 } from '@roomote/feature-flags';
@@ -29,7 +29,7 @@ import {
 } from '@/types';
 
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
-import { Env, isRoomoteCloudEnabled } from './env';
+import { Env, isBrainConfigured, isRoomoteCloudEnabled } from './env';
 import { setSentryUserContext } from './sentry-context';
 import { getAuth } from './auth';
 import {
@@ -54,6 +54,8 @@ type SignedInAuthContext = {
 
 type SignedInAuthContextOptions = {
   treatPendingAsSignedOut?: boolean;
+  /** Only enable in a Route Handler that can send renewed cookies. */
+  allowSessionRefresh?: boolean;
 };
 
 async function loadDeploymentIdentityState(userId: string) {
@@ -314,12 +316,15 @@ function isMatchingUserEntity(
   );
 }
 
-async function getBetterAuthSession() {
+async function getBetterAuthSession(allowSessionRefresh = false) {
   const auth = await getAuth();
 
   try {
     return await auth.api.getSession({
       headers: await headers(),
+      // Rendering cannot write cookies. Renewing only the database here would
+      // prevent a later browser request from renewing the cookie for 24 hours.
+      query: { disableRefresh: !allowSessionRefresh },
     });
   } catch (error) {
     // Invalid or expired auth cookies should behave like a signed-out
@@ -333,11 +338,11 @@ async function getBetterAuthSession() {
 }
 
 export async function getSignedInAuthContext(
-  _options?: SignedInAuthContextOptions,
+  options?: SignedInAuthContextOptions,
 ): Promise<SignedInAuthContext | AuthError> {
   await bootstrapWebRuntimeEnv();
 
-  const session = await getBetterAuthSession();
+  const session = await getBetterAuthSession(options?.allowSessionRefresh);
 
   if (!session) {
     return { success: false, error: 'Unauthorized: User required' };
@@ -414,16 +419,14 @@ export async function getSignedInAuthContext(
   };
 }
 
-export async function authorize(): Promise<UserAuthSuccess | AuthError> {
-  const authContext = await getSignedInAuthContext();
+export async function authorize(
+  options?: SignedInAuthContextOptions,
+): Promise<UserAuthSuccess | AuthError> {
+  const authContext = await getSignedInAuthContext(options);
 
   if (!authContext.success) {
     return authContext;
   }
-
-  const featureFlags = evaluateFeatureFlagsFromMetadata(
-    authContext.deploymentMetadata,
-  );
 
   const anonymousAnalyticsEnabled =
     isTelemetryEnvAllowed() &&
@@ -439,9 +442,12 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     name: authContext.name,
     primaryEmail: authContext.primaryEmail,
     isAdmin: authContext.isAdmin,
-    featureFlags,
     anonymousAnalyticsEnabled,
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    // Drives the Memory item in Settings navigation. Wiring presence, not
+    // just the effective toggle: an admin must be able to reach the Memory
+    // page to turn a wired-but-disabled Brain on.
+    brainConfigured: isBrainConfigured(Env) || (await isBrainEnabled()),
     cookieConsentedAt: authContext.cookieConsentedAt,
     managedAccess: getManagedDeploymentAccessFromMetadata(
       authContext.deploymentMetadata,

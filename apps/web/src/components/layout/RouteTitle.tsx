@@ -7,7 +7,7 @@ import { getSettingsTitleForPath } from '@/components/settings/settings-navigati
 
 const ROUTE_TITLES: [RegExp, string][] = [
   [/^\/analytics$/, 'Analytics'],
-  [/^\/tasks$/, 'Tasks'],
+  [/^\/sessions$/, 'Sessions'],
   [/^\/$/, 'Home'],
 ];
 

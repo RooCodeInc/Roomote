@@ -211,6 +211,12 @@ vi.mock('@/trpc/client', () => ({
           mutationName: 'createSlackApp',
         }),
       },
+      updateAppManifest: {
+        mutationOptions: (options: unknown) => ({
+          ...(options as Record<string, unknown>),
+          mutationName: 'updateSlackManifest',
+        }),
+      },
     },
     comms: {
       status: { queryKey: () => ['comms', 'status'] },

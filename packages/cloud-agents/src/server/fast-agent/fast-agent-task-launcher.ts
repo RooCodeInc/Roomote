@@ -1,0 +1,257 @@
+import {
+  ALL_REPOSITORIES,
+  buildFastAgentChildTaskMetadata,
+  buildSlackThreadPermalink,
+  TaskPayloadKind,
+  type ReasoningEffort,
+  type StandardTask,
+  type TaskInitiator,
+  type TaskSurface,
+  type TaskTrigger,
+} from '@roomote/types';
+
+import {
+  enqueueTask,
+  type TaskChannelBindings,
+  type TaskPrLinkage,
+} from '../task-run-queue';
+import { getTaskUrl } from '../task-url';
+import type { LaunchFastAgentTask } from './fast-agent-conversation';
+import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
+
+export type FastAgentTaskLaunchHooks = {
+  /**
+   * Runs after launch metadata is available and before queueing. Throwing
+   * cancels the launch.
+   */
+  afterKickoff?: (
+    taskRun: { id: number; taskId: string },
+    context: { prompt: string; taskUrl: string },
+  ) => Promise<void>;
+  /** Runs when queueing fails after afterKickoff completed. */
+  onQueueFailure?: (taskRun: { id: number; taskId: string }) => Promise<void>;
+  /** The launcher renders the task link itself (for example on a card), so
+   * the parent kickoff message should not include one. */
+  rendersTaskLink?: boolean;
+};
+
+export function createFastAgentTaskLauncher(
+  params: {
+    userId: string;
+    surface: TaskSurface;
+    initiator?: TaskInitiator;
+    trigger?: TaskTrigger;
+    taskUrlCampaign: string;
+    /** Provider bindings recorded on the task, for example a Linear session. */
+    channels?: TaskChannelBindings;
+    /** Pull request the task works on, recorded with the task at launch. */
+    prLinkage?: TaskPrLinkage;
+    buildTask: (input: {
+      prompt: string;
+      environmentId: string | null;
+      branch?: string;
+      launchIdempotencyKey?: string;
+      model?: string | null;
+      reasoningEffort?: ReasoningEffort | null;
+      parentSessionId: string;
+    }) => StandardTask | Promise<StandardTask>;
+  } & FastAgentTaskLaunchHooks,
+): LaunchFastAgentTask {
+  return async ({
+    prompt,
+    images,
+    environmentId,
+    branch,
+    launchIdempotencyKey,
+    model,
+    reasoningEffort,
+    parentSessionId,
+    postKickoff,
+  }) => {
+    const parent = await fastAgentConversationRepository.findById({
+      id: parentSessionId,
+    });
+    if (!parent) {
+      throw new Error('Fast parent session was not found.');
+    }
+    const builtTask = await params.buildTask({
+      prompt,
+      environmentId,
+      branch,
+      launchIdempotencyKey,
+      model,
+      reasoningEffort,
+      parentSessionId,
+    });
+    const task = {
+      ...builtTask,
+      payload: {
+        ...builtTask.payload,
+        // Bound automation threads retain a logical identity distinct from
+        // their provider reply target. Never reconstruct it from that target.
+        ...buildFastAgentChildTaskMetadata({
+          sessionId: parentSessionId,
+          conversation: parent.conversation,
+        }),
+        ...(branch ? { branch } : {}),
+        ...(launchIdempotencyKey ? { launchIdempotencyKey } : {}),
+        ...(images?.length ? { images } : {}),
+      },
+    };
+    let taskUrl: string | undefined;
+    let preparedTaskRun: { id: number; taskId: string } | undefined;
+
+    const launch = await enqueueTask(
+      {
+        task,
+        initiator: params.initiator ?? { kind: 'user', userId: params.userId },
+        workflow: 'standard',
+        surface: params.surface,
+        trigger: params.trigger ?? 'message',
+        ...(params.channels ? { channels: params.channels } : {}),
+        ...(params.prLinkage ? { prLinkage: params.prLinkage } : {}),
+      },
+      {
+        beforeEnqueue: async (taskRun) => {
+          const resolvedTaskUrl = getTaskUrl({
+            taskId: taskRun.taskId,
+            utm: {
+              source: params.surface,
+              campaign: params.taskUrlCampaign,
+            },
+          });
+          taskUrl = resolvedTaskUrl;
+          await postKickoff({
+            taskId: taskRun.taskId,
+            taskUrl,
+            ...(params.rendersTaskLink ? { taskLinkRendered: true } : {}),
+          });
+          await params.afterKickoff?.(
+            { id: taskRun.id, taskId: taskRun.taskId },
+            { prompt, taskUrl: resolvedTaskUrl },
+          );
+          preparedTaskRun = { id: taskRun.id, taskId: taskRun.taskId };
+        },
+      },
+    ).catch(async (error: unknown) => {
+      if (preparedTaskRun && params.onQueueFailure) {
+        try {
+          await params.onQueueFailure(preparedTaskRun);
+        } catch (settleError) {
+          console.error(
+            `[Fast Agent] Failed to settle task ${preparedTaskRun.taskId} after queueing failed: ${settleError instanceof Error ? settleError.message : String(settleError)}`,
+          );
+        }
+      }
+      throw error;
+    });
+
+    if (!launch.taskId) {
+      return {
+        success: false,
+        error: 'The task launch did not return a task ID.',
+      };
+    }
+
+    return { success: true, taskId: launch.taskId, taskUrl };
+  };
+}
+
+export type FastAgentSlackTaskLauncherParams = {
+  userId: string;
+  teamId: string;
+  teamDomain?: string;
+  channelId: string;
+  threadTs: string;
+  messageId?: string;
+  /** Attribution override for delegated tasks; automation-identity Fast
+   * turns pass their automation initiator so delegated work is not
+   * persisted as user-initiated by the launch owner. */
+  initiator?: TaskInitiator;
+  /** Opt the child into the native Slack task card in the parent thread. */
+  liveTaskStream?: boolean;
+  /** The custom automation this thread runs for; marks the child's settle as
+   * that automation's report. */
+  customAutomationId?: string;
+  /**
+   * Repository the child runs against when the launch is pinned to a bare
+   * repository rather than an environment. Defaults to all repositories.
+   */
+  repoForPayload?: string;
+} & FastAgentTaskLaunchHooks;
+
+export function createFastAgentSlackTaskLauncher(
+  params: FastAgentSlackTaskLauncherParams,
+): LaunchFastAgentTask {
+  const slackConversationUrl = buildSlackThreadPermalink({
+    slackWorkspaceDomain: params.teamDomain,
+    slackTeamId: params.teamId,
+    slackChannelId: params.channelId,
+    threadTs: params.threadTs,
+    messageTs: params.messageId,
+  });
+
+  return createFastAgentTaskLauncher({
+    userId: params.userId,
+    surface: 'slack',
+    ...(params.initiator ? { initiator: params.initiator } : {}),
+    taskUrlCampaign: 'fast-delegation',
+    afterKickoff: params.afterKickoff,
+    onQueueFailure: params.onQueueFailure,
+    rendersTaskLink: params.rendersTaskLink,
+    buildTask: ({ prompt, environmentId, model, reasoningEffort }) => ({
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: params.repoForPayload ?? ALL_REPOSITORIES,
+        description: prompt,
+        ...(params.customAutomationId
+          ? { customAutomationId: params.customAutomationId }
+          : {}),
+        communicationProvider: 'slack',
+        communicationTeamId: params.teamId,
+        ...(params.teamDomain
+          ? { communicationTeamDomain: params.teamDomain }
+          : {}),
+        communicationChannelId: params.channelId,
+        communicationThreadId: params.threadTs,
+        ...(params.messageId
+          ? { communicationMessageId: params.messageId }
+          : {}),
+        ...(slackConversationUrl ? { slackConversationUrl } : {}),
+        ...(params.liveTaskStream ? { liveTaskStream: true } : {}),
+        ...(environmentId && environmentId !== ALL_REPOSITORIES
+          ? { environmentId }
+          : {}),
+        ...(model
+          ? { harnessModelOverrides: { 'opencode-server': model } }
+          : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      },
+    }),
+  });
+}
+
+export function createFastAgentWebTaskLauncher(params: {
+  userId: string;
+}): LaunchFastAgentTask {
+  return createFastAgentTaskLauncher({
+    userId: params.userId,
+    surface: 'web',
+    taskUrlCampaign: 'fast-delegation',
+    rendersTaskLink: true,
+    buildTask: ({ prompt, environmentId, model, reasoningEffort }) => ({
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: prompt,
+        ...(environmentId && environmentId !== ALL_REPOSITORIES
+          ? { environmentId }
+          : {}),
+        ...(model
+          ? { harnessModelOverrides: { 'opencode-server': model } }
+          : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      },
+    }),
+  });
+}

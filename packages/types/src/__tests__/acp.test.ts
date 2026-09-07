@@ -6,6 +6,7 @@ import {
   parseAcpTaskCancelledPayload,
   type AcpRequestUserInputQuestion,
   isLinkedReviewResultsMessage,
+  normalizeAcpReasoningText,
   normalizeTranscriptUserText,
   parseLinkedReviewResults,
   parseAcpRequestUserInputAnswerReply,
@@ -20,6 +21,27 @@ import {
   wrapOutOfBandContext,
   ACP_API_TOOL_OUTPUT_MAX_CHARS,
 } from '../acp';
+
+describe('normalizeAcpReasoningText', () => {
+  it('separates adjacent bold reasoning headings', () => {
+    expect(
+      normalizeAcpReasoningText(
+        '**Clarifying boundaries****Assessing precision****Checking gaps**',
+      ),
+    ).toBe(
+      '**Clarifying boundaries**\n\n**Assessing precision**\n\n**Checking gaps**',
+    );
+  });
+
+  it.each([
+    'First\n\n****\n\n**Second**',
+    'The requested **read****write** permissions are required.',
+    '**read****write** permissions are required.',
+    'Permissions: **read****write**',
+  ])('preserves non-heading Markdown: %s', (markdown) => {
+    expect(normalizeAcpReasoningText(markdown)).toBe(markdown);
+  });
+});
 
 describe('wrapOutOfBandContext', () => {
   it('wraps messages with escaped content and a sent_at attribute', () => {
@@ -154,7 +176,7 @@ describe('normalizeTranscriptUserText', () => {
           '<thread_activity>\nBob Example: Added another clue\n</thread_activity>',
           '<thread_context>\n<slack_thread_message ts="109.000">Carol Example: Earlier thread detail</slack_thread_message>\n</thread_context>',
           '<replying_to ts="110.000">\nRoomote Bot: Previous reply\n</replying_to>',
-          '<slack_message ts="111.000">\nlatest question\n</slack_message>',
+          '<slack_message ts="111.000" sender_slack_id="U123" sender_name="Alice Example" sender_github="alice-example">\nlatest question\n</slack_message>',
         ].join('\n\n'),
       ),
     ).toBe('latest question');
@@ -384,6 +406,39 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe('latest question');
   });
 
+  it('hides agent-only Slack message context from transcript text', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false">',
+          'Emoji reactions are not allowed.',
+          '</slack_turn_policy>',
+          '',
+          '<slack_message_context>',
+          'Slack block text:',
+          'State: New',
+          '</slack_message_context>',
+          '',
+          '<slack_message ts="111.000">',
+          'latest question',
+          '</slack_message>',
+        ].join('\n'),
+      ),
+    ).toBe('latest question');
+  });
+
+  it('leaves malformed Slack message context visible instead of stripping arbitrary text', () => {
+    const text = [
+      '<slack_message_context>',
+      'Slack block text without a closing context tag',
+      '<slack_message>',
+      'latest question',
+      '</slack_message>',
+    ].join('\n');
+
+    expect(normalizeTranscriptUserText(text)).toBe(text);
+  });
+
   it('extracts the current Slack turn when the prompt wrappers are HTML-escaped', () => {
     expect(
       normalizeTranscriptUserText(
@@ -395,6 +450,10 @@ describe('normalizeTranscriptUserText', () => {
           '&lt;replying_to ts="110.000"&gt;',
           'Roomote Bot: Previous reply',
           '&lt;/replying_to&gt;',
+          '',
+          '&lt;slack_message_context&gt;',
+          'Slack block text: State: New',
+          '&lt;/slack_message_context&gt;',
           '',
           '&lt;slack_message ts="111.000"&gt;',
           'latest question',
@@ -630,6 +689,109 @@ describe('normalizeTranscriptUserText', () => {
 });
 
 describe('extractAcpMcpInvocation', () => {
+  it.each(['read', 'apply_patch', 'skill', 'bash', 'custom_formatter'])(
+    'keeps explicit native %s identity authoritative over titles and arguments',
+    (toolName) => {
+      for (const title of [
+        'roomote_send_chat_reply',
+        'mcp__roomote__send_chat_reply',
+        'roomote_call_integration_tool',
+      ]) {
+        expect(
+          extractAcpMcpInvocation({
+            isMcp: false,
+            toolName,
+            title,
+            mcpServerName: null,
+            mcpToolName: null,
+            rawInput: {
+              server: 'roomote',
+              tool: 'send_chat_reply',
+              integrationId: 'linear',
+              toolName: 'search_issues',
+            },
+          }),
+        ).toBeNull();
+      }
+    },
+  );
+
+  it('preserves explicit MCP metadata even with a native flag', () => {
+    expect(
+      extractAcpMcpInvocation({
+        isMcp: false,
+        toolName: 'read',
+        mcpServerName: 'linear',
+        mcpToolName: 'search_issues',
+        title: 'result prose',
+      }),
+    ).toEqual({ mcpServerName: 'linear', mcpToolName: 'search_issues' });
+  });
+
+  it.each(['call_integration_tool', 'roomote_call_integration_tool'])(
+    'unwraps explicit native transport %s before the native guard',
+    (toolName) => {
+      expect(
+        extractAcpMcpInvocation({
+          isMcp: false,
+          toolName,
+          title: 'result prose',
+          rawInput: { integrationId: 'linear', toolName: 'search_issues' },
+        }),
+      ).toEqual({ mcpServerName: 'linear', mcpToolName: 'search_issues' });
+    },
+  );
+
+  it.each([undefined, '', '   '])(
+    'preserves historical title inference without canonical identity: %s',
+    (toolName) => {
+      expect(
+        extractAcpMcpInvocation({
+          isMcp: false,
+          toolName,
+          title: 'mcp__roomote__send_chat_reply',
+        }),
+      ).toEqual({ mcpServerName: 'roomote', mcpToolName: 'send_chat_reply' });
+    },
+  );
+
+  it('presents an on-demand integration call as the integration tool it invoked', () => {
+    // Fast native tool event: arguments nested under rawInput.arguments.
+    expect(
+      extractAcpMcpInvocation({
+        kind: 'mcp',
+        title: 'call_integration_tool',
+        toolName: 'call_integration_tool',
+        rawInput: {
+          arguments: {
+            integrationId: 'github',
+            toolName: 'search_code',
+            args: { query: 'fast' },
+          },
+        },
+      }),
+    ).toEqual({ mcpServerName: 'github', mcpToolName: 'search_code' });
+    // Sandbox ACP event: the member server's flattened tool name with the
+    // tool input carried directly.
+    expect(
+      extractAcpMcpInvocation({
+        kind: 'roomote_call_integration_tool',
+        title: 'roomote_call_integration_tool',
+        rawInput: { integrationId: 'linear', toolName: 'search_issues' },
+      }),
+    ).toEqual({ mcpServerName: 'linear', mcpToolName: 'search_issues' });
+    // Without a resolvable target, fall back to the ordinary resolution.
+    expect(
+      extractAcpMcpInvocation({
+        kind: 'roomote_call_integration_tool',
+        title: 'roomote_call_integration_tool',
+      }),
+    ).toEqual({
+      mcpServerName: 'roomote',
+      mcpToolName: 'call_integration_tool',
+    });
+  });
+
   it('keeps the legacy flattened MCP fallback for historical Roomote aliases', () => {
     expect(
       extractAcpMcpInvocation({

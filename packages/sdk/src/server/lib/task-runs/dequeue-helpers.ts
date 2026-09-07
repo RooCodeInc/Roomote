@@ -4,6 +4,7 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
@@ -33,7 +34,10 @@ import {
 } from '@roomote/db/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
 import { decryptSecrets } from '@roomote/db/encryption';
-import { createTaskRunWorkerGitHubToken } from '@roomote/github';
+import {
+  createTaskRunWorkerGitHubTokenWithMetadata,
+  getGitHubRateLimitRetryAfterMs,
+} from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
 import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
 import { createTaskRunGiteaCredentials } from '@roomote/gitea';
@@ -47,6 +51,8 @@ import {
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
+import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
+import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
 
 /**
  * Resolved git author identity for commits made by the worker.
@@ -261,6 +267,7 @@ export async function fetchResolvedRuntimeEnvVars(
   deploymentEnvVars?: Record<string, string>,
   options?: {
     sourceControlProvider?: SourceControlProvider | SourceControlProvider[];
+    includeSandboxOpenRouterApiKey?: boolean;
   },
 ): Promise<Record<string, string>> {
   const envVars =
@@ -269,7 +276,7 @@ export async function fetchResolvedRuntimeEnvVars(
     deploymentEnvVars: envVars,
   });
 
-  return redactControlPlaneEnvVars(
+  const resolvedEnvVars = redactControlPlaneEnvVars(
     redactSourceControlProviderEnvVars(
       redactInferenceGatewayProviderKeys(
         withLegacySnapshotModelEnvAliases({
@@ -280,6 +287,18 @@ export async function fetchResolvedRuntimeEnvVars(
       options?.sourceControlProvider,
     ),
   );
+
+  if (options?.includeSandboxOpenRouterApiKey) {
+    return resolvedEnvVars;
+  }
+
+  if (!(SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in resolvedEnvVars)) {
+    return resolvedEnvVars;
+  }
+
+  const ordinaryTaskEnvVars = { ...resolvedEnvVars };
+  delete ordinaryTaskEnvVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
+  return ordinaryTaskEnvVars;
 }
 
 /**
@@ -404,6 +423,17 @@ export async function notifyCanceledTaskRunOnSettle(
       RunStatus.Canceled,
       taskTitle,
     );
+    // Detached like the finishRun call site: never block the cancel path on
+    // the parent's turn lock plus an orchestrator turn.
+    void notifyFastAgentParentOnSettle(
+      {
+        ...taskRun,
+        error: errorMessage ?? persistedRun?.error ?? taskRun.error,
+      },
+      RunStatus.Canceled,
+      taskTitle,
+    );
+    void settleSlackLiveTaskCardOnExit(taskRun, RunStatus.Canceled, taskTitle);
   } catch (error) {
     console.error(
       `[notifyCanceledTaskRunOnSettle] Failed for run ${taskRun.id}: ${
@@ -415,6 +445,7 @@ export async function notifyCanceledTaskRunOnSettle(
 
 const SOURCE_CONTROL_TOKEN_MAX_RETRIES = 3;
 const SOURCE_CONTROL_TOKEN_BASE_DELAY_MS = 1_000;
+const GITHUB_TOKEN_MAX_INLINE_RATE_LIMIT_DELAY_MS = 30 * 1_000;
 
 export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
   source: 'user' | 'app';
@@ -498,11 +529,12 @@ async function createProviderToken(
 ): Promise<SourceControlRuntimeToken> {
   switch (provider) {
     case 'github': {
-      const token = await createTaskRunWorkerGitHubToken(taskRun);
+      const metadata =
+        await createTaskRunWorkerGitHubTokenWithMetadata(taskRun);
       return {
-        ...buildSourceControlTokenMetadata(provider, token),
-        source: 'app',
-        expiresAt: null,
+        ...buildSourceControlTokenMetadata(provider, metadata.token),
+        source: metadata.source,
+        expiresAt: metadata.expiresAt,
       };
     }
     case 'gitlab': {
@@ -627,12 +659,47 @@ async function createProviderTokenWithRetry(
   baseDelayMs: number,
 ): Promise<SourceControlRuntimeToken | null> {
   const label = getSourceControlProviderLabel(provider);
+  let githubInlineRateLimitRetries = 0;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await createProviderToken(taskRun, provider);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const githubRetryAfterMs =
+        provider === 'github' ? getGitHubRateLimitRetryAfterMs(error) : null;
+
+      if (githubRetryAfterMs !== null) {
+        const canRetryInline =
+          githubInlineRateLimitRetries === 0 &&
+          attempt < maxRetries &&
+          githubRetryAfterMs <= GITHUB_TOKEN_MAX_INLINE_RATE_LIMIT_DELAY_MS;
+        const log = canRetryInline ? console.warn : console.error;
+        log(
+          JSON.stringify({
+            event: 'source_control_token_creation_rate_limited',
+            provider,
+            taskRunId: taskRun.id,
+            attempt,
+            maxRetries,
+            retryAfterMs: githubRetryAfterMs,
+            action: canRetryInline ? 'retry' : 'abort',
+          }),
+        );
+
+        if (canRetryInline) {
+          githubInlineRateLimitRetries += 1;
+          await new Promise((resolve) =>
+            setTimeout(resolve, githubRetryAfterMs),
+          );
+          continue;
+        }
+
+        // A dequeue cannot safely hold a run claim for a provider-directed
+        // delay that may last minutes. Stop immediately instead of converting
+        // one rate-limited POST into two more premature retries.
+        return null;
+      }
 
       if (attempt < maxRetries) {
         const delayMs = baseDelayMs * 2 ** (attempt - 1);

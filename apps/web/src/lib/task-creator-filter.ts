@@ -1,11 +1,13 @@
 /**
  * Task creator filter encoding.
  *
- * Filter values encode the task initiator columns in a flat two-part scheme
- * (no attribution cascade):
+ * Filter values encode the task initiator columns without an attribution
+ * cascade:
  *
  * - `<userId>`                        linked human initiator (initiatorUserId)
  * - `automation:<key>`                automation initiator (initiatorAutomation)
+ * - `automation:<key>:<encoded externalId>` one automation actor
+ *                                            (actorExternalId)
  * - `external:<encoded externalId>`   unlinked external human actor
  *                                     (initiatorKind 'user' + actorExternalId)
  */
@@ -26,6 +28,7 @@ type ParsedCreatorFilterValue =
   | {
       kind: 'automation';
       key: string;
+      externalId?: string;
     }
   | {
       kind: 'external';
@@ -42,9 +45,14 @@ export function buildCreatorFilterValue(input: {
   actorExternalId: string | null | undefined;
 }): string | null {
   if (input.initiatorKind === 'automation') {
-    return input.initiatorAutomation
-      ? `${AUTOMATION_CREATOR_FILTER_PREFIX}${input.initiatorAutomation}`
-      : null;
+    if (!input.initiatorAutomation) {
+      return null;
+    }
+
+    const externalId = normalizeExternalActorId(input.actorExternalId);
+    return input.initiatorAutomation === 'custom_automation' && externalId
+      ? `${AUTOMATION_CREATOR_FILTER_PREFIX}${input.initiatorAutomation}:${encodeURIComponent(externalId)}`
+      : `${AUTOMATION_CREATOR_FILTER_PREFIX}${input.initiatorAutomation}`;
   }
 
   if (input.initiatorUserId) {
@@ -64,10 +72,26 @@ export function parseCreatorFilterValue(
   value: string,
 ): ParsedCreatorFilterValue {
   if (value.startsWith(AUTOMATION_CREATOR_FILTER_PREFIX)) {
-    const key = value.slice(AUTOMATION_CREATOR_FILTER_PREFIX.length);
+    const encoded = value.slice(AUTOMATION_CREATOR_FILTER_PREFIX.length);
+    const separatorIndex = encoded.indexOf(':');
+    const key =
+      separatorIndex === -1 ? encoded : encoded.slice(0, separatorIndex);
 
     if (key) {
-      return { kind: 'automation', key };
+      if (separatorIndex === -1) {
+        return { kind: 'automation', key };
+      }
+
+      try {
+        const externalId = decodeURIComponent(
+          encoded.slice(separatorIndex + 1),
+        );
+        if (externalId) {
+          return { kind: 'automation', key, externalId };
+        }
+      } catch {
+        // Fall through to the opaque user path for malformed values.
+      }
     }
   }
 

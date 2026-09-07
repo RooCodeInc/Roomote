@@ -29,7 +29,7 @@ describe('Standard Task todo seed', () => {
       '- Execute the selected workflow end-to-end',
     );
     expect(harnessInstructions).toContain(
-      '- If the implementation changed repository files, transition into `capture-visual-proof` after implementation and before delivery or any final delivery pause so the delegated proof flow can decide whether screenshots, screencasts, both, or no browser proof apply',
+      '- If the implementation changed repository files, load `capture-visual-proof` after implementation and before delivery or any final delivery pause so the proof step can decide whether screenshots, screencasts, both, or no browser proof apply and capture them',
     );
   });
 

@@ -3,15 +3,31 @@ import {
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationConnectionScope,
   getMcpIntegrationDefaultDisabledTools,
+  getMcpIntegrationOauthResource,
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopes,
+  isMcpConnectionNotionConfig,
+  isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
+  isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
   RESEND_DEFAULT_DISABLED_TOOL_NAMES,
 } from '../mcp-oauth';
 
 describe('Linear OAuth scopes', () => {
+  it('keeps issue comments separate from issue field updates', () => {
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'dedicated comment-creation tool',
+    );
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'do not pass comment text to an issue-update or status-update tool',
+    );
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'report the returned tool error verbatim',
+    );
+  });
+
   it('makes deployment app actors assignable and mentionable', () => {
     expect(
       getMcpIntegrationOauthScopes('linear', 'linear_org_install'),
@@ -39,12 +55,68 @@ describe('monday.com OAuth', () => {
       serverMode: 'upstream_proxy',
     });
     expect(getMcpIntegrationConnectionScope('monday')).toBe('user');
+    expect(getMcpIntegrationOauthResource('monday')).toBe(
+      'https://mcp.monday.com/mcp',
+    );
     expect(getMcpIntegrationOauthScopeMode('monday')).toBe('read-only');
     expect(getMcpIntegrationOauthScopes('monday')).toEqual(
       MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
     );
     expect(getMcpIntegrationOauthScopes('monday')).not.toContain(
       'webhooks:read',
+    );
+  });
+});
+
+describe('Notion internal integration', () => {
+  it('uses a deployment-scoped native MCP with admin-managed credentials', () => {
+    expect(getMcpIntegration('notion')).toMatchObject({
+      name: 'Notion',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'native',
+    });
+    expect(getMcpIntegration('notion')?.url).toBeUndefined();
+    expect(getMcpIntegrationConnectionScope('notion')).toBe('deployment');
+  });
+
+  it('recognizes only stored Notion internal integration configs', () => {
+    expect(
+      isMcpConnectionNotionConfig({
+        type: 'notion',
+        encryptedToken: 'encrypted',
+      }),
+    ).toBe(true);
+    expect(
+      isMcpConnectionNotionConfig({
+        type: 'oauth_client',
+        client_id: 'legacy-hosted-mcp',
+        registered_redirect_uri: 'https://example.com/callback',
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('Rippling HRIS connection', () => {
+  it('keeps the deployment credential on the control plane', () => {
+    expect(getMcpIntegration('rippling')).toMatchObject({
+      name: 'Rippling',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'credential_only',
+    });
+    expect(getMcpIntegration('rippling')?.url).toBeUndefined();
+  });
+
+  it('recognizes only encrypted Rippling token configs', () => {
+    expect(
+      isMcpConnectionRipplingConfig({
+        type: 'rippling',
+        encryptedApiToken: 'encrypted',
+      }),
+    ).toBe(true);
+    expect(isMcpConnectionRipplingConfig({ type: 'rippling' } as never)).toBe(
+      false,
     );
   });
 });
@@ -112,6 +184,29 @@ describe('ElevenLabs credential-only integration', () => {
       }),
     ).toBe(false);
     expect(isMcpConnectionElevenLabsConfig({})).toBe(false);
+  });
+});
+
+describe('gbrain connection config', () => {
+  const config = {
+    type: 'gbrain' as const,
+    url: 'http://gbrain:8931',
+    agentClientId: 'agent',
+    encryptedAgentClientSecret: 'encrypted-agent',
+    ingestClientId: 'ingest',
+    encryptedIngestClientSecret: 'encrypted-ingest',
+    maintenanceClientId: 'maintenance',
+    encryptedMaintenanceClientSecret: 'encrypted-maintenance',
+  };
+
+  it('requires the dedicated maintenance credential', () => {
+    expect(isMcpConnectionGbrainConfig(config)).toBe(true);
+    expect(
+      isMcpConnectionGbrainConfig({
+        ...config,
+        maintenanceClientId: undefined,
+      } as never),
+    ).toBe(false);
   });
 });
 

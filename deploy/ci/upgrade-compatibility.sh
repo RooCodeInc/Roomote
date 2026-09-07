@@ -23,7 +23,7 @@ fi
 baseline_registry="${BASELINE_IMAGE_REGISTRY:-ghcr.io}"
 baseline_namespace="${BASELINE_IMAGE_NAMESPACE:-roocodeinc}"
 project_name="${COMPOSE_PROJECT_NAME:-roomote-upgrade-ci}"
-postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-57432}"
+postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-0}"
 redis_port="${DEPLOYMENT_CI_REDIS_PORT:-58379}"
 default_network="${ROOMOTE_DEFAULT_NETWORK:-${project_name}_default}"
 worker_network="${DOCKER_WORKER_NETWORK:-${project_name}_worker}"
@@ -57,16 +57,26 @@ cleanup() {
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$temporary_directory"
 }
-trap cleanup EXIT
 
 report_failure() {
-  local exit_code="$?"
   printf 'Upgrade compatibility test failed; final Compose state follows.\n' >&2
+  printf '\nCompose services:\n' >&2
   compose ps --all >&2 || true
-  compose logs --no-color --tail 200 >&2 || true
-  return "$exit_code"
+  printf '\nRequired service logs:\n' >&2
+  compose logs --no-color --tail 200 \
+    postgres redis minio minio-init docker-proxy db-migrate api web controller bullmq gbrain preview-proxy >&2 || true
 }
-trap report_failure ERR
+
+finish() {
+  local exit_code="$?"
+  trap - EXIT
+  if [ "$exit_code" -ne 0 ]; then
+    report_failure
+  fi
+  cleanup
+  exit "$exit_code"
+}
+trap finish EXIT
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -121,7 +131,7 @@ APP_ENV=production
 ARTIFACT_SIGNING_KEY=$artifact_signing_key
 CADDY_HTTP_PORT=19080
 CADDY_HTTPS_PORT=19443
-COMPOSE_PROFILES=local-postgres
+COMPOSE_PROFILES=local-postgres,brain
 DASHBOARD_PASSWORD=$dashboard_password
 DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
 DEFAULT_COMPUTE_PROVIDER=docker
@@ -159,10 +169,24 @@ TRPC_URL=http://api:3001
 EOF
 
 verify_endpoints() {
+  printf 'Probing API liveness endpoint\n'
   compose exec -T api curl -fsS --max-time 5 http://127.0.0.1:3001/health/liveness >/dev/null
+
+  printf 'Probing web health endpoint\n'
   compose exec -T web curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
-  compose exec -T web curl -fsS --max-time 10 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing web setup endpoint with generated token\n'
+  compose exec -T web curl -fsS \
+    --max-time 30 \
+    --retry 2 \
+    --retry-delay 1 \
+    --retry-all-errors \
+    "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing controller health endpoint\n'
   compose exec -T controller curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null
+
+  printf 'Probing BullMQ health endpoint\n'
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
 }
 
@@ -197,6 +221,72 @@ snapshot_previous_schema_contract() {
 DROP SCHEMA IF EXISTS upgrade_ci_contract CASCADE;
 CREATE SCHEMA upgrade_ci_contract;
 
+-- Contract migrations may retire compatibility-only schema once the release
+-- that stopped using it is itself the rollback target. Detect that boundary
+-- from the baseline schema so older application images receive no exception.
+CREATE TABLE upgrade_ci_contract.compatibility_boundaries (
+  name text PRIMARY KEY,
+  reason text NOT NULL
+);
+
+INSERT INTO upgrade_ci_contract.compatibility_boundaries (name, reason)
+SELECT
+  'fast-conversation-canonical-storage-v0.41.0',
+  'v0.41.0 moved Fast conversation reads and writes to canonical storage'
+WHERE to_regclass('public.fast_agent_conversation_aliases') IS NOT NULL
+  AND to_regclass('public.slack_quick_answers') IS NOT NULL
+  AND to_regprocedure('public.serialize_fast_conversation_bridge_writes()') IS NOT NULL
+  AND to_regprocedure('public.sync_canonical_fast_conversation_to_legacy()') IS NOT NULL
+  AND to_regprocedure('public.sync_legacy_fast_conversation_to_canonical()') IS NOT NULL
+  AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'fast_agent_conversations'
+      AND column_name = 'compatibility_messages'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'fast_agent_conversations'
+      AND column_name = 'legacy_conversation_ids'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'slack_fast_integration_calls'
+      AND column_name = 'fast_agent_conversation_id'
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM pg_constraint AS foreign_key
+    INNER JOIN pg_class AS source_table
+      ON source_table.oid = foreign_key.conrelid
+    INNER JOIN pg_namespace AS source_schema
+      ON source_schema.oid = source_table.relnamespace
+    INNER JOIN pg_class AS target_table
+      ON target_table.oid = foreign_key.confrelid
+    INNER JOIN pg_namespace AS target_schema
+      ON target_schema.oid = target_table.relnamespace
+    INNER JOIN pg_attribute AS source_column
+      ON source_column.attrelid = source_table.oid
+      AND source_column.attnum = foreign_key.conkey[1]
+    INNER JOIN pg_attribute AS target_column
+      ON target_column.attrelid = target_table.oid
+      AND target_column.attnum = foreign_key.confkey[1]
+    WHERE foreign_key.contype = 'f'
+      AND cardinality(foreign_key.conkey) = 1
+      AND cardinality(foreign_key.confkey) = 1
+      AND source_schema.nspname = 'public'
+      AND source_table.relname = 'slack_fast_integration_calls'
+      AND source_column.attname = 'fast_agent_conversation_id'
+      AND target_schema.nspname = 'public'
+      AND target_table.relname = 'fast_agent_conversations'
+      AND target_column.attname = 'id'
+  );
+
 -- Feature PRs use the published develop image as their CI baseline even though
 -- develop is not a supported rollback target. That image briefly shipped the
 -- v0.6 usage-table rename before this contract check existed. Allow only that
@@ -212,6 +302,56 @@ SELECT
   'unsupported interim develop schema repaired to the v0.5-compatible table name'
 WHERE to_regclass('public.llm_usage_events') IS NOT NULL
   AND to_regclass('public.task_inference_usage_events') IS NULL;
+
+INSERT INTO upgrade_ci_contract.previous_table_exceptions (table_name, reason)
+SELECT retired.table_name, boundary.reason
+FROM (
+  VALUES
+    ('fast_agent_conversation_aliases'),
+    ('slack_quick_answers')
+) AS retired(table_name)
+CROSS JOIN upgrade_ci_contract.compatibility_boundaries AS boundary
+WHERE boundary.name = 'fast-conversation-canonical-storage-v0.41.0';
+
+CREATE TABLE upgrade_ci_contract.previous_column_exceptions (
+  table_name text NOT NULL,
+  column_name text NOT NULL,
+  reason text NOT NULL,
+  PRIMARY KEY (table_name, column_name)
+);
+
+INSERT INTO upgrade_ci_contract.previous_column_exceptions (
+  table_name,
+  column_name,
+  reason
+)
+SELECT retired.table_name, retired.column_name, boundary.reason
+FROM (
+  VALUES
+    ('slack_conversation_messages', 'slack_quick_answer_id'),
+    ('slack_fast_integration_calls', 'slack_quick_answer_id')
+) AS retired(table_name, column_name)
+CROSS JOIN upgrade_ci_contract.compatibility_boundaries AS boundary
+WHERE boundary.name = 'fast-conversation-canonical-storage-v0.41.0';
+
+CREATE TABLE upgrade_ci_contract.previous_nullability_exceptions (
+  table_name text NOT NULL,
+  column_name text NOT NULL,
+  reason text NOT NULL,
+  PRIMARY KEY (table_name, column_name)
+);
+
+INSERT INTO upgrade_ci_contract.previous_nullability_exceptions (
+  table_name,
+  column_name,
+  reason
+)
+SELECT
+  'slack_fast_integration_calls',
+  'fast_agent_conversation_id',
+  boundary.reason
+FROM upgrade_ci_contract.compatibility_boundaries AS boundary
+WHERE boundary.name = 'fast-conversation-canonical-storage-v0.41.0';
 
 CREATE TABLE upgrade_ci_contract.previous_tables AS
 SELECT table_name, table_type
@@ -236,8 +376,26 @@ WHERE table_schema = 'public'
     SELECT 1
     FROM upgrade_ci_contract.previous_table_exceptions AS exception
     WHERE exception.table_name = previous.table_name
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM upgrade_ci_contract.previous_column_exceptions AS exception
+    WHERE exception.table_name = previous.table_name
+      AND exception.column_name = previous.column_name
   );
 SQL
+}
+
+report_schema_contract_boundaries() {
+  local boundaries
+  boundaries="$(
+    compose exec -T postgres psql -Atq -U postgres -d roomote \
+      -c "SELECT format('%s: %s', name, reason) FROM upgrade_ci_contract.compatibility_boundaries ORDER BY name"
+  )"
+
+  if [ -n "$boundaries" ]; then
+    printf 'Enabled schema contract boundaries:\n%s\n' "$boundaries"
+  fi
 }
 
 verify_previous_schema_contract() {
@@ -309,6 +467,12 @@ JOIN information_schema.columns AS current
  AND current.column_name = previous.column_name
 WHERE previous.is_nullable = 'YES'
   AND current.is_nullable = 'NO'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM upgrade_ci_contract.previous_nullability_exceptions AS exception
+    WHERE exception.table_name = previous.table_name
+      AND exception.column_name = previous.column_name
+  )
 
 UNION ALL
 
@@ -346,7 +510,16 @@ compose up \
   --detach \
   --wait \
   --wait-timeout 600 \
-  postgres redis minio minio-init db-migrate api web controller bullmq preview-proxy
+  postgres redis minio minio-init db-migrate api web controller bullmq gbrain preview-proxy
+
+postgres_endpoint="$(compose port postgres 5432)"
+postgres_port="${postgres_endpoint##*:}"
+case "$postgres_port" in
+  '' | *[!0-9]*)
+    printf 'could not resolve the published Postgres port from %s\n' "$postgres_endpoint" >&2
+    exit 1
+    ;;
+esac
 
 migration_container="$(compose ps --all --quiet db-migrate)"
 [ -n "$migration_container" ] || {
@@ -360,6 +533,7 @@ migration_exit="$(docker inspect --format '{{.State.ExitCode}}' "$migration_cont
 }
 verify_endpoints
 snapshot_previous_schema_contract
+report_schema_contract_boundaries
 write_marker
 baseline_migrations="$(applied_migration_count)"
 

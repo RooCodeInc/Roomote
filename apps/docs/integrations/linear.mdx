@@ -6,7 +6,8 @@ icon: 'https://api.iconify.design/simple-icons:linear.svg?color=currentColor'
 
 The Linear integration lets Roomote receive work from Linear, post progress back
 to the issue or agent session, and keep the full run available in the Roomote
-task view.
+task view. When the Brain is configured, Roomote also indexes issues from the
+connected workspace so agents can recall product context before opening Linear.
 
 Linear is optional during onboarding. Connect it when your team wants Roomote to
 work from issues that already have product context, acceptance criteria,
@@ -51,8 +52,12 @@ priority, or discussion.
 ## Starting work from Linear
 
 You can start Roomote work from a Linear agent session or by mentioning Roomote
-on an issue. Roomote uses the issue context and may ask you to confirm the
-workspace before it launches.
+on an issue. Each agent session is a Roomote Session: Roomote reads the issue,
+its comments, and any agent guidance, answers directly when no workspace is
+needed, and otherwise picks the environment and starts a task bound to the
+session. Reply in the same session to redirect it, ask a follow-up, or steer a
+running task. The session links to the Session page in Roomote so you can
+follow the full transcript there.
 
 Good Linear asks include:
 
@@ -64,9 +69,25 @@ Good Linear asks include:
 
 ## Progress and follow-up
 
-Roomote can post status, plan updates, and final responses back to Linear. The
-Roomote task view remains the best place to inspect logs, diffs, artifacts, and
-previews.
+Roomote posts its replies and the outcome of delegated tasks back to the agent
+session. While a delegated task runs, its thoughts, actions, and plan updates
+stream into the session live, and it asks its questions there when it needs
+your input. The Roomote Session and task views remain the best place to
+inspect logs, diffs, artifacts, and previews.
+
+## Brain context
+
+The Brain keeps one durable page per visible Linear issue, including its current
+workflow state, team, project, priority, labels, assignee, description, and a
+bounded set of recent comments. When available, issue pages also include cycle,
+estimate, start date, parent, and related-issue context. Collection uses the same
+workspace connection configured above; it does not require another Linear token.
+
+Roomote refreshes changed issues incrementally and periodically checks the full
+visible issue set. Archived issues remain available as historical context. If an
+issue is deleted or the connected app can no longer see it, Roomote removes its
+page only after a complete visibility check, avoiding deletion from a partial or
+failed API response.
 
 <Tip>
   Put acceptance criteria and relevant repository links directly in the Linear

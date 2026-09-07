@@ -11,6 +11,13 @@ type ParsedReleaseNotes = {
   detailsMarkdown: string;
 };
 
+type ParsedProductRelease = ParsedReleaseNotes & {
+  version: string;
+};
+
+const RELEASE_HEADING_PATTERN =
+  /^##\s+v?(\d+\.\d+\.\d+(?:-[\w.]+)?)(?:\s+\([^)]*\))?\s*$/i;
+
 function isStubText(value: string): boolean {
   return STUB_MARKER.test(value);
 }
@@ -111,4 +118,40 @@ export function parseReleaseBody(
     highlights,
     detailsMarkdown: detailsParts.join('\n').trim(),
   };
+}
+
+/** Parse product release sections from the root CHANGELOG.md. */
+export function parseProductReleaseHistory(
+  changelogMarkdown: string,
+): ParsedProductRelease[] {
+  const lines = changelogMarkdown.replace(/\r\n/g, '\n').split('\n');
+  const releases: ParsedProductRelease[] = [];
+  let version: string | null = null;
+  let start = -1;
+
+  const appendRelease = (end: number) => {
+    if (!version || start === -1) {
+      return;
+    }
+
+    releases.push({
+      version,
+      ...parseReleaseBody(lines.slice(start, end).join('\n')),
+    });
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (!/^##\s+/.test(line)) {
+      continue;
+    }
+
+    appendRelease(i);
+    const match = line.match(RELEASE_HEADING_PATTERN);
+    version = match?.[1] ?? null;
+    start = version ? i : -1;
+  }
+
+  appendRelease(lines.length);
+  return releases;
 }

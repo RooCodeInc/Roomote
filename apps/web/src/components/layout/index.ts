@@ -7,4 +7,6 @@ export { Logo } from './Logo';
 export { OriginMismatchAlert } from './OriginMismatchAlert';
 export { RoomoteWordmark } from './RoomoteWordmark';
 export { UserMenu } from './UserMenu';
+export { WorkspaceHeader } from './WorkspaceHeader';
+export { WorkspaceSurface } from './WorkspaceSurface';
 export { SideNav } from './side-nav';

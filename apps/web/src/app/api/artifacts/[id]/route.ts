@@ -66,7 +66,7 @@ export async function GET(
     downloadUrl?: string;
   } = {
     id: artifact.id,
-    taskId: artifact.taskId,
+    taskId: artifact.taskId!,
     runId: artifact.runId,
     path: artifact.path,
     version: artifact.version,
@@ -80,7 +80,7 @@ export async function GET(
   // Include download URL if artifact has been uploaded
   if (artifact.uploaded) {
     response.downloadUrl = await generateDownloadUrl(
-      artifact.taskId,
+      artifact.taskId!,
       artifact.id,
       artifact.path,
       artifact.version,

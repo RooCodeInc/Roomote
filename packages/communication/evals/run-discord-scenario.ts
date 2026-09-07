@@ -12,7 +12,7 @@
  *
  * Usage:
  *   pnpm --filter @roomote/communication eval:discord-scenario -- \
- *     --scenario evals/scenarios/discord-fast-answer.json \
+ *     --scenario evals/scenarios/discord-guild-mention-gating.json \
  *     --events http://localhost:13101/api/internal/discord/events \
  *     --target roomote@local-dev --episode 1 --out /tmp/discord-eval-bundles
  */

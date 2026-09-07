@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { useStore } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { useShallow } from 'zustand/react/shallow';
 
 import {
@@ -258,6 +259,20 @@ export function useSandboxHistoryReady(): boolean {
 export function useSandboxClient(): SandboxClient | null {
   const store = useSandboxStore();
   return useStore(store, (s) => s.client);
+}
+
+// A stable empty store so useOptionalSandboxClient can be called outside a
+// sandbox provider (e.g. the Session workspace's collated Live Preview panel).
+const nullSandboxClientStore = createStore<{ client: SandboxClient | null }>(
+  () => ({ client: null }),
+);
+
+export function useOptionalSandboxClient(): SandboxClient | null {
+  const store = useOptionalSandboxStore();
+  return useStore(
+    (store ?? nullSandboxClientStore) as typeof nullSandboxClientStore,
+    (s) => s.client,
+  );
 }
 
 export function useSandboxAppendAcpEvent() {

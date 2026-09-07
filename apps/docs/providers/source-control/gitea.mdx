@@ -82,8 +82,8 @@ as GitHub and GitLab. After syncing repositories, associate the Gitea repository
 with the intended environment and enable Review Code automation for that target.
 
 Open or reopened PR events enqueue initial review tasks. PR sync events enqueue
-delta reviews. `@roomote` comments on Gitea pull requests route into the
-existing PR owner task when possible, or enqueue a new review task.
+delta reviews. `@roomote` comments on Gitea pull requests and issues continue
+the Roomote Session for that discussion, or start one when it does not exist.
 
 ## CI Failure Triage
 
@@ -99,6 +99,19 @@ deployments match repository `host` against `GITEA_BASE_URL`).
 Roomote reads a bounded tail of failed job logs with the deployment Gitea
 credential when the Actions API exposes them. Re-sync repositories after
 upgrading so webhooks include the `workflow_run` event.
+
+## Mention Roomote on pull requests and issues
+
+Mention `@roomote` in a pull request or issue comment to talk to Roomote about
+it. Each pull request or issue is a Roomote Session: Roomote reads the
+discussion, answers as a comment when no workspace is needed, and otherwise
+starts a task on the pull request's head branch (or the issue's repository)
+and reports back in the same discussion. Mention it again to redirect it, ask a
+follow-up, or steer a running task. The commenter must have a linked Gitea
+account. Ask for a review in the mention (for example `@roomote review this`)
+and Roomote runs the Review Code automation's structured review on the current
+head, posts the findings on the pull request, and reports back in the same
+discussion.
 
 ## Current limits
 

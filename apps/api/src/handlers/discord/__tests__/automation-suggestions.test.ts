@@ -7,6 +7,7 @@ const {
   insertMock,
   insertValuesMock,
   resolveProviderMock,
+  registerTrackedSuggestionCardsMock,
   selectLimitMock,
 } = vi.hoisted(() => ({
   createTaskThreadMock: vi.fn(),
@@ -15,6 +16,7 @@ const {
   insertMock: vi.fn(),
   insertValuesMock: vi.fn(),
   resolveProviderMock: vi.fn(),
+  registerTrackedSuggestionCardsMock: vi.fn(),
   selectLimitMock: vi.fn(),
 }));
 
@@ -22,6 +24,7 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...values: unknown[]) => values),
   eq: vi.fn((...values: unknown[]) => values),
   sql: vi.fn(),
+  registerTrackedSuggestionCards: registerTrackedSuggestionCardsMock,
   trackedMessages: {
     id: 'id',
     metadata: 'metadata',
@@ -192,19 +195,17 @@ describe('Discord scheduled suggestions', () => {
       }),
     );
     expect(postMessageMock.mock.calls[0]?.[0]).not.toHaveProperty('buttons');
-    expect(insertValuesMock).toHaveBeenNthCalledWith(
-      1,
+    expect(registerTrackedSuggestionCardsMock).toHaveBeenNthCalledWith(1, [
       expect.objectContaining({
         messageTs: 'message-a',
         workItemId: 'suggestion-1',
       }),
-    );
-    expect(insertValuesMock).toHaveBeenNthCalledWith(
-      2,
+    ]);
+    expect(registerTrackedSuggestionCardsMock).toHaveBeenNthCalledWith(2, [
       expect.objectContaining({
         messageTs: 'message-b',
         workItemId: 'suggestion-2',
       }),
-    );
+    ]);
   });
 });

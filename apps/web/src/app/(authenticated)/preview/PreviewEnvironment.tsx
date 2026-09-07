@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { processImageFiles } from '@/lib';
 import { SETTINGS_PATHS } from '@/lib/settings';
 
-import { useCreateStandardTaskRun } from '@/hooks/task-runs';
+import { useStartFastSession } from '@/hooks/task-runs';
 import { useEnvironments } from '@/hooks/environments';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 
@@ -82,29 +82,19 @@ export function PreviewEnvironment({
     setSelectedModelId(launchTaskModels.data.defaultModelId);
   }, [launchTaskModels.data?.defaultModelId, selectedModelId]);
 
-  const navigateToTaskRun = useCallback(
-    (result: { success: boolean; taskId?: string; error?: string }) => {
-      if (result.success && 'taskId' in result) {
-        setIsExiting(true);
-        router.push(`/task/${result.taskId}`);
-      } else if ('error' in result) {
-        toast.error(result.error);
+  const startFastSession = useStartFastSession({
+    onSuccess: ({ taskId }) => {
+      if (!taskId) {
+        toast.error('The task did not start.');
+        return;
       }
+      setIsExiting(true);
+      router.push(`/task/${taskId}`);
     },
-    [router],
-  );
+    onError: (error: Error) => toast.error(error.message),
+  });
 
-  const mutationOptions = useCallback(
-    () => ({
-      onSuccess: navigateToTaskRun,
-      onError: (error: Error) => toast.error(error.message),
-    }),
-    [navigateToTaskRun],
-  );
-
-  const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions());
-
-  const isBusy = createStandardTaskRun.isPending;
+  const isBusy = startFastSession.isPending;
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -133,19 +123,26 @@ export function PreviewEnvironment({
         images = processed.map((p) => p.dataUrl);
       }
 
-      await createStandardTaskRun.mutateAsync({
+      if (startFastSession.isPending) {
+        return;
+      }
+
+      // The workspace is already chosen, so the owning Session delegates the
+      // task immediately instead of asking Fast to decide.
+      await startFastSession.mutateAsync({
+        text,
+        images,
         model: selectedModelId,
-        payload: {
+        pinnedLaunch: {
+          launchId: crypto.randomUUID(),
           repo: payloadRepo,
-          branch,
+          branch: branch || undefined,
           sha: payloadSha,
-          environmentId,
-          description: text,
-          images,
+          environmentId: environmentId || undefined,
         },
       });
     },
-    [createStandardTaskRun, form, repo, selectedModelId, sha],
+    [startFastSession, form, repo, selectedModelId, sha],
   );
 
   return (

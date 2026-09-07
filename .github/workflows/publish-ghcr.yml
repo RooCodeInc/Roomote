@@ -219,7 +219,7 @@ jobs:
             target: runtime-app
             image: roomote-app
             arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
+            runner: blacksmith-8vcpu-ubuntu-2404-arm
           - app: worker
             context: .
             dockerfile: apps/worker/Dockerfile
@@ -252,6 +252,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - name: Resolve checked-out commit
+        id: commit
+        shell: bash
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       # Blacksmith's builder mounts a persistent NVMe layer cache into the
       # runner (per repo/Dockerfile/arch). Unlike type=gha caching this has
       # no 10GB repo cap or per-ref scoping, and skips the multi-minute
@@ -279,6 +286,7 @@ jobs:
             R_APP_ENV=${{ needs.prepare.outputs.app_env }}
             RELEASE_VERSION=${{ needs.prepare.outputs.version }}
             RELEASE_PRODUCT_VERSION=${{ needs.prepare.outputs.product_version }}
+            GITHUB_SHA=${{ steps.commit.outputs.sha }}
 
       - name: Export digest
         shell: bash

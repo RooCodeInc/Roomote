@@ -21,10 +21,20 @@
       "import": "./src/server/non-task-provider-usage.ts",
       "require": "./src/server/non-task-provider-usage.ts"
     },
+    "./show-widget": {
+      "types": "./src/server/show-widget.ts",
+      "import": "./src/server/show-widget.ts",
+      "require": "./src/server/show-widget.ts"
+    },
     "./router-mcp-policy": {
       "types": "./src/router-mcp-policy.ts",
       "import": "./src/router-mcp-policy.ts",
       "require": "./src/router-mcp-policy.ts"
+    },
+    "./mcp-nullable-optionals": {
+      "types": "./src/server/mcp-nullable-optionals.ts",
+      "import": "./src/server/mcp-nullable-optionals.ts",
+      "require": "./src/server/mcp-nullable-optionals.ts"
     }
   },
   "typesVersions": {
@@ -35,6 +45,9 @@
       "server/non-task-provider-usage": [
         "./src/server/non-task-provider-usage.ts"
       ],
+      "show-widget": [
+        "./src/server/show-widget.ts"
+      ],
       "router-mcp-policy": [
         "./src/router-mcp-policy.ts"
       ]
@@ -43,29 +56,33 @@
   "scripts": {
     "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
     "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
-    "lint": "eslint src --ext=ts --max-warnings=0",
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run -f ../../.env.test -- vitest",
-    "test:router": "dotenvx run -f ../../.env.local -- tsx scripts/test-llm-router.ts",
     "deployment:launch-docker-task": "tsx src/server/deployment-ci-launch-task.ts",
-    "clean": "rimraf .turbo",
-    "eval:router": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.ts --no-cache --table-cell-max-length 200",
-    "eval:router:followup": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.followup.ts --no-cache --table-cell-max-length 200",
-    "eval:router:view": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 view",
-    "eval:router:share": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 share -c evals/router/promptfooconfig.ts"
+    "clean": "rimraf .turbo"
   },
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.25",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@opencode-ai/sdk": "1.18.10",
+    "@roomote/ado": "workspace:^",
     "@roomote/auth": "workspace:^",
+    "@roomote/bitbucket": "workspace:^",
+    "@roomote/communication": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:^",
     "@roomote/github": "workspace:^",
+    "@roomote/gitea": "workspace:^",
+    "@roomote/gitlab": "workspace:^",
     "@roomote/redis": "workspace:^",
     "@roomote/telemetry": "workspace:^",
     "@roomote/types": "workspace:^",
     "ai": "^6.0.116",
+    "bullmq": "^5.78.0",
+    "cron-parser": "5.6.1",
+    "dompurify": "3.4.13",
+    "jsdom": "26.1.0",
     "jszip": "^3.10.1",
     "mammoth": "^1.11.0",
     "pdfjs-dist": "^6.2.108",
@@ -74,10 +91,11 @@
     "zod-to-json-schema": "3.25.1"
   },
   "devDependencies": {
-    "@roomote/config-eslint": "workspace:^",
     "@roomote/config-typescript": "workspace:^",
     "@types/ioredis-mock": "^8.2.6",
     "@types/node": "^24.10.13",
+    "@types/jsdom": "21.1.7",
+    "ajv": "^8.20.0",
     "ioredis-mock": "^8.13.1",
     "vitest": "^4.1.1"
   }

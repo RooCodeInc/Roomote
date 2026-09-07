@@ -4,6 +4,7 @@ import { hasSlackThreadReplyContext } from '@roomote/slack/client';
 import { getRoomoteConfig } from '../../mcp/roomote-mcp-server/config';
 import {
   clearSlackReplyQuote,
+  suppressSlackReplyQuote,
   trackSlackReplyQuote,
 } from '../../mcp/roomote-mcp-server/slack-api-client';
 
@@ -73,6 +74,39 @@ export async function trackLatestUserMessageForSlackThreadQuote(params: {
   } catch (error) {
     warn?.(
       `[${logPrefix}] Non-fatal latest user message sync failure for task run ${runId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+export async function suppressNextSlackThreadReplyQuote(params: {
+  runId: number | undefined;
+  logPrefix: string;
+  warn?: (message: string) => void;
+}): Promise<{ quoteId?: string } | null> {
+  const { runId, logPrefix, warn } = params;
+  if (typeof runId !== 'number') {
+    return null;
+  }
+
+  try {
+    const roomoteConfig = await getSlackQuoteTrackingConfig({
+      runId,
+      logPrefix,
+      action: 'sync',
+      warn,
+    });
+    if (!roomoteConfig) {
+      return null;
+    }
+
+    const result = await suppressSlackReplyQuote(roomoteConfig, { runId });
+    return result.quoteId ? { quoteId: result.quoteId } : {};
+  } catch (error) {
+    warn?.(
+      `[${logPrefix}] Non-fatal Slack reply quote suppression failure for task run ${runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

@@ -1,12 +1,6 @@
-export {
-  appendEnvironmentDefinitionGuidance,
-  normalizeRepositorySelection,
-  buildEnvironmentDefinitionWorkspacePayload as buildSetupNewWorkspacePayload,
-  buildCreateEnvironmentDefinitionPrompt as buildSetupNewKickoffPrompt,
-} from '@roomote/types';
+export { normalizeRepositorySelection } from '@roomote/types';
 
 export {
-  buildSetupEnvironmentTaskTitle,
   findMatchingDefinedEnvironment as findMatchingSetupNewEnvironment,
   isEnvironmentDefinitionFailureStatus as isSetupNewOnboardingFailureStatus,
   isEnvironmentDefinitionSuccessStatus as isSetupNewOnboardingSuccessStatus,

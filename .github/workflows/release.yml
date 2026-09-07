@@ -116,6 +116,7 @@ jobs:
             fi
 
             release_sha="$(git rev-parse HEAD)"
+            shipping_guard_sha="$candidate_sha"
             git push origin "${release_sha}:refs/heads/${release_branch}"
             candidate_status="Candidate refreshed to \`${release_sha}\` from \`develop\`."
             echo "Refreshed ${release_branch} to ${release_sha}"
@@ -129,12 +130,37 @@ jobs:
             fi
 
             release_sha="$bump_sha"
+            shipping_guard_sha="$release_sha"
             candidate_status="Frozen at \`${release_sha}\` — the commit where \`${version}\` was versioned. Commits merged to \`develop\` afterward require an explicit candidate refresh or ship in the next release."
             if git ls-remote --exit-code --heads origin "$release_branch" >/dev/null 2>&1; then
-              echo "Release branch ${release_branch} already exists; leaving it frozen."
+              remote_release_sha="$(git ls-remote --exit-code --heads origin "refs/heads/${release_branch}" | cut -f1)"
+              if [ "$remote_release_sha" != "$release_sha" ]; then
+                echo "Release branch ${release_branch} points to ${remote_release_sha}, expected ${release_sha}; refusing to write Promote PR metadata for a different candidate."
+                exit 1
+              fi
+              echo "Release branch ${release_branch} already exists at ${release_sha}; leaving it frozen."
             else
               git push origin "${release_sha}:refs/heads/${release_branch}"
               echo "Cut ${release_branch} at ${release_sha}"
+            fi
+          fi
+
+          remote_release_sha="$(git ls-remote --exit-code --heads origin "refs/heads/${release_branch}" | cut -f1)"
+          if [ "$remote_release_sha" != "$release_sha" ]; then
+            echo "Release branch ${release_branch} moved to ${remote_release_sha}, expected ${release_sha}; refusing to update Promote PR metadata."
+            exit 1
+          fi
+
+          git fetch origin "refs/heads/main:refs/remotes/origin/main" --tags --quiet
+          if git rev-parse "$tag" >/dev/null 2>&1 || git merge-base --is-ancestor "$shipping_guard_sha" origin/main; then
+            echo "Cannot update Promote PR metadata for ${tag}: the candidate reached main while the branch was being prepared."
+            exit 1
+          fi
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            existing="$(gh pr list --base main --head "$release_branch" --state open --json url --jq '.[0].url // empty')"
+            if [ -z "$existing" ]; then
+              echo "Cannot refresh ${tag}: the Promote PR closed while the branch was being updated."
+              exit 1
             fi
           fi
 

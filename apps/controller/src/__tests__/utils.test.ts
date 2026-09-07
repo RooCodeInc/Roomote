@@ -1,6 +1,7 @@
 // pnpm --filter @roomote/controller test src/__tests__/utils.test.ts
 
 import {
+  type ComputeProvider,
   type EnvironmentConfig,
   SANDBOX_SERVER_NAMED_PORT,
 } from '@roomote/types';
@@ -33,7 +34,7 @@ const mockResolveEffectivePreviewRuntimeConfig = vi.fn(
   }),
 );
 type MockEnvironmentSnapshot = {
-  provider: 'modal';
+  provider: ComputeProvider;
   snapshotId: string | null;
   snapshotStatus: string | null;
   snapshotCreatedAt: Date | null;
@@ -292,9 +293,7 @@ describe('getNamedPortsForTaskRun', () => {
   });
 
   describe('environment snapshots', () => {
-    it('should return environmentSnapshotId when snapshot is ready and not expired', async () => {
-      const futureDate = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
-
+    it('returns old Modal environment snapshots without application expiry', async () => {
       vi.mocked(db.query.environments.findFirst).mockResolvedValue({
         id: 'env-123',
         config: mockEnvironmentConfig(),
@@ -305,12 +304,13 @@ describe('getNamedPortsForTaskRun', () => {
         provider: 'modal',
         snapshotId: 'snapshot-456',
         snapshotStatus: 'ready',
-        snapshotCreatedAt: null,
-        snapshotExpiresAt: futureDate,
+        snapshotCreatedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        snapshotExpiresAt: null,
       });
 
       const taskRun = {
         id: 123,
+        vendor: 'modal',
         payload: {
           environmentId: 'env-123',
         },
@@ -321,9 +321,7 @@ describe('getNamedPortsForTaskRun', () => {
       expect(result.environmentSnapshotId).toBe('snapshot-456');
     });
 
-    it('should not return environmentSnapshotId when snapshot is expired', async () => {
-      const pastDate = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
-
+    it('does not return expired environment snapshots for guarded providers', async () => {
       vi.mocked(db.query.environments.findFirst).mockResolvedValue({
         id: 'env-123',
         config: mockEnvironmentConfig(),
@@ -331,15 +329,16 @@ describe('getNamedPortsForTaskRun', () => {
         ReturnType<typeof db.query.environments.findFirst>
       >);
       mockGetEnvironmentSnapshot.mockResolvedValue({
-        provider: 'modal',
+        provider: 'e2b',
         snapshotId: 'snapshot-456',
         snapshotStatus: 'ready',
-        snapshotCreatedAt: null,
-        snapshotExpiresAt: pastDate,
+        snapshotCreatedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        snapshotExpiresAt: new Date(),
       });
 
       const taskRun = {
         id: 123,
+        vendor: 'e2b',
         payload: {
           environmentId: 'env-123',
         },
@@ -363,7 +362,7 @@ describe('getNamedPortsForTaskRun', () => {
         provider: 'modal',
         snapshotId: 'snapshot-456',
         snapshotStatus: 'pending',
-        snapshotCreatedAt: null,
+        snapshotCreatedAt: new Date(),
         snapshotExpiresAt: futureDate,
       });
 

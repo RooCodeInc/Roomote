@@ -1,0 +1,72 @@
+---
+title: Use your ChatGPT subscription with Roomote
+icon: badge-dollar-sign
+description: A practical, low-cost model setup for founders and small teams.
+---
+
+This guide is for founders and small teams that want reliable coding models
+without starting with usage-billed API keys.
+
+## Recommended starting point
+
+Connect a **ChatGPT Plus** subscription first. Plus currently costs $20/month
+and gives Roomote access to supported coding models within the plan's included
+limits. If you regularly run many or long tasks, **ChatGPT Pro** currently costs
+$200/month and provides higher usage limits. Check [ChatGPT
+pricing](https://chatgpt.com/pricing) for current prices and plan limits.
+
+Unlike an API key, a ChatGPT subscription does not create a separate per-token
+model bill. Roomote tasks count against the subscription's usage windows instead.
+This makes costs easier to predict while you learn how much model capacity your
+team needs.
+
+<Note>
+  The ChatGPT plan covers model access. Roomote Cloud, self-hosting
+  infrastructure, and sandbox compute are separate costs.
+</Note>
+
+## Connect ChatGPT
+
+During first-time setup, choose **ChatGPT (subscription)** under **Model
+provider**, then select **Connect ChatGPT**. For an existing deployment:
+
+1. Open **Settings > Models** as an admin.
+2. Under **Inference Providers**, select **Add provider**.
+3. Choose **ChatGPT (subscription)**, then select **Connect ChatGPT**.
+4. In the connection dialog, select **Open verification page**.
+5. Sign in to the ChatGPT Plus or Pro account you want Roomote to use and enter
+   the code shown by Roomote.
+6. Return to Roomote and wait for **ChatGPT (subscription)** to show as
+   connected.
+7. Enable a supported `openai/...` model, assign it to the coding role, and run
+   a small task to verify the connection.
+
+No OpenAI API key or deployment environment variable is required. Roomote keeps
+the authorization on its control plane rather than exposing it to task
+sandboxes. See the [ChatGPT provider reference](/providers/inference/chatgpt)
+for usage windows and troubleshooting.
+
+## What about Claude?
+
+Anthropic does not allow Claude Pro or Max subscription credentials to be used
+by third-party products such as Roomote. Roomote therefore cannot connect a
+Claude subscription the way it connects ChatGPT Plus or Pro.
+
+To use Claude models, add the [Anthropic provider](/providers/inference/anthropic)
+and supply an Anthropic API key. Anthropic bills that usage separately by token;
+depending on the model, task length, and repository context, a single task can
+cost several dollars. Set provider spend limits and monitor costs before making
+it the default for frequent tasks.
+
+## Limits to expect
+
+- Plus and Pro are not unlimited. Long tasks and parallel work consume the
+  plan's included usage windows more quickly.
+- Roomote displays 5-hour and weekly ChatGPT usage windows when OpenAI makes
+  that data available. A missing usage display does not necessarily mean the
+  connection is broken.
+- ChatGPT workspace policies can block the device authorization flow. If Roomote
+  reports that the Codex app is blocked, ask the ChatGPT workspace admin to
+  allow it, then restart the connection.
+- OpenAI controls which models and limits are included with each ChatGPT plan,
+  and those can change independently of Roomote.

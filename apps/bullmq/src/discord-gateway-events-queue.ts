@@ -4,6 +4,7 @@ import { resolveDiscordGatewaySecret } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import type { DiscordGatewayEvent } from '@roomote/communication/discord-event';
 import { DISCORD_GATEWAY_EVENTS_QUEUE_NAME } from '@roomote/sdk/server';
+import { resolveApiUrl } from '@roomote/types';
 
 import { getRedis } from './redis';
 
@@ -15,10 +16,11 @@ function processUrl(): string {
     throw new Error('TRPC_URL is required to process Discord gateway events');
   }
 
-  return new URL(
-    '/api/internal/discord/events/process',
-    Env.TRPC_URL,
-  ).toString();
+  // TRPC_URL may carry a path prefix — the self-hosted installer default is
+  // `https://<domain>/_roomote-api`, which the edge strips before proxying to
+  // the API. The endpoint has to be appended to that prefix, not resolved
+  // against it, or the request misses the API route entirely.
+  return resolveApiUrl(Env.TRPC_URL, '/api/internal/discord/events/process');
 }
 
 export async function processDiscordGatewayEventJob(

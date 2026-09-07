@@ -5,7 +5,7 @@ import { RunStatus } from '@roomote/types';
 import { MessageSquareWarning, RotateCcw } from 'lucide-react';
 import { Button, Sun } from '@/components/system';
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
-import { FramedSurface } from '@/components/layout';
+import { WorkspaceSurface } from '@/components/layout';
 
 import {
   type TaskSession,
@@ -26,6 +26,7 @@ import { PreviewCommand } from './PreviewCommand';
 import { PreviewPaneLayout } from './PreviewPaneLayout';
 import { WakeTaskInput } from './WakeTaskInput';
 import { OnboardingCompletionMessage } from './OnboardingCompletionMessage';
+import { TaskRobotIconScope } from './TaskRobotIconScope';
 
 interface HistoricalContentProps {
   session: TaskSession;
@@ -102,17 +103,19 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
     >
       <PreviewPaneProvider>
         <ClosePreviewOnSleepEffect asleep={isAsleep} />
-        <div className="flex h-full min-h-0 min-w-0 flex-1">
-          <FramedSurface
-            frameClassName="pb-0 md:pb-2"
-            surfaceClassName="flex flex-col bg-transparent @container"
-          >
-            <PreviewPaneLayout session={session}>
-              <ArtifactLinkProvider session={session}>
-                <PreviewCommand
-                  taskRun={session.taskRun ?? null}
-                  asleep={isAsleep}
-                />
+        <WorkspaceSurface sideActions={<SidebarActions session={session} />}>
+          <PreviewPaneLayout session={session}>
+            <ArtifactLinkProvider session={session}>
+              <PreviewCommand
+                taskRun={session.taskRun ?? null}
+                asleep={isAsleep}
+              />
+              <TaskRobotIconScope
+                taskId={session.taskId}
+                fastAgentSessionId={
+                  session.taskRun?.payload?.fastAgentSessionId
+                }
+              >
                 <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
                   <Header session={session} />
                   <Messages
@@ -134,11 +137,10 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
                     </HistoricalInputTray>
                   ) : null}
                 </div>
-              </ArtifactLinkProvider>
-            </PreviewPaneLayout>
-          </FramedSurface>
-          <SidebarActions session={session} />
-        </div>
+              </TaskRobotIconScope>
+            </ArtifactLinkProvider>
+          </PreviewPaneLayout>
+        </WorkspaceSurface>
       </PreviewPaneProvider>
     </TaskSidePanelProvider>
   );
@@ -146,7 +148,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
 
 function HistoricalInputTray({ children }: { children: ReactNode }) {
   return (
-    <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-colors border-2 border-background rounded-b-3xl">
+    <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-[background-color,border-color,outline-width] border-2 border-background rounded-b-3xl outline-0 outline-offset-[-2px] outline-accent-foreground has-[textarea:focus]:outline-2">
       {children}
     </div>
   );
@@ -163,9 +165,7 @@ function WakingUpMessage() {
       <MessageContent>
         <div className="flex items-center gap-2 text-sm">
           <Sun className="size-4 shrink-0 text-muted-foreground" />
-          <Shimmer direction="rl" duration={1}>
-            Waking up
-          </Shimmer>
+          <Shimmer>Waking up</Shimmer>
         </div>
       </MessageContent>
     </Message>

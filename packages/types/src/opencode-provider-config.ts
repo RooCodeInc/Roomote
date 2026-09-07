@@ -14,6 +14,7 @@ import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
   type OpenAiCompatibleProviderInstance,
 } from './openai-compatible-providers';
+import { ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME } from './model-provider-config';
 
 /** Fallback direct-mode base URL for default and named OpenAI-compatible ids. */
 const OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL = 'http://127.0.0.1:4000/v1';
@@ -23,6 +24,46 @@ const DEFAULT_OPENAI_COMPATIBLE_INSTANCE =
 
 export const TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME =
   'R_TASK_MODEL_CONTEXT_WINDOWS' as const;
+
+export const TASK_MODEL_COSTS_ENV_VAR_NAME = 'R_TASK_MODEL_COSTS' as const;
+
+/** USD per million tokens, the models.dev/OpenCode cost convention. */
+export type TaskModelCost = { input: number; output: number };
+
+export function parseTaskModelCosts(
+  value: string | undefined,
+): Record<string, TaskModelCost> {
+  if (!value?.trim()) {
+    return {};
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([modelId, cost]) => {
+        if (!modelId.includes('/') || !cost || typeof cost !== 'object')
+          return [];
+        const input = (cost as { input?: unknown }).input;
+        const output = (cost as { output?: unknown }).output;
+        return typeof input === 'number' &&
+          Number.isFinite(input) &&
+          input >= 0 &&
+          typeof output === 'number' &&
+          Number.isFinite(output) &&
+          output >= 0
+          ? [[modelId, { input, output }]]
+          : [];
+      }),
+    );
+  } catch {
+    return {};
+  }
+}
 
 export function parseTaskModelContextWindows(
   value: string | undefined,
@@ -54,6 +95,14 @@ export function parseTaskModelContextWindows(
 }
 
 const STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+  roomote: {
+    name: 'Roomote inference',
+    baseUrlEnvVarName: 'ROOMOTE_INFERENCE_BASE_URL',
+    fallbackBaseUrl: 'https://openrouter.ai/api/v1',
+    apiKeyEnvVarName: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    keyless: false,
+    allowOpenAiEnvFallback: false,
+  },
   [OPENAI_COMPATIBLE_PROVIDER_ID]: {
     name: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.label,
     baseUrlEnvVarName: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.baseUrlEnvVarName,
@@ -197,6 +246,7 @@ export function mergeOpenAiCompatibleProviderConfig(
   modelIds: Array<string | undefined>,
   visionModel?: string,
   modelContextWindows: Readonly<Record<string, number>> = {},
+  modelCosts: Readonly<Record<string, TaskModelCost>> = {},
 ): Record<string, unknown> {
   let merged = providerConfig;
   const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
@@ -259,6 +309,11 @@ export function mergeOpenAiCompatibleProviderConfig(
               const qualifiedModelId = `${providerId}/${modelId}`;
               const existingModel = asRecord(existingModels[modelId]);
               const contextWindow = modelContextWindows[qualifiedModelId];
+              // Without cost data OpenCode reports zero spend for these
+              // models: custom providers are invisible to its models.dev
+              // pricing, so the catalog's prices ride in explicitly.
+              const cost = modelCosts[qualifiedModelId];
+              const existingCost = asRecord(existingModel.cost);
               const existingLimit = asRecord(existingModel.limit);
               const existingOutputLimit = existingLimit.output;
               const outputLimit =
@@ -293,6 +348,15 @@ export function mergeOpenAiCompatibleProviderConfig(
                           ...existingLimit,
                           context: contextWindow,
                           output: outputLimit,
+                        },
+                      }
+                    : {}),
+                  ...(cost
+                    ? {
+                        cost: {
+                          input: cost.input,
+                          output: cost.output,
+                          ...existingCost,
                         },
                       }
                     : {}),

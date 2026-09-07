@@ -44,6 +44,18 @@ vi.mock('@/components/layout', () => ({
 
 import Layout from './layout';
 
+/**
+ * Mirrors the `<base64url payload>.<signature>` shape produced by
+ * createSignedGitHubAuthState; the layout never verifies the signature.
+ */
+function encodeSignedStyleState(payload: Record<string, unknown>): string {
+  const encoded = btoa(JSON.stringify(payload))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/u, '');
+  return `${encoded}.signature`;
+}
+
 describe('Centered layout', () => {
   beforeEach(() => {
     framedSurfaceMock.mockClear();
@@ -77,6 +89,68 @@ describe('Centered layout', () => {
 
   it('uses the basic framed surface when the callback requests the regular background', () => {
     state.searchParams = new URLSearchParams('bg=background');
+
+    render(
+      <Layout>
+        <div>child</div>
+      </Layout>,
+    );
+
+    expect(framedSurfaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variant: 'basic',
+      }),
+      undefined,
+    );
+  });
+
+  it('reads the background hint from a signed account-link state', () => {
+    state.searchParams = new URLSearchParams({
+      state: encodeSignedStyleState({
+        mode: 'auth',
+        redirect: '/settings',
+        bg: 'accent',
+      }),
+    });
+
+    render(
+      <Layout>
+        <div>child</div>
+      </Layout>,
+    );
+
+    expect(framedSurfaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variant: 'bold',
+      }),
+      undefined,
+    );
+  });
+
+  it('uses the bold framed surface for setup-originated signed states', () => {
+    state.searchParams = new URLSearchParams({
+      state: encodeSignedStyleState({
+        mode: 'auth',
+        redirect: '/setup?step=source-control-config',
+      }),
+    });
+
+    render(
+      <Layout>
+        <div>child</div>
+      </Layout>,
+    );
+
+    expect(framedSurfaceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        variant: 'bold',
+      }),
+      undefined,
+    );
+  });
+
+  it('falls back to the basic framed surface for an unreadable state', () => {
+    state.searchParams = new URLSearchParams({ state: 'not.base64.json' });
 
     render(
       <Layout>

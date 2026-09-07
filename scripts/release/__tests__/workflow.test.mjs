@@ -7,6 +7,76 @@ import YAML from 'yaml';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
+test('release preparation delegates duplicated broad checks to PR CI', () => {
+  const ciWorkflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/CI.yml'), 'utf8'),
+  );
+  const docsWorkflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/docs.yml'), 'utf8'),
+  );
+  const skill = readFileSync(
+    join(repoRoot, '.agents/skills/changeset-release-pr/SKILL.md'),
+    'utf8',
+  );
+
+  assert.deepEqual(ciWorkflow.on.pull_request.branches, ['main', 'develop']);
+  const ciCommands = Object.values(ciWorkflow.jobs)
+    .flatMap((job) => job.steps ?? [])
+    .map((step) => step.run)
+    .filter((command) => typeof command === 'string');
+  for (const command of [
+    'pnpm lint',
+    'pnpm knip',
+    'pnpm check-types',
+    'pnpm test:ci',
+    'pnpm test:release-scripts',
+  ]) {
+    assert.ok(ciCommands.includes(command), `${command} must remain in PR CI`);
+  }
+
+  assert.deepEqual(docsWorkflow.on.pull_request.branches, ['main', 'develop']);
+  assert.ok(
+    docsWorkflow.on.pull_request.paths.includes('apps/docs/**'),
+    'docs changes must trigger docs PR validation',
+  );
+  assert.ok(
+    docsWorkflow.jobs.docs.steps.some(
+      (step) => step.run === 'pnpm --filter @roomote/docs check',
+    ),
+    'docs PR validation must include validation and broken-link checks',
+  );
+
+  assert.equal(
+    skill.match(/allow the ordinary push hook to run exactly once/g)?.length,
+    2,
+  );
+  assert.equal(
+    skill.match(
+      /when `apps\/docs` changed, the \*\*Docs\*\*\s+workflow succeed/g,
+    )?.length,
+    2,
+  );
+  assert.match(
+    skill,
+    /Do not merge the release PR until the\n\*\*CI\*\* workflow/,
+  );
+  assert.match(
+    skill,
+    /Do not merge the production\nhotfix PR until the \*\*CI\*\* workflow/,
+  );
+  assert.doesNotMatch(skill, /pnpm test:release-scripts/);
+  assert.doesNotMatch(skill, /pnpm exec oxfmt --check/);
+  assert.doesNotMatch(skill, /node scripts\/pre-push-checks\.mjs/);
+
+  // Release-specific transition guards remain local to the canonical procedure.
+  assert.match(skill, /Start from the current `origin\/develop` tip/);
+  assert.match(skill, /`HEAD` is exactly `origin\/main`/);
+  assert.match(skill, /root version is exactly one patch above/);
+  assert.match(skill, /git diff --exit-code origin\/develop -- \.changeset/);
+  assert.match(skill, /Wait for \*\*Tag Product Release\*\* to succeed/);
+  assert.match(skill, /Wait for the tag-triggered \*\*Publish GHCR Images\*\*/);
+});
+
 test('release workflow keeps promotion as the only automated PR gate', () => {
   const workflow = YAML.parse(
     readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8'),
@@ -33,17 +103,97 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
     promoteScript.match(
       /git fetch origin "refs\/heads\/main:refs\/remotes\/origin\/main"(?: --tags)? --quiet/g,
     )?.length,
-    2,
+    3,
   );
   assert.doesNotMatch(promoteScript, /git fetch origin main/);
-  assert.match(promoteScript, /the candidate reached main while this refresh was running/);
-  assert.match(promoteScript, /the Promote PR closed while this refresh was running/);
+  assert.match(
+    promoteScript,
+    /the candidate reached main while this refresh was running/,
+  );
+  assert.match(
+    promoteScript,
+    /the Promote PR closed while this refresh was running/,
+  );
   assert.match(promoteScript, /release_sha="\$bump_sha"/);
+  assert.match(
+    promoteScript,
+    /points to \$\{remote_release_sha\}, expected \$\{release_sha\}; refusing to write Promote PR metadata/,
+  );
+  assert.match(
+    promoteScript,
+    /moved to \$\{remote_release_sha\}, expected \$\{release_sha\}; refusing to update Promote PR metadata/,
+  );
+  assert.match(
+    promoteScript,
+    /remote_release_sha="\$\(git ls-remote --exit-code --heads origin "refs\/heads\/\$\{release_branch\}" \| cut -f1\)"/,
+  );
+  assert.match(promoteScript, /shipping_guard_sha="\$candidate_sha"/);
+  assert.match(promoteScript, /shipping_guard_sha="\$release_sha"/);
+  assert.match(
+    promoteScript,
+    /the candidate reached main while the branch was being prepared/,
+  );
+  assert.match(
+    promoteScript,
+    /the Promote PR closed while the branch was being updated/,
+  );
+  assert.ok(
+    promoteScript.indexOf(
+      'the candidate reached main while the branch was being prepared',
+    ) <
+      promoteScript.indexOf(
+        'notes="$(node scripts/release/extract-changelog-section.mjs',
+      ),
+  );
   assert.match(
     promoteScript,
     /git push origin "\$\{release_sha\}:refs\/heads\/\$\{release_branch\}"/,
   );
   assert.doesNotMatch(promoteScript, /--force(?:-with-lease)?/);
+});
+
+test('GHCR app and embedded worker use the checked-out build commit', () => {
+  const workflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/publish-ghcr.yml'), 'utf8'),
+  );
+  const steps = workflow.jobs.build.steps;
+  const checkoutIndex = steps.findIndex((step) =>
+    step.uses?.startsWith('actions/checkout@'),
+  );
+  const commitIndex = steps.findIndex((step) => step.id === 'commit');
+  const buildIndex = steps.findIndex((step) => step.id === 'build');
+  assert.ok(checkoutIndex >= 0 && checkoutIndex < commitIndex);
+  assert.ok(commitIndex < buildIndex);
+  assert.equal(
+    steps[commitIndex].run,
+    'sha="$(git rev-parse HEAD)"\necho "sha=$sha" >> "$GITHUB_OUTPUT"\n',
+  );
+  assert.match(
+    steps[buildIndex].with['build-args'],
+    /^GITHUB_SHA=\$\{\{ steps\.commit\.outputs\.sha \}\}$/m,
+  );
+
+  const dockerfile = readFileSync(
+    join(repoRoot, '.docker/app/Dockerfile'),
+    'utf8',
+  );
+  for (const name of ['base', 'runtime-base']) {
+    const stage = dockerfile.split(` AS ${name}\n`)[1].split(/^FROM /m)[0];
+    assert.match(stage, /^ARG GITHUB_SHA$/m);
+    assert.match(stage, /^ENV GITHUB_SHA=\$\{GITHUB_SHA\}$/m);
+  }
+  assert.match(
+    dockerfile,
+    /FROM base AS build-controller[\s\S]*?RUN \.\/scripts\/build-worker-release\.sh/,
+  );
+  const workerRelease = readFileSync(
+    join(repoRoot, 'scripts/build-worker-release.sh'),
+    'utf8',
+  );
+  assert.match(
+    workerRelease,
+    /^echo "\$\{GITHUB_SHA:-.*\}" > "\$TAG\/COMMIT"$/m,
+  );
 });
 
 test('GHCR release workflow announces only newly created releases in Discord', () => {

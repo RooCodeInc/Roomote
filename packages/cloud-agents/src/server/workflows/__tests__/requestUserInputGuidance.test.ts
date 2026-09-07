@@ -179,6 +179,15 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
+      "Autonomous mode carries the request through the selected skill's workflow without waiting for extra confirmations",
+    );
+    expect(harnessInstructions).toContain(
+      'Autonomy applies to Roomote and authorized agents within the user request and permissions, not assuming authority over humans',
+    );
+    expect(harnessInstructions).toContain(
+      'Respect Human Ownership and Coordinate Agents Within Scope still apply; delegation does not expand authority',
+    );
+    expect(harnessInstructions).toContain(
       'the active `implement-changes` workflow stays responsible for the run until the required delivery result is known and must finish through the delegated `create-draft-pr` skill',
     );
     expect(harnessInstructions).toContain(
@@ -188,7 +197,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       'In Autonomous mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before delivery, any repository-file change transitions into `capture-visual-proof`, then finish through the delegated `create-draft-pr` skill so it owns commit, push, draft-PR create-or-refresh execution, and PR result reporting.',
     );
     expect(harnessInstructions).toContain(
-      "If the run later transitions into `fix-pr`, that child skill owns branch push state, any required delegated `capture-visual-proof` handoff before PR metadata refresh, PR metadata refresh itself, and PR-fixer closeout instead of inheriting the parent workflow's default PR-delivery finish.",
+      "If the run later transitions into `fix-pr`, that child skill owns branch push state, any required `capture-visual-proof` step before PR metadata refresh, PR metadata refresh itself, and PR-fixer closeout instead of inheriting the parent workflow's default PR-delivery finish.",
     );
     expect(harnessInstructions).toContain(
       'After validation and self-review, the next required action for repository-changing work is delegated delivery, not final reporting.',
@@ -256,6 +265,48 @@ describe('request_user_input guidance in workflow prompts', () => {
     expect(harnessInstructions).toContain(
       "because the creating user has linked GitHub login `octocat`, the delegated PR-delivery skill must pass `assignees: ['octocat']` in its `mcp__roomote__manage_source_control` calls so the created or refreshed pull request is assigned to that user when the provider supports it",
     );
+  });
+
+  it('uses the task provider label for linked assignee instructions', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement a repository change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      sourceControlProvider: 'gitea',
+      attribution: {
+        ...matchedUserAttributionWithAssignee,
+        githubLogin: null,
+        publicDisplayName: '@monalisa',
+        prAssigneeLogin: 'monalisa',
+      },
+    });
+
+    expect(harnessInstructions).toContain(
+      "because the creating user has linked Gitea login `monalisa`, the delegated PR-delivery skill must pass `assignees: ['monalisa']`",
+    );
+    expect(harnessInstructions).not.toContain('linked GitHub login `monalisa`');
+  });
+
+  it('preserves provider-aware attribution and assignment for all-repository tasks', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement a repository change',
+      repo: ALL_REPOSITORIES,
+      repoFullNames: ['shared/api', 'shared/web'],
+      taskRunUrl: 'https://example.com/task/123',
+      sourceControlProvider: 'gitea',
+      attribution: {
+        ...matchedUserAttributionWithAssignee,
+        githubLogin: null,
+        publicDisplayName: '@monalisa',
+        prAssigneeLogin: 'monalisa',
+      },
+    });
+
+    expect(harnessInstructions).toContain('Opened on behalf of Jane Doe.');
+    expect(harnessInstructions).toContain(
+      "because the creating user has linked Gitea login `monalisa`, the delegated PR-delivery skill must pass `assignees: ['monalisa']`",
+    );
+    expect(harnessInstructions).not.toContain('linked GitHub login `monalisa`');
   });
 
   it('uses a Slack conversation link for Slack-launched PR follow-up instructions when thread metadata is available', () => {

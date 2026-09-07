@@ -1,5 +1,5 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { TASK_WORKFLOWS } from '@roomote/types';
 
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
@@ -54,8 +54,16 @@ vi.mock('@/components/system', () => ({
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
   ),
-  DropdownMenuCheckboxItem: ({ children }: { children: React.ReactNode }) => (
-    <button type="button">{children}</button>
+  DropdownMenuCheckboxItem: ({
+    children,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    onClick?: React.MouseEventHandler<HTMLButtonElement>;
+  }) => (
+    <button type="button" onClick={onClick}>
+      {children}
+    </button>
   ),
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => (
     <div>{children}</div>
@@ -105,23 +113,32 @@ describe('TaskFilters', () => {
   it('forwards the active category to the filter hooks', () => {
     render(<TaskFilters {...baseProps} category="pr-reviews" />);
 
-    expect(useUsersForFilterMock).toHaveBeenCalledWith({
-      repositoryName: null,
-      category: 'pr-reviews',
-      timePeriod: 'all',
-    });
-    expect(useRepositoriesForFilterMock).toHaveBeenCalledWith({
-      userId: null,
-      category: 'pr-reviews',
-      timePeriod: 'all',
-    });
-    expect(usePullRequestsForFilterMock).toHaveBeenCalledWith({
-      userId: null,
-      category: 'pr-reviews',
-      repositoryName: null,
-      timePeriod: 'all',
-      search: '',
-    });
+    expect(useUsersForFilterMock).toHaveBeenCalledWith(
+      {
+        repositoryName: null,
+        category: 'pr-reviews',
+        timePeriod: 'all',
+      },
+      { enabled: true },
+    );
+    expect(useRepositoriesForFilterMock).toHaveBeenCalledWith(
+      {
+        userId: null,
+        category: 'pr-reviews',
+        timePeriod: 'all',
+      },
+      { enabled: true },
+    );
+    expect(usePullRequestsForFilterMock).toHaveBeenCalledWith(
+      {
+        userId: null,
+        category: 'pr-reviews',
+        repositoryName: null,
+        timePeriod: 'all',
+        search: '',
+      },
+      { enabled: true },
+    );
   });
 
   it('groups the user filter into Users and Automations sections', () => {
@@ -146,6 +163,38 @@ describe('TaskFilters', () => {
     expect(getByText('PR Review')).toBeInTheDocument();
     expect(getByText('Conflict Resolver')).toBeInTheDocument();
     expect(queryByText('Automation')).not.toBeInTheDocument();
+  });
+
+  it('keeps custom automation options scoped to their automation ids', () => {
+    useUsersForFilterMock.mockReturnValue({
+      data: [
+        {
+          value: 'automation:custom_automation:automation-1',
+          label: 'Daily review',
+        },
+        {
+          value: 'automation:custom_automation:automation-2',
+          label: 'Weekly review',
+        },
+      ],
+    });
+
+    const onUserChange = vi.fn();
+    const { getByText } = render(
+      <TaskFilters {...baseProps} onUserChange={onUserChange} />,
+    );
+
+    fireEvent.click(getByText('Daily review'));
+    fireEvent.click(getByText('Weekly review'));
+
+    expect(onUserChange).toHaveBeenNthCalledWith(
+      1,
+      'automation:custom_automation:automation-1',
+    );
+    expect(onUserChange).toHaveBeenNthCalledWith(
+      2,
+      'automation:custom_automation:automation-2',
+    );
   });
 
   it('renders all task workflows when the task-type filter is visible', () => {

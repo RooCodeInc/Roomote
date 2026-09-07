@@ -1,15 +1,23 @@
 import {
   db,
+  desc,
   eq,
   findReusableGitHubPrFollowUpOwner,
   getReviewCodeAutomationSettings,
+  taskRuns,
   tasks,
 } from '@roomote/db/server';
-import { type PrReviewSettings } from '@roomote/types';
+import {
+  getFastAgentParentFromPayload,
+  type FastAgentParent,
+  type PrReviewSettings,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 export type LinkedTaskRelayState = {
   linkedTaskId: string | null;
   relayEnabled: boolean;
+  handoffTarget?: 'fast_parent' | 'implementation_task';
   ownerLookupPending?: true;
 };
 
@@ -43,13 +51,6 @@ export async function getLinkedTaskRelayState({
   const settings =
     reviewerSettings ?? (await getReviewCodeAutomationSettings());
 
-  if (!settings.relayReviewResultsToTask) {
-    return {
-      linkedTaskId: null,
-      relayEnabled: false,
-    };
-  }
-
   const linkedTaskOwner = await findReusableGitHubPrFollowUpOwner({
     repoFullName: repository,
     prNumber,
@@ -79,18 +80,35 @@ export async function getLinkedTaskRelayState({
     };
   }
 
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, linkedTask.id),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { payload: true },
+  });
+  const hasFastParent = Boolean(
+    getFastAgentParentFromPayload(latestRun?.payload),
+  );
+
   if (!linkedTask.initiatorUserId) {
     return {
       linkedTaskId: linkedTask.id,
-      relayEnabled: false,
+      relayEnabled: hasFastParent,
+      ...(hasFastParent ? { handoffTarget: 'fast_parent' as const } : {}),
     };
   }
 
+  const creatorRelayEnabled =
+    settings.relayReviewResultsToTask === true &&
+    getRelayEligibleCreatorIds(settings).has(linkedTask.initiatorUserId);
+
   return {
     linkedTaskId: linkedTask.id,
-    relayEnabled: getRelayEligibleCreatorIds(settings).has(
-      linkedTask.initiatorUserId,
-    ),
+    relayEnabled: hasFastParent || creatorRelayEnabled,
+    ...(hasFastParent
+      ? { handoffTarget: 'fast_parent' as const }
+      : creatorRelayEnabled
+        ? { handoffTarget: 'implementation_task' as const }
+        : {}),
   };
 }
 
@@ -113,4 +131,48 @@ export async function isLinkedTaskCreatorRelayEnabled({
       reviewerSettings,
     })
   ).relayEnabled;
+}
+
+/**
+ * The Fast parent of the session-delegated task that opened this PR, for
+ * attaching follow-on work (like the PR's review task) to the same session.
+ */
+export async function getPrOriginFastAgentParent({
+  repository,
+  prNumber,
+  branchName,
+  sourceControlProvider = 'github',
+  host,
+  repositoryId,
+}: {
+  repository: string;
+  prNumber: number;
+  branchName: string;
+  sourceControlProvider?: SourceControlProvider;
+  host?: string | null;
+  /**
+   * The reviewing repository's own row id. Required so legacy null-host
+   * linkage rows on another instance can never supply the session; the
+   * origin task must be linked to this exact connected repository.
+   */
+  repositoryId: string;
+}): Promise<FastAgentParent | null> {
+  const owner = await findReusableGitHubPrFollowUpOwner({
+    repoFullName: repository,
+    prNumber,
+    branchName,
+    sourceControlProvider,
+    ...(host ? { host } : {}),
+    repositoryId,
+  });
+  if (!owner?.taskId) {
+    return null;
+  }
+
+  const latestRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, owner.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
+    columns: { payload: true },
+  });
+  return getFastAgentParentFromPayload(latestRun?.payload);
 }

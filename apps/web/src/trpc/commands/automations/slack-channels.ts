@@ -133,6 +133,7 @@ export async function getSlackChannelAccessWarnings({
   notifier,
   channelAutoStartSlackChannelIds,
   managerStatsSlackChannelId,
+  providerUsageLimitSlackChannelId,
   suggesterSlackChannelId,
   announcerSlackChannelId,
   platformIssueSlackChannelId,
@@ -146,6 +147,7 @@ export async function getSlackChannelAccessWarnings({
   notifier: SlackNotifier | null;
   channelAutoStartSlackChannelIds: string[];
   managerStatsSlackChannelId: string | null;
+  providerUsageLimitSlackChannelId: string | null;
   suggesterSlackChannelId: string | null;
   announcerSlackChannelId: string | null;
   platformIssueSlackChannelId: string | null;
@@ -161,6 +163,7 @@ export async function getSlackChannelAccessWarnings({
       channelAutoStartSlackChannels: [],
       managerSlackChannel: null,
       managerStatsSlackChannel: null,
+      providerUsageLimitSlackChannel: null,
       suggesterSlackChannel: null,
       announcerSlackChannel: null,
       platformIssueSlackChannel: null,
@@ -176,6 +179,7 @@ export async function getSlackChannelAccessWarnings({
   const channelIds = [
     ...channelAutoStartSlackChannelIds,
     managerStatsSlackChannelId,
+    providerUsageLimitSlackChannelId,
     suggesterSlackChannelId,
     announcerSlackChannelId,
     platformIssueSlackChannelId,
@@ -207,6 +211,11 @@ export async function getSlackChannelAccessWarnings({
       managerStatsSlackChannelId &&
       membershipByChannelId.get(managerStatsSlackChannelId) !== true
         ? managerStatsSlackChannelId
+        : null,
+    providerUsageLimitSlackChannel:
+      providerUsageLimitSlackChannelId &&
+      membershipByChannelId.get(providerUsageLimitSlackChannelId) !== true
+        ? providerUsageLimitSlackChannelId
         : null,
     suggesterSlackChannel:
       suggesterSlackChannelId &&
@@ -261,6 +270,7 @@ export async function getSlackChannelDisplayNames({
   channelAutoStartSlackChannelIds,
   managerSlackChannelId,
   managerStatsSlackChannelId,
+  providerUsageLimitSlackChannelId,
   suggesterSlackChannelId,
   announcerSlackChannelId,
   platformIssueSlackChannelId,
@@ -275,6 +285,7 @@ export async function getSlackChannelDisplayNames({
   channelAutoStartSlackChannelIds: string[];
   managerSlackChannelId: string | null;
   managerStatsSlackChannelId: string | null;
+  providerUsageLimitSlackChannelId: string | null;
   suggesterSlackChannelId: string | null;
   announcerSlackChannelId: string | null;
   platformIssueSlackChannelId: string | null;
@@ -290,6 +301,7 @@ export async function getSlackChannelDisplayNames({
       channelAutoStartSlackChannels: {},
       managerSlackChannel: null,
       managerStatsSlackChannel: null,
+      providerUsageLimitSlackChannel: null,
       suggesterSlackChannel: null,
       announcerSlackChannel: null,
       platformIssueSlackChannel: null,
@@ -307,6 +319,7 @@ export async function getSlackChannelDisplayNames({
     channelAutoStartChannelNames,
     managerSlackChannel,
     managerStatsSlackChannel,
+    providerUsageLimitSlackChannel,
     suggesterSlackChannel,
     announcerSlackChannel,
     platformIssueSlackChannel,
@@ -328,6 +341,9 @@ export async function getSlackChannelDisplayNames({
       : Promise.resolve(null),
     managerStatsSlackChannelId
       ? notifier.getChannelName(managerStatsSlackChannelId)
+      : Promise.resolve(null),
+    providerUsageLimitSlackChannelId
+      ? notifier.getChannelName(providerUsageLimitSlackChannelId)
       : Promise.resolve(null),
     suggesterSlackChannelId
       ? notifier.getChannelName(suggesterSlackChannelId)
@@ -368,6 +384,9 @@ export async function getSlackChannelDisplayNames({
     managerSlackChannel: managerSlackChannel ? `#${managerSlackChannel}` : null,
     managerStatsSlackChannel: managerStatsSlackChannel
       ? `#${managerStatsSlackChannel}`
+      : null,
+    providerUsageLimitSlackChannel: providerUsageLimitSlackChannel
+      ? `#${providerUsageLimitSlackChannel}`
       : null,
     suggesterSlackChannel: suggesterSlackChannel
       ? `#${suggesterSlackChannel}`

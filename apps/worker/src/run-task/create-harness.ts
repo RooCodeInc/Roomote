@@ -51,7 +51,10 @@ interface CreateHarnessOptions {
   logger: HarnessLogger;
   prepareQueuedPromptActorScope?: (
     targetUserId?: string,
-    delivery?: { kind: 'queuedPrompt' | 'userInputAnswer' },
+    delivery?: {
+      kind: 'queuedPrompt' | 'userInputAnswer';
+      clientMessageId?: string;
+    },
   ) => Promise<{
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
@@ -65,6 +68,8 @@ interface CreateHarnessResult {
   getSubprocess: () => ResultPromise | null;
   /** Unsubscribe from message/envelope event subscriptions. */
   unsubscribe: () => Promise<void>;
+  /** Deliver the turn's closing assistant message before idle settlement. */
+  flushPendingCompletionEvents: () => Promise<void>;
 }
 
 export async function createHarness({
@@ -145,11 +150,17 @@ export async function createHarness({
       beforeQueuedPrompt: prepareQueuedPromptActorScope
         ? async ({
             userId,
+            clientMessageId,
             kind,
           }: {
             userId?: string;
+            clientMessageId?: string;
             kind: 'queuedPrompt' | 'userInputAnswer';
-          }) => await prepareQueuedPromptActorScope(userId, { kind })
+          }) =>
+            await prepareQueuedPromptActorScope(userId, {
+              kind,
+              clientMessageId,
+            })
         : undefined,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
@@ -213,5 +224,6 @@ export async function createHarness({
     harness: reconnectableHarness,
     getSubprocess: () => reconnectableHarness.getCurrentSubprocess(),
     unsubscribe,
+    flushPendingCompletionEvents: unsubscribe.flushPendingCompletionEvents,
   };
 }

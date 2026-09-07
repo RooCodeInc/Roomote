@@ -1,6 +1,7 @@
 import pMap from 'p-map';
 
 import {
+  buildFastAgentSessionAttachment,
   type TaskPayload,
   DEFAULT_PR_REVIEW_SETTINGS,
   type PrReviewSettings,
@@ -13,7 +14,10 @@ import {
   eq,
   findActiveGitHubPrReviewTask,
 } from '@roomote/db/server';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  getPrOriginFastAgentParent,
+} from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
   updateTaskPrStatus,
@@ -117,6 +121,7 @@ export async function handleGitLabMergeRequest(
         number: mergeRequest.iid,
         externalId: mergeRequest.id ?? null,
         title: mergeRequest.title,
+        body: mergeRequest.description ?? null,
         url: mergeRequest.url,
         // The merge-request webhook carries the acting user, not the MR
         // author; the scheduled sync backfills authorLogin.
@@ -134,6 +139,7 @@ export async function handleGitLabMergeRequest(
         prNumber: mergeRequest.iid,
         prTitle: mergeRequest.title,
         prUrl: mergeRequest.url,
+        targetBranch: mergeRequest.target_branch,
         status,
         actorLogin:
           payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
@@ -151,6 +157,15 @@ export async function handleGitLabMergeRequest(
     }
 
     return { status: 'ok' };
+  }
+
+  if (mergeRequest.action === 'open' || mergeRequest.action === 'reopen') {
+    await updateTaskPrStatus(
+      'gitlab',
+      repoFullName,
+      mergeRequest.iid,
+      mergeRequest.draft ? 'draft' : 'open',
+    );
   }
 
   const taskType = getReviewTaskType(payload);
@@ -217,8 +232,25 @@ export async function handleGitLabMergeRequest(
     payload.user?.id != null ? String(payload.user.id) : payload.user?.username;
   const mrAuthorName = payload.user?.name ?? payload.user?.username;
 
-  const enqueued = await pMap(targets, async (target) =>
-    enqueueTask(
+  const enqueued = await pMap(targets, async (target) => {
+    // A PR opened by a session-delegated task pulls its review into that
+    // same session, so the review shows up as a task there instead of
+    // spawning an unrelated one.
+    const reviewBranch = mergeRequest.source_branch;
+    const originParent = reviewBranch
+      ? await getPrOriginFastAgentParent({
+          repository: repoFullName,
+          prNumber: mergeRequest.iid,
+          branchName: reviewBranch,
+          sourceControlProvider: 'gitlab',
+          repositoryId: target.repo.id,
+          // Legacy repository rows may lack a host; fall back to the
+          // webhook's own host so a same-named repository on another
+          // instance can never supply this review's session.
+          host: target.repo.host ?? toHostFromUrl(mergeRequest.url),
+        }).catch(() => null)
+      : null;
+    return enqueueTask(
       {
         task: {
           type: taskType,
@@ -230,6 +262,9 @@ export async function handleGitLabMergeRequest(
             // Legacy rows without a recorded host omit the field.
             ...(target.repo.host
               ? { sourceControlHost: target.repo.host }
+              : {}),
+            ...(originParent
+              ? buildFastAgentSessionAttachment(originParent)
               : {}),
             prNumber: mergeRequest.iid,
             prTitle: mergeRequest.title,
@@ -273,8 +308,8 @@ export async function handleGitLabMergeRequest(
       {
         launchClass: 'automation',
       },
-    ),
-  );
+    );
+  });
 
   return {
     status: 'ok',

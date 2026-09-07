@@ -58,5 +58,3 @@ export function createLinearMcp(options?: {
     },
   });
 }
-
-export const linearMcp = createLinearMcp();

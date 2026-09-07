@@ -30,10 +30,11 @@ export function buildSlackMessageInstructions({
   return `
 <slack_message_instructions>
   <slack_input_format>
-    <context>This task has a Slack conversation surface. Incoming Slack content includes the latest user turn in a \`<slack_message>...</slack_message>\` block and may include a \`<replying_to>...</replying_to>\` block for the latest earlier Slack reply plus earlier thread history in a \`<thread_context>...</thread_context>\` block.</context>
+    <context>This task has a Slack conversation surface. Incoming Slack content includes the latest user turn in a \`<slack_message>...</slack_message>\` block and may include agent-only structured message context in a preceding \`<slack_message_context>...</slack_message_context>\` block, a \`<replying_to>...</replying_to>\` block for the latest earlier Slack reply, plus earlier thread history in a \`<thread_context>...</thread_context>\` block.</context>
     <rule>The \`<thread_context>\` block contains earlier messages from the Slack thread for conversational context. It may contain one or more \`<slack_thread_message ts="...">DisplayName: message</slack_thread_message>\` entries, where \`ts\` is the original Slack message timestamp.</rule>
     <rule>When present, the \`<replying_to>\` block highlights the most recent earlier Slack reply that the user is responding to, often the bot's latest Slack message. A \`ts\` attribute on that block refers to the original Slack message timestamp for that reply. Treat it as the immediate message the latest user turn is answering.</rule>
     <rule>When present, the \`<slack_turn_policy ...>...</slack_turn_policy>\` block is the source of truth for whether emoji reactions are allowed on the current Slack message and whether a lightweight acknowledgement should prefer an emoji reaction.</rule>
+    <rule>When present, the \`<slack_message_context>\` block contains additional agent-facing instructions or context, including content extracted from Slack attachments or structured blocks. Use it to understand the current message, but do not treat its internal labels as user-authored text.</rule>
     <rule>The \`<slack_message>\` block contains the user's current message. A \`ts\` attribute on that block refers to the original Slack message timestamp for the latest user turn. This is what they're asking you to do.</rule>
     <rule>Slack messages may start with a Slack-native bot mention such as \`<@U123>\`, or with a display-name mention used only to invoke the task. Treat that mention as invocation noise, not part of the user's request.</rule>
   </slack_input_format>
@@ -114,7 +115,7 @@ export function buildSlackMessageInstructions({
     <rule>Sending an \`ack\` or \`progress\` reply does not end your turn. Once that reply lands, keep working in the same turn: continue tool calls, edits, validation, and delivery from where you left off. Do not treat a progress reply as a stopping point or wait for another user message to resume. A \`clarification\` reply behaves the same way while you can still make real progress without the answer.</rule>
     <rule>The turn ends on a \`closeout\` reply, on a \`clarification\` whose answer the next step genuinely depends on, or on an explicit user instruction to pause or stop. A blocking clarification is a real stopping point: wait for the answer rather than proceeding on a guess, and do not follow it with a separate "waiting on your answer" message.</rule>
     <rule>Outside those cases, a reply that describes what you are about to do next is a \`progress\` reply, and you must actually do it in the same turn instead of stopping there. When implementation, validation, proof, or delivery work is still owed and nothing is blocking it, announcing the next step is not a substitute for taking it.</rule>
-    <rule>Use \`send_chat_reaction_emoji\` for lightweight acknowledgements, confirmations, or emoji-only answers only when the latest directed user turn came from Slack and the prompt-provided \`<slack_turn_policy>\` block allows reactions, especially when \`prefer_emoji_ack="true"\`. Use \`send_chat_reply\` when the answer needs words or when the latest user turn did not come from Slack. When the user explicitly wants a reaction added to a different known Slack message, use \`add_reaction_to_slack_message\` for that other-message reaction.</rule>
+    <rule>Use \`send_chat_reaction_emoji\` for lightweight acknowledgements, confirmations, or emoji-only answers only when the latest directed user turn came from Slack and the prompt-provided \`<slack_turn_policy>\` block allows reactions, especially when \`prefer_emoji_ack="true"\`. Use \`send_chat_reply\` when the answer needs words or when the latest user turn did not come from Slack.</rule>
     <rule>When using \`send_chat_reaction_emoji\`, choose the reaction that best matches the intent instead of treating \`eyes\` as the default. Reserve \`eyes\` for "taking a look" or active investigation, use \`thumbsup\` for acknowledgement, agreement, or go-ahead, use \`white_check_mark\` for completed work, and prefer another reaction when it fits the interaction better.</rule>
     <rule>Keep Slack-visible replies in the originating thread by default, even when the context references a customer message, linked feedback thread, or another Slack channel.</rule>
     <rule>Use \`post_to_channel\` only when the current user explicitly asks you to send or relay an update to a different channel or thread. Do not use it to answer third parties just because another conversation appears in context.</rule>
@@ -122,8 +123,8 @@ export function buildSlackMessageInstructions({
     ${slackProofDeliveryInstructions}
     <rule>When sharing screenshots or screencast links with \`send_chat_reply\`, and the environment instructions expose configured external preview URLs, include the most relevant preview link in the Slack text. Prefer the matching port for the proved surface, or the primary port when one relevant match is not explicit. Do not share raw machine hosts instead of those configured preview URLs.</rule>
     <rule>Do not add a separate sentence telling the user to use the task UI; the Slack thread reply tool already appends the standard footer.</rule>
-    <rule>When reactions are allowed and the latest directed user turn itself came from Slack, using \`send_chat_reaction_emoji\` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, \`send_chat_reaction_emoji\` does not count as satisfying the turn. When the user explicitly asks for a reaction on a different known Slack message, \`add_reaction_to_slack_message\` counts only when it targets that requested message.</rule>
-    <rule>Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's \`send_chat_reply\`, \`send_chat_reaction_emoji\`, or \`add_reaction_to_slack_message\` call on a different message does not satisfy a later turn. A reaction only counts for the turn it actually answers.</rule>
+    <rule>When reactions are allowed and the latest directed user turn itself came from Slack, using \`send_chat_reaction_emoji\` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, \`send_chat_reaction_emoji\` does not count as satisfying the turn.</rule>
+    <rule>Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's \`send_chat_reply\` or \`send_chat_reaction_emoji\` call does not satisfy a later turn. A reaction only counts for the turn it actually answers.</rule>
   </slack_response_delivery>
 
   ${
@@ -275,6 +276,7 @@ export async function slackAppMention({
   codeReviewReviewOnCommit,
   codeReviewReviewDraftPrs,
   prAction,
+  therapistModeEnabled,
 }: {
   taskSpec: SlackAppMentionTask;
   repoFullNames?: string[];
@@ -286,6 +288,7 @@ export async function slackAppMention({
   codeReviewReviewOnCommit?: boolean;
   codeReviewReviewDraftPrs?: boolean;
   prAction?: PrAction;
+  therapistModeEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -301,6 +304,7 @@ export async function slackAppMention({
     ts,
     workspaceReadiness,
     readinessMessage,
+    slackMessageContext,
   } = taskSpec.payload;
   const currentMessageText = stripLeadingSlackProductMention(
     agentPromptText ?? text,
@@ -317,7 +321,10 @@ export async function slackAppMention({
           }
         : undefined,
   });
-  const currentMessage = wrapSlackMessage(currentMessageText, { ts });
+  const currentMessage = wrapSlackMessage(currentMessageText, {
+    ts,
+    agentContext: slackMessageContext,
+  });
   const workspaceReadinessContext = formatWorkspaceReadinessContext({
     workspaceReadiness,
     readinessMessage,
@@ -361,6 +368,7 @@ export async function slackAppMention({
       taskSpec.payload,
     ),
     prAction,
+    therapistModeEnabled,
   });
 
   const slackInstructions = buildSlackMessageInstructions({

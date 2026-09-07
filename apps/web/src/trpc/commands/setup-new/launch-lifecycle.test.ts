@@ -106,9 +106,6 @@ vi.mock('@/lib/repositories', () => ({
 }));
 
 vi.mock('@/lib/setup-new', () => ({
-  appendEnvironmentDefinitionGuidance: vi.fn(),
-  buildSetupNewKickoffPrompt: vi.fn(),
-  buildSetupNewWorkspacePayload: vi.fn(),
   findMatchingSetupNewEnvironment: vi.fn(),
   isSetupNewOnboardingFailureStatus: vi.fn(),
   isSetupNewOnboardingSuccessStatus: vi.fn(),

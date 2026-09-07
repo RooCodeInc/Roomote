@@ -74,7 +74,11 @@ async function extractAttachmentTexts(files: File[]): Promise<string[]> {
 export async function preparePromptAttachments(input: {
   text: string;
   attachments?: PromptAttachmentPart[];
-}): Promise<{ text: string; images?: string[] }> {
+}): Promise<{
+  text: string;
+  images?: string[];
+  attachmentTexts?: string[];
+}> {
   const files = await resolveAttachmentFiles(input.attachments);
   const imageFiles = files.filter((file) =>
     isRoomoteImageAttachment({
@@ -97,6 +101,7 @@ export async function preparePromptAttachments(input: {
     ...(processedImages.length > 0
       ? { images: processedImages.map((image) => image.dataUrl) }
       : {}),
+    ...(attachmentTexts.length > 0 ? { attachmentTexts } : {}),
   };
 }
 

@@ -1,0 +1,2 @@
+ALTER TABLE "fast_agent_conversations" ALTER COLUMN "current_reply_channel_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "custom_automations" ADD COLUMN "execution_mode" text DEFAULT 'sandbox_task' NOT NULL;

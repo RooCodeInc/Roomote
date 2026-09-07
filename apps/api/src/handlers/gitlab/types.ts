@@ -186,3 +186,35 @@ export const gitLabPipelineWebhookSchema = z
   .passthrough();
 
 export type GitLabPipelineWebhook = z.infer<typeof gitLabPipelineWebhookSchema>;
+
+const gitLabPushCommitSchema = z
+  .object({
+    id: z.string(),
+    message: z.string(),
+    url: z.string().optional(),
+    author: z
+      .object({
+        name: z.string().optional(),
+        email: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const gitLabPushWebhookSchema = z
+  .object({
+    object_kind: z.literal('push'),
+    ref: z.string(),
+    after: z.string(),
+    compare: z.string().nullable().optional(),
+    total_commits_count: z.number().optional(),
+    user_name: z.string().optional(),
+    user_username: z.string().optional(),
+    user_email: z.string().optional(),
+    project: gitLabProjectSchema,
+    commits: z.array(gitLabPushCommitSchema),
+  })
+  .passthrough();
+
+export type GitLabPushWebhook = z.infer<typeof gitLabPushWebhookSchema>;

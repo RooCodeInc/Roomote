@@ -542,5 +542,20 @@ describe('declarative environments', () => {
 
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
     expect(result.data?.name).toBe('Roomote');
+    const commands = result.data!.repositories[0]!.commands!;
+    const storageIndex = commands.findIndex((command) =>
+      command.run.includes('scripts/setup-sandbox-minio.ts'),
+    );
+    expect(storageIndex).toBeGreaterThan(-1);
+    expect(commands[storageIndex]?.continue_on_error).toBe(false);
+    expect(commands[storageIndex]?.detached).not.toBe(true);
+    expect(storageIndex).toBeLessThan(
+      commands.findIndex((command) => command.name === 'Start API server'),
+    );
+    expect(storageIndex).toBeLessThan(
+      commands.findIndex(
+        (command) => command.name === 'Start Next.js web dev server',
+      ),
+    );
   });
 });

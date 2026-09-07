@@ -8,11 +8,20 @@ import {
 import { decrypt } from '@roomote/db/encryption';
 import { customMcpConnectionId } from '@roomote/types';
 
+const { captureEventMock } = vi.hoisted(() => ({
+  captureEventMock: vi.fn(),
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureEvent: captureEventMock,
+}));
+
 import {
   CUSTOM_MCP_DISABLED_MESSAGE,
   assertCustomMcpEnabled,
   createCustomMcpServerCommand,
   deleteCustomMcpServerCommand,
+  disconnectCustomMcpServerCommand,
   listCustomMcpServersCommand,
   listCustomMcpServerToolsCommand,
   setCustomMcpServerDisabledToolsCommand,
@@ -62,7 +71,10 @@ describe('custom-mcp-servers commands', () => {
     await userFactory.create({ id: adminAuth.userId });
   });
 
-  beforeEach(cleanup);
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    await cleanup();
+  });
   afterAll(cleanup);
 
   it('rejects non-admin users on every command', async () => {
@@ -79,6 +91,15 @@ describe('custom-mcp-servers commands', () => {
 
   it('creates a server with encrypted header values and lists names only', async () => {
     const { id } = await createCustomMcpServerCommand(adminAuth, remoteInput);
+
+    expect(captureEventMock).toHaveBeenCalledWith('integration_enabled', {
+      userId: adminAuth.userId,
+      properties: { integration_id: customMcpConnectionId(id) },
+    });
+    expect(captureEventMock).toHaveBeenCalledWith('integration_connected', {
+      userId: adminAuth.userId,
+      properties: { integration_id: customMcpConnectionId(id) },
+    });
 
     const row = await db.query.customMcpServers.findFirst({
       where: eq(customMcpServers.id, id),
@@ -147,6 +168,7 @@ describe('custom-mcp-servers commands', () => {
       authStatus: 'authenticated',
       accessToken: 'stored-access-token',
     });
+    captureEventMock.mockClear();
 
     const result = await updateCustomMcpServerCommand(adminAuth, {
       id,
@@ -165,6 +187,10 @@ describe('custom-mcp-servers commands', () => {
     });
 
     expect(connections).toHaveLength(0);
+    expect(captureEventMock).toHaveBeenCalledWith('integration_removed', {
+      userId: adminAuth.userId,
+      properties: { integration_id: customMcpConnectionId(id) },
+    });
   });
 
   it('keeps OAuth connections when only headers change', async () => {
@@ -233,6 +259,7 @@ describe('custom-mcp-servers commands', () => {
       authConfig: {},
       enabled: true,
     });
+    captureEventMock.mockClear();
 
     const result = await deleteCustomMcpServerCommand(adminAuth, { id });
 
@@ -247,6 +274,36 @@ describe('custom-mcp-servers commands', () => {
         where: eq(mcpConnections.mcpId, customMcpConnectionId(id)),
       }),
     ).toHaveLength(0);
+    expect(captureEventMock).toHaveBeenCalledWith('integration_removed', {
+      userId: adminAuth.userId,
+      properties: { integration_id: customMcpConnectionId(id) },
+    });
+  });
+
+  it('only captures custom OAuth removal when a connection existed', async () => {
+    const { id } = await createCustomMcpServerCommand(adminAuth, {
+      ...remoteInput,
+      authType: 'oauth',
+      headers: undefined,
+    });
+    captureEventMock.mockClear();
+
+    await disconnectCustomMcpServerCommand(adminAuth, { id });
+    expect(captureEventMock).not.toHaveBeenCalled();
+
+    await db.insert(mcpConnections).values({
+      userId: null,
+      mcpId: customMcpConnectionId(id),
+      connectionRole: 'default',
+      authConfig: {},
+      enabled: true,
+    });
+    await disconnectCustomMcpServerCommand(adminAuth, { id });
+
+    expect(captureEventMock).toHaveBeenCalledWith('integration_removed', {
+      userId: adminAuth.userId,
+      properties: { integration_id: customMcpConnectionId(id) },
+    });
   });
 
   it('toggles enabled and persists disabled tools', async () => {
@@ -261,6 +318,11 @@ describe('custom-mcp-servers commands', () => {
     expect(listed[0]!.disabledTools).toEqual(['dangerous_tool']);
 
     await setCustomMcpServerEnabledCommand(adminAuth, { id, enabled: false });
+
+    expect(captureEventMock).toHaveBeenLastCalledWith('integration_disabled', {
+      userId: adminAuth.userId,
+      properties: { integration_id: customMcpConnectionId(id) },
+    });
 
     listed = await listCustomMcpServersCommand(adminAuth);
     expect(listed[0]!.enabled).toBe(false);

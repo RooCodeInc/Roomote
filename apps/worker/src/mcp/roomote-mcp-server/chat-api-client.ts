@@ -175,22 +175,6 @@ export async function addReactionToChatMessage(
   );
 }
 
-export async function addReactionToSlackMessage(
-  config: RoomoteConfig,
-  input: {
-    channel: string;
-    messageTs: string;
-    name: string;
-  },
-): Promise<SlackReactionAddResponse> {
-  return postToChatEndpoint<SlackReactionAddResponse>(
-    config,
-    'reaction_add',
-    input,
-    'Failed to add Slack reaction',
-  );
-}
-
 export async function getChatMessageContext(
   config: RoomoteConfig,
   input: {
@@ -247,6 +231,18 @@ export async function trackSlackReplyQuote(
     'track_reply_quote',
     input,
     'Failed to track Slack reply quote',
+  );
+}
+
+export async function suppressSlackReplyQuote(
+  config: RoomoteConfig,
+  input: { runId: number },
+): Promise<SlackMutationResponse> {
+  return postToChatEndpoint<SlackMutationResponse>(
+    config,
+    'suppress_reply_quote',
+    input,
+    'Failed to suppress Slack reply quote',
   );
 }
 

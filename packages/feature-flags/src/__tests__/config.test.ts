@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { FEATURE_FLAG_CONFIG } from '../config';
-import { FeatureFlag } from '../types';
+import { DEPLOYMENT_METADATA_BOOLEAN_CONFIG } from '../config';
 
-describe('feature flags', () => {
-  it('defines zero recognized flags and zero config entries', () => {
-    expect(FeatureFlag).toEqual({});
-    expect(FEATURE_FLAG_CONFIG).toEqual({});
+describe('deployment metadata config', () => {
+  it('retains the deployment-control metadata descriptors', () => {
+    expect(Object.keys(DEPLOYMENT_METADATA_BOOLEAN_CONFIG).sort()).toEqual([
+      'anonymous_analytics_enabled',
+      'deployment_disabled',
+    ]);
+    for (const descriptor of Object.values(
+      DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
+    )) {
+      expect(descriptor.kind).toBe('deployment-control');
+    }
   });
 });

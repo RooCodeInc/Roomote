@@ -66,22 +66,23 @@ describe('AnalyticsShell', () => {
     );
 
     const nav = screen.getByRole('navigation');
-    const navItems = within(nav).getAllByText(/^(Tasks|Costs)$/);
+    const navItems = within(nav).getAllByText(/^(Costs|Tasks)$/);
 
     expect(screen.getByRole('heading', { name: 'PRs' })).toBeInTheDocument();
     expect(within(nav).queryByText('PRs')).not.toBeInTheDocument();
+    expect(within(nav).queryByText('Sessions')).not.toBeInTheDocument();
     expect(navItems.map((item) => item.textContent)).toEqual([
-      'Tasks',
       'Costs',
+      'Tasks',
     ]);
   });
 
-  it('uses Tasks as the default analytics URL and keeps PRs and Costs addressable', () => {
-    expect(getAnalyticsHref('tasks')).toBe('/analytics');
+  it('uses Costs as the default analytics URL and keeps Tasks and PRs addressable', () => {
+    expect(getAnalyticsHref('costs')).toBe('/analytics');
+    expect(getAnalyticsHref('tasks')).toBe('/analytics?object=tasks');
     expect(getAnalyticsHref('pullRequests')).toBe(
       '/analytics?object=pullRequests',
     );
-    expect(getAnalyticsHref('costs')).toBe('/analytics/costs');
   });
 
   it('names the export action in each state', () => {

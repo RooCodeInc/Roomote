@@ -8,6 +8,7 @@ import { PreviewSetupState } from './PreviewSetupState';
 const { authState, statusState, startSetupMock } = vi.hoisted(() => ({
   authState: { isAdmin: false },
   statusState: {
+    error: false,
     data: null as {
       runtimeReady: boolean;
       environment: {
@@ -53,7 +54,13 @@ vi.mock('@/trpc/client', () => ({
           options?: Record<string, unknown>,
         ) => ({
           queryKey: ['previewTaskStatus', input.taskId],
-          queryFn: () => statusState.data,
+          queryFn: () => {
+            if (statusState.error) {
+              throw new Error('Status request failed');
+            }
+
+            return statusState.data;
+          },
           ...options,
           refetchInterval: false,
         }),
@@ -112,6 +119,7 @@ describe('PreviewSetupState', () => {
     vi.clearAllMocks();
     authState.isAdmin = false;
     statusState.data = buildStatus();
+    statusState.error = false;
   });
 
   it('shows the generic unavailable message without a task run', () => {
@@ -119,6 +127,23 @@ describe('PreviewSetupState', () => {
 
     expect(
       screen.getByText('Live Preview is not available for this task.'),
+    ).toBeInTheDocument();
+  });
+
+  it('distinguishes a status request failure and lets the user retry', async () => {
+    statusState.error = true;
+
+    renderSetupState(taskRun);
+
+    expect(
+      await screen.findByText("We couldn't check Live Preview availability"),
+    ).toBeInTheDocument();
+
+    statusState.error = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(
+      await screen.findByText("Web App doesn't expose any preview ports yet"),
     ).toBeInTheDocument();
   });
 
@@ -181,6 +206,7 @@ describe('PreviewSetupState', () => {
     expect(
       screen.queryByRole('link', { name: /view setup task/i }),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite');
   });
 
   it('tells non-admins to ask an administrator when the runtime is not ready', async () => {

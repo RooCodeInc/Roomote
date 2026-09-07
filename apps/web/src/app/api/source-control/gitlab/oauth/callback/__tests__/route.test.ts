@@ -8,6 +8,7 @@ const {
   resolveDeploymentEnvVarMock,
   resolveGitLabBaseUrlMock,
   syncRepositoriesMock,
+  notifySetupSourceControlSynchronizedMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   bootstrapWebRuntimeEnvMock: vi.fn(),
@@ -16,6 +17,7 @@ const {
   resolveDeploymentEnvVarMock: vi.fn(),
   resolveGitLabBaseUrlMock: vi.fn(),
   syncRepositoriesMock: vi.fn(),
+  notifySetupSourceControlSynchronizedMock: vi.fn(),
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -32,6 +34,11 @@ vi.mock('@/lib/server/setup-bootstrap-state', () => ({
 
 vi.mock('@/trpc/commands/source-control', () => ({
   syncRepositoriesCommand: syncRepositoriesMock,
+}));
+
+vi.mock('@/trpc/commands/setup/setup-session', () => ({
+  notifySetupSourceControlSynchronized:
+    notifySetupSourceControlSynchronizedMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -91,6 +98,7 @@ describe('GET /api/source-control/gitlab/oauth/callback', () => {
     exchangeGitLabOAuthCodeMock.mockResolvedValue(undefined);
     getSetupBootstrapStateMock.mockResolvedValue({ setupOpen: true });
     syncRepositoriesMock.mockResolvedValue({ success: true, repositories: [] });
+    notifySetupSourceControlSynchronizedMock.mockResolvedValue(undefined);
   });
 
   it('exchanges the code with redirect_uri built from R_PUBLIC_URL', async () => {
@@ -162,6 +170,24 @@ describe('GET /api/source-control/gitlab/oauth/callback', () => {
     expect(exchangeGitLabOAuthCodeMock).not.toHaveBeenCalled();
   });
 
+  it('syncs repositories and wakes the setup Session on a setup return', async () => {
+    await GET(
+      buildRequest(
+        '?code=auth-code&state=state-1',
+        'roomote-gitlab-oauth-state=state-1',
+      ),
+    );
+
+    expect(syncRepositoriesMock).toHaveBeenCalledWith(
+      { success: true, isAdmin: true },
+      { provider: 'gitlab' },
+    );
+    expect(notifySetupSourceControlSynchronizedMock).toHaveBeenCalledWith({
+      success: true,
+      isAdmin: true,
+    });
+  });
+
   it('returns to settings and syncs when setup is already complete', async () => {
     getSetupBootstrapStateMock.mockResolvedValue({ setupOpen: false });
 
@@ -196,7 +222,7 @@ describe('GET /api/source-control/gitlab/oauth/callback', () => {
     );
 
     expect(response.headers.get('location')).toBe(
-      'https://customer.roomote.ai/settings/source-control?gitlab=error',
+      'https://customer.roomote.ai/settings/source-control?gitlab=error&reason=GitLab+rejected+the+deployment+credential.',
     );
   });
 });

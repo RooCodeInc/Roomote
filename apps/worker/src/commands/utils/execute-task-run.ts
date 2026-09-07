@@ -2,6 +2,7 @@ import * as path from 'node:path';
 
 import {
   RunStatus,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   type SourceControlTokenMetadata,
   type TaskPayloadKind,
   WORKER_HEARTBEAT_INTERVAL_MS,
@@ -23,6 +24,8 @@ import {
 import type { WorkspaceConfig } from '../../workspace';
 import type { RepoLocalSkill } from '../../workspace/repo-local-skills';
 import { callbackMap } from '../../callbacks';
+import { getLinearSessionActivityStreamCallbacks } from '../../callbacks/linear-agent';
+import { getSlackLiveTaskStreamRunTaskCallbacks } from '../../callbacks/slack-live-task-stream';
 import {
   getCommunicationRunTaskCallbacks,
   mergeRunTaskCallbacks,
@@ -49,7 +52,11 @@ import {
 } from '../setup/workspace/types';
 
 import { BackgroundEnvironmentSetupController } from './background-environment-setup-controller';
-import { injectEnvVars, writeBashrc } from './env-vars';
+import {
+  buildEnvironmentShellEnvVars,
+  injectEnvVars,
+  writeBashrc,
+} from './env-vars';
 import { resolveRepositoryProvidersFromPayload } from './repository-providers';
 import { buildServiceContextForPreviewProxy } from './service-context';
 import { finalizeJob, handleTaskRunError } from './task-run-lifecycle';
@@ -341,11 +348,16 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     }
 
     const { envVars } = jobContext;
+    const sandboxOpenRouterApiKey =
+      envVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
+    delete envVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
     taskRun = jobContext.taskRun;
     const runIdForEvents = taskRun.id;
     callbacks = mergeRunTaskCallbacks(
       callbackMap[taskRun.payloadKind as TaskPayloadKind] ?? {},
       getCommunicationRunTaskCallbacks(taskRun),
+      getSlackLiveTaskStreamRunTaskCallbacks(taskRun),
+      getLinearSessionActivityStreamCallbacks(taskRun),
     );
 
     workerEnv = WorkerEnv.fromProcessEnv(process.env);
@@ -411,6 +423,8 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       previewProxyBaseUrl: workerEnv.previewProxyBaseUrl,
       previewProxySubdomainSuffix: workerEnv.previewProxySubdomainSuffix,
       sourceControlToken: jobContext.sourceControlToken,
+      omitInheritedModelRuntimeEnvFromShell:
+        taskWorkspace.type === 'environment',
     });
 
     if (taskRun.canceledAt) {
@@ -484,6 +498,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       id: taskRun.id,
       status: RunStatus.Preparing,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Preparing, context);
 
     const workspace = await recordWorkerPhase({
       label: 'resolveWorkspaceConfig',
@@ -548,6 +563,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
           },
           logger: startupLogger,
           workerEnv: currentWorkerEnv,
+          sandboxOpenRouterApiKey,
           backgroundEnvironmentSetup: runEnvironmentSetupInBackground,
           recordPhase: ({
             label,
@@ -653,7 +669,15 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       }
     }
 
-    writeBashrc(workerEnv.buildUserFacingEnv());
+    const userFacingEnv = workerEnv.buildUserFacingEnv();
+    writeBashrc(
+      workspace.type === 'environment'
+        ? buildEnvironmentShellEnvVars(
+            userFacingEnv,
+            Object.keys(workspace.environmentConfig.env ?? {}),
+          )
+        : userFacingEnv,
+    );
 
     if (taskRun.canceledAt) {
       await backgroundEnvironmentSetupController.flush();

@@ -1,3 +1,4 @@
+import { resolveWorkerReleaseMetadata } from '../monitoring/worker-release-metadata';
 import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
@@ -16,16 +17,21 @@ import {
   type QueuedCommunicationMessage,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getTaskReportConsumerFromPayload,
   isCommunicationProvider,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
 } from '@roomote/types';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import packageJson from '../../../../package.json';
+
 import { validateToken } from '@roomote/auth/client';
 import {
-  ROOMOTE_SYSTEM_PROMPT,
+  buildRoomoteSystemPrompt,
+  resolveRoomoteReleaseVersion,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
 } from '@roomote/cloud-agents';
@@ -85,6 +91,7 @@ import {
   buildMcpTaskEnv,
   getCommunicationReplyContext,
   getSlackReplyContext,
+  getFastAgentChildRuntimeEnv,
 } from './mcp-task-env';
 import {
   type ActorMismatchPolicy,
@@ -104,6 +111,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { buildTaskGoalContinuationPrompt } from './task-goal';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
+import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -648,6 +656,7 @@ function getQueuedSnapshotResumeLinearMessages(
 
 export const runTask = async ({
   taskRun,
+  sourceControlToken,
   envVars,
   userEnvVars,
   workspacePath,
@@ -676,6 +685,7 @@ export const runTask = async ({
     id: taskRun.id,
     status: RunStatus.Spawning,
   });
+  await callbacks.onStatus?.(taskRun, RunStatus.Spawning, context);
 
   // Register the process-level crash listeners (at most once per process) and
   // point them at this run via the module-level context slot. The `finally` at
@@ -705,13 +715,19 @@ export const runTask = async ({
       githubTokenRefreshInterval: undefined,
     };
 
+    const taskEnvVars = Object.fromEntries(
+      Object.entries(envVars).filter(
+        ([name]) => name !== SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
+      ),
+    );
     const unsanitizedEnv = workerEnv
       ? {
           ...workerEnv.buildUserFacingEnv(),
           ...(workerEnv.buildOpenCodeHarnessEnv?.() ?? {}),
-          ...envVars,
+          ...taskEnvVars,
         }
-      : { ...process.env, ...envVars };
+      : { ...process.env, ...taskEnvVars };
+    delete unsanitizedEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
 
     const sanitizedEnv = sanitizeEnv(unsanitizedEnv);
     const openCodeHarnessEnv = buildOpenCodeHarnessEnv(unsanitizedEnv);
@@ -721,7 +737,7 @@ export const runTask = async ({
     // sanitized allowlist always take precedence. This prevents an org from
     // accidentally (or maliciously) overriding vars the worker relies on.
     const deploymentEnvVars: Record<string, string> = Object.fromEntries(
-      Object.entries(envVars).filter(
+      Object.entries(taskEnvVars).filter(
         (entry): entry is [string, string] => entry[1] !== undefined,
       ),
     );
@@ -749,11 +765,6 @@ export const runTask = async ({
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME && {
         ROOMOTE_AUTH_BYPASS_HEADER_NAME:
           unsanitizedEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME,
-      }),
-      // Consumed (and removed) by generateOpenCodeConfig, which registers the
-      // hidden proof-runner subagent only when a browser surface exists.
-      ...(environmentConfig?.initialUrl && {
-        ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
       }),
     };
     // Strip credentials for disabled providers as defense in depth, even if a
@@ -798,6 +809,10 @@ export const runTask = async ({
     const inferenceGatewayXai =
       unsanitizedEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] === '1';
 
+    // Task sandboxes are gateway-only. Strip legacy direct OAuth content even
+    // when it came from an old worker snapshot or conflicting deployment env.
+    delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+
     if (
       inferenceGatewayServedKeys.length > 0 ||
       inferenceGatewayChatGpt ||
@@ -821,20 +836,16 @@ export const runTask = async ({
 
       if (inferenceGatewayChatGpt) {
         runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] = '1';
-        // Gateway mode holds the OAuth record; it must never reach the sandbox.
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
       }
       if (inferenceGatewayGitHubCopilot) {
         runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME] = '1';
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME];
       }
       if (inferenceGatewayXai) {
         runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME] = '1';
-        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_XAI_ENV_VAR_NAME];
       }
@@ -966,6 +977,7 @@ export const runTask = async ({
 
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
+    Object.assign(runtimeEnv, getFastAgentChildRuntimeEnv(taskRun));
     if (slackReplyContext?.threadTs) {
       runtimeEnv.ROOMOTE_SLACK_CHANNEL = slackReplyContext.channel;
       runtimeEnv.ROOMOTE_SLACK_THREAD_TS = slackReplyContext.threadTs;
@@ -1030,7 +1042,22 @@ export const runTask = async ({
     // OpenCode consumes Roomote's identity, workflow, and runtime guidance
     // through its developer-instructions layer.
     const harnessDeveloperInstructions =
-      [ROOMOTE_SYSTEM_PROMPT, harnessInstructions, environmentInstructions]
+      [
+        buildRoomoteSystemPrompt(
+          resolveRoomoteReleaseVersion(
+            process.env.RELEASE_PRODUCT_VERSION,
+            process.env.RELEASE_VERSION,
+            packageJson.version,
+          ),
+          {
+            reportConsumer: getTaskReportConsumerFromPayload(taskRun.payload),
+            commitSha: resolveWorkerReleaseMetadata().workerCommit,
+            appEnv: process.env.ROOMOTE_RELEASE_APP_ENV,
+          },
+        ),
+        harnessInstructions,
+        environmentInstructions,
+      ]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;
 
@@ -1052,6 +1079,7 @@ export const runTask = async ({
       id: taskRun.id,
       status: RunStatus.Connecting,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Connecting, context);
 
     const recordWorkerRuntimeEvent = createWorkerRuntimeEventRecorder({
       runId: taskRun.id,
@@ -1163,7 +1191,10 @@ export const runTask = async ({
 
     const prepareQueuedPromptActorScope = async (
       targetUserId?: string,
-      delivery?: { kind: 'queuedPrompt' | 'userInputAnswer' },
+      delivery?: {
+        kind: 'queuedPrompt' | 'userInputAnswer';
+        clientMessageId?: string;
+      },
     ) => {
       if (
         pendingTaskModelSettingsRestart &&
@@ -1176,10 +1207,75 @@ export const runTask = async ({
         };
       }
 
+      const finishQueuedPromptPreparation = async (result: {
+        shouldReconnect: boolean;
+        reason?: string;
+      }) => {
+        const clientMessageId = delivery?.clientMessageId;
+        if (result.shouldReconnect || delivery?.kind !== 'queuedPrompt') {
+          return result;
+        }
+
+        try {
+          if (!clientMessageId?.startsWith('slack:')) {
+            await sdk.taskRuns.clearActiveSlackReplyTarget({
+              runId: taskRun.id,
+            });
+            delete context.slackReplyTarget;
+            return result;
+          }
+
+          const activeTarget = await sdk.taskRuns.activateSlackReplyTarget({
+            runId: taskRun.id,
+            messageTs: clientMessageId.slice('slack:'.length),
+          });
+          if (!activeTarget) {
+            delete context.slackReplyTarget;
+            logger.warn(
+              `[runTask] Slack reply target authorization is missing for ${clientMessageId}; delivering with canonical routing`,
+            );
+          } else {
+            context.slackReplyTarget = activeTarget;
+            recordChatTurnStart({
+              turnMessageTs: clientMessageId.slice('slack:'.length),
+              allowReaction: activeTarget.reactionsAllowed,
+              sessionId: pollingState.sessionId,
+              stateFilePath:
+                mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
+            });
+          }
+          return result;
+        } catch (error) {
+          // A rolled-back API (the supported N-1 target) predates these
+          // procedures entirely, and tRPC reports that as NOT_FOUND. The
+          // procedures themselves never answer NOT_FOUND (a missing
+          // authorization is a null result), so this is unambiguous version
+          // skew. Reply-target routing did not exist on that release either,
+          // so canonical routing IS its correct behavior; blocking would
+          // instead stall every queued prompt until the snapshot is
+          // replaced.
+          if (isMissingSlackReplyTargetProcedureError(error)) {
+            delete context.slackReplyTarget;
+            logger.warn(
+              `[runTask] Slack reply target procedures are unavailable on this API (rolled-back release?); delivering with canonical routing`,
+            );
+            return result;
+          }
+
+          return {
+            shouldReconnect: false,
+            shouldBlockPrompt: true,
+            reason: `Slack reply target activation failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          };
+        }
+      };
+
       if (!targetUserId) {
-        return {
+        return finishQueuedPromptPreparation({
           shouldReconnect: false,
-        };
+        });
       }
 
       const syncResult = await syncActorScopedTurnState({
@@ -1227,12 +1323,12 @@ export const runTask = async ({
 
       if (refreshResult.didFail) {
         if (!refreshResult.actorChanged) {
-          return {
+          return finishQueuedPromptPreparation({
             shouldReconnect: false,
             reason:
               refreshResult.reason ??
               'actor-scoped MCP refresh failed for the current actor; continuing with existing MCP state',
-          };
+          });
         }
 
         return {
@@ -1244,10 +1340,10 @@ export const runTask = async ({
         };
       }
 
-      return {
+      return finishQueuedPromptPreparation({
         shouldReconnect: refreshResult.didChange,
         reason: refreshResult.reason,
-      };
+      });
     };
 
     // Create the appropriate runtime harness. Harness setup wires the
@@ -1256,6 +1352,7 @@ export const runTask = async ({
       harness,
       getSubprocess,
       unsubscribe: unsubscribeHarness,
+      flushPendingCompletionEvents,
     } = await createHarness({
       harnessType,
       workspacePath,
@@ -1442,10 +1539,12 @@ export const runTask = async ({
             eventType: 'decision',
             message: `Worker onExit finished runtime-state flush for task run #${taskRun.id}.`,
           });
+          await flushPendingCompletionEvents();
           await sdk.taskRuns.done({
             id: taskRun.id,
             status: RunStatus.Idle,
           });
+          await callbacks.onStatus?.(taskRun, RunStatus.Idle, context);
         },
       },
     });
@@ -2064,6 +2163,7 @@ export const runTask = async ({
       id: taskRun.id,
       status: RunStatus.Running,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Running, context);
 
     // Subscribe to HarnessManager state changes BEFORE starting/resuming a task
     // so we capture the initial stateChange event (which carries sessionId).
@@ -2199,6 +2299,7 @@ export const runTask = async ({
     // (syncPollingState was already called above, before task start/resume.)
     startPolling({
       taskRun,
+      sourceControlTokenExpiresAt: sourceControlToken?.expiresAt,
       task,
       state: pollingState,
       logger,

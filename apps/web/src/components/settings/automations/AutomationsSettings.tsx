@@ -12,6 +12,7 @@ import {
   communicationProviders,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+  DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   getCommunicationProviderDisplayName,
   getSourceControlProviderLabel,
@@ -29,6 +30,7 @@ import {
   type TaskTrigger,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
+import { GitMergeIcon } from '@primer/octicons-react';
 
 import { useConnectSlack } from '@/hooks/slack';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
@@ -47,6 +49,7 @@ import {
   type FormState,
   isAutomationDirty,
   type ManagerStatsFrequency,
+  type ProviderUsageLimitFrequency,
   mergeAutomationFields,
   mergeServerStatePreservingDirtySections,
   resetAutomationFields,
@@ -64,6 +67,7 @@ import {
   SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS,
 } from './ScheduleOnlyAutomationContent';
 import { CustomAutomationsSection } from './CustomAutomationsSection';
+import { AutomationDestinationPicker } from './AutomationDestinationPicker';
 import {
   buildAutomationDiscordDestinationOptions,
   buildManagerSlackChannelOptions,
@@ -82,6 +86,7 @@ import {
   AlertTitle,
   BasicTooltip,
   BellElectric,
+  BatteryWarning,
   BrandIcon,
   Button,
   Card,
@@ -100,9 +105,9 @@ import {
   Input,
   Label,
   Lightbulb,
-  Megaphone,
   Play,
   Plus,
+  RotateCcwClock,
   Search,
   Select,
   SelectContent,
@@ -113,6 +118,7 @@ import {
   MessagesSquare,
   Skeleton,
   Slack,
+  Slider,
   Spinner,
   Settings2,
   Switch,
@@ -139,6 +145,7 @@ type FieldErrors = Partial<
     | 'managerSlackChannel'
     | 'managerDiscordChannel'
     | 'managerStatsSlackChannel'
+    | 'providerUsageLimitSlackChannel'
     | 'suggesterSlackChannel'
     | 'announcerSlackChannel'
     | 'platformIssueSlackChannel'
@@ -149,6 +156,7 @@ type FieldErrors = Partial<
     | 'codeQualityAuditorSlackChannel'
     | 'ciFailureTriageSlackChannel'
     | 'managerStatsDiscordChannel'
+    | 'providerUsageLimitDiscordChannel'
     | 'sentryTriageDiscordChannel'
     | 'dependabotTriageDiscordChannel'
     | 'codeqlTriageDiscordChannel'
@@ -173,6 +181,7 @@ type SlackChannelAccessWarnings = {
   channelAutoStartSlackChannels: string[];
   managerSlackChannel: string | null;
   managerStatsSlackChannel: string | null;
+  providerUsageLimitSlackChannel: string | null;
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
@@ -286,6 +295,7 @@ const EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS: SlackChannelAccessWarnings = {
   channelAutoStartSlackChannels: [],
   managerSlackChannel: null,
   managerStatsSlackChannel: null,
+  providerUsageLimitSlackChannel: null,
   suggesterSlackChannel: null,
   announcerSlackChannel: null,
   platformIssueSlackChannel: null,
@@ -317,6 +327,8 @@ const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
   suggester: 'Suggest valuable coding work to do.',
   announcer: 'Post a recurring digest of recently merged PRs.',
   manager_stats: "Summary of Roomote's activity during the week",
+  provider_usage_limit:
+    'Alert when a configured AI provider approaches its usage limit.',
   sentry_triage: 'Scan Sentry issues and post a prioritized triage report.',
   dependabot_triage:
     'Scan open Dependabot alerts and suggest the safest updates.',
@@ -331,6 +343,7 @@ const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
 const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
   off: 'Never',
   every_hour: 'Every hour',
+  every_15_minutes: 'Every 15 minutes',
   every_6_hours: 'Every 6 hours',
   daily: 'Daily',
   weekly: 'Once a week',
@@ -519,6 +532,14 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     ),
     category: 'communication',
   },
+  providerUsageLimit: {
+    ...getAutomationDefinition(
+      'providerUsageLimit',
+      'provider_usage_limit',
+      BatteryWarning,
+    ),
+    category: 'operations',
+  },
   sentryTriage: {
     ...getAutomationDefinition('sentryTriage', 'sentry_triage', SentryIcon),
   },
@@ -553,7 +574,7 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
     category: 'communication',
   },
   announcer: {
-    ...getAutomationDefinition('announcer', 'announcer', Megaphone),
+    ...getAutomationDefinition('announcer', 'announcer', GitMergeIcon),
     category: 'communication',
   },
   platformIssueAlerts: {
@@ -586,6 +607,8 @@ const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
   'manager-channel': 'managerChannel',
   'weekly-manager-stats': 'managerStats',
   managerstats: 'managerStats',
+  'provider-usage-limit': 'providerUsageLimit',
+  providerusagelimit: 'providerUsageLimit',
   'triage-sentry-issues': 'sentryTriage',
   'sentry-triage': 'sentryTriage',
   sentrytriage: 'sentryTriage',
@@ -620,6 +643,7 @@ const AUTOMATION_RUN_KEYS_BY_ID: Partial<
   suggester: 'suggester',
   announcer: 'announcer',
   managerStats: 'manager_stats',
+  providerUsageLimit: 'provider_usage_limit',
   sentryTriage: 'sentry_triage',
   dependabotTriage: 'dependabot_triage',
   codeqlTriage: 'codeql_triage',
@@ -630,6 +654,34 @@ const AUTOMATION_RUN_KEYS_BY_ID: Partial<
     ]),
   ),
 };
+
+const AUTOMATION_HISTORY_KEYS_BY_ID: Partial<
+  Record<AutomationId, BackgroundAutomationKey>
+> = {
+  callRoomoteViaEmoji: 'call_roomote_via_emoji',
+  channelAutoStart: 'slack_channel_auto_start',
+  reviewer: 'review_code',
+  platformIssueAlerts: 'platform_issue_alerts',
+  ...AUTOMATION_RUN_KEYS_BY_ID,
+};
+
+export function getAutomationHistoryHref(
+  automationId: AutomationId,
+): string | null {
+  // Provider usage alerts are delivered directly to a communication channel;
+  // their runner does not create Roomote tasks to inspect.
+  if (
+    automationId === 'providerUsageLimit' ||
+    automationId === 'mergeAnnouncer'
+  ) {
+    return null;
+  }
+
+  const automationKey = AUTOMATION_HISTORY_KEYS_BY_ID[automationId];
+  return automationKey
+    ? `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`
+    : null;
+}
 
 type ScheduleOnlyAutomationFrequencyState = Pick<
   FormState,
@@ -703,6 +755,7 @@ function mapSettingsToFormState(
       reviewAllPullRequestAuthors: boolean;
       reviewOnCommit: boolean;
       reviewDraftPrs: boolean;
+      publishGithubCheck: boolean;
       relayReviewResultsToTask: boolean;
       relayUsers: Array<{
         userId: string;
@@ -740,6 +793,11 @@ function mapSettingsToFormState(
     managerStatsSlackChannelId: string | null;
     managerStatsSlackChannelName?: string | null;
     managerStatsDiscordChannelId: string | null;
+    providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+    providerUsageLimitThreshold: number;
+    providerUsageLimitSlackChannelId: string | null;
+    providerUsageLimitSlackChannelName?: string | null;
+    providerUsageLimitDiscordChannelId: string | null;
     sentryTriageFrequency: SentryTriageFrequency;
     sentryTriageSlackChannelId: string | null;
     sentryTriageSlackChannelName?: string | null;
@@ -765,6 +823,7 @@ function mapSettingsToFormState(
     announcerSlackChannelName?: string | null;
     announcerDiscordChannelId: string | null;
     announcerInstructions: string | null;
+    platformIssueAlertsEnabled: boolean;
     platformIssueSlackChannelId: string | null;
     platformIssueSlackChannelName?: string | null;
     platformIssueDiscordChannelId: string | null;
@@ -777,6 +836,9 @@ function mapSettingsToFormState(
     ciFailureTriageSlackChannelId: string | null;
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
+    mergeAnnouncerTargetProvider: CommunicationProvider | null;
+    mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
+    mergeAnnouncerTargetChannelId: string | null;
   } & ScheduleOnlyAutomationFrequencyState & {
       issueFixerInstructions: string | null;
     },
@@ -796,6 +858,7 @@ function mapSettingsToFormState(
       settings.reviewer.reviewAllPullRequestAuthors,
     reviewerReviewOnCommit: settings.reviewer.reviewOnCommit,
     reviewerReviewDraftPrs: settings.reviewer.reviewDraftPrs,
+    reviewerPublishGithubCheck: settings.reviewer.publishGithubCheck,
     reviewerInstructions: settings.reviewCodeInstructions ?? '',
     reviewerRelayReviewResultsToTask:
       settings.reviewer.relayReviewResultsToTask,
@@ -843,6 +906,15 @@ function mapSettingsToFormState(
       settings.managerStatsSlackChannelId ??
       '',
     managerStatsDiscordChannel: settings.managerStatsDiscordChannelId ?? '',
+    providerUsageLimitFrequency: settings.providerUsageLimitFrequency,
+    providerUsageLimitThreshold:
+      settings.providerUsageLimitThreshold ??
+      DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
+    providerUsageLimitSlackChannel:
+      settings.providerUsageLimitSlackChannelName ??
+      settings.providerUsageLimitSlackChannelId ??
+      '',
+    providerUsageLimitDiscordChannel: '',
     sentryTriageFrequency: settings.sentryTriageFrequency,
     sentryTriageSlackChannel:
       settings.sentryTriageSlackChannelName ??
@@ -880,6 +952,7 @@ function mapSettingsToFormState(
       '',
     announcerDiscordChannel: settings.announcerDiscordChannelId ?? '',
     announcerInstructions: settings.announcerInstructions ?? '',
+    platformIssueAlertsEnabled: settings.platformIssueAlertsEnabled,
     platformIssueSlackChannel:
       settings.platformIssueSlackChannelName ??
       settings.platformIssueSlackChannelId ??
@@ -903,6 +976,10 @@ function mapSettingsToFormState(
       '',
     ciFailureTriageDiscordChannel:
       settings.ciFailureTriageDiscordChannelId ?? '',
+    mergeAnnouncerTargetProvider:
+      settings.mergeAnnouncerTargetProvider ?? 'none',
+    mergeAnnouncerTargetMode: settings.mergeAnnouncerTargetMode ?? 'channel',
+    mergeAnnouncerTargetChannelId: settings.mergeAnnouncerTargetChannelId ?? '',
   };
 }
 
@@ -931,18 +1008,9 @@ export function buildSlackWorkflowLaunchUrl(
 }
 
 export function isPlatformIssueAlertsEnabled(
-  formState:
-    | Pick<
-        FormState,
-        'platformIssueSlackChannel' | 'platformIssueDiscordChannel'
-      >
-    | null
-    | undefined,
+  formState: Pick<FormState, 'platformIssueAlertsEnabled'> | null | undefined,
 ): boolean {
-  return Boolean(
-    formState?.platformIssueSlackChannel.trim() ||
-    formState?.platformIssueDiscordChannel.trim(),
-  );
+  return formState?.platformIssueAlertsEnabled ?? true;
 }
 
 export function canSelectSentryTriageFrequency({
@@ -1148,13 +1216,16 @@ const DESTINATION_SOURCE_LABELS: Record<
 
 function AutomationReportsToLine({
   destination,
+  emptyFallbackText,
 }: {
   destination: ResolvedAutomationDestinationSummary | null | undefined;
+  emptyFallbackText?: string;
 }) {
   if (!destination) {
     return (
       <p className="text-xs text-muted-foreground md:max-w-160">
-        Reports to: not configured — set a Manager Channel.
+        {emptyFallbackText ??
+          'Reports to: not configured — set a Manager Channel.'}
       </p>
     );
   }
@@ -1180,6 +1251,7 @@ function AutomationSlackDestinationInput({
   slackAppMention,
   error,
   destination,
+  reportsToFallbackText,
   onChange,
 }: {
   inputId: string;
@@ -1193,6 +1265,7 @@ function AutomationSlackDestinationInput({
   slackAppMention: string;
   error?: string;
   destination: ResolvedAutomationDestinationSummary | null | undefined;
+  reportsToFallbackText?: string;
   onChange: (value: string | null) => void;
 }) {
   return (
@@ -1218,7 +1291,10 @@ function AutomationSlackDestinationInput({
           {helperText}
         </p>
       ) : null}
-      <AutomationReportsToLine destination={destination} />
+      <AutomationReportsToLine
+        destination={destination}
+        emptyFallbackText={reportsToFallbackText}
+      />
       {showWarning ? (
         <SlackChannelAccessWarning slackAppMention={slackAppMention} />
       ) : null}
@@ -1344,6 +1420,7 @@ function AutomationCard({
   const actionLabel = iconEnabled
     ? `Configure ${automation.label}`
     : `Set up ${automation.label}`;
+  const historyHref = getAutomationHistoryHref(automation.id);
 
   if (!iconEnabled && !isAvailableMatch) {
     return null;
@@ -1384,6 +1461,18 @@ function AutomationCard({
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              {historyHref && iconEnabled && !disabled ? (
+                <BasicTooltip content="View previous runs">
+                  <Button asChild size="icon" variant="ghost">
+                    <Link
+                      href={historyHref}
+                      aria-label={`View previous runs for ${automation.label}`}
+                    >
+                      <RotateCcwClock />
+                    </Link>
+                  </Button>
+                </BasicTooltip>
+              ) : null}
               {runAction && iconEnabled && !disabled ? runAction : null}
               <BasicTooltip content={actionLabel}>
                 <Button
@@ -1600,6 +1689,9 @@ export function AutomationsSettings() {
         settingsQuery.data.slackChannelDisplayNames.managerSlackChannel,
       managerStatsSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.managerStatsSlackChannel,
+      providerUsageLimitSlackChannelName:
+        settingsQuery.data.slackChannelDisplayNames
+          .providerUsageLimitSlackChannel,
       sentryTriageSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.sentryTriageSlackChannel,
       dependabotTriageSlackChannelName:
@@ -1732,6 +1824,8 @@ export function AutomationsSettings() {
             result.slackChannelDisplayNames.managerSlackChannel,
           managerStatsSlackChannelName:
             result.slackChannelDisplayNames.managerStatsSlackChannel,
+          providerUsageLimitSlackChannelName:
+            result.slackChannelDisplayNames.providerUsageLimitSlackChannel,
           sentryTriageSlackChannelName:
             result.slackChannelDisplayNames.sentryTriageSlackChannel,
           dependabotTriageSlackChannelName:
@@ -1807,6 +1901,9 @@ export function AutomationsSettings() {
               },
             });
             break;
+          case 'queued':
+            toast.success(`${automationLabel} was queued to run.`);
+            break;
           case 'completed':
             toast.success(`${automationLabel} ran successfully.`);
             break;
@@ -1841,6 +1938,7 @@ export function AutomationsSettings() {
         channelAutoStart: false,
         managerChannel: false,
         managerStats: false,
+        providerUsageLimit: false,
         sentryTriage: false,
         dependabotTriage: false,
         codeqlTriage: false,
@@ -1870,6 +1968,11 @@ export function AutomationsSettings() {
         'managerChannel',
       ),
       managerStats: isAutomationDirty(formState, savedState, 'managerStats'),
+      providerUsageLimit: isAutomationDirty(
+        formState,
+        savedState,
+        'providerUsageLimit',
+      ),
       sentryTriage: isAutomationDirty(formState, savedState, 'sentryTriage'),
       dependabotTriage: isAutomationDirty(
         formState,
@@ -2079,6 +2182,8 @@ export function AutomationsSettings() {
     [slackChannelsQuery.data?.channels],
   );
   const managerStatsIsEnabled = formState?.managerStatsFrequency !== 'off';
+  const providerUsageLimitIsEnabled =
+    formState?.providerUsageLimitFrequency !== 'off';
   const sentryConnected = capabilities?.sentryConnected === true;
   const sentryTriageIsEnabled = formState?.sentryTriageFrequency !== 'off';
   const dependabotTriageIsEnabled =
@@ -2156,6 +2261,33 @@ export function AutomationsSettings() {
     discordChannelsQuery.data?.channels,
     formState?.channelAutoStartChannels,
   ]);
+  const mergeAnnouncerDiscordOptions = useMemo(() => {
+    const selectedChannelId =
+      formState?.mergeAnnouncerTargetProvider === 'discord'
+        ? formState.mergeAnnouncerTargetChannelId
+        : '';
+    if (
+      !selectedChannelId ||
+      channelAutoStartDiscordOptions.some(
+        (option) => option.id === selectedChannelId,
+      )
+    ) {
+      return channelAutoStartDiscordOptions;
+    }
+
+    return [
+      ...channelAutoStartDiscordOptions,
+      {
+        id: selectedChannelId,
+        name: selectedChannelId,
+        label: selectedChannelId,
+      },
+    ];
+  }, [
+    channelAutoStartDiscordOptions,
+    formState?.mergeAnnouncerTargetChannelId,
+    formState?.mergeAnnouncerTargetProvider,
+  ]);
   const renderSlackDestinationField = useCallback(
     ({
       field,
@@ -2165,6 +2297,7 @@ export function AutomationsSettings() {
       savedChannelId,
       savedDiscordChannelId,
       warningChannelId,
+      reportsToFallbackText,
       allowTelegram = false,
       savedTelegramSelected = false,
       allowTeams = false,
@@ -2177,6 +2310,7 @@ export function AutomationsSettings() {
       savedChannelId: string | null;
       savedDiscordChannelId: string | null;
       warningChannelId: string | null;
+      reportsToFallbackText?: string;
       /** Suggest Ideas: offer sticky Telegram primary-chat topic. */
       allowTelegram?: boolean;
       savedTelegramSelected?: boolean;
@@ -2287,6 +2421,7 @@ export function AutomationsSettings() {
               SLACK_DESTINATION_FIELD_AUTOMATION_KEYS[field]
             ]
           }
+          reportsToFallbackText={reportsToFallbackText}
           slackAppMention={slackAppMention}
           showWarning={
             !discordValue &&
@@ -2373,6 +2508,7 @@ export function AutomationsSettings() {
     channelAutoStart: channelAutoStartIsEnabled,
     managerChannel: managerChannelIsEnabled,
     managerStats: managerStatsIsEnabled,
+    providerUsageLimit: providerUsageLimitIsEnabled,
     sentryTriage: sentryTriageIsEnabled,
     dependabotTriage: dependabotTriageIsEnabled,
     codeqlTriage: codeqlTriageIsEnabled,
@@ -2779,6 +2915,30 @@ export function AutomationsSettings() {
                       </div>
                     </div>
 
+                    <div className="flex items-start gap-2">
+                      <Switch
+                        className="mt-1"
+                        aria-label="Publish review results as a GitHub check"
+                        checked={formState.reviewerPublishGithubCheck}
+                        onCheckedChange={(reviewerPublishGithubCheck) =>
+                          setFormState((prev) =>
+                            prev
+                              ? { ...prev, reviewerPublishGithubCheck }
+                              : prev,
+                          )
+                        }
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          Publish review results as a GitHub check
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          GitHub branch protection or rulesets control whether
+                          this check is required for merging.
+                        </p>
+                      </div>
+                    </div>
+
                     <div className="space-y-2">
                       <Label htmlFor="reviewer-instructions">
                         Additional instructions
@@ -3099,6 +3259,7 @@ export function AutomationsSettings() {
             {(
               [
                 'ciFailureTriage',
+                'mergeAnnouncer',
               ] as const satisfies readonly ScheduleOnlyBackgroundAutomationId[]
             ).map((automationId) => {
               const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
@@ -3125,30 +3286,32 @@ export function AutomationsSettings() {
                   iconEnabled={iconEnabled[automation.id]}
                   debugSection={renderDebugRunsSection(automation.id)}
                   runAction={
-                    <BasicTooltip
-                      content={getRunTooltip(
-                        automation.id,
-                        isEnabled,
-                        blockedReason,
-                      )}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() =>
-                          triggerMutation.mutate({
-                            automationKey: automation.automationKey,
-                          })
-                        }
-                        disabled={isRunDisabled(
+                    automation.id === 'ciFailureTriage' ? (
+                      <BasicTooltip
+                        content={getRunTooltip(
                           automation.id,
                           isEnabled,
-                          blockedReason != null,
+                          blockedReason,
                         )}
                       >
-                        <Play />
-                      </Button>
-                    </BasicTooltip>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() =>
+                            triggerMutation.mutate({
+                              automationKey: automation.automationKey,
+                            })
+                          }
+                          disabled={isRunDisabled(
+                            automation.id,
+                            isEnabled,
+                            blockedReason != null,
+                          )}
+                        >
+                          <Play />
+                        </Button>
+                      </BasicTooltip>
+                    ) : undefined
                   }
                   footer={
                     <AutomationFooter
@@ -3185,44 +3348,86 @@ export function AutomationsSettings() {
                       )
                     }
                   >
-                    {renderSlackDestinationField({
-                      field:
-                        automation.id === 'securityAuditor'
-                          ? 'securityAuditorSlackChannel'
-                          : automation.id === 'codeQualityAuditor'
-                            ? 'codeQualityAuditorSlackChannel'
-                            : 'ciFailureTriageSlackChannel',
-                      inputId: `${automation.id}-slack-channel`,
-                      label: 'Post follow-up work to this Slack channel',
-                      helperText:
-                        automation.id === 'ciFailureTriage'
-                          ? 'Choose where Roomote should post CI failure triage work.'
-                          : 'Choose where Roomote should post actionable follow-up work.',
-                      savedChannelId:
-                        automation.id === 'securityAuditor'
-                          ? (settingsQuery.data?.settings
-                              .securityAuditorSlackChannelId ?? null)
-                          : automation.id === 'codeQualityAuditor'
+                    {automation.id === 'mergeAnnouncer' ? (
+                      <AutomationDestinationPicker
+                        id="merge-announcer-destination"
+                        label="Post announcements to"
+                        value={{
+                          provider: formState.mergeAnnouncerTargetProvider,
+                          mode: formState.mergeAnnouncerTargetMode,
+                          channelId: formState.mergeAnnouncerTargetChannelId,
+                        }}
+                        availableProviders={communicationProviders.filter(
+                          (provider) =>
+                            settingsQuery.data?.capabilities[
+                              `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
+                            ] === true,
+                        )}
+                        slackOptions={buildSlackDestinationOptions(
+                          formState.mergeAnnouncerTargetProvider === 'slack'
+                            ? formState.mergeAnnouncerTargetChannelId
+                            : null,
+                        )}
+                        discordOptions={mergeAnnouncerDiscordOptions}
+                        defaultSlackChannelId={managerSlackChannelId ?? ''}
+                        defaultDiscordChannelId={managerDiscordChannelId ?? ''}
+                        noneLabel="Default"
+                        noneDescription="Uses the Manager Channel or primary conversation fallback."
+                        onChange={(destination) =>
+                          setFormState((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  mergeAnnouncerTargetProvider:
+                                    destination.provider,
+                                  mergeAnnouncerTargetMode: destination.mode,
+                                  mergeAnnouncerTargetChannelId:
+                                    destination.channelId,
+                                }
+                              : previous,
+                          )
+                        }
+                      />
+                    ) : (
+                      renderSlackDestinationField({
+                        field:
+                          automation.id === 'securityAuditor'
+                            ? 'securityAuditorSlackChannel'
+                            : automation.id === 'codeQualityAuditor'
+                              ? 'codeQualityAuditorSlackChannel'
+                              : 'ciFailureTriageSlackChannel',
+                        inputId: `${automation.id}-slack-channel`,
+                        label: 'Post follow-up work to this Slack channel',
+                        helperText:
+                          automation.id === 'ciFailureTriage'
+                            ? 'Choose where Roomote should post CI failure triage work.'
+                            : 'Choose where Roomote should post actionable follow-up work.',
+                        savedChannelId:
+                          automation.id === 'securityAuditor'
                             ? (settingsQuery.data?.settings
-                                .codeQualityAuditorSlackChannelId ?? null)
-                            : (settingsQuery.data?.settings
-                                .ciFailureTriageSlackChannelId ?? null),
-                      savedDiscordChannelId:
-                        automation.id === 'securityAuditor'
-                          ? (settingsQuery.data?.settings
-                              .securityAuditorDiscordChannelId ?? null)
-                          : automation.id === 'codeQualityAuditor'
+                                .securityAuditorSlackChannelId ?? null)
+                            : automation.id === 'codeQualityAuditor'
+                              ? (settingsQuery.data?.settings
+                                  .codeQualityAuditorSlackChannelId ?? null)
+                              : (settingsQuery.data?.settings
+                                  .ciFailureTriageSlackChannelId ?? null),
+                        savedDiscordChannelId:
+                          automation.id === 'securityAuditor'
                             ? (settingsQuery.data?.settings
-                                .codeQualityAuditorDiscordChannelId ?? null)
-                            : (settingsQuery.data?.settings
-                                .ciFailureTriageDiscordChannelId ?? null),
-                      warningChannelId:
-                        automation.id === 'securityAuditor'
-                          ? slackChannelAccessWarnings.securityAuditorSlackChannel
-                          : automation.id === 'codeQualityAuditor'
-                            ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
-                            : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
-                    })}
+                                .securityAuditorDiscordChannelId ?? null)
+                            : automation.id === 'codeQualityAuditor'
+                              ? (settingsQuery.data?.settings
+                                  .codeQualityAuditorDiscordChannelId ?? null)
+                              : (settingsQuery.data?.settings
+                                  .ciFailureTriageDiscordChannelId ?? null),
+                        warningChannelId:
+                          automation.id === 'securityAuditor'
+                            ? slackChannelAccessWarnings.securityAuditorSlackChannel
+                            : automation.id === 'codeQualityAuditor'
+                              ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
+                              : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
+                      })
+                    )}
                   </ScheduleOnlyAutomationContent>
                 </AutomationCard>
               );
@@ -3725,6 +3930,136 @@ export function AutomationsSettings() {
             </AutomationCard>
 
             <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.providerUsageLimit}
+              isAvailableMatch={availableAutomationMatches.has(
+                'providerUsageLimit',
+              )}
+              isOpen={openAutomationIds.has('providerUsageLimit')}
+              onOpenChange={(open) =>
+                setAutomationOpen('providerUsageLimit', open)
+              }
+              iconEnabled={iconEnabled.providerUsageLimit}
+              debugSection={renderDebugRunsSection('providerUsageLimit')}
+              runAction={
+                <BasicTooltip
+                  content={getRunTooltip(
+                    'providerUsageLimit',
+                    providerUsageLimitIsEnabled,
+                  )}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      triggerMutation.mutate({
+                        automationKey: 'provider_usage_limit',
+                      })
+                    }
+                    disabled={isRunDisabled(
+                      'providerUsageLimit',
+                      providerUsageLimitIsEnabled,
+                    )}
+                  >
+                    <Play />
+                  </Button>
+                </BasicTooltip>
+              }
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.providerUsageLimit}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'providerUsageLimit'
+                  }
+                  onSave={() => saveAgent('providerUsageLimit')}
+                  onReset={() => resetAgent('providerUsageLimit')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="provider-usage-limit-enabled"
+                    checked={providerUsageLimitIsEnabled}
+                    onCheckedChange={(enabled) =>
+                      setFormState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              providerUsageLimitFrequency: enabled
+                                ? 'every_hour'
+                                : 'off',
+                            }
+                          : prev,
+                      )
+                    }
+                  />
+                  <Label
+                    htmlFor="provider-usage-limit-enabled"
+                    className="text-sm"
+                  >
+                    Enabled
+                  </Label>
+                </div>
+
+                {providerUsageLimitIsEnabled ? (
+                  <div className="space-y-5">
+                    {renderSlackDestinationField({
+                      field: 'providerUsageLimitSlackChannel',
+                      inputId: 'provider-usage-limit-slack-channel',
+                      label: 'Post alerts to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post provider usage warnings.',
+                      savedChannelId:
+                        settingsQuery.data?.settings
+                          .providerUsageLimitSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .providerUsageLimitDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.providerUsageLimitSlackChannel,
+                    })}
+
+                    <div className="space-y-3 md:max-w-md">
+                      <div className="flex items-center justify-between gap-4">
+                        <Label htmlFor="provider-usage-limit-threshold">
+                          Alert threshold
+                        </Label>
+                        <span className="text-sm font-medium tabular-nums">
+                          {formState.providerUsageLimitThreshold}%
+                        </span>
+                      </div>
+                      <Slider
+                        id="provider-usage-limit-threshold"
+                        min={5}
+                        max={95}
+                        step={5}
+                        value={[formState.providerUsageLimitThreshold]}
+                        onValueChange={([threshold]) => {
+                          if (threshold === undefined) return;
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  providerUsageLimitThreshold: threshold,
+                                }
+                              : prev,
+                          );
+                        }}
+                        aria-label="Provider usage alert threshold"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Alert when a provider reaches this percentage of its
+                        reported quota. Roomote checks hourly and sends one
+                        alert per quota cycle, plus a critical alert at 100%.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </AutomationCard>
+
+            <AutomationCard
               automation={AUTOMATION_DEFINITIONS.sentryTriage}
               isAvailableMatch={availableAutomationMatches.has('sentryTriage')}
               isOpen={openAutomationIds.has('sentryTriage')}
@@ -4164,12 +4499,34 @@ export function AutomationsSettings() {
               }
             >
               <div className="space-y-5">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    id="platform-issue-alerts-enabled"
+                    checked={formState?.platformIssueAlertsEnabled ?? true}
+                    onCheckedChange={(enabled) =>
+                      setFormState((prev) =>
+                        prev
+                          ? { ...prev, platformIssueAlertsEnabled: enabled }
+                          : prev,
+                      )
+                    }
+                    aria-label="Alert on Config Errors enabled"
+                  />
+                  <Label
+                    htmlFor="platform-issue-alerts-enabled"
+                    className="text-sm"
+                  >
+                    Alert deployment admins about configuration issues
+                  </Label>
+                </div>
                 {renderSlackDestinationField({
                   field: 'platformIssueSlackChannel',
                   inputId: 'platform-issue-slack-channel',
                   label: 'Post alerts to this Slack channel',
                   helperText:
-                    'Choose where Roomote should post configuration issues that need an admin. Leave empty to use the Manager Channel.',
+                    'Choose where Roomote should post configuration issues. Leave empty to use the Manager Channel, then direct-message deployment admins.',
+                  reportsToFallbackText:
+                    'Reports to deployment admins via direct message (automatic).',
                   savedChannelId:
                     settingsQuery.data?.settings.platformIssueSlackChannelId ??
                     null,

@@ -10,6 +10,7 @@ import {
   GitPullRequest,
   RadioTower,
   VectorSquare,
+  Rows4,
 } from '@/components/system';
 
 export const ANALYTICS_DIMENSION_ICONS: Record<
@@ -25,4 +26,6 @@ export const ANALYTICS_DIMENSION_ICONS: Record<
   taskType: Bot,
   provider: Cpu,
   model: Brain,
+  ownerKind: Bot,
+  hasExecution: Rows4,
 };

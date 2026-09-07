@@ -2,18 +2,27 @@
 
 import { pathToFileURL } from 'node:url';
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  CALL_INTEGRATION_TOOL_TOOL,
+  FIND_INTEGRATION_TOOLS_TOOL,
   CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
-  SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
+  ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
+  ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
+  getRoomoteSearchStatusError,
+  resolveRoomoteCommunicationTarget,
+  roomoteManagementFieldSchemas,
+  shouldSearchTasks,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
   workspaceReadinessSchema,
@@ -26,6 +35,12 @@ import {
 } from '../../monitoring/sentry.js';
 
 import { handleCreatePlan } from './create-plan.js';
+import {
+  callOnDemandIntegrationTool,
+  findOnDemandIntegrationTools,
+  loadOnDemandMcpCatalog,
+  shouldRegisterOnDemandIntegrationTools,
+} from './on-demand-integrations.js';
 import { handleUpload } from './upload.js';
 import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
@@ -46,8 +61,14 @@ import {
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
-import { handleShowWidget } from './show-widget.js';
+import {
+  handleShowWidget,
+  SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
+  SHOW_WIDGET_HEIGHT_DESCRIPTION,
+  SHOW_WIDGET_THEME_GUIDANCE,
+} from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
+import { handleReportToParentSession } from './report-to-parent-session.js';
 import {
   type ChatReplyPurpose,
   recordChatReplyDeliveryFailure,
@@ -57,7 +78,6 @@ import { handlePostToChannel } from './post-to-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
 import { handleListChatChannels } from './list-chat-channels.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
-import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
@@ -71,13 +91,21 @@ import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
+import {
+  handleGetSessionMessages,
+  handleGetSessionSummary,
+  handleSearchSessions,
+  handleSendSessionMessage,
+  handleStartSession,
+} from './sessions.js';
+import { handleGetRelayUpdates } from './relay-updates.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
   automationWorkItemsResultHasSubmittedWorkItems,
 } from './automation-slack-summary-state.js';
 
-export const roomoteMcpServer = new McpServer({
+export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
@@ -100,69 +128,12 @@ const uuidStringSchema = z
   });
 
 roomoteMcpServer.registerTool(
-  'manage_custom_automations',
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
   {
-    title: 'Manage Custom Automations',
-    description:
-      'Admin-only management of deployment custom automations. List existing automations or enabled task models, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Use list_models before setting a model override; create and update accept only exact model IDs returned by that action. Model IDs encode the inference route: for example, openrouter/... targets OpenRouter, while openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription when configured. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. Keep cadence only in the schedule field; do not repeat it in the stored prompt. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
-    inputSchema: {
-      action: z.enum([
-        'list',
-        'list_models',
-        'resolve_schedule',
-        'create',
-        'update',
-        'delete',
-        'run_now',
-      ]),
-      automationId: z
-        .string()
-        .optional()
-        .describe('Required for update, delete, and run_now.'),
-      name: z.string().optional(),
-      prompt: z
-        .string()
-        .optional()
-        .describe(
-          'Automation instructions written in product language. Do not include the automation cadence; keep it only in the schedule field. When the user intends actionable or launchable follow-up tasks and the automation has both a chat report destination and an executable workspace, instruct it to post qualifying actions as launchable suggested tasks alongside the report; otherwise keep actions as report text. Do not mention internal tool names or parameters.',
-        ),
-      enabled: z.boolean().optional(),
-      schedule: z
-        .string()
-        .optional()
-        .describe(
-          `A five-field cron expression, natural-language recurring schedule, or one of these built-in presets: ${SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES.join(', ')}. Prefer a built-in preset when it matches the requested cadence.`,
-        ),
-      model: z
-        .string()
-        .nullable()
-        .describe(
-          'Optional provider/model launch override. Call list_models first and pass an exact returned model ID. The ID prefix selects the configured inference route; openai/... includes connected ChatGPT subscription routing. Omit to keep the deployment default; pass null on update to clear an existing override.',
-        )
-        .optional(),
-      environmentId: z.string().optional(),
-      targetProvider: z
-        .enum(['slack', 'discord', 'teams', 'telegram'])
-        .nullable()
-        .describe(
-          'Destination provider. Pass null on update to clear the report destination.',
-        )
-        .optional(),
-      targetMode: z
-        .enum(['channel', 'direct_message'])
-        .describe(
-          'Destination mode. Use direct_message to send reports privately to the automation owner through the selected connected provider.',
-        )
-        .optional(),
-      targetChannelId: z.string().optional(),
-      targetServiceUrl: z.string().optional(),
-    },
-    annotations: {
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: false,
-      openWorldHint: false,
-    },
+    title: MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
+    description: MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
+    inputSchema: MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
+    annotations: MANAGE_CUSTOM_AUTOMATIONS_TOOL.annotations,
   },
   async (params): Promise<ToolResult> => {
     const config = getRoomoteConfig();
@@ -219,9 +190,10 @@ roomoteMcpServer.registerTool(
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
       'HTML, CSS, and inline SVG are displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
-      'Prefer semantic HTML with the built-in widget classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the host task theme. ' +
-      'For custom CSS, use the provided `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient. ' +
-      'Keep widgets compact enough to fit without scrolling: use concise labels and a small number of cards, rows, or table entries, and choose a height that fully fits the expected content. Use ordinary prose or an artifact for long content. ' +
+      SHOW_WIDGET_THEME_GUIDANCE +
+      ' ' +
+      SHOW_WIDGET_FIXED_CANVAS_GUIDANCE +
+      ' ' +
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
       'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
@@ -238,12 +210,7 @@ roomoteMcpServer.registerTool(
         .describe(
           'Optional extra CSS injected after the built-in widget defaults. Prefer --rw-background, --rw-surface, --rw-surface-muted, --rw-text, --rw-text-muted, --rw-border, --rw-primary, --rw-accent, --rw-success, --rw-warning, and --rw-danger instead of hard-coded colors.',
         ),
-      height: z
-        .number()
-        .optional()
-        .describe(
-          'Optional widget iframe height in pixels (clamped to 120-800; default 320). Choose the smallest height that fully fits the expected content without a vertical scrollbar.',
-        ),
+      height: z.number().optional().describe(SHOW_WIDGET_HEIGHT_DESCRIPTION),
       textFallback: z
         .string()
         .optional()
@@ -323,7 +290,9 @@ roomoteMcpServer.registerTool(
       'Create, upload, download, and list artifacts in Roomote. ' +
       'Use action "create_plan" to create a markdown plan artifact (requires title and content). Returns viewUrl for sharing. ' +
       'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type). Use type "general" for ordinary files. ' +
-      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ' +
+      (isFastAgentChild()
+        ? 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not sent to the parent Session automatically; pass returned artifact IDs to `report_to_parent_session` via `imageArtifactIds` when they belong in the report (or include `viewUrl`/`rawUrl` in the report text for non-images). '
+        : 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ') +
       'Returns rawUrl for direct embedding (for example PR <img src>). ' +
       'Use action "download" to retrieve an artifact by task ID and artifact path (requires taskId and path). Downloads may target the current task or another task, so artifacts such as plans published by earlier tasks can be retrieved. ' +
       'For download, the path must include the category prefix exactly as stored in Roomote (e.g., "plans/my-plan.md" or "tmp/capture.png", not just the filename). ' +
@@ -482,9 +451,22 @@ function shouldRegisterTaskMemoryTool(): boolean {
 
 function shouldRegisterSlackThreadReplyTool(): boolean {
   return (
-    Boolean(process.env.ROOMOTE_SLACK_CHANNEL?.trim()) ||
-    (Boolean(process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim()) &&
-      Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim()))
+    process.env.ROOMOTE_FAST_AGENT_CHILD !== 'true' &&
+    (Boolean(process.env.ROOMOTE_SLACK_CHANNEL?.trim()) ||
+      (Boolean(process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim()) &&
+        Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim())))
+  );
+}
+
+function isFastAgentChild(): boolean {
+  return process.env.ROOMOTE_FAST_AGENT_CHILD === 'true';
+}
+
+/** Review children report through the PR feedback relay instead. */
+function fastAgentChildReportsToParentSession(): boolean {
+  return (
+    isFastAgentChild() &&
+    process.env.ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY !== 'false'
   );
 }
 
@@ -537,7 +519,7 @@ function getChatReplySurfaceLabel():
 }
 
 function shouldRegisterChannelPostTool(): boolean {
-  return Boolean(process.env.ROOMOTE_TASK_ID?.trim());
+  return !isFastAgentChild() && Boolean(process.env.ROOMOTE_TASK_ID?.trim());
 }
 
 function shouldRegisterPlatformIssueTool(): boolean {
@@ -552,91 +534,31 @@ const ENVIRONMENT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const manageTasksToolDescription =
-  `Manage ${PRODUCT_NAME} tasks. ` +
-  `When the user provides an existing ${PRODUCT_NAME} task URL or asks about an existing task, extract the task ID and use action "get_summary" for current status or action "get_messages" for transcript details before resorting to browser or task-UI navigation. ` +
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION +
+  ' ' +
+  `When the user provides an existing ${PRODUCT_NAME} task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation. ` +
   'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
   'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
-  'Use action "search" to find tasks by query or status. ' +
-  `Use action "get_summary" to inspect a specific task's latest status and failure details (requires taskId). ` +
+  'Use action "search_tasks" only to search direct tasks by query or status. ' +
+  `Use action "get_summary" with taskId to inspect a specific task's latest status, failure details, and uploaded image artifact IDs and viewer links. Use those stable IDs to attach a delegated task's images to a later reply. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
-  'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
+  'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript; results are newest first. ' +
+  'Use action "get_updates" with sessionId or taskId and its returned cursor for compact, chronological relay narrative and state deltas; unchanged polls return no narrative. ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
-  'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
+  'Use action "send_message" with sessionId to continue a Session, or taskId to message a specific task. ' +
   'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
 const manageTasksInputSchema = {
   action: z
     .enum([
-      'search',
-      'get_summary',
-      'get_compute_logs',
-      'get_messages',
-      'launch',
-      'cancel',
-      'send_message',
+      ...ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
       'list_models',
       'update_models',
-      'list_environments',
     ])
-    .describe(
-      'The task action to perform. Call "list_environments" immediately before "launch".',
-    ),
-  taskId: z
-    .string()
-    .optional()
-    .describe(
-      'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
-    ),
-  message: z
-    .string()
-    .optional()
-    .describe(
-      'Follow-up message text to send to a running task (required for send_message)',
-    ),
-  query: z
-    .string()
-    .optional()
-    .describe('Text to search for in task prompts (for search action)'),
-  status: z
-    .enum(['active', 'completed', 'all'])
-    .optional()
-    .describe('Filter by task status (for search action)'),
-  pullRequest: z
-    .string()
-    .optional()
-    .describe(
-      'Filter by pull request for search action: "__has_pr__" for any linked PR or "owner/repo#123" for a specific PR',
-    ),
-  limit: z
-    .number()
-    .int()
-    .refine((value) => value >= 1 && value <= 1000, {
-      message: 'Limit must be between 1 and 1,000.',
-    })
-    .optional()
-    .describe(
-      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
-    ),
-  cursor: z
-    .string()
-    .optional()
-    .describe('Pagination cursor from a previous search response (nextCursor)'),
-  prompt: z
-    .string()
-    .optional()
-    .describe(
-      'Task description or instructions in natural language (required for launch)',
-    ),
-  environmentId: z
-    .string()
-    .optional()
-    .describe(
-      'Environment ID returned by "list_environments" (required for launch). ' +
-        'Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
-    ),
-  branch: z.string().optional().describe('Branch to use (for launch)'),
+    .describe(ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION),
+  ...roomoteManagementFieldSchemas,
   role: z
     .enum(['coding', 'helper', 'vision', 'codeReview', 'explore', 'planning'])
     .optional()
@@ -654,12 +576,6 @@ const manageTasksInputSchema = {
     .optional()
     .describe(
       'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
-    ),
-  notifyOnSettle: z
-    .boolean()
-    .optional()
-    .describe(
-      'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -698,7 +614,7 @@ roomoteMcpServer.registerTool(
 roomoteMcpServer.registerTool(
   'manage_tasks',
   {
-    title: 'Manage Tasks',
+    title: 'Manage Sessions and Tasks',
     description: manageTasksToolDescription,
     inputSchema: manageTasksInputSchema,
     annotations: {
@@ -715,7 +631,53 @@ roomoteMcpServer.registerTool(
     }
 
     switch (params.action) {
+      case 'start': {
+        if (!params.message?.trim()) {
+          return errorResult('message is required for start');
+        }
+        return handleStartSession(params.message, config);
+      }
       case 'search': {
+        const statusError = getRoomoteSearchStatusError({
+          action: 'search',
+          pullRequest: params.pullRequest,
+          status: params.status,
+        });
+        if (statusError) return errorResult(statusError);
+        if (
+          shouldSearchTasks({
+            action: 'search',
+            pullRequest: params.pullRequest,
+            status: params.status,
+          })
+        ) {
+          return handleSearchTasks(
+            {
+              query: params.query,
+              pullRequest: params.pullRequest,
+              status: params.status,
+              limit: params.limit ? Math.min(params.limit, 100) : undefined,
+              cursor: params.cursor,
+            },
+            config,
+          );
+        }
+        return handleSearchSessions(
+          {
+            query: params.query,
+            status: params.status,
+            limit: params.limit ? Math.min(params.limit, 100) : undefined,
+            cursor: params.cursor,
+          },
+          config,
+        );
+      }
+      case 'search_tasks': {
+        const statusError = getRoomoteSearchStatusError({
+          action: 'search_tasks',
+          status: params.status,
+        });
+        if (statusError) return errorResult(statusError);
         return handleSearchTasks(
           {
             query: params.query,
@@ -728,10 +690,15 @@ roomoteMcpServer.registerTool(
         );
       }
       case 'get_summary': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for get_summary');
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for get_summary when taskId is omitted',
+          );
         }
-        return handleGetTaskSummary({ taskId: params.taskId }, config);
+        return target.kind === 'task'
+          ? handleGetTaskSummary({ taskId: target.id }, config)
+          : handleGetSessionSummary(target.id, config);
       }
       case 'get_compute_logs': {
         if (!params.taskId?.trim()) {
@@ -740,11 +707,36 @@ roomoteMcpServer.registerTool(
         return handleGetTaskComputeLogs({ taskId: params.taskId }, config);
       }
       case 'get_messages': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for get_messages');
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for get_messages when taskId is omitted',
+          );
         }
-        return handleGetTaskMessages(
-          { taskId: params.taskId, limit: params.limit },
+        if (target.kind === 'task') {
+          return handleGetTaskMessages(
+            { taskId: target.id, limit: params.limit },
+            config,
+          );
+        }
+        return handleGetSessionMessages(
+          { sessionId: target.id, limit: params.limit },
+          config,
+        );
+      }
+      case 'get_updates': {
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for get_updates when taskId is omitted',
+          );
+        }
+        return handleGetRelayUpdates(
+          {
+            target,
+            limit: params.limit,
+            cursor: params.cursor,
+          },
           config,
         );
       }
@@ -813,16 +805,24 @@ roomoteMcpServer.registerTool(
         return handleListTaskModels(config);
       }
       case 'send_message': {
-        if (!params.taskId?.trim()) {
-          return errorResult('taskId is required for send_message');
-        }
         if (!params.message?.trim()) {
           return errorResult('message is required for send_message');
         }
-        return handleSendMessage(
-          { taskId: params.taskId, message: params.message },
-          config,
-        );
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for send_message when taskId is omitted',
+          );
+        }
+        return target.kind === 'task'
+          ? handleSendMessage(
+              { taskId: target.id, message: params.message },
+              config,
+            )
+          : handleSendSessionMessage(
+              { sessionId: target.id, message: params.message },
+              config,
+            );
       }
       case 'list_environments': {
         return handleListEnvironments(config);
@@ -842,10 +842,10 @@ roomoteMcpServer.registerTool(
       'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
-      '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
+      '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
-      '"resolve_pull_request_thread" to resolve or reopen a thread, and "submit_pull_request_review" to approve, request changes, or leave a review comment. ' +
+      '"resolve_pull_request_thread" to resolve or reopen a thread, "request_pull_request_reviewers" to request user or team reviewers after PR creation, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
       'Provider gaps are reported as warnings with applied:false instead of errors. ' +
       'For the PR diff, use local git against the returned SHAs instead of a provider CLI. ' +
       'The platform resolves the current task source-control provider and keeps provider tokens server-side.',
@@ -860,14 +860,16 @@ roomoteMcpServer.registerTool(
           'create_pull_request_comment',
           'create_pull_request_review_comment',
           'resolve_pull_request_thread',
+          'request_pull_request_reviewers',
           'submit_pull_request_review',
+          'dismiss_pull_request_review',
           'update_pull_request_comment',
           'get_issue',
           'list_issue_comments',
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline review comment anchored to a file and line of the current diff (one finding per call); resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline comment anchored to a file and line of the current diff; resolve_pull_request_thread resolves or reopens a thread; request_pull_request_reviewers requests user or team reviewers after PR creation; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -922,6 +924,12 @@ roomoteMcpServer.registerTool(
         .describe(
           'Required for update_pull_request_comment: the comment id from list_pull_request_comments or a prior write result.',
         ),
+      reviewId: z
+        .string()
+        .optional()
+        .describe(
+          'Required for dismiss_pull_request_review: the review id from list_pull_request_comments.',
+        ),
       resolved: z
         .boolean()
         .optional()
@@ -933,6 +941,18 @@ roomoteMcpServer.registerTool(
         .optional()
         .describe(
           'Required for submit_pull_request_review: the review outcome to submit.',
+        ),
+      reviewers: z
+        .array(z.string().trim().min(1))
+        .optional()
+        .describe(
+          'Usernames to request as reviewers with request_pull_request_reviewers.',
+        ),
+      teamReviewers: z
+        .array(z.string().trim().min(1))
+        .optional()
+        .describe(
+          'Team slugs to request as reviewers with request_pull_request_reviewers.',
         ),
       path: z
         .string()
@@ -992,7 +1012,15 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, or the optional review body for submit_pull_request_review.',
+          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
+        ),
+      prAttribution: z
+        .string()
+        .trim()
+        .min(1)
+        .optional()
+        .describe(
+          'Optional PR-body provenance choice for create_or_update_pull_request. Pass the name or source-control login of a participant recorded in the task conversation or the current acting user. Omit to retain current acting-user attribution. This does not change commit authorship or assignees.',
         ),
       labels: z
         .array(z.string())
@@ -1038,6 +1066,7 @@ roomoteMcpServer.registerTool(
         limit: params.limit,
         threadId: params.threadId,
         commentId: params.commentId,
+        reviewId: params.reviewId,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
         path: params.path,
@@ -1049,8 +1078,11 @@ roomoteMcpServer.registerTool(
         targetBranch: params.targetBranch,
         title: params.title,
         body: params.body,
+        prAttribution: params.prAttribution,
         labels: params.labels,
         assignees: params.assignees,
+        reviewers: params.reviewers,
+        teamReviewers: params.teamReviewers,
         sourceControlProvider: params.sourceControlProvider,
       },
       config,
@@ -1170,6 +1202,52 @@ roomoteMcpServer.registerTool(
   },
 );
 
+if (shouldRegisterOnDemandIntegrationTools()) {
+  roomoteMcpServer.registerTool(
+    FIND_INTEGRATION_TOOLS_TOOL.name,
+    {
+      title: FIND_INTEGRATION_TOOLS_TOOL.title,
+      description: FIND_INTEGRATION_TOOLS_TOOL.description,
+      inputSchema: FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
+      annotations: FIND_INTEGRATION_TOOLS_TOOL.annotations,
+    },
+    async (params): Promise<ToolResult> => {
+      try {
+        return await findOnDemandIntegrationTools(
+          loadOnDemandMcpCatalog(),
+          params,
+        );
+      } catch (error) {
+        return errorResult(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  );
+
+  roomoteMcpServer.registerTool(
+    CALL_INTEGRATION_TOOL_TOOL.name,
+    {
+      title: CALL_INTEGRATION_TOOL_TOOL.title,
+      description: CALL_INTEGRATION_TOOL_TOOL.description,
+      inputSchema: CALL_INTEGRATION_TOOL_TOOL.inputSchema,
+      annotations: CALL_INTEGRATION_TOOL_TOOL.annotations,
+    },
+    async (params): Promise<ToolResult> => {
+      try {
+        return await callOnDemandIntegrationTool(
+          loadOnDemandMcpCatalog(),
+          params,
+        );
+      } catch (error) {
+        return errorResult(
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    },
+  );
+}
+
 if (shouldRegisterTaskMemoryTool()) {
   roomoteMcpServer.registerTool(
     'save_task_memory',
@@ -1269,117 +1347,126 @@ if (shouldRegisterAutomationWorkItemsTool()) {
   });
 }
 
-roomoteMcpServer.registerTool(
-  CHAT_CHANNELS_TOOL.name,
-  {
-    title: CHAT_CHANNELS_TOOL.title,
-    description: CHAT_CHANNELS_TOOL.description,
-    inputSchema: {},
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (): Promise<ToolResult> => {
-    const roomoteConfig = getRoomoteConfig();
-    if (!roomoteConfig) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
-
-    return handleListChatChannels(roomoteConfig);
-  },
-);
-
-roomoteMcpServer.registerTool(
-  CHAT_CHANNEL_MESSAGES_TOOL.name,
-  {
-    title: CHAT_CHANNEL_MESSAGES_TOOL.title,
-    description: CHAT_CHANNEL_MESSAGES_TOOL.description,
-    inputSchema: {
-      channel: z
-        .string()
-        .optional()
-        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
-      oldest: z
-        .string()
-        .optional()
-        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
-      latest: z
-        .string()
-        .optional()
-        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => {
-    const roomoteConfig = getRoomoteConfig();
-    if (!roomoteConfig) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
-
-    return handleGetChatChannelMessages(
-      {
-        channel: params.channel,
-        oldest: params.oldest,
-        latest: params.latest,
+if (!isFastAgentChild()) {
+  roomoteMcpServer.registerTool(
+    CHAT_CHANNELS_TOOL.name,
+    {
+      title: CHAT_CHANNELS_TOOL.title,
+      description: CHAT_CHANNELS_TOOL.description,
+      inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
-      roomoteConfig,
-    );
-  },
-);
-
-roomoteMcpServer.registerTool(
-  CHAT_MESSAGE_CONTEXT_TOOL.name,
-  {
-    title: CHAT_MESSAGE_CONTEXT_TOOL.title,
-    description: CHAT_MESSAGE_CONTEXT_TOOL.description,
-    inputSchema: {
-      channel: z
-        .string()
-        .optional()
-        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.channel),
-      messageId: z
-        .string()
-        .optional()
-        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageId),
-      messageLink: z
-        .string()
-        .optional()
-        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
     },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => {
-    const roomoteConfig = getRoomoteConfig();
-    if (!roomoteConfig) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
+    async (): Promise<ToolResult> => {
+      const roomoteConfig = getRoomoteConfig();
+      if (!roomoteConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
 
-    return handleGetChatMessageContext(
-      {
-        channel: params.channel,
-        messageId: params.messageId,
-        messageLink: params.messageLink,
+      return handleListChatChannels(roomoteConfig);
+    },
+  );
+
+  roomoteMcpServer.registerTool(
+    CHAT_CHANNEL_MESSAGES_TOOL.name,
+    {
+      title: CHAT_CHANNEL_MESSAGES_TOOL.title,
+      description: CHAT_CHANNEL_MESSAGES_TOOL.description,
+      inputSchema: {
+        channel: z
+          .string()
+          .optional()
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
+        oldest: z
+          .string()
+          .optional()
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
+        latest: z
+          .string()
+          .optional()
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
       },
-      roomoteConfig,
-    );
-  },
-);
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const roomoteConfig = getRoomoteConfig();
+      if (!roomoteConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
 
-if (shouldRegisterSlackThreadReplyTool()) {
+      return handleGetChatChannelMessages(
+        {
+          channel: params.channel,
+          oldest: params.oldest,
+          latest: params.latest,
+        },
+        roomoteConfig,
+      );
+    },
+  );
+
+  roomoteMcpServer.registerTool(
+    CHAT_MESSAGE_CONTEXT_TOOL.name,
+    {
+      title: CHAT_MESSAGE_CONTEXT_TOOL.title,
+      description: CHAT_MESSAGE_CONTEXT_TOOL.description,
+      inputSchema: {
+        channel: z
+          .string()
+          .optional()
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.channel),
+        messageId: z
+          .string()
+          .optional()
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageId),
+        messageLink: z
+          .string()
+          .optional()
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const roomoteConfig = getRoomoteConfig();
+      if (!roomoteConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
+
+      return handleGetChatMessageContext(
+        {
+          channel: params.channel,
+          messageId: params.messageId,
+          messageLink: params.messageLink,
+        },
+        roomoteConfig,
+      );
+    },
+  );
+}
+
+if (
+  shouldRegisterSlackThreadReplyTool() ||
+  fastAgentChildReportsToParentSession()
+) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
+  const reportsToParentSession = isFastAgentChild();
+  const lifecycleToolName = reportsToParentSession
+    ? 'report_to_parent_session'
+    : 'send_chat_reply';
   const supportsChatReplySuggestions =
     process.env.ROOMOTE_AUTOMATION_TASK === 'true';
   const usesPinnedSuggestionContract =
@@ -1442,28 +1529,28 @@ if (shouldRegisterSlackThreadReplyTool()) {
   const chatReplySuggestionGuidance = supportsChatReplySuggestions
     ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
+  const chatReplyDescription = reportsToParentSession
+    ? 'Session-internal: reports lifecycle information privately to the parent Session, which owns any user-visible reply. The report may be a complete engineering handoff and is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
+    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
   roomoteMcpServer.registerTool(
-    'send_chat_reply',
+    lifecycleToolName,
     {
-      title: 'Send Chat Reply',
-      description:
-        `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. ` +
-        `Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. ` +
-        `Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. ` +
-        `Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. ` +
-        "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. " +
-        chatReplyMarkdownGuidance +
-        chatReplySourceLinkingGuidance +
-        chatReplySuggestionGuidance +
-        'Write the message so its content clearly matches the selected purpose.',
+      title: reportsToParentSession
+        ? 'Report to Parent Session'
+        : 'Send Chat Reply',
+      description: chatReplyDescription,
       inputSchema: {
         purpose: z
           .enum(['ack', 'progress', 'closeout', 'clarification'])
           .describe(
-            `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
+            reportsToParentSession
+              ? 'The lifecycle purpose of this private report to the parent Session. The kickoff already acknowledged the request, so avoid another generic ack. Use progress for concrete findings, blockers, meaningful work milestones, required input, or a brief update after roughly 10 minutes of silence. Use closeout for the final result or blocker and clarification when user input is needed.'
+              : `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
           ),
         message: nonEmptyStringSchema.describe(
-          `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. ` +
+          (reportsToParentSession
+            ? 'Non-empty Markdown report for the parent Session. State concrete facts about the work or the needed handoff; the parent Session will compose any user-visible message. '
+            : `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. `) +
             "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
             chatReplyMessageMarkdownGuidance,
         ),
@@ -1477,9 +1564,9 @@ if (shouldRegisterSlackThreadReplyTool()) {
           .array(z.string())
           .optional()
           .describe(
-            'Optional already-uploaded artifact IDs for images to attach.',
+            'Optional already-uploaded artifact IDs for images to attach. A reply must not claim an image or screenshot is attached, shown, or included unless the matching imageArtifactIds or imagePaths are supplied. If attachment delivery fails, provide an accessible artifact viewer link and say that the image could not be attached.',
           ),
-        ...(supportsChatReplySuggestions
+        ...(supportsChatReplySuggestions && !reportsToParentSession
           ? {
               suggestions: z
                 .array(chatReplySuggestionSchema)
@@ -1512,28 +1599,43 @@ if (shouldRegisterSlackThreadReplyTool()) {
         return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
       }
 
-      const roomoteConfig = getRoomoteConfig();
-      if (!roomoteConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
       const taskId = process.env.ROOMOTE_TASK_ID;
       if (!taskId?.trim()) {
         return errorResult('ROOMOTE_TASK_ID environment variable not set');
       }
 
-      const result = await handleSendChatReply(
-        {
-          taskId,
-          summary: params.message,
-          imagePaths: params.imagePaths,
-          imageArtifactIds: params.imageArtifactIds,
-          suggestions: params.suggestions,
-          chatReplySurface: chatReplySurfaceLabel,
-        },
-        artifactConfig,
-        roomoteConfig,
-      );
+      const result = reportsToParentSession
+        ? await handleReportToParentSession(
+            {
+              runId: Number(process.env.ROOMOTE_TASK_RUN_ID),
+              taskId,
+              purpose: params.purpose,
+              message: params.message,
+              imagePaths: params.imagePaths,
+              imageArtifactIds: params.imageArtifactIds,
+            },
+            artifactConfig,
+          )
+        : await (async () => {
+            const roomoteConfig = getRoomoteConfig();
+            if (!roomoteConfig) {
+              return errorResult(
+                'ROOMOTE_CLOUD_TOKEN environment variable not set',
+              );
+            }
+            return handleSendChatReply(
+              {
+                taskId,
+                summary: params.message,
+                imagePaths: params.imagePaths,
+                imageArtifactIds: params.imageArtifactIds,
+                suggestions: params.suggestions,
+                chatReplySurface: chatReplySurfaceLabel,
+              },
+              artifactConfig,
+              roomoteConfig,
+            );
+          })();
 
       if (
         params.suggestions &&
@@ -1542,7 +1644,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
         hasSubmittedAutomationSlackSummary = true;
       }
 
-      recordSuccessfulSlackTurnSatisfactionResult(result, 'send_chat_reply', {
+      recordSuccessfulSlackTurnSatisfactionResult(result, lifecycleToolName, {
         replyPurpose: params.purpose,
         sessionId: extra.sessionId,
       });
@@ -1557,8 +1659,8 @@ function recordSuccessfulSlackTurnSatisfactionResult(
   result: ToolResult,
   tool:
     | 'send_chat_reply'
-    | 'send_chat_reaction_emoji'
-    | 'add_reaction_to_slack_message',
+    | 'report_to_parent_session'
+    | 'send_chat_reaction_emoji',
   options: {
     replyPurpose?: ChatReplyPurpose;
     sessionId?: string;
@@ -1576,11 +1678,19 @@ function recordSuccessfulSlackTurnSatisfactionResult(
     const parsed = JSON.parse(text) as {
       success?: unknown;
       messageTs?: unknown;
+      relayed?: unknown;
+      relayId?: unknown;
     };
 
-    if (parsed.success === true && typeof parsed.messageTs === 'string') {
+    const satisfactionId =
+      typeof parsed.messageTs === 'string'
+        ? parsed.messageTs
+        : parsed.relayed === true && typeof parsed.relayId === 'string'
+          ? parsed.relayId
+          : null;
+    if (parsed.success === true && satisfactionId) {
       recordChatReplySatisfaction({
-        messageTs: parsed.messageTs,
+        messageTs: satisfactionId,
         tool,
         replyPurpose: options.replyPurpose,
         sessionId: options.sessionId,
@@ -1753,10 +1863,11 @@ if (shouldRegisterChannelPostTool()) {
   );
 
   if (
-    hasSlackChatContext() ||
-    hasTelegramChatContext() ||
-    hasTeamsChatContext() ||
-    hasDiscordChatContext()
+    !isFastAgentChild() &&
+    (hasSlackChatContext() ||
+      hasTelegramChatContext() ||
+      hasTeamsChatContext() ||
+      hasDiscordChatContext())
   ) {
     const reactionSurface = getChatReplySurfaceLabel();
 
@@ -1817,60 +1928,6 @@ if (shouldRegisterChannelPostTool()) {
       },
     );
   }
-
-  roomoteMcpServer.registerTool(
-    'add_reaction_to_slack_message',
-    {
-      title: 'Add Reaction To Slack Message',
-      description:
-        'Slack-visible: adds an emoji reaction to a specific Slack message. ' +
-        'Use this when the user explicitly wants a reaction added to a known Slack message and you already have the channel and message timestamp. ' +
-        'The channel can be a channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>.',
-      inputSchema: {
-        channel: z
-          .string()
-          .describe(
-            'Slack channel ID, channel name, or Slack channel mention that contains the target message',
-          ),
-        messageTs: nonEmptyStringSchema.describe(
-          'Non-empty Slack message timestamp for the message to react to',
-        ),
-        name: nonEmptyStringSchema.describe(
-          'Non-empty Slack emoji name without surrounding colons, for example eyes or white_check_mark',
-        ),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async (params, extra): Promise<ToolResult> => {
-      const roomoteConfig = getRoomoteConfig();
-      if (!roomoteConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
-      const result = await handleAddReactionToSlackMessage(
-        {
-          channel: params.channel,
-          messageTs: params.messageTs,
-          name: params.name,
-        },
-        roomoteConfig,
-      );
-
-      recordSuccessfulSlackTurnSatisfactionResult(
-        result,
-        'add_reaction_to_slack_message',
-        {
-          sessionId: extra.sessionId,
-        },
-      );
-      return result;
-    },
-  );
 }
 
 async function main() {

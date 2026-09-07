@@ -10,6 +10,9 @@ import type {
   DependabotTriageFrequency,
   IssueFixerFrequency,
   ManagerStatsFrequency,
+  MergeAnnouncerFrequency,
+  ProviderUsageLimitFrequency,
+  ProviderUsageLimitThreshold,
   PrReviewSettings,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
@@ -21,6 +24,11 @@ import type {
   deploymentSettings,
   tasks,
   taskPins,
+  sessions,
+  sessionTasks,
+  sessionParticipants,
+  sessionPins,
+  sessionBackfillState,
   taskPullRequests,
   taskRuns,
   taskRunEvents,
@@ -36,6 +44,9 @@ import type {
   pullRequestSyncStates,
   repositories,
   slackAuthTokens,
+  fastAgentConversations,
+  fastAgentMessages,
+  fastAgentProviderMessages,
   slackInstallations,
   slackInstallationChannels,
   slackUserMappings,
@@ -45,7 +56,7 @@ import type {
   discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
-  slackQuickAnswers,
+  slackFastIntegrationCalls,
   linearPendingSelections,
   environmentVariables,
   environments,
@@ -53,6 +64,7 @@ import type {
   environmentRepositoryMappings,
   automations,
   customAutomations,
+  sessionWakeups,
   trackedMessages,
 } from './schema';
 
@@ -94,6 +106,31 @@ export type CreateTask = typeof tasks.$inferInsert;
 export type TaskPin = typeof taskPins.$inferSelect;
 
 export type CreateTaskPin = Omit<typeof taskPins.$inferInsert, Generated>;
+
+/**
+ * sessions
+ */
+
+export type Session = typeof sessions.$inferSelect;
+
+export type CreateSession = Omit<typeof sessions.$inferInsert, Generated>;
+
+export type SessionTask = typeof sessionTasks.$inferSelect;
+
+export type CreateSessionTask = Omit<
+  typeof sessionTasks.$inferInsert,
+  'attachedAt'
+>;
+
+export type SessionParticipant = typeof sessionParticipants.$inferSelect;
+
+export type CreateSessionParticipant = Omit<
+  typeof sessionParticipants.$inferInsert,
+  Generated
+>;
+
+export type SessionBackfillState = typeof sessionBackfillState.$inferSelect;
+export type SessionPin = typeof sessionPins.$inferSelect;
 
 /**
  * taskPullRequests
@@ -261,13 +298,41 @@ export type CreateSlackAuthToken = Omit<
 >;
 
 /**
- * slackQuickAnswers (renamed from fastAgentSessions in Stage 4)
+ * Provider-neutral Fast conversation persistence.
  */
 
-export type SlackQuickAnswer = typeof slackQuickAnswers.$inferSelect;
+export type FastAgentConversationRecord =
+  typeof fastAgentConversations.$inferSelect;
 
-export type CreateSlackQuickAnswer = Omit<
-  typeof slackQuickAnswers.$inferInsert,
+export type CreateFastAgentConversationRecord = Omit<
+  typeof fastAgentConversations.$inferInsert,
+  Generated
+>;
+
+export type FastAgentMessage = typeof fastAgentMessages.$inferSelect;
+
+export type CreateFastAgentMessage = Omit<
+  typeof fastAgentMessages.$inferInsert,
+  Generated
+>;
+
+export type FastAgentProviderMessage =
+  typeof fastAgentProviderMessages.$inferSelect;
+
+export type CreateFastAgentProviderMessage = Omit<
+  typeof fastAgentProviderMessages.$inferInsert,
+  Generated
+>;
+
+/**
+ * slackFastIntegrationCalls
+ */
+
+export type SlackFastIntegrationCall =
+  typeof slackFastIntegrationCalls.$inferSelect;
+
+export type CreateSlackFastIntegrationCall = Omit<
+  typeof slackFastIntegrationCalls.$inferInsert,
   Generated
 >;
 
@@ -481,12 +546,18 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   announcerDiscordChannelId: string | null;
   announcerInstructions: string | null;
   announcerLastRunAt: Date | null;
+  platformIssueAlertsEnabled: boolean;
   platformIssueSlackChannelId: string | null;
   platformIssueDiscordChannelId: string | null;
   managerStatsFrequency: ManagerStatsFrequency;
   managerStatsSlackChannelId: string | null;
   managerStatsDiscordChannelId: string | null;
   managerStatsLastRunAt: Date | null;
+  providerUsageLimitFrequency: ProviderUsageLimitFrequency;
+  providerUsageLimitThreshold: ProviderUsageLimitThreshold;
+  providerUsageLimitSlackChannelId: string | null;
+  providerUsageLimitDiscordChannelId: string | null;
+  providerUsageLimitLastRunAt: Date | null;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageSlackChannelId: string | null;
   sentryTriageDiscordChannelId: string | null;
@@ -519,6 +590,17 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   ciFailureTriageDiscordChannelId: string | null;
   ciFailureTriageLastRunAt: Date | null;
   ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
+  mergeAnnouncerFrequency: MergeAnnouncerFrequency;
+  mergeAnnouncerLastRunAt: Date | null;
+  mergeAnnouncerScanCursor?: CiFailureTriageScanCursor | null;
+  mergeAnnouncerTargetProvider:
+    | 'slack'
+    | 'teams'
+    | 'telegram'
+    | 'discord'
+    | null;
+  mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
+  mergeAnnouncerTargetChannelId: string | null;
 };
 
 export type SecurityAuditorScanCursor = AutomationScanCursor;
@@ -543,5 +625,16 @@ export type CustomAutomation = typeof customAutomations.$inferSelect;
 
 export type CreateCustomAutomation = Omit<
   typeof customAutomations.$inferInsert,
+  Timestamp
+>;
+
+/**
+ * session_wakeups
+ */
+
+export type SessionWakeup = typeof sessionWakeups.$inferSelect;
+
+export type CreateSessionWakeup = Omit<
+  typeof sessionWakeups.$inferInsert,
   Timestamp
 >;

@@ -14,6 +14,7 @@ import type {
  */
 export type AutomationDestinationAutomationId =
   | 'managerStats'
+  | 'providerUsageLimit'
   | 'sentryTriage'
   | 'dependabotTriage'
   | 'codeqlTriage'
@@ -66,6 +67,17 @@ export const AUTOMATION_DESTINATION_DESCRIPTORS = [
     discordSettingsKey: 'managerStatsDiscordChannelId',
     slackSettingsIncludesManagerFallback: true,
     optionalDiscordInput: false,
+    managedTargetKinds: ['slack_channel', 'discord_channel'],
+  },
+  {
+    automationId: 'providerUsageLimit',
+    automationKey: 'provider_usage_limit',
+    slackField: 'providerUsageLimitSlackChannel',
+    discordField: 'providerUsageLimitDiscordChannel',
+    slackSettingsKey: 'providerUsageLimitSlackChannelId',
+    discordSettingsKey: 'providerUsageLimitDiscordChannelId',
+    slackSettingsIncludesManagerFallback: true,
+    optionalDiscordInput: true,
     managedTargetKinds: ['slack_channel', 'discord_channel'],
   },
   {

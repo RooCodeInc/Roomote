@@ -35,6 +35,12 @@ const state = vi.hoisted(() => ({
   asanaConnection: null as null | {
     authStatus?: string | null;
   },
+  notionConnection: null as null | {
+    authStatus?: string | null;
+  },
+  ripplingConnection: null as null | {
+    authStatus?: string | null;
+  },
   granolaConnection: null as null | {
     authStatus?: string | null;
   },
@@ -101,6 +107,8 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     disconnectMcp: vi.fn(),
     setDisabledTools: vi.fn(),
     saveAsanaConnection: vi.fn(),
+    saveNotionConnection: vi.fn(),
+    saveRipplingConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
     saveGrafanaConnection: vi.fn(),
@@ -253,6 +261,22 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useAsanaConnection: () => ({
     data: state.asanaConnection,
+    isPending: false,
+  }),
+  useSaveNotionConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveNotionConnection,
+  }),
+  useNotionConnection: () => ({
+    data: state.notionConnection,
+    isPending: false,
+  }),
+  useSaveRipplingConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveRipplingConnection,
+  }),
+  useRipplingConnection: () => ({
+    data: state.ripplingConnection,
     isPending: false,
   }),
   useSaveGranolaConnection: () => ({
@@ -447,16 +471,19 @@ vi.mock('@/components/system', () => ({
   Trash: () => <svg aria-hidden="true" />,
   Switch: ({
     checked,
+    disabled,
     onCheckedChange,
     'aria-label': ariaLabel,
   }: {
     checked: boolean;
+    disabled?: boolean;
     onCheckedChange: (checked: boolean) => void;
     'aria-label'?: string;
   }) => (
     <button
       type="button"
       aria-label={ariaLabel}
+      disabled={disabled}
       data-checked={checked ? 'true' : 'false'}
       onClick={() => onCheckedChange(!checked)}
     />
@@ -467,6 +494,8 @@ vi.mock('@/components/system', () => ({
   TriangleAlert: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="triangle-alert" />
   ),
+  ToggleLeft: () => <svg aria-hidden="true" />,
+  ToggleRight: () => <svg aria-hidden="true" />,
   X: () => <svg aria-hidden="true" />,
 }));
 
@@ -488,6 +517,8 @@ describe('Integrations settings', () => {
     };
     state.linearRedirectPath = '';
     state.asanaConnection = null;
+    state.notionConnection = null;
+    state.ripplingConnection = null;
     state.granolaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
@@ -868,6 +899,7 @@ describe('Integrations settings', () => {
       'Pylon',
       'Railway',
       'Resend',
+      'Rippling',
       'Sentry',
       'Snowflake',
       'Supabase',
@@ -1359,7 +1391,7 @@ describe('Integrations settings', () => {
   });
 
   it('links user-scoped MCP tool authentication errors to personal settings in a new tab', () => {
-    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.deploymentEnablements = [{ mcpId: 'monday', enabled: true }];
     state.mcpToolsError = new Error(
       MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION,
     );
@@ -1367,7 +1399,7 @@ describe('Integrations settings', () => {
     render(<Integrations />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Manage Notion tools' }),
+      screen.getByRole('button', { name: 'Manage monday.com tools' }),
     );
 
     const link = screen.getByRole('link', { name: 'personal settings' });
@@ -1376,7 +1408,7 @@ describe('Integrations settings', () => {
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(link.closest('[data-slot="alert-description"]')).toHaveTextContent(
-      'link your Notion account in personal settings',
+      'link your monday.com account in personal settings',
     );
     expect(
       screen.queryByRole('button', { name: 'Save changes' }),
@@ -1387,12 +1419,29 @@ describe('Integrations settings', () => {
   });
 
   it('shows admin tool management for enabled user-scoped MCPs without a connection row', () => {
-    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.deploymentEnablements = [{ mcpId: 'monday', enabled: true }];
 
     render(<Integrations />);
 
     expect(
-      screen.getByRole('button', { name: 'Manage Notion tools' }),
+      screen.getByRole('button', { name: 'Manage monday.com tools' }),
+    ).toBeInTheDocument();
+  });
+
+  it('does not show duplicate tool management for Notion', () => {
+    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.userConnections = [
+      { id: 'conn-notion', mcpId: 'notion', authStatus: 'authenticated' },
+    ];
+    state.notionConnection = { authStatus: 'authenticated' };
+
+    render(<Integrations />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Manage Notion tools' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Edit Notion connection' }),
     ).toBeInTheDocument();
   });
 
@@ -1436,6 +1485,71 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('link', { name: 'app.asana.com/0/my-apps' }),
     ).toHaveAttribute('href', 'https://app.asana.com/0/my-apps');
+  });
+
+  it('opens the Notion internal integration dialog with page-sharing guidance', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Internal integration secret'),
+    ).toHaveAttribute('type', 'password');
+    expect(
+      screen.getByText(
+        /share only the approved pages or data sources with it/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /choose its read, update, insert, and comment capabilities/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('opens the Rippling HRIS dialog with secure roster guidance', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Rippling' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect Rippling' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('API token')).toHaveAttribute(
+      'type',
+      'password',
+    );
+    expect(
+      screen.getByText(/workers.read and the user, department, team/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/never sent to agents/i)).toBeInTheDocument();
+  });
+
+  it('lets admins replace a legacy Notion OAuth connection in place', () => {
+    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.userConnections = [
+      { id: 'conn-notion', mcpId: 'notion', authStatus: 'authenticated' },
+    ];
+    state.notionConnection = null;
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Edit Notion connection' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
+
+    expect(
+      screen.getByText('Internal integration secret is required'),
+    ).toBeInTheDocument();
+    expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
   });
 
   it('opens the Grafana credential dialog from the integrations page', () => {
@@ -1491,6 +1605,24 @@ describe('Integrations settings', () => {
       {
         accessToken: 'asana-secret-token',
       },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it('submits a Notion internal integration secret', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+    fireEvent.change(screen.getByLabelText('Internal integration secret'), {
+      target: { value: 'ntn_restricted-secret' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
+
+    expect(mutations.saveNotionConnection).toHaveBeenCalledWith(
+      { internalIntegrationSecret: 'ntn_restricted-secret' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),

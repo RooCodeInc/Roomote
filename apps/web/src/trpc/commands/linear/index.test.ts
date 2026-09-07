@@ -6,6 +6,7 @@ const {
   getPersistedEnvironmentVariableNamesMock,
   resolveDeploymentEnvVarMock,
   upsertDeploymentEnvironmentVariablesMock,
+  captureEventMock,
 } = vi.hoisted(() => ({
   envState: {} as Record<string, string | boolean | undefined>,
   deletedConnectionsState: [] as Array<{ id: string }>,
@@ -14,6 +15,11 @@ const {
   getPersistedEnvironmentVariableNamesMock: vi.fn(),
   resolveDeploymentEnvVarMock: vi.fn(),
   upsertDeploymentEnvironmentVariablesMock: vi.fn(),
+  captureEventMock: vi.fn(),
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureEvent: captureEventMock,
 }));
 
 vi.mock('@/lib/server/env', () => ({
@@ -183,6 +189,20 @@ describe('Linear OAuth setup', () => {
       ],
     );
     expect(result).toEqual({ success: true });
+    expect(captureEventMock).toHaveBeenCalledWith('integration_disabled', {
+      userId: ADMIN.userId,
+      properties: { integration_id: 'linear' },
+    });
+    expect(captureEventMock).toHaveBeenCalledWith('integration_removed', {
+      userId: ADMIN.userId,
+      properties: { integration_id: 'linear' },
+    });
+  });
+
+  it('does not capture lifecycle events when setup removal changes nothing', async () => {
+    await removeLinearOauthSetupCommand(ADMIN);
+
+    expect(captureEventMock).not.toHaveBeenCalled();
   });
 
   it('saves all three credentials in the encrypted deployment store', async () => {
@@ -215,6 +235,14 @@ describe('Linear OAuth setup', () => {
     });
 
     expect(result.requiresReconnect).toBe(true);
+    expect(captureEventMock).toHaveBeenCalledWith('integration_removed', {
+      userId: ADMIN.userId,
+      properties: { integration_id: 'linear' },
+    });
+    expect(captureEventMock).toHaveBeenCalledWith('integration_disabled', {
+      userId: ADMIN.userId,
+      properties: { integration_id: 'linear' },
+    });
   });
 
   it('keeps the workspace connected when only the webhook secret changes', async () => {
@@ -228,6 +256,7 @@ describe('Linear OAuth setup', () => {
     });
 
     expect(result.requiresReconnect).toBe(false);
+    expect(captureEventMock).not.toHaveBeenCalled();
   });
 
   it('keeps saved values when an administrator leaves their fields blank', async () => {

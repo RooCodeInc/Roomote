@@ -1,6 +1,9 @@
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
-import type { RunTokenContext } from '@roomote/types';
+import type {
+  AcpRequestUserInputQuestion,
+  RunTokenContext,
+} from '@roomote/types';
 
 const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
   mockPrepareActorScopedTurn: vi.fn(),
@@ -9,11 +12,13 @@ const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
 const {
   mockFindFirstById,
   mockGetRoomoteConfig,
+  mockSuppressSlackReplyQuote,
   mockTrackSlackReplyQuote,
   mockClearSlackReplyQuote,
 } = vi.hoisted(() => ({
   mockFindFirstById: vi.fn(),
   mockGetRoomoteConfig: vi.fn(),
+  mockSuppressSlackReplyQuote: vi.fn(),
   mockTrackSlackReplyQuote: vi.fn(),
   mockClearSlackReplyQuote: vi.fn(),
 }));
@@ -53,6 +58,7 @@ vi.mock('../../../mcp/roomote-mcp-server/config', () => ({
 }));
 
 vi.mock('../../../mcp/roomote-mcp-server/slack-api-client', () => ({
+  suppressSlackReplyQuote: mockSuppressSlackReplyQuote,
   trackSlackReplyQuote: mockTrackSlackReplyQuote,
   clearSlackReplyQuote: mockClearSlackReplyQuote,
 }));
@@ -67,6 +73,16 @@ function createCaller(options?: {
     autoSteerWhenQueued?: boolean;
     userId?: string;
   }) => boolean;
+  sendCommand?: (command: unknown) => boolean;
+  pendingUserInputRequests?: Array<{
+    requestId: string;
+    sessionId: string;
+    turnId: string;
+    callId: string;
+    status: 'pending';
+    ts: number;
+    questions: AcpRequestUserInputQuestion[];
+  }>;
   supportsNativeTurnSteering?: boolean;
   status?: {
     phase: string;
@@ -83,6 +99,7 @@ function createCaller(options?: {
   );
 
   const sendFollowUpPrompt = vi.fn(options?.sendFollowUpPrompt ?? (() => true));
+  const sendCommand = vi.fn(options?.sendCommand ?? (() => true));
   const getStatus = vi.fn(
     () =>
       options?.status ?? {
@@ -109,7 +126,9 @@ function createCaller(options?: {
     workingDirectory: '/tmp',
     harness: {
       isConnected: true,
-      getPendingUserInputRequests: () => [],
+      getPendingUserInputRequests: () =>
+        options?.pendingUserInputRequests ?? [],
+      sendCommand,
     },
     harnessManager,
     auth: {
@@ -127,6 +146,7 @@ function createCaller(options?: {
     caller: appRouter.createCaller(ctx),
     cancelTaskAndWaitForTurnExit,
     sendFollowUpPrompt,
+    sendCommand,
     getStatus,
   };
 }
@@ -149,6 +169,10 @@ describe('steerTask procedure', () => {
     mockTrackSlackReplyQuote.mockResolvedValue({
       success: true,
       quoteId: 'quote-1',
+    });
+    mockSuppressSlackReplyQuote.mockResolvedValue({
+      success: true,
+      quoteId: 'suppression-1',
     });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
@@ -223,6 +247,149 @@ describe('steerTask procedure', () => {
       autoSteerWhenQueued: true,
       userId: 'sender-user-1',
     });
+  });
+
+  it('skips Slack reply quote tracking for orchestrated steers', async () => {
+    const { caller, sendFollowUpPrompt } = createCaller({
+      supportsNativeTurnSteering: true,
+    });
+
+    const result = await caller.commands.steerTask({
+      prompt: 'Continue the delegated task',
+      quoteText: 'Continue the delegated task',
+      suppressSlackReplyQuote: true,
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
+    expect(mockSuppressSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1 },
+    );
+    expect(
+      mockSuppressSlackReplyQuote.mock.invocationCallOrder[0],
+    ).toBeLessThan(sendFollowUpPrompt.mock.invocationCallOrder[0]!);
+    expect(sendFollowUpPrompt).toHaveBeenCalledWith({
+      prompt: 'Continue the delegated task',
+      autoSteerWhenQueued: true,
+      userId: 'sender-user-1',
+    });
+  });
+
+  it('answers one pending input request before steering', async () => {
+    const { caller, sendCommand, sendFollowUpPrompt } = createCaller({
+      pendingUserInputRequests: [
+        {
+          requestId: 'request-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          ts: 123,
+          questions: [
+            {
+              id: 'approach',
+              header: 'Approach',
+              question: 'Which approach should I use?',
+              isOther: true,
+              isSecret: false,
+              options: [
+                { label: 'Minimal', description: 'Make the smallest change.' },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await caller.commands.steerTask({
+      prompt: 'Use a separate helper instead.',
+      quoteText: 'Use a separate helper instead.',
+      answerPendingInput: true,
+      suppressSlackReplyQuote: true,
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(sendCommand).toHaveBeenCalledWith({
+      commandName: 'AnswerUserInputRequest',
+      data: {
+        requestId: 'request-1',
+        answers: {
+          approach: { answers: ['Use a separate helper instead.'] },
+        },
+        userId: 'sender-user-1',
+      },
+    });
+    expect(sendFollowUpPrompt).not.toHaveBeenCalled();
+    expect(mockSuppressSlackReplyQuote).toHaveBeenCalledOnce();
+  });
+
+  it('steers when more than one input request is pending', async () => {
+    const pendingRequest = {
+      requestId: 'request-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      callId: 'call-1',
+      status: 'pending' as const,
+      ts: 123,
+      questions: [],
+    };
+    const { caller, sendCommand, sendFollowUpPrompt } = createCaller({
+      pendingUserInputRequests: [
+        pendingRequest,
+        { ...pendingRequest, requestId: 'request-2' },
+      ],
+      supportsNativeTurnSteering: true,
+    });
+
+    await caller.commands.steerTask({
+      prompt: 'Continue the delegated task',
+      quoteText: 'Continue the delegated task',
+      answerPendingInput: true,
+    });
+
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(sendFollowUpPrompt).toHaveBeenCalledOnce();
+  });
+
+  it('steers when one pending input request cannot parse the reply', async () => {
+    const { caller, sendCommand, sendFollowUpPrompt } = createCaller({
+      pendingUserInputRequests: [
+        {
+          requestId: 'request-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          ts: 123,
+          questions: [
+            {
+              id: 'approach',
+              header: 'Approach',
+              question: 'Which approach should I use?',
+              isOther: false,
+              isSecret: false,
+              options: [
+                { label: 'Minimal', description: 'Make the smallest change.' },
+              ],
+            },
+          ],
+        },
+      ],
+      supportsNativeTurnSteering: true,
+    });
+
+    await caller.commands.steerTask({
+      prompt: 'Use a separate helper instead.',
+      quoteText: 'Use a separate helper instead.',
+      answerPendingInput: true,
+    });
+
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(sendFollowUpPrompt).toHaveBeenCalledOnce();
   });
 
   it('forwards workflow phase for explicit steer prompts', async () => {
@@ -360,6 +527,26 @@ describe('steerTask procedure', () => {
     // Tracked through an older API (no quoteId): the rollback stays pending
     // rather than risking an unscoped clear.
     expect(mockClearSlackReplyQuote).not.toHaveBeenCalled();
+  });
+
+  it('rolls back persisted quote suppression when an orchestrated steer cannot start', async () => {
+    const { caller } = createCaller({ sendFollowUpPrompt: () => false });
+
+    await expect(
+      caller.commands.steerTask({
+        prompt: 'Continue the delegated task',
+        quoteText: 'Continue the delegated task',
+        suppressSlackReplyQuote: true,
+      }),
+    ).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+
+    expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1, quoteId: 'suppression-1' },
+    );
   });
 
   it('throws PRECONDITION_FAILED when the active turn cannot be interrupted', async () => {

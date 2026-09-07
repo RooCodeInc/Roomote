@@ -24,6 +24,7 @@ describe('handleGetTaskMessages', () => {
           text: 'Hello, I will help you fix this bug.',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
         {
           id: 'msg-2',
@@ -34,12 +35,19 @@ describe('handleGetTaskMessages', () => {
           text: 'Should I also update the tests?',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
       ],
       returned: 2,
     });
 
     const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
+
+    expect(vi.mocked(tasksApiClient.getTaskMessages)).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      { limit: undefined, order: 'desc' },
+    );
 
     const text = result.content[0]?.text ?? '';
     expect(text).toContain('2 message(s)');
@@ -59,6 +67,7 @@ describe('handleGetTaskMessages', () => {
           text: 'Most recent message',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
       ],
       returned: 1,
@@ -78,6 +87,50 @@ describe('handleGetTaskMessages', () => {
     const text = result.content[0]?.text ?? '';
     expect(text).toContain('Latest 1 message(s)');
     expect(text).toContain('Most recent message');
+  });
+
+  it('labels linked subagent messages without changing parent message labels', async () => {
+    vi.mocked(tasksApiClient.getTaskMessages).mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'msg-child',
+          taskId: 'task-1',
+          ts: 1700000002,
+          eventType: 'roomote_runtime.tool_call',
+          role: 'assistant',
+          text: 'Capture screenshot',
+          images: [],
+          metadata: {
+            sessionId: 'session-child',
+            parentSessionId: 'session-parent',
+            agentType: 'proof-runner',
+            isSubagent: true,
+          },
+          visibleInTranscript: true,
+        },
+        {
+          id: 'msg-parent',
+          taskId: 'task-1',
+          ts: 1700000001,
+          eventType: 'roomote_runtime.assistant_text',
+          role: 'assistant',
+          text: 'Parent response',
+          images: [],
+          metadata: { sessionId: 'session-parent' },
+          visibleInTranscript: true,
+        },
+      ],
+      returned: 2,
+    });
+
+    const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
+    const text = result.content[0]?.text ?? '';
+
+    expect(text).toContain(
+      '[assistant] (roomote_runtime.tool_call) [subagent:proof-runner session:session-child parent:session-parent]',
+    );
+    expect(text).toContain('[assistant] (roomote_runtime.assistant_text)');
+    expect(text).not.toContain('(roomote_runtime.assistant_text) [subagent:');
   });
 
   it('should return a message when no messages found', async () => {
@@ -115,6 +168,7 @@ describe('handleGetTaskMessages', () => {
           text: 'npm test',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
       ],
       returned: 1,
@@ -165,6 +219,7 @@ describe('handleGetTaskMessages', () => {
           text: 'custom message',
           images: [],
           metadata: {},
+          visibleInTranscript: true,
         },
       ],
       returned: 1,

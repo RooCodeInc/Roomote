@@ -4,6 +4,8 @@ import {
   taskRuns,
   taskPullRequests,
   environments,
+  fastAgentConversations,
+  fastAgentMessages,
   llmUsageEvents,
   and,
   eq,
@@ -30,6 +32,65 @@ import {
 } from './dimensions';
 import { formatAnalyticsDateTime, getTimeCutoff } from './time-buckets';
 
+const MULTIPLE_VALUES_LABEL = 'Multiple';
+
+export function aggregateCostAnalyticsRowsByTask(
+  rows: AnalyticsRow[],
+): AnalyticsRow[] {
+  const aggregatedRows = new Map<string, AnalyticsRow>();
+  const ungroupedRows: AnalyticsRow[] = [];
+
+  for (const row of rows) {
+    const taskId = row.meta?.canonicalTaskId;
+    if (!taskId) {
+      ungroupedRows.push(row);
+      continue;
+    }
+
+    const existingRow = aggregatedRows.get(taskId);
+    if (!existingRow) {
+      aggregatedRows.set(taskId, {
+        ...row,
+        id: `task:${taskId}`,
+        details: {
+          ...row.details,
+          id: `task:${taskId}`,
+        },
+      });
+      continue;
+    }
+
+    const value = existingRow.value + row.value;
+    const values: Record<string, string> = {
+      ...existingRow.details.values,
+      cost: value.toFixed(2),
+    };
+
+    for (const [key, rowValue] of Object.entries(row.details.values)) {
+      if (key === 'date' || key === 'cost' || key === 'taskTitle') {
+        continue;
+      }
+
+      if (values[key] !== rowValue) {
+        values[key] = MULTIPLE_VALUES_LABEL;
+      }
+    }
+
+    aggregatedRows.set(taskId, {
+      ...existingRow,
+      value,
+      details: {
+        ...existingRow.details,
+        values,
+      },
+    });
+  }
+
+  return [...aggregatedRows.values(), ...ungroupedRows].sort(
+    (left, right) => right.timestamp.getTime() - left.timestamp.getTime(),
+  );
+}
+
 export async function getCostAnalyticsRows(
   _auth: UserAuthSuccess,
   timePeriod: TimePeriodFilter | undefined,
@@ -50,6 +111,7 @@ export async function getCostAnalyticsRows(
       costMicroUsd: llmUsageEvents.costMicroUsd,
       taskId: llmUsageEvents.taskId,
       runId: llmUsageEvents.runId,
+      harnessSessionId: llmUsageEvents.harnessSessionId,
       userId: llmUsageEvents.userId,
       taskUserId: tasks.initiatorUserId,
       providerId: llmUsageEvents.providerId,
@@ -63,6 +125,7 @@ export async function getCostAnalyticsRows(
       eventUserEmail: usageUsers.email,
       taskUserName: taskInitiatorUsers.name,
       taskUserEmail: taskInitiatorUsers.email,
+      source: llmUsageEvents.source,
       runEnvironmentId: sql<
         string | null
       >`${taskRuns.payload} ->> 'environmentId'`,
@@ -100,6 +163,39 @@ export async function getCostAnalyticsRows(
           );
   const environmentNameById = new Map(
     environmentRows.map((environment) => [environment.id, environment.name]),
+  );
+  const nativeSessionIds = [
+    ...new Set(
+      usageRows
+        .filter((row) => !row.taskId)
+        .map((row) => row.harnessSessionId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const nativeMessageSessionRows =
+    nativeSessionIds.length === 0
+      ? []
+      : await db
+          .select({
+            nativeSessionId: fastAgentMessages.nativeSessionId,
+          })
+          .from(fastAgentMessages)
+          .where(inArray(fastAgentMessages.nativeSessionId, nativeSessionIds));
+  const currentNativeSessionRows =
+    nativeSessionIds.length === 0
+      ? []
+      : await db
+          .select({
+            nativeSessionId: fastAgentConversations.openCodeSessionId,
+          })
+          .from(fastAgentConversations)
+          .where(
+            inArray(fastAgentConversations.openCodeSessionId, nativeSessionIds),
+          );
+  const fastNativeSessionIds = new Set(
+    [...nativeMessageSessionRows, ...currentNativeSessionRows]
+      .map((row) => row.nativeSessionId)
+      .filter((id): id is string => Boolean(id)),
   );
   const pullRequestRows = await db
     .select({
@@ -144,13 +240,20 @@ export async function getCostAnalyticsRows(
 
   return usageRows.map((row) => {
     const isTask = Boolean(row.taskId);
+    const isMemory = !isTask && row.source === 'brain_synthesis';
+    const isSession =
+      !isTask &&
+      !isMemory &&
+      fastNativeSessionIds.has(row.harnessSessionId ?? '');
     const taskType = isTask
       ? getTaskTypeDimensionValue({
           initiatorKind: row.initiatorKind,
           initiatorAutomation: row.initiatorAutomation,
           actorDisplayName: row.actorDisplayName,
         })
-      : createLabelBackedDimensionValue('Non-task inference');
+      : createLabelBackedDimensionValue(
+          isMemory ? 'Memories' : isSession ? 'Session' : 'Non-task inference',
+        );
     const attributedUserId = row.userId ?? row.taskUserId;
     const userDimension =
       isTask && row.initiatorKind === 'automation'
@@ -171,7 +274,6 @@ export async function getCostAnalyticsRows(
       (row.runEnvironmentId
         ? (environmentNameById.get(row.runEnvironmentId) ?? NO_PROJECT_LABEL)
         : NO_PROJECT_LABEL);
-
     return {
       id: row.id,
       timestamp,
@@ -180,6 +282,7 @@ export async function getCostAnalyticsRows(
         user: userDimension,
         taskType,
         project: createLabelBackedDimensionValue(project),
+        source: createLabelBackedDimensionValue(row.source),
         provider: createLabelBackedDimensionValue(provider),
         model: createLabelBackedDimensionValue(model),
       },
@@ -190,10 +293,11 @@ export async function getCostAnalyticsRows(
           user: userDimension.label,
           taskType: taskType.label,
           project,
+          source: row.source,
           provider,
           model,
           cost: cost.toFixed(2),
-          taskTitle: row.taskTitle ?? 'Non-task inference',
+          taskTitle: row.taskTitle ?? taskType.label,
         },
         links: row.taskId ? { task: `/task/${row.taskId}` } : undefined,
       },

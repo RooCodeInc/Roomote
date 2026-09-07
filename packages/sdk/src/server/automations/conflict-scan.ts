@@ -573,8 +573,9 @@ async function scanProviderNeutralRepos({
       });
 
       for (const pr of listResult.pullRequests) {
-        // Must have the opt-in label
-        if (!pr.labels.includes(conflictResolverLabel)) {
+        // Must have the opt-in label. A provider that does not report labels
+        // at all (null) cannot satisfy an opt-in label, same as an empty set.
+        if (!pr.labels?.includes(conflictResolverLabel)) {
           continue;
         }
 

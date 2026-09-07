@@ -15,6 +15,7 @@ import {
   isExitedRunStatus,
 } from '@roomote/types';
 import { captureTaskSettled } from '@roomote/telemetry/server';
+import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -88,6 +89,13 @@ export async function cancelTask(
 
     if (canceledRun) {
       void captureTaskSettled(canceledRun.id, 'canceled');
+      // A run canceled before any worker claimed it has nobody else to
+      // settle its Slack task card (the worker settles it otherwise).
+      void settleSlackLiveTaskCardForRun({
+        taskId,
+        payload: job.payload,
+        status: RunStatus.Canceled,
+      });
     }
 
     return c.json({ success: true });

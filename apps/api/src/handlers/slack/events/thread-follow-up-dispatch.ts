@@ -22,7 +22,9 @@ type SlackThreadFollowUpResumeHandlerResult<T> =
 
 export async function resolveSlackThreadFollowUpRoute(params: {
   threadId: string;
+  channelId: string;
   slackTeamId: string;
+  taskId?: string;
   prefetchedActiveRun?: ActiveSlackThreadTaskRun | null;
   allowCompletedResume?: boolean;
 }): Promise<SlackThreadFollowUpRoute> {
@@ -32,9 +34,19 @@ export async function resolveSlackThreadFollowUpRoute(params: {
     prefetchedActiveRun,
     allowCompletedResume = true,
   } = params;
+  const lookupScope = params.taskId
+    ? {
+        taskId: params.taskId,
+        trackedAlias: {
+          slackTeamId,
+          channelId: params.channelId,
+          threadTs: threadId,
+        },
+      }
+    : { slackTeamId };
   const activeRun =
     prefetchedActiveRun === undefined
-      ? await findActiveSlackTaskRun(threadId, { slackTeamId })
+      ? await findActiveSlackTaskRun(threadId, lookupScope)
       : prefetchedActiveRun;
 
   if (activeRun) {
@@ -45,9 +57,10 @@ export async function resolveSlackThreadFollowUpRoute(params: {
     return { kind: 'fresh' };
   }
 
-  const completedRun = await findCompletedSlackTaskRunWithSnapshot(threadId, {
-    slackTeamId,
-  });
+  const completedRun = await findCompletedSlackTaskRunWithSnapshot(
+    threadId,
+    lookupScope,
+  );
 
   if (completedRun?.snapshotId) {
     return { kind: 'resume', completedRun };

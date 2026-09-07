@@ -10,6 +10,9 @@ import {
   asRecord,
   asString,
   buildAcpRequestUserInputRequestId,
+  INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
+  INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
+  normalizeAcpReasoningText,
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
@@ -46,6 +49,11 @@ import type {
   TaskCommand,
 } from '../../harness';
 import { buildTaskGoalContext } from '../../../../run-task/task-goal';
+import {
+  hasTerminalChatReplyDeliveryFailure,
+  MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL,
+  recordChatReplyDeliveryFailure,
+} from '../../../../mcp/roomote-mcp-server/chat-reply-satisfaction';
 import {
   TERMINAL_PROVIDER_ERROR_SAY,
   TaskCommandName,
@@ -121,6 +129,7 @@ interface OpenCodeServerHarnessOptions {
   stopHookReminderStallTimeoutMs?: number;
   turnStallTimeoutMs?: number;
   subagentSettlementGraceMs?: number;
+  visualProofTimeoutMs?: number;
   queuedPromptRetryDelayMs?: number;
   /**
    * Max automatic continue attempts after a provider rate-limit session.error
@@ -143,6 +152,7 @@ interface OpenCodeServerHarnessOptions {
   }) => void;
   beforeQueuedPrompt?: (input: {
     userId?: string;
+    clientMessageId?: string;
     /**
      * Distinguishes deliveries that survive a reconnect (queued prompts are
      * restored and replayed) from ones that do not (user-input answers fail
@@ -271,6 +281,8 @@ interface ActiveOpenCodeSubagentWatchdog {
   // spawn's task tool part is still unsettled; cleared by settlement or by any
   // further child event. See handleChildSessionTerminal.
   settlementTimer: ReturnType<typeof setTimeout> | null;
+  settlementPending: boolean;
+  incompleteSettlementChecks: number;
   updatePayload: Record<string, unknown>;
   activitySeenChildToolCallIds: Set<string>;
   activityLastAction: string | null;
@@ -280,6 +292,11 @@ interface ActiveOpenCodeSubagentWatchdog {
   // Armed when an activity change lands inside the throttle window, so the
   // newest action and message still reach the transcript once it closes.
   activityFlushTimer: ReturnType<typeof setTimeout> | null;
+}
+
+interface OpenCodeChildSessionRelationship {
+  parentSessionId: string;
+  agentType: string | null;
 }
 
 const OPEN_CODE_EXECUTE_TOOLS = new Set(['bash', 'shell']);
@@ -309,11 +326,16 @@ const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
 // toward waiting. Any further child event cancels the pending recovery, and
 // expiry re-verifies the child's state before acting.
 const DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS = 10 * 60_000;
+const MAX_INCOMPLETE_SUBAGENT_SETTLEMENT_RECHECKS = 1;
+const DEFAULT_VISUAL_PROOF_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS = 1_000;
 const MAX_PROGRESS_COMMAND_CHARS = 240;
 const FALLBACK_OPENCODE_STOP_HOOK_REMINDER =
   'Before finalizing, post a terminal chat-visible reply for the current turn.';
 const ROOMOTE_OPENCODE_VISUAL_AGENT_NAME = 'visual';
+const CAPTURE_VISUAL_PROOF_SKILL = 'capture-visual-proof';
+const VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT =
+  'The visual proof step exceeded its shared five-minute deadline. Do not retry capture or run further proof recovery. Return a blocked proof handoff with blocker type `proof capture timed out`, then continue the active parent workflow without visual proof.';
 // OpenCode's built-in tool for loading skills into the session.
 const OPENCODE_SKILL_TOOL = 'skill';
 // Hidden continuation submitted automatically after a turn that exited plan
@@ -334,7 +356,34 @@ type OpenCodeMessageRole = OpenCodeMessageInfo['role'];
 let lastOpenCodeMessageIdTimestamp = 0;
 let openCodeMessageIdCounter = 0;
 
-function createOpenCodeMessageId(): string {
+const OPENCODE_MESSAGE_ID_RANDOM_LENGTH = 14;
+const MAX_OPENCODE_MESSAGE_ID_SORTABLE = (BigInt(1) << BigInt(48)) - BigInt(1);
+
+function formatOpenCodeMessageId(sortable: bigint): string {
+  const timeBytes = Buffer.alloc(6);
+
+  for (let index = 0; index < 6; index += 1) {
+    timeBytes[index] = Number(
+      (sortable >> BigInt(40 - 8 * index)) & BigInt(0xff),
+    );
+  }
+
+  return `msg_${timeBytes.toString('hex')}${'0'.repeat(
+    OPENCODE_MESSAGE_ID_RANDOM_LENGTH,
+  )}`;
+}
+
+function openCodeMessageIdSortable(messageId: string): bigint | undefined {
+  const match = /^msg_([a-f0-9]{12})/u.exec(messageId);
+
+  if (!match?.[1]) {
+    return undefined;
+  }
+
+  return BigInt(`0x${match[1]}`);
+}
+
+function createOpenCodeMessageId(afterMessageId?: string): string {
   const currentTimestamp = Date.now();
 
   if (currentTimestamp !== lastOpenCodeMessageIdTimestamp) {
@@ -346,18 +395,27 @@ function createOpenCodeMessageId(): string {
 
   let sortable = BigInt(currentTimestamp) * BigInt(0x1000);
   sortable += BigInt(openCodeMessageIdCounter);
+  sortable &= MAX_OPENCODE_MESSAGE_ID_SORTABLE;
 
-  const timeBytes = Buffer.alloc(6);
+  const candidate = formatOpenCodeMessageId(sortable);
 
-  for (let index = 0; index < 6; index += 1) {
-    timeBytes[index] = Number(
-      (sortable >> BigInt(40 - 8 * index)) & BigInt(0xff),
-    );
+  if (!afterMessageId || candidate > afterMessageId) {
+    return candidate;
   }
 
-  // OpenCode compares message IDs lexicographically to decide whether an
-  // assistant answered after the latest user prompt.
-  return `msg_${timeBytes.toString('hex')}${'0'.repeat(14)}`;
+  const afterSortable = openCodeMessageIdSortable(afterMessageId);
+
+  if (
+    afterSortable !== undefined &&
+    afterSortable < MAX_OPENCODE_MESSAGE_ID_SORTABLE
+  ) {
+    return formatOpenCodeMessageId(afterSortable + BigInt(1));
+  }
+
+  // OpenCode only requires message IDs to start with `msg`. If an unknown ID
+  // shape (or the maximum 48-bit prefix) reaches us, extending it is the one
+  // format-agnostic way to preserve the ordering invariant.
+  return `${afterMessageId}0`;
 }
 
 function visibleQueuedMessages(
@@ -570,11 +628,13 @@ function extractAssistantText(message: OpenCodeSessionMessage): string {
 }
 
 function extractAssistantReasoning(message: OpenCodeSessionMessage): string {
-  return message.parts
-    .filter((part) => part.type === 'reasoning')
-    .map(extractPartText)
-    .filter((text) => text.length > 0)
-    .join('\n');
+  return normalizeAcpReasoningText(
+    message.parts
+      .filter((part) => part.type === 'reasoning')
+      .map(extractPartText)
+      .filter((text) => text.length > 0)
+      .join('\n'),
+  );
 }
 
 function parseOpenCodeMessageRole(value: unknown): OpenCodeMessageRole | null {
@@ -1272,6 +1332,20 @@ function isTerminalOpenCodeToolStatus(status: AcpToolStatus): boolean {
   return status === 'completed' || status === 'failed';
 }
 
+function isFailedTerminalChatReply(tool: OpenCodeNormalizedToolPart): boolean {
+  const rawInput = asRecord(tool.callPayload.rawInput);
+  const purpose = asString(rawInput?.purpose);
+
+  return (
+    tool.status === 'failed' &&
+    tool.callPayload.isMcp === true &&
+    tool.callPayload.mcpServerName === 'roomote' &&
+    (tool.callPayload.mcpToolName === 'send_chat_reply' ||
+      tool.callPayload.mcpToolName === 'report_to_parent_session') &&
+    (purpose === 'closeout' || purpose === 'clarification')
+  );
+}
+
 function truncateProgressCommand(command: string): string {
   if (command.length <= MAX_PROGRESS_COMMAND_CHARS) {
     return command;
@@ -1367,6 +1441,9 @@ function normalizeOpenCodeToolPart(
     !mcpInvocation.isMcp && OPEN_CODE_SEARCH_TOOLS.has(normalizedToolName);
   const isSubagentSpawn =
     !mcpInvocation.isMcp && isOpenCodeSubagentTaskTool(normalizedToolName);
+  const childSessionId = isSubagentSpawn
+    ? extractOpenCodeTaskToolChildSessionId(toolPart)
+    : null;
   const kind = mcpInvocation.isMcp
     ? 'mcp'
     : isSubagentSpawn
@@ -1397,6 +1474,7 @@ function normalizeOpenCodeToolPart(
     ...(context.messageId ? { turnId: context.messageId } : {}),
     toolCallId,
     kind,
+    toolName: mcpInvocation.isMcp ? mcpInvocation.mcpToolName : toolName,
     title,
     status,
     isExecute,
@@ -1408,13 +1486,14 @@ function normalizeOpenCodeToolPart(
     ...(isSubagentSpawn
       ? {
           isSubagentSpawn: true,
+          senderThreadId: context.sessionId,
+          receiverThreadIds: childSessionId ? [childSessionId] : [],
           agentType: asString(asRecord(input)?.subagent_type) ?? null,
         }
       : {}),
     ...(mcpInvocation.isMcp
       ? {
           serverName: mcpInvocation.mcpServerName,
-          toolName: mcpInvocation.mcpToolName,
         }
       : {}),
     ...(knownMcpServerNames.length > 0
@@ -1526,6 +1605,7 @@ export class OpenCodeServerHarness
   private readonly executeToolProgressIntervalMs: number;
   private readonly stopHookReminderStallTimeoutMs: number;
   private readonly subagentSettlementGraceMs: number;
+  private readonly visualProofTimeoutMs: number;
   private readonly queuedPromptRetryDelayMs: number;
   private readonly providerRateLimitMaxRetries: number;
   private readonly providerRateLimitBaseDelayMs: number;
@@ -1536,7 +1616,10 @@ export class OpenCodeServerHarness
   private readonly streamedMessageIds = new Set<string>();
   private readonly streamedReasoningMessageIds = new Set<string>();
   private readonly persistedMessageIds = new Set<string>();
-  private readonly recordedChildUsageMessageIds = new Set<string>();
+  private readonly linkedChildSessions = new Map<
+    string,
+    OpenCodeChildSessionRelationship
+  >();
   private readonly emittedToolCallKeys = new Set<string>();
   private readonly persistedToolResultKeys = new Set<string>();
   private readonly activeExecuteToolProgress = new Map<
@@ -1570,6 +1653,8 @@ export class OpenCodeServerHarness
   private disposed = false;
   private sessionId: string | undefined;
   private resumedSessionPendingValidation = false;
+  /** Greatest message id observed in the current OpenCode session. */
+  private latestSessionMessageId: string | undefined;
   private inFlight = false;
   private nativeSteerSubmissionsInFlight = 0;
   private recoveringWedgedTurn = false;
@@ -1605,8 +1690,12 @@ export class OpenCodeServerHarness
   // via the OpenCode skill tool. Drives per-prompt agent selection so plan-mode
   // turns can run on the built-in read-only `plan` agent.
   private activeWorkflowSkill: string | null = null;
+  private visualProofTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
+  private visualProofAttempt = 0;
+  private readonly taskToolProofAttempts = new Map<string, number | null>();
   private commandEnv: Record<string, string> | undefined;
   private stopHookReminderCount = 0;
+  private terminalChatReplyDeliveryFailed = false;
   private lastBlockedCloseoutAssistantText: string | null = null;
   private stopHookReminderStallTimer: ReturnType<typeof setTimeout> | null =
     null;
@@ -1669,6 +1758,8 @@ export class OpenCodeServerHarness
       OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS;
     this.subagentSettlementGraceMs =
       options.subagentSettlementGraceMs ?? DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS;
+    this.visualProofTimeoutMs =
+      options.visualProofTimeoutMs ?? DEFAULT_VISUAL_PROOF_TIMEOUT_MS;
     this.queuedPromptRetryDelayMs =
       options.queuedPromptRetryDelayMs ?? DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS;
     this.providerRateLimitMaxRetries =
@@ -1705,7 +1796,7 @@ export class OpenCodeServerHarness
     this.prompts = new RuntimePromptQueue({
       getSessionId: () => this.sessionId,
       getNextSequence: () => this.runtimeEvents.nextTs(),
-      emitRuntimeOutput: (event) => this.emit('runtimeOutput', event),
+      emitRuntimeUpdate: (event) => this.runtimeEvents.outputAndPersist(event),
     });
     this.stallWatchdogs = new OpenCodeStallWatchdogs({
       turnStallTimeoutMs:
@@ -1869,6 +1960,7 @@ export class OpenCodeServerHarness
     this.clearReplayAbortErrorSuppression();
     this.clearQueuedPromptRetryTimer();
     this.clearProviderErrorRecoveryState();
+    this.clearVisualProofTimeout();
     this.clearAllExecuteToolProgress();
     void this.cleanupVisualAttachmentDirectories();
     this.rejectEventStreamReady?.(
@@ -2065,6 +2157,7 @@ export class OpenCodeServerHarness
       case TaskCommandName.CloseTask:
         this.currentWorkflowPhase = null;
         this.activeWorkflowSkill = null;
+        this.clearVisualProofTimeout();
         this.inFlight = false;
         this.prompts.clear();
         this.clearQueuedPromptRetryTimer();
@@ -2077,6 +2170,7 @@ export class OpenCodeServerHarness
         // session.
         this.sessionId = command.data;
         this.resumedSessionPendingValidation = true;
+        this.latestSessionMessageId = undefined;
         this.runtimeEvents.taskStarted(command.data);
         return;
       case TaskCommandName.RestoreQueuedMessages:
@@ -2118,11 +2212,13 @@ export class OpenCodeServerHarness
     this.clearProviderErrorRecoveryState();
     this.clearAllExecuteToolProgress();
     this.stopHookReminderCount = 0;
+    this.terminalChatReplyDeliveryFailed = false;
     this.lastBlockedCloseoutAssistantText = null;
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
+    this.clearVisualProofTimeout();
     this.cancelRequestedBeforeSession = false;
     this.resetSessionCreateAbortController();
 
@@ -2285,6 +2381,7 @@ export class OpenCodeServerHarness
   }
 
   private async handleCancelTask(command?: CancelTaskCommand): Promise<void> {
+    this.clearVisualProofTimeout();
     const sessionId = this.sessionId;
 
     if (!sessionId) {
@@ -2530,6 +2627,10 @@ export class OpenCodeServerHarness
       existing.updatePayload = input.updatePayload;
       if (existing.childSessionId) {
         this.childSessionWatchdogKeys.set(existing.childSessionId, eventKey);
+        this.linkedChildSessions.set(existing.childSessionId, {
+          parentSessionId: existing.sessionId,
+          agentType: existing.agentType,
+        });
       }
       return;
     }
@@ -2544,6 +2645,8 @@ export class OpenCodeServerHarness
       childSessionId: input.childSessionId,
       startedAtMs: Date.now(),
       settlementTimer: null,
+      settlementPending: false,
+      incompleteSettlementChecks: 0,
       updatePayload: input.updatePayload,
       activitySeenChildToolCallIds: new Set(),
       activityLastAction: null,
@@ -2555,6 +2658,10 @@ export class OpenCodeServerHarness
     this.activeSubagentWatchdogs.set(eventKey, watchdog);
     if (input.childSessionId) {
       this.childSessionWatchdogKeys.set(input.childSessionId, eventKey);
+      this.linkedChildSessions.set(input.childSessionId, {
+        parentSessionId: input.sessionId,
+        agentType: input.agentType,
+      });
     }
     this.logger.info(
       `Tracking OpenCode subagent run toolCallId=${input.toolCallId} agentType=${
@@ -2653,6 +2760,7 @@ export class OpenCodeServerHarness
     this.clearSubagentActivityFlush(watchdog);
     if (watchdog.childSessionId) {
       this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
+      this.linkedChildSessions.delete(watchdog.childSessionId);
     }
     this.activeSubagentWatchdogs.delete(eventKey);
   }
@@ -2686,6 +2794,7 @@ export class OpenCodeServerHarness
       this.activeSubagentWatchdogs.delete(eventKey);
       if (watchdog.childSessionId) {
         this.childSessionWatchdogKeys.delete(watchdog.childSessionId);
+        this.linkedChildSessions.delete(watchdog.childSessionId);
       }
     }
   }
@@ -2716,10 +2825,11 @@ export class OpenCodeServerHarness
       return;
     }
 
-    if (watchdog.settlementTimer) {
+    if (watchdog.settlementPending) {
       return;
     }
 
+    watchdog.settlementPending = true;
     const timer = setTimeout(() => {
       void this.recoverUnsettledSpawn(eventKey);
     }, this.subagentSettlementGraceMs);
@@ -2733,16 +2843,20 @@ export class OpenCodeServerHarness
       ? this.activeSubagentWatchdogs.get(eventKey)
       : undefined;
 
-    if (watchdog?.settlementTimer) {
-      clearTimeout(watchdog.settlementTimer);
+    if (watchdog?.settlementPending) {
+      if (watchdog.settlementTimer) {
+        clearTimeout(watchdog.settlementTimer);
+      }
       watchdog.settlementTimer = null;
+      watchdog.settlementPending = false;
+      watchdog.incompleteSettlementChecks = 0;
     }
   }
 
   private async recoverUnsettledSpawn(eventKey: string): Promise<void> {
     const watchdog = this.activeSubagentWatchdogs.get(eventKey);
 
-    if (!watchdog) {
+    if (!watchdog?.settlementPending) {
       return;
     }
 
@@ -2754,14 +2868,11 @@ export class OpenCodeServerHarness
       return;
     }
 
-    // Verify before acting: abort only a child whose latest assistant message
-    // is completed — finished work with an unsettled spawn is a provable leak.
-    // An in-flight latest message means the child may still be producing (a
-    // silent revival whose busy transition we missed), and a failed lookup
-    // proves nothing; in both cases never abort — re-arm and check again.
-    // Bias: a false abort kills real work, an extra wait only delays recovery
-    // of an already-stuck spawn.
-    let childFinishedItsWork = false;
+    // A completed latest message proves the spawn leaked. An incomplete latest
+    // message can itself be stale after a provider timeout, so allow one extra
+    // grace window for a silent revival before trusting the terminal event.
+    // Failed lookups still prove nothing and keep waiting indefinitely.
+    let childState: 'finished' | 'incomplete' | 'unverified' = 'unverified';
 
     try {
       const messages = await this.client.messages({
@@ -2773,9 +2884,11 @@ export class OpenCodeServerHarness
         .reverse()
         .find((message) => message.info.role === 'assistant');
 
-      childFinishedItsWork =
+      childState =
         latestAssistantMessage === undefined ||
-        Boolean(latestAssistantMessage.info.time?.completed);
+        Boolean(latestAssistantMessage.info.time?.completed)
+          ? 'finished'
+          : 'incomplete';
     } catch (error) {
       this.logger.warn(
         `Could not verify OpenCode child session ${childSessionId} before recovering an unsettled spawn; leaving it running: ${
@@ -2784,14 +2897,26 @@ export class OpenCodeServerHarness
       );
     }
 
-    if (!childFinishedItsWork) {
-      if (this.disposed || !this.activeSubagentWatchdogs.has(eventKey)) {
+    if (
+      childState === 'unverified' ||
+      (childState === 'incomplete' &&
+        watchdog.incompleteSettlementChecks <
+          MAX_INCOMPLETE_SUBAGENT_SETTLEMENT_RECHECKS)
+    ) {
+      if (
+        this.disposed ||
+        !watchdog.settlementPending ||
+        !this.activeSubagentWatchdogs.has(eventKey)
+      ) {
         return;
       }
 
-      this.logger.warn(
-        `OpenCode subagent child session ${childSessionId} reported terminal but its latest assistant message is not completed; not aborting, re-checking in ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId}`,
-      );
+      if (childState === 'incomplete') {
+        watchdog.incompleteSettlementChecks += 1;
+        this.logger.warn(
+          `OpenCode subagent child session ${childSessionId} reported terminal but its latest assistant message is not completed; not aborting, re-checking in ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId}`,
+        );
+      }
       const timer = setTimeout(() => {
         void this.recoverUnsettledSpawn(eventKey);
       }, this.subagentSettlementGraceMs);
@@ -2802,7 +2927,10 @@ export class OpenCodeServerHarness
 
     // The spawn may have settled while the verification round-tripped; a
     // removed tracker means there is nothing left to recover.
-    if (!this.activeSubagentWatchdogs.has(eventKey)) {
+    if (
+      !watchdog.settlementPending ||
+      !this.activeSubagentWatchdogs.has(eventKey)
+    ) {
       return;
     }
 
@@ -2811,7 +2939,7 @@ export class OpenCodeServerHarness
     this.stopSubagentWatchdog(eventKey);
 
     this.logger.warn(
-      `OpenCode subagent child session ${childSessionId} finished but its task tool call did not settle within ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId} agentType=${
+      `OpenCode subagent child session ${childSessionId} reported terminal but its task tool call did not settle after ${watchdog.incompleteSettlementChecks + 1} verification window(s) of ${this.subagentSettlementGraceMs}ms toolCallId=${watchdog.toolCallId} agentType=${
         watchdog.agentType ?? 'unknown'
       } title=${watchdog.title}; aborting the child session so the spawn settles`,
     );
@@ -2976,17 +3104,11 @@ export class OpenCodeServerHarness
     });
   }
 
-  /**
-   * Hidden accounting for subagent (child-session) turns: completed assistant
-   * messages on child sessions never reach the main-session finalize path, so
-   * emit their inference usage directly from the event payload. The agent name
-   * comes from the message itself, with the parent spawn watchdog's agentType
-   * as a fallback.
-   */
-  private handleChildSessionMessageUpdated(
+  private async handleChildSessionMessageUpdated(
     childSessionId: string,
     payload: OpenCodeEventPayload,
-  ): void {
+    relationship: OpenCodeChildSessionRelationship,
+  ): Promise<void> {
     if (payload.type !== 'message.updated') {
       return;
     }
@@ -3004,40 +3126,30 @@ export class OpenCodeServerHarness
     }
 
     const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-    const watchdog = eventKey
-      ? this.activeSubagentWatchdogs.get(eventKey)
-      : undefined;
-
-    watchdog?.childAssistantMessageIds.add(info.id);
+    this.activeSubagentWatchdogs
+      .get(eventKey ?? '')
+      ?.childAssistantMessageIds.add(info.id);
 
     if (!info.time?.completed) {
       return;
     }
 
-    if (this.recordedChildUsageMessageIds.has(info.id)) {
-      return;
-    }
-
-    this.recordedChildUsageMessageIds.add(info.id);
-    this.emit(
-      'runtimeInferenceUsage',
-      createInferenceUsageEvent(
-        info,
-        createTokenUsage(info),
-        this.resolveChildSessionAgentType(childSessionId),
-      ),
-    );
+    await this.finalizeAssistantMessage(info.id, {
+      sessionId: childSessionId,
+      metadata: this.childSessionMetadata(relationship),
+      agentType: relationship.agentType ?? undefined,
+      finalizeParentTurn: false,
+    });
   }
 
-  private resolveChildSessionAgentType(
-    childSessionId: string,
-  ): string | undefined {
-    const eventKey = this.childSessionWatchdogKeys.get(childSessionId);
-    const watchdog = eventKey
-      ? this.activeSubagentWatchdogs.get(eventKey)
-      : undefined;
-
-    return watchdog?.agentType ?? undefined;
+  private childSessionMetadata(
+    relationship: OpenCodeChildSessionRelationship,
+  ): Record<string, unknown> {
+    return {
+      parentSessionId: relationship.parentSessionId,
+      agentType: relationship.agentType,
+      isSubagent: true,
+    };
   }
 
   private updateExecuteToolProgress(
@@ -3360,6 +3472,7 @@ export class OpenCodeServerHarness
         signal: this.composeSessionCreateSignal(),
       });
       this.sessionId = session.id;
+      this.latestSessionMessageId = undefined;
       this.logger.info(
         `Created OpenCode session sessionId=${session.id} elapsedMs=${
           Date.now() - startedAt
@@ -3519,12 +3632,22 @@ export class OpenCodeServerHarness
   }
 
   private async validateResumedSession(sessionId: string): Promise<boolean> {
+    this.latestSessionMessageId = undefined;
+
     try {
-      await this.client.messages({
+      const messages = await this.client.messages({
         sessionId,
-        limit: 1,
+        // A failed prompt can be newer by wall-clock time while still sorting
+        // below an older assistant by id, so inspect a short tail and keep the
+        // greatest id rather than trusting the first result alone.
+        limit: 20,
         signal: this.eventAbortController.signal,
       });
+
+      for (const message of messages) {
+        this.recordSessionMessageId(message.info.id);
+      }
+
       return true;
     } catch (error) {
       this.logger.warn(
@@ -3576,8 +3699,68 @@ export class OpenCodeServerHarness
 
     this.activeWorkflowSkill = transition.nextSkill;
 
+    if (transition.nextSkill === CAPTURE_VISUAL_PROOF_SKILL) {
+      this.startVisualProofTimeout();
+    } else {
+      this.clearVisualProofTimeout();
+    }
+
     if (transition.queueContinuation) {
       this.enqueuePlanExitContinuation();
+    }
+  }
+
+  private startVisualProofTimeout(): void {
+    if (this.visualProofTimeoutTimer) {
+      return;
+    }
+
+    this.visualProofAttempt += 1;
+    const timer = setTimeout(() => {
+      this.visualProofTimeoutTimer = null;
+      void this.recoverVisualProofTimeout();
+    }, this.visualProofTimeoutMs);
+    timer.unref?.();
+    this.visualProofTimeoutTimer = timer;
+  }
+
+  private clearVisualProofTimeout(): void {
+    if (!this.visualProofTimeoutTimer) {
+      return;
+    }
+
+    clearTimeout(this.visualProofTimeoutTimer);
+    this.visualProofTimeoutTimer = null;
+  }
+
+  private async recoverVisualProofTimeout(): Promise<void> {
+    if (
+      this.disposed ||
+      !this.inFlight ||
+      this.activeWorkflowSkill !== CAPTURE_VISUAL_PROOF_SKILL
+    ) {
+      return;
+    }
+
+    this.logger.warn(
+      `OpenCode visual proof step exceeded its shared ${this.visualProofTimeoutMs}ms deadline; aborting the current proof turn and resuming with a blocked proof handoff`,
+    );
+    // The replay is a parent-workflow continuation, not a new proof attempt.
+    this.activeWorkflowSkill = null;
+    const queuedId = this.prompts.enqueue({
+      text: VISUAL_PROOF_TIMEOUT_RECOVERY_PROMPT,
+      visibleInTranscript: false,
+    });
+    this.prompts.prioritize(queuedId);
+
+    try {
+      await this.interruptForQueuedReplay();
+    } catch (error) {
+      this.logger.error(
+        `Failed to recover the timed-out OpenCode visual proof step: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
   }
 
@@ -3620,7 +3803,12 @@ export class OpenCodeServerHarness
   private async submitPrompt(prompt: PromptInput): Promise<void> {
     this.suppressAssistantOutputUntilNextPrompt = false;
     const sessionId = await this.ensureSession(prompt.text);
-    const messageID = createOpenCodeMessageId();
+    // OpenCode determines whether a user turn is pending by comparing message
+    // IDs lexicographically. A snapshot can resume on a process whose clock or
+    // generator state trails the process that wrote the restored assistant
+    // message, so seed the new ID from the session history validated above.
+    const messageID = createOpenCodeMessageId(this.latestSessionMessageId);
+    this.recordSessionMessageId(messageID);
     const nonEmptyImages = (prompt.images ?? []).filter(
       (image) => image.trim().length > 0,
     );
@@ -3718,13 +3906,18 @@ export class OpenCodeServerHarness
     const sessionId = eventSessionId(payload);
 
     if (sessionId && this.sessionId && sessionId !== this.sessionId) {
+      const relationship = this.linkedChildSessions.get(sessionId);
+      if (!relationship) {
+        return;
+      }
+
       // Child-session events are turn progress for the parent too: they mean
       // OpenCode is alive executing a spawn the in-flight turn is waiting on.
       this.stallWatchdogs.noteProgress();
 
-      // Child-session (subagent) events are otherwise dropped here; fold tool
-      // activity into the parent spawn row and record hidden inference usage
-      // before returning. A child session going idle or erroring is its
+      // Keep the parent spawn summary while routing linked child messages and
+      // tools through the same envelope pipeline as main-session events. A
+      // child session going idle or erroring is its
       // terminal signal — handled per launch kind by
       // handleChildSessionTerminal — and must never finish the parent turn.
       if (payload.type === 'session.idle' || payload.type === 'session.error') {
@@ -3734,7 +3927,16 @@ export class OpenCodeServerHarness
 
       this.clearSubagentSettlement(sessionId);
       this.handleChildSessionToolActivity(sessionId, payload);
-      this.handleChildSessionMessageUpdated(sessionId, payload);
+      const metadata = this.childSessionMetadata(relationship);
+      if (payload.type === 'message.part.updated') {
+        this.handleMessagePartUpdated(payload, metadata);
+      } else if (payload.type === 'message.updated') {
+        await this.handleChildSessionMessageUpdated(
+          sessionId,
+          payload,
+          relationship,
+        );
+      }
       return;
     }
 
@@ -4112,8 +4314,14 @@ export class OpenCodeServerHarness
     const attemptNumber = this.providerErrorRecoveryCounts[recovery.kind];
     const delayMs = resolveOpenCodeProviderErrorRetryDelayMs({
       attemptNumber,
-      baseDelayMs: this.providerErrorBaseDelayMs,
-      maxDelayMs: this.providerErrorMaxDelayMs,
+      baseDelayMs:
+        recovery.kind === 'provider_error'
+          ? this.providerErrorBaseDelayMs
+          : INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
+      maxDelayMs:
+        recovery.kind === 'provider_error'
+          ? this.providerErrorMaxDelayMs
+          : INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
     });
     const errorSummary = summarizeOpenCodeProviderError(error);
     const retryAtMs = Date.now() + delayMs;
@@ -4333,7 +4541,10 @@ export class OpenCodeServerHarness
     return this.providerRateLimitRetryTimer !== null;
   }
 
-  private handleMessagePartUpdated(payload: OpenCodeEventPayload): void {
+  private handleMessagePartUpdated(
+    payload: OpenCodeEventPayload,
+    metadata?: Record<string, unknown>,
+  ): void {
     const properties = asRecord(payload.properties);
     const part = asRecord(properties?.part) as OpenCodePart | null;
 
@@ -4399,6 +4610,7 @@ export class OpenCodeServerHarness
         sessionId,
         messageId,
         text: delta,
+        metadata,
       });
       return;
     }
@@ -4419,23 +4631,32 @@ export class OpenCodeServerHarness
         sessionId,
         messageId,
         text: delta,
+        metadata,
       });
       return;
     }
 
     if (part.type === 'tool') {
       const toolPart = part as OpenCodeToolPart;
-      this.handleToolPartUpdated(toolPart, { sessionId, messageId, partId });
+      this.handleToolPartUpdated(
+        toolPart,
+        { sessionId, messageId, partId },
+        metadata,
+      );
       return;
     }
 
     if (part.type === 'subtask') {
       const subtaskPart = part as OpenCodeSubtaskPart;
-      this.handleSubtaskPartUpdated(subtaskPart, {
-        sessionId,
-        messageId,
-        partId,
-      });
+      this.handleSubtaskPartUpdated(
+        subtaskPart,
+        {
+          sessionId,
+          messageId,
+          partId,
+        },
+        metadata,
+      );
     }
   }
 
@@ -4446,14 +4667,13 @@ export class OpenCodeServerHarness
       messageId?: string;
       partId: string;
     },
+    metadata?: Record<string, unknown>,
   ): void {
     const normalized = normalizeOpenCodeToolPart(
       toolPart,
       context,
       this.knownMcpServerNames,
     );
-
-    this.trackActiveWorkflowSkill(toolPart, context.sessionId);
 
     if (isOpenCodeQuestionTool(normalized.toolName)) {
       this.registerQuestionToolRequest(toolPart, context, normalized.status);
@@ -4465,6 +4685,56 @@ export class OpenCodeServerHarness
       messageId: context.messageId,
       toolCallId: normalized.toolCallId,
     });
+
+    if (!this.persistedToolResultKeys.has(eventKey)) {
+      this.trackActiveWorkflowSkill(toolPart, context.sessionId);
+    }
+
+    if (
+      context.sessionId === this.sessionId &&
+      isOpenCodeSubagentTaskTool(toolPart.tool ?? '')
+    ) {
+      // Bind even pending calls to their original attempt. Late updates from
+      // an earlier judge must not end a fresh proof deadline.
+      if (!this.taskToolProofAttempts.has(eventKey)) {
+        this.taskToolProofAttempts.set(
+          eventKey,
+          this.visualProofTimeoutTimer ? this.visualProofAttempt : null,
+        );
+      }
+      if (
+        this.visualProofTimeoutTimer &&
+        this.taskToolProofAttempts.get(eventKey) === this.visualProofAttempt &&
+        !this.persistedToolResultKeys.has(eventKey) &&
+        extractOpenCodeTaskToolAgentType(toolPart) === 'judge'
+      ) {
+        // The judge consumes the finished proof result, including no-op or
+        // blocked results. Queued or failed judges are not capture timeouts,
+        // and uploads alone are not a completion boundary.
+        this.clearVisualProofTimeout();
+        this.activeWorkflowSkill = null;
+      }
+    }
+
+    if (
+      isFailedTerminalChatReply(normalized) &&
+      !this.terminalChatReplyDeliveryFailed &&
+      !this.persistedToolResultKeys.has(eventKey)
+    ) {
+      const failure = recordChatReplyDeliveryFailure({
+        retryable: true,
+        sessionId: context.sessionId,
+        stateFilePath:
+          this.commandEnv?.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
+      });
+
+      if (failure.terminalDeliveryFailure) {
+        this.terminalChatReplyDeliveryFailed = true;
+        this.logger.warn(
+          `OpenCode terminal chat reply failed ${MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL} times; completing the turn and handing delivery back to the platform. Last error: ${normalized.error ?? normalized.output ?? 'unknown error'}`,
+        );
+      }
+    }
 
     // Capture the final activity summary before the terminal status disarms
     // the watchdog, so the settled spawn row keeps its receipt.
@@ -4513,6 +4783,7 @@ export class OpenCodeServerHarness
         status: normalized.status,
         payload: normalized.callPayload,
         contentText: normalized.contentText,
+        metadata,
       });
     }
 
@@ -4535,6 +4806,7 @@ export class OpenCodeServerHarness
             subagentActivity: terminalSubagentActivity,
           }
         : normalized.updatePayload,
+      metadata,
     });
 
     if (
@@ -4556,6 +4828,7 @@ export class OpenCodeServerHarness
               subagentActivity: terminalSubagentActivity,
             }
           : normalized.resultPayload,
+        metadata,
       });
     }
   }
@@ -4699,6 +4972,7 @@ export class OpenCodeServerHarness
       messageId?: string;
       partId: string;
     },
+    metadata?: Record<string, unknown>,
   ): void {
     const normalized = normalizeOpenCodeSubtaskPart(subtaskPart, context);
     const eventKey = buildOpenCodeToolEventKey({
@@ -4745,6 +5019,7 @@ export class OpenCodeServerHarness
       status: normalized.status,
       payload: normalized.callPayload,
       contentText: normalized.contentText,
+      metadata,
     });
   }
 
@@ -4758,6 +5033,8 @@ export class OpenCodeServerHarness
     if (!info || !info.id) {
       return;
     }
+
+    this.recordSessionMessageId(info.id);
 
     const role = parseOpenCodeMessageRole(info.role);
 
@@ -4810,6 +5087,9 @@ export class OpenCodeServerHarness
 
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
+    // capture-visual-proof is a turn-scoped handoff. Once that turn returns,
+    // its deadline must not carry into the parent's delivery turn.
+    this.clearVisualProofTimeout();
     // A completed turn means the model recovered past any prior rate-limit
     // or provider-error hop; reset so a later failure gets a fresh bounded
     // automatic-retry budget.
@@ -4823,7 +5103,14 @@ export class OpenCodeServerHarness
 
     if (sessionId) {
       const stopDecision = this.evaluateSlackStopHook(sessionId);
-      let missingChatCloseoutReminderCount: number | null = null;
+      let missingChatCloseoutReminderCount =
+        this.terminalChatReplyDeliveryFailed &&
+        hasTerminalChatReplyDeliveryFailure({
+          stateFilePath:
+            this.commandEnv?.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
+        })
+          ? MAX_RETRYABLE_DELIVERY_FAILURES_BEFORE_TERMINAL
+          : null;
 
       if (stopDecision.blocked) {
         const reason =
@@ -4879,6 +5166,7 @@ export class OpenCodeServerHarness
       }
 
       this.stopHookReminderCount = 0;
+      this.terminalChatReplyDeliveryFailed = false;
 
       const completionText =
         missingChatCloseoutReminderCount !== null && !finalized?.text.trim()
@@ -5040,8 +5328,14 @@ export class OpenCodeServerHarness
 
   private async finalizeAssistantMessage(
     messageId: string,
+    options?: {
+      sessionId?: string;
+      metadata?: Record<string, unknown>;
+      agentType?: string;
+      finalizeParentTurn?: boolean;
+    },
   ): Promise<FinalizedAssistantTurn | null> {
-    const sessionId = this.sessionId;
+    const sessionId = options?.sessionId ?? this.sessionId;
 
     if (!sessionId || this.persistedMessageIds.has(messageId)) {
       return null;
@@ -5053,7 +5347,7 @@ export class OpenCodeServerHarness
       signal: this.eventAbortController.signal,
     });
 
-    return this.persistAssistantMessage(message);
+    return this.persistAssistantMessage(message, options);
   }
 
   /**
@@ -5136,7 +5430,15 @@ export class OpenCodeServerHarness
 
   private persistAssistantMessage(
     message: OpenCodeSessionMessage,
+    options?: {
+      metadata?: Record<string, unknown>;
+      agentType?: string;
+      finalizeParentTurn?: boolean;
+    },
   ): FinalizedAssistantTurn {
+    if (options?.finalizeParentTurn !== false) {
+      this.recordSessionMessageId(message.info.id);
+    }
     const text = extractAssistantText(message);
     const tokenUsage = createTokenUsage(message.info);
     const finalized = {
@@ -5156,6 +5458,7 @@ export class OpenCodeServerHarness
         messageId: message.info.id,
         text: reasoning,
         hadDelta: this.streamedReasoningMessageIds.has(message.info.id),
+        metadata: options?.metadata,
       });
     }
     this.runtimeEvents.assistantMessage({
@@ -5163,6 +5466,7 @@ export class OpenCodeServerHarness
       messageId: message.info.id,
       text,
       hadDelta: this.streamedMessageIds.has(message.info.id),
+      metadata: options?.metadata,
     });
     this.runtimeEvents.usageUpdate({
       sessionId: message.info.sessionID,
@@ -5172,11 +5476,22 @@ export class OpenCodeServerHarness
     });
     this.emit(
       'runtimeInferenceUsage',
-      createInferenceUsageEvent(message.info, tokenUsage),
+      createInferenceUsageEvent(message.info, tokenUsage, options?.agentType),
     );
-    this.finalizedAssistantTurn = finalized;
+    if (options?.finalizeParentTurn !== false) {
+      this.finalizedAssistantTurn = finalized;
+    }
 
     return finalized;
+  }
+
+  private recordSessionMessageId(messageId: string | undefined): void {
+    if (
+      messageId &&
+      (!this.latestSessionMessageId || messageId > this.latestSessionMessageId)
+    ) {
+      this.latestSessionMessageId = messageId;
+    }
   }
 
   private scheduleQueuedPromptRetry(): void {
@@ -5265,6 +5580,7 @@ export class OpenCodeServerHarness
 
     const result = await this.beforeQueuedPrompt({
       userId: prompt.userId,
+      clientMessageId: prompt.clientMessageId,
       kind: 'queuedPrompt',
     });
 

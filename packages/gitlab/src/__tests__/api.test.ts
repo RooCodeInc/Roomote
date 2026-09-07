@@ -1240,6 +1240,7 @@ describe('ensureGitLabWebhooksForProjects', () => {
     expect(createCall?.[1]?.body).toContain('"merge_requests_events":true');
     expect(createCall?.[1]?.body).toContain('"issues_events":true');
     expect(createCall?.[1]?.body).toContain('"pipeline_events":true');
+    expect(createCall?.[1]?.body).toContain('"push_events":true');
     expect(createCall?.[1]?.body).toContain('"token":"webhook-secret"');
 
     const updateCall = fetchMock.mock.calls.find(

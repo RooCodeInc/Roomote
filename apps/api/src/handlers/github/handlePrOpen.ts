@@ -7,6 +7,11 @@ import {
   TaskPayloadKind,
 } from '@roomote/types';
 import { enqueueTask } from '@roomote/cloud-agents/server';
+import { and, db, eq, taskPullRequests } from '@roomote/db/server';
+import {
+  acquireGithubPrReviewLifecycleLock,
+  publishGithubPrReviewCheck,
+} from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
@@ -18,6 +23,7 @@ import type {
 } from './types';
 import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { getBackgroundGithubTaskProperties } from './backgroundGithubTaskProperties';
+import { getCurrentGitHubPrHeadSha } from './currentPrHead';
 import { getReviewTaskRelayPayload } from './reviewTaskRelayPayload';
 
 export async function handlePrOpen(
@@ -30,7 +36,12 @@ export async function handlePrOpen(
     | WebhookPullRequestOpened
     | WebhookPullRequestReadyForReview
     | WebhookPullRequestReopened,
-  options?: { isDraftToReady?: boolean },
+  options?: {
+    isDraftToReady?: boolean;
+    isExplicitReviewRequest?: boolean;
+    expectedGithubCheckRunId?: number;
+    expectedHeadSha?: string;
+  },
 ): Promise<WebhookResponse> {
   if (pr.locked) {
     return { status: 'error', message: 'PR is locked' };
@@ -51,6 +62,10 @@ export async function handlePrOpen(
   const { targets: allTargets } = result;
 
   const targets = allTargets.filter((target) => {
+    if (options?.isExplicitReviewRequest) {
+      return true;
+    }
+
     const settings = target.settings as PrReviewSettings | null;
     const reviewOnCommit =
       settings?.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit;
@@ -83,43 +98,120 @@ export async function handlePrOpen(
       branchName: pr.head.ref,
       prBody: pr.body ?? null,
       reviewerSettings: target.settings,
+      repositoryId: target.repo.id,
+      host: target.repo.host ?? toHostFromUrl(pr.html_url),
     });
 
-    return enqueueTask({
-      task: {
-        type: TaskPayloadKind.GithubPrReview,
-        ...getBackgroundGithubTaskProperties(target.properties),
-        payload: {
-          repo: repository.full_name,
-          prNumber: pr.number,
-          prTitle: pr.title,
-          prUrl: pr.html_url,
-          headSha: pr.head.sha,
-          branchName: pr.head.ref,
-          ...relayPayload,
-        } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>,
-      },
-      initiator: {
-        kind: 'automation',
-        key: 'review_code',
-        actor: { externalId: String(sender.id), displayName: sender.login },
-      },
-      workflow: 'pr_review',
-      surface: 'github',
-      trigger: 'webhook',
-      prLinkage: {
-        provider: 'github',
-        host: target.repo.host ?? toHostFromUrl(pr.html_url) ?? 'github.com',
-        repositoryId: target.repo.id,
+    const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+      repository.full_name,
+      pr.number,
+    );
+    if (!releaseLifecycleLock) {
+      throw new Error(
+        `Timed out serializing PR review launch for ${repository.full_name}#${pr.number}`,
+      );
+    }
+
+    try {
+      releaseLifecycleLock.signal.throwIfAborted();
+
+      if (options?.expectedGithubCheckRunId) {
+        const currentLinkage = await db.query.taskPullRequests.findFirst({
+          where: and(
+            eq(taskPullRequests.sourceControlProvider, 'github'),
+            eq(taskPullRequests.repository, repository.full_name),
+            eq(taskPullRequests.prNumber, pr.number),
+            eq(
+              taskPullRequests.githubCheckRunId,
+              options.expectedGithubCheckRunId,
+            ),
+          ),
+          columns: { id: true },
+        });
+
+        if (!currentLinkage) {
+          console.log(
+            `[handlePrOpen] ${repository.full_name}#${pr.number} -> skip_replaced_rerequested_check`,
+          );
+          return null;
+        }
+      }
+
+      const headSha = await getCurrentGitHubPrHeadSha({
+        installationId: installation!.id,
         repository: repository.full_name,
         prNumber: pr.number,
-        prUrl: pr.html_url,
-        prTitle: pr.title,
-        prSha: pr.head.sha,
-        prBaseRef: pr.base?.ref ?? null,
-        prBaseSha: pr.base?.sha ?? null,
-      },
-    });
+      });
+
+      if (!headSha) {
+        throw new Error(
+          `Could not resolve the live head for ${repository.full_name}#${pr.number}.`,
+        );
+      }
+
+      if (options?.expectedHeadSha && headSha !== options.expectedHeadSha) {
+        console.log(
+          `[handlePrOpen] ${repository.full_name}#${pr.number} -> skip_stale_rerequested_check`,
+        );
+        return null;
+      }
+
+      const launch = await enqueueTask({
+        task: {
+          type: TaskPayloadKind.GithubPrReview,
+          ...getBackgroundGithubTaskProperties(target.properties),
+          payload: {
+            repo: repository.full_name,
+            prNumber: pr.number,
+            prTitle: pr.title,
+            prUrl: pr.html_url,
+            headSha,
+            branchName: pr.head.ref,
+            ...relayPayload,
+          } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>,
+        },
+        initiator: {
+          kind: 'automation',
+          key: 'review_code',
+          actor: { externalId: String(sender.id), displayName: sender.login },
+        },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: {
+          provider: 'github',
+          host: target.repo.host ?? toHostFromUrl(pr.html_url) ?? 'github.com',
+          repositoryId: target.repo.id,
+          repository: repository.full_name,
+          prNumber: pr.number,
+          prUrl: pr.html_url,
+          prTitle: pr.title,
+          prSha: headSha,
+          prBaseRef: pr.base?.ref ?? null,
+          prBaseSha: pr.base?.sha ?? null,
+        },
+      });
+
+      if (
+        target.settings?.publishGithubCheck ||
+        options?.isExplicitReviewRequest
+      ) {
+        releaseLifecycleLock.signal.throwIfAborted();
+        await publishGithubPrReviewCheck({
+          installationId: installation!.id,
+          repository: repository.full_name,
+          prNumber: pr.number,
+          headSha,
+          taskId: launch.taskId,
+          runId: launch.id,
+          signal: releaseLifecycleLock.signal,
+        });
+      }
+
+      return launch;
+    } finally {
+      await releaseLifecycleLock();
+    }
   });
 
   return {

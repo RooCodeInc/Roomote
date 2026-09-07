@@ -4,18 +4,21 @@ import type { SlackFile, WorkObjectMetadata, WorkObjectUnfurl } from '../types';
 import { SlackNotifier } from '../slack-notifier';
 import { Env } from '@roomote/env';
 
-const { apiCallMock, chatUnfurlMock, WebClientMock } = vi.hoisted(() => ({
-  apiCallMock: vi.fn(),
-  chatUnfurlMock: vi.fn(),
-  WebClientMock: vi.fn().mockImplementation(function () {
-    return {
-      apiCall: apiCallMock,
-      chat: {
-        unfurl: chatUnfurlMock,
-      },
-    };
-  }),
-}));
+const { apiCallMock, chatUnfurlMock, chatStopStreamMock, WebClientMock } =
+  vi.hoisted(() => ({
+    apiCallMock: vi.fn(),
+    chatUnfurlMock: vi.fn(),
+    chatStopStreamMock: vi.fn(),
+    WebClientMock: vi.fn().mockImplementation(function () {
+      return {
+        apiCall: apiCallMock,
+        chat: {
+          unfurl: chatUnfurlMock,
+          stopStream: chatStopStreamMock,
+        },
+      };
+    }),
+  }));
 
 type GlobalWithFetchMock = {
   fetch: ReturnType<typeof vi.fn>;
@@ -49,6 +52,104 @@ describe('SlackNotifier', () => {
     }
 
     process.env.SLACK_API_BASE_URL = originalBaseUrl;
+  });
+
+  describe('stopMessageStream', () => {
+    it('passes explicit processing to Slack without changing unspecified caller defaults', async () => {
+      chatStopStreamMock.mockResolvedValue({ ok: true });
+      await expect(
+        notifier.stopMessageStream({
+          channel: 'C123',
+          ts: '100.001',
+          sessionStatus: 'processing',
+        }),
+      ).resolves.toBe(true);
+      expect(chatStopStreamMock).toHaveBeenLastCalledWith({
+        channel: 'C123',
+        ts: '100.001',
+        session_status: 'processing',
+      });
+      await notifier.stopMessageStream({ channel: 'C123', ts: '100.001' });
+      expect(chatStopStreamMock).toHaveBeenLastCalledWith({
+        channel: 'C123',
+        ts: '100.001',
+      });
+    });
+  });
+
+  describe('setAgentSessionStatus', () => {
+    it('sets a titled agent session status through the Web API', async () => {
+      apiCallMock.mockResolvedValue({
+        ok: true,
+        title: 'Investigate Slack agent status',
+      });
+
+      await expect(
+        notifier.setAgentSessionStatus({
+          channel: 'C123',
+          threadTs: '100.001',
+          status: 'processing',
+          title: 'Investigate Slack agent status',
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        title: 'Investigate Slack agent status',
+      });
+
+      expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.setStatus', {
+        channel_id: 'C123',
+        thread_ts: '100.001',
+        status: 'processing',
+        title: 'Investigate Slack agent status',
+      });
+    });
+
+    it('treats Slack status rejections as best-effort failures', async () => {
+      apiCallMock.mockResolvedValue({ ok: false, error: 'feature_disabled' });
+
+      await expect(
+        notifier.setAgentSessionStatus({
+          channel: 'C123',
+          threadTs: '100.001',
+          status: 'active',
+        }),
+      ).resolves.toEqual({ ok: false });
+    });
+
+    it('renames an existing agent session through the Web API', async () => {
+      apiCallMock.mockResolvedValue({ ok: true });
+
+      await expect(
+        notifier.renameAgentSession({
+          channel: 'C123',
+          threadTs: '100.001',
+          title: 'Investigate Slack agent status',
+        }),
+      ).resolves.toEqual({ ok: true });
+
+      expect(apiCallMock).toHaveBeenCalledWith('agents.sessions.rename', {
+        channel_id: 'C123',
+        thread_ts: '100.001',
+        title: 'Investigate Slack agent status',
+      });
+    });
+
+    it('exposes invalid title rejections from Slack platform errors', async () => {
+      apiCallMock.mockRejectedValue(
+        Object.assign(new Error('An API error occurred: invalid_name'), {
+          code: 'slack_webapi_platform_error',
+          data: { ok: false, error: 'invalid_name' },
+        }),
+      );
+
+      await expect(
+        notifier.renameAgentSession({
+          channel: 'C123',
+          threadTs: '100.001',
+          title: 'Invalid title',
+        }),
+      ).resolves.toEqual({ ok: false, error: 'invalid_name' });
+    });
   });
 
   describe('getDirectMessageUserId', () => {
@@ -95,6 +196,7 @@ describe('SlackNotifier', () => {
       const ts = await notifier.postMessage({
         channel: 'C123',
         text: 'hello world',
+        client_msg_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       });
 
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
@@ -106,7 +208,11 @@ describe('SlackNotifier', () => {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           }),
-          body: JSON.stringify({ channel: 'C123', text: 'hello world' }),
+          body: JSON.stringify({
+            channel: 'C123',
+            text: 'hello world',
+            client_msg_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          }),
         }),
       );
 
@@ -1163,6 +1269,14 @@ describe('SlackNotifier', () => {
         filetype: 'svg',
       };
 
+      const misleadingFilename: SlackFile = {
+        ...smallImage,
+        id: 'F5',
+        name: 'document.png',
+        mimetype: 'application/pdf',
+        filetype: 'pdf',
+      };
+
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: true,
         arrayBuffer: async () => new TextEncoder().encode('fake-image').buffer,
@@ -1173,6 +1287,7 @@ describe('SlackNotifier', () => {
         largeImage,
         textFile,
         svgFile,
+        misleadingFilename,
       ]);
 
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
@@ -1548,6 +1663,17 @@ describe('SlackNotifier', () => {
         [
           'can you see this?',
           '',
+          'Forwarded Slack message:',
+          'Context:',
+          '- Author: Annie Easley',
+          '- Channel: C0EXAMPLE01',
+          'Text:',
+          'Forwarded body',
+        ].join('\n'),
+      );
+      expect(message?.authoredText).toBe('can you see this?');
+      expect(message?.agentContext).toBe(
+        [
           'Forwarded Slack message:',
           'Context:',
           '- Author: Annie Easley',
@@ -3111,6 +3237,65 @@ describe('SlackNotifier', () => {
       expect(getUsersInfoSpy).toHaveBeenCalledWith(['U123', 'U456']);
       expect(output).toBe('Hi @Alice and @Alice plus @Bob.');
     });
+
+    it('replaces the installed Roomote app mention without fetching user info', async () => {
+      notifier = new SlackNotifier(token, {
+        botUserId: 'UROOMOTE',
+        botName: 'Roomote',
+      });
+      const getUsersInfoSpy = vi.spyOn(
+        SlackNotifier.prototype as unknown as {
+          getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+        },
+        'getUsersInfo',
+      );
+
+      const output = await notifier.replaceMentionsWithNames(
+        '<@UROOMOTE> please inspect this',
+      );
+
+      expect(output).toBe('@Roomote please inspect this');
+      expect(getUsersInfoSpy).not.toHaveBeenCalled();
+    });
+
+    it('uses installation metadata for Roomote while resolving user mentions normally', async () => {
+      notifier = new SlackNotifier(token, {
+        botUserId: 'UROOMOTE',
+        appName: 'Roomote',
+      });
+      const getUsersInfoSpy = vi
+        .spyOn(
+          SlackNotifier.prototype as unknown as {
+            getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+          },
+          'getUsersInfo',
+        )
+        .mockResolvedValue(new Map([['U123', 'Alice']]));
+
+      const output = await notifier.replaceMentionsWithNames(
+        '<@U123> tagged <@UROOMOTE>',
+      );
+
+      expect(getUsersInfoSpy).toHaveBeenCalledWith(['U123']);
+      expect(output).toBe('@Alice tagged @Roomote');
+    });
+
+    it('falls back to user info when installation metadata has no readable bot name', async () => {
+      notifier = new SlackNotifier(token, { botUserId: 'UROOMOTE' });
+      const getUsersInfoSpy = vi
+        .spyOn(
+          SlackNotifier.prototype as unknown as {
+            getUsersInfo(userIds: string[]): Promise<Map<string, string>>;
+          },
+          'getUsersInfo',
+        )
+        .mockResolvedValue(new Map([['UROOMOTE', 'Roomote']]));
+
+      const output = await notifier.replaceMentionsWithNames('<@UROOMOTE>');
+
+      expect(getUsersInfoSpy).toHaveBeenCalledWith(['UROOMOTE']);
+      expect(output).toBe('@Roomote');
+    });
   });
 
   describe('normalizeIncomingText', () => {
@@ -3124,6 +3309,18 @@ describe('SlackNotifier', () => {
       );
 
       expect(output).toBe('Hi @Alice [Example](https://example.com/path)');
+    });
+
+    it('keeps raw mention tokens when preserveMentions is set', async () => {
+      const replaceSpy = vi.spyOn(notifier, 'replaceMentionsWithNames');
+
+      const output = await notifier.normalizeIncomingText(
+        'Hi <@U123> <https://example.com/path|Example>',
+        { preserveMentions: true },
+      );
+
+      expect(output).toBe('Hi <@U123> [Example](https://example.com/path)');
+      expect(replaceSpy).not.toHaveBeenCalled();
     });
   });
 

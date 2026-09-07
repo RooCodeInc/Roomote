@@ -1,8 +1,8 @@
 'use client';
 
 import { memo, useRef, useEffect, useState } from 'react';
-import { LayoutGrid } from 'lucide-react';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
+import { LayoutGrid } from '@/components/system';
 
 import { type TaskArtifact, useTaskSidePanel } from '../hooks';
 

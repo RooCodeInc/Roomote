@@ -25,6 +25,7 @@ const {
   mockRecordSnapshotResumeEvent,
   mockResolveSlackTaskRunRouting,
   mockResolveTaskRunSourceControlProviders,
+  mockRebindPendingSlackRequestUserInputRun,
   onBootstrapFailureMock,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
@@ -50,6 +51,7 @@ const {
   mockRecordSnapshotResumeEvent: vi.fn(),
   mockResolveSlackTaskRunRouting: vi.fn(),
   mockResolveTaskRunSourceControlProviders: vi.fn(),
+  mockRebindPendingSlackRequestUserInputRun: vi.fn(),
   onBootstrapFailureMock: vi.fn(),
 }));
 
@@ -69,6 +71,11 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: (...args: unknown[]) => mockReleaseTaskRun(...args),
+}));
+
+vi.mock('@roomote/slack', () => ({
+  rebindPendingSlackRequestUserInputRun: (...args: unknown[]) =>
+    mockRebindPendingSlackRequestUserInputRun(...args),
 }));
 
 vi.mock('../update-task-run', () => ({
@@ -178,6 +185,7 @@ describe('dequeueResumeTaskRun', () => {
       threadTs: null,
       route: { kind: 'task', webPath: null },
     });
+    mockRebindPendingSlackRequestUserInputRun.mockResolvedValue(false);
     mockReportBootstrapFailure.mockImplementation(
       ({
         callback,
@@ -248,7 +256,10 @@ describe('dequeueResumeTaskRun', () => {
     });
     expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(
       { ORG_ENV: '1' },
-      { sourceControlProvider: ['gitlab', 'github'] },
+      {
+        sourceControlProvider: ['gitlab', 'github'],
+        includeSandboxOpenRouterApiKey: true,
+      },
     );
     expect(result?.harnessInstructions).toBe('preserved instructions');
     expect(result?.sourceSelectedRepositories).toEqual([
@@ -315,6 +326,12 @@ describe('dequeueResumeTaskRun', () => {
 
     expect(result?.setupOnboardingTask).toBe(true);
     expect(mockResolveSlackTaskRunRouting).toHaveBeenCalledWith(resumeRun);
+    expect(mockRebindPendingSlackRequestUserInputRun).toHaveBeenCalledWith({
+      threadId: '1710000000.000100',
+      taskId: 'task-101',
+      sourceRunId: 99,
+      resumedRunId: 101,
+    });
   });
 
   it('persists worker runtime metadata when the resume worker claims the run', async () => {

@@ -5,6 +5,7 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 const AVATAR_SIZES = {
+  xs: 'size-5 text-[9px]',
   sm: 'size-6 text-[10px]',
   md: 'size-8 text-xs',
   lg: 'size-10 text-sm',
@@ -99,7 +100,7 @@ export const Avatar = React.forwardRef<HTMLDivElement, AvatarProps>(
         aria-label={label || undefined}
         aria-hidden={label ? undefined : true}
         className={cn(
-          'flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-muted-foreground font-medium uppercase',
+          'flex shrink-0 items-center justify-center overflow-clip rounded-full border border-border bg-muted text-muted-foreground font-medium uppercase',
           AVATAR_SIZES[size],
           className,
         )}

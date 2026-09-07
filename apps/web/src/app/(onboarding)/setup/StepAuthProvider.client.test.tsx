@@ -77,29 +77,19 @@ describe('StepAuthProvider', () => {
     expect(onContinue).not.toHaveBeenCalled();
   });
 
-  it('disables Back and the skip link while a selection is being saved', () => {
-    const onBack = vi.fn();
+  it('disables the skip action while a selection is being saved', () => {
     const onSkip = vi.fn();
 
     render(
-      <StepAuthProvider
-        onContinue={vi.fn()}
-        onBack={onBack}
-        onSkip={onSkip}
-        disabled={true}
-      />,
+      <StepAuthProvider onContinue={vi.fn()} onSkip={onSkip} disabled={true} />,
     );
 
-    const backButton = screen.getByRole('button', { name: /back/i });
     const skipButton = screen.getByRole('button', { name: 'Do this later' });
 
-    expect(backButton).toBeDisabled();
     expect(skipButton).toBeDisabled();
 
-    fireEvent.click(backButton);
     fireEvent.click(skipButton);
 
-    expect(onBack).not.toHaveBeenCalled();
     expect(onSkip).not.toHaveBeenCalled();
   });
 

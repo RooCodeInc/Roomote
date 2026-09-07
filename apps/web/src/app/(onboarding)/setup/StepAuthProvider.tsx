@@ -9,10 +9,6 @@ import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
-import { SetupFooter } from './SetupFooter';
-import { getSetupStepDefinition } from './types';
-
-const AUTH_PROVIDER_STEP = getSetupStepDefinition('auth-provider');
 export type AdditionalCommunicationProviderChoice = 'telegram' | 'discord';
 export type CommunicationProviderChoice =
   | SetupAuthProviderId
@@ -28,7 +24,6 @@ const ADDITIONAL_COMMUNICATION_PROVIDERS: Record<
 
 export function StepAuthProvider({
   onContinue,
-  onBack,
   onSkip,
   additionalProviders = [],
   disabled = false,
@@ -47,7 +42,7 @@ export function StepAuthProvider({
   ];
   return (
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
-      <StepTitle text={AUTH_PROVIDER_STEP.title} />
+      <StepTitle text="Communication provider" />
       <div className="space-y-4 max-w-xl">
         <p>
           Roomote needs a messaging tool to talk to you and your team directly.
@@ -80,20 +75,18 @@ export function StepAuthProvider({
               </Button>
             );
           })}
-        </div>
-
-        <SetupFooter onBack={onBack} backDisabled={disabled}>
           {onSkip ? (
-            <button
-              type="button"
-              className="cursor-pointer text-sm text-muted-foreground underline disabled:cursor-not-allowed disabled:opacity-50"
+            <Button
+              className="w-full py-5"
+              variant="outline"
               onClick={onSkip}
               disabled={disabled}
             >
-              Do this later
-            </button>
+              <span className="font-medium grow text-left">Do this later</span>
+              <ArrowRight />
+            </Button>
           ) : null}
-        </SetupFooter>
+        </div>
       </div>
     </div>
   );

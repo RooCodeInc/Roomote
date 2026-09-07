@@ -251,3 +251,46 @@ export const adoBuildCompleteWebhookSchema = z
 export type AdoBuildCompleteWebhook = z.infer<
   typeof adoBuildCompleteWebhookSchema
 >;
+
+const adoPushCommitSchema = z
+  .object({
+    id: z.string().optional(),
+    commitId: z.string().optional(),
+    message: z.string().optional(),
+    comment: z.string().optional(),
+    url: z.string().optional(),
+    author: z
+      .object({
+        name: z.string().optional(),
+        email: z.string().optional(),
+        displayName: z.string().optional(),
+        uniqueName: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+const adoRefUpdateSchema = z
+  .object({
+    name: z.string(),
+    isDelete: z.boolean().optional(),
+    newObjectId: z.string().optional(),
+  })
+  .passthrough();
+
+export const adoPushWebhookSchema = z
+  .object({
+    resource: z
+      .object({
+        repository: adoRepositorySchema,
+        refUpdates: z.array(adoRefUpdateSchema),
+        commits: z.array(adoPushCommitSchema),
+        pushedBy: adoIdentitySchema.optional(),
+        createdBy: adoIdentitySchema.optional(),
+      })
+      .passthrough(),
+  })
+  .merge(adoWebhookBaseSchema);
+
+export type AdoPushWebhook = z.infer<typeof adoPushWebhookSchema>;

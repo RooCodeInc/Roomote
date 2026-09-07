@@ -29,8 +29,15 @@ export const CUSTOM_MCP_SERVER_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  * at save time. `github` and `slack` are not MCP_INTEGRATIONS ids but are
  * reserved by the self-setup catalog and service detection.
  */
+/**
+ * Server key of the built-in Roomote MCP server. Security-relevant gating
+ * (Fast parent-only automation management, acknowledgement exemption) keys on
+ * this id, so every comparison site must use this constant.
+ */
+export const ROOMOTE_MCP_ID = 'roomote';
+
 export const RESERVED_CUSTOM_MCP_SERVER_NAMES: ReadonlySet<string> = new Set([
-  'roomote',
+  ROOMOTE_MCP_ID,
   'github',
   'slack',
   // The Brain is infrastructure rather than a catalog integration, so the

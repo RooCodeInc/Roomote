@@ -1,6 +1,5 @@
 import { type LucideIcon } from '@/components/system';
-import { ChartColumnIncreasing, House, Zap } from '@/components/system';
-import { Rows4 } from 'lucide-react';
+import { ChartColumnIncreasing, House, Rows4, Zap } from '@/components/system';
 
 interface PrimaryNavItem {
   icon: LucideIcon;
@@ -11,7 +10,11 @@ interface PrimaryNavItem {
   matchExact: boolean;
   matchPaths: string[];
   adminOnly?: boolean;
+  requiresSetup?: boolean;
 }
+
+export const SETUP_INCOMPLETE_NAV_TOOLTIP =
+  'Available when setup is completed.';
 
 const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
   {
@@ -21,14 +24,15 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'Start here',
     matchExact: true,
     matchPaths: ['/'],
+    requiresSetup: true,
   },
   {
     icon: Rows4,
-    href: '/tasks',
-    label: 'Tasks',
-    description: 'View current and past tasks',
+    href: '/sessions',
+    label: 'Sessions',
+    description: 'View current and past conversations',
     matchExact: false,
-    matchPaths: ['/tasks', '/cloud-agents'],
+    matchPaths: ['/sessions', '/tasks', '/cloud-agents'],
   },
   {
     icon: Zap,
@@ -38,6 +42,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: false,
     matchPaths: ['/automations'],
     adminOnly: true,
+    requiresSetup: true,
   },
   {
     icon: ChartColumnIncreasing,
@@ -47,6 +52,7 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     matchExact: false,
     matchPaths: ['/analytics'],
     adminOnly: true,
+    requiresSetup: true,
   },
 ];
 

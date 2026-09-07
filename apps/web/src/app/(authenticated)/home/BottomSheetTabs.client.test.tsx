@@ -4,8 +4,8 @@ vi.mock('./PullRequestsList', () => ({
   PullRequestsList: () => <div>Pull requests</div>,
 }));
 
-vi.mock('./RecentTasksList', () => ({
-  RecentTasksList: () => <div>Recent tasks</div>,
+vi.mock('./RecentSessionsList', () => ({
+  RecentSessionsList: () => <div>Recent sessions</div>,
 }));
 
 import { BottomSheetTabs } from './BottomSheetTabs';
@@ -14,11 +14,11 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 
-it('renders the task tabs without the feedback prompt', () => {
+it('renders the home tabs without the feedback prompt', () => {
   render(<BottomSheetTabs />);
 
   expect(
-    screen.getByRole('button', { name: 'Recent Tasks' }),
+    screen.getByRole('button', { name: 'Recent Sessions' }),
   ).toBeInTheDocument();
   expect(
     screen.getByRole('button', { name: 'Recent PRs' }),

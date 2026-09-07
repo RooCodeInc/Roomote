@@ -148,6 +148,11 @@ describe('createSlackAppFromManifestCommand', () => {
     const manifest = JSON.parse(body.manifest);
     expect(manifest).toMatchObject({
       display_information: { name: 'Roomote' },
+      features: {
+        agent_view: {
+          agent_description: 'Cloud coding agents for all',
+        },
+      },
       settings: {
         event_subscriptions: {
           request_url: 'https://roomote.example.com/api/webhooks/slack',

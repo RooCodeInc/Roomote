@@ -21,6 +21,10 @@ export function splitInferenceProviders(
     // connected, so operators can create another named instance. Named
     // connected rows themselves stay out of the Add Provider list.
     availableProviders: providers.filter((provider) => {
+      if (provider.hidden) {
+        return false;
+      }
+
       const isConnected =
         provider.runtimeApiKeySatisfied || provider.savedApiKeySatisfied;
 

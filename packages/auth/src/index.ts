@@ -36,10 +36,13 @@ export {
 } from './mcp-access-token';
 
 export {
+  type CreateGitHubTokenRuntimeOptions,
   type GitHubAppCredentials,
+  type GitHubTokenMetadata,
   type CreateGitHubTokenOptions,
   createGitHubTokenOptionsSchema,
   createGitHubToken,
+  createGitHubTokenWithMetadata,
   resolveGitHubAppCredentials,
 } from './github-token';
 

@@ -121,21 +121,23 @@ describe('Slack reply satisfaction state', () => {
     });
   });
 
-  it('records successful Slack reactions with message timestamps', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
+  it('records parent Session reports as terminal lifecycle satisfaction', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-session-'));
     tempDirs.push(tempDir);
     const stateFilePath = path.join(tempDir, 'reply-state.json');
     process.env[SLACK_REPLY_SATISFACTION_STATE_FILE_ENV] = stateFilePath;
 
     recordSlackReplySatisfaction({
-      messageTs: '111.222',
-      tool: 'add_reaction_to_slack_message',
+      messageTs: 'report-1',
+      tool: 'report_to_parent_session',
+      replyPurpose: 'closeout',
       nowMs: 1234,
     });
 
     expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
-      messageTs: '111.222',
-      tool: 'add_reaction_to_slack_message',
+      messageTs: 'report-1',
+      tool: 'report_to_parent_session',
+      replyPurpose: 'closeout',
       recordedAtMs: 1234,
     });
   });
@@ -176,44 +178,14 @@ describe('Slack reply satisfaction state', () => {
 
     recordSlackReplySatisfaction({
       messageTs: 'user-333.444',
-      tool: 'add_reaction_to_slack_message',
+      tool: 'send_chat_reaction_emoji',
       nowMs: 1234,
     });
 
     expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
       messageTs: 'user-333.444',
-      tool: 'add_reaction_to_slack_message',
+      tool: 'send_chat_reaction_emoji',
       recordedAtMs: 1234,
-    });
-  });
-
-  it('marks the current turn satisfied when a reaction targets that Slack message', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
-    tempDirs.push(tempDir);
-    const stateFilePath = path.join(tempDir, 'reply-state.json');
-    process.env[SLACK_REPLY_SATISFACTION_STATE_FILE_ENV] = stateFilePath;
-    fs.writeFileSync(
-      stateFilePath,
-      JSON.stringify({
-        currentTurnMessageTs: '111.222',
-        currentTurnStartedAtMs: 1000,
-      }),
-      'utf8',
-    );
-
-    recordSlackReplySatisfaction({
-      messageTs: '111.222',
-      tool: 'add_reaction_to_slack_message',
-      nowMs: 1234,
-    });
-
-    expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
-      currentTurnMessageTs: '111.222',
-      currentTurnStartedAtMs: 1000,
-      messageTs: '111.222',
-      tool: 'add_reaction_to_slack_message',
-      recordedAtMs: 1234,
-      satisfiedTurnMessageTs: '111.222',
     });
   });
 
@@ -476,35 +448,6 @@ describe('Slack reply satisfaction state', () => {
     });
   });
 
-  it('does not satisfy the current turn when a reaction targets a different Slack message', () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
-    tempDirs.push(tempDir);
-    const stateFilePath = path.join(tempDir, 'reply-state.json');
-    process.env[SLACK_REPLY_SATISFACTION_STATE_FILE_ENV] = stateFilePath;
-    fs.writeFileSync(
-      stateFilePath,
-      JSON.stringify({
-        currentTurnMessageTs: '111.222',
-        currentTurnStartedAtMs: 1000,
-      }),
-      'utf8',
-    );
-
-    recordSlackReplySatisfaction({
-      messageTs: '333.444',
-      tool: 'add_reaction_to_slack_message',
-      nowMs: 1234,
-    });
-
-    expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
-      currentTurnMessageTs: '111.222',
-      currentTurnStartedAtMs: 1000,
-      messageTs: '333.444',
-      tool: 'add_reaction_to_slack_message',
-      recordedAtMs: 1234,
-    });
-  });
-
   it('does not satisfy a non-Slack current turn even if a reaction records the same identifier', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
     tempDirs.push(tempDir);
@@ -702,7 +645,7 @@ describe('Slack reply satisfaction state', () => {
 
     recordSlackReplySatisfaction({
       messageTs: '111.222',
-      tool: 'add_reaction_to_slack_message',
+      tool: 'send_chat_reaction_emoji',
       nowMs: 1234,
     });
 
@@ -711,7 +654,7 @@ describe('Slack reply satisfaction state', () => {
       currentTurnStartedAtMs: 1000,
       initialAckReminderAtMs: 1100,
       messageTs: '111.222',
-      tool: 'add_reaction_to_slack_message',
+      tool: 'send_chat_reaction_emoji',
       recordedAtMs: 1234,
       satisfiedTurnMessageTs: '111.222',
     });
@@ -766,7 +709,7 @@ describe('Slack reply satisfaction state', () => {
     it('stamps a terminal outcome when the bounded retry budget is spent', () => {
       const stateFilePath = writeStateFile({
         startedAtMs: 1000,
-        deliveryFailureCount: 4,
+        deliveryFailureCount: 2,
         lastDeliveryFailureAtMs: 1900,
       });
 
@@ -779,7 +722,7 @@ describe('Slack reply satisfaction state', () => {
       expect(result).toEqual({ terminalDeliveryFailure: true });
       expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
         startedAtMs: 1000,
-        deliveryFailureCount: 5,
+        deliveryFailureCount: 3,
         lastDeliveryFailureAtMs: 2000,
         terminalDeliveryFailureAtMs: 2000,
       });
@@ -788,7 +731,7 @@ describe('Slack reply satisfaction state', () => {
     it('keeps the earliest terminal stamp across later failures', () => {
       const stateFilePath = writeStateFile({
         startedAtMs: 1000,
-        deliveryFailureCount: 5,
+        deliveryFailureCount: 3,
         lastDeliveryFailureAtMs: 2000,
         terminalDeliveryFailureAtMs: 2000,
       });
@@ -802,7 +745,7 @@ describe('Slack reply satisfaction state', () => {
       expect(result).toEqual({ terminalDeliveryFailure: true });
       const state = JSON.parse(fs.readFileSync(stateFilePath, 'utf8'));
       expect(state.terminalDeliveryFailureAtMs).toBe(2000);
-      expect(state.deliveryFailureCount).toBe(6);
+      expect(state.deliveryFailureCount).toBe(4);
     });
 
     it('ignores failures reported from non-parent sessions', () => {

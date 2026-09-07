@@ -169,6 +169,7 @@ export function evaluateSetupFunnelMilestones(input: {
 
 export async function recordSetupFunnelMilestones(
   candidates: SetupFunnelMilestoneInput[],
+  options: { allowAfterSetupCompletion?: boolean } = {},
 ): Promise<void> {
   if (candidates.length === 0 || !(await isAnonymousAnalyticsEnabled())) {
     return;
@@ -188,7 +189,11 @@ export async function recordSetupFunnelMilestones(
         where: eq(deploymentSettings.id, 'default'),
         columns: { metadata: true, setupCompletedAt: true },
       });
-      if (!settings || settings.setupCompletedAt !== null) {
+      if (
+        !settings ||
+        (settings.setupCompletedAt !== null &&
+          !options.allowAfterSetupCompletion)
+      ) {
         return [];
       }
 

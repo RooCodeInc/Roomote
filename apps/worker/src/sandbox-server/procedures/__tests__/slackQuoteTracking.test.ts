@@ -1,11 +1,13 @@
 const {
   mockFindFirstById,
   mockGetRoomoteConfig,
+  mockSuppressSlackReplyQuote,
   mockTrackSlackReplyQuote,
   mockClearSlackReplyQuote,
 } = vi.hoisted(() => ({
   mockFindFirstById: vi.fn(),
   mockGetRoomoteConfig: vi.fn(),
+  mockSuppressSlackReplyQuote: vi.fn(),
   mockTrackSlackReplyQuote: vi.fn(),
   mockClearSlackReplyQuote: vi.fn(),
 }));
@@ -45,12 +47,14 @@ vi.mock('../../../mcp/roomote-mcp-server/config', () => ({
 }));
 
 vi.mock('../../../mcp/roomote-mcp-server/slack-api-client', () => ({
+  suppressSlackReplyQuote: mockSuppressSlackReplyQuote,
   trackSlackReplyQuote: mockTrackSlackReplyQuote,
   clearSlackReplyQuote: mockClearSlackReplyQuote,
 }));
 
 import {
   clearLatestUserMessageForSlackThreadQuote,
+  suppressNextSlackThreadReplyQuote,
   trackLatestUserMessageForSlackThreadQuote,
 } from '../slackQuoteTracking';
 
@@ -71,6 +75,10 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     mockTrackSlackReplyQuote.mockResolvedValue({
       success: true,
       quoteId: 'quote-1',
+    });
+    mockSuppressSlackReplyQuote.mockResolvedValue({
+      success: true,
+      quoteId: 'suppression-1',
     });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
@@ -110,6 +118,22 @@ describe('trackLatestUserMessageForSlackThreadQuote', () => {
     });
 
     expect(trackedQuote).toEqual({});
+  });
+
+  it('persists next-reply suppression through the API', async () => {
+    const suppression = await suppressNextSlackThreadReplyQuote({
+      runId: 1,
+      logPrefix: 'testProcedure',
+    });
+
+    expect(suppression).toEqual({ quoteId: 'suppression-1' });
+    expect(mockSuppressSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1 },
+    );
   });
 
   it('does not leak raw user IDs into the stored Slack quote username', async () => {

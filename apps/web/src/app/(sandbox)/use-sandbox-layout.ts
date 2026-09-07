@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useLayoutEffect } from 'react';
 
 interface SandboxLayoutContextValue {
   isSidebarVisible: boolean;
@@ -21,4 +21,28 @@ export function useSandboxLayout() {
   }
 
   return ctx;
+}
+
+export function useResponsiveSandboxSidebar(scopeKey: string) {
+  const { setSidebarVisible } = useSandboxLayout();
+
+  useLayoutEffect(() => {
+    const mobileQuery = window.matchMedia?.('(max-width: 767px)');
+
+    if (!mobileQuery) {
+      return;
+    }
+
+    setSidebarVisible(!mobileQuery.matches);
+
+    const handleViewportChange = (event: MediaQueryListEvent) =>
+      setSidebarVisible(!event.matches);
+
+    mobileQuery.addEventListener('change', handleViewportChange);
+
+    return () => {
+      mobileQuery.removeEventListener('change', handleViewportChange);
+      setSidebarVisible(true);
+    };
+  }, [scopeKey, setSidebarVisible]);
 }

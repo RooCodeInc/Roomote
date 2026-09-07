@@ -26,6 +26,8 @@ import {
   DEFAULT_LAUNCH_CODING_HARNESS,
   getDisplayModelProviderId,
   getTaskInitiatorLinkedUserId,
+  getFastAgentParentFromPayload,
+  getTaskReportConsumerFromPayload,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
   isReasoningEffort,
@@ -47,6 +49,7 @@ import {
   db,
   deploymentSettings,
   ensureAutomationRowsOnce,
+  ensureSessionForTask,
   isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
@@ -59,6 +62,8 @@ import {
   tasks,
   users,
   environments,
+  sessions,
+  sessionTasks,
   and,
   desc,
   eq,
@@ -68,6 +73,7 @@ import {
   recordSnapshotResumeEvent,
   resolveDefaultComputeProvider,
   resolveWorkspaceRepositoryProviders,
+  resolveWorkspaceSourceControlHost,
   sql,
 } from '@roomote/db/server';
 import { type Redis, getRedis } from '@roomote/redis';
@@ -89,7 +95,7 @@ import {
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
 } from './llm-task-title';
-import { resolveRequestedWorkKindDecision } from './router/requested-work-kind';
+import { resolveRequestedWorkKindDecision } from './requested-work-kind';
 
 enum TaskRunQueueKeys {
   // Keep the v2 layout during the debounce rollout. Old and new producers and
@@ -98,6 +104,35 @@ enum TaskRunQueueKeys {
   Entries = 'queue:cloud-jobs:v2:entries',
   EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
   Scopes = 'queue:cloud-jobs:v2:scopes',
+}
+
+const SNAPSHOT_RESUME_ADVISORY_LOCK_NAMESPACE = 0x52534d45;
+
+/** True when the error (or any of its causes) is a Postgres deadlock (40P01). */
+function isPostgresDeadlockError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current; depth += 1) {
+    if (
+      typeof current === 'object' &&
+      current !== null &&
+      'code' in current &&
+      (current as { code?: unknown }).code === '40P01'
+    ) {
+      return true;
+    }
+    current =
+      typeof current === 'object' && current !== null && 'cause' in current
+        ? (current as { cause?: unknown }).cause
+        : undefined;
+  }
+  return false;
+}
+
+export class SnapshotResumeAlreadyExistsError extends Error {
+  constructor(public readonly existingRunId: number) {
+    super(`Snapshot resume run ${existingRunId} already exists.`);
+    this.name = 'SnapshotResumeAlreadyExistsError';
+  }
 }
 
 export function resolveFreshTaskComputeProvider(
@@ -961,11 +996,14 @@ type FreshTask = Exclude<
 >;
 
 /**
- * A fresh launch creates a tasks row (initiator stamp, classification,
- * commit-author block, channel bindings) plus its first run.
+ * A fresh launch normally creates a tasks row (initiator stamp,
+ * classification, commit-author block, channel bindings) plus its first run.
+ * `existingTaskId` attaches another fresh run to an existing durable task.
  */
 export type FreshTaskLaunch = {
   task: FreshTask;
+  /** Reuse the durable task identity for a later PR review run. */
+  existingTaskId?: string;
   goal?: TaskGoalInput;
   /** Explicit user-facing title. Locked against all LLM title generation. */
   title?: string;
@@ -1372,8 +1410,32 @@ async function enqueueFreshLaunch(
   const { task, initiator, workflow, surface, trigger } = input;
   const visibility: TaskVisibility = input.visibility ?? 'visible';
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
-
   await assertUserIsNotDeleted(linkedUserId);
+
+  const requestedExistingTask = input.existingTaskId
+    ? await db.query.tasks.findFirst({
+        where: and(eq(tasks.id, input.existingTaskId), isNull(tasks.deletedAt)),
+        columns: {
+          id: true,
+          workflow: true,
+          harness: true,
+        },
+      })
+    : null;
+
+  if (input.existingTaskId && !requestedExistingTask) {
+    throw new Error(`Task ${input.existingTaskId} was not found.`);
+  }
+
+  if (requestedExistingTask && workflow !== 'pr_review') {
+    throw new Error('Only PR review launches can reuse an existing task.');
+  }
+
+  if (requestedExistingTask && requestedExistingTask.workflow !== workflow) {
+    throw new Error(
+      `Task ${requestedExistingTask.id} uses workflow '${requestedExistingTask.workflow}', not '${workflow}'.`,
+    );
+  }
 
   // Child launches inherit the provider-neutral origin coordinates so the
   // agent can see where the parent conversation started.
@@ -1423,7 +1485,8 @@ async function enqueueFreshLaunch(
   const { initialPaths } = await resolveEnvironmentContext(task);
 
   const resolvedHarness = await resolveRequestedHarness(task);
-  const targetHarness = resolvedHarness.harness;
+  const targetHarness =
+    requestedExistingTask?.harness ?? resolvedHarness.harness;
   const { task: taskWithHarnessOverrides, model: effectiveTaskModel } =
     resolveEffectiveHarnessModelState({
       task,
@@ -1498,123 +1561,387 @@ async function enqueueFreshLaunch(
     githubUserId: 'githubUserId' in task ? task.githubUserId : null,
   };
 
-  // This is the only place where fresh tasks and their first runs are created.
-  const taskRun = await db.transaction(async (tx) => {
-    const chatgptConnected = effectiveTaskModel.startsWith('openai/')
-      ? await isChatGptSubscriptionConnected(tx)
-      : false;
-    const modelProvider =
-      getDisplayModelProviderId(effectiveTaskModel, {
-        chatgptConnected,
-      }) ?? DEFAULT_STANDARD_TASK_MODEL_PROVIDER;
+  const fastParent = getFastAgentParentFromPayload(
+    taskWithHarnessOverrides.payload,
+  );
+  const fastAgentSessionId =
+    taskWithHarnessOverrides.payload.fastAgentSessionId ??
+    fastParent?.sessionId ??
+    null;
+  const launchIdempotencyKey =
+    taskWithHarnessOverrides.payload.launchIdempotencyKey;
 
-    const matchedHumanActor = await resolveMatchedHumanActor(tx, linkedUserId);
-    const commitAuthor = evaluateCommitAuthor({
-      initiator,
-      matchedHumanActor,
-      externalGithubIdentity,
+  // Fresh runs are persisted atomically with either a new task or the existing
+  // durable task they continue.
+  const runPersistTransaction = () =>
+    db.transaction(async (tx) => {
+      if (fastAgentSessionId) {
+        // Parallel launch_task calls from one Fast turn write the same
+        // session and conversation rows; serializing per parent conversation
+        // prevents lock-order deadlocks (40P01) between them.
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`fast-parent-launch:${fastAgentSessionId}`}, 0))`,
+        );
+      }
+      if (launchIdempotencyKey) {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`task-launch:${launchIdempotencyKey}`}, 0))`,
+        );
+        const [existingRun] = await tx
+          .select()
+          .from(taskRuns)
+          .where(
+            and(
+              sql`${taskRuns.payload}->>'launchIdempotencyKey' = ${launchIdempotencyKey}`,
+              isNull(taskRuns.canceledAt),
+            ),
+          )
+          .limit(1)
+          .for('update');
+        if (existingRun) {
+          const existingFastParent = getFastAgentParentFromPayload(
+            existingRun.payload,
+          );
+          const existingFastAgentSessionId =
+            existingRun.fastAgentSessionId ?? existingFastParent?.sessionId;
+          if (
+            fastAgentSessionId &&
+            existingFastAgentSessionId !== fastAgentSessionId
+          ) {
+            throw new Error(
+              'Launch idempotency key is already attached to another Fast Session.',
+            );
+          }
+          if (fastAgentSessionId) {
+            const [existingSession] = await tx
+              .select({ fastConversationId: sessions.fastConversationId })
+              .from(sessionTasks)
+              .innerJoin(sessions, eq(sessionTasks.sessionId, sessions.id))
+              .where(eq(sessionTasks.taskId, existingRun.taskId))
+              .limit(1);
+            if (
+              existingSession &&
+              existingSession.fastConversationId !== fastAgentSessionId
+            ) {
+              throw new Error(
+                'Launch idempotency key is already attached to another Session.',
+              );
+            }
+          }
+          await ensureSessionForTask(tx, {
+            taskId: existingRun.taskId,
+            fastConversationId: fastAgentSessionId,
+            origin: fastAgentSessionId ? 'fast_delegation' : 'direct_launch',
+            existingTaskReused: true,
+          });
+          return {
+            taskRun: existingRun,
+            createdRun: false,
+            reusedTask: true,
+          };
+        }
+      }
+      const chatgptConnected = effectiveTaskModel.startsWith('openai/')
+        ? await isChatGptSubscriptionConnected(tx)
+        : false;
+      const modelProvider =
+        getDisplayModelProviderId(effectiveTaskModel, {
+          chatgptConnected,
+        }) ?? DEFAULT_STANDARD_TASK_MODEL_PROVIDER;
+
+      const matchedHumanActor = await resolveMatchedHumanActor(
+        tx,
+        linkedUserId,
+      );
+      const commitAuthor = evaluateCommitAuthor({
+        initiator,
+        matchedHumanActor,
+        externalGithubIdentity,
+      });
+
+      let existingTask = requestedExistingTask;
+
+      if (workflow === 'pr_review' && input.prLinkage?.provider === 'github') {
+        const canonicalKey = `${input.prLinkage.provider}:${input.prLinkage.repository}:${input.prLinkage.prNumber}`;
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtextextended(${canonicalKey}, 0))`,
+        );
+
+        const [canonicalTask] = await tx
+          .select({
+            id: tasks.id,
+            workflow: tasks.workflow,
+            harness: tasks.harness,
+          })
+          .from(tasks)
+          .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+          .where(
+            and(
+              eq(tasks.workflow, 'pr_review'),
+              eq(
+                taskPullRequests.sourceControlProvider,
+                input.prLinkage.provider,
+              ),
+              eq(taskPullRequests.repository, input.prLinkage.repository),
+              eq(taskPullRequests.prNumber, input.prLinkage.prNumber),
+              isNull(tasks.deletedAt),
+            ),
+          )
+          .orderBy(desc(tasks.createdAt))
+          .limit(1);
+
+        if (
+          requestedExistingTask &&
+          canonicalTask &&
+          requestedExistingTask.id !== canonicalTask.id
+        ) {
+          throw new Error(
+            `Task ${requestedExistingTask.id} is not the canonical review task for ${canonicalKey}.`,
+          );
+        }
+
+        existingTask = canonicalTask ?? requestedExistingTask;
+      }
+
+      let taskId: string;
+
+      if (existingTask) {
+        await tx.execute(
+          sql`SELECT id FROM tasks WHERE id = ${existingTask.id} FOR UPDATE`,
+        );
+
+        const existingLinkage = await tx.query.taskPullRequests.findFirst({
+          where: and(
+            eq(taskPullRequests.taskId, existingTask.id),
+            eq(
+              taskPullRequests.sourceControlProvider,
+              input.prLinkage!.provider,
+            ),
+            eq(taskPullRequests.repository, input.prLinkage!.repository),
+            eq(taskPullRequests.prNumber, input.prLinkage!.prNumber),
+          ),
+          columns: { taskId: true },
+        });
+
+        if (!existingLinkage) {
+          throw new Error(
+            `Task ${existingTask.id} is not linked to ${input.prLinkage!.provider}:${input.prLinkage!.repository}#${input.prLinkage!.prNumber}.`,
+          );
+        }
+
+        const activeRun = await tx.query.taskRuns.findFirst({
+          where: and(
+            eq(taskRuns.taskId, existingTask.id),
+            inArray(taskRuns.status, [...activeRunStatuses]),
+          ),
+        });
+
+        if (activeRun) {
+          await ensureSessionForTask(tx, {
+            taskId: existingTask.id,
+            fastConversationId:
+              getFastAgentParentFromPayload(taskWithHarnessOverrides.payload)
+                ?.sessionId ?? null,
+            origin: 'follow_up',
+            existingTaskReused: true,
+          });
+          return { taskRun: activeRun, createdRun: false, reusedTask: true };
+        }
+
+        taskId = existingTask.id;
+      } else {
+        const createdTask = await createTaskWithRetry(
+          {
+            workflow,
+            surface,
+            trigger,
+            visibility,
+            state: 'active',
+            ...initiatorColumns,
+            ...commitAuthor,
+            slackChannelId: input.channels?.slackChannelId ?? null,
+            slackThreadTs: input.channels?.slackThreadTs ?? null,
+            linearSessionId: input.channels?.linearSessionId ?? null,
+            linearIssueId: input.channels?.linearIssueId ?? null,
+            linearOrganizationId: input.channels?.linearOrganizationId ?? null,
+            harness: targetHarness,
+            modelProvider,
+            model: effectiveTaskModel,
+            title,
+            ...(titleIsLocked
+              ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
+              : {}),
+            prompt: initialPrompt,
+            goalObjective: input.goal?.objective ?? null,
+            goalStatus: input.goal ? 'active' : null,
+            goalMaxContinuations: input.goal?.maxContinuations ?? null,
+            goalLastContinuationId: initialGoalGeneration,
+            goalGenerationIds: initialGoalGeneration
+              ? [initialGoalGeneration]
+              : [],
+            requestedWorkKind: requestedWorkKindDecision.kind,
+            requestedWorkKindSource: requestedWorkKindDecision.source,
+            requestedWorkKindConfidence: requestedWorkKindDecision.confidence,
+            repositoryName,
+            repositoryUrl: repositoryName
+              ? `https://github.com/${repositoryName}`
+              : null,
+            defaultBranch: taskWithHarnessOverrides.payload.branch ?? null,
+            timestamp: nowTs,
+          },
+          { db: tx },
+        );
+        taskId = createdTask.id;
+      }
+
+      await ensureSessionForTask(tx, {
+        taskId,
+        fastConversationId: fastAgentSessionId,
+        origin: fastAgentSessionId
+          ? 'fast_delegation'
+          : existingTask
+            ? 'follow_up'
+            : 'direct_launch',
+        existingTaskReused: Boolean(existingTask),
+      });
+
+      if (input.prLinkage) {
+        const prLinkage = {
+          sourceControlProvider: input.prLinkage.provider,
+          host: input.prLinkage.host ?? null,
+          repositoryId: input.prLinkage.repositoryId ?? null,
+          repository: input.prLinkage.repository,
+          prNumber: input.prLinkage.prNumber,
+          prUrl: input.prLinkage.prUrl,
+          prTitle: input.prLinkage.prTitle ?? null,
+          prSha: input.prLinkage.prSha ?? null,
+          prBaseRef: input.prLinkage.prBaseRef ?? null,
+          prBaseSha: input.prLinkage.prBaseSha ?? null,
+        };
+        const githubArtifactIds = {
+          ...(input.prLinkage.githubReactionId !== undefined
+            ? { githubReactionId: input.prLinkage.githubReactionId }
+            : {}),
+          ...(input.prLinkage.githubCheckRunId !== undefined
+            ? { githubCheckRunId: input.prLinkage.githubCheckRunId }
+            : {}),
+          ...(input.prLinkage.githubReviewCommentId !== undefined
+            ? { githubReviewCommentId: input.prLinkage.githubReviewCommentId }
+            : {}),
+        };
+
+        if (existingTask) {
+          const [updatedLinkage] = await tx
+            .update(taskPullRequests)
+            .set({ ...prLinkage, ...githubArtifactIds })
+            .where(
+              and(
+                eq(taskPullRequests.taskId, taskId),
+                eq(
+                  taskPullRequests.sourceControlProvider,
+                  input.prLinkage.provider,
+                ),
+                eq(taskPullRequests.repository, input.prLinkage.repository),
+                eq(taskPullRequests.prNumber, input.prLinkage.prNumber),
+              ),
+            )
+            .returning({ taskId: taskPullRequests.taskId });
+
+          if (!updatedLinkage) {
+            throw new Error(
+              `Task ${taskId} is not linked to ${input.prLinkage.provider}:${input.prLinkage.repository}#${input.prLinkage.prNumber}.`,
+            );
+          }
+        } else {
+          await tx.insert(taskPullRequests).values({
+            taskId,
+            ...prLinkage,
+            githubReactionId: input.prLinkage.githubReactionId ?? null,
+            githubCheckRunId: input.prLinkage.githubCheckRunId ?? null,
+            githubReviewCommentId:
+              input.prLinkage.githubReviewCommentId ?? null,
+          });
+        }
+
+        await projectPendingPrReviewEventsForAssociation(tx, {
+          taskId,
+          sourceControlProvider: input.prLinkage.provider,
+          repository: input.prLinkage.repository,
+          prNumber: input.prLinkage.prNumber,
+        });
+      }
+
+      const [insertedRun] = await tx
+        .insert(taskRuns)
+        .values({
+          taskId,
+          kind: 'fresh',
+          payloadKind: taskWithHarnessOverrides.type,
+          actingUserId: options.skipInitialActingUser ? null : linkedUserId,
+          status: options.initialStatus ?? RunStatus.Pending,
+          taskPhase: options.initialTaskPhase ?? null,
+          error: options.initialError ?? null,
+          ...(options.initialStatus === RunStatus.Dequeued
+            ? { dequeuedAt: new Date() }
+            : {}),
+          harness: existingTask?.harness ?? targetHarness,
+          vendor: targetComputeProvider,
+          port: task.payload.port,
+          initialPaths,
+          payload: taskWithHarnessOverrides.payload,
+          keepaliveMs,
+          // Launching-run lineage for platform-spawned tasks. Without this on
+          // the run row, notify-source-run-on-settle has no pointer back to
+          // the parent run.
+          sourceRunId: taskWithHarnessOverrides.sourceRunId ?? null,
+        })
+        .returning();
+
+      if (!insertedRun) {
+        throw new Error('Failed to create `task_runs` record.');
+      }
+
+      if (options.afterCreateInTransaction) {
+        await options.afterCreateInTransaction(tx, insertedRun);
+      }
+
+      if (existingTask) {
+        await syncTaskStateFromRuns(tx, taskId);
+      }
+
+      return {
+        taskRun: insertedRun,
+        createdRun: true,
+        reusedTask: Boolean(existingTask),
+      };
     });
 
-    const createdTask = await createTaskWithRetry(
-      {
-        workflow,
-        surface,
-        trigger,
-        visibility,
-        state: 'active',
-        ...initiatorColumns,
-        ...commitAuthor,
-        slackChannelId: input.channels?.slackChannelId ?? null,
-        slackThreadTs: input.channels?.slackThreadTs ?? null,
-        linearSessionId: input.channels?.linearSessionId ?? null,
-        linearIssueId: input.channels?.linearIssueId ?? null,
-        linearOrganizationId: input.channels?.linearOrganizationId ?? null,
-        harness: targetHarness,
-        modelProvider,
-        model: effectiveTaskModel,
-        title,
-        ...(titleIsLocked
-          ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
-          : {}),
-        prompt: initialPrompt,
-        goalObjective: input.goal?.objective ?? null,
-        goalStatus: input.goal ? 'active' : null,
-        goalMaxContinuations: input.goal?.maxContinuations ?? null,
-        goalLastContinuationId: initialGoalGeneration,
-        goalGenerationIds: initialGoalGeneration ? [initialGoalGeneration] : [],
-        requestedWorkKind: requestedWorkKindDecision.kind,
-        requestedWorkKindSource: requestedWorkKindDecision.source,
-        requestedWorkKindConfidence: requestedWorkKindDecision.confidence,
-        repositoryName,
-        repositoryUrl: repositoryName
-          ? `https://github.com/${repositoryName}`
-          : null,
-        defaultBranch: taskWithHarnessOverrides.payload.branch ?? null,
-        timestamp: nowTs,
-      },
-      { db: tx },
+  let persisted: Awaited<ReturnType<typeof runPersistTransaction>>;
+  try {
+    persisted = await runPersistTransaction();
+  } catch (error) {
+    if (!isPostgresDeadlockError(error)) {
+      throw error;
+    }
+    // The aborted transaction persisted nothing, so one retry is safe and
+    // absorbs any remaining lock-order conflict with an unrelated writer.
+    console.warn(
+      `[task-run-queue] Retrying task persistence after a deadlock: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
     );
+    persisted = await runPersistTransaction();
+  }
+  const { taskRun, createdRun, reusedTask } = persisted;
 
-    if (input.prLinkage) {
-      await tx.insert(taskPullRequests).values({
-        taskId: createdTask.id,
-        sourceControlProvider: input.prLinkage.provider,
-        host: input.prLinkage.host ?? null,
-        repositoryId: input.prLinkage.repositoryId ?? null,
-        repository: input.prLinkage.repository,
-        prNumber: input.prLinkage.prNumber,
-        prUrl: input.prLinkage.prUrl,
-        prTitle: input.prLinkage.prTitle ?? null,
-        prSha: input.prLinkage.prSha ?? null,
-        prBaseRef: input.prLinkage.prBaseRef ?? null,
-        prBaseSha: input.prLinkage.prBaseSha ?? null,
-        githubReactionId: input.prLinkage.githubReactionId ?? null,
-        githubCheckRunId: input.prLinkage.githubCheckRunId ?? null,
-        githubReviewCommentId: input.prLinkage.githubReviewCommentId ?? null,
-      });
-      await projectPendingPrReviewEventsForAssociation(tx, {
-        taskId: createdTask.id,
-        sourceControlProvider: input.prLinkage.provider,
-        repository: input.prLinkage.repository,
-        prNumber: input.prLinkage.prNumber,
-      });
-    }
+  if (!createdRun) {
+    return taskRun;
+  }
 
-    const [insertedRun] = await tx
-      .insert(taskRuns)
-      .values({
-        taskId: createdTask.id,
-        kind: 'fresh',
-        payloadKind: taskWithHarnessOverrides.type,
-        actingUserId: options.skipInitialActingUser ? null : linkedUserId,
-        status: options.initialStatus ?? RunStatus.Pending,
-        taskPhase: options.initialTaskPhase ?? null,
-        error: options.initialError ?? null,
-        ...(options.initialStatus === RunStatus.Dequeued
-          ? { dequeuedAt: new Date() }
-          : {}),
-        harness: targetHarness,
-        vendor: targetComputeProvider,
-        port: task.payload.port,
-        initialPaths,
-        payload: taskWithHarnessOverrides.payload,
-        keepaliveMs,
-        // Launching-run lineage for platform-spawned tasks. Without this on
-        // the run row, notify-source-run-on-settle has no pointer back to
-        // the parent run.
-        sourceRunId: taskWithHarnessOverrides.sourceRunId ?? null,
-      })
-      .returning();
-
-    if (!insertedRun) {
-      throw new Error('Failed to create `task_runs` record.');
-    }
-
-    if (options.afterCreateInTransaction) {
-      await options.afterCreateInTransaction(tx, insertedRun);
-    }
-
-    return insertedRun;
+  const delegated = Boolean(reusedTask || fastAgentSessionId);
+  void captureEvent(delegated ? 'session_task_delegated' : 'session_created', {
+    ...(linkedUserId ? { userId: linkedUserId } : {}),
+    properties: { surface, outcome: 'created' },
   });
 
   if (shouldCaptureTaskCreatedEvent(taskRun.payloadKind)) {
@@ -1669,22 +1996,19 @@ async function enqueueFreshLaunch(
   // Fire-and-forget: generate an LLM title from the initial prompt during
   // startup so the user sees a meaningful title before the worker records
   // the first envelope. Titles live on tasks only.
-  const description =
-    'description' in task.payload ? task.payload.description : undefined;
-
   if (
     !options.skipEarlyTitleGeneration &&
+    !reusedTask &&
     !explicitTitle &&
     !hasDeterministicTaskRunTitle(task.type) &&
-    typeof description === 'string' &&
-    description.trim()
+    initialPrompt?.trim()
   ) {
     void (async () => {
       try {
         const generatedTitle = await generateLlmTaskTitle({
           userId: linkedUserId,
           taskId: taskRun.taskId,
-          messages: [{ role: 'user', text: description }],
+          messages: [{ role: 'user', text: initialPrompt }],
         });
         if (isFallbackTaskTitle(generatedTitle)) {
           return;
@@ -1860,14 +2184,43 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
-  const repositoryProviders = await resolveWorkspaceRepositoryProviders(
-    db,
-    workspace,
-  );
+  const [repositoryProviders, workspaceHost] = await Promise.all([
+    resolveWorkspaceRepositoryProviders(db, workspace),
+    resolveWorkspaceSourceControlHost(db, workspace),
+  ]);
+  const isAggregateWorkspace =
+    workspace.type === 'repository_set' ||
+    workspace.type === 'all_repositories';
+  const requiresCompleteCoverage =
+    isAggregateWorkspace || workspace.type === 'environment';
+  const expectedRepositoryCount =
+    workspace.type === 'repository_set'
+      ? new Set(workspace.repositories).size
+      : undefined;
+
+  if (requiresCompleteCoverage) {
+    payload.repositoryProviders = repositoryProviders;
+  }
+
+  if (
+    requiresCompleteCoverage &&
+    (Object.keys(repositoryProviders).length === 0 ||
+      (expectedRepositoryCount !== undefined &&
+        Object.keys(repositoryProviders).length !== expectedRepositoryCount))
+  ) {
+    payload.sourceControlProvider = undefined;
+    payload.sourceControlHost = undefined;
+    return;
+  }
+
   const providers = Object.values(repositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
-  if (spansProviders) {
+  if (requiresCompleteCoverage && !spansProviders) {
+    payload.sourceControlHost = workspaceHost;
+  }
+
+  if (spansProviders && !requiresCompleteCoverage) {
     payload.repositoryProviders = repositoryProviders;
   }
 
@@ -2136,6 +2489,66 @@ function inheritSnapshotResumeSourceControlStamps(
   }
 }
 
+function inheritSnapshotResumeFastAgentParent(
+  payload: SnapshotResumeTask['payload'],
+  sourcePayload: unknown,
+): void {
+  const parent = getFastAgentParentFromPayload(sourcePayload);
+  if (parent && !payload.fastAgentParent) {
+    payload.fastAgentParent = parent;
+  }
+  if (
+    parent &&
+    getTaskReportConsumerFromPayload(sourcePayload) === 'orchestrator' &&
+    !payload.reportConsumer
+  ) {
+    payload.reportConsumer = 'orchestrator';
+  }
+}
+
+function inheritSnapshotResumeFastAgentSession(
+  payload: SnapshotResumeTask['payload'],
+  sourcePayload: unknown,
+): void {
+  const fastAgentSessionId = z
+    .string()
+    .uuid()
+    .safeParse(
+      sourcePayload && typeof sourcePayload === 'object'
+        ? (sourcePayload as Record<string, unknown>).fastAgentSessionId
+        : undefined,
+    );
+  if (fastAgentSessionId.success && !payload.fastAgentSessionId) {
+    payload.fastAgentSessionId = fastAgentSessionId.data;
+  }
+}
+
+function inheritSnapshotResumeCommunicationContext(
+  payload: SnapshotResumeTask['payload'],
+  sourcePayload: unknown,
+): void {
+  if (
+    sourcePayload &&
+    typeof sourcePayload === 'object' &&
+    !Array.isArray(sourcePayload) &&
+    (sourcePayload as Record<string, unknown>).communicationContextInherited ===
+      true
+  ) {
+    payload.communicationContextInherited = true;
+  }
+
+  if (
+    sourcePayload &&
+    typeof sourcePayload === 'object' &&
+    !Array.isArray(sourcePayload) &&
+    (sourcePayload as Record<string, unknown>).liveTaskStream === true
+  ) {
+    // The card in the Slack thread belongs to the task; every resumed run
+    // must keep updating it.
+    payload.liveTaskStream = true;
+  }
+}
+
 async function enqueueSnapshotResume(
   input: ResumeTaskLaunch,
   options: EnqueueTaskOptions,
@@ -2175,6 +2588,9 @@ async function enqueueSnapshotResume(
   }
 
   inheritSnapshotResumeSourceControlStamps(task.payload, sourceRun.payload);
+  inheritSnapshotResumeFastAgentParent(task.payload, sourceRun.payload);
+  inheritSnapshotResumeFastAgentSession(task.payload, sourceRun.payload);
+  inheritSnapshotResumeCommunicationContext(task.payload, sourceRun.payload);
 
   await recordSnapshotResumeRequestEvent({
     runId: sourceRun.id,
@@ -2242,9 +2658,7 @@ async function enqueueSnapshotResume(
       break;
     }
 
-    // Resume rows created before stamps were inherited may lack them even
-    // though an ancestor has them; pick up whatever is still missing while
-    // walking, nearest ancestor first.
+    // Older resume rows may lack established source-control stamps.
     inheritSnapshotResumeSourceControlStamps(task.payload, parentRun.payload);
 
     sourceTaskType = parentRun.payloadKind;
@@ -2304,6 +2718,22 @@ async function enqueueSnapshotResume(
 
   try {
     taskRun = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(${SNAPSHOT_RESUME_ADVISORY_LOCK_NAMESPACE}, ${sourceRun.id})`,
+      );
+
+      const existingResume = await tx.query.taskRuns.findFirst({
+        where: and(
+          eq(taskRuns.sourceRunId, sourceRun.id),
+          eq(taskRuns.kind, 'resume'),
+          isNull(taskRuns.canceledAt),
+        ),
+        columns: { id: true },
+      });
+      if (existingResume) {
+        throw new SnapshotResumeAlreadyExistsError(existingResume.id);
+      }
+
       const [insertedRun] = await tx
         .insert(taskRuns)
         .values({

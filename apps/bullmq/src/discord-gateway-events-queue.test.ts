@@ -86,6 +86,30 @@ describe('processDiscordGatewayEventJob', () => {
     ).rejects.toThrow('HTTP 425');
   });
 
+  it('preserves a TRPC_URL path prefix without a trailing slash', async () => {
+    envMock.TRPC_URL = 'https://roomote.example.com/_roomote-api';
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    await processDiscordGatewayEventJob({ data: event } as Job<typeof event>);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://roomote.example.com/_roomote-api/api/internal/discord/events/process',
+      expect.any(Object),
+    );
+  });
+
+  it('preserves a TRPC_URL path prefix with a trailing slash', async () => {
+    envMock.TRPC_URL = 'https://roomote.example.com/_roomote-api/';
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+
+    await processDiscordGatewayEventJob({ data: event } as Job<typeof event>);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://roomote.example.com/_roomote-api/api/internal/discord/events/process',
+      expect.any(Object),
+    );
+  });
+
   it('fails fast when the worker API URL is missing', async () => {
     envMock.TRPC_URL = undefined;
 

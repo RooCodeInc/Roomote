@@ -8,7 +8,9 @@ import { HonoAdapter } from '@bull-board/hono';
 
 import {
   bootstrapGeneratedAuthKeypairs,
+  db,
   ensureAutomationRows,
+  waitForMigrations,
 } from '@roomote/db/server';
 import {
   DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
@@ -47,8 +49,32 @@ import { startDockerValidationQueue } from './docker-validation-queue';
 import { startSlackPrInactivityQueue } from './slack-pr-inactivity-queue';
 import { startPrReviewNotificationQueue } from './pr-review-notification-queue';
 import { startActivePrReviewFollowUpQueue } from './active-pr-review-follow-up-queue';
+import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeability-check-queue';
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
+import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
+import { readBullMqQueueHealth } from './health';
+import { startSessionWakeupQueue } from './session-wakeup-queue';
+import { installBullMqGracefulShutdown } from './graceful-shutdown';
+
+// Deployments roll every service at once while migrations run only ahead
+// of the api service. A boot that reads a column the pending migration adds
+// would crash-loop past the platform's restart budget and stay down after
+// the migration lands, so wait for the schema instead.
+try {
+  const readiness = await waitForMigrations({
+    database: db,
+    log: (message) => console.info(message),
+  });
+  if (readiness.state === 'unmanaged') {
+    console.info(
+      'Database has no migration bookkeeping; assuming its schema is managed directly.',
+    );
+  }
+} catch (error) {
+  console.error('Database migrations did not become ready', error);
+  process.exit(1);
+}
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
@@ -181,6 +207,21 @@ const {
   worker: activePrReviewFollowUpWorker,
   queueEvents: activePrReviewFollowUpQueueEvents,
 } = startActivePrReviewFollowUpQueue();
+const {
+  queue: pullRequestMergeabilityCheckQueue,
+  worker: pullRequestMergeabilityCheckWorker,
+  queueEvents: pullRequestMergeabilityCheckQueueEvents,
+} = startPullRequestMergeabilityCheckQueue();
+const {
+  queue: fastAgentParentEventQueue,
+  worker: fastAgentParentEventWorker,
+  queueEvents: fastAgentParentEventQueueEvents,
+} = await startFastAgentParentEventQueue();
+const {
+  queue: sessionWakeupQueue,
+  worker: sessionWakeupWorker,
+  queueEvents: sessionWakeupQueueEvents,
+} = await startSessionWakeupQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
@@ -217,6 +258,11 @@ createBullBoard({
     new BullMQAdapter(slackPrInactivityQueue, { readOnlyMode: false }),
     new BullMQAdapter(prReviewNotificationQueue, { readOnlyMode: false }),
     new BullMQAdapter(activePrReviewFollowUpQueue, { readOnlyMode: false }),
+    new BullMQAdapter(pullRequestMergeabilityCheckQueue, {
+      readOnlyMode: false,
+    }),
+    new BullMQAdapter(fastAgentParentEventQueue, { readOnlyMode: false }),
+    new BullMQAdapter(sessionWakeupQueue, { readOnlyMode: false }),
   ],
   serverAdapter,
 });
@@ -249,35 +295,51 @@ app.use('/admin/*', createAdminDashboardMiddleware(adminDashboardAuth));
 
 app.get('/admin/health', async (c) => {
   try {
-    const jobCounts = await schedulerQueue.getJobCounts();
-    const sandboxOidcRefreshJobCounts =
-      await sandboxOidcRefreshQueue.getJobCounts();
+    const redisStatus = redis?.status ?? 'unhealthy';
+    const health = await readBullMqQueueHealth(redisStatus, async () => ({
+      scheduler: await schedulerQueue.getJobCounts(),
+      sandboxOidcRefresh: await sandboxOidcRefreshQueue.getJobCounts(),
+    }));
 
-    return c.json({
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      services: {
-        redis: redis?.status ?? 'unhealthy',
-        queues: {
-          scheduler: {
-            waiting: jobCounts.waiting,
-            active: jobCounts.active,
-            completed: jobCounts.completed,
-            failed: jobCounts.failed,
-            delayed: jobCounts.delayed,
-            repeat: jobCounts.repeat,
-          },
-          sandboxOidcRefresh: {
-            waiting: sandboxOidcRefreshJobCounts.waiting,
-            active: sandboxOidcRefreshJobCounts.active,
-            completed: sandboxOidcRefreshJobCounts.completed,
-            failed: sandboxOidcRefreshJobCounts.failed,
-            delayed: sandboxOidcRefreshJobCounts.delayed,
-            repeat: sandboxOidcRefreshJobCounts.repeat,
+    if (health.queueCounts === null) {
+      return c.json(
+        {
+          status: health.status,
+          timestamp: new Date().toISOString(),
+          services: { redis: redisStatus },
+        },
+        health.httpStatus,
+      );
+    }
+
+    return c.json(
+      {
+        status: health.status,
+        timestamp: new Date().toISOString(),
+        services: {
+          redis: redisStatus,
+          queues: {
+            scheduler: {
+              waiting: health.queueCounts.scheduler.waiting,
+              active: health.queueCounts.scheduler.active,
+              completed: health.queueCounts.scheduler.completed,
+              failed: health.queueCounts.scheduler.failed,
+              delayed: health.queueCounts.scheduler.delayed,
+              repeat: health.queueCounts.scheduler.repeat,
+            },
+            sandboxOidcRefresh: {
+              waiting: health.queueCounts.sandboxOidcRefresh.waiting,
+              active: health.queueCounts.sandboxOidcRefresh.active,
+              completed: health.queueCounts.sandboxOidcRefresh.completed,
+              failed: health.queueCounts.sandboxOidcRefresh.failed,
+              delayed: health.queueCounts.sandboxOidcRefresh.delayed,
+              repeat: health.queueCounts.sandboxOidcRefresh.repeat,
+            },
           },
         },
       },
-    });
+      health.httpStatus,
+    );
   } catch (error) {
     return c.json(
       {
@@ -336,10 +398,11 @@ app.route('/admin/queues', serverAdapter.registerPlugin());
 
 app.get('/', (c) => c.redirect('/admin/queues'));
 
-async function gracefulShutdown() {
-  console.log('[Shutdown] Starting graceful shutdown...');
-
-  try {
+// Resumed Fast turns execute inside this process, so shutdown drains and
+// aborts them before anything else closes; see graceful-shutdown.ts.
+installBullMqGracefulShutdown({
+  fastAgentWorker: fastAgentParentEventWorker,
+  closeRemaining: async () => {
     await schedulerWorker.close();
     await schedulerQueueEvents.close();
     await schedulerQueue.close();
@@ -387,17 +450,18 @@ async function gracefulShutdown() {
     await activePrReviewFollowUpWorker.close();
     await activePrReviewFollowUpQueueEvents.close();
     await activePrReviewFollowUpQueue.close();
+    await pullRequestMergeabilityCheckWorker.close();
+    await pullRequestMergeabilityCheckQueueEvents.close();
+    await pullRequestMergeabilityCheckQueue.close();
+    await fastAgentParentEventQueueEvents.close();
+    await fastAgentParentEventQueue.close();
+    await sessionWakeupWorker.close();
+    await sessionWakeupQueueEvents.close();
+    await sessionWakeupQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
-  } catch (error) {
-    console.error('[Shutdown] Error during shutdown:', error);
-  }
-
-  process.exit(0);
-}
-
-process.on('SIGTERM', gracefulShutdown);
-process.on('SIGINT', gracefulShutdown);
+  },
+});
 
 const port = Number(process.env.PORT || 13002);
 

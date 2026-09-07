@@ -15,8 +15,8 @@ describe('opencode-server bootstrap', () => {
   // apps/worker/src/run-task/slack-posting-tools.ts).
   const slackPostingToolExclusions = {
     roomote_send_chat_reply: false,
+    roomote_report_to_parent_session: false,
     roomote_send_chat_reaction_emoji: false,
-    roomote_add_reaction_to_slack_message: false,
     roomote_post_to_channel: false,
     roomote_reply_to_slack_thread: false,
   };
@@ -156,6 +156,23 @@ describe('opencode-server bootstrap', () => {
     for (const tempDir of tempDirs.splice(0)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it('keeps project config disabled in the parent worker harness', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        OPENCODE_DISABLE_PROJECT_CONFIG: '0',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    expect(commandEnv.OPENCODE_DISABLE_PROJECT_CONFIG).toBe('1');
   });
 
   it('moves literal remote MCP header values into env vars before preparing the runtime overlay', async () => {
@@ -505,13 +522,15 @@ describe('opencode-server bootstrap', () => {
 
     const content = fs.readFileSync(integrationInstructionsPath, 'utf8');
 
-    expect(content).toContain('# Connected integration: Supermemory');
-    expect(content).toContain('Recall early');
-    expect(content).toContain('Save durable knowledge proactively');
-    expect(content).toContain('Do not wait for the user to ask');
+    expect(content).toContain('# Connected memory: Supermemory');
+    expect(content).toContain('first normal context or work tool call');
+    expect(content).toContain('remain visible in the session');
+    expect(content).toContain(
+      'At task completion, proactively save concise durable learnings',
+    );
   });
 
-  it('skips the integration usage instructions file when attached MCP servers define none', async () => {
+  it('injects Linear mutation guidance for attached Linear MCP servers', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -541,10 +560,16 @@ describe('opencode-server bootstrap', () => {
       'roomote-opencode-integration-instructions.md',
     );
 
-    expect(config.instructions ?? []).not.toContain(
-      integrationInstructionsPath,
+    expect(config.instructions).toContain(integrationInstructionsPath);
+
+    const content = fs.readFileSync(integrationInstructionsPath, 'utf8');
+
+    expect(content).toContain('# Connected integration: Linear');
+    expect(content).toContain('dedicated comment-creation tool');
+    expect(content).toContain(
+      'do not pass comment text to an issue-update or status-update tool',
     );
-    expect(fs.existsSync(integrationInstructionsPath)).toBe(false);
+    expect(content).toContain('report the returned tool error verbatim');
   });
 
   it('writes only developer instructions and skips the legacy system prompt file', async () => {
@@ -659,7 +684,7 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
-  it('configures a hidden judge subagent when the code review model is configured', async () => {
+  it('configures a hidden judge subagent on the vision model when one is configured', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -668,8 +693,10 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
+        R_VISION_MODEL: 'test-provider/vision-model',
+        R_VISION_MODEL_REASONING_EFFORT: 'high',
         R_CODE_REVIEW_MODEL: 'test-provider/review-model',
-        R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
+        R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'low',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -691,13 +718,17 @@ describe('opencode-server bootstrap', () => {
       openCodeConfigDir,
       'roomote-opencode-advisor-model-instructions.md',
     );
+    const visualModelInstructionsPath = path.join(
+      openCodeConfigDir,
+      'roomote-opencode-visual-model-instructions.md',
+    );
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
+        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
       mode: 'subagent',
       hidden: true,
-      model: 'test-provider/review-model',
+      model: 'test-provider/vision-model',
       options: { reasoningEffort: 'high' },
       prompt: expect.stringContaining('implementation review support'),
       permission: {
@@ -729,9 +760,13 @@ describe('opencode-server bootstrap', () => {
     });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.instructions).toEqual([
+      visualModelInstructionsPath,
       judgeModelInstructionsPath,
       advisorModelInstructionsPath,
     ]);
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'the judge runs on that vision model so it can open proof screenshots directly',
+    );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'judge',
     );
@@ -739,16 +774,19 @@ describe('opencode-server bootstrap', () => {
       'Keep judge tool use minimal and targeted.',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'do not run the judge pass until that handoff has returned',
+      'do not run the judge pass until that step has returned a capture result, honest no-op, not-applicable, unnecessary, or blocked outcome',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'verify kept screenshot and screencast evidence',
+      'open the kept screenshot and keyframe images and verify them against the plan and shipped change',
+    );
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
+      'the path `/tmp/capture-visual-proof/diff-at-start.patch` when it exists',
     );
     expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
       'If judge-driven fixes change repository files and this run requires a pre-delivery',
     );
-    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).toContain(
-      'background visual proof is configured to run after delivery, do not re-run a pre-delivery proof handoff',
+    expect(fs.readFileSync(judgeModelInstructionsPath, 'utf8')).not.toContain(
+      'background visual proof',
     );
     expect(runtimeEnv).not.toHaveProperty('R_CODE_REVIEW_MODEL');
     expect(runtimeEnv).not.toHaveProperty(
@@ -756,7 +794,7 @@ describe('opencode-server bootstrap', () => {
     );
   });
 
-  it('configures a hidden judge subagent with the coding model when no code review model is configured', async () => {
+  it('configures a hidden judge subagent with the coding model when no vision model is configured', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -790,7 +828,7 @@ describe('opencode-server bootstrap', () => {
 
     expect(baseConfig.agent?.judge).toEqual({
       description:
-        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, including visual-proof verification when evidence is available, and returns concise review findings.',
+        'Compares completed implementation against a plan or requested outcome after validation and any pre-delivery visual proof, opens captured proof images to verify them, and returns concise review findings.',
       mode: 'subagent',
       hidden: true,
       model: 'test-provider/main-model',
@@ -1470,174 +1508,6 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
-  it('configures a hidden proof-runner subagent when a proof browser target is provided', async () => {
-    const { prepareOpenCodeCommandEnv } =
-      await import('../opencode-server/bootstrap');
-
-    const homeDir = createTempHome();
-    const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: {
-        ...createDirectHarnessRuntimeEnv(homeDir),
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/',
-      },
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
-    const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
-      agent?: Record<string, unknown>;
-      instructions?: string[];
-    };
-    const proofRunnerInstructionsPath = path.join(
-      homeDir,
-      '.config',
-      'opencode',
-      'roomote-opencode-proof-runner-instructions.md',
-    );
-    const judgeModelInstructionsPath = path.join(
-      homeDir,
-      '.config',
-      'opencode',
-      'roomote-opencode-judge-model-instructions.md',
-    );
-    const advisorModelInstructionsPath = path.join(
-      homeDir,
-      '.config',
-      'opencode',
-      'roomote-opencode-advisor-model-instructions.md',
-    );
-    const proofRunnerAgent = config.agent?.['proof-runner'] as {
-      prompt?: string;
-    };
-
-    expect(config.agent?.['proof-runner']).toMatchObject({
-      description: expect.stringContaining('proof'),
-      mode: 'subagent',
-      hidden: true,
-      permission: {
-        bash: 'allow',
-        read: 'allow',
-        edit: 'deny',
-        task: 'deny',
-        skill: 'allow',
-      },
-      tools: {
-        ...slackPostingToolExclusions,
-        roomote_manage_source_control: false,
-        roomote_manage_tasks: false,
-        roomote_manage_environments: false,
-      },
-    });
-    const proofRunnerTools = (
-      config.agent?.['proof-runner'] as { tools?: Record<string, boolean> }
-    ).tools;
-    expect(proofRunnerTools).not.toHaveProperty('roomote_manage_artifacts');
-    expect(Object.values(proofRunnerTools ?? {})).not.toContain(true);
-    expect(proofRunnerAgent.prompt).toContain(
-      'Browser target: http://localhost:3000/',
-    );
-    expect(proofRunnerAgent.prompt).toContain('manage_artifacts');
-    expect(proofRunnerAgent.prompt).toContain('agent-browser');
-    expect(proofRunnerAgent.prompt).toContain(
-      'explicitly load the `agent-browser` skill',
-    );
-    expect(proofRunnerAgent.prompt).toContain(
-      'agent-browser skills get core --full',
-    );
-    expect(proofRunnerAgent.prompt).toContain(
-      'not an OpenCode tool or MCP tool',
-    );
-    expect(config.instructions).toEqual([
-      judgeModelInstructionsPath,
-      advisorModelInstructionsPath,
-      proofRunnerInstructionsPath,
-    ]);
-    expect(fs.readFileSync(proofRunnerInstructionsPath, 'utf8')).toContain(
-      'proof-runner',
-    );
-    expect(fs.readFileSync(proofRunnerInstructionsPath, 'utf8')).toContain(
-      'http://localhost:3000/',
-    );
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_PROOF_BROWSER_TARGET');
-  });
-
-  it('does not add a proof-runner subagent when no proof browser target is provided', async () => {
-    const { prepareOpenCodeCommandEnv } =
-      await import('../opencode-server/bootstrap');
-
-    const homeDir = createTempHome();
-
-    const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
-    const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
-      agent?: Record<string, unknown>;
-      instructions?: string[];
-    };
-    const proofRunnerInstructionsPath = path.join(
-      homeDir,
-      '.config',
-      'opencode',
-      'roomote-opencode-proof-runner-instructions.md',
-    );
-
-    expect(config.agent).toEqual({
-      judge: expect.objectContaining({ model: 'test-provider/main-model' }),
-      advisor: expect.objectContaining({ model: 'test-provider/main-model' }),
-      architect: expect.objectContaining({ mode: 'primary' }),
-      general: { tools: slackPostingToolExclusions },
-    });
-    expect(config.instructions).toEqual([
-      path.join(
-        homeDir,
-        '.config',
-        'opencode',
-        'roomote-opencode-judge-model-instructions.md',
-      ),
-      path.join(
-        homeDir,
-        '.config',
-        'opencode',
-        'roomote-opencode-advisor-model-instructions.md',
-      ),
-    ]);
-    expect(fs.existsSync(proofRunnerInstructionsPath)).toBe(false);
-    expect(runtimeEnv).not.toHaveProperty('ROOMOTE_PROOF_BROWSER_TARGET');
-  });
-
-  it('registers both the visual and proof-runner subagents together', async () => {
-    const { prepareOpenCodeCommandEnv } =
-      await import('../opencode-server/bootstrap');
-
-    const homeDir = createTempHome();
-
-    const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: {
-        ...createDirectHarnessRuntimeEnv(homeDir),
-        R_VISION_MODEL: 'test-provider/vision-model',
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/',
-      },
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
-    const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
-      agent?: Record<string, unknown>;
-      instructions?: string[];
-    };
-
-    expect(config.agent?.visual).toMatchObject({ mode: 'subagent' });
-    expect(config.agent?.judge).toMatchObject({ mode: 'subagent' });
-    expect(config.agent?.advisor).toMatchObject({ mode: 'subagent' });
-    expect(config.agent?.['proof-runner']).toMatchObject({
-      mode: 'subagent',
-    });
-    expect(config.instructions).toHaveLength(4);
-  });
-
   it('excludes the Slack-posting tools from every generated subagent and the built-in general agent', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
@@ -1649,7 +1519,6 @@ describe('opencode-server bootstrap', () => {
         ...createDirectHarnessRuntimeEnv(homeDir),
         R_VISION_MODEL: 'test-provider/vision-model',
         R_EXPLORE_MODEL: 'test-provider/explore-model',
-        ROOMOTE_PROOF_BROWSER_TARGET: 'http://localhost:3000/',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
@@ -1664,7 +1533,6 @@ describe('opencode-server bootstrap', () => {
       'judge',
       'advisor',
       'explore',
-      'proof-runner',
       'general',
     ]) {
       expect(config.agent?.[agentName]?.tools, agentName).toMatchObject(
@@ -1837,7 +1705,7 @@ describe('opencode-server bootstrap', () => {
     });
   });
 
-  it('materializes OPENCODE_AUTH_CONTENT into auth.json and strips the env var', async () => {
+  it('strips OPENCODE_AUTH_CONTENT without materializing auth.json', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1863,11 +1731,10 @@ describe('opencode-server bootstrap', () => {
       'opencode',
       'auth.json',
     );
-    expect(fs.existsSync(authPath)).toBe(true);
-    expect(fs.readFileSync(authPath, 'utf8')).toBe(authContent);
+    expect(fs.existsSync(authPath)).toBe(false);
   });
 
-  it('removes stale auth.json before ChatGPT gateway mode starts', async () => {
+  it('removes stale auth.json before the task harness starts', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1892,7 +1759,6 @@ describe('opencode-server bootstrap', () => {
     const { commandEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
-        R_INFERENCE_GATEWAY_CHATGPT: '1',
         OPENCODE_AUTH_CONTENT: JSON.stringify({
           openai: { type: 'oauth', refresh: 'conflicting-token' },
         }),
@@ -1905,7 +1771,7 @@ describe('opencode-server bootstrap', () => {
     expect(fs.existsSync(authPath)).toBe(false);
   });
 
-  it('fails closed when stale auth.json cannot be removed in gateway mode', async () => {
+  it('fails closed when stale auth.json cannot be removed', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1924,38 +1790,11 @@ describe('opencode-server bootstrap', () => {
       prepareOpenCodeCommandEnv({
         runtimeEnv: {
           ...createDirectHarnessRuntimeEnv(homeDir),
-          R_INFERENCE_GATEWAY_CHATGPT: '1',
         },
         workspacePath: '/tmp/workspace',
         logger: createLogger(),
       }),
-    ).rejects.toThrow(
-      'Failed to remove OpenCode auth.json for ChatGPT gateway mode',
-    );
-  });
-
-  it('leaves OPENCODE_AUTH_CONTENT set when auth.json cannot be written', async () => {
-    const { prepareOpenCodeCommandEnv } =
-      await import('../opencode-server/bootstrap');
-
-    // Point HOME at a path that cannot be created (a file under an existing
-    // file) so the mkdir for the opencode data dir fails.
-    const homeDir = createTempHome();
-    fs.writeFileSync(path.join(homeDir, '.local'), 'block');
-
-    const authContent = JSON.stringify({ openai: { type: 'oauth' } });
-
-    const { commandEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: {
-        ...createDirectHarnessRuntimeEnv(homeDir),
-        OPENCODE_AUTH_CONTENT: authContent,
-      },
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
-    // Failed materialization keeps the env var as a fallback.
-    expect(commandEnv.OPENCODE_AUTH_CONTENT).toBe(authContent);
+    ).rejects.toThrow('Failed to remove OpenCode auth.json from task sandbox');
   });
 
   it('strips disabled-provider credentials after sourcing the shared BASH_ENV', async () => {

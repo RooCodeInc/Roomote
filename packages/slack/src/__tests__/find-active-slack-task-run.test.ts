@@ -34,6 +34,13 @@ vi.mock('@roomote/db/server', () => {
       isActive: 'slackInstallations.isActive',
       teamId: 'slackInstallations.teamId',
     },
+    trackedMessages: {
+      surface: 'trackedMessages.surface',
+      kind: 'trackedMessages.kind',
+      channelId: 'trackedMessages.channelId',
+      threadTs: 'trackedMessages.threadTs',
+      metadata: 'trackedMessages.metadata',
+    },
     db: {
       select: vi.fn(() => queryChain),
     },
@@ -114,6 +121,27 @@ describe('findActiveSlackTaskRun', () => {
             'T-second',
           ]),
         }),
+        { inArray: ['taskRuns.status', [...activeRunStatuses]] },
+        { isNull: 'taskRuns.canceledAt' },
+        { isNull: 'tasks.deletedAt' },
+      ],
+    });
+  });
+
+  it('can resolve a trusted tracked-thread alias by task id alone', async () => {
+    await findActiveSlackTaskRun('111.000', {
+      taskId: 'task-1',
+      trackedAlias: {
+        slackTeamId: 'T-first',
+        channelId: 'C123',
+        threadTs: '111.000',
+      },
+    });
+
+    expect(whereMock).toHaveBeenNthCalledWith(1, {
+      and: [
+        { eq: ['taskRuns.taskId', 'task-1'] },
+        expect.objectContaining({ sql: expect.any(Array) }),
         { inArray: ['taskRuns.status', [...activeRunStatuses]] },
         { isNull: 'taskRuns.canceledAt' },
         { isNull: 'tasks.deletedAt' },

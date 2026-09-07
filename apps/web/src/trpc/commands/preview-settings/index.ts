@@ -135,12 +135,22 @@ export function applyPreviewRuntimeUiMock(
   };
 }
 
+// The probe label must satisfy the Caddy on-demand TLS ask endpoint: a
+// 13-char base36 taskId prefix plus the configured subdomain suffix. The
+// fixed synthetic taskId keeps repeated probes on one hostname so on-demand
+// TLS does not mint a new certificate per probe.
+const PROBE_TASK_ID = '0000000000000';
+
 async function probePreviewHostname(
   previewProxyBaseUrl: string,
   hostname: string,
+  subdomainSuffix: string | null,
 ): Promise<RuntimePreviewValidation> {
   const probeUrl = new URL(previewProxyBaseUrl);
-  probeUrl.hostname = `roomote-preview-check-${Date.now()}.${hostname}`;
+  const probeLabel = subdomainSuffix
+    ? `${PROBE_TASK_ID}-preview-check-${subdomainSuffix}`
+    : `${PROBE_TASK_ID}-preview-check`;
+  probeUrl.hostname = `${probeLabel}.${hostname}`;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
@@ -229,6 +239,7 @@ async function validateRuntimePreviewConfig(): Promise<
     validation = await probePreviewHostname(
       analysis.previewProxyBaseUrl,
       analysis.primaryPreviewDomain,
+      resolvedConfig.effective.previewProxySubdomainSuffix ?? null,
     );
   }
 
@@ -239,7 +250,10 @@ async function validateRuntimePreviewConfig(): Promise<
     roomotePreviewDomain: resolvedConfig.effective.roomotePreviewDomain,
     primaryPreviewDomain: analysis.primaryPreviewDomain,
     exampleHostname: analysis.primaryPreviewDomain
-      ? buildExamplePreviewHostname(analysis.primaryPreviewDomain)
+      ? buildExamplePreviewHostname(
+          analysis.primaryPreviewDomain,
+          resolvedConfig.effective.previewProxySubdomainSuffix,
+        )
       : null,
     validation,
   });

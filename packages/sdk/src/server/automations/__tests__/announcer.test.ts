@@ -97,9 +97,12 @@ vi.mock('../destination', () => ({
     provider: string;
     channelId: string;
     serviceUrl?: string;
+    teamId?: string;
   }) =>
     destination.provider === 'slack'
-      ? {}
+      ? destination.teamId
+        ? { teamId: destination.teamId }
+        : {}
       : {
           communicationProvider: destination.provider,
           communicationChannelId: destination.channelId,
@@ -231,6 +234,46 @@ describe('announcerJob non-Slack posting', () => {
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ key: 'announcer', status: 'succeeded' }),
+    );
+  });
+
+  it('ignores installation A before any outcome and launches the manager report for owner B', async () => {
+    mockSlackInstallationRows.mockResolvedValue([
+      { slackBotToken: 'xoxb-a', slackTeamId: 'T-A' },
+      { slackBotToken: 'xoxb-b', slackTeamId: 'T-B' },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C-MANAGER',
+      teamId: 'T-B',
+      source: 'manager_channel',
+    });
+    mockGetAutomationRuntime.mockImplementation(async () => ({
+      key: 'announcer',
+      enabled: mockRecordAutomationRunOutcome.mock.calls.length === 0,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      destination: null,
+    }));
+    const result = await announcerJob();
+    expect(result.completed).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            teamId: 'T-B',
+            slackChannel: 'C-MANAGER',
+          }),
+        }),
+      }),
+    );
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: 'succeeded' }),
     );
   });
 

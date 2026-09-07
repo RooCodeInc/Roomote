@@ -2,7 +2,7 @@
 #
 # Roomote one-command installer for a single self-managed host.
 #
-#   curl -fsSL https://get.roomote.dev | bash
+#   curl -fsSL https://get.roomote.dev | sudo bash
 #
 # get.roomote.dev serves this file and mirrors the release lookup and
 # deployment-file fetches (see deploy/get-roomote/README.md); GitHub is the
@@ -17,7 +17,7 @@
 #
 # Bring your own domain (recommended for production):
 #
-#   curl -fsSL https://get.roomote.dev | bash -s -- --domain roomote.example.com
+#   curl -fsSL https://get.roomote.dev | sudo bash -s -- --domain roomote.example.com
 #
 # Re-running is safe: an existing /opt/roomote/.env keeps its secrets and only
 # deployment-owned metadata (image tags, URLs) is refreshed.
@@ -34,7 +34,8 @@ usage: install.sh [options]
 
 Options:
   --domain <host>            Public app hostname (default: roomote.<ip>.sslip.io)
-  --preview-domain <host>    Preview hostname (default: preview.<domain>)
+  --preview-domain <host>    Dedicated preview hostname (default: flat
+                             <task>-<port>-preview.<domain> hostnames)
   --tls-mode <acme|internal> TLS certificate mode (default: acme)
   --skip-dns-check           Skip public-DNS verification for --domain
   --version <tag>            Roomote image tag (default: latest GitHub release)
@@ -42,6 +43,7 @@ Options:
                              (default: RooCodeInc/Roomote)
   --image-registry <host>    Image registry (default: ghcr.io)
   --image-namespace <ns>     Image namespace (default: roocodeinc)
+  --no-setup-url             Do not print the tokenized first-admin setup URL
   --help                     Show this help
 
 Environment overrides:
@@ -81,6 +83,7 @@ die() {
 
 domain=''
 preview_domain=''
+preview_subdomain_suffix=''
 tls_mode="${ROOMOTE_TLS_MODE:-}"
 skip_dns_check='false'
 roomote_version="${ROOMOTE_VERSION:-}"
@@ -89,6 +92,7 @@ image_registry='ghcr.io'
 image_namespace='roocodeinc'
 source_dir="${ROOMOTE_INSTALL_SOURCE_DIR:-}"
 install_root='/opt/roomote'
+print_setup_url='true'
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -124,6 +128,10 @@ while [ "$#" -gt 0 ]; do
       image_namespace="${2:-}"
       shift 2
       ;;
+    --no-setup-url)
+      print_setup_url='false'
+      shift
+      ;;
     --help | -h)
       usage
       exit 0
@@ -149,10 +157,8 @@ fi
 # Before anything else (including the root check, so nobody sudo-pipes a
 # script for nothing): this installer manages Docker, systemd, and /opt on
 # the host, so it only runs on a Linux server. The non-Linux message is
-# OS-specific so macOS/Windows users get a concrete local-trial path
-# (Multipass VM) instead of only the SSH-into-a-server guidance, but the
-# installer never installs Multipass, launches VMs, or mutates the host on a
-# non-Linux system.
+# OS-specific so macOS/Windows users run this same installer inside a Linux VM
+# instead of substituting the repository's development Compose files.
 host_kernel="$(uname -s)"
 if [ "$host_kernel" != 'Linux' ]; then
   case "$host_kernel" in
@@ -161,16 +167,11 @@ if [ "$host_kernel" != 'Linux' ]; then
 this installer sets up a Linux server (Ubuntu/Debian, x86_64 or arm64) and
 cannot run on macOS.
 
-If you must try the installer locally, spin up an Ubuntu VM with Multipass and run it
-inside:
+For local evaluation on this Mac, create or reuse a full Ubuntu VM and run this
+same installer inside it. Add a temporary HTTPS tunnel when OAuth callbacks or
+webhooks must reach the VM:
 
-  brew install --cask multipass
-  multipass launch 24.04 --name roomote --cpus 4 --memory 6G --disk 40G
-  multipass shell roomote
-  curl -fsSL https://get.roomote.dev | sudo bash
-
-Note: a local VM is for trying the installer only, not a production path.
-Networking, domains, and webhooks may behave differently than on a real VPS.
+  https://docs.roomote.dev/self-hosting/agent-installation
 
 For production, SSH into the Ubuntu/Debian server you want to run Roomote on
 and run the installer there (or look for alternatives in https://docs.roomote.dev).
@@ -184,18 +185,11 @@ EOF
 this installer sets up a Linux server (Ubuntu/Debian, x86_64 or arm64) and
 cannot run on Windows.
 
-Run it on a real Linux server, or try it locally inside an Ubuntu VM. The
-closest PowerShell-friendly option is Multipass on Windows (install it
-optionally with `winget install -e --id Canonical.Multipass`):
+For local evaluation on this Windows machine, create or reuse a full Ubuntu VM
+and run this same installer inside it. Add a temporary HTTPS tunnel when OAuth
+callbacks or webhooks must reach the VM:
 
-  multipass launch 24.04 --name roomote --cpus 4 --memory 6G --disk 40G
-  multipass shell roomote
-  curl -fsSL https://get.roomote.dev | sudo bash
-
-Note: a local VM is for trying the installer only, not a production path.
-Networking, domains, and webhooks may behave differently than on a real VPS.
-WSL2 is not recommended because the installer expects a server-like Linux
-host with Docker, systemd, and full networking.
+  https://docs.roomote.dev/self-hosting/agent-installation
 
 For production, SSH into the Ubuntu/Debian server you want to run Roomote on
 and run the installer there.
@@ -298,6 +292,22 @@ log "Installing Roomote $roomote_version"
 
 # --- Domains -----------------------------------------------------------------
 
+read_saved_env_value() {
+  # Accepts the same line shapes set_env_value writes and rewrites:
+  # optional leading whitespace, an optional "export " prefix, and values
+  # containing '='.
+  local file="$1"
+  local key="$2"
+  awk -v key="$key" '
+    BEGIN { pattern = "^[[:space:]]*(export[[:space:]]+)?" key "=" }
+    $0 ~ pattern {
+      sub(/^[^=]*=/, "")
+      print
+      exit
+    }
+  ' "$file"
+}
+
 detect_public_ip() {
   local ip
   for endpoint in 'https://api.ipify.org' 'https://ifconfig.me/ip' 'https://ipinfo.io/ip'; do
@@ -310,15 +320,22 @@ detect_public_ip() {
   return 1
 }
 
-if [ -z "$domain" ] && [ -f "$install_root/.env" ]; then
-  domain="$(awk -F= '/^ROOMOTE_APP_DOMAIN=/ { print $2; exit }' "$install_root/.env")"
-  if [ -n "$domain" ]; then
-    log "Reusing the existing domain $domain from $install_root/.env"
-  fi
+saved_app_domain=''
+saved_preview_domain=''
+saved_preview_subdomain_suffix=''
+if [ -f "$install_root/.env" ]; then
+  saved_app_domain="$(read_saved_env_value "$install_root/.env" ROOMOTE_APP_DOMAIN)"
+  saved_preview_domain="$(read_saved_env_value "$install_root/.env" ROOMOTE_PREVIEW_DOMAIN)"
+  saved_preview_subdomain_suffix="$(read_saved_env_value "$install_root/.env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX)"
+fi
+
+if [ -z "$domain" ] && [ -n "$saved_app_domain" ]; then
+  domain="$saved_app_domain"
+  log "Reusing the existing domain $domain from $install_root/.env"
 fi
 
 if [ -z "$tls_mode" ] && [ -f "$install_root/.env" ]; then
-  tls_mode="$(awk -F= '/^ROOMOTE_TLS_MODE=/ { print $2; exit }' "$install_root/.env")"
+  tls_mode="$(read_saved_env_value "$install_root/.env" ROOMOTE_TLS_MODE)"
 fi
 tls_mode="${tls_mode:-acme}"
 case "$tls_mode" in
@@ -357,8 +374,32 @@ else
   fi
 fi
 
+if [ -z "$preview_domain" ] && [ -n "$saved_preview_domain" ]; then
+  if [ "$saved_preview_domain" = "$saved_app_domain" ]; then
+    # Flat layout: previews follow the app domain, including across a rerun
+    # that changes --domain.
+    preview_domain="$domain"
+  else
+    preview_domain="$saved_preview_domain"
+    if [ -n "$saved_app_domain" ] && [ "$saved_app_domain" != "$domain" ]; then
+      warn "Keeping the dedicated preview domain $preview_domain from $install_root/.env; pass --preview-domain if previews should follow the new app domain $domain."
+    fi
+  fi
+fi
+
 if [ -z "$preview_domain" ]; then
-  preview_domain="preview.$domain"
+  # Fresh installs (and reruns whose .env predates preview settings) default
+  # to flat preview hostnames.
+  preview_domain="$domain"
+fi
+
+if [ "$preview_domain" = "$domain" ]; then
+  # Flat layouts always carry a subdomain suffix so preview hostnames stay
+  # inside the reserved "-<suffix>" namespace, even when --preview-domain
+  # restates the app domain explicitly.
+  preview_subdomain_suffix="${saved_preview_subdomain_suffix:-preview}"
+else
+  preview_subdomain_suffix="$saved_preview_subdomain_suffix"
 fi
 
 # --- Docker ------------------------------------------------------------------
@@ -463,15 +504,7 @@ env_has_value() {
 }
 
 read_env_value() {
-  local key="$1"
-  awk -v key="$key" '
-    BEGIN { pattern = "^[[:space:]]*(export[[:space:]]+)?" key "=" }
-    $0 ~ pattern {
-      sub(/^[^=]*=/, "")
-      print
-      exit
-    }
-  ' "$env_file"
+  read_saved_env_value "$env_file" "$1"
 }
 
 generate_p256_keypair() {
@@ -549,6 +582,7 @@ set_env_value ROOMOTE_VERSION "$roomote_version"
 set_env_value ROOMOTE_REPO "$repo"
 set_env_value ROOMOTE_APP_DOMAIN "$domain"
 set_env_value ROOMOTE_PREVIEW_DOMAIN "$preview_domain"
+set_env_value PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"
 set_env_value ROOMOTE_TLS_MODE "$tls_mode"
 if [ "$tls_mode" = 'internal' ]; then
   set_env_value ROOMOTE_CADDY_LOCAL_CERTS 'local_certs'
@@ -616,9 +650,10 @@ docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-ti
 log "Downloading the task worker image in the background"
 nohup sh -c "docker pull $(printf '%q' "$worker_image") >>/var/log/roomote-worker-pull.log 2>&1" >/dev/null 2>&1 &
 
-setup_token="$(awk -F= '/^SETUP_TOKEN=/ { print $2; exit }' .env)"
+if [ "$print_setup_url" = 'true' ]; then
+  setup_token="$(awk -F= '/^SETUP_TOKEN=/ { print $2; exit }' .env)"
 
-cat <<EOF
+  cat <<EOF
 
 Roomote is up. One step left:
 
@@ -631,6 +666,17 @@ issued -- wait a minute and reload.
 
 Manage later with the roomote command: roomote status | logs | upgrade | backup
 EOF
+else
+  cat <<'EOF'
+
+Roomote is up. The tokenized setup URL was not printed.
+
+In a separate trusted terminal, run `sudo roomote setup-url` and open the
+result to create the first admin account.
+
+Manage later with the roomote command: roomote status | logs | upgrade | backup
+EOF
+fi
 
 }
 

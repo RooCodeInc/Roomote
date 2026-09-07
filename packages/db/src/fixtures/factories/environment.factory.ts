@@ -33,7 +33,7 @@ export const environmentFactory = Factory.define<
     config: (params.config as CreateEnvironment['config']) || {
       name: envName,
       repositories: [
-        { repository: `${faker.internet.userName()}/${faker.lorem.slug()}` },
+        { repository: `${faker.internet.username()}/${faker.lorem.slug()}` },
       ],
     },
     isEval: params.isEval ?? false,

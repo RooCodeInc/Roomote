@@ -20,11 +20,13 @@ const state = vi.hoisted(() => ({
     enabled: boolean;
     scheduleMode: 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
-    model: null;
+    model: string | null;
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
+    executionMode?: 'sandbox_task' | 'fast';
     environmentId: string;
     target: {
-      provider: 'slack' | 'discord' | 'teams' | 'telegram';
-      externalRef: string;
+      provider?: 'slack' | 'discord' | 'teams' | 'telegram';
+      externalRef?: string;
       targetKind?:
         | 'slack_channel'
         | 'slack_user'
@@ -44,6 +46,7 @@ const state = vi.hoisted(() => ({
     createdByName: string;
     createdAt: Date;
     updatedAt: Date;
+    latestFastResult?: string | null;
   }>,
   environments: [] as Array<{ id: string; name: string }>,
   nextUpdateSettingsResult: null as {
@@ -74,6 +77,7 @@ const state = vi.hoisted(() => ({
           reviewAllPullRequestAuthors: false,
           reviewOnCommit: true,
           reviewDraftPrs: true,
+          publishGithubCheck: false,
           relayReviewResultsToTask: false,
           relayUsers: [],
         },
@@ -98,6 +102,10 @@ const state = vi.hoisted(() => ({
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
         managerStatsDiscordChannelId: null,
+        providerUsageLimitFrequency: 'every_hour' as const,
+        providerUsageLimitThreshold: 85,
+        providerUsageLimitSlackChannelId: null,
+        providerUsageLimitDiscordChannelId: null,
         sentryTriageFrequency: 'off' as const,
         sentryTriageSlackChannelId: null,
         sentryTriageDiscordChannelId: null,
@@ -120,6 +128,15 @@ const state = vi.hoisted(() => ({
         ciFailureTriageFrequency: 'off' as const,
         ciFailureTriageSlackChannelId: null,
         ciFailureTriageDiscordChannelId: null,
+        mergeAnnouncerFrequency: 'off' as 'off' | 'daily',
+        mergeAnnouncerTargetProvider: null as
+          | 'slack'
+          | 'discord'
+          | 'teams'
+          | 'telegram'
+          | null,
+        mergeAnnouncerTargetMode: null as 'channel' | 'direct_message' | null,
+        mergeAnnouncerTargetChannelId: null,
         suggesterFrequency: 'off' as const,
         suggesterSlackChannelId: null,
         suggesterDiscordChannelId: null,
@@ -132,6 +149,7 @@ const state = vi.hoisted(() => ({
         announcerInstructions: null,
         platformIssueSlackChannelId: null,
         platformIssueDiscordChannelId: null,
+        platformIssueAlertsEnabled: true,
       },
       slackChannelDisplayNames: {
         channelAutoStartSlackChannels: {
@@ -139,6 +157,7 @@ const state = vi.hoisted(() => ({
         },
         managerSlackChannel: '#roomote-managers',
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -154,6 +173,7 @@ const state = vi.hoisted(() => ({
         channelAutoStartSlackChannels: [],
         managerSlackChannel: null,
         managerStatsSlackChannel: null,
+        providerUsageLimitSlackChannel: null,
         suggesterSlackChannel: null,
         announcerSlackChannel: null,
         platformIssueSlackChannel: null,
@@ -172,12 +192,14 @@ const state = vi.hoisted(() => ({
         reviewAllPullRequestAuthors: false,
         reviewOnCommit: true,
         reviewDraftPrs: true,
+        publishGithubCheck: false,
         relayReviewResultsToTask: false,
         relayUsers: [],
       },
       resolvedDestinations: Object.fromEntries(
         [
           'manager_stats',
+          'provider_usage_limit',
           'sentry_triage',
           'dependabot_triage',
           'codeql_triage',
@@ -326,6 +348,7 @@ vi.mock('@tanstack/react-query', () => ({
               id: 'anthropic/claude-sonnet-5',
               displayName: 'Claude Sonnet 5',
               isDefault: true,
+              metadata: { supportsReasoning: true },
             },
           ],
         },
@@ -504,7 +527,10 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-import { AutomationsSettings } from './AutomationsSettings';
+import {
+  AutomationsSettings,
+  getAutomationHistoryHref,
+} from './AutomationsSettings';
 
 async function openSuggesterCard() {
   fireEvent.click(
@@ -565,6 +591,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.reviewer.reviewAllPullRequestAuthors = false;
     state.settingsQuery.data.reviewer.reviewOnCommit = true;
     state.settingsQuery.data.reviewer.reviewDraftPrs = true;
+    state.settingsQuery.data.reviewer.publishGithubCheck = false;
     state.settingsQuery.data.settings.reviewCodeInstructions = null;
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
@@ -595,6 +622,27 @@ describe('AutomationsSettings', () => {
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
+  });
+
+  it('shows provider usage alert enablement, channel destination, and threshold controls', async () => {
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Inference Provider Usage Alerts',
+      }),
+    );
+
+    expect(screen.getByRole('switch', { name: 'Enabled' })).toBeChecked();
+    expect(
+      screen.getByLabelText('Post alerts to this Slack channel'),
+    ).toBeInTheDocument();
+    const thresholdSlider = screen.getByRole('slider', {
+      name: 'Provider usage alert threshold',
+    });
+    expect(thresholdSlider).toHaveAttribute('aria-valuemin', '5');
+    expect(thresholdSlider).toHaveAttribute('aria-valuenow', '85');
+    expect(screen.getByText('85%')).toBeInTheDocument();
   });
 
   it('configures Call Roomote via emoji with a name and instructions', async () => {
@@ -630,6 +678,25 @@ describe('AutomationsSettings', () => {
     expect(screen.getByLabelText('Additional instructions')).toHaveValue(
       'Focus on authorization boundaries.',
     );
+  });
+
+  it('explains that GitHub controls whether the review check is required', async () => {
+    state.settingsQuery.data.reviewer.enabled = true;
+    state.settingsQuery.data.settings.reviewer.enabled = true;
+
+    render(<AutomationsSettings />);
+    await openReviewerCard();
+
+    expect(
+      screen.getByRole('switch', {
+        name: 'Publish review results as a GitHub check',
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        'GitHub branch protection or rulesets control whether this check is required for merging.',
+      ),
+    ).toBeVisible();
   });
 
   it('shows per-automation Slack destinations without requiring a manager channel', async () => {
@@ -787,6 +854,26 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText('#automation-reports (Discord)'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('switch', { name: 'Alert on Config Errors enabled' }),
+    ).toBeChecked();
+  });
+
+  it('shows the deployment-admin DM fallback for unconfigured platform issue alerts', async () => {
+    state.settingsQuery.data.resolvedDestinations.platform_issue_alerts = null;
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /(?:Set up|Configure) Alert on Config Errors/,
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Reports to deployment admins via direct message (automatic).',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('hides the launch mode picker when decision mode is disabled', async () => {
@@ -846,6 +933,85 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('Meta automations')).toBeNull();
   });
 
+  it('links enabled built-in automations to their filtered task history', async () => {
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('link', {
+        name: 'View previous runs for Auto-respond to channels',
+      }),
+    ).toHaveAttribute(
+      'href',
+      '/tasks?userId=automation%3Aslack_channel_auto_start',
+    );
+    expect(
+      screen.queryByRole('link', {
+        name: 'View previous runs for Review Code',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['callRoomoteViaEmoji', 'call_roomote_via_emoji'],
+    ['channelAutoStart', 'slack_channel_auto_start'],
+    ['managerStats', 'manager_stats'],
+    ['sentryTriage', 'sentry_triage'],
+    ['dependabotTriage', 'dependabot_triage'],
+    ['codeqlTriage', 'codeql_triage'],
+    ['issueFixer', 'issue_fixer'],
+    ['securityAuditor', 'security_auditor'],
+    ['codeQualityAuditor', 'code_quality_auditor'],
+    ['ciFailureTriage', 'ci_failure_triage'],
+    ['reviewer', 'review_code'],
+    ['conflictResolver', 'conflict_resolver'],
+    ['suggester', 'suggester'],
+    ['announcer', 'announcer'],
+    ['platformIssueAlerts', 'platform_issue_alerts'],
+  ] as const)(
+    'builds the filtered task history link for %s',
+    (automationId, automationKey) => {
+      expect(getAutomationHistoryHref(automationId)).toBe(
+        `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`,
+      );
+    },
+  );
+
+  it('does not add task history to non-running built-in configuration', () => {
+    expect(getAutomationHistoryHref('managerChannel')).toBeNull();
+  });
+
+  it('does not add task history to provider usage alerts', () => {
+    expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
+  });
+
+  it('shows Merge announcer as a webhook-driven automation without task history', async () => {
+    state.settingsQuery.data.settings.mergeAnnouncerFrequency = 'daily';
+    state.settingsQuery.data.settings.mergeAnnouncerTargetProvider = 'discord';
+    state.settingsQuery.data.settings.mergeAnnouncerTargetMode =
+      'direct_message';
+    state.settingsQuery.data.settings.mergeAnnouncerTargetChannelId = null;
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Merge announcer')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Summarize commits pushed to each active repository’s default branch and announce who pushed them.',
+      ),
+    ).toBeInTheDocument();
+    expect(getAutomationHistoryHref('mergeAnnouncer')).toBeNull();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Merge announcer' }),
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Discord');
+    expect(
+      screen.getByRole('combobox', { name: 'Discord destination type' }),
+    ).toHaveTextContent('DM me');
+  });
+
   it('filters available automations by category and provider-aware search', async () => {
     render(<AutomationsSettings />);
 
@@ -893,7 +1059,7 @@ describe('AutomationsSettings', () => {
     ).toHaveLength(17);
   });
 
-  it('uses plain text empty states for built-in and custom automations', async () => {
+  it('keeps platform issue alerts enabled by default while showing the custom empty state', async () => {
     state.settingsQuery.data.settings.channelAutoStartSlackChannels = [];
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
     state.settingsQuery.data.slackChannelDisplayNames.managerSlackChannel =
@@ -901,11 +1067,14 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    const builtInEmptyState = await screen.findByText(
-      'No built-in automations enabled yet.',
-    );
-    expect(builtInEmptyState.tagName).toBe('P');
-    expect(builtInEmptyState).toHaveClass('text-sm', 'text-muted-foreground');
+    expect(
+      screen.queryByText('No built-in automations enabled yet.'),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', {
+        name: 'Configure Alert on Config Errors',
+      }),
+    ).toBeInTheDocument();
     const customEmptyState = screen.getByText(
       'No custom automations created yet.',
     );
@@ -977,6 +1146,14 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     ).toBeEnabled();
+    expect(
+      screen.getByRole('link', {
+        name: 'View previous runs for Weekly flaky-test scan',
+      }),
+    ).toHaveAttribute(
+      'href',
+      '/tasks?userId=automation%3Acustom_automation%3Aautomation-1',
+    );
     fireEvent.click(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     );
@@ -1020,6 +1197,11 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('button', {
         name: 'Configure Weekly flaky-test scan',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', {
+        name: 'View previous runs for Weekly flaky-test scan',
       }),
     ).toBeInTheDocument();
     expect(
@@ -1075,10 +1257,79 @@ describe('AutomationsSettings', () => {
       await screen.findByText('Daily, in All repositories →'),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
-    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
     expect(
       screen.getByRole('option', { name: 'All repositories' }),
     ).toBeInTheDocument();
+  });
+
+  it('offers no preference in the environment menu and explains channel-less output', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-fast',
+        name: 'Fast daily digest',
+        prompt: 'Summarize priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+        latestFastResult: 'No actionable regressions found.',
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Daily →')).toBeInTheDocument();
+    expect(
+      screen.getByText('No actionable regressions found.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', {
+        name: 'View previous runs for Fast daily digest',
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Fast daily digest' }),
+    );
+    expect(screen.getByText('Delegated task model')).toBeInTheDocument();
+    expect(screen.getByText('Effort')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Automation effort' }),
+    ).toHaveTextContent('High');
+    expect(
+      screen.getByText(
+        'Each run is a Session in the web app and does not post to chat.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
+    expect(
+      screen.getByRole('option', { name: 'Let Roomote decide' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mutations.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'automation-fast',
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      }),
+    );
   });
 
   it('humanizes custom schedules and shows the last run when available', async () => {
@@ -1129,7 +1380,8 @@ describe('AutomationsSettings', () => {
         scheduleMode: 'daily',
         cronExpression: null,
         model: null,
-        environmentId: 'env-1',
+        executionMode: 'fast',
+        environmentId: '__fast__',
         target: {
           provider: 'slack',
           targetKind: 'slack_user',
@@ -1160,6 +1412,11 @@ describe('AutomationsSettings', () => {
         'Results are sent privately to your linked Slack account.',
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('shows DM me for non-Slack custom automation destinations', async () => {
@@ -1174,7 +1431,8 @@ describe('AutomationsSettings', () => {
         scheduleMode: 'daily',
         cronExpression: null,
         model: null,
-        environmentId: 'env-1',
+        executionMode: 'fast',
+        environmentId: '__fast__',
         target: {
           provider: 'discord',
           targetKind: 'discord_user',
@@ -1203,6 +1461,97 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText(
         'Results are sent privately to your linked Discord account.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('explains that Teams replies continue the Fast session', async () => {
+    state.settingsQuery.data.capabilities.teamsConnected = true;
+    state.customAutomations = [
+      {
+        id: 'automation-teams-fast',
+        name: 'Teams daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {
+          provider: 'teams',
+          targetKind: 'teams_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Teams daily brief',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('explains that Telegram replies continue the Fast session', async () => {
+    state.settingsQuery.data.capabilities.telegramConnected = true;
+    state.customAutomations = [
+      {
+        id: 'automation-telegram-fast',
+        name: 'Telegram daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {
+          provider: 'telegram',
+          targetKind: 'telegram_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Telegram daily brief',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });

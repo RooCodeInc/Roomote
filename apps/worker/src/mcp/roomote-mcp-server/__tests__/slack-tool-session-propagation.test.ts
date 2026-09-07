@@ -10,8 +10,8 @@ const mockState = vi.hoisted(() => ({
   registeredTools: [] as RegisteredTool[],
   connect: vi.fn(async () => undefined),
   handleSendChatReply: vi.fn(),
+  handleReportToParentSession: vi.fn(),
   handleSendChatReactionEmoji: vi.fn(),
-  handleAddReactionToSlackMessage: vi.fn(),
   recordChatReplySatisfaction: vi.fn(),
   recordChatReplyDeliveryFailure: vi.fn(),
 }));
@@ -45,12 +45,12 @@ vi.mock('../send-chat-reply.js', () => ({
   handleSendChatReply: mockState.handleSendChatReply,
 }));
 
-vi.mock('../send-chat-reaction-emoji.js', () => ({
-  handleSendChatReactionEmoji: mockState.handleSendChatReactionEmoji,
+vi.mock('../report-to-parent-session.js', () => ({
+  handleReportToParentSession: mockState.handleReportToParentSession,
 }));
 
-vi.mock('../add-reaction-to-slack-message.js', () => ({
-  handleAddReactionToSlackMessage: mockState.handleAddReactionToSlackMessage,
+vi.mock('../send-chat-reaction-emoji.js', () => ({
+  handleSendChatReactionEmoji: mockState.handleSendChatReactionEmoji,
 }));
 
 vi.mock('../chat-reply-satisfaction.js', () => ({
@@ -74,8 +74,8 @@ describe('roomote MCP Slack tool session propagation', () => {
     mockState.registeredTools.length = 0;
     mockState.connect.mockClear();
     mockState.handleSendChatReply.mockReset();
+    mockState.handleReportToParentSession.mockReset();
     mockState.handleSendChatReactionEmoji.mockReset();
-    mockState.handleAddReactionToSlackMessage.mockReset();
     mockState.recordChatReplySatisfaction.mockReset();
     mockState.recordChatReplyDeliveryFailure.mockReset();
     mockState.recordChatReplyDeliveryFailure.mockReturnValue({
@@ -89,6 +89,8 @@ describe('roomote MCP Slack tool session propagation', () => {
       ROOMOTE_SLACK_CHANNEL: 'C123',
       ROOMOTE_SLACK_THREAD_TS: '123.456',
     };
+    // The test runner may itself be a Fast child; normal Slack cases must opt out.
+    delete process.env.ROOMOTE_FAST_AGENT_CHILD;
 
     await import('../index.js');
   });
@@ -118,6 +120,43 @@ describe('roomote MCP Slack tool session propagation', () => {
       tool: 'send_chat_reply',
       replyPurpose: 'closeout',
       sessionId: 'thread-child',
+    });
+  });
+
+  it('records a successful parent Session report as lifecycle satisfaction', async () => {
+    vi.resetModules();
+    mockState.registeredTools.length = 0;
+    mockState.handleReportToParentSession.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            relayed: true,
+            relayId: 'relay-1',
+          }),
+        },
+      ],
+    });
+    process.env = {
+      ...originalEnv,
+      ROOMOTE_CLOUD_TOKEN: 'cloud-token',
+      ROOMOTE_TASK_ID: 'task-1',
+      ROOMOTE_TASK_RUN_ID: '42',
+      ROOMOTE_FAST_AGENT_CHILD: 'true',
+    };
+    await import('../index.js');
+
+    await getRegisteredTool('report_to_parent_session').handler!(
+      { message: 'still working', purpose: 'progress' },
+      { sessionId: 'fast-child-session' },
+    );
+
+    expect(mockState.recordChatReplySatisfaction).toHaveBeenCalledWith({
+      messageTs: 'relay-1',
+      tool: 'report_to_parent_session',
+      replyPurpose: 'progress',
+      sessionId: 'fast-child-session',
     });
   });
 

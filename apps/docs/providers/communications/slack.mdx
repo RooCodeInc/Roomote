@@ -37,6 +37,20 @@ If Slack is already configured, Settings → Communications shows the saved
 credentials and still offers **Create a new Slack app with a configuration
 token** when you need to replace them.
 
+### Update an existing Slack app
+
+After connecting a workspace, use **Settings → Communications → Slack → Update
+app** to bring the existing app manifest up to date with the current Roomote
+configuration. Generate and paste a fresh app configuration token when
+prompted. Roomote exports the app's current manifest, preserves custom fields,
+adds or updates Roomote's required capabilities, scopes, events, redirect URLs,
+and callback URLs, validates the result, and then applies it. The token is not
+stored.
+
+If the update changes permissions, Roomote shows **Reinstall in Slack**. Finish
+that approval step before testing the new capabilities because Slack does not
+add scopes to existing installations automatically.
+
 ### Alternative: env vars or an existing app
 
 If you already have a Slack app, or production secret management should own the
@@ -57,6 +71,26 @@ Roomote can receive events and post replies.
 During OAuth install, Roomote also records the installed bot display name when
 Slack exposes it, so setup and automation guidance can show the actual Slack
 app users should mention instead of assuming `@Roomote`.
+
+## Automatic manager channel
+
+After the app is installed, the first user who links their Slack account to
+Roomote triggers setup of a public `#roomote-managers` channel in that workspace.
+Installing the app alone does not trigger setup. Roomote creates the channel or
+reuses an existing public, unarchived, nonshared channel with that exact name,
+ensures the bot is a member, and sets it as the shared **Manager Channel** under
+**Settings > Automations > Automation output**.
+
+Existing Slack or Discord Manager Channel settings and explicit automation
+destinations are preserved. This setup does not create or enable automations.
+Private channels are not selected, converted, or read by automatic setup; they
+remain available for manual configuration with the appropriate bot access.
+
+Automatic setup requires the bot scopes `channels:manage` and `channels:join`.
+For an existing installation, use **Update app**, then **Reinstall in Slack** to
+approve these permissions. If workspace restrictions, unavailable permissions,
+or Slack errors prevent setup, account authentication still succeeds. Link your
+Slack account again to retry, or configure the Manager Channel manually.
 
 ## Redirect URLs
 
@@ -88,8 +122,11 @@ Scopes**:
 
 ```text
 app_mentions:read
+assistant:write
 channels:read
 channels:history
+channels:manage
+channels:join
 chat:write
 files:read
 groups:read
@@ -122,6 +159,8 @@ Turn on **Event Subscriptions** and set **Request URL** to:
 Subscribe to these bot events:
 
 ```text
+app_context_changed
+app_home_opened
 app_mention
 message.im
 message.channels
@@ -143,11 +182,39 @@ Turn on **Interactivity & Shortcuts** and use the same request URL:
 Roomote uses this endpoint for button clicks and other interactive Slack
 payloads.
 
-## App home and messages
+## Agent messaging experience
 
-If you want to start tasks by direct message, make sure the app can receive DMs.
-Enable the app surfaces needed for messages to the bot, then keep the
-`message.im` event subscription enabled.
+Roomote-created apps enable Slack's current **Agent messaging experience**
+(`features.agent_view`). This keeps conversations in the app's Messages tab,
+opens Fast-mode responses in threads, and allows Slack to render native loading
+states and streamed task cards. Tasks delegated by Fast appear as native cards
+that stream coding progress and settle to their final result in the same thread.
+
+For an existing app, use **Update app** in Settings → Communications to apply
+these settings. You can also configure them manually by enabling the **Agents**
+feature, selecting the Agent messaging experience, adding the `assistant:write`
+scope and the `app_home_opened` and `app_context_changed` events, and then
+reinstalling the app. Hard-refresh Slack afterward. Keep `message.im` enabled
+so direct messages continue reaching Roomote.
+
+## Fast answers
+
+**Fast response mode** is always on across Slack, Discord, Microsoft Teams, and
+Telegram: ordinary messages from your linked account go through the Fast
+orchestrator, which can delegate work into tasks. In channels, mention the app,
+for example `@Roomote summarize this thread` or `@Roomote fix the failing CI
+job`. Replies in a Fast-owned Slack thread continue that Fast session; replies
+in an existing task-only thread continue the task.
+
+Fast can read a bounded history from the current Slack channel, discover other
+channels in the same workspace, and post standalone updates to channels where
+the Roomote app is authorized. Reactions remain scoped to the current inbound
+message. Fast can also use MCP servers and user-scoped integrations that you are
+allowed to access and delegate repository work to Roomote tasks. Deployment
+admins can manage custom automations through Fast. Fast does not read other
+channels implicitly or inspect repository contents without delegating the work
+to a task. When the request spans every repository, Fast can delegate it to the
+deployment's all-repositories environment.
 
 ## Local URL changes
 
@@ -160,5 +227,6 @@ restart Roomote with the matching URL.
 1. sign in with Slack, if Slack sign-in is enabled
 2. install the Slack app to the workspace
 3. mention the app in a channel or send it a direct message
-4. confirm Roomote starts a task and replies with a task link
-5. reply in the same thread and confirm the message continues the same task
+4. confirm Roomote answers in Fast and includes a web continuation link
+5. reply in the same thread and confirm the message continues the same Fast
+   session; when Fast delegates work, confirm the task card stays in that thread

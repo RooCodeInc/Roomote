@@ -3,10 +3,23 @@ import { createMiddleware } from 'hono/factory';
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../types';
+import { resolveTaskOrSessionUserIdOrNull } from './proxy-utils';
 
 export interface McpAuth {
   userId: string | undefined;
   authContext: AuthTokenContext | RunTokenContext;
+}
+
+export async function resolveMcpTaskOrSessionUserId(
+  auth: McpAuth,
+): Promise<string | undefined> {
+  if (auth.authContext.tokenType !== 'run') {
+    return auth.userId;
+  }
+
+  return (
+    (await resolveTaskOrSessionUserIdOrNull(auth.authContext)) ?? undefined
+  );
 }
 
 type McpVariables = Variables & { mcpAuth: McpAuth };
@@ -28,8 +41,6 @@ export const mcpAuthMiddleware = createMiddleware<{
     return c.json({ error: 'Authentication required' }, 401);
   }
 
-  // Run tokens minted for the deployment service principal carry a null
-  // userId; surface that as undefined rather than pretending a user exists.
   const userId =
     'userId' in authContext ? (authContext.userId ?? undefined) : undefined;
 

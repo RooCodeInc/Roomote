@@ -58,7 +58,7 @@ For Slack-started tasks: I can reply directly in the originating Slack thread.
 
 Available when your org connects them:
 - Linear -- look up issue details, project context, update status
-- Notion -- read Notion docs and specs
+- Notion -- search and read docs and specs, with optional deployment-admin-approved writes
 - Sentry -- pull error details, stack traces, affected users from Sentry links
 - Neon / Supabase -- database access for schema and data context
 - Better Stack -- monitoring data and incidents

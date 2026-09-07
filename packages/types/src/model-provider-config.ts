@@ -9,6 +9,7 @@ import {
 import {
   OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
   mapRecommendedTaskModels,
+  type RecommendedTaskModelSlugMap,
   type SuggestedTaskModel,
 } from './recommended-task-models';
 import {
@@ -46,6 +47,30 @@ export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
  */
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
 
+/** Hosting-managed inference backed by Roomote credits. */
+export const ROOMOTE_INFERENCE_PROVIDER_ID = 'roomote' as const;
+export const ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME =
+  'R_TRIAL_OPENROUTER_API_KEY' as const;
+export const ROOMOTE_TRIAL_MODEL_PRESET_ID = 'trial' as const;
+
+/**
+ * Provider env vars that are hosting delivery mechanisms, not credentials:
+ * setup imports the injected value into encrypted Settings storage, and only
+ * the stored value ever satisfies or authenticates the provider. Every
+ * runtime read must go through this predicate — reading the process value
+ * directly would resurrect a provider whose stored key the operator deleted
+ * to disable it.
+ */
+export const SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES = [
+  ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+] as const;
+
+export function isSettingsOnlyProviderEnvVar(name: string): boolean {
+  return SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES.includes(
+    name as (typeof SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES)[number],
+  );
+}
+
 /**
  * Model-id prefix used when composing or looking up task models for a setup
  * catalog provider. Subscription connect surfaces are not prefixes: ChatGPT
@@ -69,6 +94,7 @@ export function getSetupProviderTaskModelPrefix(
 export const OPENCODE_GO_API_KEY_ENV_VAR_NAME = 'OPENCODE_GO_API_KEY' as const;
 
 export const SETUP_MODEL_PROVIDER_IDS = [
+  ROOMOTE_INFERENCE_PROVIDER_ID,
   'openrouter',
   ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -76,7 +102,7 @@ export const SETUP_MODEL_PROVIDER_IDS = [
 ] as const;
 
 /**
- * Built-in catalog providerids. Named OpenAI-compatible connections use
+ * Built-in catalog provider IDs. Named OpenAI-compatible connections use
  * `openai-compatible-<slug>` in addition to this closed set.
  */
 export type BuiltinSetupModelProviderId =
@@ -96,18 +122,140 @@ export type SetupModelProviderId =
  */
 export type SetupModelProviderAuthKind = 'api-key' | 'endpoint' | 'oauth';
 
+type TaskModelRoleDescriptor = {
+  modelConfigKey: string;
+  reasoningConfigKey: string;
+  modelEnvVar: string;
+  reasoningEnvVar: string;
+  defaultReasoningEffort: ReasoningEffort;
+  modelFallback: 'deployment-default' | 'coding';
+  reasoningModelFallback: 'configured' | 'coding';
+  runtimeStatusKey: string;
+  settingsModelInputKey: string;
+  settingsReasoningInputKey: string;
+  settingsModelInputOptional: boolean;
+  invalidModelMessage: string;
+  includeInSandbox: boolean;
+};
+
 /**
- * The default-model roles a deployment configures: one model per kind of
- * work. `coding` drives new task launches; every other role falls back to
- * the coding model at runtime when unset.
+ * Canonical persistence, environment, fallback, and Settings metadata for
+ * every deployment model role. Public configuration remains flat; consumers
+ * iterate this table instead of maintaining parallel role switches.
  */
-export type TaskModelRole =
-  | 'coding'
-  | 'helper'
-  | 'vision'
-  | 'codeReview'
-  | 'explore'
-  | 'planning';
+export const TASK_MODEL_ROLE_DESCRIPTORS = {
+  coding: {
+    modelConfigKey: 'roomoteModel',
+    reasoningConfigKey: 'roomoteModelReasoningEffort',
+    modelEnvVar: 'R_MODEL',
+    reasoningEnvVar: 'R_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'medium',
+    modelFallback: 'deployment-default',
+    reasoningModelFallback: 'configured',
+    runtimeStatusKey: 'codingModel',
+    settingsModelInputKey: 'defaultModelId',
+    settingsReasoningInputKey: 'codingModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid default model.',
+    includeInSandbox: true,
+  },
+  orchestration: {
+    modelConfigKey: 'roomoteOrchestrationModel',
+    reasoningConfigKey: 'roomoteOrchestrationModelReasoningEffort',
+    modelEnvVar: 'R_ORCHESTRATION_MODEL',
+    reasoningEnvVar: 'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'configured',
+    runtimeStatusKey: 'orchestrationModel',
+    settingsModelInputKey: 'orchestrationModelId',
+    settingsReasoningInputKey: 'orchestrationModelReasoningEffort',
+    settingsModelInputOptional: true,
+    invalidModelMessage: 'Choose a valid orchestration model.',
+    includeInSandbox: false,
+  },
+  helper: {
+    modelConfigKey: 'roomoteSmallModel',
+    reasoningConfigKey: 'roomoteSmallModelReasoningEffort',
+    modelEnvVar: 'R_SMALL_MODEL',
+    reasoningEnvVar: 'R_SMALL_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'coding',
+    runtimeStatusKey: 'helperModel',
+    settingsModelInputKey: 'helperModelId',
+    settingsReasoningInputKey: 'helperModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid helper model.',
+    includeInSandbox: true,
+  },
+  vision: {
+    modelConfigKey: 'roomoteVisionModel',
+    reasoningConfigKey: 'roomoteVisionModelReasoningEffort',
+    modelEnvVar: 'R_VISION_MODEL',
+    reasoningEnvVar: 'R_VISION_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'configured',
+    runtimeStatusKey: 'visionModel',
+    settingsModelInputKey: 'visionModelId',
+    settingsReasoningInputKey: 'visionModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid vision model.',
+    includeInSandbox: true,
+  },
+  codeReview: {
+    modelConfigKey: 'roomoteCodeReviewModel',
+    reasoningConfigKey: 'roomoteCodeReviewModelReasoningEffort',
+    modelEnvVar: 'R_CODE_REVIEW_MODEL',
+    reasoningEnvVar: 'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'high',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'coding',
+    runtimeStatusKey: 'codeReviewModel',
+    settingsModelInputKey: 'codeReviewModelId',
+    settingsReasoningInputKey: 'codeReviewModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid code review model.',
+    includeInSandbox: true,
+  },
+  explore: {
+    modelConfigKey: 'roomoteExploreModel',
+    reasoningConfigKey: 'roomoteExploreModelReasoningEffort',
+    modelEnvVar: 'R_EXPLORE_MODEL',
+    reasoningEnvVar: 'R_EXPLORE_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'low',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'coding',
+    runtimeStatusKey: 'exploreModel',
+    settingsModelInputKey: 'exploreModelId',
+    settingsReasoningInputKey: 'exploreModelReasoningEffort',
+    settingsModelInputOptional: true,
+    invalidModelMessage: 'Choose a valid explore model.',
+    includeInSandbox: true,
+  },
+  planning: {
+    modelConfigKey: 'roomotePlanningModel',
+    reasoningConfigKey: 'roomotePlanningModelReasoningEffort',
+    modelEnvVar: 'R_PLANNING_MODEL',
+    reasoningEnvVar: 'R_PLANNING_MODEL_REASONING_EFFORT',
+    defaultReasoningEffort: 'high',
+    modelFallback: 'coding',
+    reasoningModelFallback: 'coding',
+    runtimeStatusKey: 'planningModel',
+    settingsModelInputKey: 'planningModelId',
+    settingsReasoningInputKey: 'planningModelReasoningEffort',
+    settingsModelInputOptional: false,
+    invalidModelMessage: 'Choose a valid advisor model.',
+    includeInSandbox: true,
+  },
+} as const satisfies Record<string, TaskModelRoleDescriptor>;
+
+export type TaskModelRole = keyof typeof TASK_MODEL_ROLE_DESCRIPTORS;
+
+export const TASK_MODEL_ROLES = Object.freeze(
+  Object.keys(TASK_MODEL_ROLE_DESCRIPTORS) as TaskModelRole[],
+);
 
 /**
  * A provider's recommended default models for the non-coding roles. The
@@ -221,6 +369,14 @@ export type SetupModelProviderDescriptor = {
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
   'openrouter';
 
+/**
+ * Non-secret placeholder persisted by the local dev-login flow when no model
+ * provider is configured. Runtime resolution rejects it before any upstream
+ * request; its only purpose is to let local development pass setup.
+ */
+export const DEV_LOGIN_INFERENCE_API_KEY_PLACEHOLDER =
+  'roomote-dev-login-intentionally-invalid';
+
 const OPENAI_RECOMMENDED_MODEL_PRESETS = [
   {
     id: 'default',
@@ -285,7 +441,87 @@ const OPENAI_RECOMMENDED_MODEL_PRESETS = [
   },
 ] as const satisfies readonly RecommendedModelPreset[];
 
+const OPENROUTER_EFFICIENT_MODEL_PRESET = {
+  id: 'efficient',
+  label: 'Efficient',
+  // Reasoning efforts are intentionally unset so the shared per-role
+  // defaults apply, exactly as they do for a hand-configured model.
+  roles: {
+    coding: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    helper: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    codeReview: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    explore: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+    planning: { modelId: 'openrouter/openai/gpt-5.6-luna' },
+  },
+} as const satisfies RecommendedModelPreset;
+
+/**
+ * Roomote inference is an aliased namespace over OpenRouter: `roomote/<slug>`
+ * serves OpenRouter's `<slug>` through the trial key while staying separate
+ * from an operator's own OpenRouter connection. These two helpers are the
+ * only home of that translation — the gateway's request rewrite, model
+ * lookup, and catalog seeding all import them instead of re-deriving the
+ * prefix.
+ */
+function rebaseOpenRouterModelIdForRoomote(modelId: string): string {
+  return modelId.replace(/^openrouter\//u, `${ROOMOTE_INFERENCE_PROVIDER_ID}/`);
+}
+
+/**
+ * The upstream (OpenRouter-side) slug for a `roomote/`-prefixed model id, or
+ * null when the id is not in the Roomote namespace.
+ */
+export function rebaseRoomoteModelIdToUpstream(modelId: string): string | null {
+  const prefix = `${ROOMOTE_INFERENCE_PROVIDER_ID}/`;
+
+  return modelId.startsWith(prefix) ? modelId.slice(prefix.length) : null;
+}
+
+function rebaseOpenRouterPresetForRoomote(
+  preset: RecommendedModelPreset,
+): RecommendedModelPreset {
+  return {
+    ...preset,
+    roles: Object.fromEntries(
+      Object.entries(preset.roles).map(([role, config]) => [
+        role,
+        {
+          ...config,
+          modelId: rebaseOpenRouterModelIdForRoomote(config.modelId),
+        },
+      ]),
+    ) as RecommendedModelPreset['roles'],
+  };
+}
+
+const ROOMOTE_TRIAL_MODEL_PRESET = {
+  ...rebaseOpenRouterPresetForRoomote(OPENROUTER_EFFICIENT_MODEL_PRESET),
+  id: ROOMOTE_TRIAL_MODEL_PRESET_ID,
+  label: 'Roomote Trial',
+  default: true,
+} as const satisfies RecommendedModelPreset;
+
 export const SETUP_MODEL_PROVIDER_CATALOG = [
+  {
+    id: ROOMOTE_INFERENCE_PROVIDER_ID,
+    label: 'Roomote inference',
+    envVarName: ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    defaultRoomoteModel: ROOMOTE_TRIAL_MODEL_PRESET.roles.coding!.modelId,
+    authKind: 'api-key',
+    suggestedTaskModels: mapRecommendedTaskModels(
+      Object.fromEntries(
+        Object.entries(OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS).map(
+          ([modelId, openRouterModelId]) => [
+            modelId,
+            rebaseOpenRouterModelIdForRoomote(openRouterModelId),
+          ],
+        ),
+      ) as RecommendedTaskModelSlugMap,
+    ),
+    recommendedPresets: [ROOMOTE_TRIAL_MODEL_PRESET],
+    // Only hosting can enable this provider. It is never a user connection.
+    hidden: true,
+  },
   {
     id: 'openrouter',
     label: 'OpenRouter',
@@ -305,7 +541,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         roles: {
           coding: { modelId: DEFAULT_TASK_MODEL_ID, reasoningEffort: 'medium' },
           helper: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -313,7 +549,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -327,11 +563,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         label: 'Quick turnaround',
         roles: {
           coding: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           helper: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -339,7 +575,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.7-flash',
+            modelId: 'openrouter/google/gemini-3.8-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -348,6 +584,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
           },
         },
       },
+      OPENROUTER_EFFICIENT_MODEL_PRESET,
     ],
   },
   {
@@ -357,17 +594,20 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'vercel/openai/gpt-5.6-terra',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'vercel/anthropic/claude-fable-5.1',
       'claude-fable-5': 'vercel/anthropic/claude-fable-5',
       'claude-haiku-4-5': 'vercel/anthropic/claude-haiku-4.5',
       'claude-opus-5': 'vercel/anthropic/claude-opus-5',
       'claude-sonnet-5': 'vercel/anthropic/claude-sonnet-5',
+      'gpt-6-astra': 'vercel/openai/gpt-6-astra',
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
-      'gemini-3-7-flash': 'vercel/google/gemini-3.7-flash',
+      'gemini-3-8-flash': 'vercel/google/gemini-3.8-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
-      'glm-5-2': 'vercel/zai/glm-5.2',
+      'glm-5-3-flash': 'vercel/zai/glm-5.3-flash',
+      'glm-5-3': 'vercel/zai/glm-5.3',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
@@ -377,9 +617,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Vision is unset: the recommended coding model is multimodal, so image
     // work follows the coding model ("same as coding").
     recommendedRoleModels: {
-      helper: 'vercel/google/gemini-3.7-flash',
+      helper: 'vercel/google/gemini-3.8-flash',
       codeReview: 'vercel/anthropic/claude-sonnet-5',
-      explore: 'vercel/google/gemini-3.7-flash',
+      explore: 'vercel/google/gemini-3.8-flash',
       planning: 'vercel/anthropic/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -392,6 +632,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     // Requesty's models.dev slugs are provider-local rather than lab/model.
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'requesty/claude-fable-5-1',
       'claude-fable-5': 'requesty/claude-fable-5',
       'claude-haiku-4-5': 'requesty/claude-haiku-4-5',
       'claude-opus-5': 'requesty/claude-opus-5',
@@ -399,16 +640,17 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
-      'gemini-3-7-flash': 'requesty/gemini-3.7-flash',
+      'gemini-3-8-flash': 'requesty/vertex/gemini-3.8-flash',
       'deepseek-v4-flash-0731': 'requesty/deepseek-v4-flash-0731',
-      'glm-5-2': 'requesty/glm-5.2',
+      'glm-5-3-flash': 'requesty/glm-5.3-flash',
+      'glm-5-3': 'requesty/glm-5.3',
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-6': 'requesty/grok-4.6',
     }),
     recommendedRoleModels: {
-      helper: 'requesty/gemini-3.7-flash',
+      helper: 'requesty/vertex/gemini-3.8-flash',
       codeReview: 'requesty/claude-sonnet-5',
-      explore: 'requesty/gemini-3.7-flash',
+      explore: 'requesty/vertex/gemini-3.8-flash',
       planning: 'requesty/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -530,6 +772,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'openai/gpt-5.6-sol',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'gpt-6-astra': 'openai/gpt-6-astra',
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
@@ -607,6 +850,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'anthropic/claude-sonnet-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'anthropic/claude-fable-5-1',
       'claude-fable-5': 'anthropic/claude-fable-5',
       'claude-haiku-4-5': 'anthropic/claude-haiku-4-5',
       'claude-opus-5': 'anthropic/claude-opus-5',
@@ -684,14 +928,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'opencode/big-pickle',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'opencode/claude-fable-5-1',
       'claude-fable-5': 'opencode/claude-fable-5',
       'claude-haiku-4-5': 'opencode/claude-haiku-4-5',
       'claude-opus-5': 'opencode/claude-opus-5',
       'claude-sonnet-5': 'opencode/claude-sonnet-5',
+      'gpt-6-astra': 'opencode/gpt-6-astra',
       'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
-      'gemini-3-7-flash': 'opencode/gemini-3.7-flash',
+      'gemini-3-8-flash': 'opencode/gemini-3.8-flash',
       // Zen serves the dated Flash release under this stable model alias.
       'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode/deepseek-v4-pro',
@@ -705,10 +951,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // so vision gets an explicit multimodal recommendation instead of the
     // usual same-as-coding fallback.
     recommendedRoleModels: {
-      helper: 'opencode/gemini-3.7-flash',
+      helper: 'opencode/gemini-3.8-flash',
       vision: 'opencode/claude-sonnet-5',
       codeReview: 'opencode/claude-sonnet-5',
-      explore: 'opencode/gemini-3.7-flash',
+      explore: 'opencode/gemini-3.8-flash',
       planning: 'opencode/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -729,6 +975,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
+      'glm-5-3-flash': 'opencode-go/glm-5.3-flash',
       'glm-5-3': 'opencode-go/glm-5.3',
       'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
       'grok-4-6': 'opencode-go/grok-4.6',
@@ -770,6 +1017,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'bedrock-mantle/anthropic.claude-fable-5-1',
       'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
       'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
       'claude-opus-5': 'bedrock-mantle/anthropic.claude-opus-5',
@@ -792,10 +1040,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'google',
     label: 'Google Gemini',
     envVarName: 'GEMINI_API_KEY',
-    defaultRoomoteModel: 'google/gemini-3.7-flash',
+    defaultRoomoteModel: 'google/gemini-3.8-flash',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gemini-3-7-flash': 'google/gemini-3.7-flash',
+      'gemini-3-8-flash': 'google/gemini-3.8-flash',
     }),
     // All non-coding roles follow the Flash coding default.
   },
@@ -821,7 +1069,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'zai',
     label: 'Z.AI',
     envVarName: 'ZAI_API_KEY',
-    defaultRoomoteModel: 'zai/glm-5.2',
+    defaultRoomoteModel: 'zai/glm-5.3',
     authKind: 'api-key',
     credentialHelp: {
       text: 'Paste a platform API key for the selected region. International keys come from the Z.AI API console; China keys come from the Zhipu / BigModel console. Coding Plan membership keys belong on Z.AI Coding Plan, not here.',
@@ -838,7 +1086,8 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       },
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
-      'glm-5-2': 'zai/glm-5.2',
+      'glm-5-3-flash': 'zai/glm-5.3-flash',
+      'glm-5-3': 'zai/glm-5.3',
     }),
     recommendedRoleModels: {
       vision: 'zai/glm-5v-turbo',
@@ -866,6 +1115,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       },
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
+      'glm-5-3-flash': 'zai-coding-plan/glm-5.3-flash',
       'glm-5-3': 'zai-coding-plan/glm-5.3',
     }),
     recommendedRoleModels: {
@@ -886,10 +1136,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'github-copilot/gpt-5.6-luna',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5-1': 'github-copilot/claude-fable-5.1',
       'claude-fable-5': 'github-copilot/claude-fable-5',
       'claude-haiku-4-5': 'github-copilot/claude-haiku-4.5',
       'claude-opus-5': 'github-copilot/claude-opus-5',
       'claude-sonnet-5': 'github-copilot/claude-sonnet-5',
+      'gpt-6-astra': 'github-copilot/gpt-6-astra',
       'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
       'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
@@ -982,6 +1234,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'openai/gpt-5.6-sol',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'gpt-6-astra': 'openai/gpt-6-astra',
       'gpt-5-6-sol': 'openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
@@ -1180,20 +1433,18 @@ export function isSetupModelProviderId(
   return isOpenAiCompatibleProviderId(value);
 }
 
-export type DeploymentModelConfig = {
-  roomoteModel: string | null;
-  roomoteSmallModel: string | null;
-  roomoteVisionModel: string | null;
-  roomoteCodeReviewModel: string | null;
-  roomoteExploreModel: string | null;
-  roomotePlanningModel: string | null;
-  roomoteModelReasoningEffort: ReasoningEffort | null;
-  roomoteSmallModelReasoningEffort: ReasoningEffort | null;
-  roomoteVisionModelReasoningEffort: ReasoningEffort | null;
-  roomoteCodeReviewModelReasoningEffort: ReasoningEffort | null;
-  roomoteExploreModelReasoningEffort: ReasoningEffort | null;
-  roomotePlanningModelReasoningEffort: ReasoningEffort | null;
+type DeploymentModelFields = {
+  [Role in TaskModelRole as (typeof TASK_MODEL_ROLE_DESCRIPTORS)[Role]['modelConfigKey']]:
+    | string
+    | null;
 };
+
+type DeploymentReasoningFields = {
+  [Role in TaskModelRole as (typeof TASK_MODEL_ROLE_DESCRIPTORS)[Role]['reasoningConfigKey']]: ReasoningEffort | null;
+};
+
+export type DeploymentModelConfig = DeploymentModelFields &
+  DeploymentReasoningFields;
 
 /**
  * Roomote's default reasoning level per default-model role. Applied at
@@ -1201,14 +1452,12 @@ export type DeploymentModelConfig = {
  * role, and skipped for models whose metadata reports that they do not
  * support configurable reasoning.
  */
-export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
-  coding: 'medium',
-  helper: 'low',
-  vision: 'low',
-  codeReview: 'high',
-  explore: 'low',
-  planning: 'high',
-} as const satisfies Record<TaskModelRole, ReasoningEffort>;
+export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = Object.fromEntries(
+  TASK_MODEL_ROLES.map((role) => [
+    role,
+    TASK_MODEL_ROLE_DESCRIPTORS[role].defaultReasoningEffort,
+  ]),
+) as Record<TaskModelRole, ReasoningEffort>;
 
 /**
  * Runtime env var names carrying each overridable non-coding role's model and
@@ -1216,31 +1465,18 @@ export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
  * emitted by `resolveModelRuntimeEnv` in packages/db and consumed by the
  * worker's OpenCode config generation.
  */
-export const TASK_MODEL_OVERRIDE_ROLE_ENV_VARS = {
-  helper: {
-    model: 'R_SMALL_MODEL',
-    reasoningEffort: 'R_SMALL_MODEL_REASONING_EFFORT',
-  },
-  vision: {
-    model: 'R_VISION_MODEL',
-    reasoningEffort: 'R_VISION_MODEL_REASONING_EFFORT',
-  },
-  codeReview: {
-    model: 'R_CODE_REVIEW_MODEL',
-    reasoningEffort: 'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
-  },
-  explore: {
-    model: 'R_EXPLORE_MODEL',
-    reasoningEffort: 'R_EXPLORE_MODEL_REASONING_EFFORT',
-  },
-  planning: {
-    model: 'R_PLANNING_MODEL',
-    reasoningEffort: 'R_PLANNING_MODEL_REASONING_EFFORT',
-  },
-} as const satisfies Record<
-  TaskModelOverrideRole,
-  { model: string; reasoningEffort: string }
->;
+export const TASK_MODEL_OVERRIDE_ROLE_ENV_VARS = Object.fromEntries(
+  TASK_MODEL_OVERRIDE_ROLES.map((role) => {
+    const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+    return [
+      role,
+      {
+        model: descriptor.modelEnvVar,
+        reasoningEffort: descriptor.reasoningEnvVar,
+      },
+    ];
+  }),
+) as Record<TaskModelOverrideRole, { model: string; reasoningEffort: string }>;
 
 /**
  * Materializes a task's per-role overrides into the runtime env var overlay
@@ -1381,20 +1617,15 @@ export type SetupModelStatus = {
 };
 
 export function createEmptyDeploymentModelConfig(): DeploymentModelConfig {
-  return {
-    roomoteModel: null,
-    roomoteSmallModel: null,
-    roomoteVisionModel: null,
-    roomoteCodeReviewModel: null,
-    roomoteExploreModel: null,
-    roomotePlanningModel: null,
-    roomoteModelReasoningEffort: null,
-    roomoteSmallModelReasoningEffort: null,
-    roomoteVisionModelReasoningEffort: null,
-    roomoteCodeReviewModelReasoningEffort: null,
-    roomoteExploreModelReasoningEffort: null,
-    roomotePlanningModelReasoningEffort: null,
-  };
+  return Object.fromEntries(
+    TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [
+        [descriptor.modelConfigKey, null],
+        [descriptor.reasoningConfigKey, null],
+      ];
+    }),
+  ) as DeploymentModelConfig;
 }
 
 export function normalizeDeploymentModelConfig(
@@ -1413,34 +1644,23 @@ export function normalizeDeploymentModelConfig(
       : null;
   };
 
-  return {
-    roomoteModel: normalizeEnabledModel(value?.roomoteModel),
-    roomoteSmallModel: normalizeEnabledModel(value?.roomoteSmallModel),
-    roomoteVisionModel: normalizeEnabledModel(value?.roomoteVisionModel),
-    roomoteCodeReviewModel: normalizeEnabledModel(
-      value?.roomoteCodeReviewModel,
-    ),
-    roomoteExploreModel: normalizeEnabledModel(value?.roomoteExploreModel),
-    roomotePlanningModel: normalizeEnabledModel(value?.roomotePlanningModel),
-    roomoteModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteModelReasoningEffort,
-    ),
-    roomoteSmallModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteSmallModelReasoningEffort,
-    ),
-    roomoteVisionModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteVisionModelReasoningEffort,
-    ),
-    roomoteCodeReviewModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteCodeReviewModelReasoningEffort,
-    ),
-    roomoteExploreModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomoteExploreModelReasoningEffort,
-    ),
-    roomotePlanningModelReasoningEffort: normalizeOptionalReasoningEffort(
-      value?.roomotePlanningModelReasoningEffort,
-    ),
-  };
+  return Object.fromEntries(
+    TASK_MODEL_ROLES.flatMap((role) => {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      return [
+        [
+          descriptor.modelConfigKey,
+          normalizeEnabledModel(value?.[descriptor.modelConfigKey]),
+        ],
+        [
+          descriptor.reasoningConfigKey,
+          normalizeOptionalReasoningEffort(
+            value?.[descriptor.reasoningConfigKey],
+          ),
+        ],
+      ];
+    }),
+  ) as DeploymentModelConfig;
 }
 
 /**
@@ -1468,20 +1688,23 @@ export function buildRecommendedDeploymentModelConfig(
     : getDefaultRecommendedModelPreset(provider);
   const roles = preset?.roles ?? {};
 
-  return normalizeDeploymentModelConfig({
-    roomoteModel: roles.coding?.modelId ?? provider.defaultRoomoteModel,
-    roomoteSmallModel: roles.helper?.modelId,
-    roomoteVisionModel: roles.vision?.modelId,
-    roomoteCodeReviewModel: roles.codeReview?.modelId,
-    roomoteExploreModel: roles.explore?.modelId,
-    roomotePlanningModel: roles.planning?.modelId,
-    roomoteModelReasoningEffort: roles.coding?.reasoningEffort,
-    roomoteSmallModelReasoningEffort: roles.helper?.reasoningEffort,
-    roomoteVisionModelReasoningEffort: roles.vision?.reasoningEffort,
-    roomoteCodeReviewModelReasoningEffort: roles.codeReview?.reasoningEffort,
-    roomoteExploreModelReasoningEffort: roles.explore?.reasoningEffort,
-    roomotePlanningModelReasoningEffort: roles.planning?.reasoningEffort,
-  });
+  return normalizeDeploymentModelConfig(
+    Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        const recommended = roles[role];
+        const modelId =
+          role === 'coding'
+            ? (recommended?.modelId ?? provider.defaultRoomoteModel)
+            : recommended?.modelId;
+
+        return [
+          [descriptor.modelConfigKey, modelId],
+          [descriptor.reasoningConfigKey, recommended?.reasoningEffort],
+        ];
+      }),
+    ),
+  );
 }
 
 export function normalizeOptionalReasoningEffort(
@@ -1964,7 +2187,11 @@ export function buildSetupModelStatus(input: {
     const requiredEnvVarNames =
       getSetupModelProviderRequiredEnvVarNames(provider);
     const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
+    // Settings-only vars (the Roomote trial key) are delivery mechanisms,
+    // not credentials: only the stored key connects the provider. See
+    // `SETTINGS_ONLY_MODEL_PROVIDER_ENV_VAR_NAMES`.
     const isRuntimeConfigured = (name: string) =>
+      !isSettingsOnlyProviderEnvVar(name) &&
       isConfiguredEnvValue(runtimeEnv[name]);
     const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
     const additionalEnvValues = Object.fromEntries(
@@ -2001,7 +2228,6 @@ export function buildSetupModelStatus(input: {
         (name) => isPersisted(name) || isRuntimeConfigured(name),
       ) &&
       requiredEnvVarNames.some(isPersisted);
-
     return {
       ...provider,
       additionalEnvValues,

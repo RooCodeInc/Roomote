@@ -20,6 +20,13 @@ const {
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  DevLoginInferencePlaceholderError: class DevLoginInferencePlaceholderError extends Error {
+    constructor() {
+      super(
+        'Local development login uses an intentionally invalid inference key.',
+      );
+    }
+  },
   db: {
     query: {
       taskRuns: { findFirst: mockFindTaskRun },
@@ -38,6 +45,8 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 import { inference } from '../index';
+import { resetRoomoteInferenceKeyCache } from '../registry';
+import { DevLoginInferencePlaceholderError } from '@roomote/db/server';
 
 function createApp(authContext: Variables['authContext']) {
   const app = new Hono<{ Variables: Variables }>();
@@ -118,6 +127,9 @@ describe('inference gateway', () => {
     vi.unstubAllEnvs();
     delete process.env.AWS_BEARER_TOKEN_BEDROCK;
     delete process.env.AWS_REGION;
+    // The Roomote trial key resolution is cached with a TTL; drop it so each
+    // test observes its own mockResolveModelProviderEnvValue behavior.
+    resetRoomoteInferenceKeyCache();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
@@ -144,6 +156,22 @@ describe('inference gateway', () => {
     const response = await postMessages(createApp(createUserToken()));
 
     expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports the local dev-login placeholder without contacting an upstream', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockRejectedValueOnce(
+      new DevLoginInferencePlaceholderError(),
+    );
+
+    const response = await postMessages(createApp(createRunToken()));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'Local development login uses an intentionally invalid inference key.',
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -260,6 +288,70 @@ describe('inference gateway', () => {
         'Bearer provider-secret-key',
       );
     }
+  });
+
+  it('routes Roomote models through OpenRouter with only the managed key', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/roomote/v1/chat/completions',
+      { model: 'roomote/openai/gpt-5.6-luna', messages: [] },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
+      'R_TRIAL_OPENROUTER_API_KEY',
+    ]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: 'openai/gpt-5.6-luna',
+    });
+  });
+
+  it('returns an actionable response when managed Roomote inference is unavailable', async () => {
+    mockResolveModelProviderEnvValue.mockResolvedValue(undefined);
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/roomote/v1/chat/completions',
+      { model: 'roomote/openai/gpt-5.6-luna', messages: [] },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      error:
+        'Roomote inference is unavailable. Connect an inference provider to continue.',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns an actionable response when Roomote inference credits are exhausted', async () => {
+    stubUpstreamFetch(
+      new Response(
+        JSON.stringify({ error: { message: 'insufficient credits' } }),
+        {
+          status: 402,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/roomote/v1/chat/completions',
+      { model: 'roomote/openai/gpt-5.6-luna', messages: [] },
+    );
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toMatchObject({
+      error:
+        'Roomote inference credits are exhausted. Connect an inference provider to continue.',
+    });
   });
 
   it.each([
@@ -1194,6 +1286,7 @@ describe('inference gateway', () => {
     const response = await postMessages(
       createApp(createRunToken()),
       '/api/inference/opencode-go/v1/responses',
+      { 'user-agent': 'opencode/1.18.10' },
     );
 
     expect(response.status).toBe(200);
@@ -1206,6 +1299,7 @@ describe('inference gateway', () => {
 
     const headers = new Headers(init.headers);
     expect(headers.get('authorization')).toBe('Bearer provider-secret-key');
+    expect(headers.get('user-agent')).toBe('roomote opencode/1.18.10');
   });
 
   it('preserves the query string on upstream requests', async () => {

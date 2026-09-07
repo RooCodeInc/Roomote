@@ -47,6 +47,7 @@ vi.mock('@roomote/slack', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  maybeEnqueueBrainMemoryForCompletedRun: vi.fn().mockResolvedValue(undefined),
   withSandboxServerRpcClient: vi.fn().mockResolvedValue(undefined),
 }));
 

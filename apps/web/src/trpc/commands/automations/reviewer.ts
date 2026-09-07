@@ -1,6 +1,6 @@
 import {
   DEFAULT_PR_REVIEW_SETTINGS,
-  getRoomoteManagedGitHubLogins,
+  getGitHubAppBotLogin,
   type PrReviewSettings,
 } from '@roomote/types';
 import {
@@ -11,7 +11,7 @@ import {
   upsertAutomation,
   users,
 } from '@roomote/db/server';
-import { getEffectiveGitHubAppSlug } from '@roomote/github';
+import { getEffectiveGitHubAppSlugs } from '@roomote/github';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -36,6 +36,7 @@ export interface ReviewerBackgroundAgentSettings {
   reviewAllPullRequestAuthors: boolean;
   reviewOnCommit: boolean;
   reviewDraftPrs: boolean;
+  publishGithubCheck: boolean;
   relayReviewResultsToTask: boolean;
   relayUsers: ReviewerRelayUser[];
   approvePr: boolean;
@@ -56,7 +57,10 @@ function getRoomoteReviewerLogins(): string[] {
   // evaluation so Next.js instrumentation can bootstrap the Node.js runtime
   // before server routes import this module.
   return normalizeGitHubLogins(
-    getRoomoteManagedGitHubLogins(getEffectiveGitHubAppSlug()),
+    getEffectiveGitHubAppSlugs().flatMap((appSlug) => [
+      getGitHubAppBotLogin(appSlug),
+      `app/${appSlug}`,
+    ]),
   );
 }
 
@@ -79,6 +83,9 @@ export function mapReviewerSettingsToBackgroundSettings(
       settings.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit,
     reviewDraftPrs:
       settings.reviewDraftPrs ?? DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs,
+    publishGithubCheck:
+      settings.publishGithubCheck ??
+      DEFAULT_PR_REVIEW_SETTINGS.publishGithubCheck,
     relayReviewResultsToTask:
       settings.relayReviewResultsToTask ??
       DEFAULT_PR_REVIEW_SETTINGS.relayReviewResultsToTask,

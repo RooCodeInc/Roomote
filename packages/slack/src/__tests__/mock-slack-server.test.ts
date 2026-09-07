@@ -430,6 +430,63 @@ describe('MockSlackServer', () => {
     }
   });
 
+  it('returns complete user profiles from users.list and users.info', async () => {
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        acceptedBotTokens: ['xoxb-mock-token'],
+        channels: [],
+        users: [
+          {
+            id: 'UADA',
+            name: 'ada',
+            displayName: 'Ada',
+            realName: 'Ada Lovelace',
+            title: 'Mathematician',
+            updated: 1_786_817_600,
+          },
+          { id: 'UGRACE', name: 'grace', displayName: 'Grace Hopper' },
+        ],
+      },
+    });
+
+    try {
+      await server.start();
+      const headers = { authorization: 'Bearer xoxb-mock-token' };
+      const first = await fetch(`${server.baseUrl}/api/users.list?limit=1`, {
+        headers,
+      });
+
+      await expect(first.json()).resolves.toMatchObject({
+        ok: true,
+        members: [
+          {
+            id: 'UADA',
+            profile: {
+              display_name: 'Ada',
+              real_name: 'Ada Lovelace',
+              title: 'Mathematician',
+            },
+          },
+        ],
+        response_metadata: { next_cursor: '1' },
+      });
+
+      const info = await fetch(`${server.baseUrl}/api/users.info?user=UADA`, {
+        headers,
+      });
+      await expect(info.json()).resolves.toMatchObject({
+        ok: true,
+        user: {
+          id: 'UADA',
+          profile: { title: 'Mathematician' },
+        },
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('returns channel members with Slack-style pagination', async () => {
     const server = new MockSlackServer({
       state: {
@@ -591,6 +648,89 @@ describe('MockSlackServer', () => {
     }
   });
 
+  it('exports, validates, and updates an existing app manifest with a config token', async () => {
+    const originalManifest = {
+      display_information: { name: 'Roomote' },
+      oauth_config: { scopes: { bot: ['chat:write'] } },
+    };
+    const updatedManifest = {
+      ...originalManifest,
+      features: { agent_view: { agent_description: 'Coding agents' } },
+    };
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        acceptedBotTokens: ['xoxb-mock-token'],
+        acceptedConfigTokens: ['xoxe.xoxp-config-token'],
+        manifestPermissionsUpdated: true,
+        createdManifests: [{ appId: 'A0MANIFEST', manifest: originalManifest }],
+        channels: [{ id: 'C1', name: 'product-debug', isMember: true }],
+        users: [{ id: 'U1', name: 'alex', displayName: 'Alex' }],
+      },
+    });
+
+    try {
+      await server.start();
+      const headers = {
+        authorization: 'Bearer xoxe.xoxp-config-token',
+        'content-type': 'application/json',
+      };
+
+      const exportResponse = await fetch(
+        `${server.baseUrl}/api/apps.manifest.export`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ app_id: 'A0MANIFEST' }),
+        },
+      );
+      await expect(exportResponse.json()).resolves.toEqual({
+        ok: true,
+        manifest: originalManifest,
+      });
+
+      const validateResponse = await fetch(
+        `${server.baseUrl}/api/apps.manifest.validate`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            app_id: 'A0MANIFEST',
+            manifest: JSON.stringify(updatedManifest),
+          }),
+        },
+      );
+      await expect(validateResponse.json()).resolves.toEqual({
+        ok: true,
+        errors: [],
+      });
+
+      const updateResponse = await fetch(
+        `${server.baseUrl}/api/apps.manifest.update`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            app_id: 'A0MANIFEST',
+            manifest: JSON.stringify(updatedManifest),
+          }),
+        },
+      );
+      await expect(updateResponse.json()).resolves.toEqual({
+        ok: true,
+        app_id: 'A0MANIFEST',
+        permissions_updated: true,
+      });
+
+      expect(server.getState()).toMatchObject({
+        createdManifests: [{ appId: 'A0MANIFEST', manifest: updatedManifest }],
+        updatedManifests: [{ appId: 'A0MANIFEST', manifest: updatedManifest }],
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('rejects apps.manifest.create with invalid_manifest when the manifest is not JSON', async () => {
     const server = new MockSlackServer({
       state: {
@@ -744,6 +884,82 @@ describe('MockSlackServer', () => {
       await expect(response.json()).resolves.toEqual({
         ok: false,
         error: 'not_in_channel',
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('streams a message through chat.startStream, appendStream, and stopStream', async () => {
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        acceptedBotTokens: ['xoxb-mock-token'],
+        botUserId: 'BROOMOTE',
+        channels: [{ id: 'C1', name: 'product-debug', isMember: true }],
+        users: [{ id: 'U1', name: 'alex', displayName: 'Alex' }],
+        messages: [],
+      },
+    });
+
+    try {
+      await server.start();
+      const call = async (method: string, body: Record<string, unknown>) => {
+        const response = await fetch(`${server.baseUrl}/api/${method}`, {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer xoxb-mock-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+        return (await response.json()) as {
+          ok: boolean;
+          ts?: string;
+          error?: string;
+        };
+      };
+
+      const started = await call('chat.startStream', {
+        channel: 'C1',
+        thread_ts: '1710000000.000100',
+        recipient_team_id: 'T1',
+        recipient_user_id: 'U1',
+        markdown_text: 'Looking',
+      });
+      expect(started.ok).toBe(true);
+      const ts = started.ts!;
+
+      expect(
+        await call('chat.appendStream', {
+          channel: 'C1',
+          ts,
+          markdown_text: ' at the logs',
+        }),
+      ).toMatchObject({ ok: true, ts });
+      expect(
+        await call('chat.stopStream', {
+          channel: 'C1',
+          ts,
+          markdown_text: '.',
+          blocks: [{ type: 'context', elements: [] }],
+        }),
+      ).toMatchObject({ ok: true, ts });
+      expect(
+        await call('chat.appendStream', {
+          channel: 'C1',
+          ts: '0.0',
+          markdown_text: 'x',
+        }),
+      ).toMatchObject({ ok: false, error: 'message_not_found' });
+
+      const state = server.getState();
+      const streamed = state.messages?.find((message) => message.ts === ts);
+      expect(streamed).toMatchObject({
+        channel: 'C1',
+        thread_ts: '1710000000.000100',
+        text: 'Looking at the logs.',
+        blocks: [{ type: 'context', elements: [] }],
       });
     } finally {
       await server.stop();

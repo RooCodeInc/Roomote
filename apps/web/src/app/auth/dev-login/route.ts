@@ -13,6 +13,7 @@ import {
   isEnvFlagEnabled,
   isWebServerBindExposed,
 } from '@/lib/server/env';
+import { ensureDevLoginInferenceSetup } from './dev-inference';
 
 export const runtime = 'nodejs';
 
@@ -178,6 +179,8 @@ export async function GET(request: NextRequest) {
         updatedAt: now,
       },
     });
+
+  await ensureDevLoginInferenceSetup(authUser.id);
 
   await db.insert(authSessions).values({
     id: `dev-login-session-${randomUUID()}`,

@@ -420,6 +420,16 @@ export class MockDiscordServer {
         ),
       );
     }
+    if (method === 'GET' && path === `/guilds/${this.guildId}/threads/active`) {
+      return jsonResponse({
+        threads: Object.values(this.state.channels).filter(
+          (channel) =>
+            channel.guild_id === this.guildId &&
+            (channel.type === 10 || channel.type === 11 || channel.type === 12),
+        ),
+        members: [],
+      });
+    }
     const guildMember = /^\/guilds\/([^/]+)\/members\/([^/?]+)$/u.exec(path);
     if (method === 'GET' && guildMember && guildMember[1] === this.guildId) {
       // Real Discord rejects the literal `@me` on this route (unlike

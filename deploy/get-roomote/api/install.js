@@ -1,7 +1,7 @@
 const { DEFAULT_REF, fetchRawFile, sendTextFile } = require('./_github');
 
 // Serves deploy/install.sh from the default branch so
-// `curl -fsSL https://get.roomote.dev | bash` works.
+// `curl -fsSL https://get.roomote.dev | sudo bash` works.
 module.exports = async (req, res) => {
   const upstream = await fetchRawFile(DEFAULT_REF, 'deploy/install.sh');
   if (!upstream.ok) {

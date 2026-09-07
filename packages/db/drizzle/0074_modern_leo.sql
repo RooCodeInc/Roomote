@@ -1,0 +1,1 @@
+ALTER TABLE "slack_auth_tokens" ADD COLUMN "message_ts" text;

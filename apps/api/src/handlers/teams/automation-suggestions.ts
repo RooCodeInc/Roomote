@@ -6,6 +6,7 @@ import {
   getAutomationRuntime,
   inArray,
   isNotNull,
+  registerTrackedSuggestionCards,
   sql,
   teamsInstallations,
   trackedMessages,
@@ -58,30 +59,20 @@ export async function postCurrentThreadSuggestionsToTeams(params: {
       return false;
     }
 
-    const trackedRow = {
-      surface: 'teams' as const,
-      kind: 'suggestion_card' as const,
-      dedupeKey: `${params.conversationId}:${posted.messageId}`,
-      channelId: params.conversationId,
-      ...(params.threadId ? { threadTs: params.threadId } : {}),
-      messageTs: posted.messageId,
-      workItemId: suggestion.id,
-      createdByUserId: params.createdByUserId,
-      metadata: {
+    await registerTrackedSuggestionCards([
+      {
+        surface: 'teams',
+        channelId: params.conversationId,
+        messageTs: posted.messageId,
+        threadTs: params.threadId,
+        workItemId: suggestion.id,
+        createdByUserId: params.createdByUserId,
         suggestionType: 'suggested_tasks',
         suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
         suggestionGroupKey: params.suggestionGroupKey,
-        ...(params.launchRouting
-          ? { launchRouting: params.launchRouting }
-          : {}),
+        launchRouting: params.launchRouting,
       },
-    };
-    await db
-      .insert(trackedMessages)
-      .values(trackedRow)
-      .onConflictDoNothing({
-        target: [trackedMessages.kind, trackedMessages.dedupeKey],
-      });
+    ]);
   }
 
   return true;

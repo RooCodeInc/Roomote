@@ -8,6 +8,7 @@ const {
   insertOnConflictDoNothingMock,
   insertValuesMock,
   postMessageMock,
+  registerTrackedSuggestionCardsMock,
   selectLimitMock,
   selectWhereRowsMock,
 } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ const {
   insertOnConflictDoNothingMock: vi.fn(),
   insertValuesMock: vi.fn(),
   postMessageMock: vi.fn(),
+  registerTrackedSuggestionCardsMock: vi.fn(),
   selectLimitMock: vi.fn(),
   selectWhereRowsMock: vi.fn(),
 }));
@@ -52,6 +54,7 @@ vi.mock('@roomote/db/server', () => ({
     sql: [Array.from(strings), values],
   })),
   getAutomationRuntime: getAutomationRuntimeMock,
+  registerTrackedSuggestionCards: registerTrackedSuggestionCardsMock,
   db: {
     insert: insertMock,
     select: vi.fn(() => ({
@@ -149,20 +152,18 @@ describe('postScheduledSuggestionsToTeams', () => {
         text: expect.stringContaining('Fix crash'),
       }),
     );
-    expect(insertValuesMock).toHaveBeenNthCalledWith(
-      1,
+    expect(registerTrackedSuggestionCardsMock).toHaveBeenNthCalledWith(1, [
       expect.objectContaining({
         messageTs: '1720000000000',
         workItemId: 'aaa',
       }),
-    );
-    expect(insertValuesMock).toHaveBeenNthCalledWith(
-      2,
+    ]);
+    expect(registerTrackedSuggestionCardsMock).toHaveBeenNthCalledWith(2, [
       expect.objectContaining({
         messageTs: '1720000000001',
         workItemId: 'bbb',
       }),
-    );
+    ]);
   });
 
   it('does not advertise the typed suggestion fallback on current-thread cards', async () => {

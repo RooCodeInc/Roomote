@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -39,10 +39,6 @@ vi.mock('@roomote/db/encryption', () => ({
 
 import { db } from '@roomote/db/server';
 import { vercelMcp } from '../vercel';
-
-type JsonRpcErrorBody = {
-  error: { message: string };
-};
 
 function createInitializeRequest(id: number) {
   return {
@@ -120,34 +116,6 @@ describe('vercel MCP auth and tool handling', () => {
     mockFindConnection.mockResolvedValue(mockConnectionRow());
   });
 
-  it('rejects when auth context is missing', async () => {
-    const response = await postMcp(
-      createApp(undefined),
-      createInitializeRequest(1),
-    );
-    const body = (await response.json()) as JsonRpcErrorBody;
-
-    expect(response.status).toBe(401);
-    expect(body.error.message).toContain('Unauthorized');
-  });
-
-  it('rejects user auth tokens for Vercel access', async () => {
-    const authToken: AuthTokenContext = {
-      userId: 'user-1',
-      tokenType: 'auth',
-      version: 1,
-    };
-
-    const response = await postMcp(
-      createApp(authToken),
-      createInitializeRequest(1),
-    );
-    const body = (await response.json()) as JsonRpcErrorBody;
-
-    expect(response.status).toBe(403);
-    expect(body.error.message).toContain('requires a task run token');
-  });
-
   it('initializes successfully for task run tokens', async () => {
     const response = await postMcp(
       createApp(createRunToken()),
@@ -158,54 +126,6 @@ describe('vercel MCP auth and tool handling', () => {
     await expect(response.json()).resolves.toMatchObject({
       result: {
         protocolVersion: '2025-06-18',
-        serverInfo: { name: 'roomote-vercel-mcp', version: '1.0.0' },
-      },
-    });
-  });
-
-  it('accepts a token minted for user A after the acting user switched to user B', async () => {
-    // Web steer / follow-up delivery mutate task_runs.actingUserId mid-run;
-    // the run-scoped token stays authorized (the token's userId is mint-time
-    // attribution and is never compared against the mutable acting user).
-    mockFindTaskRun.mockResolvedValue({
-      id: 42,
-      actingUserId: 'user-2',
-    });
-
-    const response = await postMcp(
-      createApp(createRunToken()),
-      createInitializeRequest(1),
-    );
-
-    expect(response.status).toBe(200);
-  });
-
-  it('accepts a deployment-principal token after a human became the acting user', async () => {
-    // A human replying in the thread of an automation run switches the acting
-    // user from null to that human; the run-scoped null-principal token must
-    // keep working (default mock: actingUserId 'user-1').
-    const response = await postMcp(
-      createApp(createRunToken({ userId: null, principal: 'deployment' })),
-      createInitializeRequest(1),
-    );
-
-    expect(response.status).toBe(200);
-  });
-
-  it('allows deployment-principal tokens for deployment-principal task runs', async () => {
-    mockFindTaskRun.mockResolvedValue({
-      id: 42,
-      actingUserId: null,
-    });
-
-    const response = await postMcp(
-      createApp(createRunToken({ userId: null, principal: 'deployment' })),
-      createInitializeRequest(1),
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      result: {
         serverInfo: { name: 'roomote-vercel-mcp', version: '1.0.0' },
       },
     });

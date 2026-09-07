@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
+import { handleMergeAnnouncerPush } from '@roomote/sdk/server';
 
 import { apiLogger, logApiError } from '../../logging';
 import { recordWebhook } from '../github/recordWebhook';
+import { normalizeAdoPush } from '../merge-announcer-push';
 import {
   type AdoUpdatedNotificationType,
   handleAdoPullRequest,
@@ -18,6 +20,7 @@ import {
   adoBuildCompleteWebhookSchema,
   adoPullRequestCommentWebhookSchema,
   adoPullRequestWebhookSchema,
+  adoPushWebhookSchema,
   adoWorkItemCommentedWebhookSchema,
 } from './types';
 import { verifyAdoWebhook } from './verifyWebhook';
@@ -32,6 +35,7 @@ const ADO_PULL_REQUEST_COMMENT_EVENT =
   'ms.vss-code.git-pullrequest-comment-event';
 const ADO_WORK_ITEM_COMMENTED_EVENT = 'workitem.commented';
 const ADO_BUILD_COMPLETE_EVENT = 'build.complete';
+const ADO_PUSH_EVENT = 'git.push';
 
 function getAdoUpdatedNotificationType(
   value: string | undefined,
@@ -140,6 +144,30 @@ ado.post('/', async (c) => {
         eventName,
         payload,
         () => handleAdoBuild(payload),
+        { provider: 'ado' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === ADO_PUSH_EVENT) {
+      const payload = adoPushWebhookSchema.parse(parsedJson);
+
+      await recordWebhook(
+        deliveryId,
+        eventName,
+        payload,
+        async () => {
+          const results = await Promise.all(
+            normalizeAdoPush(payload).map((event) =>
+              handleMergeAnnouncerPush(event),
+            ),
+          );
+          return (
+            results.find((result) => result.status === 'error') ??
+            results[0] ?? { status: 'ok', message: 'No branch updates' }
+          );
+        },
         { provider: 'ado' },
       );
 

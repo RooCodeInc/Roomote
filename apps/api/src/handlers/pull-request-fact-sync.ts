@@ -22,6 +22,9 @@ export function scheduleSourceControlPullRequestFactSync(params: {
     title: string;
     url: string;
     authorLogin?: string | null;
+    /** Omit when the event payload does not carry it; the list sync fills it and an omission never erases it. */
+    body?: string | null;
+    labels?: string[] | null;
     state: 'closed' | 'merged';
     createdAt?: string | null;
     updatedAt?: string | null;
@@ -51,6 +54,8 @@ export function scheduleSourceControlPullRequestFactSync(params: {
     host: toHostFromUrl(pullRequest.url),
     pullRequest: {
       authorLogin: pullRequest.authorLogin ?? null,
+      body: pullRequest.body ?? null,
+      labels: pullRequest.labels ?? null,
       closedAt: mergedAt ?? updatedAt,
       createdAt,
       externalPullRequestId: pullRequest.externalId ?? pullRequest.number,

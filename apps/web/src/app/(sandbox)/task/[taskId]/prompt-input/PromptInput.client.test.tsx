@@ -6,6 +6,7 @@ import {
 } from 'react';
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -32,6 +33,7 @@ const {
   toggleVoiceDictationMock,
   useMutationMock,
   useOptionalPendingUserInputRequestStateMock,
+  useQueryMock,
   useSandboxClientMock,
   useSandboxConnectedMock,
   useSandboxConnectionStatusMock,
@@ -41,6 +43,7 @@ const {
   useSandboxTaskPhaseMock,
   useTRPCClientMock,
   useTRPCMock,
+  useTaskMessageEnvelopesMock,
   useVoiceDictationMock,
 } = vi.hoisted(() => ({
   autoCompleteDraftSaveRef: { current: true },
@@ -69,6 +72,7 @@ const {
   toggleVoiceDictationMock: vi.fn(),
   useMutationMock: vi.fn(),
   useOptionalPendingUserInputRequestStateMock: vi.fn(),
+  useQueryMock: vi.fn(),
   useSandboxClientMock: vi.fn(),
   useSandboxConnectedMock: vi.fn(),
   useSandboxConnectionStatusMock: vi.fn(),
@@ -78,6 +82,7 @@ const {
   useSandboxTaskPhaseMock: vi.fn(),
   useTRPCClientMock: vi.fn(),
   useTRPCMock: vi.fn(),
+  useTaskMessageEnvelopesMock: vi.fn(),
   useVoiceDictationMock: vi.fn(),
 }));
 
@@ -93,6 +98,7 @@ const submittedFilesRef: {
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: useMutationMock,
+  useQuery: useQueryMock,
   useQueryClient: () => ({
     setQueryData: queryClientSetQueryDataMock,
   }),
@@ -101,6 +107,17 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: useTRPCClientMock,
   useTRPC: useTRPCMock,
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => ({
+    authStatus: 'signed-in',
+    isSignedIn: true,
+    user: {
+      name: null,
+      resource: { imageUrl: undefined },
+    },
+  }),
 }));
 
 vi.mock('sonner', () => ({
@@ -231,6 +248,10 @@ vi.mock('../hooks/SandboxProvider', () => ({
   useSandboxTaskPhase: useSandboxTaskPhaseMock,
 }));
 
+vi.mock('../hooks/use-task-message-envelopes', () => ({
+  useTaskMessageEnvelopes: useTaskMessageEnvelopesMock,
+}));
+
 vi.mock('../PendingUserInputRequestPanel', () => ({
   useOptionalPendingUserInputRequestState:
     useOptionalPendingUserInputRequestStateMock,
@@ -327,6 +348,9 @@ describe('PromptInput', () => {
         },
       },
       tasks: {
+        composerSuggestion: {
+          queryOptions: vi.fn((input, options) => ({ input, ...options })),
+        },
         messageEnvelopes: {
           queryKey: vi.fn(({ taskId }: { taskId: string }) => [
             'tasks.messageEnvelopes',
@@ -363,6 +387,8 @@ describe('PromptInput', () => {
       toggle: toggleVoiceDictationMock,
     });
 
+    useQueryMock.mockReturnValue({ data: undefined });
+    useTaskMessageEnvelopesMock.mockReturnValue({ data: undefined });
     useSandboxClientMock.mockReturnValue(null);
     useSandboxCurrentUserInfoMock.mockReturnValue(null);
     useSandboxQueuedMessagesMock.mockReturnValue([]);
@@ -392,6 +418,31 @@ describe('PromptInput', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Connecting...');
     expect(screen.getByPlaceholderText(/Message agent/i)).toBeDisabled();
     expect(screen.queryByText('Task status')).not.toBeInTheDocument();
+  });
+
+  it('focuses an auto-focus composer once it is connected without stealing focus again', () => {
+    const composer = () => (
+      <>
+        <button type="button">Other control</button>
+        <PromptInput
+          autoFocus
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />
+      </>
+    );
+    const { rerender } = render(composer());
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+
+    expect(textarea).not.toHaveFocus();
+    useSandboxConnectedMock.mockReturnValue(true);
+    rerender(composer());
+    expect(textarea).toHaveFocus();
+
+    const otherControl = screen.getByRole('button', { name: 'Other control' });
+    act(() => otherControl.focus());
+    rerender(composer());
+    expect(otherControl).toHaveFocus();
   });
 
   it('opens command search when a slash is typed at the start of the prompt', () => {
@@ -861,13 +912,14 @@ describe('PromptInput', () => {
     expect(directSandboxSendPromptMock).not.toHaveBeenCalled();
   });
 
-  it('enables Goal Mode and sends only the objective to the agent', async () => {
+  it('queues Goal Mode optimistically during an active turn', async () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
       connectionError: false,
       reconnect: vi.fn(),
     });
+    useSandboxTaskPhaseMock.mockReturnValue('running');
     useSandboxClientMock.mockReturnValue({
       commands: {
         sendPrompt: { mutate: vi.fn() },
@@ -898,6 +950,13 @@ describe('PromptInput', () => {
       });
     });
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
+    expect(appendOptimisticQueuedMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'ship the release',
+        optimistic: true,
+      }),
+    );
+    expect(appendOptimisticAcpEventMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
   });
 
@@ -994,56 +1053,59 @@ describe('PromptInput', () => {
     expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
   });
 
-  it('steers prompts into the transcript while the task is running', async () => {
-    useSandboxConnectedMock.mockReturnValue(true);
-    useSandboxConnectionStatusMock.mockReturnValue({
-      connected: true,
-      connectionError: false,
-      reconnect: vi.fn(),
-    });
-    useSandboxTaskPhaseMock.mockReturnValue('running');
-    useSandboxClientMock.mockReturnValue({
-      commands: {
-        sendPrompt: { mutate: vi.fn() },
-        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
-      },
-    });
-
-    render(
-      <PromptInput
-        taskRun={createTaskRun(42, { taskId: 'task-running-send' })}
-        onFileSearchOpen={() => {}}
-        onCommandSearchOpen={() => {}}
-      />,
-    );
-
-    fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
-      target: { value: 'queued follow-up' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => {
-      expect(sandboxSendPromptMutateMock).toHaveBeenCalledWith({
-        taskId: 'task-running-send',
-        prompt: 'queued follow-up',
-        images: undefined,
-        source: 'web',
-        clientMessageId: expect.any(String),
-        userImageUrl: undefined,
-        autoSteerWhenQueued: true,
+  it.each(['running', 'waiting_for_user_input'] as const)(
+    'shows prompts as queued until runtime delivery while the task is %s',
+    async (taskPhase) => {
+      useSandboxConnectedMock.mockReturnValue(true);
+      useSandboxConnectionStatusMock.mockReturnValue({
+        connected: true,
+        connectionError: false,
+        reconnect: vi.fn(),
       });
-    });
+      useSandboxTaskPhaseMock.mockReturnValue(taskPhase);
+      useSandboxClientMock.mockReturnValue({
+        commands: {
+          sendPrompt: { mutate: vi.fn() },
+          touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+        },
+      });
 
-    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: 'roomote_runtime.user_prompt',
-        role: 'user',
-        text: 'queued follow-up',
-      }),
-    );
-    expect(appendOptimisticQueuedMessageMock).not.toHaveBeenCalled();
-    expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
-  });
+      render(
+        <PromptInput
+          taskRun={createTaskRun(42, { taskId: 'task-running-send' })}
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
+        target: { value: 'queued follow-up' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      await waitFor(() => {
+        expect(sandboxSendPromptMutateMock).toHaveBeenCalledWith({
+          taskId: 'task-running-send',
+          prompt: 'queued follow-up',
+          images: undefined,
+          source: 'web',
+          clientMessageId: expect.any(String),
+          userImageUrl: undefined,
+          autoSteerWhenQueued: true,
+        });
+      });
+
+      expect(appendOptimisticQueuedMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: expect.stringMatching(/^local:/),
+          text: 'queued follow-up',
+          optimistic: true,
+        }),
+      );
+      expect(appendOptimisticAcpEventMock).not.toHaveBeenCalled();
+      expect(queryClientSetQueryDataMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('steers the oldest queued message from empty Enter even after the parent turn leaves running state', async () => {
     const steerQueuedMessageMutateMock = vi.fn().mockResolvedValue(undefined);
@@ -1176,7 +1238,7 @@ describe('PromptInput', () => {
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to send message.');
   });
 
-  it('removes the optimistic transcript message and shows a toast when a running send fails', async () => {
+  it('removes the optimistic queued message and shows a toast when a running send fails', async () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
@@ -1208,12 +1270,283 @@ describe('PromptInput', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(removeOptimisticMessageMock).toHaveBeenCalledWith(
+      expect(removeOptimisticQueuedMessageMock).toHaveBeenCalledWith(
         expect.any(String),
       );
     });
 
-    expect(removeOptimisticQueuedMessageMock).not.toHaveBeenCalled();
+    expect(removeOptimisticMessageMock).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to send message.');
+  });
+});
+
+describe('PromptInput ghost suggestion', () => {
+  function renderConnectedComposer(
+    suggestion = 'Add a regression test for that',
+  ) {
+    useSandboxTaskPhaseMock.mockReturnValue('waiting_for_prompt');
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({
+      data: [
+        {
+          eventType: 'roomote_runtime.user_prompt',
+          text: 'Fix the login redirect',
+        },
+        {
+          eventType: 'roomote_runtime.assistant_message',
+          text: 'The redirect is fixed',
+        },
+      ],
+    });
+    useQueryMock.mockReturnValue({
+      data: { suggestion, messageCount: 6 },
+    });
+
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+        taskRun={createTaskRun(1)}
+      />,
+    );
+
+    return screen.getByPlaceholderText(suggestion);
+  }
+
+  it('renders the suggestion as ghost placeholder text when the composer is empty', () => {
+    const textarea = renderConnectedComposer();
+
+    expect(textarea).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.focus(textarea);
+
+    expect(
+      screen.getByRole('button', { name: 'Insert suggested message' }),
+    ).toHaveTextContent('Tab to accept');
+    expect(screen.getByText(/Press Tab to accept/)).toBeInTheDocument();
+
+    fireEvent.blur(textarea);
+
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('accepts the suggestion with Tab', () => {
+    const textarea = renderConnectedComposer();
+
+    fireEvent.keyDown(textarea, { key: 'Tab', code: 'Tab' });
+
+    expect(textarea).toHaveValue('Add a regression test for that');
+    // Once accepted, the ghost hint disappears and the default placeholder returns.
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each(['mouse', 'touch'])(
+    'accepts a long suggestion without losing focus on %s pointer down',
+    (pointerType) => {
+      const suggestion =
+        'Implement the marker fix and add regression coverage.';
+      const textarea = renderConnectedComposer(suggestion);
+      act(() => textarea.focus());
+      const hint = screen.getByRole('button', {
+        name: 'Insert suggested message',
+      });
+
+      expect(
+        fireEvent.pointerDown(hint, { pointerType, cancelable: true }),
+      ).toBe(false);
+      expect(textarea).toHaveFocus();
+      fireEvent.click(hint);
+
+      expect(textarea).toHaveValue(suggestion);
+      expect(textarea).toHaveFocus();
+      expect(hint).not.toBeInTheDocument();
+    },
+  );
+
+  it('dismisses the suggestion with Escape and does not re-show it', () => {
+    const textarea = renderConnectedComposer();
+
+    fireEvent.keyDown(textarea, { key: 'Escape', code: 'Escape' });
+
+    expect(textarea).toHaveValue('');
+    expect(
+      screen.queryByPlaceholderText('Add a regression test for that'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Message agent/i)).toBeInTheDocument();
+  });
+
+  it('hides the ghost suggestion while the composer has text', () => {
+    const textarea = renderConnectedComposer();
+
+    fireEvent.change(textarea, {
+      target: { value: 'my own message', selectionStart: 14 },
+    });
+
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+    // Tab must not overwrite user-authored text.
+    fireEvent.keyDown(screen.getByPlaceholderText(/Message agent/i), {
+      key: 'Tab',
+      code: 'Tab',
+    });
+    expect(screen.getByPlaceholderText(/Message agent/i)).toHaveValue(
+      'my own message',
+    );
+  });
+
+  it('hides the ghost suggestion while the agent is still working', () => {
+    const textarea = renderConnectedComposer();
+    expect(textarea).toBeInTheDocument();
+
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+    cleanup();
+
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+        taskRun={createTaskRun(1)}
+      />,
+    );
+
+    // Same cached suggestion, but a running agent must fall back to the
+    // default placeholder and disable the query.
+    expect(
+      screen.queryByPlaceholderText('Add a regression test for that'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Message agent/i)).toBeInTheDocument();
+    const runningQueryArg = useQueryMock.mock.calls.at(-1)?.[0] as {
+      enabled?: boolean;
+    };
+    expect(runningQueryArg?.enabled).toBe(false);
+  });
+
+  it('does not re-show a sent suggestion in the emptied composer', async () => {
+    const textarea = renderConnectedComposer();
+
+    fireEvent.keyDown(textarea, { key: 'Tab', code: 'Tab' });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(sandboxSendPromptMutateMock).toHaveBeenCalled();
+    });
+
+    // The composer is empty and idle again, but the consumed suggestion must
+    // not come back: the cached query still holds it until the next history
+    // bucket.
+    expect(
+      screen.queryByPlaceholderText('Add a regression test for that'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Message agent/i)).toBeInTheDocument();
+  });
+
+  it('advances the suggestion revision from persisted conversational history', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    let history = [
+      {
+        eventType: 'roomote_runtime.user_prompt',
+        text: 'Fix the login redirect',
+      },
+      {
+        eventType: 'roomote_runtime.assistant_message',
+        text: 'The redirect is fixed',
+      },
+      {
+        eventType: 'roomote_runtime.tool_call',
+        text: 'This UI-only event must not advance the cache',
+      },
+    ];
+    useTaskMessageEnvelopesMock.mockImplementation(() => ({ data: history }));
+    const props = {
+      onFileSearchOpen: () => {},
+      onCommandSearchOpen: () => {},
+      taskRun: createTaskRun(1),
+    };
+
+    const { rerender } = render(<PromptInput {...props} />);
+
+    expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      input: { historyRevision: 1 },
+    });
+
+    // A user message alone must not advance the revision: only a completed
+    // agent turn regenerates the suggestion.
+    history = [
+      ...history,
+      {
+        eventType: 'roomote_runtime.user_prompt',
+        text: 'Please add a regression test',
+      },
+    ];
+    rerender(<PromptInput {...props} />);
+
+    expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      input: { historyRevision: 1 },
+    });
+
+    history = [
+      ...history,
+      {
+        eventType: 'roomote_runtime.assistant_message',
+        text: 'The regression test now passes',
+      },
+    ];
+    rerender(<PromptInput {...props} />);
+
+    expect(useQueryMock.mock.calls.at(-1)?.[0]).toMatchObject({
+      input: { historyRevision: 2 },
+    });
+  });
+
+  it('does not request a suggestion until persisted history has enough messages', () => {
+    useTaskMessageEnvelopesMock.mockReturnValue({ data: [] });
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+        taskRun={createTaskRun(1)}
+      />,
+    );
+
+    const queryArg = useQueryMock.mock.calls.at(-1)?.[0] as {
+      enabled?: boolean;
+    };
+    expect(queryArg?.enabled).toBe(false);
   });
 });

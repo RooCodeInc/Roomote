@@ -118,6 +118,9 @@ export default async function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        {/* Must run synchronously before first paint: App Router queues
+            inline beforeInteractive Scripts until client bootstrap, which
+            flashes the wrong theme. */}
         <script dangerouslySetInnerHTML={{ __html: getThemeBootScript() }} />
       </head>
       <body

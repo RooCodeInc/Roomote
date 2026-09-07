@@ -1,6 +1,7 @@
 import pMap from 'p-map';
 
 import {
+  buildFastAgentSessionAttachment,
   type TaskPayload,
   DEFAULT_PR_REVIEW_SETTINGS,
   type PrReviewSettings,
@@ -19,7 +20,10 @@ import {
   isNull,
   sql,
 } from '@roomote/db/server';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  getPrOriginFastAgentParent,
+} from '@roomote/cloud-agents/server';
 import {
   recordPrStatusChangeInTaskHistory,
   updateTaskPrStatus,
@@ -207,6 +211,7 @@ function scheduleAdoPullRequestFactSync(
     pullRequest: {
       number: pullRequest.pullRequestId,
       title: pullRequest.title,
+      body: pullRequest.description ?? null,
       url: getAdoPullRequestUrl({
         resourceContainers: payload.resourceContainers,
         pullRequest,
@@ -261,6 +266,7 @@ export async function handleAdoPullRequest(
           pullRequest,
           repositoryFullName: repoFullName,
         }),
+        targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
         status: 'closed',
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??
@@ -307,6 +313,7 @@ export async function handleAdoPullRequest(
           pullRequest,
           repositoryFullName: repoFullName,
         }),
+        targetBranch: stripAdoGitRefPrefix(pullRequest.targetRefName),
         status: 'merged',
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??
@@ -323,6 +330,19 @@ export async function handleAdoPullRequest(
     await notifyTerminalPullRequestThreads(payload, repoFullName, 'merged');
 
     return { status: 'ok' };
+  }
+
+  if (
+    pullRequest.status === 'active' &&
+    (payload.eventType === 'git.pullrequest.created' ||
+      payload.eventType === 'git.pullrequest.updated')
+  ) {
+    await updateTaskPrStatus(
+      'ado',
+      repoFullName,
+      pullRequest.pullRequestId,
+      pullRequest.isDraft ? 'draft' : 'open',
+    );
   }
 
   const taskType = getReviewTaskType(payload, context);
@@ -402,8 +422,25 @@ export async function handleAdoPullRequest(
   const prAuthorName = getAdoIdentityName(pullRequest.createdBy);
   const prAuthorId = pullRequest.createdBy?.id?.trim() || prAuthorName;
 
-  const enqueued = await pMap(targets, async (target) =>
-    enqueueTask(
+  const enqueued = await pMap(targets, async (target) => {
+    // A PR opened by a session-delegated task pulls its review into that
+    // same session, so the review shows up as a task there instead of
+    // spawning an unrelated one.
+    const reviewBranch = branchName;
+    const originParent = reviewBranch
+      ? await getPrOriginFastAgentParent({
+          repository: repoFullName,
+          prNumber: pullRequest.pullRequestId,
+          branchName: reviewBranch,
+          sourceControlProvider: 'ado',
+          repositoryId: target.repo.id,
+          // Legacy repository rows may lack a host; fall back to the
+          // webhook's own host so a same-named repository on another
+          // instance can never supply this review's session.
+          host: target.repo.host ?? toHostFromUrl(prUrl),
+        }).catch(() => null)
+      : null;
+    return enqueueTask(
       {
         task: {
           type: taskType,
@@ -415,6 +452,9 @@ export async function handleAdoPullRequest(
             // Legacy rows without a recorded host omit the field.
             ...(target.repo.host
               ? { sourceControlHost: target.repo.host }
+              : {}),
+            ...(originParent
+              ? buildFastAgentSessionAttachment(originParent)
               : {}),
             prNumber: pullRequest.pullRequestId,
             prTitle: pullRequest.title,
@@ -456,8 +496,8 @@ export async function handleAdoPullRequest(
       {
         launchClass: 'automation',
       },
-    ),
-  );
+    );
+  });
 
   return {
     status: 'ok',

@@ -11,52 +11,12 @@ const SETUP_STEP_DEFINITIONS = [
     title: `Welcome to ${PRODUCT_NAME}!`,
   },
   {
-    id: 'auth-provider',
-    title: 'Communication provider',
-  },
-  {
-    id: 'auth-env-vars',
-    title: 'Configure comms',
-  },
-  {
-    id: 'slack',
-    title: 'Connect Slack',
-  },
-  {
-    id: 'env-vars',
+    id: 'inference',
     title: 'Configure inference',
   },
   {
-    id: 'source-control-provider',
-    title: 'Source control provider',
-  },
-  {
-    id: 'source-control-config',
-    title: 'Configure source control',
-  },
-  {
-    id: 'source-control-connect',
-    title: 'Connect source control',
-  },
-  {
-    id: 'automation-recommendations',
-    title: 'Automation recommendations',
-  },
-  {
-    id: 'compute-provider',
-    title: 'Sandbox provider',
-  },
-  {
-    id: 'compute-config',
-    title: 'Configure sandboxes',
-  },
-  {
-    id: 'repo-selection',
-    title: 'Set up environment',
-  },
-  {
-    id: 'invoke',
-    title: "That's it!",
+    id: 'env-vars',
+    title: 'Configure inference provider',
   },
 ] as const satisfies readonly SetupStepConfig[];
 
@@ -64,9 +24,17 @@ type SetupStepDefinition = (typeof SETUP_STEP_DEFINITIONS)[number];
 
 export type SetupStep = SetupStepDefinition['id'];
 
-export const SETUP_STEPS: SetupStep[] = SETUP_STEP_DEFINITIONS.map(
+export const SETUP_STEPS: readonly SetupStep[] = SETUP_STEP_DEFINITIONS.map(
   (definition) => definition.id,
 );
+
+export function getSetupSteps(
+  _hasCommunicationAuthProvider: boolean,
+): readonly SetupStep[] {
+  // Communication-provider configuration is excluded from the activation
+  // path; the parameter remains for call-site stability.
+  return SETUP_STEPS;
+}
 
 const SETUP_STEP_DEFINITION_MAP = Object.fromEntries(
   SETUP_STEP_DEFINITIONS.map((definition) => [definition.id, definition]),
@@ -76,16 +44,6 @@ const SETUP_STEP_DEFINITION_MAP = Object.fromEntries(
 
 export function getSetupStepDefinition(step: SetupStep) {
   return SETUP_STEP_DEFINITION_MAP[step];
-}
-
-/**
- * Canonical URL for a signed-in setup step. The setup flow keeps the active
- * step in the query string (`/setup?step=<step-id>`) so the URL is the source
- * of truth for navigation, deep links, and browser back/forward. OAuth
- * callbacks and setup deep links depend on this exact shape.
- */
-export function getSetupStepPath(step: SetupStep): string {
-  return `/setup?step=${step}`;
 }
 
 /**

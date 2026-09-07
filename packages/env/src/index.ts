@@ -128,6 +128,10 @@ const serverSchema = {
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
   R_CURATED_INTEGRATIONS_DISABLED: optInBoolean(),
+  // Kill switch for durable retry scheduling. When set, an in-flight Fast
+  // turn waits out inference retry backoff inside its owning process (the
+  // pre-scheduling behavior) instead of parking the turn for the queue.
+  R_FAST_DURABLE_RETRY_DISABLED: optInBoolean(),
   // Operator kill switch for admin-configured custom MCP servers. Deliberately
   // independent of R_CURATED_INTEGRATIONS_DISABLED: operators who disable the
   // curated catalog are the primary custom-server audience.
@@ -155,14 +159,18 @@ const serverSchema = {
   // RELEASE_VERSION, so channel builds (develop-<sha>/main-<sha>) still know
   // which product release they contain. Read by the in-app release notices.
   RELEASE_PRODUCT_VERSION: z.string().min(1).optional(),
+  // Kill switch for the low-noise recurring-automation offer in Fast mode.
+  R_FAST_AUTOMATION_OFFERS_DISABLED: optInBoolean(),
   TRPC_URL: z.string().min(1),
   R_MODEL: z.string().min(1).optional(),
+  R_ORCHESTRATION_MODEL: z.string().min(1).optional(),
   R_SMALL_MODEL: z.string().min(1).optional(),
   R_VISION_MODEL: z.string().min(1).optional(),
   R_CODE_REVIEW_MODEL: z.string().min(1).optional(),
   R_EXPLORE_MODEL: z.string().min(1).optional(),
   R_PLANNING_MODEL: z.string().min(1).optional(),
   R_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
+  R_ORCHESTRATION_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
   R_SMALL_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
   R_VISION_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
   R_CODE_REVIEW_MODEL_REASONING_EFFORT: z.string().min(1).optional(),
@@ -181,6 +189,7 @@ const serverSchema = {
   SANDBOX_OIDC_PUBLIC_KEY_SECONDARY: z.string().min(1).optional(),
   R_GITHUB_APP_ID: emptyStringDefault(),
   R_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
+  R_GITHUB_ADDITIONAL_APP_SLUGS: z.string().optional(),
   R_GITHUB_APP_PRIVATE_KEY: emptyStringDefault(),
   R_GITHUB_CLIENT_ID: emptyStringDefault(),
   R_GITHUB_CLIENT_SECRET: emptyStringDefault(),
@@ -198,7 +207,6 @@ const serverSchema = {
   R_SLACK_SIGNING_SECRET: z.string().min(1).optional(),
   SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api/'),
   SLACK_UNFURL_ALLOWED_DOMAINS: z.string().optional(),
-  ROUTER_DEBUG_CHANNEL_ID: z.string().optional(),
   // When adding an integration/instance secret below, also add it to
   // CONTROL_PLANE_ENV_VAR_NAMES (packages/types/src/control-plane-env-vars.ts)
   // unless it is already a `secret` field in a setup catalog, or it leaks into
@@ -339,6 +347,9 @@ const serverSchema = {
   // queries. Distinct credential class from the ingest token by design: a
   // compromised agent path must be structurally incapable of writes.
   R_GBRAIN_AGENT_TOKEN: z.string().min(1).optional(),
+  // Admin-scoped bearer token used only by the scheduler to enqueue gbrain's
+  // built-in maintenance cycle. Normally Roomote provisions this itself.
+  R_GBRAIN_MAINTENANCE_TOKEN: z.string().min(1).optional(),
   // gbrain's admin bootstrap token, given directly or as a file path (the
   // compose profile mounts the gbrain volume read-only and points this at
   // the token the entrypoint generates). Roomote uses it once, headlessly,
@@ -358,6 +369,31 @@ const serverSchema = {
   // an OpenAI key for something else never silently re-points an existing
   // Brain at a different embedding path.
   R_BRAIN_OPENAI_API_KEY: z.string().min(1).optional(),
+  // Free-trial OpenRouter credential a hosting provisioner injects for new
+  // cloud deployments: a Roomote-minted key with a hard spend limit. The env
+  // variable is only hosting's delivery mechanism — setup imports its value
+  // into encrypted Settings storage, and every runtime read (inference
+  // gateway, credit balance, provider status) resolves the stored key, never
+  // this variable. Activating the trial is an explicit operator choice in
+  // the setup wizard; deleting the Roomote provider in Settings removes the
+  // stored key and disables the trial even while hosting keeps injecting
+  // this variable. Rotating the injected value re-imports it only while the
+  // stored key still exists. Served through the inference gateway like any
+  // other provider key, so it never reaches a sandbox.
+  R_TRIAL_OPENROUTER_API_KEY: z.string().min(1).optional(),
+  // Dedicated capped OpenRouter key forwarded by the launcher only to workers
+  // preparing nested Roomote deployments. Setup maps it to OPENROUTER_API_KEY.
+  SANDBOX_OPENROUTER_API_KEY: z.string().min(1).optional(),
+  // Optional self-run inference upstreams for the Brain gateway. When set,
+  // the gateway routes that path's requests there instead of the configured
+  // model provider — embeddings can move to a local or fleet
+  // inference service while chat synthesis keeps flowing to the provider.
+  // Model names pass through unrewritten: the upstream owns its own names.
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL: z.string().url().optional(),
+  // One key for both paths: they are the same service in every planned
+  // deployment shape. Optional because a compose-network upstream may have
+  // no auth at all.
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY: z.string().min(1).optional(),
   // Shared secret between this deployment and its Brain container, so the
   // Brain can reach /api/brain/inference without holding a provider key of
   // its own. It is the Brain's whole credential: the real provider key stays
@@ -504,10 +540,15 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_GBRAIN_URL',
   'R_GBRAIN_INGEST_TOKEN',
   'R_GBRAIN_AGENT_TOKEN',
+  'R_GBRAIN_MAINTENANCE_TOKEN',
   'R_GBRAIN_ADMIN_TOKEN',
   'R_GBRAIN_ADMIN_TOKEN_FILE',
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
+  'R_TRIAL_OPENROUTER_API_KEY',
+  'SANDBOX_OPENROUTER_API_KEY',
+  'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
+  'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
   'R_BRAIN_GATEWAY_TOKEN',
   'R_BRAIN_GATEWAY_TOKEN_FILE',
   'R_BRAIN_MODEL',
@@ -536,7 +577,6 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
   'SLACK_UNFURL_ALLOWED_DOMAINS',
-  'ROUTER_DEBUG_CHANNEL_ID',
   'R_TEAMS_BOT_APP_ID',
   'R_TEAMS_BOT_APP_PASSWORD',
   'R_TEAMS_BOT_TENANT_ID',
@@ -623,12 +663,14 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'GITHUB_AUTOMATED_SKIP_REPOS',
   'GITHUB_AUTOMATED_SKIP_OWNERS',
   'R_MODEL',
+  'R_ORCHESTRATION_MODEL',
   'R_SMALL_MODEL',
   'R_VISION_MODEL',
   'R_CODE_REVIEW_MODEL',
   'R_EXPLORE_MODEL',
   'R_PLANNING_MODEL',
   'R_MODEL_REASONING_EFFORT',
+  'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
   'R_SMALL_MODEL_REASONING_EFFORT',
   'R_VISION_MODEL_REASONING_EFFORT',
   'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
@@ -674,34 +716,41 @@ export function isRoomoteCloudEnabled(
  * deployment. Enabled unless explicitly disabled.
  */
 /**
- * Whether this deployment has a Brain at all. Deliberately a topology
- * question, not a credential one: the gateway token is only ever set when
- * someone wired a Brain on purpose (templates generate it, compose operators
- * set it), so the provider key that makes it useful can arrive later from
- * Settings without a redeploy.
+ * Whether this deployment *might* have a Brain: some Brain wiring exists in
+ * the environment. This is deliberately a superset question, not activation.
+ * Deployment templates supply the gateway token directly or by file as
+ * plumbing between the gbrain service and the inference gateway, so either
+ * signal means "a Brain could be wired here", never "an operator turned the
+ * Brain on". Activation — everything user-visible, from delivering the
+ * gbrain MCP server to agents to running ingestion — additionally requires
+ * the Brain to be enabled: the `brainEnabled` Settings toggle, falling back
+ * to an explicit R_BRAIN_* provider key for deployments that opted in
+ * before the toggle existed. That predicate lives in isBrainEnabled
+ * (@roomote/db).
  *
  * Not R_GBRAIN_URL, which every compose file defaults to a service address
  * whether or not that service runs. Keying on a defaulted value made this
  * true everywhere and quietly enqueued memories on deployments that have no
  * Brain and never will.
  *
- * The two are separate on purpose. This gates the cheap, synchronous paths
- * that only need to know a Brain exists, above all the outbox insert inside
- * the run-completion transaction, which must not do a database lookup of its
- * own. Whether the Brain is usable right now is an async question answered
- * where it is actually needed, by resolving a connection and a provider.
- *
- * Enqueuing memories for a Brain that has no key yet is intentional: the
- * drainer holds them until one is configured, so turning the Brain on later
- * picks up the history rather than starting from that moment.
+ * The split exists because this gates the cheap, synchronous paths that only
+ * need to know a Brain might exist, above all the outbox insert inside the
+ * run-completion transaction, which must not do a database lookup of its
+ * own. Enqueuing memories for a Brain that is not enabled yet is
+ * intentional: the drainer holds them until it is, so turning the Brain on
+ * later picks up the history rather than starting from that moment.
  */
 export function isBrainConfigured(env: {
   R_BRAIN_GATEWAY_TOKEN?: string;
+  R_BRAIN_GATEWAY_TOKEN_FILE?: string;
   R_BRAIN_OPENROUTER_API_KEY?: string;
   R_BRAIN_OPENAI_API_KEY?: string;
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL?: string;
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY?: string;
 }): boolean {
   return Boolean(
     env.R_BRAIN_GATEWAY_TOKEN?.trim() ||
+    env.R_BRAIN_GATEWAY_TOKEN_FILE?.trim() ||
     env.R_BRAIN_OPENROUTER_API_KEY?.trim() ||
     env.R_BRAIN_OPENAI_API_KEY?.trim(),
   );

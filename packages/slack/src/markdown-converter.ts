@@ -1,18 +1,18 @@
 /**
  * Converts standard markdown to Slack's mrkdwn format
  */
-export function convertMarkdownToSlack(text: string): string {
+function convertMarkdownProseToSlack(text: string): string {
   let converted = text;
-
-  // Convert bold: **text** → *text*
-  converted = converted.replace(/\*\*(.+?)\*\*/g, '*$1*');
 
   // Convert italic (underscore): _text_ stays the same (Slack uses _text_ for italic)
 
-  // Convert italic (asterisk): *text* → _text_ (but only if not already bold)
-  // We need to be careful not to affect our already converted bold
-  // This regex looks for single asterisks not preceded by or followed by another asterisk
-  converted = converted.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '_$1_');
+  // Convert bold and asterisk italics in one pass so newly converted bold is
+  // not mistaken for italic by a second replacement.
+  converted = converted.replace(
+    /\*\*(.+?)\*\*|(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g,
+    (_match, bold: string | undefined, italic: string | undefined) =>
+      bold === undefined ? `_${italic ?? ''}_` : `*${bold}*`,
+  );
 
   // Convert strikethrough: ~~text~~ → ~text~
   converted = converted.replace(/~~(.+?)~~/g, '~$1~');
@@ -20,6 +20,82 @@ export function convertMarkdownToSlack(text: string): string {
   // Convert links: [text](url) → <url|text>
   converted = convertMarkdownLinksToSlack(converted);
 
+  return converted;
+}
+
+export function convertMarkdownToSlack(text: string): string {
+  let converted = '';
+  let proseStart = 0;
+  let index = 0;
+
+  while (index < text.length) {
+    const delimiter = text[index];
+    if (delimiter !== '`' && delimiter !== '~') {
+      index += 1;
+      continue;
+    }
+
+    let delimiterLength = 1;
+    while (text[index + delimiterLength] === delimiter) {
+      delimiterLength += 1;
+    }
+    const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+    const indentation = text.slice(lineStart, index);
+    const isFence = delimiterLength >= 3 && /^ {0,3}$/.test(indentation ?? '');
+    if (delimiter === '~' && !isFence) {
+      index += delimiterLength;
+      continue;
+    }
+
+    let closingIndex = -1;
+    if (isFence) {
+      let candidateLineStart = text.indexOf('\n', index + delimiterLength);
+      while (candidateLineStart !== -1) {
+        candidateLineStart += 1;
+        const candidateLineEnd = text.indexOf('\n', candidateLineStart);
+        const line = text.slice(
+          candidateLineStart,
+          candidateLineEnd === -1 ? text.length : candidateLineEnd,
+        );
+        const match = line.match(/^ {0,3}(`+|~+)\s*$/);
+        if (
+          match?.[1]?.[0] === delimiter &&
+          match[1].length >= delimiterLength
+        ) {
+          closingIndex = candidateLineStart + line.indexOf(match[1]);
+          delimiterLength = match[1].length;
+          break;
+        }
+        candidateLineStart = candidateLineEnd;
+      }
+    } else {
+      const marker = delimiter.repeat(delimiterLength);
+      let candidate = text.indexOf(marker, index + delimiterLength);
+      while (candidate !== -1) {
+        if (
+          text[candidate - 1] !== delimiter &&
+          text[candidate + delimiterLength] !== delimiter
+        ) {
+          closingIndex = candidate;
+          break;
+        }
+        candidate = text.indexOf(marker, candidate + delimiterLength);
+      }
+    }
+
+    if (closingIndex === -1) {
+      index += delimiterLength;
+      continue;
+    }
+
+    converted += convertMarkdownProseToSlack(text.slice(proseStart, index));
+    const codeEnd = closingIndex + delimiterLength;
+    converted += text.slice(index, codeEnd);
+    index = codeEnd;
+    proseStart = codeEnd;
+  }
+
+  converted += convertMarkdownProseToSlack(text.slice(proseStart));
   return converted;
 }
 

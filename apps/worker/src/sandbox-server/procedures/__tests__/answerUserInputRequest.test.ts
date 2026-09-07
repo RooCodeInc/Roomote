@@ -10,11 +10,13 @@ const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
 const {
   mockFindFirstById,
   mockGetRoomoteConfig,
+  mockSuppressSlackReplyQuote,
   mockTrackSlackReplyQuote,
   mockClearSlackReplyQuote,
 } = vi.hoisted(() => ({
   mockFindFirstById: vi.fn(),
   mockGetRoomoteConfig: vi.fn(),
+  mockSuppressSlackReplyQuote: vi.fn(),
   mockTrackSlackReplyQuote: vi.fn(),
   mockClearSlackReplyQuote: vi.fn(),
 }));
@@ -54,6 +56,7 @@ vi.mock('../../../mcp/roomote-mcp-server/config', () => ({
 }));
 
 vi.mock('../../../mcp/roomote-mcp-server/slack-api-client', () => ({
+  suppressSlackReplyQuote: mockSuppressSlackReplyQuote,
   trackSlackReplyQuote: mockTrackSlackReplyQuote,
   clearSlackReplyQuote: mockClearSlackReplyQuote,
 }));
@@ -141,6 +144,10 @@ describe('answerUserInputRequest procedure', () => {
       success: true,
       quoteId: 'quote-1',
     });
+    mockSuppressSlackReplyQuote.mockResolvedValue({
+      success: true,
+      quoteId: 'suppression-1',
+    });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
 
@@ -208,6 +215,58 @@ describe('answerUserInputRequest procedure', () => {
     );
     expect(mockTrackSlackReplyQuote.mock.invocationCallOrder[0]).toBeLessThan(
       sendCommand.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('skips Slack reply quote tracking for orchestrated answers', async () => {
+    const { caller, sendCommand } = createCaller({
+      getPendingUserInputRequests: () => [
+        createPendingRequest('rui:session:turn:call'),
+      ],
+    });
+
+    const result = await caller.commands.answerUserInputRequest({
+      requestId: 'rui:session:turn:call',
+      suppressSlackReplyQuote: true,
+      answers: {
+        color: {
+          answers: ['Blue'],
+        },
+      },
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
+    expect(mockSuppressSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1 },
+    );
+    expect(sendCommand).toHaveBeenCalledOnce();
+  });
+
+  it('rolls back persisted quote suppression when an orchestrated answer cannot be sent', async () => {
+    const { caller, sendCommand } = createCaller({ sendCommand: () => false });
+
+    await expect(
+      caller.commands.answerUserInputRequest({
+        requestId: 'rui:session:turn:call',
+        suppressSlackReplyQuote: true,
+        answers: { color: { answers: ['Blue'] } },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    expect(
+      mockSuppressSlackReplyQuote.mock.invocationCallOrder[0],
+    ).toBeLessThan(sendCommand.mock.invocationCallOrder[0]!);
+    expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1, quoteId: 'suppression-1' },
     );
   });
 

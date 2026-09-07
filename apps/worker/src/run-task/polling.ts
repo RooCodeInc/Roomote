@@ -1,11 +1,15 @@
 import {
   TaskPayloadKind,
   getCommunicationProviderFromTaskPayload,
+  getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
 
-import { getLinearSessionIdFromResumePayload } from './linear-resume-payload';
+import {
+  getLinearFastParentSessionId,
+  getLinearSessionIdFromResumePayload,
+} from './linear-resume-payload';
 
 import type { ListenerOptions, RunTaskState } from './types';
 import {
@@ -22,11 +26,15 @@ export const startPolling = (options: ListenerOptions) => {
 
   // Prefer the task channel bindings from the dequeue/resume response; fall
   // back to payload-derived extraction for payloads that predate them.
+  // Fast children are deliberately unbound from the Slack thread, but their
+  // request_user_input answers are still queued by run ID, so they need the
+  // same answer-polling loop to ever receive them.
   if (
     task?.slackThreadTs ||
     task?.slackChannelId ||
     getSlackThreadTsFromTaskPayload(taskRun.payload) ||
-    getSlackChannelFromTaskPayload(taskRun.payload)
+    getSlackChannelFromTaskPayload(taskRun.payload) ||
+    getFastAgentParentFromPayload(taskRun.payload)
   ) {
     state.slackMessageInterval = createSlackMessageInterval(options);
   }
@@ -43,13 +51,17 @@ export const startPolling = (options: ListenerOptions) => {
       });
   }
 
+  // Answers to a Linear elicitation reach the run through this poller, so a
+  // task delegated from a Linear Fast Session needs it as much as a direct
+  // Linear task does.
   if (
     taskRun.payloadKind === TaskPayloadKind.LinearAgentSession ||
     (taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
       !!(
         task?.linearSessionId ??
         getLinearSessionIdFromResumePayload(taskRun.payload)
-      ))
+      )) ||
+    getLinearFastParentSessionId(taskRun.payload) !== null
   ) {
     state.linearMessageInterval = createLinearMessageInterval(options);
   }
@@ -57,6 +69,7 @@ export const startPolling = (options: ListenerOptions) => {
   state.githubTokenRefreshInterval = createGitHubTokenRefreshInterval({
     runId: taskRun.id,
     logger,
+    initialExpiresAt: options.sourceControlTokenExpiresAt,
   });
 };
 

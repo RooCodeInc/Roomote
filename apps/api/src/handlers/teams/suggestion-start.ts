@@ -4,21 +4,25 @@ import {
   claimWorkItem,
   db,
   eq,
-  finalizeWorkItemLaunched,
   inArray,
   isNotNull,
-  releaseWorkItemClaim,
   sql,
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
 import {
+  ALL_REPOSITORIES,
+  FAST_EXECUTION,
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-  isDeploymentReadOnlyError,
 } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
-import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import type { FastAgentStartResult } from '../fast-agent-entry.js';
+import { launchClaimedSuggestedTask } from '../tasks/suggestion-launch.js';
+import {
+  resolveSuggestedTaskLaunchTarget,
+  type SuggestedTaskLaunchTarget,
+} from '../tasks/suggestion-launch-target.js';
 import { claimCurrentThreadSuggestionByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import { stripTeamsMessageIdSuffix } from './find-active-teams-run.js';
 
@@ -73,6 +77,11 @@ export type ClaimedTeamsSuggestion = {
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
+  usesRouterLaunch?: boolean;
+  launchTarget?: string;
+  /** The scan or onboarding task that produced the suggestion. */
+  sourceTaskId?: string | null;
+  originSessionId?: unknown;
   launchClaimedAt: Date;
 };
 
@@ -114,6 +123,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       messageTs: trackedMessages.messageTs,
       threadTs: trackedMessages.threadTs,
       createdAt: trackedMessages.createdAt,
+      metadata: trackedMessages.metadata,
     })
     .from(trackedMessages)
     .where(
@@ -140,7 +150,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
   // Group cards by their intro message and keep the newest group: the list the
   // user is replying to. message_ts is '<introMessageId>:<workItemId>'; strip
   // the known workItemId suffix (intro ids may themselves contain ':').
-  const groups = new Map<string, { createdAt: Date; workItemIds: string[] }>();
+  const groups = new Map<string, { createdAt: Date; cards: typeof cards }>();
 
   for (const card of scopedCards) {
     if (!card.workItemId || !card.messageTs) {
@@ -154,7 +164,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
     const group = groups.get(groupKey);
 
     if (group) {
-      group.workItemIds.push(card.workItemId);
+      group.cards.push(card);
 
       if (card.createdAt > group.createdAt) {
         group.createdAt = card.createdAt;
@@ -162,7 +172,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
     } else {
       groups.set(groupKey, {
         createdAt: card.createdAt,
-        workItemIds: [card.workItemId],
+        cards: [card],
       });
     }
   }
@@ -176,7 +186,12 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
   const items = await db
     .select({ id: workItems.id, title: workItems.title })
     .from(workItems)
-    .where(inArray(workItems.id, latestGroup.workItemIds))
+    .where(
+      inArray(
+        workItems.id,
+        latestGroup.cards.map((card) => card.workItemId!),
+      ),
+    )
     .orderBy(asc(workItems.sortOrder), asc(workItems.createdAt));
 
   const target = items[input.ideaNumber - 1];
@@ -200,6 +215,10 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       investigationContext: claimed.investigationContext,
       targetRepositoryFullName: claimed.targetRepositoryFullName,
       targetEnvironmentId: claimed.targetEnvironmentId,
+      sourceTaskId: claimed.sourceTaskId,
+      originSessionId: latestGroup.cards.find(
+        (card) => card.workItemId === target.id,
+      )?.metadata?.originSessionId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };
@@ -229,10 +248,12 @@ function buildTeamsSuggestionTaskPromptText(
   suggestion: ClaimedTeamsSuggestion,
 ): string {
   return [
-    `Start this suggested task: ${suggestion.title}`,
+    suggestion.title,
     '',
     suggestion.brief ?? '',
-    ...(suggestion.targetRepositoryFullName
+    ...(suggestion.targetRepositoryFullName &&
+    suggestion.targetRepositoryFullName !== ALL_REPOSITORIES &&
+    suggestion.targetRepositoryFullName !== FAST_EXECUTION
       ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
       : []),
     ...(suggestion.targetEnvironmentId
@@ -244,14 +265,17 @@ function buildTeamsSuggestionTaskPromptText(
   ].join('\n');
 }
 
-/** Minimal structural view of startNewTeamsTask's launch outcomes. */
-type TeamsSuggestionLaunchOutcome =
-  | { status: 'started'; launchResult: { id: number; taskId: string } }
-  | { status: 'replied_inline' };
+/** Minimal structural view of a pinned suggestion launch outcome. */
+type TeamsSuggestionLaunchOutcome = {
+  status: 'started';
+  launchResult: { id: number; taskId: string };
+};
 
 type LaunchClaimedTeamsSuggestionResult =
-  | { result: 'started'; runId: number }
+  | { result: 'started'; runId: number | null }
   | { result: 'replied_inline' }
+  /** The launch was refused with a reason that was posted to the user. */
+  | { result: 'rejected' }
   /**
    * The fenced finalize lost to a reclaim after the task was enqueued: the
    * orphaned run was best-effort canceled and the user got a corrective
@@ -272,103 +296,92 @@ type LaunchClaimedTeamsSuggestionResult =
  */
 export async function launchClaimedTeamsSuggestion(params: {
   suggestion: ClaimedTeamsSuggestion;
-  /** Launches the task from the suggestion prompt (startNewTeamsTask). */
-  launchTask: (promptText: string) => Promise<TeamsSuggestionLaunchOutcome>;
+  /** Launches the task from the suggestion prompt inside the owning Session. */
+  launchTask: (
+    promptText: string,
+    target: SuggestedTaskLaunchTarget,
+  ) => Promise<TeamsSuggestionLaunchOutcome>;
+  /**
+   * Starts a Fast turn from the suggestion prompt. Must resolve on admission
+   * (not turn completion) so the claim is finalized promptly, and return an
+   * abort handle so a lost finalize can cancel the orphaned turn.
+   */
+  launchFast?: (promptText: string) => Promise<FastAgentStartResult>;
   /** Posts a best-effort visible reply into the conversation. */
   postMessage: (text: string) => Promise<void>;
 }): Promise<LaunchClaimedTeamsSuggestionResult> {
   const { suggestion } = params;
-  const claimedAt = suggestion.launchClaimedAt;
-
-  try {
-    const launch = await params.launchTask(
-      buildTeamsSuggestionTaskPromptText(suggestion),
-    );
-
-    if (launch.status === 'started') {
-      // Close the launch state machine: `launching` -> `launched` with the
-      // task link, so a later "start idea N" can never relaunch this
-      // suggestion and the task stays linked to its work item.
-      const finalized = await finalizeWorkItemLaunched(db, {
-        id: suggestion.id,
-        taskId: launch.launchResult.taskId,
-        claimedAt,
-      });
-
-      if (!finalized) {
-        // The task is already enqueued but the fencing guard rejected the
-        // finalize (our stale claim was reclaimed by another launcher), so
-        // the run is orphaned from the work item. Best-effort cancel it while
-        // it is still pre-sandbox; log loudly either way with the outcome.
-        const cancelNote = await cancelOrphanedWorkItemRunBestEffort(
-          launch.launchResult.id,
-        );
-
-        apiLogger.warn(
-          `[teams] finalize lost the fencing guard for work item ${suggestion.id}; task ${launch.launchResult.taskId} (run ${launch.launchResult.id}) was orphaned — ${cancelNote}`,
-        );
-
-        // startNewTeamsTask already posted its started acknowledgement before
-        // the finalize, so correct it: the user must not follow the canceled
-        // orphan. Surface the claim-lose outcome instead of a started one.
-        await params.postMessage(
-          `"${suggestion.title}" was already started elsewhere — this duplicate launch was canceled.`,
-        );
-
-        return { result: 'already_started' };
+  const target = resolveSuggestedTaskLaunchTarget(suggestion);
+  // Cards without a pinned workspace let Fast decide; pinned cards delegate
+  // through the owning Session without a model turn.
+  const usesFastTurn = target.kind === 'fast' || target.kind === 'router';
+  const launchResult = await launchClaimedSuggestedTask({
+    suggestion,
+    policy: {
+      fastEligible: usesFastTurn,
+      userDefaultEnabled: usesFastTurn,
+      fastAvailable: Boolean(params.launchFast),
+      requiredMode: usesFastTurn ? ('fast' as const) : ('coding' as const),
+    },
+    launch: async (mode) => {
+      const promptText = buildTeamsSuggestionTaskPromptText(suggestion);
+      if (mode === 'fast') {
+        const fastStart = (await params.launchFast?.(promptText)) ?? {
+          accepted: false as const,
+          reason: 'Fast mode is unavailable.',
+        };
+        return fastStart.accepted
+          ? {
+              accepted: true,
+              runId: null,
+              taskId: null,
+              abort: fastStart.abort,
+            }
+          : fastStart;
       }
+      const launch = await params.launchTask(promptText, target);
+      return {
+        accepted: true,
+        runId: launch.launchResult.id,
+        taskId: launch.launchResult.taskId,
+      };
+    },
+  });
 
-      return { result: 'started', runId: launch.launchResult.id };
-    }
-
-    // Routing answered inline; no task was launched. Release the claim so the
-    // suggestion is retryable now instead of dead for the stale window.
-    await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt });
-
-    return { result: 'replied_inline' };
-  } catch (error) {
-    if (isDeploymentReadOnlyError(error)) {
-      await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt }).catch(
-        (releaseError) => {
-          apiLogger.warn(
-            `[teams] Failed to release claim for work item ${suggestion.id} after read-only launch block: ${
-              releaseError instanceof Error
-                ? releaseError.message
-                : String(releaseError)
-            }`,
-          );
-        },
-      );
-
-      await params.postMessage(MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE);
-
-      return { result: 'launch_failed' };
-    }
-
-    apiLogger.warn(
-      `[teams] Failed to launch suggestion ${suggestion.id} from "start idea" reply: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-
-    // Release the claim (fenced on our token) so the suggestion becomes
-    // retryable immediately rather than after the 10-minute stale window.
-    await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt }).catch(
-      (releaseError) => {
-        apiLogger.warn(
-          `[teams] Failed to release claim for work item ${suggestion.id} after launch failure: ${
-            releaseError instanceof Error
-              ? releaseError.message
-              : String(releaseError)
-          }`,
-        );
-      },
-    );
-
-    await params.postMessage(
-      `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
-    );
-
-    return { result: 'launch_failed' };
+  if (launchResult.status === 'started') {
+    return { result: 'started', runId: launchResult.runId };
   }
+  if (launchResult.status === 'rejected') {
+    // A reasoned rejection (a refused Fast turn) posted nothing itself;
+    // reasonless rejections already replied inline from task routing.
+    if (launchResult.reason) {
+      await params.postMessage(
+        `Could not start "${suggestion.title}" — ${launchResult.reason}`,
+      );
+      return { result: 'rejected' };
+    }
+    return { result: 'replied_inline' };
+  }
+  if (
+    launchResult.status === 'finalize_lost' ||
+    launchResult.status === 'finalize_failed'
+  ) {
+    apiLogger.warn(
+      `[teams] failed to finalize work item ${suggestion.id}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
+    );
+    await params.postMessage(
+      `"${suggestion.title}" was already started elsewhere — this duplicate launch was canceled.`,
+    );
+    return { result: 'already_started' };
+  }
+
+  apiLogger.warn(
+    `[teams] Failed to launch suggestion ${suggestion.id}: ${launchResult.error instanceof Error ? launchResult.error.message : String(launchResult.error)}`,
+  );
+  await params.postMessage(
+    launchResult.readOnly
+      ? MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE
+      : `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
+  );
+  return { result: 'launch_failed' };
 }

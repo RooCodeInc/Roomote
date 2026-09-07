@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { TaskPhase } from '@roomote/types';
 
-import { FramedSurface, useRegisterCommands } from '@/components/layout';
+import { WorkspaceSurface, useRegisterCommands } from '@/components/layout';
 import { FileDiffIcon, Info, Logs, Terminal } from '@/components/system';
 
 import {
@@ -33,15 +33,18 @@ import { PendingUserInputRequestStateProvider } from './PendingUserInputRequestP
 import { TaskInputStack } from './TaskInputStack';
 import { OnboardingCompletionMessage } from './OnboardingCompletionMessage';
 import { ProductTips, Startup } from './startup';
+import { TaskRobotIconScope } from './TaskRobotIconScope';
 
 interface LiveContentProps {
   session: TaskSession;
+  newTaskHref: string;
   onBootStatusChange?: () => void;
   onTaskPhaseChange?: (phase: TaskPhase | null) => void;
 }
 
 function LiveContent({
   session,
+  newTaskHref,
   onBootStatusChange,
   onTaskPhaseChange,
 }: LiveContentProps) {
@@ -52,6 +55,7 @@ function LiveContent({
     >
       <LiveContentInner
         session={session}
+        newTaskHref={newTaskHref}
         onBootStatusChange={onBootStatusChange}
         onTaskPhaseChange={onTaskPhaseChange}
       />
@@ -61,6 +65,7 @@ function LiveContent({
 
 function LiveContentInner({
   session,
+  newTaskHref,
   onBootStatusChange,
   onTaskPhaseChange,
 }: LiveContentProps) {
@@ -224,25 +229,34 @@ function LiveContentInner({
 
   return (
     <PreviewPaneProvider>
-      <div className="flex h-full min-h-0 min-w-0 flex-1 bg-card">
-        <FramedSurface
-          frameClassName="pb-0 md:pb-2"
-          surfaceClassName="flex flex-col bg-transparent @container"
-        >
-          <PreviewPaneLayout
+      <WorkspaceSurface
+        sideActions={
+          <SidebarActions
             session={session}
-            diffPanel={{
-              data: diffView.data,
-              error: diffView.error,
-              isLoading: diffView.isLoading,
-              onRefresh: diffView.refresh,
-            }}
-          >
-            <ArtifactLinkProvider session={session}>
-              <PreviewCommand
-                taskRun={session.taskRun ?? null}
-                asleep={asleep}
-              />
+            showDiff={isViewActive('diff')}
+            onToggleDiff={() =>
+              isViewActive('diff') ? closeSidePanel() : openDiffView()
+            }
+            changedFileCount={diffView.data?.summary.changedFileCount ?? 0}
+            isDiffLoading={diffView.isLoading}
+          />
+        }
+      >
+        <PreviewPaneLayout
+          session={session}
+          diffPanel={{
+            data: diffView.data,
+            error: diffView.error,
+            isLoading: diffView.isLoading,
+            onRefresh: diffView.refresh,
+          }}
+        >
+          <ArtifactLinkProvider session={session}>
+            <PreviewCommand taskRun={session.taskRun ?? null} asleep={asleep} />
+            <TaskRobotIconScope
+              taskId={session.taskId}
+              fastAgentSessionId={session.taskRun?.payload?.fastAgentSessionId}
+            >
               <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
                 <Header session={session} />
                 <ConnectionStatusBanner session={session} />
@@ -261,17 +275,8 @@ function LiveContentInner({
                         <>
                           <Startup
                             runId={bootingTaskRun.id}
-                            taskId={session.taskId}
                             initialTaskRun={bootingTaskRun}
-                            prompt={
-                              session.prompt &&
-                              session.prompt.visibleInTranscript !== false
-                                ? {
-                                    text: session.prompt.text,
-                                    images: session.prompt.images,
-                                  }
-                                : null
-                            }
+                            newTaskHref={newTaskHref}
                             onStatusChange={onBootStatusChange}
                           />
                           <ProductTips />
@@ -280,7 +285,7 @@ function LiveContentInner({
                     </>
                   }
                 />
-                <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-colors border-2 border-background rounded-b-3xl">
+                <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-[background-color,border-color,outline-width] border-2 border-background rounded-b-3xl outline-0 outline-offset-[-2px] outline-accent-foreground has-[textarea:focus]:outline-2">
                   <PendingUserInputRequestStateProvider taskId={session.taskId}>
                     <TaskInputStack
                       session={session}
@@ -288,34 +293,26 @@ function LiveContentInner({
                       onFileSearchOpen={handleFileSearchOpen}
                       onCommandSearchOpen={handleCommandSearchOpen}
                       scrollToBottom={scrollToBottom}
+                      autoFocus
                     />
                   </PendingUserInputRequestStateProvider>
                 </div>
               </div>
-            </ArtifactLinkProvider>
-            <FileSearch
-              open={fileSearchOpen}
-              onOpenChange={setFileSearchOpen}
-              onSelectFile={handleSelectFile}
-            />
-            <CommandSearch
-              open={commandSearchOpen}
-              onOpenChange={setCommandSearchOpen}
-              onSelectCommand={handleSelectCommand}
-            />
-            <SleepInvalidationEffect taskRun={session.taskRun} />
-          </PreviewPaneLayout>
-        </FramedSurface>
-        <SidebarActions
-          session={session}
-          showDiff={isViewActive('diff')}
-          onToggleDiff={() =>
-            isViewActive('diff') ? closeSidePanel() : openDiffView()
-          }
-          changedFileCount={diffView.data?.summary.changedFileCount ?? 0}
-          isDiffLoading={diffView.isLoading}
-        />
-      </div>
+            </TaskRobotIconScope>
+          </ArtifactLinkProvider>
+          <FileSearch
+            open={fileSearchOpen}
+            onOpenChange={setFileSearchOpen}
+            onSelectFile={handleSelectFile}
+          />
+          <CommandSearch
+            open={commandSearchOpen}
+            onOpenChange={setCommandSearchOpen}
+            onSelectCommand={handleSelectCommand}
+          />
+          <SleepInvalidationEffect taskRun={session.taskRun} />
+        </PreviewPaneLayout>
+      </WorkspaceSurface>
     </PreviewPaneProvider>
   );
 }

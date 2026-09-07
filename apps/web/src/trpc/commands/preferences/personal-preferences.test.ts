@@ -12,12 +12,41 @@ function buildAuth(userId: string) {
 }
 
 describe('personal preferences', () => {
-  it('defaults mind reader mode to disabled', async () => {
+  it('defaults opt-in preferences to disabled', async () => {
     const user = await userFactory.create();
 
     await expect(
       getPersonalPreferencesCommand(buildAuth(user.id)),
-    ).resolves.toEqual(expect.objectContaining({ mindReaderMode: false }));
+    ).resolves.toEqual(
+      expect.objectContaining({
+        mindReaderMode: false,
+        therapistMode: false,
+      }),
+    );
+  });
+
+  it('persists therapist mode without replacing other metadata', async () => {
+    const user = await userFactory.create({
+      metadata: { existing_value: 'preserved' },
+    });
+
+    await expect(
+      updatePersonalPreferencesCommand(buildAuth(user.id), {
+        therapistMode: true,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ therapistMode: true }));
+
+    const storedUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { metadata: true },
+    });
+
+    expect(storedUser?.metadata).toEqual(
+      expect.objectContaining({
+        existing_value: 'preserved',
+        therapist_mode: true,
+      }),
+    );
   });
 
   it('persists mind reader mode without replacing other metadata', async () => {

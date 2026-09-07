@@ -7,9 +7,10 @@ import {
 } from '@roomote/types';
 
 import type { Variables } from '../../../types';
+import { apiLogger } from '../../../logging';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitTaskSuggestions } from '../submitTaskSuggestions';
-import { getAutomationRuntime } from '@roomote/db/server';
+import { db, getAutomationRuntime } from '@roomote/db/server';
 import { postScheduledSuggestionsToTelegram } from '../../telegram/automation-suggestions';
 import { postScheduledSuggestionsToTeams } from '../../teams/automation-suggestions';
 import { postScheduledSuggestionsToDiscord } from '../../discord/automation-suggestions';
@@ -22,8 +23,11 @@ const {
   mockEnvironmentFindFirst,
   mockFindEnvironmentForRepo,
   mockPostMessage,
+  mockGetSessionForTask,
+  mockGetOrCreate,
   insertedWorkItemValues,
   insertedTrackedMessageValues,
+  automationThreadReceipts,
 } = vi.hoisted(() => ({
   mockTaskRunFindFirst: vi.fn(),
   mockTaskFindFirst: vi.fn(),
@@ -32,12 +36,16 @@ const {
   mockEnvironmentFindFirst: vi.fn(),
   mockFindEnvironmentForRepo: vi.fn(),
   mockPostMessage: vi.fn(),
+  mockGetSessionForTask: vi.fn(),
+  mockGetOrCreate: vi.fn(),
   insertedWorkItemValues: [] as Record<string, unknown>[],
   insertedTrackedMessageValues: [] as Record<string, unknown>[],
+  automationThreadReceipts: [] as Record<string, unknown>[],
 }));
 
 // Mutable so a test can simulate "Slack installed but no channel resolves".
 let slackInstallationChannelRows: unknown[] = [{ channelId: 'C-FALLBACK' }];
+let transactionActive = false;
 let repositoryRows: Array<{
   id: string;
   fullName: string;
@@ -52,12 +60,11 @@ function makeSelectResult(name: string): unknown[] {
       return [{ id: 'inst-1', botAccessToken: 'xoxb-test', teamId: 'T1' }];
     case 'slackInstallationChannels':
       return slackInstallationChannelRows;
-    // Existing suggestion work_items + existing summary tracked_messages both
-    // resolve empty so the persist + post paths run fresh.
+    // Retain persisted suggestions and cards so repeated submissions dedupe.
     case 'workItems':
       return insertedWorkItemValues;
     case 'trackedMessages':
-      return [];
+      return [...insertedTrackedMessageValues, ...automationThreadReceipts];
     case 'environments':
       return [
         {
@@ -73,12 +80,33 @@ function makeSelectResult(name: string): unknown[] {
 function createSelectBuilder() {
   let tableName = '';
   let filtersActiveRepositories = false;
+  let trackedMessageCondition: unknown;
+  function matches(row: Record<string, unknown>, condition: unknown): boolean {
+    const { type, args } = condition as { type: string; args: unknown[] };
+    if (type === 'and') {
+      return args.every((arg) => matches(row, arg));
+    }
+    if (type === 'inArray') {
+      return (args[1] as unknown[]).includes(row[args[0] as string]);
+    }
+    if (type === 'eq') {
+      const column = args[0];
+      if (typeof column === 'string') return row[column] === args[1];
+      const sqlArgs = (column as { args: [string[]] }).args;
+      const key = sqlArgs[0].join('').includes('sourceTaskId')
+        ? 'sourceTaskId'
+        : 'slackTeamId';
+      return (row.metadata as Record<string, unknown>)?.[key] === args[1];
+    }
+    return true;
+  }
   const builder = {
     from(table: { _name?: string }) {
       tableName = table?._name ?? '';
       return builder;
     },
     where(condition?: { type?: string; args?: unknown[] }) {
+      if (tableName === 'trackedMessages') trackedMessageCondition = condition;
       filtersActiveRepositories =
         tableName === 'repositories' &&
         (condition?.type === 'and' ||
@@ -96,7 +124,11 @@ function createSelectBuilder() {
       resolve: (rows: unknown[]) => T,
       reject?: (error: unknown) => T,
     ): Promise<T> {
-      const rows = makeSelectResult(tableName);
+      const rows = makeSelectResult(tableName).filter(
+        (row) =>
+          !trackedMessageCondition ||
+          matches(row as Record<string, unknown>, trackedMessageCondition),
+      );
       const filteredRows = filtersActiveRepositories
         ? rows.filter(
             (row) =>
@@ -163,6 +195,12 @@ const tx = {
 };
 
 vi.mock('@roomote/slack', () => ({
+  buildTaskSuggestionMessageMetadata: vi.fn(
+    ({ sourceTaskId, suggestionId }) => ({
+      event_type: 'roomote.setup_onboarding_suggestion',
+      event_payload: { sourceTaskId, suggestionId, schemaVersion: 1 },
+    }),
+  ),
   SlackNotifier: class {
     postMessage = mockPostMessage;
   },
@@ -174,6 +212,7 @@ vi.mock('@roomote/communication/chat-messages', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   findEnvironmentForRepo: mockFindEnvironmentForRepo,
+  fastAgentConversationRepository: { getOrCreate: mockGetOrCreate },
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -234,9 +273,66 @@ vi.mock('@roomote/db/server', () => ({
     raw: (value: unknown) => value,
   }),
   buildTaskSuggestionContentHash: vi.fn(() => 'fingerprint'),
+  findTrackedSuggestionWorkItemIds: vi.fn(async () => new Set()),
+  registerTrackedSuggestionCards: vi.fn(
+    async (
+      registrations: Array<{
+        surface: string;
+        channelId: string;
+        messageTs: string;
+        threadTs?: string;
+        workItemId: string;
+        createdByUserId: string | null;
+        suggestionType: string;
+        suggestionKey: string;
+        suggestionGroupKey?: string;
+        launchRouting?: 'router';
+      }>,
+    ) => {
+      insertedTrackedMessageValues.push(
+        ...registrations.map((registration) => ({
+          surface: registration.surface,
+          kind: 'suggestion_card',
+          dedupeKey: `${registration.channelId}:${registration.messageTs}`,
+          channelId: registration.channelId,
+          messageTs: registration.messageTs,
+          ...(registration.threadTs ? { threadTs: registration.threadTs } : {}),
+          workItemId: registration.workItemId,
+          createdByUserId: registration.createdByUserId,
+          metadata: {
+            suggestionType: registration.suggestionType,
+            suggestionKey: registration.suggestionKey,
+            ...(registration.suggestionGroupKey
+              ? { suggestionGroupKey: registration.suggestionGroupKey }
+              : {}),
+            ...(registration.launchRouting
+              ? { launchRouting: registration.launchRouting }
+              : {}),
+          },
+        })),
+      );
+    },
+  ),
   resolveRepositorySelectionByIds: vi.fn(),
-  upsertBackgroundAutomationSlackThread: vi.fn(),
+  upsertBackgroundAutomationSlackThread: vi.fn(async (_tx, params) => {
+    expect(transactionActive).toBe(true);
+    const dedupeKey = `${params.slackTeamId}:${params.slackChannelId}:${params.threadTs}`;
+    const receipt = {
+      surface: params.surface,
+      kind: 'automation_thread',
+      dedupeKey,
+      channelId: params.slackChannelId,
+      threadTs: params.threadTs,
+      metadata: params.metadata,
+    };
+    const existing = automationThreadReceipts.find(
+      (row) => row.dedupeKey === dedupeKey,
+    );
+    if (existing) Object.assign(existing, receipt);
+    else automationThreadReceipts.push(receipt);
+  }),
   getAutomationRuntime: vi.fn(async () => ({ slackChannelId: 'C-AUTO' })),
+  getSessionForTask: mockGetSessionForTask,
   environments: { _name: 'environments' },
   repositories: { _name: 'repositories' },
   slackInstallationChannels: { _name: 'slackInstallationChannels' },
@@ -244,7 +340,13 @@ vi.mock('@roomote/db/server', () => ({
   slackUserMappings: { _name: 'slackUserMappings' },
   taskRuns: { _name: 'taskRuns' },
   tasks: { _name: 'tasks' },
-  trackedMessages: { _name: 'trackedMessages' },
+  trackedMessages: {
+    _name: 'trackedMessages',
+    surface: 'surface',
+    kind: 'kind',
+    workItemId: 'workItemId',
+    metadata: 'metadata',
+  },
   workItems: { _name: 'workItems' },
   db: {
     query: {
@@ -266,7 +368,14 @@ vi.mock('@roomote/db/server', () => ({
     },
     select: () => createSelectBuilder(),
     insert: (table: { _name?: string }) => createInsertBuilder(table),
-    transaction: async (cb: (executor: typeof tx) => unknown) => cb(tx),
+    transaction: async (cb: (executor: typeof tx) => unknown) => {
+      transactionActive = true;
+      try {
+        return await cb(tx);
+      } finally {
+        transactionActive = false;
+      }
+    },
   },
 }));
 
@@ -343,8 +452,11 @@ describe('submitTaskSuggestions', () => {
     mockEnvironmentFindFirst.mockReset();
     mockFindEnvironmentForRepo.mockReset();
     mockPostMessage.mockReset();
+    mockGetSessionForTask.mockReset().mockResolvedValue(null);
+    mockGetOrCreate.mockReset();
     insertedWorkItemValues.length = 0;
     insertedTrackedMessageValues.length = 0;
+    automationThreadReceipts.length = 0;
     slackInstallationChannelRows = [{ channelId: 'C-FALLBACK' }];
     repositoryRows = [{ id: 'repo-1', fullName: 'acme/app' }];
     vi.mocked(getAutomationRuntime).mockResolvedValue({
@@ -830,6 +942,16 @@ describe('submitTaskSuggestions', () => {
       initiatorUserId: null,
       initiatorAutomation: 'suggest_ideas',
     });
+    mockGetSessionForTask.mockImplementation(async () => {
+      expect(transactionActive).toBe(false);
+      return {
+        id: 'session-1',
+        ownerKind: 'automation',
+        ownerAutomation: 'suggest_ideas',
+        ownerUserId: null,
+        fastConversationId: null,
+      };
+    });
 
     const authContext: RunTokenContext = {
       runId: 1,
@@ -867,7 +989,226 @@ describe('submitTaskSuggestions', () => {
     expect(insertedTrackedMessageValues[0]).toMatchObject({
       createdByUserId: null,
     });
+    expect(mockGetSessionForTask).toHaveBeenCalledWith(db, 'task-1');
+    expect(mockGetOrCreate).toHaveBeenCalledExactlyOnceWith({
+      sessionId: 'session-1',
+      owner: { kind: 'automation', automationKey: 'suggest_ideas' },
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: 'ts-1',
+        replyTarget: { channelId: 'C-AUTO', threadId: 'ts-1' },
+      },
+    });
+
+    const postCount = mockPostMessage.mock.calls.length;
+    mockGetSessionForTask.mockResolvedValue({
+      id: 'session-1',
+      fastConversationId: 'fast-1',
+    });
+    expect((await requestSuggestions(app)).status).toBe(200);
+    expect(mockPostMessage).toHaveBeenCalledTimes(postCount);
+    expect(mockGetSessionForTask).toHaveBeenCalledTimes(2);
+    expect(mockGetOrCreate).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    {
+      ownerKind: 'user',
+      ownerUserId: 'session-owner',
+      fastConversationId: 'fast-1',
+    },
+    { ownerKind: 'system', ownerUserId: null, fastConversationId: null },
+  ])(
+    'does not bind an already-bound or unsupported Session: $ownerKind',
+    async (session) => {
+      mockTaskFindFirst.mockResolvedValue({
+        initiatorUserId: null,
+        initiatorAutomation: 'suggest_ideas',
+      });
+      mockGetSessionForTask.mockResolvedValue({ id: 'session-1', ...session });
+      const app = createApp({
+        runId: 1,
+        userId: null,
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      });
+
+      expect((await requestSuggestions(app)).status).toBe(200);
+      expect(mockPostMessage.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(mockGetOrCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['C-AUTO', 'C-CHANGED', undefined])(
+    'recovers a failed Session bind without reposting when the configured channel is %s',
+    async (configuredChannel) => {
+      mockTaskFindFirst.mockResolvedValue({
+        initiatorUserId: null,
+        initiatorAutomation: 'suggest_ideas',
+      });
+      mockGetSessionForTask.mockResolvedValue({
+        id: 'session-1',
+        ownerKind: 'automation',
+        ownerAutomation: 'suggest_ideas',
+        fastConversationId: null,
+      });
+      mockGetOrCreate.mockRejectedValueOnce(new Error('binding unavailable'));
+      mockGetOrCreate.mockImplementation(async () => {
+        expect(transactionActive).toBe(false);
+        mockGetSessionForTask.mockResolvedValue({
+          id: 'session-1',
+          fastConversationId: 'fast-1',
+        });
+      });
+      const warn = vi.spyOn(apiLogger, 'warn').mockImplementation(() => {});
+      const app = createApp({
+        runId: 1,
+        userId: null,
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      });
+      try {
+        expect((await requestSuggestions(app)).status).toBe(200);
+        const postCount = mockPostMessage.mock.calls.length;
+        expect(postCount).toBeGreaterThanOrEqual(2);
+        expect(automationThreadReceipts).toEqual([
+          {
+            surface: 'slack',
+            kind: 'automation_thread',
+            dedupeKey: 'T1:C-AUTO:ts-1',
+            channelId: 'C-AUTO',
+            threadTs: 'ts-1',
+            metadata: {
+              sourceTaskId: 'task-1',
+              slackTeamId: 'T1',
+              suggestionCount: 1,
+            },
+          },
+        ]);
+        vi.mocked(getAutomationRuntime).mockResolvedValue({
+          slackChannelId: configuredChannel,
+        } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
+        slackInstallationChannelRows = [];
+        expect((await requestSuggestions(app)).status).toBe(200);
+        expect(mockPostMessage).toHaveBeenCalledTimes(postCount);
+        expect(mockGetOrCreate).toHaveBeenCalledTimes(2);
+        expect(mockGetOrCreate).toHaveBeenLastCalledWith({
+          sessionId: 'session-1',
+          owner: { kind: 'automation', automationKey: 'suggest_ideas' },
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T1',
+            conversationId: 'ts-1',
+            replyTarget: { channelId: 'C-AUTO', threadId: 'ts-1' },
+          },
+        });
+        expect((await requestSuggestions(app)).status).toBe(200);
+        expect(mockPostMessage).toHaveBeenCalledTimes(postCount);
+        expect(mockGetOrCreate).toHaveBeenCalledTimes(2);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            'Slack report published but Session binding failed for task task-1: binding unavailable',
+          ),
+        );
+        expect(postScheduledSuggestionsToDiscord).not.toHaveBeenCalled();
+        expect(postScheduledSuggestionsToTelegram).not.toHaveBeenCalled();
+        expect(postScheduledSuggestionsToTeams).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  it.each([0, 1])(
+    'reuses the report root and original channel after %i cards were delivered',
+    async (deliveredCards) => {
+      const app = createApp({
+        runId: 1,
+        userId: null,
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      });
+      const submit = () =>
+        app.request('/tasks/task-1/task_suggestions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            suggestions: ['First', 'Second'].map((title) => ({
+              title,
+              brief: `${title} action.`,
+              targetRepositoryFullName: 'acme/app',
+              workspaceReadiness: 'bare_repo',
+            })),
+          }),
+        });
+      mockPostMessage
+        .mockResolvedValueOnce('root-1')
+        .mockResolvedValueOnce(deliveredCards ? 'card-1' : undefined)
+        .mockResolvedValueOnce(undefined);
+
+      await submit();
+      expect(insertedTrackedMessageValues).toHaveLength(deliveredCards);
+      expect(automationThreadReceipts).toHaveLength(1);
+      expect(automationThreadReceipts[0]).toMatchObject({
+        channelId: 'C-AUTO',
+        threadTs: 'root-1',
+        metadata: { sourceTaskId: 'task-1', slackTeamId: 'T1' },
+      });
+      vi.mocked(getAutomationRuntime).mockResolvedValue({
+        slackChannelId: 'C-CHANGED',
+      } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
+      mockPostMessage.mockClear();
+
+      expect((await submit()).status).toBe(200);
+      expect(mockPostMessage).toHaveBeenCalledTimes(2 - deliveredCards);
+      for (const [message] of mockPostMessage.mock.calls) {
+        expect(message).toMatchObject({
+          channel: 'C-AUTO',
+          thread_ts: 'root-1',
+        });
+      }
+      expect(insertedTrackedMessageValues).toHaveLength(2);
+      expect(automationThreadReceipts).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    { sourceTaskId: 'other-task', slackTeamId: 'T1' },
+    { sourceTaskId: 'task-1', slackTeamId: 'OTHER-TEAM' },
+  ])(
+    'ignores report receipts outside the task and team: %j',
+    async (metadata) => {
+      automationThreadReceipts.push({
+        surface: 'slack',
+        kind: 'automation_thread',
+        channelId: 'C-OTHER',
+        threadTs: 'other-root',
+        metadata,
+      });
+      const app = createApp({
+        runId: 1,
+        userId: null,
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      });
+
+      expect((await requestSuggestions(app)).status).toBe(200);
+      expect(mockPostMessage).toHaveBeenCalledTimes(2);
+      expect(mockPostMessage).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ channel: 'C-AUTO' }),
+      );
+      expect(mockPostMessage.mock.calls[0]?.[0]).not.toHaveProperty(
+        'thread_ts',
+      );
+      expect(automationThreadReceipts).toHaveLength(2);
+    },
+  );
 
   it('keeps mixed-readiness suggestion batches above the old limit of five', async () => {
     mockTaskFindFirst.mockResolvedValue({
@@ -907,6 +1248,12 @@ describe('submitTaskSuggestions', () => {
   });
 
   it('still posts and leaves automationKey null for a user-initiated scan', async () => {
+    mockGetSessionForTask.mockResolvedValue({
+      id: 'session-1',
+      ownerKind: 'user',
+      ownerUserId: 'session-owner',
+      fastConversationId: null,
+    });
     mockTaskFindFirst.mockResolvedValue({
       initiatorUserId: 'user-1',
       initiatorAutomation: null,
@@ -933,6 +1280,12 @@ describe('submitTaskSuggestions', () => {
     expect(insertedTrackedMessageValues[0]).toMatchObject({
       createdByUserId: 'user-1',
     });
+    expect(mockGetOrCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        owner: { kind: 'user', userId: 'session-owner' },
+      }),
+    );
   });
 
   it('falls through Discord to Telegram when Slack has no destination', async () => {

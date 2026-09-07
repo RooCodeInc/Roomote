@@ -7,6 +7,9 @@ import {
   buildTerminalReviewStatus,
   buildTerminalReviewSummaryBody,
   buildReviewSummaryBody,
+  getReviewFooterPhase,
+  getReviewSummaryMarkerPhase,
+  isReviewSummaryInProgress,
   parseReviewSummaryMarkerSha,
   REVIEW_STATUS_START_MARKER,
   REVIEW_STATUS_END_MARKER,
@@ -80,6 +83,78 @@ describe('review meta footer', () => {
     );
   });
 
+  it('uses the footer phase instead of relying on status prose', () => {
+    const body = buildReviewSummaryBody({
+      summaryMarker: MARKER('abc1234deadbeef'),
+      statusContent: 'I am reviewing the updated PR head now.',
+      metaPhase: 'Reviewing',
+    });
+
+    expect(getReviewFooterPhase(body)).toBe('Reviewing');
+    expect(getReviewSummaryMarkerPhase(body)).toBe('Reviewing');
+    expect(isReviewSummaryInProgress(body)).toBe(true);
+    expect(body).toContain('version=2 phase=reviewing');
+  });
+
+  it('trusts a Reviewed footer over terminal prose that starts with Reviewing', () => {
+    const body = buildReviewSummaryBody({
+      summaryMarker: MARKER('abc1234deadbeef'),
+      statusContent: 'Reviewing uncovered one actionable issue.',
+      metaPhase: 'Reviewed',
+    });
+
+    expect(getReviewFooterPhase(body)).toBe('Reviewed');
+    expect(getReviewSummaryMarkerPhase(body)).toBe('Reviewed');
+    expect(isReviewSummaryInProgress(body)).toBe(false);
+    expect(body).toContain('version=2 phase=reviewed');
+  });
+
+  it('trusts the hidden marker phase when presentation metadata disagrees', () => {
+    const body = [
+      '<!-- roomote-review-summary sha=abc1234 mode=sync version=2 phase=reviewing -->',
+      REVIEW_STATUS_START_MARKER,
+      'No code issues found.',
+      REVIEW_STATUS_END_MARKER,
+      '<sub>Reviewed abc1234</sub>',
+    ].join('\n');
+
+    expect(getReviewSummaryMarkerPhase(body)).toBe('Reviewing');
+    expect(isReviewSummaryInProgress(body)).toBe(true);
+  });
+
+  it('ignores phase metadata from unsupported marker versions', () => {
+    const body = [
+      '<!-- roomote-review-summary sha=abc1234 mode=sync version=1 phase=reviewing -->',
+      REVIEW_STATUS_START_MARKER,
+      'No code issues found.',
+      REVIEW_STATUS_END_MARKER,
+      '<sub>Reviewed abc1234</sub>',
+    ].join('\n');
+
+    expect(getReviewSummaryMarkerPhase(body)).toBeUndefined();
+    expect(isReviewSummaryInProgress(body)).toBe(false);
+  });
+
+  it('parses the alternate HTML comment ending without regex filtering', () => {
+    const body =
+      '<!-- roomote-review-summary sha=abc1234 mode=sync version=2 phase=reviewing --!>';
+
+    expect(parseReviewSummaryMarkerSha(body)).toBe('abc1234');
+    expect(getReviewSummaryMarkerPhase(body)).toBe('Reviewing');
+  });
+
+  it('falls back to legacy status wording when no footer exists', () => {
+    const body = [
+      MARKER('abc1234deadbeef'),
+      REVIEW_STATUS_START_MARKER,
+      'I am reviewing the updated PR head now.',
+      REVIEW_STATUS_END_MARKER,
+    ].join('\n');
+
+    expect(getReviewFooterPhase(body)).toBeUndefined();
+    expect(isReviewSummaryInProgress(body)).toBe(true);
+  });
+
   it('appends the footer at the bottom of the summary body', () => {
     const body = buildReviewSummaryBody({
       summaryMarker: MARKER('abc1234deadbeef'),
@@ -117,7 +192,9 @@ describe('review meta footer', () => {
       repositoryFullName: 'RooCodeInc/Roomote',
     });
 
-    expect(updated.startsWith(MARKER('aaa1111deadbeef'))).toBe(true);
+    expect(updated).toContain(
+      'sha=aaa1111deadbeef mode=initial version=2 phase=reviewing',
+    );
     expect(updated).toContain('>aaa1111</a>');
     expect(updated).toContain(
       'href="https://github.com/RooCodeInc/Roomote/commit/aaa1111deadbeef"',
@@ -131,7 +208,7 @@ describe('buildTerminalReviewSummaryBody', () => {
 
   it('finalizes an in-progress initial summary, preserving the marker and checklist', () => {
     const existing = buildReviewSummaryBody({
-      summaryMarker: MARKER('abc123'),
+      summaryMarker: MARKER('abc123f'),
       statusContent: IN_PROGRESS_INITIAL,
       checklistContent: '- [ ] Fix the thing\n- [x] Already addressed',
     });
@@ -142,7 +219,9 @@ describe('buildTerminalReviewSummaryBody', () => {
     });
 
     expect(updated).not.toBeNull();
-    expect(updated!.startsWith(MARKER('abc123'))).toBe(true);
+    expect(updated).toContain(
+      'sha=abc123f mode=initial version=2 phase=reviewed',
+    );
     expect(updated).toContain(
       `${REVIEW_STATUS_START_MARKER}\n${terminal}\n${REVIEW_STATUS_END_MARKER}`,
     );
@@ -150,12 +229,12 @@ describe('buildTerminalReviewSummaryBody', () => {
     expect(updated).toContain(
       `${REVIEW_CHECKLIST_START_MARKER}\n- [ ] Fix the thing\n- [x] Already addressed\n${REVIEW_CHECKLIST_END_MARKER}`,
     );
-    expect(updated).toContain('<sub>Reviewed abc123</sub>');
+    expect(updated).toContain('<sub>Reviewed abc123f</sub>');
   });
 
   it('finalizes an in-progress sync summary', () => {
     const existing = buildReviewSummaryBody({
-      summaryMarker: MARKER('def456', 'sync'),
+      summaryMarker: MARKER('def456f', 'sync'),
       statusContent: IN_PROGRESS_SYNC,
     });
 
@@ -165,15 +244,32 @@ describe('buildTerminalReviewSummaryBody', () => {
     });
 
     expect(updated).not.toBeNull();
-    expect(updated!.startsWith(MARKER('def456', 'sync'))).toBe(true);
+    expect(updated).toContain('sha=def456f mode=sync version=2 phase=reviewed');
     expect(updated).toContain(terminal);
     expect(updated).not.toContain(IN_PROGRESS_SYNC);
-    expect(updated).toContain('<sub>Reviewed def456</sub>');
+    expect(updated).toContain('<sub>Reviewed def456f</sub>');
+  });
+
+  it('finalizes natural in-progress prose when the footer is Reviewing', () => {
+    const existing = buildReviewSummaryBody({
+      summaryMarker: MARKER('def456f', 'sync'),
+      statusContent: 'I am reviewing the updated PR head now.',
+      metaPhase: 'Reviewing',
+    });
+
+    const updated = buildTerminalReviewSummaryBody({
+      existingBody: existing,
+      terminalStatus: terminal,
+    });
+
+    expect(updated).not.toBeNull();
+    expect(updated).toContain(terminal);
+    expect(updated).toContain('<sub>Reviewed def456f</sub>');
   });
 
   it('does not clobber a comment the agent already finalized', () => {
     const existing = buildReviewSummaryBody({
-      summaryMarker: MARKER('abc123'),
+      summaryMarker: MARKER('abc123f'),
       statusContent: COMPLETION,
     });
 
@@ -205,7 +301,7 @@ describe('buildTerminalReviewSummaryBody', () => {
 
   it('preserves the checklist when finalizing a sync comment that has one', () => {
     const existing = buildReviewSummaryBody({
-      summaryMarker: MARKER('def456', 'sync'),
+      summaryMarker: MARKER('def456f', 'sync'),
       statusContent: IN_PROGRESS_SYNC,
       checklistContent: '- [ ] Surviving finding',
     });

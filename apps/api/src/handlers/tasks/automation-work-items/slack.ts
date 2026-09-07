@@ -6,6 +6,7 @@ import {
   db,
   type DatabaseOrTransaction,
   eq,
+  findActiveSlackInstallationForChannel,
   getAutomationRuntime,
   isNull,
   slackInstallationChannels,
@@ -27,23 +28,28 @@ export async function resolveAutomationSlackTarget(params: {
   slack: SlackNotifier;
   channelId: string;
 } | null> {
-  const [slackInstallation] = await db
-    .select({
-      id: slackInstallations.id,
-      botAccessToken: slackInstallations.botAccessToken,
-    })
-    .from(slackInstallations)
-    .where(eq(slackInstallations.isActive, true))
-    .limit(1);
+  const runtime = await getAutomationRuntime(params.slackConfig.automationKey);
+  const configuredChannelId = runtime.slackChannelId;
+  const slackInstallation =
+    runtime.destination?.source === 'manager_channel' &&
+    runtime.destination.provider === 'slack'
+      ? await findActiveSlackInstallationForChannel(
+          runtime.destination.channelId,
+        )
+      : (
+          await db
+            .select({
+              id: slackInstallations.id,
+              botAccessToken: slackInstallations.botAccessToken,
+            })
+            .from(slackInstallations)
+            .where(eq(slackInstallations.isActive, true))
+            .limit(1)
+        )[0];
 
   if (!slackInstallation) {
     return null;
   }
-
-  // Two-level fallback: the automation's own slack_channel target, then the
-  // shared manager channel (getAutomationRuntime resolves both levels).
-  const runtime = await getAutomationRuntime(params.slackConfig.automationKey);
-  const configuredChannelId = runtime.slackChannelId;
 
   const [channel] = configuredChannelId
     ? [{ channelId: configuredChannelId }]

@@ -11,7 +11,14 @@ const {
   taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
   getHarnessModelOverrideMock: vi.fn(),
   resolveBuiltInMcpServersMock: vi.fn(() => []),
-  subscribeHarnessCallbacksMock: vi.fn(() => async () => {}),
+  subscribeHarnessCallbacksMock: vi.fn(() =>
+    Object.assign(
+      vi.fn(async () => {}),
+      {
+        flushPendingCompletionEvents: vi.fn(async () => {}),
+      },
+    ),
+  ),
   startOpenCodeServerHarnessMock: vi.fn(),
 }));
 
@@ -391,6 +398,7 @@ describe('createHarness', () => {
       | {
           beforeQueuedPrompt?: (input: {
             userId?: string;
+            clientMessageId?: string;
             kind: 'queuedPrompt' | 'userInputAnswer';
           }) => Promise<unknown>;
         }
@@ -400,11 +408,13 @@ describe('createHarness', () => {
     await expect(
       startOptions?.beforeQueuedPrompt?.({
         userId: 'user-2',
+        clientMessageId: 'slack:1710000000.456',
         kind: 'queuedPrompt',
       }),
     ).resolves.toBeUndefined();
     expect(beforeQueuedPrompt).toHaveBeenCalledWith('user-2', {
       kind: 'queuedPrompt',
+      clientMessageId: 'slack:1710000000.456',
     });
   });
 
@@ -514,6 +524,7 @@ describe('createHarness', () => {
       }),
     );
     expect(result.getSubprocess()).toBe(initialSubprocess);
+    expect(result.flushPendingCompletionEvents).toBeTypeOf('function');
 
     integrations.userMcpServers = {
       roomote: {

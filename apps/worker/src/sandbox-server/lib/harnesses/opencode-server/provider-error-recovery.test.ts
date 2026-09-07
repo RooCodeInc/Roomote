@@ -27,7 +27,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
           }),
         },
       }),
-    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 6 });
   });
 
   it('gives unknown provider errors a bounded retry budget', () => {
@@ -36,7 +36,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
         name: 'UnknownError',
         data: { message: 'Upstream connection closed unexpectedly.' },
       }),
-    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 6 });
   });
 
   it('classifies native ContentFilterError payloads as policy refusals', () => {
@@ -74,7 +74,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
       getOpenCodeProviderErrorRecovery({
         message: 'The provider returned an error: API key is invalid.',
       }),
-    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 6 });
   });
 
   it('gives status-less billing codes the bounded retry budget', () => {
@@ -88,7 +88,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     expect(isOpenCodeTerminalProviderError(error)).toBe(false);
     expect(getOpenCodeProviderErrorRecovery(error)).toMatchObject({
       kind: 'provider_error',
-      maxRetries: 3,
+      maxRetries: 6,
     });
   });
 
@@ -110,7 +110,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
       expect(isOpenCodeTerminalProviderError({ statusCode })).toBe(false);
       expect(getOpenCodeProviderErrorRecovery({ statusCode })).toMatchObject({
         kind: 'provider_error',
-        maxRetries: 3,
+        maxRetries: 6,
       });
     },
   );
@@ -156,7 +156,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     ).toBe(false);
     expect(
       getOpenCodeProviderErrorRecovery({ message: 'Payment required' }),
-    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 6 });
   });
 
   it('does not classify policy-refusal prose without structured metadata', () => {
@@ -164,7 +164,7 @@ describe('getOpenCodeProviderErrorRecovery', () => {
       getOpenCodeProviderErrorRecovery({
         message: 'This content was flagged for possible cybersecurity risk.',
       }),
-    ).toMatchObject({ kind: 'provider_error', maxRetries: 3 });
+    ).toMatchObject({ kind: 'provider_error', maxRetries: 6 });
   });
 });
 
@@ -205,6 +205,14 @@ describe('formatOpenCodeProviderErrorRetryNoticeText', () => {
 });
 
 describe('resolveOpenCodeProviderErrorRetryDelayMs', () => {
+  it('uses a longer exponential backoff for transient provider overloads', () => {
+    expect(
+      [1, 2, 3, 4, 5, 6].map((attemptNumber) =>
+        resolveOpenCodeProviderErrorRetryDelayMs({ attemptNumber }),
+      ),
+    ).toEqual([5_000, 10_000, 20_000, 40_000, 60_000, 60_000]);
+  });
+
   it('waits at least one second and exponentially backs off', () => {
     expect(
       [1, 2, 3].map((attemptNumber) =>

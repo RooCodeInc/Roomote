@@ -80,11 +80,13 @@ function gitLabMergeRequestSyncReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewSyncTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const prompt = buildGitLabMergeRequestSyncReviewPrompt({
     taskSpec,
@@ -102,6 +104,7 @@ function gitLabMergeRequestSyncReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }
 
@@ -156,11 +159,13 @@ function giteaPullRequestSyncReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewSyncTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const prompt = buildGiteaPullRequestSyncReviewPrompt({
     taskSpec,
@@ -178,6 +183,7 @@ function giteaPullRequestSyncReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }
 
@@ -232,11 +238,13 @@ function bitbucketPullRequestSyncReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewSyncTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const prompt = buildBitbucketPullRequestSyncReviewPrompt({
     taskSpec,
@@ -254,6 +262,7 @@ function bitbucketPullRequestSyncReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }
 
@@ -308,11 +317,13 @@ function adoPullRequestSyncReview({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPullRequestReviewSyncTask;
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const prompt = buildAdoPullRequestSyncReviewPrompt({
     taskSpec,
@@ -330,6 +341,7 @@ function adoPullRequestSyncReview({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }
 
@@ -340,6 +352,7 @@ export async function githubPrReviewSync({
   taskRunUrl,
   additionalInstructions,
   attribution,
+  therapistModeEnabled,
 }: {
   runId?: number;
   taskSpec: GithubPullRequestReviewSyncTask;
@@ -347,6 +360,7 @@ export async function githubPrReviewSync({
   taskRunUrl: string;
   additionalInstructions?: string | null;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }): Promise<{
   prompt: string;
   harnessInstructions?: string;
@@ -359,6 +373,7 @@ export async function githubPrReviewSync({
         taskRunUrl,
         additionalInstructions,
         attribution,
+        therapistModeEnabled,
       });
     case 'gitea':
       return giteaPullRequestSyncReview({
@@ -366,6 +381,7 @@ export async function githubPrReviewSync({
         taskRunUrl,
         additionalInstructions,
         attribution,
+        therapistModeEnabled,
       });
     case 'bitbucket':
       return bitbucketPullRequestSyncReview({
@@ -373,6 +389,7 @@ export async function githubPrReviewSync({
         taskRunUrl,
         additionalInstructions,
         attribution,
+        therapistModeEnabled,
       });
     case 'ado':
       return adoPullRequestSyncReview({
@@ -380,6 +397,7 @@ export async function githubPrReviewSync({
         taskRunUrl,
         additionalInstructions,
         attribution,
+        therapistModeEnabled,
       });
     case 'github':
       break;
@@ -571,5 +589,6 @@ export async function githubPrReviewSync({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,
+    therapistModeEnabled,
   });
 }

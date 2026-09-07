@@ -20,6 +20,7 @@ import {
 } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import { Env, isCustomMcpDisabled } from '@/lib/server/env';
+import { captureIntegrationLifecycleEvent } from '@/lib/server/integration-telemetry';
 
 export const CUSTOM_MCP_DISABLED_MESSAGE =
   'Custom MCP servers are disabled by the deployment operator.';
@@ -240,6 +241,20 @@ export async function createCustomMcpServerCommand(
     `[custom-mcp-servers] created '${input.name}' (${input.transport}) by user ${auth.userId}`,
   );
 
+  const integrationId = customMcpConnectionId(created.id);
+  captureIntegrationLifecycleEvent(
+    'integration_enabled',
+    integrationId,
+    auth.userId,
+  );
+  if (input.transport === 'stdio' || input.authType !== 'oauth') {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      integrationId,
+      auth.userId,
+    );
+  }
+
   return { id: created.id };
 }
 
@@ -277,6 +292,7 @@ export async function updateCustomMcpServerCommand(
   const credentialTargetChanged =
     columns.url !== existing.url || columns.authType !== existing.authType;
 
+  let removedConnection = false;
   await db.transaction(async (tx) => {
     await tx
       .update(customMcpServers)
@@ -290,9 +306,11 @@ export async function updateCustomMcpServerCommand(
       .where(eq(customMcpServers.id, input.id));
 
     if (credentialTargetChanged) {
-      await tx
+      const deleted = await tx
         .delete(mcpConnections)
-        .where(eq(mcpConnections.mcpId, customMcpConnectionId(input.id)));
+        .where(eq(mcpConnections.mcpId, customMcpConnectionId(input.id)))
+        .returning({ id: mcpConnections.id });
+      removedConnection = deleted.length > 0;
     }
   });
 
@@ -302,6 +320,14 @@ export async function updateCustomMcpServerCommand(
         ? ' (credential target changed; tokens cleared)'
         : ''),
   );
+
+  if (removedConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_removed',
+      customMcpConnectionId(input.id),
+      auth.userId,
+    );
+  }
 
   return { credentialsCleared: credentialTargetChanged };
 }
@@ -330,6 +356,12 @@ export async function deleteCustomMcpServerCommand(
 
   console.log(
     `[custom-mcp-servers] deleted '${existing.name}' by user ${auth.userId}`,
+  );
+
+  captureIntegrationLifecycleEvent(
+    'integration_removed',
+    customMcpConnectionId(input.id),
+    auth.userId,
   );
 
   return { deleted: true };
@@ -653,9 +685,18 @@ export async function disconnectCustomMcpServerCommand(
 ) {
   assertAdmin(auth);
 
-  await db
+  const deleted = await db
     .delete(mcpConnections)
-    .where(eq(mcpConnections.mcpId, customMcpConnectionId(input.id)));
+    .where(eq(mcpConnections.mcpId, customMcpConnectionId(input.id)))
+    .returning({ id: mcpConnections.id });
+
+  if (deleted.length > 0) {
+    captureIntegrationLifecycleEvent(
+      'integration_removed',
+      customMcpConnectionId(input.id),
+      auth.userId,
+    );
+  }
 
   return { disconnected: true };
 }
@@ -676,6 +717,12 @@ export async function setCustomMcpServerEnabledCommand(
   if (!updated) {
     throw new Error('Custom MCP server not found.');
   }
+
+  captureIntegrationLifecycleEvent(
+    input.enabled ? 'integration_enabled' : 'integration_disabled',
+    customMcpConnectionId(input.id),
+    auth.userId,
+  );
 
   return { enabled: input.enabled };
 }

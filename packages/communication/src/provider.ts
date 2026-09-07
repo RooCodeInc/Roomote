@@ -21,6 +21,7 @@ export type CommunicationMessage = {
   text: string;
   channelId: string;
   threadId?: string;
+  replyToMessageId?: string;
   fileCount: number;
   files?: CommunicationMessageAttachment[];
 };
@@ -36,6 +37,8 @@ export type CommunicationMessageButton = {
 export type CommunicationPostMessageInput = {
   channelId: string;
   threadId?: string;
+  /** Stable logical-send key used by providers that support deduplication. */
+  idempotencyKey?: string;
   text?: string;
   blocks?: unknown[];
   images?: Array<{ url: string; altText: string; contentType?: string }>;

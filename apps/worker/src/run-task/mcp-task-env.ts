@@ -3,8 +3,11 @@ import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  getTaskReportConsumerFromPayload,
+  isPrReviewRun,
 } from '@roomote/types';
 
 interface SlackReplyContext {
@@ -29,6 +32,36 @@ const RESERVED_COMMUNICATION_MCP_ENV_KEYS = [
   'ROOMOTE_COMMUNICATION_CHANNEL_ID',
   'ROOMOTE_COMMUNICATION_THREAD_ID',
 ] as const;
+
+export function isFastAgentChildTaskRun(taskRun: {
+  payload: unknown;
+}): boolean {
+  return (
+    getFastAgentParentFromPayload(taskRun.payload) !== null &&
+    getTaskReportConsumerFromPayload(taskRun.payload) === 'orchestrator'
+  );
+}
+
+/**
+ * Runtime env that tells the Roomote MCP server how this run talks to its
+ * parent Session. A review child gets no report tool: its outcome reaches the
+ * Session through the PR feedback relay alone, so an additional report would
+ * only produce narration the parent then double-announces.
+ */
+export function getFastAgentChildRuntimeEnv(taskRun: {
+  payload: unknown;
+  payloadKind?: string | null;
+}): Record<string, string> {
+  if (!isFastAgentChildTaskRun(taskRun)) {
+    return {};
+  }
+  return {
+    ROOMOTE_FAST_AGENT_CHILD: 'true',
+    ...(isPrReviewRun(taskRun)
+      ? { ROOMOTE_FAST_AGENT_CHILD_CHAT_RELAY: 'false' }
+      : {}),
+  };
+}
 
 function hasInheritedCommunicationContext(payload: unknown): boolean {
   return (
@@ -141,6 +174,17 @@ export function buildMcpTaskEnv(input: {
         'roomote-slack-reply-satisfaction.json',
       ].join('/');
     }
+  }
+
+  if (input.runtimeEnv.ROOMOTE_FAST_AGENT_CHILD === 'true') {
+    // Fast children cannot post to the inherited chat surface directly, but
+    // their private parent report still uses the normal lifecycle hooks.
+    mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE ??= [
+      input.runtimeEnv.HOME ?? '/tmp',
+      '.config',
+      'opencode',
+      'roomote-slack-reply-satisfaction.json',
+    ].join('/');
   }
 
   return mcpTaskEnv;

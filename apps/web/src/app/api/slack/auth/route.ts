@@ -105,14 +105,6 @@ export async function GET(request: NextRequest) {
       `Slack auth error: ${error instanceof Error ? error.message : 'Unknown error'}`,
     );
 
-    try {
-      await db.delete(slackAuthTokens).where(eq(slackAuthTokens.token, state));
-    } catch (error) {
-      console.error(
-        `Failed to delete auth token: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
-    }
-
     return NextResponse.redirect(
       new URL('/error?message=Failed to complete authentication', callbackHost),
     );

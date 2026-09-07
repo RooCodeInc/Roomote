@@ -2,7 +2,7 @@ import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 
 import { logger } from '@/lib/server/logger';
 
-import { POST } from '../route';
+import { maxDuration, POST } from '../route';
 
 vi.mock('@/lib/server/logger', () => ({
   logger: {
@@ -82,6 +82,18 @@ describe('POST /api/trpc/[trpc]', () => {
         method: 'POST',
       }),
     );
+
+  it('allows post-response Fast turns to reach their recovery deadline', () => {
+    expect(maxDuration).toBe(800);
+  });
+
+  it('enables cookie renewal in the HTTP route handler', async () => {
+    const response = await call();
+    expect(createContextMock).toHaveBeenCalledWith({
+      allowSessionRefresh: true,
+    });
+    await response.text();
+  });
 
   it('emits one request-timing line with the auth and handler durations', async () => {
     const response = await call();

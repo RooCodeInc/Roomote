@@ -106,7 +106,7 @@ export type ManagedDeploymentAccess = Pick<
 >;
 
 export const MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE =
-  'This deployment is read-only. New task launches are paused.';
+  'New tasks are paused due to a billing issue. Please check billing.';
 
 export function isDeploymentReadOnlyError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) {

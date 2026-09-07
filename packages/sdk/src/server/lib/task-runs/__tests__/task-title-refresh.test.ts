@@ -14,12 +14,15 @@ import {
   refreshTaskTitleOnCompletion,
 } from '../record-task-message-envelope';
 
-const { mockGenerateLlmTaskTitle, mockSyncTaskThreadTitle } = vi.hoisted(
-  () => ({
-    mockGenerateLlmTaskTitle: vi.fn(),
-    mockSyncTaskThreadTitle: vi.fn(),
-  }),
-);
+const {
+  mockGenerateLlmTaskTitle,
+  mockRefreshTaskSessionTitle,
+  mockSyncTaskThreadTitle,
+} = vi.hoisted(() => ({
+  mockGenerateLlmTaskTitle: vi.fn(),
+  mockRefreshTaskSessionTitle: vi.fn(),
+  mockSyncTaskThreadTitle: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
   const actual =
@@ -28,6 +31,7 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => {
   return {
     ...actual,
     generateLlmTaskTitle: mockGenerateLlmTaskTitle,
+    refreshTaskSessionTitle: mockRefreshTaskSessionTitle,
   };
 });
 
@@ -91,6 +95,8 @@ describe('task title refresh', () => {
     vi.clearAllMocks();
     mockGenerateLlmTaskTitle.mockReset();
     mockGenerateLlmTaskTitle.mockResolvedValue('Generated summary title');
+    mockRefreshTaskSessionTitle.mockReset();
+    mockRefreshTaskSessionTitle.mockResolvedValue(undefined);
     mockSyncTaskThreadTitle.mockResolvedValue(undefined);
   });
 
@@ -115,6 +121,11 @@ describe('task title refresh', () => {
     expect(task?.llmTitleCheckpoint).toBe(LLM_TITLE_LOCKED_CHECKPOINT);
     expect(mockSyncTaskThreadTitle).toHaveBeenCalledWith({
       taskId: 'task-title-final',
+    });
+    expect(mockRefreshTaskSessionTitle).toHaveBeenCalledWith({
+      taskId: 'task-title-final',
+      userId: undefined,
+      mode: 'final',
     });
   });
 
@@ -250,6 +261,11 @@ describe('task title refresh', () => {
 
     await vi.waitFor(() => {
       expect(mockSyncTaskThreadTitle).toHaveBeenCalledWith({ taskId });
+      expect(mockRefreshTaskSessionTitle).toHaveBeenCalledWith({
+        taskId,
+        userId: undefined,
+        mode: 'checkpoint',
+      });
     });
     expect(mockGenerateLlmTaskTitle).not.toHaveBeenCalled();
   });

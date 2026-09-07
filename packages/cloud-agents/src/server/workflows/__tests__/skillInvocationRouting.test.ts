@@ -26,6 +26,29 @@ describe('packaged skill invocation routing', () => {
       'utf8',
     );
 
+  it.each(['sentry-triage', 'triage-sentry'])(
+    '%s describes schema-driven Sentry discovery and scoped triage outcomes',
+    (skillName) => {
+      const skill = readPackagedSkill(skillName);
+      expect(skill).toContain('Discover the available Sentry capabilities');
+      expect(skill).toContain('advertised schemas');
+      expect(skill).toContain('required organization scope');
+      expect(skill).toContain('request or automation context');
+      expect(skill).toContain(
+        'If the scope is unspecified, request clarification',
+      );
+      expect(skill).toContain('requested report destination');
+      expect(skill).toContain('ambiguity');
+      expect(skill).toContain('actual tool error');
+      expect(skill).not.toMatch(
+        /mcp__sentry__|find_integration_tools|call_integration_tool|find_organizations|organizationSlug|`args`|submit_automation_work_items|post_to_channel/,
+      );
+      expect(skill).not.toMatch(
+        /Roomote|Roo Vet|roomote-|Slack|React|\bNode\b|last 24 hours|production|preview/,
+      );
+    },
+  );
+
   const listBacktickMarkdownReferences = (
     content: string,
     directoryNames: string[],
@@ -83,6 +106,15 @@ describe('packaged skill invocation routing', () => {
     );
     expect(generalSkill).toContain(
       'Do not assume repository inspection is relevant',
+    );
+    expect(generalSkill).toContain(
+      'call `query` and wait for its result before choosing or calling any overlapping source',
+    );
+    expect(generalSkill).toContain(
+      'Never put the Brain query and an overlapping integration lookup in the same parallel batch',
+    );
+    expect(generalSkill).toContain(
+      'freshness beyond its collection window could materially change the answer',
     );
     expect(generalSkill).toContain(
       'repository or workspace file edits or commands, validation of repository changes, or code delivery',

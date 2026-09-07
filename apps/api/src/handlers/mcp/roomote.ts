@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import {
   and,
@@ -31,6 +31,8 @@ import {
 } from '@roomote/auth';
 import { z } from 'zod';
 
+import packageJson from '../../../../../package.json';
+
 import type { Variables } from '../../types';
 
 import {
@@ -48,7 +50,10 @@ import {
 } from './communication-message-lookup';
 import { requireCommunicationLookupTaskRun } from './communication-lookup-run-context';
 import type { McpAuth } from './middleware';
+import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
+import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
+import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -101,6 +106,12 @@ async function resolveRoomoteMcpAuth(
   }
 
   if (isRunTokenContext(authContext)) {
+    if (!options.allowLegacyAudience) {
+      throw new McpProxyError(
+        403,
+        'Forbidden: member tools require a user-scoped access token',
+      );
+    }
     await assertTaskRunTokenTargetExists(authContext);
 
     return {
@@ -147,6 +158,11 @@ async function buildAboutMePayload(options: {
   userId: string | null;
   operation: 'overview' | 'integrations';
 }) {
+  const version = resolveAboutMeVersion(
+    Env.RELEASE_PRODUCT_VERSION,
+    Env.RELEASE_VERSION,
+    packageJson.version,
+  );
   const [
     environmentRows,
     linearRows,
@@ -224,6 +240,7 @@ async function buildAboutMePayload(options: {
     requestedOperation: options.operation,
     product: {
       name: PRODUCT_NAME,
+      ...(version ? { version } : {}),
       appUrl: Env.R_APP_URL,
       docsUrl: getDefaultDocsUrl(Env.APP_ENV ?? 'development'),
     },
@@ -292,6 +309,7 @@ async function buildCommunicationMessageContextPayload(options: {
   channel?: string;
   messageId?: string;
   messageLink?: string;
+  provider?: 'slack' | 'discord';
 }) {
   let taskRun: CommunicationLookupTaskRun | undefined;
 
@@ -318,6 +336,9 @@ async function buildCommunicationMessageContextPayload(options: {
       ? { messageLink: options.messageLink }
       : {}),
     ...(taskRun ? { taskRun } : {}),
+    ...(options.auth.tokenType === 'auth' && options.provider
+      ? { provider: options.provider }
+      : {}),
     ...(options.auth.tokenType === 'auth'
       ? { actingUserId: options.actingUserId }
       : {}),
@@ -330,6 +351,7 @@ async function buildCommunicationChannelMessagesPayload(options: {
   channel?: string;
   oldest?: string;
   latest?: string;
+  provider?: 'slack' | 'discord';
 }) {
   let taskRun: CommunicationLookupTaskRun | undefined;
 
@@ -355,6 +377,9 @@ async function buildCommunicationChannelMessagesPayload(options: {
       ? { latest: options.latest }
       : {}),
     ...(taskRun ? { taskRun } : {}),
+    ...(options.auth.tokenType === 'auth' && options.provider
+      ? { provider: options.provider }
+      : {}),
     ...(options.auth.tokenType === 'auth'
       ? { actingUserId: options.actingUserId }
       : {}),
@@ -370,15 +395,20 @@ function createRoomoteTransport() {
 function createRoomoteMcpServer(
   auth: McpAuthContext,
   actingUserId: string | null,
-  memberAuth?: McpAuth,
+  toolAuth: McpAuth,
+  registerMemberTools: boolean,
 ) {
-  const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel.`,
   });
 
-  if (memberAuth) {
-    registerRoomoteMemberTools(server, memberAuth);
+  if (registerMemberTools) {
+    registerRoomoteMemberTools(server, toolAuth);
+    if (actingUserId) {
+      registerRoomoteCommunicationTools(server, actingUserId);
+    }
   }
+  registerRoomoteCustomAutomationsTool(server, toolAuth);
 
   server.registerTool(
     'get_about_me',
@@ -429,6 +459,12 @@ function createRoomoteMcpServer(
           .string()
           .optional()
           .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
+        provider: z
+          .enum(['slack', 'discord'])
+          .optional()
+          .describe(
+            'Optional communication provider for raw channel IDs, names, or mentions when no task run supplies one.',
+          ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -438,7 +474,7 @@ function createRoomoteMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ channel, oldest, latest }) => {
+    async ({ channel, oldest, latest, provider }) => {
       const payload = await buildCommunicationChannelMessagesPayload({
         auth,
         actingUserId,
@@ -451,6 +487,7 @@ function createRoomoteMcpServer(
         ...(typeof latest === 'string' && latest.trim().length > 0
           ? { latest: latest.trim() }
           : {}),
+        ...(provider ? { provider } : {}),
       });
 
       return toMcpToolResult(payload);
@@ -475,6 +512,12 @@ function createRoomoteMcpServer(
           .string()
           .optional()
           .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
+        provider: z
+          .enum(['slack', 'discord'])
+          .optional()
+          .describe(
+            'Optional communication provider for raw channel IDs, names, or mentions when no task run supplies one.',
+          ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -484,7 +527,7 @@ function createRoomoteMcpServer(
         openWorldHint: false,
       },
     },
-    async ({ channel, messageId, messageLink }) => {
+    async ({ channel, messageId, messageLink, provider }) => {
       const payload = await buildCommunicationMessageContextPayload({
         auth,
         actingUserId,
@@ -497,6 +540,7 @@ function createRoomoteMcpServer(
         ...(typeof messageLink === 'string' && messageLink.trim().length > 0
           ? { messageLink: messageLink.trim() }
           : {}),
+        ...(provider ? { provider } : {}),
       });
 
       return toMcpToolResult(payload);
@@ -517,26 +561,34 @@ function createRoomoteMcpRouter(options: {
 
     try {
       const rawAuth = c.get('authContext');
+      if (!rawAuth) {
+        throw new McpProxyError(
+          401,
+          'Unauthorized: missing or invalid bearer token',
+        );
+      }
       const auth = await resolveRoomoteMcpAuth(rawAuth, options);
       // Null means the job runs as the deployment service principal; the
       // context tools are informational and support that case. Member tools
       // are only mounted on the public endpoint and retain the resolved user.
       const actingUserId = await resolveActingUserIdOrNull(auth);
-      const memberAuth =
-        options.memberTools && rawAuth
-          ? {
-              userId: actingUserId ?? undefined,
-              authContext:
-                rawAuth.tokenType === 'mcp'
-                  ? {
-                      userId: rawAuth.userId,
-                      tokenType: 'auth' as const,
-                      version: rawAuth.version,
-                    }
-                  : rawAuth,
-            }
-          : undefined;
-      const server = createRoomoteMcpServer(auth, actingUserId, memberAuth);
+      const toolAuth = {
+        userId: actingUserId ?? undefined,
+        authContext:
+          rawAuth.tokenType === 'mcp'
+            ? {
+                userId: rawAuth.userId,
+                tokenType: 'auth' as const,
+                version: rawAuth.version,
+              }
+            : rawAuth,
+      };
+      const server = createRoomoteMcpServer(
+        auth,
+        actingUserId,
+        toolAuth,
+        options.memberTools,
+      );
 
       await server.connect(transport);
       return await transport.handleRequest(c.req.raw);

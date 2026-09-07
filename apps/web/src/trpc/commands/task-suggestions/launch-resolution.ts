@@ -239,53 +239,6 @@ async function resolveSuggestionEnvironmentId(params: {
   return matchingEnvironment?.id ?? null;
 }
 
-export async function resolveSuggestionLaunchWorkspace(params: {
-  suggestion: SuggestionLaunchCandidate;
-}): Promise<
-  | {
-      workspace: {
-        repoForPayload: string;
-        targetRepositoryFullName: string;
-        environmentId?: string;
-        readinessMessage?: string | null;
-      };
-    }
-  | {
-      failureReason: string;
-    }
-> {
-  const context = await buildSuggestionResolutionContext([params.suggestion]);
-  const targetRepository = resolveTargetRepository(params.suggestion, context);
-
-  if (targetRepository && 'failureReason' in targetRepository) {
-    return targetRepository;
-  }
-
-  if (!targetRepository) {
-    return {
-      failureReason:
-        "I couldn't start this suggestion because it was generated before per-idea launch targeting was saved. Regenerate the suggestions and try again.",
-    };
-  }
-
-  const environmentId = await resolveSuggestionEnvironmentId({
-    suggestion: params.suggestion,
-    context,
-    targetRepositoryFullName: targetRepository.repositoryFullName,
-  });
-
-  return {
-    workspace: {
-      repoForPayload: targetRepository.repositoryFullName,
-      targetRepositoryFullName: targetRepository.repositoryFullName,
-      ...(environmentId ? { environmentId } : {}),
-      ...(environmentId
-        ? {}
-        : { readinessMessage: params.suggestion.readinessMessage }),
-    },
-  };
-}
-
 export async function decorateSuggestionsWithEnvironmentIds(
   suggestions: PersistedTaskSuggestion[],
 ) {

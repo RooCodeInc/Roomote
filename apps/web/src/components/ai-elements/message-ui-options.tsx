@@ -7,6 +7,7 @@ export interface MessageUiOptions {
   displayMode?: 'default' | 'narration';
   expandReasoningByDefault?: boolean;
   hideNewTaskAction?: boolean;
+  hidePrReviewActions?: boolean;
 }
 
 const DEFAULT_MESSAGE_UI_OPTIONS: MessageUiOptions = {};

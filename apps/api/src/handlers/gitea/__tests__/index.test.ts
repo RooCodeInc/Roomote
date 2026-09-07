@@ -7,6 +7,7 @@ const {
   mockHandleGiteaComment,
   mockHandleGiteaIssue,
   mockHandleGiteaWorkflowRun,
+  mockHandleMergeAnnouncerPush,
   mockRecordWebhook,
   mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
@@ -14,12 +15,17 @@ const {
   mockHandleGiteaComment: vi.fn(),
   mockHandleGiteaIssue: vi.fn(),
   mockHandleGiteaWorkflowRun: vi.fn(),
+  mockHandleMergeAnnouncerPush: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
   resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  handleMergeAnnouncerPush: mockHandleMergeAnnouncerPush,
 }));
 
 vi.mock('../../logging', () => ({
@@ -63,6 +69,7 @@ describe('gitea webhook router', () => {
     mockHandleGiteaComment.mockReset();
     mockHandleGiteaIssue.mockReset();
     mockHandleGiteaWorkflowRun.mockReset();
+    mockHandleMergeAnnouncerPush.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
@@ -72,6 +79,7 @@ describe('gitea webhook router', () => {
     mockHandleGiteaComment.mockResolvedValue({ status: 'ok' });
     mockHandleGiteaIssue.mockResolvedValue({ status: 'ok' });
     mockHandleGiteaWorkflowRun.mockResolvedValue({ status: 'ok' });
+    mockHandleMergeAnnouncerPush.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -132,6 +140,43 @@ describe('gitea webhook router', () => {
           full_name: 'acme/backend',
         }),
       }),
+    );
+  });
+
+  it('records and routes normalized push webhooks', async () => {
+    const payload = {
+      ref: 'refs/heads/main',
+      pusher: { username: 'alice' },
+      repository: {
+        id: 123,
+        full_name: 'acme/backend',
+        html_url: 'https://git.example.com/acme/backend',
+      },
+      commits: [{ id: 'abc', message: 'Ship backend' }],
+    };
+    const body = JSON.stringify(payload);
+
+    const response = await app.request('http://localhost/api/webhooks/gitea', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-gitea-event': 'push',
+        'x-gitea-delivery': 'push-delivery',
+        'x-gitea-signature': sign(body),
+      },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'push-delivery',
+      'push',
+      expect.anything(),
+      expect.any(Function),
+      { provider: 'gitea' },
+    );
+    expect(mockHandleMergeAnnouncerPush).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'gitea', pusher: 'alice' }),
     );
   });
 

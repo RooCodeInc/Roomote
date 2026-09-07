@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 const state = vi.hoisted(() => ({
   isAdmin: true,
   cloudEnabled: false,
+  brainConfigured: true,
   pushMock: vi.fn(),
 }));
 
@@ -34,6 +35,7 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({
     isAdmin: state.isAdmin,
     cloudEnabled: state.cloudEnabled,
+    brainConfigured: state.brainConfigured,
   }),
 }));
 
@@ -77,6 +79,7 @@ describe('SettingsShell', () => {
   beforeEach(() => {
     state.isAdmin = true;
     state.cloudEnabled = false;
+    state.brainConfigured = true;
     state.pushMock.mockReset();
   });
 
@@ -99,6 +102,10 @@ describe('SettingsShell', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /users/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /skills/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /memory/i })).toHaveAttribute(
+      'href',
+      '/settings/memory',
+    );
     expect(
       screen.getByRole('link', { name: /sandboxes/i }),
     ).toBeInTheDocument();

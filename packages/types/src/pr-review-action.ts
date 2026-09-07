@@ -7,6 +7,47 @@
  */
 export type PrReviewActionChoice = 'yes' | 'auto' | 'dismiss';
 
+export const PR_REVIEW_ACTION_LABELS: Record<PrReviewActionChoice, string> = {
+  yes: 'Resolve these issues',
+  auto: 'Auto-resolve on this PR',
+  dismiss: 'Dismiss',
+};
+
+export const PR_REVIEW_ACTION_OFFER_PAYLOAD_KEY = 'prReviewAction' as const;
+
+export type PrReviewActionOfferStatus =
+  | 'pending'
+  | 'resolved'
+  | 'auto_resolved'
+  | 'dismissed'
+  | 'stale';
+
+export interface PrReviewActionOffer {
+  deliveryId: string;
+  question: string;
+  status: PrReviewActionOfferStatus;
+}
+
+export function parsePrReviewActionOffer(
+  payload: Record<string, unknown> | null | undefined,
+): PrReviewActionOffer | null {
+  const value = payload?.[PR_REVIEW_ACTION_OFFER_PAYLOAD_KEY];
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const offer = value as Record<string, unknown>;
+  if (
+    typeof offer.deliveryId !== 'string' ||
+    typeof offer.question !== 'string' ||
+    !['pending', 'resolved', 'auto_resolved', 'dismissed', 'stale'].includes(
+      String(offer.status),
+    )
+  ) {
+    return null;
+  }
+
+  return offer as unknown as PrReviewActionOffer;
+}
+
 const PR_REVIEW_CALLBACK_PREFIX = 'prr:';
 const CALLBACK_CHOICE_CODES: Record<PrReviewActionChoice, string> = {
   yes: 'y',

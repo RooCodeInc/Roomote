@@ -172,11 +172,16 @@ function normalizeSlackChannelMessages(messages: SlackThreadMessage[]) {
 
 export function getSlackReplyTarget(
   taskRun: SlackReplyTargetTaskRun,
+  options?: { preferPayload?: boolean },
 ): { channel: string; threadTs?: string } | null {
-  const channel =
-    taskRun.slackChannelId ?? getSlackChannelFromTaskPayload(taskRun.payload);
-  const threadTs =
-    taskRun.slackThreadTs ?? getSlackThreadTsFromTaskPayload(taskRun.payload);
+  const payloadChannel = getSlackChannelFromTaskPayload(taskRun.payload);
+  const payloadThreadTs = getSlackThreadTsFromTaskPayload(taskRun.payload);
+  const channel = options?.preferPayload
+    ? (payloadChannel ?? taskRun.slackChannelId)
+    : (taskRun.slackChannelId ?? payloadChannel);
+  const threadTs = options?.preferPayload
+    ? (payloadThreadTs ?? taskRun.slackThreadTs)
+    : (taskRun.slackThreadTs ?? payloadThreadTs);
 
   if (channel) {
     return {

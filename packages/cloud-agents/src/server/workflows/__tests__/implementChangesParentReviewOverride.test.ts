@@ -9,13 +9,11 @@ describe('implement-changes parent review override guidance', () => {
   it('allows task-level workflows to narrow the parent review step without broadening all runs', () => {
     const skillPath = path.resolve(
       thisDirPath,
-      '../skills/standard/implement-changes/SKILL.md',
+      '../skills/standard/implement-changes/resources/default-workflow.md',
     );
     const skillContent = fs.readFileSync(skillPath, 'utf8');
 
-    expect(skillContent).toContain(
-      '<title>Run the required parent review step</title>',
-    );
+    expect(skillContent).toContain('## 4. Validate and Review');
     expect(skillContent).toContain(
       'By default, run a brief self-review over the task diff before branch/push/PR actions, focused on obvious request-satisfaction gaps, diff stability, accidental scope creep, and other cheap author-side catches.',
     );
@@ -26,7 +24,7 @@ describe('implement-changes parent review override guidance', () => {
       'if the workflow says the parent step is only a brief author sanity check before a child review loop',
     );
     expect(skillContent).toContain(
-      'Ask it specifically to compare plan versus built result and to verify visual proof when evidence was captured or when proof should have applied, not to repeat generic code review',
+      'Ask it specifically to compare plan versus built result, to open the images and verify visual proof when evidence was captured or when proof should have applied, and to report undisclosed source drift between the proof snapshot and the shipped diff, not to repeat generic code review',
     );
     expect(skillContent).toContain(
       'keep any repo reads minimal and targeted instead of doing open-ended exploration',

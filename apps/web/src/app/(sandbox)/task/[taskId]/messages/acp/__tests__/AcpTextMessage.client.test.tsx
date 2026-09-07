@@ -1,9 +1,54 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 const transcriptVisibilityState = vi.hoisted(() => ({
   enabled: false,
+}));
+const reviewActionMutate = vi.hoisted(() => vi.fn());
+
+const slackUsersState = vi.hoisted(() => ({
+  users: {} as Record<string, { name: string; profileUrl: string | null }>,
+}));
+const artifactViewerState = vi.hoisted(() => ({
+  openSessionArtifactViewer: null as ReturnType<typeof vi.fn> | null,
+  artifactLink: null as {
+    openArtifact: ReturnType<typeof vi.fn>;
+    artifacts: Array<{ path: string }>;
+  } | null,
+}));
+
+vi.mock(
+  '@/app/(sandbox)/sessions/[sessionId]/session-task-panel-context',
+  () => ({
+    useOpenSessionArtifactViewer: () =>
+      artifactViewerState.openSessionArtifactViewer,
+  }),
+);
+
+vi.mock('../../../hooks/ArtifactLinkProvider', () => ({
+  useArtifactLink: () => artifactViewerState.artifactLink,
+}));
+
+vi.mock('@/trpc/client', () => ({
+  useTRPCClient: () => ({
+    sandboxSession: {
+      handlePrReviewNotificationAction: { mutate: reviewActionMutate },
+    },
+  }),
+  useTRPC: () => ({
+    slack: {
+      resolveUsers: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ['slack.resolveUsers', input],
+        }),
+      },
+    },
+  }),
+}));
+
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({ data: { users: slackUsersState.users } }),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -52,55 +97,62 @@ vi.mock('@/components/ai-elements', () => ({
     <time data-anchor-id={anchorId}>{String(ts)}</time>
   ),
 }));
-vi.mock('@/components/system', () => ({
-  BasicTooltip: ({
-    children,
-    content,
-  }: {
-    children: ReactNode;
-    content: ReactNode;
-  }) => (
-    <div data-testid="basic-tooltip" data-content={String(content)}>
-      {children}
-    </div>
-  ),
-  Button: ({
-    children,
-    ...props
-  }: { children: ReactNode } & Record<string, unknown>) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
-  ),
-  ChevronDownIcon: () => <svg aria-label="ChevronDownIcon" />,
-  GitCommitVertical: () => <svg aria-label="GitCommitVertical" />,
-  GitPullRequestCreateArrow: () => (
-    <svg aria-label="GitPullRequestCreateArrow" />
-  ),
-  GitPullRequestDraft: () => <svg aria-label="GitPullRequestDraft" />,
-  Image: () => <svg aria-label="Image" />,
-  ListChecks: () => <svg aria-label="ListChecks" />,
-  MediaViewerDialog: ({
-    children,
-    open,
-    title,
-  }: {
-    children: ReactNode;
-    open: boolean;
-    title: string;
-  }) =>
-    open ? (
-      <div data-testid="media-viewer" aria-label={title}>
+vi.mock('@/components/system', async () => {
+  const actual = await vi.importActual<typeof import('@/components/system')>(
+    '@/components/system',
+  );
+
+  return {
+    ...actual,
+    BasicTooltip: ({
+      children,
+      content,
+    }: {
+      children: ReactNode;
+      content: ReactNode;
+    }) => (
+      <div data-testid="basic-tooltip" data-content={String(content)}>
         {children}
       </div>
-    ) : null,
-  MediaViewerImage: ({ alt }: { alt: string }) => (
-    <div role="img" aria-label={alt} />
-  ),
-  ScanFace: () => <svg aria-label="ScanFace" />,
-  ScanSearch: () => <svg aria-label="ScanSearch" />,
-  Sparkles: () => <svg aria-label="Sparkles" />,
-}));
+    ),
+    Button: ({
+      children,
+      ...props
+    }: { children: ReactNode } & Record<string, unknown>) => (
+      <button type="button" {...props}>
+        {children}
+      </button>
+    ),
+    ChevronDownIcon: () => <svg aria-label="ChevronDownIcon" />,
+    GitCommitVertical: () => <svg aria-label="GitCommitVertical" />,
+    GitPullRequestCreateArrow: () => (
+      <svg aria-label="GitPullRequestCreateArrow" />
+    ),
+    GitPullRequestDraft: () => <svg aria-label="GitPullRequestDraft" />,
+    Image: () => <svg aria-label="Image" />,
+    ListChecks: () => <svg aria-label="ListChecks" />,
+    MediaViewerDialog: ({
+      children,
+      open,
+      title,
+    }: {
+      children: ReactNode;
+      open: boolean;
+      title: string;
+    }) =>
+      open ? (
+        <div data-testid="media-viewer" aria-label={title}>
+          {children}
+        </div>
+      ) : null,
+    MediaViewerImage: ({ alt }: { alt: string }) => (
+      <div role="img" aria-label={alt} />
+    ),
+    ScanFace: () => <svg aria-label="ScanFace" />,
+    ScanSearch: () => <svg aria-label="ScanSearch" />,
+    Sparkles: () => <svg aria-label="Sparkles" />,
+  };
+});
 
 vi.mock('../../../useInternalTranscriptRowsVisible', () => ({
   useInternalTranscriptRowsVisible: () => transcriptVisibilityState.enabled,
@@ -111,6 +163,58 @@ import { AcpTextMessage } from '../AcpTextMessage';
 describe('AcpTextMessage', () => {
   beforeEach(() => {
     transcriptVisibilityState.enabled = false;
+    reviewActionMutate.mockReset();
+    slackUsersState.users = {};
+  });
+
+  const reviewOfferMessage = (status = 'pending') => ({
+    id: 'review-offer-1',
+    ts: 123,
+    role: 'assistant' as const,
+    kind: 'text' as const,
+    partial: false,
+    sessionId: 'session-1',
+    updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+    text: 'Review feedback remains.',
+    data: {
+      prReviewAction: {
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        question: 'Would you like me to resolve these issues?',
+        status,
+      },
+    },
+  });
+
+  it('renders and dispatches a canonical review action offer', async () => {
+    reviewActionMutate.mockResolvedValue({ status: 'resolved' });
+    render(<AcpTextMessage msg={reviewOfferMessage()} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    );
+    await waitFor(() =>
+      expect(reviewActionMutate).toHaveBeenCalledWith({
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        choice: 'yes',
+      }),
+    );
+    expect(
+      await screen.findByText('Resolving the current review issues.'),
+    ).toBeVisible();
+  });
+
+  it('does not render a persisted dismissed offer', () => {
+    render(<AcpTextMessage msg={reviewOfferMessage('dismissed')} />);
+
+    expect(
+      screen.queryByTestId('pr-review-notification-actions'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Review action dismissed.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resolve these issues' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows copy and new task actions for assistant completion text', () => {
@@ -135,6 +239,34 @@ describe('AcpTextMessage', () => {
     expect(
       screen.getByRole('button', { name: 'new-task:Done!' }),
     ).toBeVisible();
+  });
+
+  it.each([
+    ['+1', '👍'],
+    ['exploding_head', '🤯'],
+    ['flag-gb', '🇬🇧'],
+    ['thumbsup::skin-tone-6', '👍🏿'],
+    ['female-technologist::skin-tone-3', '👩🏼‍💻'],
+    ['ship_it', ':ship_it:'],
+  ])('renders reaction receipt %s as %s', (reaction, expected) => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'reaction-1',
+          ts: 123,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          text: `[Reacted with :${reaction}:]`,
+          data: { reaction, purpose: 'closeout' },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('message-response')).toHaveTextContent(expected);
+    expect(screen.queryByText(/Reacted with/)).not.toBeInTheDocument();
   });
 
   it('passes a permalink anchor id to the timestamp', () => {
@@ -326,6 +458,44 @@ describe('AcpTextMessage', () => {
     expect(
       screen.getByRole('button', { name: 'new-task:Continue' }),
     ).toBeVisible();
+  });
+
+  it('renders raw Slack mention tokens in user text as linked names', () => {
+    slackUsersState.users = {
+      U0BJNE7FC12: {
+        name: 'Roomote',
+        profileUrl: 'https://acme.slack.com/team/U0BJNE7FC12',
+      },
+    };
+
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-1',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.user_prompt',
+          text: '<@U0BJNE7FC12> determine why the mobile app cannot handle the link',
+          data: {},
+        }}
+      />,
+    );
+
+    const mention = screen.getByTestId('slack-mention');
+    expect(mention).toHaveTextContent('@Roomote');
+    expect(mention).toHaveAttribute(
+      'href',
+      'https://acme.slack.com/team/U0BJNE7FC12',
+    );
+    expect(screen.getByTestId('message-plain-text')).toHaveTextContent(
+      '@Roomote determine why the mobile app cannot handle the link',
+    );
+    expect(screen.getByTestId('message-plain-text')).not.toHaveTextContent(
+      '<@U0BJNE7FC12>',
+    );
   });
 
   it('renders user text as plain text instead of markdown', () => {
@@ -718,8 +888,12 @@ describe('AcpTextMessage', () => {
       />,
     );
 
-    const avatar = screen.getByRole('img', { name: 'Test User' });
+    const avatar = screen.getByLabelText('Test User');
     expect(avatar).toBeVisible();
+    expect(avatar.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://example.com/avatar.png',
+    );
     expect(screen.getByTestId('basic-tooltip')).toHaveAttribute(
       'data-content',
       'Test User',
@@ -774,7 +948,7 @@ describe('AcpTextMessage', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
-  it('does not show avatar when userImageUrl is missing', () => {
+  it('falls back to initials when the user image fails to load', () => {
     render(
       <AcpTextMessage
         msg={{
@@ -787,11 +961,42 @@ describe('AcpTextMessage', () => {
           updateType: 'roomote_runtime.assistant_message',
           text: 'Hello',
           data: {},
+          userName: 'Test User',
+          userEmail: 'test@example.com',
+          userImageUrl: 'https://example.com/missing.png',
         }}
       />,
     );
 
-    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    const avatar = screen.getByLabelText('Test User');
+    fireEvent.error(avatar.querySelector('img')!);
+
+    expect(avatar.querySelector('img')).not.toBeInTheDocument();
+    expect(screen.getByText('TU')).toBeInTheDocument();
+  });
+
+  it('falls back to initials when userImageUrl is missing', () => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-1',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.assistant_message',
+          text: 'Hello',
+          data: {},
+          userName: 'Test User',
+          userEmail: 'test@example.com',
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText('Test User')).toBeVisible();
+    expect(screen.getByText('TU')).toBeInTheDocument();
+    expect(document.querySelector('img')).not.toBeInTheDocument();
   });
 
   it('shows copy and new task actions for optimistic user text', () => {
@@ -849,6 +1054,101 @@ describe('AcpTextMessage', () => {
         name: 'Conversation image attachment 1',
       }),
     ).toBeVisible();
+  });
+
+  it('opens artifact-backed images in the Session artifact viewer instead of the media dialog', () => {
+    const openSessionArtifactViewer = vi.fn();
+    artifactViewerState.openSessionArtifactViewer = openSessionArtifactViewer;
+    const url = '/api/artifacts/artifact-1/raw?sig=abc&ts=7200';
+
+    try {
+      render(
+        <AcpTextMessage
+          msg={{
+            id: 'message-1',
+            ts: 123,
+            role: 'assistant',
+            kind: 'text',
+            partial: false,
+            sessionId: 'session-1',
+            updateType: 'roomote_runtime.assistant_message_chunk',
+            text: 'Here is the screenshot',
+            images: [url],
+            imageArtifacts: [
+              {
+                url,
+                owner: { taskId: 'task-1' },
+                path: 'proof/session.png',
+                version: 1,
+              },
+            ],
+            data: {},
+          }}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Open conversation image attachment 1',
+        }),
+      );
+
+      expect(openSessionArtifactViewer).toHaveBeenCalledWith({
+        owner: { taskId: 'task-1' },
+        path: 'proof/session.png',
+        version: 1,
+      });
+      expect(screen.queryByTestId('media-viewer')).toBeNull();
+    } finally {
+      artifactViewerState.openSessionArtifactViewer = null;
+    }
+  });
+
+  it('opens artifact-backed images in the task artifact panel on a task page', () => {
+    const openArtifact = vi.fn();
+    artifactViewerState.artifactLink = {
+      openArtifact,
+      artifacts: [{ path: 'proof/session.png' }],
+    };
+    const url = '/api/artifacts/artifact-1/raw?sig=abc&ts=7200';
+
+    try {
+      render(
+        <AcpTextMessage
+          msg={{
+            id: 'message-1',
+            ts: 123,
+            role: 'assistant',
+            kind: 'text',
+            partial: false,
+            sessionId: 'session-1',
+            updateType: 'roomote_runtime.assistant_message_chunk',
+            text: 'Here is the screenshot',
+            images: [url],
+            imageArtifacts: [
+              {
+                url,
+                owner: { taskId: 'task-1' },
+                path: 'proof/session.png',
+                version: 1,
+              },
+            ],
+            data: {},
+          }}
+        />,
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Open conversation image attachment 1',
+        }),
+      );
+
+      expect(openArtifact).toHaveBeenCalledWith('proof/session.png', 1);
+      expect(screen.queryByTestId('media-viewer')).toBeNull();
+    } finally {
+      artifactViewerState.artifactLink = null;
+    }
   });
 
   it('preserves leading and trailing whitespace in assistant action content', () => {

@@ -20,6 +20,16 @@ import {
 const MAX_REPOSITORIES_PER_RUN = 8;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 15 * 60 * 1000;
 
+function toPullRequestFactSnapshot(
+  pullRequest: GitHub.PullRequestAnalyticsItem,
+): PullRequestFactSnapshot {
+  return {
+    ...pullRequest,
+    body: pullRequest.body ?? null,
+    labels: pullRequest.labels ?? null,
+  };
+}
+
 function getRateLimitCooldownUntil(error: unknown, now: Date): Date | null {
   if (!(error instanceof Error) || !('status' in error)) {
     return null;
@@ -86,11 +96,13 @@ async function syncRepositoryPullRequestFacts(params: {
       !params.backfillCompletedAt && Boolean(params.bootstrapCreatedAfter);
 
     if (!params.backfillCompletedAt) {
-      backfillPullRequests = await GitHub.getPullRequestsForAnalytics({
-        userId: params.actorUserId,
-        repositoryIds: [params.repositoryId],
-        createdAfter: params.bootstrapCreatedAfter,
-      });
+      backfillPullRequests = (
+        await GitHub.getPullRequestsForAnalytics({
+          userId: params.actorUserId,
+          repositoryIds: [params.repositoryId],
+          createdAfter: params.bootstrapCreatedAfter,
+        })
+      ).map(toPullRequestFactSnapshot);
 
       await upsertPullRequestFacts({
         repositoryId: params.repositoryId,
@@ -126,12 +138,13 @@ async function syncRepositoryPullRequestFacts(params: {
         ? (getLatestUpdatedAt(backfillPullRequests, null) ?? params.now)
         : params.now);
 
-    const incrementalPullRequests =
+    const incrementalPullRequests = (
       await GitHub.getUpdatedPullRequestsForAnalytics({
         userId: params.actorUserId,
         repositoryIds: [params.repositoryId],
         updatedAfter: previousUpdatedAt,
-      });
+      })
+    ).map(toPullRequestFactSnapshot);
 
     await upsertPullRequestFacts({
       repositoryId: params.repositoryId,

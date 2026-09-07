@@ -2,6 +2,7 @@ const mockPersistPrReviewEvent = vi.fn();
 const mockRecordPrReviewCycleState = vi.fn();
 const mockClaimDuePrReviewDeliveries = vi.fn();
 const mockReleasePrReviewDeliveries = vi.fn();
+const mockReleaseSupersededCanonicalPrReviewAction = vi.fn();
 const mockDeferPrReviewDeliveries = vi.fn();
 const mockCompletePrReviewDeliveries = vi.fn();
 const mockRenewPrReviewDeliveryClaim = vi.fn();
@@ -35,6 +36,8 @@ vi.mock('@roomote/db/server', async () => {
       mockClaimDuePrReviewDeliveries(...args),
     releasePrReviewDeliveries: (...args: unknown[]) =>
       mockReleasePrReviewDeliveries(...args),
+    releaseSupersededCanonicalPrReviewAction: (...args: unknown[]) =>
+      mockReleaseSupersededCanonicalPrReviewAction(...args),
     deferPrReviewDeliveries: (...args: unknown[]) =>
       mockDeferPrReviewDeliveries(...args),
     completePrReviewDeliveries: (...args: unknown[]) =>
@@ -64,6 +67,7 @@ vi.mock('../slack-task-run-routing', () => ({
 
 import {
   PR_REVIEW_NOTIFICATION_DEBOUNCE_MS,
+  PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS,
   consumePendingPrReviewActivity,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,
@@ -71,6 +75,8 @@ import {
   hasPrReviewNotificationThreadContext,
   migrateLegacyPrReviewNotificationRequest,
   resolvePrReviewNotificationRoute,
+  retrySupersededPrReviewAction,
+  schedulePrReviewNotificationJob,
   startPrReviewNotificationCycle,
 } from '../pr-review-notification';
 
@@ -101,6 +107,33 @@ const claim = {
   events: [baseInput.event],
 };
 
+it('defers rate-limited deliveries without consuming task deferral budget', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-22T12:00:00.000Z'));
+
+  await schedulePrReviewNotificationJob({
+    request: {
+      taskId: claim.taskId,
+      repository: claim.repository,
+      prNumber: claim.prNumber,
+      prUrl: claim.prUrl,
+      deferrals: 0,
+      deliveryIds: claim.deliveryIds,
+      leaseToken: claim.leaseToken,
+      events: [],
+    },
+    delayMs: 900_000,
+    countDeferral: false,
+  });
+
+  expect(mockDeferPrReviewDeliveries).toHaveBeenCalledWith(
+    { deliveryIds: claim.deliveryIds, leaseToken: claim.leaseToken },
+    new Date('2026-08-22T12:15:00.000Z'),
+    { incrementDeferrals: false },
+  );
+  vi.useRealTimers();
+});
+
 describe('durable PR review notification ownership', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -110,6 +143,7 @@ describe('durable PR review notification ownership', () => {
     mockRecordPrReviewCycleState.mockResolvedValue(undefined);
     mockClaimDuePrReviewDeliveries.mockResolvedValue([]);
     mockReleasePrReviewDeliveries.mockResolvedValue(undefined);
+    mockReleaseSupersededCanonicalPrReviewAction.mockResolvedValue(false);
     mockRedisLrange.mockResolvedValue([]);
     mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T123' }]);
     mockRedisGet.mockResolvedValue(null);
@@ -120,11 +154,12 @@ describe('durable PR review notification ownership', () => {
     vi.useRealTimers();
   });
 
-  it('commits the normalized event without creating Redis ownership state', async () => {
+  it('keeps human review feedback on the one-minute debounce', async () => {
     await expect(enqueuePrReviewNotification(baseInput)).resolves.toEqual({
       notifiedTaskCount: 1,
     });
 
+    expect(PR_REVIEW_NOTIFICATION_DEBOUNCE_MS).toBe(1 * 60 * 1000);
     expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         repository: 'owner/repo',
@@ -133,6 +168,114 @@ describe('durable PR review notification ownership', () => {
       }),
     );
     expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('releases and immediately redispatches a superseded action delivery', async () => {
+    const deliveryId = '11111111-1111-4111-8111-111111111111';
+    mockReleaseSupersededCanonicalPrReviewAction.mockResolvedValue(true);
+    mockClaimDuePrReviewDeliveries.mockResolvedValue([claim]);
+
+    await expect(
+      retrySupersededPrReviewAction({
+        taskId: claim.taskId,
+        repository: claim.repository,
+        prNumber: claim.prNumber,
+        prUrl: claim.prUrl,
+        deferrals: 0,
+        ownershipVersion: 'canonical',
+        deliveryId,
+        deliveryIds: [deliveryId],
+        leaseToken: claim.leaseToken,
+        events: [],
+      }),
+    ).resolves.toBe(true);
+
+    expect(mockReleaseSupersededCanonicalPrReviewAction).toHaveBeenCalledWith({
+      deliveryId,
+      leaseToken: claim.leaseToken,
+    });
+    expect(mockClaimDuePrReviewDeliveries).toHaveBeenCalled();
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'notify-pr-review-activity',
+      expect.objectContaining({ taskId: claim.taskId }),
+    );
+  });
+
+  it('delays provisional Roomote inline findings by five minutes', async () => {
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_comment',
+        providerEventId: 'github-review-comment:roomote-inline',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+        batchId: 'cycle-1',
+        observedAt: 100,
+      },
+    });
+
+    expect(PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS).toBe(5 * 60 * 1000);
+    expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchKind: 'roomote',
+        batchId: 'cycle-1',
+        dueAt: new Date(1_000 + PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS),
+        isSummary: false,
+      }),
+    );
+  });
+
+  it('promotes completed Roomote review summaries immediately', async () => {
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_summary',
+        providerEventId: 'github-review-summary:cycle-1',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+        batchId: 'cycle-1',
+        observedAt: 100,
+      },
+    });
+
+    expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchKind: 'roomote',
+        batchId: 'cycle-1',
+        dueAt: new Date(1_000),
+        isSummary: true,
+      }),
+    );
+    expect(mockClaimDuePrReviewDeliveries).toHaveBeenCalled();
+  });
+
+  it('debounces CI failures through the same durable notification batch', async () => {
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'ci_failure',
+        providerEventId: 'github-check-run:9001',
+        authorLogin: 'github-actions',
+        checkName: 'CI / Tests',
+        reviewHeadSha: 'abc123',
+        url: 'https://github.com/owner/repo/actions/runs/7/job/8',
+        observedAt: 100,
+      },
+    });
+
+    expect(mockPersistPrReviewEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batchKind: 'human',
+        batchId: null,
+        dueAt: new Date(1_000 + PR_REVIEW_NOTIFICATION_DEBOUNCE_MS),
+        event: expect.objectContaining({
+          kind: 'ci_failure',
+          checkName: 'CI / Tests',
+        }),
+      }),
+    );
   });
 
   it('groups one external automated reviewer under a stable database batch', async () => {
@@ -370,7 +513,7 @@ describe('PR review notification routing', () => {
 });
 
 describe('formatPrReviewActivityMessage', () => {
-  it('converts markdown links for Slack and appends a missing PR link', () => {
+  it('keeps clean markdown links for Slack and appends a missing PR link', () => {
     expect(
       formatPrReviewActivityMessage({
         repository: 'owner/repo',
@@ -381,7 +524,7 @@ describe('formatPrReviewActivityMessage', () => {
           'Alice commented on [the review](https://github.com/owner/repo/pull/42#discussion_r1).',
       }),
     ).toBe(
-      'Alice commented on <https://github.com/owner/repo/pull/42#discussion_r1|the review>.',
+      'Alice commented on [the review](https://github.com/owner/repo/pull/42#discussion_r1).',
     );
     expect(
       formatPrReviewActivityMessage({
@@ -392,7 +535,22 @@ describe('formatPrReviewActivityMessage', () => {
         summary: 'Alice requested changes.',
       }),
     ).toBe(
-      'Alice requested changes.\n<https://github.com/owner/repo/pull/42|owner/repo#42>',
+      'Alice requested changes.\n[owner/repo#42](https://github.com/owner/repo/pull/42)',
+    );
+  });
+
+  it('removes angle brackets wrapped around markdown link targets', () => {
+    expect(
+      formatPrReviewActivityMessage({
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        provider: 'slack',
+        summary:
+          'Review feedback on [PR #42](<https://github.com/owner/repo/pull/42>): update [the test](<https://github.com/owner/repo/pull/42#discussion_r1>).',
+      }),
+    ).toBe(
+      'Review feedback on [PR #42](https://github.com/owner/repo/pull/42): update [the test](https://github.com/owner/repo/pull/42#discussion_r1).',
     );
   });
 });

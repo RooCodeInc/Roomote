@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
 
 import {
   createCustomAutomation,
@@ -20,6 +20,23 @@ import {
 } from '../../server';
 
 describe('custom automations helpers', () => {
+  it('persists Fast as an execution mode without an environment', async () => {
+    const created = await createCustomAutomation({
+      name: `Fast digest ${Date.now()}`,
+      prompt: 'Summarize actionable work using Fast.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: FAST_EXECUTION,
+      target: {},
+    });
+
+    expect(created.executionMode).toBe('fast');
+    expect(created.environmentId).toBeNull();
+    expect(created.allRepositories).toBe(false);
+
+    await deleteCustomAutomation(created.id);
+  });
+
   it('persists an explicit all-repositories workspace target', async () => {
     const created = await createCustomAutomation({
       name: `Org-wide digest ${Date.now()}`,
@@ -152,7 +169,7 @@ describe('custom automations helpers', () => {
     await deleteCustomAutomation(created.id);
   });
 
-  it('persists a model override and rejects malformed model ids', async () => {
+  it('persists model and effort overrides and rejects invalid combinations', async () => {
     const [environment] = await db
       .insert(environments)
       .values({
@@ -167,10 +184,12 @@ describe('custom automations helpers', () => {
       enabled: true,
       scheduleMode: 'daily',
       model: 'anthropic/claude-sonnet-5',
+      reasoningEffort: 'high',
       environmentId: environment!.id,
       target: {},
     });
     expect(created.model).toBe('anthropic/claude-sonnet-5');
+    expect(created.reasoningEffort).toBe('high');
 
     const cleared = await updateCustomAutomation(created.id, {
       name: created.name,
@@ -178,10 +197,24 @@ describe('custom automations helpers', () => {
       enabled: true,
       scheduleMode: 'daily',
       model: null,
+      reasoningEffort: null,
       environmentId: environment!.id,
       target: {},
     });
     expect(cleared.model).toBeNull();
+    expect(cleared.reasoningEffort).toBeNull();
+
+    await expect(
+      updateCustomAutomation(created.id, {
+        name: created.name,
+        prompt: created.prompt,
+        enabled: true,
+        scheduleMode: 'daily',
+        reasoningEffort: 'medium',
+        environmentId: environment!.id,
+        target: {},
+      }),
+    ).rejects.toThrow('requires a model override');
 
     await expect(
       updateCustomAutomation(created.id, {

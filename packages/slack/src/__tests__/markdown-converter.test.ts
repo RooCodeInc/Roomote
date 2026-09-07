@@ -68,9 +68,27 @@ describe('convertMarkdownLinksToSlack', () => {
 
 describe('convertMarkdownToSlack', () => {
   it('converts bold markdown to Slack bold', () => {
-    // Note: the converter first reduces **text** → *text*, then the italic
-    // regex converts *text* → _text_. This is existing behavior.
-    expect(convertMarkdownToSlack('**hello**')).toBe('_hello_');
+    expect(convertMarkdownToSlack('**hello**')).toBe('*hello*');
+  });
+
+  it('leaves markdown-like syntax inside code unchanged', () => {
+    expect(
+      convertMarkdownToSlack(
+        '**outside** `**inline** [link](https://example.com)`\n```ts\nconst value = "**fenced**";\n```',
+      ),
+    ).toBe(
+      '*outside* `**inline** [link](https://example.com)`\n```ts\nconst value = "**fenced**";\n```',
+    );
+  });
+
+  it('protects variable-length inline code and tilde fences', () => {
+    expect(
+      convertMarkdownToSlack(
+        '**outside** ``code with ` and **bold**``\n~~~md\n[link](https://example.com) **bold**\n~~~',
+      ),
+    ).toBe(
+      '*outside* ``code with ` and **bold**``\n~~~md\n[link](https://example.com) **bold**\n~~~',
+    );
   });
 
   it('converts strikethrough markdown to Slack strikethrough', () => {

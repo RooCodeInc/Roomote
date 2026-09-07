@@ -34,6 +34,24 @@ describe('task creator filter helpers', () => {
     ).toBeNull();
   });
 
+  it('round-trips custom automation actor filter values', () => {
+    const value = buildCreatorFilterValue({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: 'custom:automation-1',
+    });
+
+    expect(value).toBe(
+      `automation:custom_automation:${encodeURIComponent('custom:automation-1')}`,
+    );
+    expect(parseCreatorFilterValue(value ?? '')).toEqual({
+      kind: 'automation',
+      key: 'custom_automation',
+      externalId: 'custom:automation-1',
+    });
+  });
+
   it('uses the plain user id for linked human initiators', () => {
     const value = buildCreatorFilterValue({
       initiatorKind: 'user',
@@ -120,6 +138,15 @@ describe('task creator filter helpers', () => {
     expect(parseCreatorFilterValue('automation:')).toEqual({
       kind: 'user',
       userId: 'automation:',
+    });
+  });
+
+  it('falls back to the opaque user path for malformed automation actors', () => {
+    expect(
+      parseCreatorFilterValue('automation:custom_automation:%E0%A4%A'),
+    ).toEqual({
+      kind: 'user',
+      userId: 'automation:custom_automation:%E0%A4%A',
     });
   });
 });

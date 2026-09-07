@@ -41,6 +41,7 @@ vi.mock('next/headers', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   recordLicenseUsageObservation: vi.fn(async () => undefined),
+  isBrainEnabled: vi.fn(async () => false),
   db: {
     query: {
       deploymentSettings: {
@@ -106,6 +107,7 @@ vi.mock('./env', () => ({
   Env: {
     R_ALLOWED_EMAILS: '',
   },
+  isBrainConfigured: () => false,
   isRoomoteCloudEnabled: () => false,
 }));
 
@@ -172,6 +174,22 @@ describe('authorize', () => {
     mockUpdateWhere.mockResolvedValue([]);
   });
 
+  it('does not consume rolling renewal during server rendering', async () => {
+    await authorize();
+    expect(mockGetSession).toHaveBeenCalledWith({
+      headers: expect.any(Headers),
+      query: { disableRefresh: true },
+    });
+  });
+
+  it('allows cookie-writable route handlers to renew sessions', async () => {
+    await authorize({ allowSessionRefresh: true });
+    expect(mockGetSession).toHaveBeenCalledWith({
+      headers: expect.any(Headers),
+      query: { disableRefresh: false },
+    });
+  });
+
   it('exposes an existing cookie acceptance timestamp', async () => {
     mockUsersFindFirst.mockResolvedValue({
       id: 'user-1',
@@ -206,17 +224,6 @@ describe('authorize', () => {
 
     expect(result.success).toBe(true);
     expect(mockUpdateSet).not.toHaveBeenCalled();
-  });
-
-  it('hydrates an empty feature flag map from stale deployment metadata', async () => {
-    mockDeploymentFindFirst.mockResolvedValue({
-      metadata: { suggestion_routing: true },
-    });
-
-    const result = await authorize();
-
-    expect(result.success).toBe(true);
-    if (result.success) expect(result.featureFlags).toEqual({});
   });
 
   it('keeps an unchanged member with incomplete onboarding read-only', async () => {

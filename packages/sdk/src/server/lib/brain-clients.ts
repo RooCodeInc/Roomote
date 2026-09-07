@@ -1,6 +1,6 @@
 /**
  * Brain (gbrain) client provisioning and access-token minting over
- * gbrain's admin HTTP API. Verified against gbrain 0.45.10.0:
+ * gbrain's admin HTTP API. Verified against gbrain 0.46.12.3:
  *
  * - POST /admin/login {token} -> Set-Cookie gbrain_admin (bootstrap token is
  *   exchanged for a cookie session; the token itself is never persisted).
@@ -15,9 +15,17 @@
 
 import { readFileSync } from 'node:fs';
 
-import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  isBrainEnabled,
+  isNull,
+  mcpConnections,
+  resetBrainIngestionState,
+} from '@roomote/db/server';
 import { decrypt, encrypt } from '@roomote/db/encryption';
-import { Env, isBrainConfigured } from '@roomote/env';
+import { Env } from '@roomote/env';
 import {
   BRAIN_MCP_ID,
   isMcpConnectionGbrainConfig,
@@ -33,11 +41,13 @@ function normalizeBaseUrl(url: string): string {
 async function adminLogin(
   baseUrl: string,
   adminToken: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const response = await fetch(`${normalizeBaseUrl(baseUrl)}/admin/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token: adminToken }),
+    ...(signal ? { signal } : {}),
   });
 
   if (!response.ok) {
@@ -99,11 +109,13 @@ async function registerClient(
 export type ProvisionedGbrainClients = {
   agent: { clientId: string; clientSecret: string };
   ingest: { clientId: string; clientSecret: string };
+  maintenance: { clientId: string; clientSecret: string };
 };
 
 /**
- * Register the two Roomote credential classes against a gbrain server:
- * a read-only agent client and a write-capable ingest client. The admin
+ * Register Roomote's three credential classes against a gbrain server:
+ * a read-only agent client, a write-capable ingest client, and an
+ * admin-scoped maintenance client. The admin
  * bootstrap token is used transiently for the session and never stored.
  * Previously provisioned clients (when re-connecting) should be revoked by
  * the caller via revokeGbrainClient, best-effort.
@@ -121,8 +133,14 @@ export async function provisionGbrainClients(
     'roomote-ingest',
     'read write',
   );
+  const maintenance = await registerClient(
+    baseUrl,
+    cookie,
+    'roomote-maintenance',
+    'admin',
+  );
 
-  return { agent, ingest };
+  return { agent, ingest, maintenance };
 }
 
 /** Best-effort revocation of a previously provisioned client. */
@@ -218,9 +236,13 @@ export async function mintGbrainAccessToken(
  * hatch: static tokens win over provisioning when present.
  */
 export async function resolveBrainConnection(
-  role: 'agent' | 'ingest',
+  role: 'agent' | 'ingest' | 'maintenance',
 ): Promise<{ baseUrl: string; token: string } | null> {
-  if (!isBrainConfigured(Env)) {
+  // The Settings toggle (with its legacy R_BRAIN_* key fallback) is the one
+  // activation signal: the gateway token and R_GBRAIN_URL are
+  // template-generated plumbing on some platforms, so neither can carry the
+  // operator's intent to turn the Brain on.
+  if (!(await isBrainEnabled())) {
     return null;
   }
 
@@ -230,8 +252,11 @@ export async function resolveBrainConnection(
     return null;
   }
 
-  const staticToken =
-    role === 'agent' ? Env.R_GBRAIN_AGENT_TOKEN : Env.R_GBRAIN_INGEST_TOKEN;
+  const staticToken = {
+    agent: Env.R_GBRAIN_AGENT_TOKEN,
+    ingest: Env.R_GBRAIN_INGEST_TOKEN,
+    maintenance: Env.R_GBRAIN_MAINTENANCE_TOKEN,
+  }[role];
 
   if (staticToken) {
     return { baseUrl, token: staticToken };
@@ -259,12 +284,16 @@ export async function resolveBrainConnection(
   const mint = async (
     resolved: McpConnectionGbrainConfig,
   ): Promise<{ baseUrl: string; token: string }> => {
-    const clientId =
-      role === 'agent' ? resolved.agentClientId : resolved.ingestClientId;
-    const encryptedSecret =
-      role === 'agent'
-        ? resolved.encryptedAgentClientSecret
-        : resolved.encryptedIngestClientSecret;
+    const clientId = {
+      agent: resolved.agentClientId,
+      ingest: resolved.ingestClientId,
+      maintenance: resolved.maintenanceClientId,
+    }[role];
+    const encryptedSecret = {
+      agent: resolved.encryptedAgentClientSecret,
+      ingest: resolved.encryptedIngestClientSecret,
+      maintenance: resolved.encryptedMaintenanceClientSecret,
+    }[role];
 
     return {
       baseUrl: resolved.url,
@@ -356,6 +385,10 @@ async function provisionAndStoreBrainClients(
       encryptedAgentClientSecret: encrypt(clients.agent.clientSecret),
       ingestClientId: clients.ingest.clientId,
       encryptedIngestClientSecret: encrypt(clients.ingest.clientSecret),
+      maintenanceClientId: clients.maintenance.clientId,
+      encryptedMaintenanceClientSecret: encrypt(
+        clients.maintenance.clientSecret,
+      ),
     };
 
     await db
@@ -382,6 +415,12 @@ async function provisionAndStoreBrainClients(
         },
       });
 
+    // Provisioning is also how Roomote detects a recreated gbrain database:
+    // the old OAuth clients disappear with the corpus. Its ingestion
+    // checkpoints live in Roomote's Postgres database, so reset them here or
+    // the fresh Brain would incorrectly skip completed backfills.
+    await resetBrainIngestionState(db);
+
     console.log('[brain] provisioned scoped clients for the Brain');
 
     return authConfig;
@@ -391,6 +430,118 @@ async function provisionAndStoreBrainClients(
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    return null;
+  }
+}
+
+// ─── Admin stats ────────────────────────────────────────────────────────────
+
+export type BrainAdminStats = {
+  version: string | null;
+  pageCount: number | null;
+  chunkCount: number | null;
+  embeddedCount: number | null;
+};
+
+/**
+ * A settings page must not hold a request open on an unresponsive admin API;
+ * the stats consumer degrades to the sampled/inferred values on its own.
+ */
+const BRAIN_STATS_TIMEOUT_MS = 4_000;
+
+/**
+ * Same rationale as the corpus sample's cache: one settings view asks more
+ * than once, and the answer only moves as fast as ingestion does. Failures
+ * are cached briefly so a Brain coming back is noticed promptly.
+ */
+const BRAIN_STATS_CACHE_TTL_MS = 30_000;
+const BRAIN_STATS_FAILURE_CACHE_TTL_MS = 5_000;
+
+let brainStatsCache: {
+  value: BrainAdminStats | null;
+  expiresAtMs: number;
+} | null = null;
+
+/** Drop the cached stats, so the next call re-reads the admin API. */
+export function resetBrainStatsCache(): void {
+  brainStatsCache = null;
+}
+
+function toCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+/**
+ * gbrain's own census of the corpus, from `/admin/api/full-stats`: the exact
+ * page count (the MCP listing answers a bounded recency window, never a
+ * total) and embedding coverage (`embedded_count` vs `chunk_count`), which
+ * is the direct measurement of whether semantic recall actually works —
+ * unlike inferring it from provider-key presence. Returns null when the
+ * deployment holds no admin token or the Brain does not answer; callers keep
+ * their inferred fallbacks.
+ */
+export async function readBrainStats(): Promise<BrainAdminStats | null> {
+  const cached = brainStatsCache;
+
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return cached.value;
+  }
+
+  const value = await fetchBrainStats();
+
+  brainStatsCache = {
+    value,
+    expiresAtMs:
+      Date.now() +
+      (value ? BRAIN_STATS_CACHE_TTL_MS : BRAIN_STATS_FAILURE_CACHE_TTL_MS),
+  };
+
+  return value;
+}
+
+async function fetchBrainStats(): Promise<BrainAdminStats | null> {
+  const baseUrl = Env.R_GBRAIN_URL;
+  const adminToken = readGbrainAdminToken();
+
+  if (!baseUrl || !adminToken) {
+    return null;
+  }
+
+  try {
+    // One deadline across the login and the stats read: a Brain that accepts
+    // the connection but hangs the login must not hold brain.get beyond the
+    // stats budget — degrading to null is the whole contract here.
+    const deadline = AbortSignal.timeout(BRAIN_STATS_TIMEOUT_MS);
+    const cookie = await adminLogin(baseUrl, adminToken, deadline);
+    const response = await fetch(
+      `${normalizeBaseUrl(baseUrl)}/admin/api/full-stats`,
+      {
+        headers: { cookie },
+        signal: deadline,
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`full-stats answered ${response.status}`);
+    }
+
+    const stats = (await response.json()) as Record<string, unknown>;
+
+    return {
+      version: typeof stats.version === 'string' ? stats.version : null,
+      pageCount: toCount(stats.page_count),
+      chunkCount: toCount(stats.chunk_count),
+      embeddedCount: toCount(stats.embedded_count),
+    };
+  } catch (error) {
+    console.warn(
+      `[brain] admin stats read failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
     return null;
   }
 }

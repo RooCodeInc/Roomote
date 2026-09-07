@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
+import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
 
 const {
   answerCallbackMock,
@@ -21,7 +22,13 @@ const {
   releaseWorkItemClaimMock,
   resolveTelegramSenderUserIdMock,
   resolveTelegramWorkspaceMock,
-  startNewTelegramTaskMock,
+  launchTelegramTaskMock,
+  launchPinnedMock,
+  getSessionForTaskMock,
+  continueFastAgentSurfaceReplyMock,
+  getOrCreateFastAgentSessionMock,
+  fastAbortMock,
+  resolveSuggestionFastConversationMock,
 } = vi.hoisted(() => ({
   answerCallbackMock: vi.fn(),
   apiLoggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -34,7 +41,27 @@ const {
   releaseWorkItemClaimMock: vi.fn(),
   resolveTelegramSenderUserIdMock: vi.fn(),
   resolveTelegramWorkspaceMock: vi.fn(),
-  startNewTelegramTaskMock: vi.fn(),
+  launchTelegramTaskMock: vi.fn(),
+  launchPinnedMock: vi.fn(),
+  getSessionForTaskMock: vi.fn(),
+  continueFastAgentSurfaceReplyMock: vi.fn(),
+  getOrCreateFastAgentSessionMock: vi.fn(),
+  fastAbortMock: vi.fn(),
+  resolveSuggestionFastConversationMock: vi.fn(),
+}));
+
+vi.mock('../../tasks/suggestion-launch.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof suggestionLaunch>()),
+  resolveSuggestionFastConversation: resolveSuggestionFastConversationMock,
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  continueFastAgentSurfaceReply: continueFastAgentSurfaceReplyMock,
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  getOrCreateFastAgentSession: getOrCreateFastAgentSessionMock,
+  launchPinnedFastSessionTask: launchPinnedMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -56,6 +83,7 @@ vi.mock('@roomote/db/server', () => ({
   db: { query: { taskRuns: { findFirst: vi.fn() } } },
   finalizeWorkItemLaunched: finalizeWorkItemLaunchedMock,
   releaseWorkItemClaim: releaseWorkItemClaimMock,
+  getSessionForTask: getSessionForTaskMock,
 }));
 
 vi.mock('../../../logging.js', () => ({ apiLogger: apiLoggerMock }));
@@ -81,10 +109,7 @@ vi.mock('../replies.js', () => ({
   answerTelegramCallbackQueryBestEffort: answerCallbackMock,
   clearTelegramMessageButtonsBestEffort: vi.fn(),
   postTelegramMessageBestEffort: postTelegramMessageBestEffortMock,
-}));
-
-vi.mock('../routing-confirmation.js', () => ({
-  handleTelegramRoutingCallback: vi.fn(),
+  telegramPrivateTopicsEnabledBestEffort: vi.fn(async () => true),
 }));
 
 vi.mock('../setup-suggestions.js', () => ({
@@ -93,12 +118,14 @@ vi.mock('../setup-suggestions.js', () => ({
     data.startsWith('idea:') ? data.slice('idea:'.length) : null,
 }));
 
-vi.mock('../task-orchestration.js', () => ({
-  startNewTelegramTask: startNewTelegramTaskMock,
-}));
-
 vi.mock('../task-launch.js', () => ({
+  launchTelegramTask: launchTelegramTaskMock,
   resolveTelegramWorkspace: resolveTelegramWorkspaceMock,
+  shouldCreateTelegramTaskTopic: ({
+    forceNewTopic,
+  }: {
+    forceNewTopic?: boolean;
+  }) => Boolean(forceNewTopic),
 }));
 
 import {
@@ -131,7 +158,9 @@ beforeEach(() => {
     title: 'Fix the flaky test',
     brief: 'The retry loop never terminates.',
     investigationContext: null,
-    targetRepositoryFullName: null,
+    targetRepositoryFullName: '__all_repositories__',
+    launchTarget: '__all_repositories__',
+    sourceTaskId: 'scan-task-1',
     launchClaimedAt: CLAIMED_AT,
   });
   findCurrentThreadSuggestionIdByMessageMock.mockResolvedValue(WORK_ITEM_ID);
@@ -142,11 +171,42 @@ beforeEach(() => {
       title: 'Fix the flaky test',
       brief: 'The retry loop never terminates.',
       investigationContext: null,
-      targetRepositoryFullName: null,
+      targetRepositoryFullName: '__all_repositories__',
+      launchTarget: '__all_repositories__',
+      sourceTaskId: 'scan-task-1',
       launchClaimedAt: CLAIMED_AT,
     },
   });
+  getSessionForTaskMock.mockResolvedValue({ id: 'session-origin' });
   finalizeWorkItemLaunchedMock.mockResolvedValue(true);
+  launchTelegramTaskMock.mockResolvedValue({ id: 7, taskId: 'task-1' });
+  // The pinned-launch primitive runs the surface launcher inside a Session.
+  launchPinnedMock.mockImplementation(
+    async (input: {
+      launchId: string;
+      conversation: unknown;
+      launch: (context: {
+        parent: { sessionId: string; conversation: unknown };
+        launchIdempotencyKey: string;
+        postKickoff: () => Promise<void>;
+      }) => Promise<
+        { success: true; taskId: string } | { success: false; error: string }
+      >;
+    }) => {
+      const result = await input.launch({
+        parent: { sessionId: 'fast-1', conversation: input.conversation },
+        launchIdempotencyKey: `pinned-launch:${input.launchId}`,
+        postKickoff: async () => {},
+      });
+      if (!result.success) throw new Error(result.error);
+      return {
+        sessionId: 'session-1',
+        fastConversationId: 'fast-1',
+        taskId: result.taskId,
+        runId: 7,
+      };
+    },
+  );
   releaseWorkItemClaimMock.mockResolvedValue(true);
   cancelOrphanedWorkItemRunBestEffortMock.mockResolvedValue(
     'orphaned run canceled',
@@ -156,6 +216,18 @@ beforeEach(() => {
     repoForPayload: 'acme/app',
     workspaceDisplayName: 'App',
   });
+  getOrCreateFastAgentSessionMock.mockResolvedValue({ id: 'session-1' });
+  resolveSuggestionFastConversationMock.mockImplementation(
+    async ({ conversation }) => conversation,
+  );
+  fastAbortMock.mockResolvedValue(undefined);
+  // Admission fires before the turn runs; the default turn then completes.
+  continueFastAgentSurfaceReplyMock.mockImplementation(
+    async ({ onAccepted }: { onAccepted?: (abort: unknown) => void }) => {
+      onAccepted?.(fastAbortMock);
+      return true;
+    },
+  );
 });
 
 describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
@@ -178,11 +250,6 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
   });
 
   it('launches a reaction against the exact tracked suggestion message with linked-user attribution', async () => {
-    startNewTelegramTaskMock.mockResolvedValue({
-      status: 'started',
-      launchResult: { id: 7, taskId: 'task-1' },
-    });
-
     const handled = await handleTelegramSuggestionReaction({
       chat: { id: 555, type: 'private' },
       message_id: 100,
@@ -198,33 +265,189 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
       channelId: '555',
       messageId: '100',
     });
-    expect(startNewTelegramTaskMock).toHaveBeenCalledWith(
+    expect(launchTelegramTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         launchOwnerUserId: 'user-1',
         queuedMessage: expect.objectContaining({
+          text: 'Fix the flaky test\n\nThe retry loop never terminates.',
           user: 'Matt',
           userId: 'user-1',
         }),
+        fastAgentParent: expect.objectContaining({ sessionId: 'fast-1' }),
       }),
     );
     expect(answerCallbackMock).not.toHaveBeenCalled();
   });
 
   it('starts a suggestion in a fresh topic while preserving its source topic for fallback', async () => {
-    startNewTelegramTaskMock.mockResolvedValue({
-      status: 'started',
-      launchResult: { id: 7, taskId: 'task-1' },
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
+    claimTelegramSuggestionLaunchMock.mockResolvedValueOnce({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: '__all_repositories__',
+      launchTarget: '__all_repositories__',
+      sourceTaskId: null,
+      originSessionId: 'session-card',
+      launchClaimedAt: CLAIMED_AT,
     });
-
     await handleTelegramCallbackQuery(buildSuggestionQuery(44));
 
-    expect(startNewTelegramTaskMock).toHaveBeenCalledWith(
+    expect(resolveOrigin).toHaveBeenCalledWith(null, 'session-card');
+    expect(launchPinnedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ originSessionId: 'session-origin' }),
+    );
+
+    expect(launchTelegramTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        forceNewTopic: true,
+        createTopicForTask: true,
         queuedMessage: expect.objectContaining({ threadTs: '44' }),
         metadata: expect.objectContaining({ communicationThreadId: '44' }),
       }),
     );
+  });
+
+  it('keeps the taskless router card origin when dispatching to Fast', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      usesRouterLaunch: true,
+      sourceTaskId: null,
+      originSessionId: 'session-card',
+      launchClaimedAt: CLAIMED_AT,
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(resolveOrigin).toHaveBeenCalledWith(null, 'session-card');
+    expect(resolveSuggestionFastConversationMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      originSessionId: 'session-origin',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '555',
+        conversationId: '555:user:user-1',
+        replyTarget: { channelId: '555' },
+      },
+    });
+    expect(continueFastAgentSurfaceReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        question: expect.stringContaining('Fix the flaky test'),
+      }),
+    );
+    expect(launchTelegramTaskMock).not.toHaveBeenCalled();
+    expect(launchPinnedMock).not.toHaveBeenCalled();
+    expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: WORK_ITEM_ID, taskId: null, claimedAt: CLAIMED_AT },
+    );
+  });
+
+  it('admits the Fast turn on the original conversation and canonical reply target, not the clicked topic', async () => {
+    vi.spyOn(
+      suggestionLaunch,
+      'resolveSuggestionOriginSessionId',
+    ).mockResolvedValueOnce('session-origin');
+    claimTelegramSuggestionLaunchMock.mockResolvedValueOnce({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      targetRepositoryFullName: '__fast__',
+      launchTarget: '__fast__',
+      sourceTaskId: null,
+      originSessionId: 'session-origin',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    const canonicalConversation = {
+      surface: 'telegram' as const,
+      workspaceId: '555',
+      conversationId: '11:user:report-owner',
+      replyTarget: { channelId: '555', threadId: '11' },
+    };
+    resolveSuggestionFastConversationMock.mockResolvedValueOnce(
+      canonicalConversation,
+    );
+    getOrCreateFastAgentSessionMock.mockImplementationOnce(async (input) => {
+      expect(input).toEqual({
+        userId: 'user-1',
+        conversation: canonicalConversation,
+      });
+      return { id: 'fast-origin', conversation: canonicalConversation };
+    });
+    continueFastAgentSurfaceReplyMock.mockImplementationOnce(
+      ({ sessionId, userId, onAccepted }) => {
+        expect(sessionId).toBe('fast-origin');
+        expect(userId).toBe('user-1');
+        expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
+        onAccepted(fastAbortMock);
+        return new Promise<boolean>(() => {});
+      },
+    );
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery(44));
+
+    expect(resolveSuggestionFastConversationMock).toHaveBeenCalledWith({
+      userId: 'user-1',
+      originSessionId: 'session-origin',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '555',
+        conversationId: '44:user:user-1',
+        replyTarget: { channelId: '555', threadId: '44' },
+      },
+    });
+    expect(continueFastAgentSurfaceReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'fast-origin',
+        userId: 'user-1',
+        currentMessageId: '100',
+      }),
+    );
+    expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: WORK_ITEM_ID, taskId: null, claimedAt: CLAIMED_AT },
+    );
+    expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
+    expect(fastAbortMock).not.toHaveBeenCalled();
+    expect(launchPinnedMock).not.toHaveBeenCalled();
+    expect(launchTelegramTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the fenced claim if taskless origin resolution fails before Fast dispatch', async () => {
+    vi.spyOn(
+      suggestionLaunch,
+      'resolveSuggestionOriginSessionId',
+    ).mockRejectedValueOnce(new Error('Origin unavailable'));
+    claimTelegramSuggestionLaunchMock.mockResolvedValueOnce({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      usesRouterLaunch: true,
+      sourceTaskId: null,
+      originSessionId: 'session-origin',
+      launchClaimedAt: CLAIMED_AT,
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery(44));
+
+    expect(continueFastAgentSurfaceReplyMock).not.toHaveBeenCalled();
+    expect(resolveSuggestionFastConversationMock).not.toHaveBeenCalled();
+    expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledTimes(1);
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
+      id: WORK_ITEM_ID,
+      claimedAt: CLAIMED_AT,
+    });
   });
 
   it('launches directly in the environment saved on the suggestion', async () => {
@@ -237,10 +460,6 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
       targetEnvironmentId: 'env-1',
       launchClaimedAt: CLAIMED_AT,
     });
-    startNewTelegramTaskMock.mockResolvedValue({
-      status: 'started',
-      launchResult: { id: 7, taskId: 'task-1' },
-    });
 
     await handleTelegramCallbackQuery(buildSuggestionQuery());
 
@@ -249,19 +468,224 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
       id: 'env-1',
       name: 'env-1',
     });
-    expect(startNewTelegramTaskMock).toHaveBeenCalledWith(
+    expect(launchTelegramTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        workspaceOverride: expect.objectContaining({ environmentId: 'env-1' }),
+        workspace: expect.objectContaining({ environmentId: 'env-1' }),
       }),
     );
   });
 
-  it('finalizes the work item with the task id and the claim token on success', async () => {
-    startNewTelegramTaskMock.mockResolvedValue({
-      status: 'started',
-      launchResult: { id: 7, taskId: 'task-1' },
+  it('keeps a bare-repository suggestion on its saved repository', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: null,
+      launchClaimedAt: CLAIMED_AT,
     });
 
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(resolveTelegramWorkspaceMock).not.toHaveBeenCalled();
+    expect(launchTelegramTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: {
+          repoForPayload: 'acme/app',
+          workspaceDisplayName: 'acme/app',
+        },
+      }),
+    );
+    expect(continueFastAgentSurfaceReplyMock).not.toHaveBeenCalled();
+  });
+
+  it('launches an all-repositories suggestion without resolving an environment', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: '__all_repositories__',
+      launchTarget: '__all_repositories__',
+      launchClaimedAt: CLAIMED_AT,
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(resolveTelegramWorkspaceMock).not.toHaveBeenCalled();
+    expect(launchTelegramTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace: expect.objectContaining({
+          repoForPayload: '__all_repositories__',
+        }),
+      }),
+    );
+  });
+
+  it('starts a Fast-targeted suggestion without launching a coding task', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: '__fast__',
+      launchTarget: '__fast__',
+      launchClaimedAt: CLAIMED_AT,
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(getOrCreateFastAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+    );
+    expect(continueFastAgentSurfaceReplyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        question: expect.stringContaining('Fix the flaky test'),
+      }),
+    );
+    expect(launchTelegramTaskMock).not.toHaveBeenCalled();
+    expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: WORK_ITEM_ID, taskId: null, claimedAt: CLAIMED_AT },
+    );
+  });
+
+  it('finalizes a Fast-targeted suggestion on admission without waiting for the turn to finish', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: '__fast__',
+      launchTarget: '__fast__',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    // The turn itself never settles; the launcher must not depend on it.
+    continueFastAgentSurfaceReplyMock.mockImplementation(
+      ({ onAccepted }: { onAccepted?: (abort: unknown) => void }) => {
+        onAccepted?.(fastAbortMock);
+        return new Promise<boolean>(() => {});
+      },
+    );
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledWith(
+      expect.anything(),
+      { id: WORK_ITEM_ID, taskId: null, claimedAt: CLAIMED_AT },
+    );
+    expect(fastAbortMock).not.toHaveBeenCalled();
+  });
+
+  it('aborts the accepted Fast turn when finalize loses the fencing guard', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: '__fast__',
+      launchTarget: '__fast__',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    finalizeWorkItemLaunchedMock.mockResolvedValue(false);
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(fastAbortMock).toHaveBeenCalledTimes(1);
+    expect(cancelOrphanedWorkItemRunBestEffortMock).not.toHaveBeenCalled();
+    expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('was already started elsewhere'),
+      }),
+    );
+  });
+
+  it('posts the rejection reason and releases the claim when the Fast session refuses the suggestion', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: '__fast__',
+      launchTarget: '__fast__',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    continueFastAgentSurfaceReplyMock.mockImplementation(
+      async ({ onRejected }: { onRejected?: () => void }) => {
+        onRejected?.();
+        return false;
+      },
+    );
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
+      id: WORK_ITEM_ID,
+      claimedAt: CLAIMED_AT,
+    });
+    expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Could not start "Fix the flaky test"'),
+      }),
+    );
+  });
+
+  it('fails loudly instead of routing elsewhere when a legacy pinned environment no longer resolves', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: 'env-1',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    resolveTelegramWorkspaceMock.mockResolvedValue(null);
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(launchTelegramTaskMock).not.toHaveBeenCalled();
+    expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
+      id: WORK_ITEM_ID,
+      claimedAt: CLAIMED_AT,
+    });
+    expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Could not start'),
+      }),
+    );
+  });
+
+  it('fails loudly when an explicit environment target was deleted after the card was posted', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      // The environment FK cleared the column; the card still names it.
+      targetEnvironmentId: null,
+      launchTarget: 'env-1',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    resolveTelegramWorkspaceMock.mockResolvedValue(null);
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(resolveTelegramWorkspaceMock).toHaveBeenCalledWith({
+      type: 'environment',
+      id: 'env-1',
+      name: 'env-1',
+    });
+    expect(launchTelegramTaskMock).not.toHaveBeenCalled();
+    expect(releaseWorkItemClaimMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('finalizes the work item with the task id and the claim token on success', async () => {
     await handleTelegramCallbackQuery(buildSuggestionQuery());
 
     expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledTimes(1);
@@ -273,10 +697,6 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
   });
 
   it('best-effort cancels the orphaned run and logs loudly when finalize loses the fencing guard', async () => {
-    startNewTelegramTaskMock.mockResolvedValue({
-      status: 'started',
-      launchResult: { id: 7, taskId: 'task-1' },
-    });
     finalizeWorkItemLaunchedMock.mockResolvedValue(false);
 
     await handleTelegramCallbackQuery(buildSuggestionQuery());
@@ -302,10 +722,6 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
   });
 
   it('still logs the loud warn when the orphaned-run cancel reports a failure', async () => {
-    startNewTelegramTaskMock.mockResolvedValue({
-      status: 'started',
-      launchResult: { id: 7, taskId: 'task-1' },
-    });
     finalizeWorkItemLaunchedMock.mockResolvedValue(false);
     // The helper never throws; a failed cancel comes back as a note.
     cancelOrphanedWorkItemRunBestEffortMock.mockResolvedValue(
@@ -323,11 +739,6 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
   });
 
   it('does not cancel or post a corrective reply when finalize succeeds', async () => {
-    startNewTelegramTaskMock.mockResolvedValue({
-      status: 'started',
-      launchResult: { id: 7, taskId: 'task-1' },
-    });
-
     await handleTelegramCallbackQuery(buildSuggestionQuery());
 
     expect(cancelOrphanedWorkItemRunBestEffortMock).not.toHaveBeenCalled();
@@ -338,24 +749,8 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     );
   });
 
-  it('releases the claim with the token when routing replies inline (no task launched)', async () => {
-    startNewTelegramTaskMock.mockResolvedValue({
-      status: 'replied_inline',
-      routingDecision: { status: 'platform_answer' },
-    });
-
-    await handleTelegramCallbackQuery(buildSuggestionQuery());
-
-    expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
-    expect(releaseWorkItemClaimMock).toHaveBeenCalledTimes(1);
-    expect(releaseWorkItemClaimMock).toHaveBeenCalledWith(expect.anything(), {
-      id: WORK_ITEM_ID,
-      claimedAt: CLAIMED_AT,
-    });
-  });
-
   it('releases the claim with the token when the launch throws, so the suggestion is retryable immediately', async () => {
-    startNewTelegramTaskMock.mockRejectedValue(new Error('enqueue exploded'));
+    launchTelegramTaskMock.mockRejectedValue(new Error('enqueue exploded'));
 
     await handleTelegramCallbackQuery(buildSuggestionQuery());
 
@@ -374,7 +769,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
   });
 
   it('posts the canonical read-only message when the suggestion launch is policy-blocked', async () => {
-    startNewTelegramTaskMock.mockRejectedValue({
+    launchTelegramTaskMock.mockRejectedValue({
       code: 'deployment_read_only',
     });
 
@@ -386,7 +781,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     });
     expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'This deployment is read-only. New task launches are paused.',
+        text: 'New tasks are paused due to a billing issue. Please check billing.',
       }),
     );
   });
@@ -396,7 +791,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
 
     await handleTelegramCallbackQuery(buildSuggestionQuery());
 
-    expect(startNewTelegramTaskMock).not.toHaveBeenCalled();
+    expect(launchTelegramTaskMock).not.toHaveBeenCalled();
     expect(finalizeWorkItemLaunchedMock).not.toHaveBeenCalled();
     expect(releaseWorkItemClaimMock).not.toHaveBeenCalled();
   });

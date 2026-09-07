@@ -20,8 +20,14 @@ export async function getAutomationOnboardingStatusCommand(
   assertAdmin(auth);
 
   const settings = await getBackgroundAgentSettingsForDeployment();
+  const {
+    providerUsageLimitFrequency: _providerUsageLimitFrequency,
+    ...userConfiguredAutomationSettings
+  } = settings;
 
   return {
-    hasEnabledAutomations: hasEnabledBackgroundAgents(settings),
+    hasEnabledAutomations: hasEnabledBackgroundAgents(
+      userConfiguredAutomationSettings,
+    ),
   };
 }

@@ -4,6 +4,7 @@ import {
   appendSlackForwardedMessageContext,
   extractSlackForwardedMessageFiles,
   formatSlackAttachmentTitleContexts,
+  formatSlackAttachmentContext,
   formatSlackBlockLinkContext,
   formatSlackBlockTextContext,
   formatSlackForwardedMessageContext,
@@ -296,6 +297,22 @@ describe('forwarded-message-context', () => {
 
     expect(context).toBe(
       ['Slack block text:', 'Assigned to <@U123>', 'Priority high'].join('\n'),
+    );
+  });
+
+  it('formats attachment context independently from authored text', () => {
+    const context = formatSlackAttachmentContext('Review:', undefined, [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: 'Review: <https://new.example/2>',
+        },
+      },
+    ]);
+
+    expect(context).toBe(
+      ['Slack block text:', 'Review: https://new.example/2'].join('\n'),
     );
   });
 

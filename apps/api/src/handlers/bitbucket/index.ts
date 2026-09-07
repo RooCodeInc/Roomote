@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
+import { handleMergeAnnouncerPush } from '@roomote/sdk/server';
 
 import { apiLogger, logApiError } from '../../logging';
 import { recordWebhook } from '../github/recordWebhook';
+import { normalizeBitbucketPush } from '../merge-announcer-push';
 import { handleBitbucketComment } from './handleComment';
 import { handleBitbucketCommitStatus } from './handleCommitStatus';
 import { handleBitbucketPullRequest } from './handlePullRequest';
@@ -13,6 +15,7 @@ import {
   bitbucketCommitStatusWebhookSchema,
   bitbucketPullRequestCommentWebhookSchema,
   bitbucketPullRequestWebhookSchema,
+  bitbucketPushWebhookSchema,
 } from './types';
 import { verifyBitbucketWebhook } from './verifyWebhook';
 
@@ -34,6 +37,7 @@ const BITBUCKET_COMMIT_STATUS_EVENTS = new Set([
   'repo:commit_status_created',
   'repo:commit_status_updated',
 ]);
+const BITBUCKET_PUSH_EVENT = 'repo:push';
 
 function getBitbucketDeliveryId({
   body,
@@ -100,6 +104,30 @@ bitbucket.post('/', async (c) => {
         eventName,
         payload,
         () => handleBitbucketCommitStatus(payload),
+        { provider: 'bitbucket' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === BITBUCKET_PUSH_EVENT) {
+      const payload = bitbucketPushWebhookSchema.parse(parsedJson);
+
+      await recordWebhook(
+        deliveryId,
+        eventName,
+        payload,
+        async () => {
+          const results = await Promise.all(
+            normalizeBitbucketPush(payload).map((event) =>
+              handleMergeAnnouncerPush(event),
+            ),
+          );
+          return (
+            results.find((result) => result.status === 'error') ??
+            results[0] ?? { status: 'ok', message: 'No branch updates' }
+          );
+        },
         { provider: 'bitbucket' },
       );
 

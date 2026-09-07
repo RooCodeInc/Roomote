@@ -4,10 +4,12 @@ import {
   buildSourceControlTokenMetadata,
   filterRepositoryNamesForSourceControlProvider,
   getSourceControlTokenEnvVar,
+  getSourceControlProviderCapabilities,
   normalizeSourceControlProvider,
   parsePullRequestUrl,
   resolveSourceControlProviderFromPayload,
   stripCloneUrlUserInfo,
+  supportsPullRequestDraftTransition,
 } from '../source-control';
 
 describe('source control provider helpers', () => {
@@ -35,6 +37,31 @@ describe('source control provider helpers', () => {
         sourceControlProvider: 'ado',
       }),
     ).toBe('ado');
+  });
+
+  it('declares draft-to-ready semantics for every capable provider', () => {
+    expect(getSourceControlProviderCapabilities('github')).toEqual({
+      pullRequestDraftTransition: 'native',
+    });
+    expect(getSourceControlProviderCapabilities('gitlab')).toEqual({
+      pullRequestDraftTransition: 'title_prefix',
+    });
+    expect(getSourceControlProviderCapabilities('gitea')).toEqual({
+      pullRequestDraftTransition: 'title_prefix',
+    });
+    expect(getSourceControlProviderCapabilities('ado')).toEqual({
+      pullRequestDraftTransition: 'native',
+    });
+    expect(getSourceControlProviderCapabilities('bitbucket')).toEqual({
+      pullRequestDraftTransition: 'native',
+    });
+    expect(
+      ['github', 'gitlab', 'gitea', 'ado', 'bitbucket'].every((provider) =>
+        supportsPullRequestDraftTransition(
+          provider as Parameters<typeof supportsPullRequestDraftTransition>[0],
+        ),
+      ),
+    ).toBe(true);
   });
 
   it('uses provider maps as an authoritative repository allowlist', () => {

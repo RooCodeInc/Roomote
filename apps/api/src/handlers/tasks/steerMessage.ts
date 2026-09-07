@@ -1,8 +1,9 @@
 import type { Context } from 'hono';
 
 import type { Variables } from '../../types';
-import type { McpAuth } from '../mcp/middleware';
+import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
 import { steerMessageToTask } from './sendMessageToTask';
+import { sendMessageToFastSessionForUser } from './fastSessionCommunication';
 
 /**
  * POST /api/tasks/:taskId/steer_message
@@ -12,7 +13,11 @@ import { steerMessageToTask } from './sendMessageToTask';
 export async function steerMessage(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
-  const auth = c.get('mcpAuth');
+  const requestAuth = c.get('mcpAuth');
+  const auth = {
+    ...requestAuth,
+    userId: await resolveMcpTaskOrSessionUserId(requestAuth),
+  };
 
   if (!auth.userId) {
     return c.json({ error: 'User context required' }, 403);
@@ -24,10 +29,18 @@ export async function steerMessage(
     return c.json({ error: 'taskId is required' }, 400);
   }
 
-  let body: { message: string; images?: string[] };
+  let body: {
+    message: string;
+    images?: string[];
+    senderMode?: 'fast_agent';
+  };
 
   try {
-    body = (await c.req.json()) as { message: string; images?: string[] };
+    body = (await c.req.json()) as {
+      message: string;
+      images?: string[];
+      senderMode?: 'fast_agent';
+    };
   } catch {
     return c.json({ error: 'Invalid JSON body' }, 400);
   }
@@ -36,12 +49,26 @@ export async function steerMessage(
     return c.json({ error: 'message is required' }, 400);
   }
 
-  const result = await steerMessageToTask({
+  if (body.senderMode !== undefined && body.senderMode !== 'fast_agent') {
+    return c.json({ error: 'senderMode is invalid' }, 400);
+  }
+
+  let result = await steerMessageToTask({
     taskId,
     userId: auth.userId,
     message: body.message,
     images: body.images,
+    senderMode: body.senderMode,
   });
+
+  if (!result.success && result.status === 404) {
+    result = await sendMessageToFastSessionForUser({
+      sessionId: taskId,
+      userId: auth.userId,
+      message: body.message,
+      images: body.images,
+    });
+  }
 
   if (result.success) {
     return c.json(result);

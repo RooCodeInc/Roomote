@@ -8,30 +8,16 @@ import {
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
 
-const {
-  mockRefreshGitHubToken,
-  mockApplyDeploymentEnvVarsReload,
-  mockRematerializeOpenCodeCredentialFiles,
-} = vi.hoisted(() => ({
-  mockRefreshGitHubToken: vi.fn(),
-  mockApplyDeploymentEnvVarsReload: vi.fn(),
-  mockRematerializeOpenCodeCredentialFiles: vi.fn(),
-}));
+const { mockRefreshGitHubToken, mockApplyDeploymentEnvVarsReload } = vi.hoisted(
+  () => ({
+    mockRefreshGitHubToken: vi.fn(),
+    mockApplyDeploymentEnvVarsReload: vi.fn(),
+  }),
+);
 
 vi.mock('../../../run-task/polling/github-token-refresh', () => ({
   refreshGitHubToken: mockRefreshGitHubToken,
 }));
-
-vi.mock('../../../run-task/agent-home', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('../../../run-task/agent-home')>();
-
-  return {
-    ...actual,
-    rematerializeOpenCodeCredentialFiles:
-      mockRematerializeOpenCodeCredentialFiles,
-  };
-});
 
 vi.mock('../reloadDeploymentEnvVars', async (importOriginal) => {
   const actual =
@@ -79,29 +65,11 @@ describe('restoreScrubbedCredentials procedure', () => {
       names: ['OPENAI_API_KEY'],
       envVars: { OPENAI_API_KEY: 'fresh-openai-key' },
     });
-    mockRematerializeOpenCodeCredentialFiles.mockReturnValue({
-      failedSteps: [],
-    });
   });
 
-  it('releases the barrier and re-materializes token files, env vars, and OpenCode credentials', async () => {
+  it('releases the barrier and restores token files and env vars', async () => {
     await engageCredentialWriteBarrier();
-    const caller = createCaller({
-      workerEnv: {},
-      taskRuntime: {
-        homeDir: '/workspace/.roomote-runtime-home',
-        runtimeEnv: {
-          XDG_DATA_HOME: '/task/data',
-          OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth","access":"old"}}',
-        },
-      },
-    });
-    mockApplyDeploymentEnvVarsReload.mockResolvedValue({
-      names: ['OPENCODE_AUTH_CONTENT'],
-      envVars: {
-        OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth","access":"fresh"}}',
-      },
-    });
+    const caller = createCaller();
 
     const result = await caller.commands.restoreScrubbedCredentials();
 
@@ -113,26 +81,6 @@ describe('restoreScrubbedCredentials procedure', () => {
     expect(mockApplyDeploymentEnvVarsReload).toHaveBeenCalledWith(
       expect.objectContaining({ runId: 1 }),
     );
-    expect(mockRematerializeOpenCodeCredentialFiles).toHaveBeenCalledWith({
-      homeDir: '/workspace/.roomote-runtime-home',
-      runtimeEnv: {
-        XDG_DATA_HOME: '/task/data',
-        OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth","access":"fresh"}}',
-      },
-      logger: console,
-    });
-  });
-
-  it('fails when rewriting OpenCode credential files fails', async () => {
-    mockRematerializeOpenCodeCredentialFiles.mockReturnValue({
-      failedSteps: ['rewrite OpenCode auth file'],
-    });
-    const caller = createCaller();
-
-    await expect(caller.commands.restoreScrubbedCredentials()).rejects.toThrow(
-      'rewrite OpenCode auth file',
-    );
-    expect(isCredentialWriteBarrierEngaged()).toBe(false);
   });
 
   it('fails when the token refresh could not produce a token', async () => {

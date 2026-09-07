@@ -8,6 +8,7 @@ import {
   db,
   eq,
   findBackgroundAutomationSlackThread,
+  getAutomationRuntime,
   getCustomAutomationById,
   getTaskAutomationInitiatorKey,
   slackInstallations,
@@ -16,16 +17,23 @@ import {
   workItems,
 } from '@roomote/db/server';
 import {
+  type BackgroundAutomationKey,
   getSlackTeamIdFromTaskPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getTriggerableBackgroundAutomationSettingsHash,
+  TaskPayloadKind,
   type SlackBlock,
 } from '@roomote/types';
 import {
+  buildAutomationResultBlocks,
   buildSlackThreadFooterText,
   buildSlackThreadReplyFooterBlock,
+  clearNextSlackReplyQuoteSuppressionIfId,
   clearLatestUserMessage,
   clearSlackThreadReplyFooterMessageTs,
   getLatestUserMessage,
+  getNextSlackReplyQuoteSuppression,
+  getActiveSlackRunReplyTarget,
   getSlackThreadReplyFooterMessageTs,
   removeSlackThreadReplyFooter,
   resolveSlackThreadFooterContext,
@@ -35,14 +43,19 @@ import {
   setSlackThreadReplyFooterMessageTs,
   SlackNotifier,
   SlackPostDeliveryError,
+  suppressNextSlackReplyQuote,
   trackSlackBotReply,
   withSlackThreadReplyFooterLock,
   THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE as SLACK_THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE,
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
 } from '@roomote/slack';
 import {
+  buildAutomationIconUrl,
+  buildCustomAutomationSettingsUrl,
+  buildManagerSlackSettingsUrl,
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
+  resolveAutomationResultSubtitle,
 } from '@roomote/sdk/server';
 import {
   clearLatestUserMessageForReplyQuoteIfId,
@@ -54,10 +67,7 @@ import type { Variables } from '../../types';
 import type { McpAuth } from './middleware';
 import { bindLateSlackThreadToTask } from '../tasks/automation-work-items/slack.js';
 import { getTaskChannelBindings } from '../tasks/helpers';
-import {
-  buildAutomationRootFooterBlocks,
-  refreshAutomationRootFooter,
-} from '../tasks/automation-slack-root-footer.js';
+import { refreshAutomationRootFooter } from '../tasks/automation-slack-root-footer.js';
 import {
   hasRealTaskRunUser,
   isRunTokenContext,
@@ -155,11 +165,18 @@ async function buildLateBoundSlackRootFooterText(params: {
   });
 }
 
-async function buildLateBoundAutomationRootFooterBlocks(params: {
+type AutomationRootPresentation = {
+  automationLabel: string;
+  automationIconUrl: string;
+  configureUrl: string;
+  linkedPrUrls: string[];
+  scheduleMode: string | null;
+};
+
+async function buildLateBoundAutomationRootPresentation(params: {
   automationWorkItemId: string;
-  taskUrl: string;
   taskId: string;
-}): Promise<SlackBlock[] | null> {
+}): Promise<AutomationRootPresentation | null> {
   const workItem = await db.query.workItems.findFirst({
     columns: {
       automationKey: true,
@@ -174,26 +191,34 @@ async function buildLateBoundAutomationRootFooterBlocks(params: {
     return null;
   }
 
-  const automationLabel =
-    getTriggerableBackgroundAutomationDescriptorByKey(workItem.automationKey)
-      ?.label ?? workItem.automationKey.replaceAll('_', ' ');
+  const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+    workItem.automationKey,
+  );
+  const settingsHash = descriptor
+    ? getTriggerableBackgroundAutomationSettingsHash(descriptor.automationKey)
+    : null;
+  if (!descriptor || !settingsHash) return null;
   const linkedPrs = await resolveSlackThreadLinkedPrs({
     taskId: params.taskId,
     prRepo: null,
     prNumber: null,
   });
-  return buildAutomationRootFooterBlocks({
-    automationLabel,
-    taskUrl: params.taskUrl,
+  const automationRuntime = await getAutomationRuntime(
+    descriptor.automationKey,
+  );
+  return {
+    automationLabel: descriptor.label,
+    automationIconUrl: buildAutomationIconUrl(descriptor.slackIcon),
+    configureUrl: buildManagerSlackSettingsUrl(settingsHash),
     linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
-  });
+    scheduleMode: automationRuntime.scheduleMode,
+  };
 }
 
-async function buildLateBoundCustomAutomationRootFooterBlocks(params: {
+async function buildLateBoundCustomAutomationRootPresentation(params: {
   customAutomationId: string;
-  taskUrl: string;
   taskId: string;
-}): Promise<SlackBlock[] | null> {
+}): Promise<AutomationRootPresentation | null> {
   const automation = await getCustomAutomationById(params.customAutomationId);
 
   if (!automation) {
@@ -205,11 +230,42 @@ async function buildLateBoundCustomAutomationRootFooterBlocks(params: {
     prRepo: null,
     prNumber: null,
   });
-  return buildAutomationRootFooterBlocks({
+  return {
     automationLabel: automation.name,
-    taskUrl: params.taskUrl,
+    automationIconUrl: buildAutomationIconUrl('zap'),
+    configureUrl: buildCustomAutomationSettingsUrl(automation.id),
     linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
+    scheduleMode: automation.scheduleMode,
+  };
+}
+
+async function buildBackgroundAutomationRootPresentation(params: {
+  automationKey: BackgroundAutomationKey;
+  taskId: string;
+}): Promise<AutomationRootPresentation | null> {
+  const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+    params.automationKey,
+  );
+  if (!descriptor) return null;
+  const settingsHash = getTriggerableBackgroundAutomationSettingsHash(
+    descriptor.automationKey,
+  );
+  if (!settingsHash) return null;
+  const linkedPrs = await resolveSlackThreadLinkedPrs({
+    taskId: params.taskId,
+    prRepo: null,
+    prNumber: null,
   });
+  const automationRuntime = await getAutomationRuntime(
+    descriptor.automationKey,
+  );
+  return {
+    automationLabel: descriptor.label,
+    automationIconUrl: buildAutomationIconUrl(descriptor.slackIcon),
+    configureUrl: buildManagerSlackSettingsUrl(settingsHash),
+    linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
+    scheduleMode: automationRuntime.scheduleMode,
+  };
 }
 
 function getAutomationWorkItemIdFromTaskPayload(
@@ -327,9 +383,11 @@ async function peekSlackThreadReplyQuote(params: { runId: number }): Promise<{
 
 async function refreshTrackedAutomationThreadRootFooter(params: {
   slack: SlackNotifier;
+  slackTeamId: string;
   channel: string;
   threadTs: string;
   taskId: string;
+  runId: number;
   taskUrl: string;
 }): Promise<void> {
   // Run rows are gone; the automation-thread linkage lives on the tracked
@@ -338,6 +396,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   const [trackedThread, boundTask] = await Promise.all([
     findBackgroundAutomationSlackThread({
       surface: 'slack',
+      slackTeamId: params.slackTeamId,
       slackChannelId: params.channel,
       threadTs: params.threadTs,
     }),
@@ -371,6 +430,8 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
     ? (getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
         ?.label ?? null)
     : null;
+  let customAutomationId: string | null = null;
+  let scheduleMode: string | null = null;
 
   // Custom automation runs have no registry descriptor, so the key would
   // render as "custom automation"; label the footer with the automation's
@@ -384,7 +445,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
       .where(eq(taskRuns.taskId, params.taskId))
       .orderBy(asc(taskRuns.createdAt))
       .limit(10);
-    const customAutomationId =
+    customAutomationId =
       runs
         .map((run) => getCustomAutomationIdFromTaskPayload(run.payload))
         .find((id) => id !== null) ?? null;
@@ -393,14 +454,41 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
       const customAutomation =
         await getCustomAutomationById(customAutomationId);
       automationLabel = customAutomation?.name ?? null;
+      scheduleMode = customAutomation?.scheduleMode ?? null;
     }
   }
+
+  const descriptor = trackedAutomationKey
+    ? getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
+    : null;
+  const settingsHash = descriptor
+    ? getTriggerableBackgroundAutomationSettingsHash(descriptor.automationKey)
+    : null;
+  const configureUrl = customAutomationId
+    ? buildCustomAutomationSettingsUrl(customAutomationId)
+    : settingsHash
+      ? buildManagerSlackSettingsUrl(settingsHash)
+      : buildManagerSlackSettingsUrl();
+  if (!scheduleMode && descriptor) {
+    scheduleMode = (await getAutomationRuntime(descriptor.automationKey))
+      .scheduleMode;
+  }
+  const subtitle = await resolveAutomationResultSubtitle({
+    taskId: params.taskId,
+    runId: params.runId,
+    scheduleMode,
+  });
 
   const updated = await refreshAutomationRootFooter({
     slack: params.slack,
     channelId: params.channel,
     messageTs: params.threadTs,
     automationLabel: automationLabel ?? automationKey.replaceAll('_', ' '),
+    automationIconUrl: buildAutomationIconUrl(
+      customAutomationId ? 'zap' : (descriptor?.slackIcon ?? 'zap'),
+    ),
+    configureUrl,
+    subtitle,
     taskUrl: params.taskUrl,
     taskId: params.taskId,
   });
@@ -719,6 +807,40 @@ slackMcp.post('/track_reply_quote', async (c) => {
   return c.json({ success: true, quoteId: quote.id });
 });
 
+slackMcp.post('/suppress_reply_quote', async (c) => {
+  const { authContext } = c.get('mcpAuth');
+
+  if (!isRunTokenContext(authContext)) {
+    return c.json(
+      {
+        error:
+          'Slack reply quote suppression MCP is only available for task run tokens',
+      },
+      403,
+    );
+  }
+
+  let runId: number;
+  try {
+    runId = parseSlackReplyQuoteRunId(await c.req.json());
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : 'Invalid JSON body' },
+      400,
+    );
+  }
+
+  if (runId !== authContext.runId) {
+    return c.json(
+      { error: 'runId must match the authenticated task run' },
+      403,
+    );
+  }
+
+  const quoteId = await suppressNextSlackReplyQuote(runId);
+  return c.json({ success: true, quoteId });
+});
+
 slackMcp.post('/clear_reply_quote', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
@@ -750,11 +872,17 @@ slackMcp.post('/clear_reply_quote', async (c) => {
   }
 
   if (parsedBody.quoteId) {
-    await clearLatestUserMessageForReplyQuoteIfId(
-      'slack',
-      parsedBody.runId,
-      parsedBody.quoteId,
-    );
+    await Promise.all([
+      clearLatestUserMessageForReplyQuoteIfId(
+        'slack',
+        parsedBody.runId,
+        parsedBody.quoteId,
+      ),
+      clearNextSlackReplyQuoteSuppressionIfId(
+        parsedBody.runId,
+        parsedBody.quoteId,
+      ),
+    ]);
   } else {
     // Bare runId requests come from previous-release workers whose clear
     // contract has always been run-scoped.
@@ -763,6 +891,40 @@ slackMcp.post('/clear_reply_quote', async (c) => {
 
   return c.json({ success: true });
 });
+
+async function findSlackNotifierForLateBoundChannel(
+  channelId: string,
+): Promise<
+  | { status: 'resolved'; slack: SlackNotifier; teamId: string }
+  | { status: 'unresolved' }
+  | { status: 'indeterminate' }
+> {
+  const installations = await db.query.slackInstallations.findMany({
+    columns: { botAccessToken: true, teamId: true },
+    where: eq(slackInstallations.isActive, true),
+  });
+  const candidates = await Promise.all(
+    installations.map(async (installation) => {
+      const slack = new SlackNotifier(installation.botAccessToken);
+      return {
+        membership: await slack.isAppInChannel(channelId),
+        slack,
+        teamId: installation.teamId,
+      };
+    }),
+  );
+  if (candidates.some((candidate) => candidate.membership === null)) {
+    return { status: 'indeterminate' };
+  }
+
+  const matchingInstallations = candidates.filter(
+    (candidate) => candidate.membership === true,
+  );
+
+  return matchingInstallations.length === 1
+    ? { status: 'resolved', ...matchingInstallations[0]! }
+    : { status: 'unresolved' };
+}
 
 slackMcp.post('/thread_reply', async (c) => {
   const { authContext } = c.get('mcpAuth');
@@ -782,6 +944,7 @@ slackMcp.post('/thread_reply', async (c) => {
       actingUserId: true,
       taskId: true,
       payload: true,
+      payloadKind: true,
     },
     where: eq(taskRuns.id, authContext.runId),
   });
@@ -811,25 +974,50 @@ slackMcp.post('/thread_reply', async (c) => {
     );
   }
 
-  const communicationReply = await maybeSendCommunicationThreadReply({
-    taskRun: {
-      id: taskRun.id,
-      taskId: taskRun.taskId,
-      payload: taskRun.payload,
-    },
-    parsedBody,
-  });
+  const activeSlackReplyTarget = await getActiveSlackRunReplyTarget(taskRun.id);
+  const resumeSlackReplyTarget =
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
+      ? getSlackReplyTarget(
+          {
+            slackChannelId: null,
+            slackThreadTs: null,
+            payload: taskRun.payload,
+          },
+          { preferPayload: true },
+        )
+      : null;
+  const communicationReply =
+    activeSlackReplyTarget || resumeSlackReplyTarget
+      ? null
+      : await maybeSendCommunicationThreadReply({
+          taskRun: {
+            id: taskRun.id,
+            taskId: taskRun.taskId,
+            payload: taskRun.payload,
+          },
+          parsedBody,
+        });
 
   if (communicationReply) {
     return communicationReply;
   }
 
   const channelBindings = await getTaskChannelBindings(taskRun.taskId);
-  const slackReplyTarget = getSlackReplyTarget({
-    slackChannelId: channelBindings?.slackChannelId ?? null,
-    slackThreadTs: channelBindings?.slackThreadTs ?? null,
-    payload: taskRun.payload,
-  });
+  const slackReplyTarget = activeSlackReplyTarget
+    ? {
+        channel: activeSlackReplyTarget.channel,
+        threadTs: activeSlackReplyTarget.threadTs,
+      }
+    : getSlackReplyTarget(
+        {
+          slackChannelId: channelBindings?.slackChannelId ?? null,
+          slackThreadTs: channelBindings?.slackThreadTs ?? null,
+          payload: taskRun.payload,
+        },
+        {
+          preferPayload: taskRun.payloadKind === TaskPayloadKind.SnapshotResume,
+        },
+      );
   if (!slackReplyTarget) {
     return c.json(
       {
@@ -863,25 +1051,56 @@ slackMcp.post('/thread_reply', async (c) => {
     );
   }
 
-  const slackTeamId = getSlackTeamIdFromTaskPayload(taskRun.payload);
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    columns: { botAccessToken: true, teamId: true },
-    where: slackTeamId
-      ? and(
-          eq(slackInstallations.isActive, true),
-          eq(slackInstallations.teamId, slackTeamId),
-        )
-      : eq(slackInstallations.isActive, true),
-  });
-
-  if (!slackInstallation?.botAccessToken) {
+  const slackTeamId =
+    activeSlackReplyTarget?.slackTeamId ??
+    getSlackTeamIdFromTaskPayload(taskRun.payload);
+  const needsLateBoundSlackResolution =
+    !slackTeamId && !slackReplyTarget.threadTs;
+  const lateBoundSlackResolution = needsLateBoundSlackResolution
+    ? await findSlackNotifierForLateBoundChannel(slackReplyTarget.channel)
+    : null;
+  if (lateBoundSlackResolution?.status === 'indeterminate') {
     return c.json(
-      { error: 'No active Slack installation found for this deployment' },
+      {
+        error: 'Slack report destination could not be verified; retry shortly',
+        retryable: true,
+      },
+      503,
+    );
+  }
+  const lateBoundSlack =
+    lateBoundSlackResolution?.status === 'resolved'
+      ? lateBoundSlackResolution
+      : null;
+  const slackInstallation = needsLateBoundSlackResolution
+    ? null
+    : await db.query.slackInstallations.findFirst({
+        columns: { botAccessToken: true, teamId: true },
+        where: slackTeamId
+          ? and(
+              eq(slackInstallations.isActive, true),
+              eq(slackInstallations.teamId, slackTeamId),
+            )
+          : eq(slackInstallations.isActive, true),
+      });
+  const resolvedSlack =
+    lateBoundSlack?.slack ??
+    (slackInstallation?.botAccessToken
+      ? new SlackNotifier(slackInstallation.botAccessToken)
+      : null);
+  const resolvedSlackTeamId =
+    lateBoundSlack?.teamId ?? slackInstallation?.teamId ?? null;
+
+  if (!resolvedSlack || !resolvedSlackTeamId) {
+    return c.json(
+      {
+        error: needsLateBoundSlackResolution
+          ? 'Slack report destination could not be resolved to one active installation'
+          : 'No active Slack installation found for this deployment',
+      },
       404,
     );
   }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
 
   const artifactIds = [
     ...new Set(parsedBody.images.map((image) => image.artifactId)),
@@ -925,34 +1144,43 @@ slackMcp.post('/thread_reply', async (c) => {
   let outboundThreadTs = existingThreadTs ?? '';
 
   const createLateBoundRootMessage = async (): Promise<string> => {
-    const lateBoundAutomationFooterBlocks =
+    const automationPresentation =
       includeFooter && automationWorkItemId
-        ? await buildLateBoundAutomationRootFooterBlocks({
+        ? await buildLateBoundAutomationRootPresentation({
             automationWorkItemId,
-            taskUrl,
             taskId: taskRun.taskId,
           })
         : includeFooter && customAutomationId
-          ? await buildLateBoundCustomAutomationRootFooterBlocks({
+          ? await buildLateBoundCustomAutomationRootPresentation({
               customAutomationId,
-              taskUrl,
               taskId: taskRun.taskId,
             })
-          : null;
+          : includeFooter && backgroundAutomationKey
+            ? await buildBackgroundAutomationRootPresentation({
+                automationKey: backgroundAutomationKey,
+                taskId: taskRun.taskId,
+              })
+            : null;
+    const automationSubtitle = automationPresentation
+      ? await resolveAutomationResultSubtitle({
+          taskId: taskRun.taskId,
+          runId: taskRun.id,
+          scheduleMode: automationPresentation.scheduleMode,
+        })
+      : undefined;
     const rootFooterBlocks =
-      lateBoundAutomationFooterBlocks ??
-      (includeFooter
-        ? [
+      automationPresentation || !includeFooter
+        ? []
+        : [
             buildSlackThreadReplyFooterBlock({
               footerText: await buildLateBoundSlackRootFooterText({
                 taskUrl,
                 taskId: taskRun.taskId,
               }),
             }),
-          ]
-        : []);
+          ];
     const trackRootFooterMessageTs =
-      includeFooter && lateBoundAutomationFooterBlocks === null;
+      includeFooter && automationPresentation === null;
     const fallbackText =
       normalizedText ??
       (normalizedBlocks && normalizedBlocks.length > 0
@@ -978,13 +1206,24 @@ slackMcp.post('/thread_reply', async (c) => {
     }
     blocks.push(...imageBlocks);
     blocks.push(...rootFooterBlocks);
+    const outboundBlocks = automationPresentation
+      ? buildAutomationResultBlocks({
+          title: automationPresentation.automationLabel,
+          iconUrl: automationPresentation.automationIconUrl,
+          configureUrl: automationPresentation.configureUrl,
+          subtitle: automationSubtitle,
+          contentBlocks: blocks as SlackBlock[],
+          taskUrl,
+          linkedPrUrls: automationPresentation.linkedPrUrls,
+        })
+      : blocks;
 
-    const rootPostResult = await slack.postMessageDetailed({
+    const rootPostResult = await resolvedSlack.postMessageDetailed({
       channel: slackReplyTarget.channel,
       text: getSlackFallbackText(fallbackText, imageBlocks.length),
       unfurl_links: false,
       unfurl_media: false,
-      blocks,
+      blocks: outboundBlocks,
     });
     const rootMessageTs = rootPostResult.ts;
 
@@ -1099,24 +1338,26 @@ slackMcp.post('/thread_reply', async (c) => {
             slackReplyTarget.channel,
             existingThreadTs,
           );
-        const pendingQuote = await peekSlackThreadReplyQuote({
-          runId: taskRun.id,
-        });
+        const [pendingQuote, replyQuoteSuppressionId] = await Promise.all([
+          peekSlackThreadReplyQuote({ runId: taskRun.id }),
+          getNextSlackReplyQuoteSuppression(taskRun.id),
+        ]);
+        const renderedQuote = replyQuoteSuppressionId ? null : pendingQuote;
         const replyFallbackText =
           normalizedText ??
           (normalizedBlocks && normalizedBlocks.length > 0
             ? 'Slack reply'
             : getSlackFallbackText(undefined, imageBlocks.length));
         const fallbackText =
-          normalizedText && pendingQuote
-            ? `${pendingQuote.quote}\n${normalizedText}`
+          normalizedText && renderedQuote
+            ? `${renderedQuote.quote}\n${normalizedText}`
             : replyFallbackText;
         const blocks: unknown[] = [];
 
-        if (normalizedText && pendingQuote) {
+        if (normalizedText && renderedQuote) {
           blocks.push(
             buildSlackThreadReplyQuoteBlock({
-              quote: pendingQuote.quote,
+              quote: renderedQuote.quote,
             }),
           );
         }
@@ -1150,7 +1391,7 @@ slackMcp.post('/thread_reply', async (c) => {
           );
         }
 
-        const replyPostResult = await slack.postMessageDetailed({
+        const replyPostResult = await resolvedSlack.postMessageDetailed({
           channel: slackReplyTarget.channel,
           thread_ts: existingThreadTs,
           text: getSlackFallbackText(fallbackText, imageBlocks.length),
@@ -1177,6 +1418,21 @@ slackMcp.post('/thread_reply', async (c) => {
           } catch (error) {
             console.error(
               `[slackMcp#thread_reply] Failed to clear latest user message for task run ${taskRun.id}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
+
+        if (replyQuoteSuppressionId) {
+          try {
+            await clearNextSlackReplyQuoteSuppressionIfId(
+              taskRun.id,
+              replyQuoteSuppressionId,
+            );
+          } catch (error) {
+            console.error(
+              `[slackMcp#thread_reply] Failed to clear reply quote suppression for task run ${taskRun.id}: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -1221,7 +1477,7 @@ slackMcp.post('/thread_reply', async (c) => {
         ) {
           try {
             await removeSlackThreadReplyFooter({
-              slack,
+              slack: resolvedSlack,
               channel: slackReplyTarget.channel,
               threadTs: existingThreadTs,
               messageTs: previousFooterMessageTs,
@@ -1250,7 +1506,7 @@ slackMcp.post('/thread_reply', async (c) => {
             );
             try {
               await removeSlackThreadReplyFooter({
-                slack,
+                slack: resolvedSlack,
                 channel: slackReplyTarget.channel,
                 threadTs: existingThreadTs,
                 messageTs: nextMessageTs,
@@ -1282,10 +1538,12 @@ slackMcp.post('/thread_reply', async (c) => {
 
         try {
           await refreshTrackedAutomationThreadRootFooter({
-            slack,
+            slack: resolvedSlack,
+            slackTeamId: resolvedSlackTeamId,
             channel: slackReplyTarget.channel,
             threadTs: existingThreadTs,
             taskId: taskRun.taskId,
+            runId: taskRun.id,
             taskUrl,
           });
         } catch (error) {
@@ -1386,7 +1644,7 @@ slackMcp.post('/thread_reply', async (c) => {
   const subject = hasRealTaskRunUser(taskRun.actingUserId)
     ? await findSlackConversationSubjectByUserId({
         userId: taskRun.actingUserId,
-        slackTeamId: slackInstallation.teamId,
+        slackTeamId: resolvedSlackTeamId,
       })
     : null;
 

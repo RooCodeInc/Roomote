@@ -177,64 +177,27 @@ function buildOutOfBandTaskUrl(taskId: string, utmCampaign: string): string {
 }
 
 /**
- * Posts a Slack thread reply that becomes the sticky "Working on..." footer
- * message for the thread: attaches the current footer, then removes it from
- * whatever prior reply still carries the tracked footer.
- *
- * Used by out-of-band posts (PR review updates, PR terminal status) so the
- * footer rides on the latest thread message the same way MCP thread replies do.
+ * Post a Slack thread message carrying the given footer text as the thread's
+ * sticky footer: attach the footer block, remove the footer from the prior
+ * tracked message, and persist the new location.
  */
-export async function postSlackThreadMessageWithStickyFooter(params: {
+export async function postSlackThreadMessageWithFooterText(params: {
   slack: Pick<
     SlackNotifier,
     'postMessage' | 'getMessageBlocks' | 'updateMessage'
   >;
   channel: string;
   threadTs: string;
-  taskId: string;
   text: string;
   /** Body blocks without the footer context block. */
-  blocks?: unknown[];
-  utmCampaign?: string;
-  /**
-   * Footer content style. `active` keeps linked PR / live preview when the
-   * shared resolver still considers the task active. `reply-only` is for
-   * terminal events (merged/closed PRs) so the relocated sticky line never
-   * reads as "still working on this" after the task becomes terminal.
-   */
-  footerStyle?: 'active' | 'reply-only';
+  bodyBlocks: unknown[];
+  footerText: string;
+  clientMsgId?: string;
 }): Promise<string | null> {
-  const taskUrl = buildOutOfBandTaskUrl(
-    params.taskId,
-    params.utmCampaign ?? 'slack.out_of_band',
-  );
-  const footerContext = await resolveSlackThreadFooterContext({
-    taskId: params.taskId,
-    prRepo: null,
-    prNumber: null,
-    channelId: params.channel,
-    threadTs: params.threadTs,
+  const footerBlock = buildSlackThreadReplyFooterBlock({
+    footerText: params.footerText,
   });
-  const replyOnly = params.footerStyle === 'reply-only';
-  const footerText = buildSlackThreadFooterText({
-    taskUrl,
-    linkedPrs: replyOnly ? [] : footerContext.linkedPrs,
-    livePreviewUrl: replyOnly ? null : footerContext.livePreviewUrl,
-    explicitMentionRequired: footerContext.explicitMentionRequired,
-  });
-  const footerBlock = buildSlackThreadReplyFooterBlock({ footerText });
-  const bodyBlocks =
-    params.blocks && params.blocks.length > 0
-      ? params.blocks
-      : [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: params.text,
-            },
-          },
-        ];
+  const bodyBlocks = params.bodyBlocks;
 
   return withSlackThreadReplyFooterLock({
     channel: params.channel,
@@ -252,6 +215,7 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
         unfurl_links: false,
         unfurl_media: false,
         blocks: [...bodyBlocks, footerBlock],
+        ...(params.clientMsgId ? { client_msg_id: params.clientMsgId } : {}),
       });
 
       if (!nextMessageTs) {
@@ -310,5 +274,170 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
 
       return nextMessageTs;
     },
+  });
+}
+
+/**
+ * Rewrites an existing thread message (for example one that was streamed)
+ * into its final body and makes it the sticky footer carrier, the same way a
+ * freshly posted reply would be.
+ */
+export async function updateSlackThreadMessageWithFooterText(params: {
+  slack: Pick<SlackNotifier, 'getMessageBlocks' | 'updateMessage'>;
+  channel: string;
+  threadTs: string;
+  messageTs: string;
+  text: string;
+  /** Body blocks without the footer context block. */
+  bodyBlocks: unknown[];
+  footerText: string;
+}): Promise<boolean> {
+  const footerBlock = buildSlackThreadReplyFooterBlock({
+    footerText: params.footerText,
+  });
+
+  return withSlackThreadReplyFooterLock({
+    channel: params.channel,
+    threadTs: params.threadTs,
+    fn: async () => {
+      const previousFooterMessageTs = await getSlackThreadReplyFooterMessageTs(
+        params.channel,
+        params.threadTs,
+      );
+      const updated = await params.slack.updateMessage({
+        channel: params.channel,
+        ts: params.messageTs,
+        message: {
+          text: params.text,
+          blocks: [...params.bodyBlocks, footerBlock],
+        },
+      });
+      if (!updated) {
+        return false;
+      }
+
+      if (
+        previousFooterMessageTs &&
+        previousFooterMessageTs !== params.messageTs
+      ) {
+        try {
+          await removeSlackThreadReplyFooter({
+            slack: params.slack,
+            channel: params.channel,
+            threadTs: params.threadTs,
+            messageTs: previousFooterMessageTs,
+          });
+        } catch (error) {
+          console.error(
+            `[slackThreadFooter] Failed to remove footer from prior Slack message ${previousFooterMessageTs}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+
+      try {
+        await setSlackThreadReplyFooterMessageTs(
+          params.channel,
+          params.threadTs,
+          params.messageTs,
+        );
+      } catch (error) {
+        console.error(
+          `[slackThreadFooter] Failed to persist latest footer message ts ${params.messageTs}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        // Without the pointer no later reply could strip this footer, so
+        // take it back off rather than let the thread collect duplicates.
+        try {
+          await removeSlackThreadReplyFooter({
+            slack: params.slack,
+            channel: params.channel,
+            threadTs: params.threadTs,
+            messageTs: params.messageTs,
+          });
+        } catch (removeError) {
+          console.error(
+            `[slackThreadFooter] Failed to remove footer from Slack message ${params.messageTs} after persistence failure: ${
+              removeError instanceof Error
+                ? removeError.message
+                : String(removeError)
+            }`,
+          );
+        }
+      }
+
+      return true;
+    },
+  });
+}
+
+/**
+ * Posts a Slack thread reply that becomes the sticky "Working on..." footer
+ * message for the thread: attaches the current footer, then removes it from
+ * whatever prior reply still carries the tracked footer.
+ *
+ * Used by out-of-band posts (PR review updates, PR terminal status) so the
+ * footer rides on the latest thread message the same way MCP thread replies do.
+ */
+export async function postSlackThreadMessageWithStickyFooter(params: {
+  slack: Pick<
+    SlackNotifier,
+    'postMessage' | 'getMessageBlocks' | 'updateMessage'
+  >;
+  channel: string;
+  threadTs: string;
+  taskId: string;
+  text: string;
+  /** Body blocks without the footer context block. */
+  blocks?: unknown[];
+  utmCampaign?: string;
+  /**
+   * Footer content style. `active` keeps linked PR / live preview when the
+   * shared resolver still considers the task active. `reply-only` is for
+   * terminal events (merged/closed PRs) so the relocated sticky line never
+   * reads as "still working on this" after the task becomes terminal.
+   */
+  footerStyle?: 'active' | 'reply-only';
+}): Promise<string | null> {
+  const taskUrl = buildOutOfBandTaskUrl(
+    params.taskId,
+    params.utmCampaign ?? 'slack.out_of_band',
+  );
+  const footerContext = await resolveSlackThreadFooterContext({
+    taskId: params.taskId,
+    prRepo: null,
+    prNumber: null,
+    channelId: params.channel,
+    threadTs: params.threadTs,
+  });
+  const replyOnly = params.footerStyle === 'reply-only';
+  const footerText = buildSlackThreadFooterText({
+    taskUrl,
+    linkedPrs: replyOnly ? [] : footerContext.linkedPrs,
+    livePreviewUrl: replyOnly ? null : footerContext.livePreviewUrl,
+    explicitMentionRequired: footerContext.explicitMentionRequired,
+  });
+  const bodyBlocks =
+    params.blocks && params.blocks.length > 0
+      ? params.blocks
+      : [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: params.text,
+            },
+          },
+        ];
+
+  return postSlackThreadMessageWithFooterText({
+    slack: params.slack,
+    channel: params.channel,
+    threadTs: params.threadTs,
+    text: params.text,
+    bodyBlocks,
+    footerText,
   });
 }

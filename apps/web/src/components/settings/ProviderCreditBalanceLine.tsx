@@ -4,17 +4,18 @@ import type { ProviderCreditBalance } from '@roomote/types';
 
 import { Progress } from '@/components/system';
 import { cn } from '@/lib/utils';
+import { formatCurrency } from '@/lib/formatters';
 
 function formatMoney(amount: number, currency = 'USD'): string {
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(currency === 'USD' ? 'en-US' : undefined, {
       style: 'currency',
       currency,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `$${amount.toFixed(2)}`;
+    return formatCurrency(Number(amount.toFixed(2)));
   }
 }
 
@@ -59,22 +60,22 @@ export function ProviderCreditBalanceLine({
   const remainingLabel = formatMoney(balance.remaining, currency);
   const label =
     balance.limit !== undefined
-      ? `Credits: ${remainingLabel} of ${formatMoney(balance.limit, currency)} left`
-      : `Credits: ${remainingLabel} left`;
+      ? `${remainingLabel} of ${formatMoney(balance.limit, currency)} left`
+      : `${remainingLabel} left`;
 
   const usedPercent = getUsedPercent(balance);
 
   return (
-    <div className={cn('min-w-0 space-y-1', className)}>
-      <p className="min-w-0 truncate text-xs text-muted-foreground">{label}</p>
+    <div className={cn('min-w-0 space-y-1.5', className)}>
       {usedPercent !== undefined ? (
         <Progress
           value={usedPercent}
-          className="h-1.5 bg-muted"
+          className="h-2 bg-muted"
           barClassName={barClassName(usedPercent)}
           aria-label="Credit balance"
         />
       ) : null}
+      <p className="min-w-0 truncate text-xs text-muted-foreground">{label}</p>
     </div>
   );
 }

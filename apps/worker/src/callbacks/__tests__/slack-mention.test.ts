@@ -5,11 +5,13 @@ const {
   mockBuildRequestUserInputTaskUrl,
   mockBuildStartedBlocks,
   mockClearPendingSlackRequestUserInput,
+  mockClearActiveSlackReplyTarget,
   mockAddReaction,
   mockEnqueueSlackPrInactivityCheck,
   mockFetchThreadMessages,
   mockGetSlackThreadFooterText,
   mockGetSlackStartedMessageData,
+  mockGetActiveSlackReplyTarget,
   mockPostMessage,
   mockRecordOutboundSlackConversationMessage,
   mockRemoveReaction,
@@ -48,6 +50,7 @@ const {
     },
   ]),
   mockClearPendingSlackRequestUserInput: vi.fn().mockResolvedValue(null),
+  mockClearActiveSlackReplyTarget: vi.fn().mockResolvedValue(undefined),
   mockAddReaction: vi.fn().mockResolvedValue(true),
   mockEnqueueSlackPrInactivityCheck: vi
     .fn()
@@ -67,6 +70,7 @@ const {
       '_Reply or use the <http://localhost:13000/task/task_row_123?utm_source=slack|web app>._',
     ),
   mockGetSlackStartedMessageData: vi.fn(),
+  mockGetActiveSlackReplyTarget: vi.fn().mockResolvedValue(null),
   mockPostMessage: vi.fn().mockResolvedValue('posted-ts'),
   mockRecordOutboundSlackConversationMessage: vi
     .fn()
@@ -84,6 +88,8 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       enqueueSlackPrInactivityCheck: mockEnqueueSlackPrInactivityCheck,
+      clearActiveSlackReplyTarget: mockClearActiveSlackReplyTarget,
+      getActiveSlackReplyTarget: mockGetActiveSlackReplyTarget,
       getSlackThreadFooterText: mockGetSlackThreadFooterText,
       getSlackStartedMessageData: mockGetSlackStartedMessageData,
       recordOutboundSlackConversationMessage:
@@ -200,6 +206,8 @@ describe('slackMentionCallbacks', () => {
       warningText:
         '> :warning: Heads up: my humans are working on an issue that may affect me.',
     });
+    mockGetActiveSlackReplyTarget.mockResolvedValue(null);
+    mockClearActiveSlackReplyTarget.mockResolvedValue(undefined);
     mockSlackInstallationsFindFirst.mockResolvedValue({
       botAccessToken: 'xoxb-test',
     });
@@ -238,60 +246,25 @@ describe('slackMentionCallbacks', () => {
     }
   });
 
-  it('loads started-message metadata through sdk.taskRuns on start', async () => {
+  it('clears the reply target and removes the ack reaction on start', async () => {
     const taskRun = createTaskRun();
     const context = {};
 
     await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
 
+    expect(mockClearActiveSlackReplyTarget).toHaveBeenCalledWith({
+      runId: 123,
+    });
     expect(mockRemoveReaction).toHaveBeenCalledWith({
       channel: 'C123',
       timestamp: '1710000000.100',
       name: 'eyes',
     });
-    expect(sdk.taskRuns.getSlackStartedMessageData).toHaveBeenCalledWith({
-      runId: 123,
-    });
-    expect(mockBuildStartedBlocks).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDisplayName: 'App',
-        runId: 123,
-        initiatingSlackUserId: 'U123',
-        otherRunningTasksCount: 2,
-        warningText:
-          '> :warning: Heads up: my humans are working on an issue that may affect me.',
-        taskUrl: expect.stringContaining(
-          '/task/task_row_123?utm_source=slack&utm_medium=link&utm_campaign=slack.app.mention',
-        ),
-      }),
-    );
-    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    // The started-message refresh is gone with the Follow button; onStart
+    // no longer reads started-message metadata or edits the message.
+    expect(sdk.taskRuns.getSlackStartedMessageData).not.toHaveBeenCalled();
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
   });
-
-  it('falls back to the Slack app mention payload user when older started-message metadata has no initiating Slack user', async () => {
-    const taskRun = createTaskRun();
-    const context = {};
-    mockGetSlackStartedMessageData.mockResolvedValueOnce({
-      ts: 'started-ts',
-      agentName: 'Agent',
-      workspaceDisplayName: 'App',
-      workspaceOnly: false,
-    });
-
-    await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
-
-    expect(mockBuildStartedBlocks).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDisplayName: 'App',
-        runId: 123,
-        initiatingSlackUserId: 'U123',
-        taskUrl: expect.stringContaining(
-          '/task/task_row_123?utm_source=slack&utm_medium=link&utm_campaign=slack.app.mention',
-        ),
-      }),
-    );
-  });
-
   it('removes eyes reactions for SnapshotResume runs when the triggering message ts is available', async () => {
     const taskRun = createSnapshotResumeTaskRun();
     const context = {};
@@ -303,9 +276,7 @@ describe('slackMentionCallbacks', () => {
       timestamp: '1710000000.100',
       name: 'eyes',
     });
-    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
   });
-
   it('still removes the ack reaction when resume state pre-seeds sessionId', async () => {
     const taskRun = createSnapshotResumeTaskRun();
     const context = { sessionId: 'existing-session' };
@@ -317,30 +288,25 @@ describe('slackMentionCallbacks', () => {
       timestamp: '1710000000.100',
       name: 'eyes',
     });
-    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
   });
-
-  it('still refreshes the started message when reaction cleanup fails', async () => {
+  it('logs and continues when reaction cleanup fails', async () => {
     const taskRun = createTaskRun();
     const context = {};
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockRemoveReaction.mockRejectedValueOnce(new Error('reaction failed'));
 
     try {
-      await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
+      await expect(
+        slackMentionCallbacks.onStart?.(taskRun, 'task_123', context),
+      ).resolves.toBeUndefined();
 
       expect(errorSpy).toHaveBeenCalledWith(
         '[slackMentionCallbacks#onStart] Failed Slack reaction cleanup for task run 123: reaction failed',
       );
-      expect(sdk.taskRuns.getSlackStartedMessageData).toHaveBeenCalledWith({
-        runId: 123,
-      });
-      expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
     } finally {
       errorSpy.mockRestore();
     }
   });
-
   it('retries and warns when Slack reaction cleanup returns false', async () => {
     const taskRun = createTaskRun();
     const context = {};
@@ -363,7 +329,6 @@ describe('slackMentionCallbacks', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         '[slackMentionCallbacks#onStart] Slack reaction cleanup failed for task run 123; retrying once (emoji=eyes, channel=C123, timestamp=1710000000.100)',
       );
-      expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
     } finally {
       warnSpy.mockRestore();
     }
@@ -565,6 +530,65 @@ describe('slackMentionCallbacks', () => {
     expect(
       mockSetPendingSlackRequestUserInput.mock.invocationCallOrder[0],
     ).toBeLessThan(mockPostMessage.mock.invocationCallOrder[0]!);
+  });
+
+  it('posts request_user_input prompts to the active turn thread', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    mockGetActiveSlackReplyTarget.mockResolvedValueOnce({
+      slackTeamId: 'T123',
+      channel: 'C_ALERT',
+      threadTs: '333.444',
+    });
+
+    await slackMentionCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      {
+        type: 'request_user_input',
+        request: {
+          requestId: 'rui:redirected',
+          sessionId: 'session_1',
+          turnId: 'turn_1',
+          callId: 'call_1',
+          questions: [
+            {
+              id: 'language',
+              header: 'Language',
+              question: 'Which language should I use?',
+              isOther: false,
+              isSecret: false,
+              options: [
+                {
+                  label: 'TypeScript',
+                  description: 'Use the existing app stack.',
+                },
+              ],
+            },
+          ],
+          status: 'pending',
+        },
+        ts: 1000,
+      },
+      context,
+    );
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C_ALERT',
+        thread_ts: '333.444',
+      }),
+    );
+    expect(mockSetPendingSlackRequestUserInput).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ threadId: '333.444' }),
+    );
+    expect(mockRecordOutboundSlackConversationMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slackChannelId: 'C_ALERT',
+        threadTs: '333.444',
+      }),
+    );
   });
 
   it('updates native Slack request_user_input blocks when the same request id receives richer questions', async () => {
@@ -906,6 +930,37 @@ describe('slackMentionCallbacks', () => {
     });
   });
 
+  it('keeps a delayed follow-up on the turn target captured at dispatch', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await slackMentionCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      {
+        type: 'followup',
+        question: 'Need anything else?',
+        suggestions: [],
+        ts: 1003,
+      },
+      context,
+      {
+        slackReplyTarget: {
+          slackTeamId: 'T123',
+          channel: 'C_EARLIER',
+          threadTs: '333.444',
+        },
+      },
+    );
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C_EARLIER',
+        thread_ts: '333.444',
+      }),
+    );
+    expect(mockGetActiveSlackReplyTarget).not.toHaveBeenCalled();
+  });
+
   it('does not mirror todo updates into Slack threads', async () => {
     const taskRun = createTaskRun();
     const context = {};
@@ -1070,6 +1125,9 @@ describe('slackMentionCallbacks', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         '[slackMentionCallbacks#onExit] Failed to clear pending request_user_input state: cleanup failed',
       );
+      expect(mockClearActiveSlackReplyTarget).toHaveBeenCalledWith({
+        runId: 123,
+      });
     } finally {
       errorSpy.mockRestore();
     }

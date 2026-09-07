@@ -47,7 +47,7 @@ vi.mock('@/components/ai-elements', () => ({
 }));
 
 vi.mock('@/components/layout', () => ({
-  FramedSurface: ({ children }: { children: ReactNode }) => (
+  WorkspaceSurface: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
 }));
@@ -79,6 +79,12 @@ vi.mock('./DraftPromptBanner', () => ({
 
 vi.mock('./Header', () => ({
   Header: () => <div>Header</div>,
+}));
+
+vi.mock('./TaskRobotIconScope', () => ({
+  TaskRobotIconScope: ({ children }: { children: ReactNode }) => (
+    <>{children}</>
+  ),
 }));
 
 vi.mock('./Messages', () => ({

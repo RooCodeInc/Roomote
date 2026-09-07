@@ -3,6 +3,7 @@
 import {
   type TaskPayload,
   DEFAULT_CODING_HARNESS,
+  getTaskInitiatorLinkedUserId,
   DEFAULT_LAUNCH_CODING_HARNESS,
   getCommunicationChannelFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
@@ -40,6 +41,38 @@ import {
   shouldUseAppTokenOnly,
 } from '../task-runs';
 import { ALL_REPOSITORIES } from '../constants';
+import { getSnapshotExpiresAt } from '../compute-providers/snapshot-retention';
+
+describe('getTaskInitiatorLinkedUserId', () => {
+  it('links a user initiator to its user', () => {
+    expect(getTaskInitiatorLinkedUserId({ kind: 'user', userId: 'u1' })).toBe(
+      'u1',
+    );
+    expect(
+      getTaskInitiatorLinkedUserId({
+        kind: 'user',
+        externalId: 'U1',
+        matchedUserId: 'u2',
+      }),
+    ).toBe('u2');
+    expect(
+      getTaskInitiatorLinkedUserId({ kind: 'user', externalId: 'U1' }),
+    ).toBeNull();
+  });
+
+  it('links an automation initiator only through its acting user', () => {
+    expect(
+      getTaskInitiatorLinkedUserId({ kind: 'automation', key: 'suggester' }),
+    ).toBeNull();
+    expect(
+      getTaskInitiatorLinkedUserId({
+        kind: 'automation',
+        key: 'custom_automation',
+        actingUserId: 'u3',
+      }),
+    ).toBe('u3');
+  });
+});
 
 describe('isSourceControlTaskSurface', () => {
   it.each(['github', 'gitlab', 'gitea', 'bitbucket', 'ado'] as const)(
@@ -180,16 +213,46 @@ describe('snapshot resume helpers', () => {
   });
 
   it('treats snapshots inside the ttl as resumable', () => {
-    expect(isSnapshotResumable(new Date('2026-05-14T00:00:00.000Z'))).toBe(
-      true,
-    );
+    expect(
+      isSnapshotResumable(new Date('2026-05-14T00:00:00.000Z'), 'vercel'),
+    ).toBe(true);
   });
 
-  it('treats expired or missing snapshots as not resumable', () => {
-    expect(isSnapshotResumable(new Date('2026-05-12T23:59:59.000Z'))).toBe(
-      false,
-    );
-    expect(isSnapshotResumable(null)).toBe(false);
+  it('keeps old Modal filesystem snapshots resumable', () => {
+    expect(
+      isSnapshotResumable(new Date('2026-04-01T00:00:00.000Z'), 'modal'),
+    ).toBe(true);
+    expect(
+      getSnapshotExpiresAt(new Date('2026-04-01T00:00:00.000Z'), 'modal'),
+    ).toBeNull();
+  });
+
+  it('keeps old broker-backed Roomote snapshots resumable', () => {
+    expect(
+      isSnapshotResumable(new Date('2026-04-01T00:00:00.000Z'), 'roomote'),
+    ).toBe(true);
+    expect(
+      getSnapshotExpiresAt(new Date('2026-04-01T00:00:00.000Z'), 'roomote'),
+    ).toBeNull();
+  });
+
+  it('expires Vercel snapshots at the seven-day boundary', () => {
+    expect(
+      isSnapshotResumable(new Date('2026-05-13T00:00:00.001Z'), 'vercel'),
+    ).toBe(true);
+    expect(
+      isSnapshotResumable(new Date('2026-05-13T00:00:00.000Z'), 'vercel'),
+    ).toBe(false);
+    expect(
+      getSnapshotExpiresAt(new Date('2026-05-13T00:00:00.000Z'), 'vercel'),
+    ).toEqual(new Date('2026-05-20T00:00:00.000Z'));
+  });
+
+  it('preserves the seven-day safeguard for unknown providers', () => {
+    expect(
+      isSnapshotResumable(new Date('2026-05-12T23:59:59.000Z'), null),
+    ).toBe(false);
+    expect(isSnapshotResumable(null, 'modal')).toBe(false);
   });
 
   it('exports a stable expired snapshot error message', () => {
@@ -268,6 +331,36 @@ describe('Task Tool invocation helpers', () => {
 });
 
 describe('taskSpecSchema', () => {
+  it('parses a channel-less automation Fast parent', () => {
+    const parsed = taskSpecSchema.parse({
+      userId: 'user-1',
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Delegated from a Fast automation',
+        communicationContextInherited: true,
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'automation',
+            workspaceId: 'automation-1',
+            conversationId: 'occurrence-1',
+          },
+        },
+      },
+    });
+
+    if (parsed.type !== TaskPayloadKind.StandardTask) {
+      throw new Error('Expected StandardTask payload');
+    }
+    expect(parsed.payload.fastAgentParent?.conversation).toEqual({
+      surface: 'automation',
+      workspaceId: 'automation-1',
+      conversationId: 'occurrence-1',
+    });
+  });
+
   it('preserves sourceControlProvider on StandardTask payloads', () => {
     const parsed = taskSpecSchema.parse({
       userId: 'user-1',
@@ -495,6 +588,16 @@ describe('taskSpecSchema', () => {
         channel: 'C123',
         slackChannel: 'C123',
         thread_ts: '111.222',
+        communicationContextInherited: true,
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: '111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
+        },
       },
     });
 
@@ -505,6 +608,16 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.channel).toBe('C123');
     expect(parsed.payload.slackChannel).toBe('C123');
     expect(parsed.payload.thread_ts).toBe('111.222');
+    expect(parsed.payload.communicationContextInherited).toBe(true);
+    expect(parsed.payload.fastAgentParent?.sessionId).toBe(
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(parsed.payload.fastAgentParent?.conversation).toEqual({
+      surface: 'slack',
+      workspaceId: 'T123',
+      conversationId: '111.222',
+      replyTarget: { channelId: 'C123', threadId: '111.222' },
+    });
   });
 
   it('parses Dependabot suggestion sources on SuggestedTasks payloads', () => {

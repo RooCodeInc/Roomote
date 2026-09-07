@@ -20,9 +20,15 @@ import {
   workspaceReadinessSchema,
   type WorkspaceReadiness,
 } from '@roomote/types';
-import { SlackNotifier } from '@roomote/slack';
+import {
+  buildTaskSuggestionMessageMetadata,
+  SlackNotifier,
+} from '@roomote/slack';
 import { SETUP_SUGGESTIONS_THREAD_INTRO_TEXT } from '@roomote/communication/chat-messages';
-import { findEnvironmentForRepo } from '@roomote/cloud-agents/server';
+import {
+  fastAgentConversationRepository,
+  findEnvironmentForRepo,
+} from '@roomote/cloud-agents/server';
 import {
   buildAutomationRootSummaryMessage,
   buildAutomationRootSummaryText,
@@ -36,7 +42,10 @@ import {
   db,
   environments,
   eq,
+  findActiveSlackInstallationForChannel,
+  findTrackedSuggestionWorkItemIds,
   inArray,
+  registerTrackedSuggestionCards,
   repositories,
   resolveRepositorySelectionByIds,
   slackInstallationChannels,
@@ -49,6 +58,7 @@ import {
   upsertBackgroundAutomationSlackThread,
   workItems,
   getAutomationRuntime,
+  getSessionForTask,
 } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
@@ -101,9 +111,6 @@ const submitTaskSuggestionsBodySchema = z.object({
   delivery: z.literal('current_thread').optional(),
   submissionKey: z.string().trim().min(1).max(200).optional(),
 });
-
-const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
-  'roomote.setup_onboarding_suggestion';
 
 type SuggestedTasksPayload = TaskPayload<typeof TaskPayloadKind.Scan>;
 
@@ -177,29 +184,23 @@ type SuggestionCardMessageRow = {
   createdByUserId: string | null;
 };
 
-/**
- * Map Slack suggestion-card rows to `tracked_messages` insert values. The
- * launch state lives on the referenced `work_items` row; the tracked message
- * carries only registry metadata (suggestion type + key) and dedups on
- * `(kind, dedupeKey)` where dedupeKey is `${channelId}:${messageTs}`.
- */
-function buildSlackSuggestionCardValues(
+function registerSlackSuggestionMessageRows(
   rows: SuggestionCardMessageRow[],
-): (typeof trackedMessages.$inferInsert)[] {
-  return rows.map((row) => ({
-    surface: 'slack' as const,
-    kind: 'suggestion_card' as const,
-    dedupeKey: `${row.channelId}:${row.messageTs}`,
-    channelId: row.channelId,
-    messageTs: row.messageTs,
-    workItemId: row.workItemId,
-    createdByUserId: row.createdByUserId,
-    metadata: {
+  executor?: Parameters<typeof registerTrackedSuggestionCards>[1],
+): Promise<void> {
+  return registerTrackedSuggestionCards(
+    rows.map((row) => ({
+      surface: 'slack',
+      channelId: row.channelId,
+      messageTs: row.messageTs,
+      workItemId: row.workItemId,
+      createdByUserId: row.createdByUserId,
       suggestionType: row.suggestionType,
       suggestionKey: row.suggestionKey,
-      ...(row.launchRouting ? { launchRouting: row.launchRouting } : {}),
-    },
-  }));
+      launchRouting: row.launchRouting,
+    })),
+    executor,
+  );
 }
 
 function buildSuggestionMessageKey(params: {
@@ -207,20 +208,6 @@ function buildSuggestionMessageKey(params: {
   suggestionId: string;
 }): string {
   return `${params.sourceTaskId}:${params.suggestionId}`;
-}
-
-function buildSuggestionMessageMetadata(params: {
-  sourceTaskId: string;
-  suggestionId: string;
-}) {
-  return {
-    event_type: SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE,
-    event_payload: {
-      sourceTaskId: params.sourceTaskId,
-      suggestionId: params.suggestionId,
-      schemaVersion: 1,
-    },
-  };
 }
 
 function buildSuggestedTasksSummaryLockKey(params: {
@@ -787,7 +774,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
       thread_ts: rootMessageTs,
       text,
       blocks,
-      metadata: buildSuggestionMessageMetadata({
+      metadata: buildTaskSuggestionMessageMetadata({
         sourceTaskId: params.sourceTaskId,
         suggestionId: suggestion.id,
       }),
@@ -864,12 +851,7 @@ async function postCurrentThreadSuggestionsToSlack(params: {
     existingRootMessageTs: params.slackThreadTs,
     suggestions: missingSuggestions,
     insertSuggestionMessages: async (suggestionMessageRows) => {
-      await db
-        .insert(trackedMessages)
-        .values(buildSlackSuggestionCardValues(suggestionMessageRows))
-        .onConflictDoNothing({
-          target: [trackedMessages.kind, trackedMessages.dedupeKey],
-        });
+      await registerSlackSuggestionMessageRows(suggestionMessageRows);
     },
   });
 
@@ -887,24 +869,10 @@ async function getMissingTrackedSuggestions(
     return [];
   }
 
-  const existingSuggestionCards = await db
-    .select({ workItemId: trackedMessages.workItemId })
-    .from(trackedMessages)
-    .where(
-      and(
-        eq(trackedMessages.surface, surface),
-        eq(trackedMessages.kind, 'suggestion_card'),
-        inArray(
-          trackedMessages.workItemId,
-          suggestions.map((suggestion) => suggestion.id),
-        ),
-      ),
-    );
-  const deliveredWorkItemIds = new Set(
-    existingSuggestionCards
-      .map((card) => card.workItemId)
-      .filter((workItemId): workItemId is string => Boolean(workItemId)),
-  );
+  const deliveredWorkItemIds = await findTrackedSuggestionWorkItemIds({
+    surface,
+    workItemIds: suggestions.map((suggestion) => suggestion.id),
+  });
   const missingSuggestions = suggestions.filter(
     (suggestion) => !deliveredWorkItemIds.has(suggestion.id),
   );
@@ -970,12 +938,7 @@ async function postSetupTaskSuggestionsToSlack(params: {
     rootText: introText,
     suggestions: missingSuggestions,
     insertSuggestionMessages: async (suggestionMessageRows) => {
-      await db
-        .insert(trackedMessages)
-        .values(buildSlackSuggestionCardValues(suggestionMessageRows))
-        .onConflictDoNothing({
-          target: [trackedMessages.kind, trackedMessages.dedupeKey],
-        });
+      await registerSlackSuggestionMessageRows(suggestionMessageRows);
     },
   });
 
@@ -1018,7 +981,7 @@ async function postSetupTaskSuggestionsToSlack(params: {
  * on delivery, not on mere Slack-installation existence, so a Slack-installed
  * deployment that cannot resolve a channel still falls through to another provider.
  */
-async function postSuggestedTasksSummaryToSlack(params: {
+export async function postSuggestedTasksSummaryToSlack(params: {
   sourceTaskId: string;
   createdByUserId: string | null;
   suggestionSource?: TaskSuggestionSource;
@@ -1034,34 +997,40 @@ async function postSuggestedTasksSummaryToSlack(params: {
   // suppress the summary post; user-attribution decoration is skipped instead.
   const createdByUserId = params.createdByUserId;
 
-  const [slackInstallation] = await db
-    .select({
-      id: slackInstallations.id,
-      botAccessToken: slackInstallations.botAccessToken,
-    })
-    .from(slackInstallations)
-    .where(eq(slackInstallations.isActive, true))
-    .limit(1);
+  const slackConfig = resolveScheduledSuggestionSlackConfig(
+    params.suggestionSource,
+  );
+  const automationRuntime = await getAutomationRuntime(
+    slackConfig.automationKey,
+  );
+  const configuredChannelId = automationRuntime.slackChannelId;
+  const slackInstallation =
+    automationRuntime.destination?.source === 'manager_channel' &&
+    automationRuntime.destination.provider === 'slack'
+      ? await findActiveSlackInstallationForChannel(
+          automationRuntime.destination.channelId,
+        )
+      : (
+          await db
+            .select({
+              id: slackInstallations.id,
+              teamId: slackInstallations.teamId,
+              botAccessToken: slackInstallations.botAccessToken,
+            })
+            .from(slackInstallations)
+            .where(eq(slackInstallations.isActive, true))
+            .limit(1)
+        )[0];
 
   if (!slackInstallation) {
     return false;
   }
 
-  const slackConfig = resolveScheduledSuggestionSlackConfig(
-    params.suggestionSource,
-  );
   const automationLabel =
     getScheduledSuggestionBackgroundAutomationDescriptor(
       params.suggestionSource,
     )?.label ?? null;
   const shouldTrackAutomationThread = Boolean(params.suggestionSource);
-
-  // Two-level fallback: the automation's own slack_channel target, then the
-  // shared manager channel (getAutomationRuntime resolves both levels).
-  const automationRuntime = await getAutomationRuntime(
-    slackConfig.automationKey,
-  );
-  const configuredChannelId = automationRuntime.slackChannelId;
 
   const [channel] = configuredChannelId
     ? [{ channelId: configuredChannelId }]
@@ -1077,11 +1046,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
         .orderBy(asc(slackInstallationChannels.createdAt))
         .limit(1);
 
-  if (!channel) {
-    return false;
-  }
-
-  return await db.transaction(async (tx) => {
+  const publication = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${buildSuggestedTasksSummaryLockKey(
         {
@@ -1089,6 +1054,29 @@ async function postSuggestedTasksSummaryToSlack(params: {
         },
       )}))`,
     );
+
+    const [receipt] = await tx
+      .select({
+        channelId: trackedMessages.channelId,
+        threadTs: trackedMessages.threadTs,
+      })
+      .from(trackedMessages)
+      .where(
+        and(
+          eq(trackedMessages.surface, 'slack'),
+          eq(trackedMessages.kind, 'automation_thread'),
+          eq(
+            sql`${trackedMessages.metadata}->>'sourceTaskId'`,
+            params.sourceTaskId,
+          ),
+          eq(
+            sql`${trackedMessages.metadata}->>'slackTeamId'`,
+            slackInstallation.teamId,
+          ),
+        ),
+      )
+      .limit(1);
+    const channelId = receipt?.channelId ?? channel?.channelId;
 
     const existingSuggestionCards = await tx
       .select({ workItemId: trackedMessages.workItemId })
@@ -1113,7 +1101,15 @@ async function postSuggestedTasksSummaryToSlack(params: {
     );
 
     if (missingSuggestions.length === 0) {
-      return true;
+      return {
+        delivered: true,
+        channelId,
+        rootMessageTs: receipt?.threadTs ?? null,
+      };
+    }
+
+    if (!channelId) {
+      return { delivered: false, channelId, rootMessageTs: null };
     }
 
     const rootMessage = await buildScheduledSuggestionRootMessage({
@@ -1125,7 +1121,8 @@ async function postSuggestedTasksSummaryToSlack(params: {
     const postResult = await postTaskSuggestionsThreadToSlack({
       sourceTaskId: params.sourceTaskId,
       slackBotAccessToken: slackInstallation.botAccessToken,
-      slackChannelId: channel.channelId,
+      slackChannelId: channelId,
+      existingRootMessageTs: receipt?.threadTs ?? undefined,
       createdByUserId,
       suggestionType: slackConfig.suggestionType,
       rootText: buildAutomationRootSummaryText({
@@ -1141,12 +1138,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
         : null,
       suggestions: missingSuggestions,
       insertSuggestionMessages: async (suggestionMessageRows) => {
-        await tx
-          .insert(trackedMessages)
-          .values(buildSlackSuggestionCardValues(suggestionMessageRows))
-          .onConflictDoNothing({
-            target: [trackedMessages.kind, trackedMessages.dedupeKey],
-          });
+        await registerSlackSuggestionMessageRows(suggestionMessageRows, tx);
       },
     });
 
@@ -1156,8 +1148,8 @@ async function postSuggestedTasksSummaryToSlack(params: {
       supportsHistoricalThreadFeedback(slackConfig.automationKey)
     ) {
       const slackThreadPayloadPatch = JSON.stringify({
-        channel: channel.channelId,
-        slackChannel: channel.channelId,
+        channel: channelId,
+        slackChannel: channelId,
         thread_ts: postResult.rootMessageTs,
       });
 
@@ -1165,7 +1157,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
       await tx
         .update(tasks)
         .set({
-          slackChannelId: channel.channelId,
+          slackChannelId: channelId,
           slackThreadTs: postResult.rootMessageTs,
         })
         .where(eq(tasks.id, params.sourceTaskId));
@@ -1180,26 +1172,71 @@ async function postSuggestedTasksSummaryToSlack(params: {
         .where(eq(taskRuns.taskId, params.sourceTaskId));
     }
 
-    if (postResult && shouldTrackAutomationThread) {
+    if (postResult) {
       await upsertBackgroundAutomationSlackThread(tx, {
         surface: 'slack',
         automationKey: slackConfig.automationKey,
-        slackChannelId: channel.channelId,
+        slackTeamId: slackInstallation.teamId,
+        slackChannelId: channelId,
         threadTs: postResult.rootMessageTs,
         summaryText: rootMessage.summaryText,
         postedAt: new Date(),
         metadata: {
           suggestionCount: params.suggestions.length,
           sourceTaskId: params.sourceTaskId,
+          slackTeamId: slackInstallation.teamId,
         },
       });
     }
 
     // Delivered only when the root message was actually posted/persisted.
-    return Boolean(
-      postResult && postResult.trackedMessages === missingSuggestions.length,
-    );
+    return {
+      delivered: Boolean(
+        postResult && postResult.trackedMessages === missingSuggestions.length,
+      ),
+      channelId,
+      rootMessageTs: postResult?.rootMessageTs ?? null,
+    };
   });
+
+  if (publication.rootMessageTs && publication.channelId) {
+    try {
+      const session = await getSessionForTask(db, params.sourceTaskId);
+      if (session && !session.fastConversationId) {
+        const owner =
+          session.ownerKind === 'automation' && session.ownerAutomation
+            ? {
+                kind: 'automation' as const,
+                automationKey: session.ownerAutomation,
+              }
+            : session.ownerKind === 'user' && session.ownerUserId
+              ? { kind: 'user' as const, userId: session.ownerUserId }
+              : null;
+        if (owner) {
+          await fastAgentConversationRepository.getOrCreate({
+            sessionId: session.id,
+            owner,
+            conversation: {
+              surface: 'slack',
+              workspaceId: slackInstallation.teamId,
+              conversationId: publication.rootMessageTs,
+              replyTarget: {
+                channelId: publication.channelId,
+                threadId: publication.rootMessageTs,
+              },
+            },
+          });
+        }
+      }
+    } catch (error) {
+      // Delivery already committed; binding failure must not trigger a repost.
+      apiLogger.warn(
+        `[submitTaskSuggestions] Slack report published but Session binding failed for task ${params.sourceTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return publication.delivered;
 }
 
 /**

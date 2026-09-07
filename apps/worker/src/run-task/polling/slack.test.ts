@@ -9,6 +9,7 @@ import type { ListenerOptions } from '../types';
 
 const {
   mockGetSlackMessages,
+  mockActivateSlackReplyTarget,
   mockGetSlackRequestUserInputAnswers,
   mockPrepareActorScopedTurn,
   mockPrependSlackMessages,
@@ -16,6 +17,7 @@ const {
   mockCaptureWorkerException,
 } = vi.hoisted(() => ({
   mockGetSlackMessages: vi.fn(),
+  mockActivateSlackReplyTarget: vi.fn(),
   mockGetSlackRequestUserInputAnswers: vi.fn(),
   mockPrepareActorScopedTurn: vi.fn(),
   mockPrependSlackMessages: vi.fn(),
@@ -26,6 +28,7 @@ const {
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
+      activateSlackReplyTarget: mockActivateSlackReplyTarget,
       getSlackMessages: mockGetSlackMessages,
       getSlackRequestUserInputAnswers: mockGetSlackRequestUserInputAnswers,
     },
@@ -148,6 +151,7 @@ describe('createSlackMessageInterval', () => {
     vi.useFakeTimers();
     vi.resetAllMocks();
     mockGetSlackMessages.mockResolvedValue([]);
+    mockActivateSlackReplyTarget.mockResolvedValue(true);
     mockGetSlackRequestUserInputAnswers.mockResolvedValue([]);
     mockPrepareActorScopedTurn.mockImplementation(
       async (targetUserId?: string) => ({
@@ -222,6 +226,36 @@ describe('createSlackMessageInterval', () => {
         userId: 'user-2',
         clientMessageId: 'slack:1710000000.123',
       });
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('keeps targeted Slack messages queued until their harness turn starts', async () => {
+    mockGetSlackMessages.mockResolvedValueOnce([
+      {
+        text: 'Please continue here',
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.456',
+        channel: 'C123',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, sendPrompt } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(sendPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clientMessageId: 'slack:1710000000.456',
+          queueOnly: true,
+        }),
+      );
+      expect(mockActivateSlackReplyTarget).not.toHaveBeenCalled();
     } finally {
       clearInterval(interval);
     }
@@ -517,6 +551,104 @@ describe('createSlackMessageInterval', () => {
       expect(mockGetSlackMessages).toHaveBeenCalledWith({
         runId: 42,
       });
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('delivers request_user_input answers when reply target authorization is missing', async () => {
+    mockActivateSlackReplyTarget.mockResolvedValueOnce(false);
+    mockGetSlackRequestUserInputAnswers.mockResolvedValueOnce([
+      {
+        requestId: 'rui:session:turn:call',
+        answers: { language: { answers: ['Rust'] } },
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.902',
+        channel: 'C_ALERT',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, answerUserInputRequest } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(answerUserInputRequest).toHaveBeenCalledTimes(1);
+      expect(mockPrependSlackRequestUserInputAnswers).not.toHaveBeenCalled();
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('delivers request_user_input answers canonically when the reply-target procedure is missing', async () => {
+    mockActivateSlackReplyTarget.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          'No "mutation"-procedure on path "taskRuns.activateSlackReplyTarget"',
+        ),
+        {
+          name: 'TRPCClientError',
+          data: { code: 'NOT_FOUND', httpStatus: 404 },
+        },
+      ),
+    );
+    mockGetSlackRequestUserInputAnswers.mockResolvedValueOnce([
+      {
+        requestId: 'rui:session:turn:call',
+        answers: { language: { answers: ['Rust'] } },
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.903',
+        channel: 'C_ALERT',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, logger, answerUserInputRequest } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(answerUserInputRequest).toHaveBeenCalledTimes(1);
+      expect(mockPrependSlackRequestUserInputAnswers).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('delivering request_user_input answer'),
+      );
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('requeues request_user_input answers on transient reply-target failures', async () => {
+    mockActivateSlackReplyTarget.mockRejectedValueOnce(
+      new Error('socket hang up'),
+    );
+    mockGetSlackRequestUserInputAnswers.mockResolvedValueOnce([
+      {
+        requestId: 'rui:session:turn:call',
+        answers: { language: { answers: ['Rust'] } },
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.904',
+        channel: 'C_ALERT',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, answerUserInputRequest } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(answerUserInputRequest).not.toHaveBeenCalled();
+      expect(mockPrependSlackRequestUserInputAnswers).toHaveBeenCalledWith(42, [
+        expect.objectContaining({ ts: '1710000000.904' }),
+      ]);
     } finally {
       clearInterval(interval);
     }

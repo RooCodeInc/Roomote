@@ -30,7 +30,7 @@ import {
 function makeReviewSummaryComment(login: string): Schemas.IssueComment {
   return {
     id: 1,
-    body: '<!-- roomote-review-summary sha=abc mode=initial -->\nReviewing.',
+    body: '<!-- roomote-review-summary sha=abc1234 mode=initial -->\nReviewing.',
     url: 'https://github.com/acme/repo/issues/1#issuecomment-1',
     user: { id: 100, login, type: 'Bot' },
     created_at: '2026-07-10T00:00:00Z',
@@ -140,5 +140,28 @@ describe('getPrBodyAttributionLine', () => {
 
     expect(line).toContain('@acme');
     expect(line).not.toContain('@roomote');
+  });
+
+  it('keeps task wording when the link destination is a Session', () => {
+    const taskLine = getPrBodyAttributionLine({
+      attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+      taskUrl: 'https://app.roomote.dev/task/task-123',
+      taskSurface: 'slack',
+    });
+    const sessionLine = getPrBodyAttributionLine({
+      attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+      taskUrl: 'https://app.roomote.dev/sessions/session-123',
+      taskSurface: 'slack',
+    });
+
+    expect(sessionLine).toBe(
+      taskLine?.replace(
+        'https://app.roomote.dev/task/task-123',
+        'https://app.roomote.dev/sessions/session-123',
+      ),
+    );
+    expect(sessionLine).not.toContain('Fast session');
+    expect(sessionLine).not.toContain('execution details');
+    expect(sessionLine).toContain('in [the web UI](');
   });
 });

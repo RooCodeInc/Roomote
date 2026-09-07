@@ -27,7 +27,7 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 ## Build
 
-- `pnpm lint` — oxfmt format check + oxlint + residual ESLint across workspaces
+- `pnpm lint` — oxfmt format check + monorepo oxlint + residual ESLint in web and worker
 - `pnpm check-types` — TypeScript type checking
 - `pnpm format` — oxfmt formatting
 
@@ -40,7 +40,7 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Matches the full pre-push suite (pre-push runs the same gates in parallel after oxlint)
 - `pnpm check` — Runs lint + check-types + test + knip
 - If `pnpm lint` fails because of formatting, run `pnpm format` and rerun `pnpm lint`
-- Pre-commit hooks: `lint-staged` (oxfmt on staged files). Pre-push: `node scripts/pre-push-checks.mjs` (oxlint, then residual ESLint + `check-types:fast` + knip in parallel).
+- Pre-commit hooks: `lint-staged` (oxfmt on staged files). Pre-push: `node scripts/pre-push-checks.mjs` (oxlint, then web/worker residual ESLint + `check-types:fast` + knip in parallel).
 
 ## Working notes
 
@@ -56,3 +56,4 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - Present LLM / agent narrative output in Slack as `markdown` blocks (`{ type: 'markdown', text }`) with standard markdown (`[label](url)`, `**bold**`, lists, tables, code fences) whenever possible. Do not convert that body text into legacy mrkdwn (`*bold*`, `<url|label>`) before posting a `markdown` block.
 - Do not migrate hardcoded product UI Block Kit (routing confirmations, sticky footers, unfurls, accessory sections, etc.) for style alone; keep `mrkdwn` there when those builders already rely on it or Slack requires it (for example `section` text with an `accessory`).
 - When reading inbound Slack message blocks, continue to accept both `markdown` blocks and legacy `mrkdwn` text objects.
+- Built-in automation result cards use the icon named by `slackIcon` in `packages/types/src/background-automation-registry.ts`; custom automations always use `zap`. When adding an automation or changing its Automations UI icon, update that registry value and `apps/web/scripts/generate-automation-icons.mjs`, then run `pnpm --filter @roomote/web automation:icons` so the matching black-on-white PNG under `apps/web/public/automation-icons/` stays in sync for Slack.

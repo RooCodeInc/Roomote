@@ -1,0 +1,1 @@
+ALTER TABLE "brain_memory_events" ADD COLUMN "revision" integer DEFAULT 0 NOT NULL;

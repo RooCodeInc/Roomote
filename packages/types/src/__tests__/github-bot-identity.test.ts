@@ -1,6 +1,5 @@
 import {
-  getRoomoteGitHubAppSlugs,
-  getRoomoteManagedGitHubLogins,
+  findPrBodyAttributionLine,
   formatPrBodyAttribution,
   matchesRoomoteGitHubLogin,
   normalizePrBodyAttributionAppMention,
@@ -19,64 +18,30 @@ describe('Roomote GitHub bot identity helpers', () => {
         '> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of @octocat.<!-- roomote:pr-attribution:end --> Follow up in [the web UI](https://example.com/task/1).',
       );
     });
-  });
 
-  describe('getRoomoteGitHubAppSlugs', () => {
-    it('always includes hosted-product slugs and a custom configured slug', () => {
-      expect(getRoomoteGitHubAppSlugs().sort()).toEqual(
-        ['roomote', 'roomote-dev'].sort(),
-      );
-      expect(getRoomoteGitHubAppSlugs('Acme').sort()).toEqual(
-        ['acme', 'roomote', 'roomote-dev'].sort(),
-      );
-    });
-  });
+    it.each(['&#8203;', '&amp;#8203;', '\u200B'])(
+      'finds marker-wrapped attribution with the %s prefix',
+      (prefix) => {
+        const body = `\n\n> ${prefix}<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote.`;
 
-  describe('getRoomoteManagedGitHubLogins', () => {
-    it('returns exact bot and app logins for hosted and configured slugs', () => {
-      expect(getRoomoteManagedGitHubLogins('acme').sort()).toEqual(
-        [
-          'app/acme',
-          'app/roomote',
-          'app/roomote-dev',
-          'acme[bot]',
-          'roomote-dev[bot]',
-          'roomote[bot]',
-        ].sort(),
-      );
-    });
-
-    it('does not invent open roomote-* prefix logins', () => {
-      expect(
-        getRoomoteManagedGitHubLogins('roomote').some((login) =>
-          login.startsWith('roomote-staging'),
-        ),
-      ).toBe(false);
-    });
+        expect(findPrBodyAttributionLine(body)).toBe('> Created by Roomote.');
+      },
+    );
   });
 
   describe('matchesRoomoteGitHubLogin', () => {
-    it('matches exact managed logins for a custom slug', () => {
-      expect(matchesRoomoteGitHubLogin('acme[bot]', 'acme')).toBe(true);
-      expect(matchesRoomoteGitHubLogin('app/acme', 'acme')).toBe(true);
+    it('matches only exact logins for the configured slug', () => {
+      expect(matchesRoomoteGitHubLogin('Acme[bot]', ' acme ')).toBe(true);
+      expect(matchesRoomoteGitHubLogin('APP/ACME', 'acme')).toBe(true);
       expect(matchesRoomoteGitHubLogin('acme[bot]', 'roomote')).toBe(false);
+      expect(matchesRoomoteGitHubLogin('roomote-preview[bot]', 'roomote')).toBe(
+        false,
+      );
     });
 
-    it('matches roomote-dev and hosted logins without a custom slug', () => {
-      expect(matchesRoomoteGitHubLogin('roomote[bot]')).toBe(true);
-      expect(matchesRoomoteGitHubLogin('roomote-dev[bot]')).toBe(true);
-      expect(matchesRoomoteGitHubLogin('app/roomote-dev')).toBe(true);
-    });
-
-    it('matches open roomote-* and app/roomote-* prefix forms', () => {
-      expect(matchesRoomoteGitHubLogin('roomote-staging[bot]')).toBe(true);
-      expect(matchesRoomoteGitHubLogin('app/roomote-canary')).toBe(true);
-      expect(matchesRoomoteGitHubLogin('Roomote-Edge[bot]')).toBe(true);
-    });
-
-    it('rejects unrelated logins', () => {
-      expect(matchesRoomoteGitHubLogin('octocat')).toBe(false);
-      expect(matchesRoomoteGitHubLogin('app/dependabot')).toBe(false);
+    it('matches nothing without a configured slug', () => {
+      expect(matchesRoomoteGitHubLogin('roomote[bot]')).toBe(false);
+      expect(matchesRoomoteGitHubLogin('app/roomote')).toBe(false);
     });
   });
 

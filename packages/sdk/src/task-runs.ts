@@ -184,9 +184,6 @@ export async function syncActingUserId(
   return { result: 'updated', actingUserId: serverUserId };
 }
 
-export const enqueue = (options: AppRouterInput['taskRuns']['enqueue']) =>
-  client.taskRuns.enqueue.mutate(options);
-
 export async function dequeue(
   options: AppRouterInput['taskRuns']['dequeue'],
   { onBootstrapFailure }: TaskRunBootstrapOptions = {},
@@ -256,6 +253,10 @@ export const getMessageSources = (
   options: AppRouterInput['taskRuns']['getMessageSources'],
 ) => client.taskRuns.getMessageSources.query(options);
 
+export const renderSlackLiveTaskCard = (
+  options: AppRouterInput['taskRuns']['renderSlackLiveTaskCard'],
+) => client.taskRuns.renderSlackLiveTaskCard.mutate(options);
+
 export const getResolvedGitAuthor = (
   options: AppRouterInput['taskRuns']['getResolvedGitAuthor'],
 ) => client.taskRuns.getResolvedGitAuthor.query(options);
@@ -275,6 +276,18 @@ export const enqueueSlackPrInactivityCheck = (
 export const getSlackMessages = (
   options: AppRouterInput['taskRuns']['getSlackMessages'],
 ) => client.taskRuns.getSlackMessages.query(options);
+
+export const activateSlackReplyTarget = (
+  options: AppRouterInput['taskRuns']['activateSlackReplyTarget'],
+) => client.taskRuns.activateSlackReplyTarget.mutate(options);
+
+export const getActiveSlackReplyTarget = (
+  options: AppRouterInput['taskRuns']['getActiveSlackReplyTarget'],
+) => client.taskRuns.getActiveSlackReplyTarget.query(options);
+
+export const clearActiveSlackReplyTarget = (
+  options: AppRouterInput['taskRuns']['clearActiveSlackReplyTarget'],
+) => client.taskRuns.clearActiveSlackReplyTarget.mutate(options);
 
 export const getCommunicationMessages = (
   options: AppRouterInput['taskRuns']['getCommunicationMessages'],
@@ -303,6 +316,19 @@ export const recordOutboundSlackConversationMessage = (
 export const setPendingSlackRequestUserInput = (
   options: AppRouterInput['taskRuns']['setPendingSlackRequestUserInput'],
 ) => client.taskRuns.setPendingSlackRequestUserInput.mutate(options);
+
+export const publishFastAgentRequestUserInput = (
+  options: AppRouterInput['taskRuns']['publishFastAgentRequestUserInput'],
+) => client.taskRuns.publishFastAgentRequestUserInput.mutate(options);
+
+export const reportToParentSession = (
+  options: AppRouterInput['taskRuns']['reportToParentSession'],
+) => client.taskRuns.reportToParentSession.mutate(options);
+
+/** @deprecated Kept for workers already running against the prior API contract. */
+export const relayFastAgentChildChatReply = (
+  options: AppRouterInput['taskRuns']['relayFastAgentChildChatReply'],
+) => client.taskRuns.relayFastAgentChildChatReply.mutate(options);
 
 export const clearPendingSlackRequestUserInput = (
   options: AppRouterInput['taskRuns']['clearPendingSlackRequestUserInput'],

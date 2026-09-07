@@ -3,14 +3,10 @@ import { sanitizeSandboxPathString } from '@/lib';
 import {
   type LucideIcon,
   AlertCircle,
-  File as FileIcon,
-  FolderIcon,
   Loader2,
-  Search,
-  SquarePen,
-  Terminal,
-  Wrench,
+  Telescope,
 } from '@/components/system';
+import { useTaskRobotIconContext } from '@/components/tasks/TaskRobotIcon';
 import {
   Message,
   MessageContent,
@@ -22,11 +18,13 @@ import {
 import { messageAnchorId } from '../message-anchor';
 
 import { AcpToolDetails } from './AcpToolDetails';
-import { hidesExpandedToolResult } from './tool-detail-visibility';
-import type {
-  GroupedToolCallRenderBlock,
-  GroupedToolDisplayKind,
-} from './render-blocks';
+import type { GroupedToolCallRenderBlock } from './render-blocks';
+import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
+import { resolveToolPresentation } from './tool-presentation';
+import { resolveToolPresentationPolicy } from './tool-presentation-policy';
+import { resolveTaskToolReference } from './task-tool-reference';
+import { useTaskToolIcon } from './task-tool-icon';
+import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
 interface AcpGroupedToolMessageProps {
   group: GroupedToolCallRenderBlock;
@@ -53,7 +51,12 @@ export function AcpGroupedToolMessage({
     (item) =>
       item.msg.partial === true || item.msg.data.status === 'in_progress',
   );
-  const showExpandedDetails = group.items.length > 0;
+  const showExpandedDetails = group.items.some(
+    (item) =>
+      resolveToolPresentationPolicy(item.msg, {
+        showInternalMessages: showSubagentPayload,
+      }).detailMode === 'expandable',
+  );
 
   const toolState = hasFailed
     ? 'output-error'
@@ -61,11 +64,26 @@ export function AcpGroupedToolMessage({
       ? 'input-available'
       : 'output-available';
 
+  const firstPresentation = resolveToolPresentation(
+    group.items[0]!.msg.data,
+    group.items[0]!.msg.partial,
+  );
   const ToolIcon = groupedToolIcon({
-    displayKind: group.displayKind,
+    presentation: firstPresentation,
     hasFailed,
-    hasRunning,
+    isExploration: group.action === 'Exploring',
   });
+  const context = useTaskRobotIconContext();
+  const references = group.items.map((item) =>
+    resolveTaskToolReference(item.msg, context),
+  );
+  const firstReference = references[0];
+  const uniformReference =
+    firstReference?.taskId &&
+    references.every((reference) => reference?.taskId === firstReference.taskId)
+      ? firstReference
+      : null;
+  const taskIcon = useTaskToolIcon(uniformReference, hasFailed);
 
   return (
     <Message from="assistant" className="chat-tool-use-message">
@@ -83,6 +101,7 @@ export function AcpGroupedToolMessage({
             action={group.action}
             object={objectSummary}
             icon={ToolIcon}
+            {...taskIcon}
             state={toolState}
             collapsible={showExpandedDetails}
           />
@@ -92,15 +111,15 @@ export function AcpGroupedToolMessage({
                 const sectionTitle = sanitizeSandboxPathString(
                   item.objectLabel,
                 );
-                const showItemDetails = !hidesExpandedToolResult(item.msg, {
-                  showSubagentPayload,
-                });
-
+                const showItemDetails =
+                  resolveToolPresentationPolicy(item.msg, {
+                    showInternalMessages: showSubagentPayload,
+                  }).detailMode === 'expandable';
                 return (
                   <section key={item.msg.id} className="space-y-2">
                     <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground">
                       <GroupedToolItemIcon
-                        displayKind={item.displayKind}
+                        msg={item.msg}
                         className="size-3 shrink-0"
                       />
                       <span className="truncate">{sectionTitle}</span>
@@ -124,48 +143,58 @@ export function AcpGroupedToolMessage({
 }
 
 function groupedToolIcon(params: {
-  displayKind: GroupedToolDisplayKind;
-  hasRunning: boolean;
+  presentation: ReturnType<typeof resolveToolPresentation>;
   hasFailed: boolean;
+  isExploration: boolean;
 }): LucideIcon {
-  if (params.hasRunning) return Loader2;
   if (params.hasFailed) return AlertCircle;
-  return groupedDisplayKindIcon(params.displayKind);
+  if (params.isExploration) return Telescope;
+  return params.presentation.integrationIcon
+    ? mcpIntegrationIconFor(params.presentation.integrationIcon)
+    : toolIconForKey(params.presentation.iconKey);
 }
 
 function GroupedToolItemIcon({
-  displayKind,
+  msg,
   className,
 }: {
-  displayKind: GroupedToolDisplayKind;
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
   className?: string;
 }) {
-  const Icon = groupedDisplayKindIcon(displayKind);
+  const presentation = resolveToolPresentation(msg.data, msg.partial);
+  const context = useTaskRobotIconContext();
+  const reference = resolveTaskToolReference(msg, context);
+  const failed = presentation.phase === 'failed';
+  const { iconElement, iconAction } = useTaskToolIcon(reference, failed);
+  const Icon =
+    reference && failed
+      ? AlertCircle
+      : presentation.integrationIcon
+        ? mcpIntegrationIconFor(presentation.integrationIcon)
+        : toolIconForKey(presentation.iconKey);
+  if (iconElement) {
+    return (
+      <>
+        {iconAction ? (
+          <button
+            type="button"
+            aria-label={iconAction.label}
+            onClick={iconAction.onClick}
+            className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {iconElement}
+          </button>
+        ) : (
+          iconElement
+        )}
+        {presentation.phase === 'running' ? (
+          <Loader2
+            aria-label="Running"
+            className="size-3 shrink-0 animate-spin"
+          />
+        ) : null}
+      </>
+    );
+  }
   return <Icon className={className} />;
-}
-
-function groupedDisplayKindIcon(
-  displayKind: GroupedToolDisplayKind,
-): LucideIcon {
-  if (displayKind === 'search') {
-    return Search;
-  }
-
-  if (displayKind === 'list') {
-    return FolderIcon;
-  }
-
-  if (displayKind === 'read') {
-    return FileIcon;
-  }
-
-  if (displayKind === 'execute') {
-    return Terminal;
-  }
-
-  if (displayKind === 'edit') {
-    return SquarePen;
-  }
-
-  return Wrench;
 }

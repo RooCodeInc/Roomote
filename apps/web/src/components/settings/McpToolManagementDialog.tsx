@@ -19,6 +19,8 @@ import {
   Label,
   Spinner,
   Switch,
+  ToggleLeft,
+  ToggleRight,
 } from '@/components/system';
 import {
   useMcpConnectionTools,
@@ -26,7 +28,6 @@ import {
 } from '@/hooks/mcp-connections';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import { SETTINGS_PATHS } from '@/lib/settings';
-import { ToggleLeft, ToggleRight } from 'lucide-react';
 
 type McpToolManagementDialogProps = {
   mcpId: string | null;
@@ -121,7 +122,6 @@ export function McpToolManagementDialog({
     () => initialDisabledToolNames.join('\n'),
     [initialDisabledToolNames],
   );
-
   useEffect(() => {
     if (!open) {
       lastSyncedToolStateKey.current = null;
@@ -164,8 +164,10 @@ export function McpToolManagementDialog({
     toolsQuery.data != null &&
     loadedTools.length > 0;
   const showBulkToolActions = loadedTools.length > 3;
-  const hasEnabledTools =
-    normalizedDisabledToolNames.length < loadedTools.length;
+  const availableTools = loadedTools;
+  const hasEnabledTools = availableTools.some(
+    (tool) => !normalizedDisabledToolNames.includes(tool.name),
+  );
 
   const handleToggle = (toolName: string, enabled: boolean) => {
     setDisabledToolNames((current) => {
@@ -182,11 +184,18 @@ export function McpToolManagementDialog({
   };
 
   const handleEnableAllTools = () => {
-    setDisabledToolNames([]);
+    const availableToolNames = new Set(availableTools.map((tool) => tool.name));
+    setDisabledToolNames((current) =>
+      current.filter((toolName) => !availableToolNames.has(toolName)),
+    );
   };
 
   const handleDisableAllTools = () => {
-    setDisabledToolNames(loadedTools.map((tool) => tool.name));
+    setDisabledToolNames((current) =>
+      Array.from(
+        new Set([...current, ...availableTools.map((tool) => tool.name)]),
+      ),
+    );
   };
 
   const handleSave = () => {
@@ -309,7 +318,9 @@ export function McpToolManagementDialog({
                   className="px-0!"
                   disabled={
                     setDisabledTools.isPending ||
-                    normalizedDisabledToolNames.length === loadedTools.length
+                    availableTools.every((tool) =>
+                      normalizedDisabledToolNames.includes(tool.name),
+                    )
                   }
                   onClick={handleDisableAllTools}
                 >
@@ -323,7 +334,10 @@ export function McpToolManagementDialog({
                   className="px-0!"
                   disabled={
                     setDisabledTools.isPending ||
-                    normalizedDisabledToolNames.length === 0
+                    availableTools.every(
+                      (tool) =>
+                        !normalizedDisabledToolNames.includes(tool.name),
+                    )
                   }
                   onClick={handleEnableAllTools}
                 >

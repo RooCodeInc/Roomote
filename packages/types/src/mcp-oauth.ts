@@ -124,6 +124,29 @@ export interface McpConnectionAsanaConfig {
 }
 
 /**
+ * Deployment-scoped Notion internal integration configuration.
+ *
+ * Notion enforces the content boundary: this token can only access pages and
+ * data sources explicitly shared with the internal integration. The secret is
+ * expected to be encrypted before persistence.
+ */
+export interface McpConnectionNotionConfig {
+  type: 'notion';
+  encryptedToken: string;
+}
+
+/**
+ * Deployment-scoped Rippling HRIS configuration.
+ *
+ * The API token is used only by the server-side Brain collector and is
+ * expected to be encrypted before persistence.
+ */
+export interface McpConnectionRipplingConfig {
+  type: 'rippling';
+  encryptedApiToken: string;
+}
+
+/**
  * Deployment-scoped Granola connection config stored in mcpConnections.authConfig.
  *
  * The API key is expected to be encrypted before persistence.
@@ -191,11 +214,13 @@ export interface McpConnectionGrafanaConfig {
  * service (typically deployment-internal).
  *
  * Provisioned automatically at connect time: the admin supplies gbrain's
- * bootstrap token once (never persisted), and Roomote registers two OAuth
+ * bootstrap token once (never persisted), and Roomote registers three OAuth
  * clients via gbrain's admin API. Scopes are enforced server-side by gbrain:
  * the agent client is `read`-scoped (structurally incapable of mutation; the
  * proxy's tool allowlist is defense-in-depth on top), and the ingest client
- * carries `write` for the server-side ingestion worker only. Secrets are
+ * carries `write` for the server-side ingestion worker only. A third,
+ * admin-scoped maintenance client is held only by the scheduler, which uses
+ * it to enqueue the built-in nightly maintenance cycle. Secrets are
  * encrypted before persistence; short-lived access tokens are minted on
  * demand via the client_credentials grant. R_GBRAIN_* env, when set,
  * overrides this config entirely (operator-managed deployments, static
@@ -208,6 +233,8 @@ export interface McpConnectionGbrainConfig {
   encryptedAgentClientSecret: string;
   ingestClientId: string;
   encryptedIngestClientSecret: string;
+  maintenanceClientId: string;
+  encryptedMaintenanceClientSecret: string;
 }
 
 /**
@@ -221,6 +248,8 @@ export type McpConnectionAuthConfig =
   | McpConnectionOAuthConfig
   | McpConnectionSnowflakeConfig
   | McpConnectionAsanaConfig
+  | McpConnectionNotionConfig
+  | McpConnectionRipplingConfig
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
   | McpConnectionVercelConfig
@@ -314,6 +343,8 @@ export type McpIntegrationServerMode =
   | 'native'
   | 'credential_only';
 
+export type McpIntegrationCategory = 'memory';
+
 export type McpIntegrationOAuthClientEnv = {
   clientIdEnv: string;
   clientSecretEnv?: string;
@@ -338,6 +369,8 @@ export type McpIntegration = {
   url?: string;
   description: string;
   icon: string;
+  /** Optional behavioral category used for shared task guidance. */
+  category?: McpIntegrationCategory;
   /**
    * Optional agent-facing usage guidance. When this integration's MCP server
    * is attached to a task, the worker injects this text into the agent's
@@ -350,6 +383,8 @@ export type McpIntegration = {
   authorizationParameters?: McpIntegrationAuthorizationParameter[];
   oauthClientEnv?: McpIntegrationOAuthClientEnv;
   oauthEndpoints?: McpIntegrationOAuthEndpoints;
+  /** RFC 8707 resource indicator sent throughout this integration's OAuth flow. */
+  oauthResource?: string;
   oauthScopes?: string[];
   oauthScopeSeparator?: ' ' | ',';
   oauthScopeMode?: McpIntegrationOauthScopeMode;
@@ -384,13 +419,36 @@ export const RESEND_DEFAULT_DISABLED_TOOL_NAMES = [
   'update-webhook',
 ] as const;
 
+/**
+ * Path prefixes of the API-hosted MCP proxy mounts. URL producers build proxy
+ * URLs from these, and consumers (e.g. the Fast integration broker) use the
+ * same constants to recognize deployment-proxied MCP endpoints — keep both
+ * sides on these rather than string literals so a mount move cannot silently
+ * break the recognition.
+ */
+export const MCP_INTEGRATION_PROXY_PATH_PREFIX = '/api/mcp/';
+export const MCP_ROUTING_PROXY_PATH_PREFIX = '/api/mcp-routing/';
+
 export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'notion',
     name: 'Notion',
-    url: 'https://mcp.notion.com/mcp',
-    description: `Access your Notion pages, databases, and content within ${PRODUCT_NAME} tasks`,
+    description: `Connect Notion so your agents can find context and keep shared pages and data sources up to date from ${PRODUCT_NAME} tasks`,
     icon: 'notion',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'native',
+    instructions:
+      'Use Notion for pages and data sources explicitly shared with the deployment integration. Content outside that connection boundary, including unshared private pages, is unavailable. Notion controls whether the connection may read, update, insert, or comment.',
+  },
+  {
+    id: 'rippling',
+    name: 'Rippling',
+    description: `Connect Rippling so Brain can keep an authoritative employee directory and reporting structure current for ${PRODUCT_NAME} tasks`,
+    icon: 'rippling',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
   },
   {
     id: 'jira',
@@ -413,6 +471,8 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.linear.app/mcp',
     description: `Enable Linear so this deployment can route issue context and task entry through it.`,
     icon: 'linear',
+    instructions:
+      'Use Linear tools to read and update Linear issues. Add issue discussion with the dedicated comment-creation tool; do not pass comment text to an issue-update or status-update tool. Use issue-update tools only for issue fields such as status, title, description, assignee, or labels. Before calling a mutation tool, follow its advertised input schema exactly. If a Linear tool rejects a request, report the returned tool error verbatim instead of inferring a different failure reason.',
     connectionScope: 'deployment',
     connectionMode: 'oauth',
     serverMode: 'upstream_proxy',
@@ -433,6 +493,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.monday.com/mcp',
     description: `Inspect monday.com boards, items, updates, docs, and workspace context from ${PRODUCT_NAME} tasks`,
     icon: 'monday',
+    oauthResource: 'https://mcp.monday.com/mcp',
     oauthScopes: [...MONDAY_MCP_READ_ONLY_OAUTH_SCOPES],
     oauthScopeMode: 'read-only',
     serverMode: 'upstream_proxy',
@@ -574,7 +635,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'elevenlabs',
     name: 'ElevenLabs',
-    description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice. The API key stays on the control plane; agents get no ElevenLabs tools and the key never enters a task sandbox`,
+    description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice`,
     icon: 'elevenlabs',
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
@@ -586,25 +647,8 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.supermemory.ai/mcp',
     description: `Enable Supermemory so this deployment can save and recall shared memories across ${PRODUCT_NAME} tasks.`,
     icon: 'supermemory',
+    category: 'memory',
     connectionScope: 'deployment',
-    instructions: [
-      'The Supermemory MCP tools share one persistent memory store across every task in this deployment.',
-      '',
-      'Recall early: when starting substantive work, use the Supermemory recall tool to check for relevant context such as team preferences, repository conventions, and decisions from earlier tasks before assuming that context does not exist. Recall is read-only and cheap; prefer one recall pass near the start of a task over skipping it.',
-      '',
-      'Save durable knowledge proactively: prefer writing useful shared memories when they appear. Do not wait for the user to ask you to save. Supermemory is designed to surface the relevant memories later, so missing durable context is worse than saving a few concise reusable facts.',
-      '',
-      'Save when you learn something future tasks should inherit, for example:',
-      '- user or team preferences and durable corrections (for example "always open draft PRs")',
-      '- deployment-wide conventions or workflow norms',
-      '- lasting product or architecture decisions with rationale that future tasks must respect',
-      '- recurring operational gotchas that cost real effort and will matter again',
-      '- stable "how we do X here" guidance that is not already encoded in the repository',
-      '',
-      'When such knowledge appears mid-task, save it promptly as a short standalone fact. Near task closeout, do one final memory check and save any remaining durable findings from this task. Prefer concise reusable wording over conversation dumps.',
-      '',
-      'Never save task status or progress notes, code snippets or file contents, secrets or credentials, private one-task details, or anything easily rederivable from the repository. Do not dump transcripts or large blobs.',
-    ].join('\n'),
   },
   {
     id: 'x',
@@ -856,6 +900,21 @@ export function getMcpIntegrationOauthEndpoints(
   return integration?.oauthEndpoints;
 }
 
+export function getMcpIntegrationOauthResource(
+  integrationOrId: McpIntegration | string | undefined,
+): string | undefined {
+  if (!integrationOrId) {
+    return undefined;
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.oauthResource;
+}
+
 export function getMcpIntegrationOauthScopeSeparator(
   integrationOrId: McpIntegration | string | undefined,
 ): ' ' | ',' {
@@ -917,6 +976,32 @@ export function isMcpConnectionAsanaConfig(
     typeof authConfig === 'object' &&
     'type' in authConfig &&
     authConfig.type === 'asana',
+  );
+}
+
+export function isMcpConnectionNotionConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionNotionConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'notion' &&
+    'encryptedToken' in authConfig &&
+    typeof authConfig.encryptedToken === 'string',
+  );
+}
+
+export function isMcpConnectionRipplingConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionRipplingConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'rippling' &&
+    'encryptedApiToken' in authConfig &&
+    typeof authConfig.encryptedApiToken === 'string',
   );
 }
 
@@ -989,7 +1074,11 @@ export function isMcpConnectionGbrainConfig(
     'ingestClientId' in authConfig &&
     typeof authConfig.ingestClientId === 'string' &&
     'encryptedIngestClientSecret' in authConfig &&
-    typeof authConfig.encryptedIngestClientSecret === 'string',
+    typeof authConfig.encryptedIngestClientSecret === 'string' &&
+    'maintenanceClientId' in authConfig &&
+    typeof authConfig.maintenanceClientId === 'string' &&
+    'encryptedMaintenanceClientSecret' in authConfig &&
+    typeof authConfig.encryptedMaintenanceClientSecret === 'string',
   );
 }
 

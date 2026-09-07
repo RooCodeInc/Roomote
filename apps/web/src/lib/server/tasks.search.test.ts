@@ -1,7 +1,15 @@
-import { runFactory, taskFactory, userFactory } from '@roomote/db/server';
+import {
+  db,
+  runFactory,
+  taskFactory,
+  tasks,
+  userFactory,
+} from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
-import { searchTasks } from './tasks';
+import { buildCreatorFilterValue } from '@/lib/task-creator-filter';
+
+import { getCreatorFilterCondition, searchTasks } from './tasks';
 
 describe('searchTasks', () => {
   it('returns only the current users tasks by default', async () => {
@@ -117,5 +125,28 @@ describe('searchTasks', () => {
     });
 
     expect(results.map((task) => task.id)).toEqual([myTask.id]);
+  });
+});
+
+describe('getCreatorFilterCondition', () => {
+  it('scopes custom automation filters to one actor id', () => {
+    const filterValue = buildCreatorFilterValue({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: 'automation-1',
+    });
+    const query = db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(getCreatorFilterCondition(filterValue!))
+      .toSQL();
+
+    expect(query.sql).toContain('"tasks"."actor_external_id" = $3');
+    expect(query.params).toEqual([
+      'automation',
+      'custom_automation',
+      'automation-1',
+    ]);
   });
 });

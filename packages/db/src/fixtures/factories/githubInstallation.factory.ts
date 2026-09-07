@@ -29,7 +29,7 @@ export const githubInstallationFactory = Factory.define<
     installedByUserId: installedByUserId || faker.string.uuid(),
     installationId: installationId || faker.number.int(),
     appId: faker.number.int(),
-    accountLogin: faker.internet.userName(),
+    accountLogin: faker.internet.username(),
     accountType: 'Organization',
     permissions: {},
     ...rest,

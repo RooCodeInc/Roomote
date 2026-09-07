@@ -4,6 +4,11 @@ import { Env } from '@roomote/env';
  * Comma-separated list of repository full names (e.g. "owner/repo") that
  * should be skipped for automated GitHub processing.
  *
+ * "Automated" means unsolicited work such as Review Code, Triage Issues,
+ * conflict checks, and workflow-run handling. Explicit mentions of this app
+ * and lifecycle notifications for tasks that already track a pull request are
+ * never skipped: someone addressing the app by name always gets a response.
+ *
  * The value comes from the optional `GITHUB_AUTOMATED_SKIP_REPOS` env var.
  */
 const skippedRepos: Set<string> = new Set(

@@ -185,20 +185,42 @@ export async function confirmUpload(
   artifactId: string,
   taskId: string,
 ): Promise<void> {
-  const response = await fetchWithTimeout(
-    `${config.platformApiUrl}/api/artifacts/${encodeURIComponent(artifactId)}/upload_complete?taskId=${encodeURIComponent(taskId)}`,
-    {
-      method: 'POST',
-      headers: buildApiHeaders(config),
-    },
-    { label: 'Failed to confirm upload' },
-  );
+  const url = `${config.platformApiUrl}/api/artifacts/${encodeURIComponent(artifactId)}/upload_complete?taskId=${encodeURIComponent(taskId)}`;
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    throw new Error(
-      `Failed to confirm upload: ${response.status} ${response.statusText}`,
-    );
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    let retryable = true;
+    try {
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers: buildApiHeaders(config),
+        },
+        { label: 'Failed to confirm upload' },
+      );
+
+      if (response.ok) {
+        return;
+      }
+
+      lastError = new Error(
+        `Failed to confirm upload: ${response.status} ${response.statusText}`,
+      );
+      if (response.status < 500) {
+        retryable = false;
+        throw lastError;
+      }
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error('Failed to confirm upload');
+      if (!retryable) {
+        throw lastError;
+      }
+    }
   }
+
+  throw lastError ?? new Error('Failed to confirm upload');
 }
 
 /**

@@ -1,5 +1,7 @@
 'use client';
 
+import { formatCurrency } from '@/lib/formatters';
+
 import {
   ANALYTICS_TIME_RANGE_OPTIONS,
   type AnalyticsCostSummary,
@@ -9,10 +11,10 @@ import {
 import {
   AnalyticsSummaryCard,
   AnalyticsSummaryCardsGrid,
-} from './AnalyticsSummaryCards';
+} from '@/components/system';
 
 function format(value: number | null) {
-  return value === null ? '—' : `$${value.toFixed(2)}`;
+  return value === null ? '—' : formatCurrency(Number(value.toFixed(2)));
 }
 
 function formatCount(value: number) {

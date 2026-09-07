@@ -1,15 +1,23 @@
 import { getVisiblePrimaryNavItems } from './navigation-items';
 
 describe('getVisiblePrimaryNavItems', () => {
-  it('places task history before automations for admins', () => {
+  it('places sessions before automations for admins', () => {
     const items = getVisiblePrimaryNavItems({ isAdmin: true });
 
     expect(items.map((item) => item.href)).toEqual([
       '/',
-      '/tasks',
+      '/sessions',
       '/automations',
       '/analytics',
     ]);
+  });
+
+  it('marks Home, Automations, and Analytics as setup-gated', () => {
+    const items = getVisiblePrimaryNavItems({ isAdmin: true });
+
+    expect(
+      items.filter((item) => item.requiresSetup).map((item) => item.href),
+    ).toEqual(['/', '/automations', '/analytics']);
   });
 
   it('hides analytics from non-admins', () => {
@@ -17,7 +25,7 @@ describe('getVisiblePrimaryNavItems', () => {
       isAdmin: false,
     });
 
-    expect(items.map((item) => item.href)).toEqual(['/', '/tasks']);
+    expect(items.map((item) => item.href)).toEqual(['/', '/sessions']);
   });
 
   it('hides automations from non-admins', () => {
@@ -25,6 +33,6 @@ describe('getVisiblePrimaryNavItems', () => {
       isAdmin: false,
     });
 
-    expect(items.map((item) => item.href)).toEqual(['/', '/tasks']);
+    expect(items.map((item) => item.href)).toEqual(['/', '/sessions']);
   });
 });

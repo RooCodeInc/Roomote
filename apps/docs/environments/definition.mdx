@@ -473,10 +473,12 @@ before the environment is used for a task.
 
 ## Validate and iterate
 
-The visual **Editor**, **YAML**, and **Preview** views in the environment editor
-all operate on this same document, so you can switch between hand-written YAML
-and the form freely. Roomote validates the definition on save; fix any reported
-errors before the environment runs a task.
+The visual **Editor**, **YAML**, **Diff**, and **Preview** views in the
+environment editor all operate on this same document, so you can switch between
+hand-written YAML and the form freely. **Diff** keeps the saved configuration
+read-only on the left while you edit the YAML draft on the right. Roomote
+validates the definition on save; fix any reported errors before the environment
+runs a task.
 
 After saving, the surest test is to run a real task. A healthy environment
 finishes setup without manual intervention, exposes the previews or logs a task

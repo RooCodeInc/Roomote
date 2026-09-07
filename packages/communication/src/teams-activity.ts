@@ -80,6 +80,15 @@ export const teamsActivitySchema = z
           .passthrough(),
       )
       .optional(),
+    reactionsRemoved: z
+      .array(
+        z
+          .object({
+            type: z.string(),
+          })
+          .passthrough(),
+      )
+      .optional(),
     attachments: z.array(z.unknown()).optional(),
   })
   .passthrough();
@@ -387,6 +396,13 @@ export function getTeamsConversationMessageIdSuffix(
   return cleanOptionalString(
     conversationId.slice(separatorIndex + ';messageid='.length),
   );
+}
+
+export function getTeamsBaseConversationId(conversationId: string): string {
+  const separatorIndex = conversationId.indexOf(';messageid=');
+  return separatorIndex === -1
+    ? conversationId
+    : conversationId.slice(0, separatorIndex);
 }
 
 export function getTeamsActivityThreadId(

@@ -1,10 +1,6 @@
 import { z } from 'zod';
 
-import {
-  ACP_ENVELOPE_EVENT_TYPES,
-  RunStatus,
-  TaskPayloadKind,
-} from '@roomote/types';
+import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const {
@@ -646,108 +642,5 @@ describe('taskRunsRouter queue message guards', () => {
       messageCreatedAt: new Date('2026-07-01T12:00:00.000Z'),
       messageCompletedAt: new Date('2026-07-01T12:00:01.000Z'),
     });
-  });
-
-  it('allows explicit compute provider overrides for auth-token callers', async () => {
-    await expect(
-      createAuthCaller().enqueue({
-        task: {
-          type: TaskPayloadKind.StandardTask,
-          computeProvider: 'modal',
-          payload: {
-            repo: 'acme/api',
-            description: 'Ship it',
-          },
-        },
-        initiator: { kind: 'user', userId: 'user-1' },
-        workflow: 'standard',
-        surface: 'api',
-        trigger: 'manual',
-      }),
-    ).resolves.toEqual({ id: 99, taskId: 'task-99' });
-
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          computeProvider: 'modal',
-        }),
-      }),
-    );
-  });
-
-  it('validates the initiator union and passes the classified launch through', async () => {
-    await expect(
-      createAuthCaller().enqueue({
-        task: {
-          type: TaskPayloadKind.StandardTask,
-          payload: {
-            repo: 'acme/api',
-            description: 'Ship it',
-          },
-        },
-        initiator: { kind: 'user', userId: 'user-1' },
-        workflow: 'standard',
-        surface: 'api',
-        trigger: 'manual',
-      }),
-    ).resolves.toEqual({ id: 99, taskId: 'task-99' });
-
-    expect(mockEnqueueTask).toHaveBeenCalledWith({
-      task: {
-        type: TaskPayloadKind.StandardTask,
-        payload: {
-          repo: 'acme/api',
-          description: 'Ship it',
-        },
-      },
-      initiator: { kind: 'user', userId: 'user-1' },
-      workflow: 'standard',
-      surface: 'api',
-      trigger: 'manual',
-    });
-  });
-
-  it('rejects launches without an initiator', async () => {
-    await expect(
-      createAuthCaller().enqueue({
-        task: {
-          type: TaskPayloadKind.StandardTask,
-          payload: {
-            repo: 'acme/api',
-            description: 'Ship it',
-          },
-        },
-        workflow: 'standard',
-        surface: 'api',
-        trigger: 'manual',
-      } as never),
-    ).rejects.toThrow();
-
-    expect(mockEnqueueTask).not.toHaveBeenCalled();
-  });
-
-  it('accepts snapshot resumes through the resume input shape', async () => {
-    await expect(
-      createAuthCaller().enqueue({
-        task: {
-          type: TaskPayloadKind.SnapshotResume,
-          payload: {
-            repo: 'acme/api',
-            sourceSnapshotId: 'snap-1',
-            sourceRunId: 42,
-          },
-        },
-        actingUserId: 'user-2',
-      }),
-    ).resolves.toEqual({ id: 99, taskId: 'task-99' });
-
-    expect(mockEnqueueTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actingUserId: 'user-2',
-        task: expect.objectContaining({
-          type: TaskPayloadKind.SnapshotResume,
-        }),
-      }),
-    );
   });
 });

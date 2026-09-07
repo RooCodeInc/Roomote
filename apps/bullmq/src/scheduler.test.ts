@@ -43,6 +43,7 @@ vi.mock('@roomote/sdk/server', () => ({
   customAutomationsJob: vi.fn(),
   dependabotTriageJob: vi.fn(),
   managerStatsJob: vi.fn(),
+  providerUsageLimitJob: vi.fn(),
   securityAuditorJob: vi.fn(),
   sentryTriageJob: vi.fn(),
   suggesterJob: vi.fn(),
@@ -60,6 +61,9 @@ vi.mock('./scheduled-jobs', () => ({
   webhookCleanupJob: vi.fn(),
   standbyRetentionJob: vi.fn(),
   prReviewNotificationDispatchJob: vi.fn(),
+  brainOutboxDrainJob: vi.fn(),
+  brainCollectorsJob: vi.fn(),
+  brainMaintenanceJob: vi.fn(),
 }));
 
 import { ScheduledJobName } from './types';
@@ -92,12 +96,33 @@ describe('startScheduler', () => {
 
     expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
       ScheduledJobName.PrReviewNotificationDispatch,
-      { every: 10 * 1000 },
+      { every: 60 * 1000 },
     );
     expect(mocks.workerConstructor).toHaveBeenCalledTimes(1);
     expect(mocks.queueEventsConstructor).toHaveBeenCalledTimes(1);
     expect(
       mocks.queue.upsertJobScheduler.mock.invocationCallOrder.at(-1),
     ).toBeLessThan(mocks.workerConstructor.mock.invocationCallOrder[0]!);
+  });
+
+  it('schedules Brain maintenance nightly', async () => {
+    await startScheduler();
+
+    expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
+      ScheduledJobName.BrainMaintenance,
+      { pattern: '0 7 * * *' },
+    );
+  });
+
+  it('checks provider usage limits every hour', async () => {
+    await startScheduler();
+
+    expect(mocks.queue.removeJobScheduler).toHaveBeenCalledWith(
+      'ProviderUsageLimitCheck',
+    );
+    expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
+      'provider_usage_limit',
+      { every: 60 * 60 * 1000 },
+    );
   });
 });

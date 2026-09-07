@@ -1,9 +1,6 @@
 import { DiscordApiError } from '@roomote/communication';
 
-import {
-  replaceOrPostDiscordMessage,
-  replyToDiscordEvent,
-} from '../replies.js';
+import { replyToDiscordEvent } from '../replies.js';
 
 function interactionContext() {
   return {
@@ -132,81 +129,5 @@ describe('replyToDiscordEvent', () => {
       text: 'I sent you a DM to link your Discord account.',
       replyToMessageId: 'message-1',
     });
-  });
-});
-
-describe('replaceOrPostDiscordMessage', () => {
-  it('edits a card in a task thread through the thread, not its parent', async () => {
-    // A thread is itself a channel and editMessage takes no separate thread
-    // id. Addressing the parent finds an unknown message, which silently
-    // degrades into a second acknowledgement beside a stale card.
-    const editMessage = vi.fn().mockResolvedValue(undefined);
-    const postMessage = vi.fn();
-
-    const result = await replaceOrPostDiscordMessage({
-      provider: { editMessage, postMessage } as never,
-      replace: { channel: channelContext(), messageId: 'card-1' },
-      text: 'Started a task in Acme.',
-    });
-
-    expect(editMessage).toHaveBeenCalledWith({
-      channelId: 'thread-1',
-      messageId: 'card-1',
-      text: 'Started a task in Acme.',
-    });
-    expect(postMessage).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      channelId: 'channel-1',
-      threadId: 'thread-1',
-      messageId: 'card-1',
-    });
-  });
-
-  it('posts when the card it should replace was deleted', async () => {
-    const editMessage = vi.fn().mockRejectedValue(
-      new DiscordApiError({
-        method: 'PATCH',
-        path: '/channels/thread-1/messages/card-1',
-        status: 404,
-        message: 'Unknown Message',
-        code: 10008,
-      }),
-    );
-    const postMessage = vi.fn().mockResolvedValue({
-      provider: 'discord',
-      channelId: 'channel-1',
-      messageId: 'ack-1',
-    });
-
-    await replaceOrPostDiscordMessage({
-      provider: { editMessage, postMessage } as never,
-      replace: { channel: channelContext(), messageId: 'card-1' },
-      text: 'Started a task in Acme.',
-    });
-
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: 'channel-1', threadId: 'thread-1' }),
-    );
-  });
-
-  it('answers through the interaction when someone is waiting on one', async () => {
-    const editInteractionResponse = vi
-      .fn()
-      .mockResolvedValue({ messageId: 'card-1' });
-    const editMessage = vi.fn();
-
-    await replaceOrPostDiscordMessage({
-      provider: { editInteractionResponse, editMessage } as never,
-      replace: {
-        channel: channelContext(),
-        interaction: { applicationId: 'app-1', ...interactionContext() },
-      },
-      text: 'Started a task in Acme.',
-    });
-
-    expect(editInteractionResponse).toHaveBeenCalledWith(
-      expect.objectContaining({ interactionToken: 'interaction-token' }),
-    );
-    expect(editMessage).not.toHaveBeenCalled();
   });
 });

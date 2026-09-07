@@ -237,8 +237,13 @@ export function hasConfiguredPreviewPorts(
   return Boolean(config?.ports?.length);
 }
 
-export function buildExamplePreviewHostname(domain: string): string {
-  return `abc123def4567-web.${domain}`;
+export function buildExamplePreviewHostname(
+  domain: string,
+  subdomainSuffix?: string | null,
+): string {
+  return subdomainSuffix
+    ? `abc123def4567-web-${subdomainSuffix}.${domain}`
+    : `abc123def4567-web.${domain}`;
 }
 
 export function isLocalPreviewDomain(hostname: string | null | undefined) {

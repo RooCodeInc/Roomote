@@ -79,7 +79,7 @@ export const AcpCommandOutputMessage = ({
           showCommandCopy
           showOutputCopy={isOutputPresent}
         >
-          <CodeBlockHeader className="w-full">
+          <CodeBlockHeader className="min-h-7 w-full">
             <CodeBlockTitle>
               <CodeBlockCommand
                 spinner={isPending}

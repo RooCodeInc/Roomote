@@ -102,6 +102,7 @@ describe('fetchSnapshotEnv', () => {
     // gateway-served provider keys, like the task dequeue path).
     expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(undefined, {
       sourceControlProvider: ['github'],
+      includeSandboxOpenRouterApiKey: false,
     });
 
     // Verify createSourceControlTokenForTaskRun was called with the task run.
@@ -139,6 +140,7 @@ describe('fetchSnapshotEnv', () => {
 
     expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(undefined, {
       sourceControlProvider: ['github'],
+      includeSandboxOpenRouterApiKey: false,
     });
   });
 

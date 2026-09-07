@@ -7,7 +7,7 @@ import {
   extractErrorDetails,
   isObservedTimeoutError,
   resolveComputeProviderTarget,
-  SANDBOX_SNAPSHOT_EXPIRY_MS,
+  getSnapshotExpiresAt,
   shouldCompleteTaskOnSnapshot,
   withoutCompleteTaskOnSnapshot,
 } from '@roomote/types';
@@ -36,7 +36,11 @@ import {
   type SourceInstanceSnapshot,
 } from '@roomote/compute-providers';
 import { drainLinearMessagesToResumeRun } from '@roomote/linear';
-import { finishRun, withSandboxServerRpcClient } from '@roomote/sdk/server';
+import {
+  finishRun,
+  maybeEnqueueBrainMemoryForCompletedRun,
+  withSandboxServerRpcClient,
+} from '@roomote/sdk/server';
 import { drainSlackMessagesToResumeRun } from '@roomote/slack';
 import { z } from 'zod';
 
@@ -717,9 +721,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   // resume window the snapshot no longer has.
   const snapshotCreatedAt = persistedSnapshotCreatedAt ?? now;
 
-  const snapshotExpiresAt = new Date(
-    snapshotCreatedAt.getTime() + SANDBOX_SNAPSHOT_EXPIRY_MS,
-  );
+  const snapshotExpiresAt = getSnapshotExpiresAt(snapshotCreatedAt, provider);
 
   const expectedSnapshotId = persistedSnapshotId ?? taskRun.snapshotId ?? null;
   const completed = await db.transaction(async (tx) => {
@@ -756,6 +758,8 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       // the shared helper keeps a non-terminal sibling from being overwritten.
       await syncTaskStateFromRuns(tx, taskRun.taskId);
     }
+
+    await maybeEnqueueBrainMemoryForCompletedRun(tx, runId);
 
     await markTaskStartParallelCountEndedAt(tx, {
       runId: runId,
@@ -858,7 +862,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       queueAttempt,
       snapshotIntentId,
       triggerPath,
-      snapshotExpiresAt: snapshotExpiresAt.toISOString(),
+      snapshotExpiresAt: snapshotExpiresAt?.toISOString() ?? null,
       recoveredFromSnapshotting: Boolean(reconciledSnapshot),
       reconciledSnapshotCreatedAt:
         reconciledSnapshot?.createdAt.toISOString() ?? null,
@@ -1264,6 +1268,9 @@ async function finalizeUnresumableRunAfterSnapshotFailure(input: {
     }
 
     await syncTaskStateFromRuns(tx, taskRun.taskId);
+    if (finalStatus === RunStatus.Completed) {
+      await maybeEnqueueBrainMemoryForCompletedRun(tx, taskRun.id);
+    }
     return true;
   });
 

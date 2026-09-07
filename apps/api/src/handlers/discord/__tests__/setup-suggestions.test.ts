@@ -213,6 +213,10 @@ describe('Discord setup suggestions', () => {
   });
 
   it('requires the button to belong to the current Discord thread', async () => {
+    findTrackedCardMock.mockResolvedValueOnce({
+      id: 'tracked-1',
+      metadata: { originSessionId: 'session-card' },
+    });
     const claim = await claimDiscordSuggestionLaunch({
       suggestionId: 'suggestion-1',
       channelId: 'thread-1',
@@ -227,6 +231,7 @@ describe('Discord setup suggestions', () => {
     expect(claim).toMatchObject({
       id: 'suggestion-1',
       targetRepositoryFullName: 'owner/repo',
+      originSessionId: 'session-card',
     });
 
     findTrackedCardMock.mockResolvedValueOnce(null);
@@ -262,6 +267,35 @@ describe('Discord setup suggestions', () => {
       investigationContext: null,
       targetRepositoryFullName: null,
       targetEnvironmentId: null,
+      usesRouterLaunch: true,
+    });
+    expect(claim?.launchTarget).toBeUndefined();
+  });
+
+  it("keeps the card's explicit launch target so a deleted environment fails loudly", async () => {
+    findTrackedCardMock.mockResolvedValue({
+      id: 'tracked-1',
+      metadata: { launchTarget: 'env-1' },
+    });
+    claimWorkItemMock.mockResolvedValue({
+      id: 'suggestion-1',
+      title: 'Fix tests',
+      brief: 'Repair the flaky test.',
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      // The environment FK was cleared after the card was posted.
+      targetEnvironmentId: null,
+      launchClaimedAt: new Date('2026-07-12T12:00:00.000Z'),
+    });
+
+    const claim = await claimDiscordSuggestionLaunch({
+      suggestionId: 'suggestion-1',
+      channelId: 'thread-1',
+    });
+
+    expect(claim).toMatchObject({
+      launchTarget: 'env-1',
+      usesRouterLaunch: false,
     });
   });
 });

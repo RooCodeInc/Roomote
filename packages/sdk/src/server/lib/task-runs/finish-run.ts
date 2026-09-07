@@ -6,7 +6,8 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
-  getEnvironmentDefinitionIdFromPayload,
+  getTriggerableBackgroundAutomationDescriptorByKey,
+  getTriggerableBackgroundAutomationSettingsHash,
   parseConflictResolutionSummary,
   resolveComputeProviderTarget,
   stripRunErrorMarkers,
@@ -27,6 +28,8 @@ import {
   type TaskPullRequest,
   buildPendingEnvironmentSnapshotMatchForTaskRun,
   db,
+  getAutomationRuntime,
+  getCustomAutomationById,
   taskRuns,
   taskPullRequests,
   deploymentSettings,
@@ -57,6 +60,7 @@ import {
   createTaskRunGitHubToken,
   createIssueComment,
   deleteReaction,
+  getCheckRun,
   updateCheckRun,
 } from '@roomote/github';
 import { revokeTaskRunScopedGitLabTokens } from '@roomote/gitlab';
@@ -68,13 +72,19 @@ import {
 } from './conflict-resolution-comments';
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
+import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
+import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import {
+  acquireGithubPrReviewLifecycleLock,
+  getGithubPrReviewCheckResult,
+} from './github-pr-review-check';
+import {
   SlackNotifier,
-  buildTaskFailedMessage,
   getSlackStartedMessageTs,
+  refreshAutomationRootFooter,
   SLACK_RUNTIME_FAILURE_TEXT,
   SLACK_STARTUP_FAILURE_TEXT,
 } from '@roomote/slack';
@@ -90,7 +100,12 @@ import {
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
 } from '../slack-conversation-log';
-import { buildManagerSlackSettingsUrl } from '../manager-slack';
+import {
+  buildAutomationIconUrl,
+  buildCustomAutomationSettingsUrl,
+  buildManagerSlackSettingsUrl,
+} from '../manager-slack';
+import { resolveAutomationResultSubtitle } from '../automation-result-metadata';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -101,6 +116,97 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
  * from `task` and attempt-scoped state from the run row.
  */
 type FinishedRun = TaskRun & { task: Task };
+
+function getCustomAutomationIdFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const customAutomationId = (payload as { customAutomationId?: unknown })
+    .customAutomationId;
+  return typeof customAutomationId === 'string' && customAutomationId
+    ? customAutomationId
+    : null;
+}
+
+async function refreshFinishedAutomationSlackResult(
+  run: FinishedRun,
+): Promise<void> {
+  const automationKey = run.task.initiatorAutomation;
+  if (!automationKey) return;
+
+  const { channel, teamId, threadTs } = await resolveSlackTaskRunRouting(run);
+  if (!channel || !threadTs) return;
+
+  let automationLabel: string;
+  let automationIcon: string;
+  let configureUrl: string;
+  let scheduleMode: string | null;
+
+  if (automationKey === 'custom_automation') {
+    const siblingRuns = await db.query.taskRuns.findMany({
+      columns: { payload: true },
+      where: eq(taskRuns.taskId, run.taskId),
+      orderBy: [asc(taskRuns.createdAt)],
+    });
+    const customAutomationId = siblingRuns
+      .map((siblingRun) => getCustomAutomationIdFromPayload(siblingRun.payload))
+      .find((id) => id !== null);
+    if (!customAutomationId) return;
+
+    const automation = await getCustomAutomationById(customAutomationId);
+    if (!automation) return;
+    automationLabel = automation.name;
+    automationIcon = 'zap';
+    configureUrl = buildCustomAutomationSettingsUrl(automation.id);
+    scheduleMode = automation.scheduleMode;
+  } else {
+    const descriptor =
+      getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
+    const settingsHash = descriptor
+      ? getTriggerableBackgroundAutomationSettingsHash(descriptor.automationKey)
+      : null;
+    if (!descriptor || !settingsHash) return;
+
+    automationLabel = descriptor.label;
+    automationIcon = descriptor.slackIcon;
+    configureUrl = buildManagerSlackSettingsUrl(settingsHash);
+    scheduleMode = (await getAutomationRuntime(descriptor.automationKey))
+      .scheduleMode;
+  }
+
+  const slackInstallation = await db.query.slackInstallations.findFirst({
+    where: teamId
+      ? and(
+          eq(slackInstallations.isActive, true),
+          eq(slackInstallations.teamId, teamId),
+        )
+      : eq(slackInstallations.isActive, true),
+  });
+  if (!slackInstallation?.botAccessToken) return;
+
+  const subtitle = await resolveAutomationResultSubtitle({
+    taskId: run.taskId,
+    runId: run.id,
+    scheduleMode,
+  });
+  if (!subtitle) return;
+
+  await refreshAutomationRootFooter({
+    slack: new SlackNotifier(slackInstallation.botAccessToken),
+    channelId: channel,
+    messageTs: threadTs,
+    automationLabel,
+    automationIconUrl: buildAutomationIconUrl(automationIcon),
+    configureUrl,
+    subtitle,
+    taskUrl: getTaskUrl({
+      taskId: run.taskId,
+      utm: { campaign: run.payloadKind, source: 'slack' },
+    }),
+    taskId: run.taskId,
+  });
+}
 
 export const finishRun = async ({
   id,
@@ -250,10 +356,24 @@ export const finishRun = async ({
     // completion or not at all, so no completed task can silently skip
     // memory ingestion. Deployments without a Brain never enqueue; skip
     // rules and DLP live in the bullmq drainer, not here.
-    if (status === RunStatus.Completed && isBrainConfigured(Env)) {
-      await maybeEnqueueBrainMemoryEvent(tx, id);
+    if (status === RunStatus.Completed) {
+      await maybeEnqueueBrainMemoryForCompletedRun(tx, id);
     }
   });
+
+  if (status !== RunStatus.Idle) {
+    try {
+      await refreshFinishedAutomationSlackResult(run);
+    } catch (refreshError) {
+      console.error(
+        `[finishRun] Failed to refresh Slack automation result metadata for run ${id}: ${
+          refreshError instanceof Error
+            ? refreshError.message
+            : String(refreshError)
+        }`,
+      );
+    }
+  }
 
   // Truthful snapshot state: a snapshot refresh that dies on any terminal
   // path — spawn failure, worker crash before claiming, watchdog cleanup,
@@ -287,6 +407,21 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
+  // Detached: this can hold the parent's turn lock through a full
+  // orchestrator turn, and settle callers (tRPC finish, controller, queue
+  // jobs) must not block on it. The delivery claim keeps it idempotent.
+  void notifyFastAgentParentOnSettle(
+    {
+      ...run,
+      error: sanitizedError ?? run.error,
+      errorCode: errorCode ?? run.errorCode,
+    },
+    status,
+    run.task.title,
+  );
+  // The worker settles its own card on exit; this covers runs finalized
+  // here without one (reaper, failed bootstrap). Never throws.
+  void settleSlackLiveTaskCardOnExit(run, status, run.task.title);
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
@@ -421,28 +556,6 @@ export const finishRun = async ({
     }
   }
 
-  const linkedEnvironmentDefinitionId =
-    status === RunStatus.Idle && run.taskPhase === 'waiting_for_prompt'
-      ? await resolveSetupCompletionEnvironmentDefinitionId(run)
-      : null;
-
-  if (
-    (status === RunStatus.Completed ||
-      linkedEnvironmentDefinitionId !== null) &&
-    (payloadKind === TaskPayloadKind.SlackAppMention ||
-      payloadKind === TaskPayloadKind.SnapshotResume)
-  ) {
-    try {
-      await cleanupSlackSetupCompletion(run);
-    } catch (err) {
-      console.error(
-        `[finishRun] Failed to clean up Slack setup completion UI for run ${id}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-
   if (status === RunStatus.Completed) {
     try {
       await maybeSendSlackQuestionChannelInvite(run);
@@ -485,6 +598,19 @@ export const finishRun = async ({
     }
   }
 };
+
+/**
+ * Keep every direct completion writer on the same Brain activation guard.
+ * The caller supplies its transaction so completion and enqueue stay atomic.
+ */
+export async function maybeEnqueueBrainMemoryForCompletedRun(
+  tx: Parameters<typeof maybeEnqueueBrainMemoryEvent>[0],
+  runId: number,
+): Promise<void> {
+  if (isBrainConfigured(Env)) {
+    await maybeEnqueueBrainMemoryEvent(tx, runId);
+  }
+}
 
 /**
  * Flip this snapshot run's environment_snapshots row from 'pending' to
@@ -570,102 +696,219 @@ async function cleanupGithubPrReviewArtifacts(
       continue;
     }
 
-    if (prRow.githubReactionId) {
+    const releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+      prRow.repository,
+      prRow.prNumber,
+    );
+    if (!releaseLifecycleLock) {
+      console.error(
+        `[finishRun] Timed out serializing PR review cleanup for ${prRow.repository}#${prRow.prNumber}`,
+      );
+      continue;
+    }
+
+    try {
+      releaseLifecycleLock.signal.throwIfAborted();
+      let token: string | undefined;
+      let checkRunId = prRow.githubCheckRunId;
       try {
-        const token = await createTaskRunGitHubToken(run);
-
-        await deleteReaction(token, {
-          reaction_id: prRow.githubReactionId,
-          owner,
-          repo,
-          issue_number: prRow.prNumber,
+        const currentLinkage = await db.query.taskPullRequests.findFirst({
+          where: eq(taskPullRequests.id, prRow.id),
+          columns: { githubCheckRunId: true },
         });
-
-        await db
-          .update(taskPullRequests)
-          .set({ githubReactionId: null, updatedAt: new Date() })
-          .where(eq(taskPullRequests.id, prRow.id));
+        checkRunId = currentLinkage?.githubCheckRunId ?? null;
       } catch (error) {
         console.error(
-          `[finishRun] Failed to delete reaction for run ${run.id}: ${
+          `[finishRun] Failed to refresh PR review check linkage for run ${run.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
+        continue;
       }
-    }
 
-    if (prRow.githubCheckRunId) {
-      try {
-        const token = await createTaskRunGitHubToken(run);
-
-        await updateCheckRun(token, {
-          owner,
-          repo,
-          check_run_id: prRow.githubCheckRunId,
-          status: 'completed',
-          conclusion: 'success',
-        });
-      } catch (error) {
-        console.error(
-          `[finishRun] Failed to complete check run for run ${run.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+      if (!checkRunId) {
+        console.log(
+          `[finishRun] Skipping PR review cleanup for run ${run.id}; no current check owner is available`,
         );
+        continue;
       }
-    }
 
-    // GitHub PR review summary comment finalization (safety net).
-    // The review-code skill is responsible for patching the summary comment's
-    // in-progress status to a terminal result, but when it doesn't (the run
-    // failed before the agent ran, the agent skipped the update, or posted the
-    // result as a separate comment) the starting line stays forever. This
-    // ensures the comment reflects the terminal run outcome without clobbering
-    // a real agent completion (it only patches comments still showing an
-    // in-progress status line).
-    if (status !== RunStatus.Idle) {
       try {
-        const token = await createTaskRunGitHubToken(run);
-        // A user-stopped run arrives here already normalized to Canceled (see
-        // finishRun), so the review outcome maps naturally.
-        const outcome =
-          status === RunStatus.Completed
-            ? 'completed'
-            : status === RunStatus.Failed
-              ? 'failed'
-              : 'canceled';
-        const terminalStatus = buildTerminalReviewStatus({
-          outcome,
-          taskUrl: getTaskUrl({
-            taskId: run.taskId,
-            utm: {
-              source: 'github-comment',
-              medium: 'link',
-              campaign: 'github.pr.review',
-            },
-          }),
-        });
-
-        const finalized = await finalizeGithubPrReviewComment({
-          gitHubToken: token,
+        releaseLifecycleLock.signal.throwIfAborted();
+        token = await createTaskRunGitHubToken(run);
+        releaseLifecycleLock.signal.throwIfAborted();
+        const { data: checkRun } = await getCheckRun(token, {
           owner,
           repo,
-          prNumber: prRow.prNumber,
-          commentId: prRow.githubReviewCommentId,
-          terminalStatus,
+          check_run_id: checkRunId,
+          request: { signal: releaseLifecycleLock.signal },
         });
+        releaseLifecycleLock.signal.throwIfAborted();
+        const owningRunId = Number(
+          /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
+        );
 
-        if (finalized) {
+        if (!Number.isFinite(owningRunId) || owningRunId !== run.id) {
           console.log(
-            `[finishRun] Finalized stale PR review summary comment for run ${run.id} on ${prRow.repository}#${prRow.prNumber}`,
+            `[finishRun] Skipping PR review cleanup for run ${run.id}; check ${checkRunId} belongs to ${Number.isFinite(owningRunId) ? `run ${owningRunId}` : 'an unknown run'}`,
           );
+          continue;
         }
       } catch (error) {
         console.error(
-          `[finishRun] Failed to finalize PR review summary comment for run ${run.id}: ${
+          `[finishRun] Failed to verify PR review check ownership for run ${run.id}: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
+        continue;
       }
+
+      if (prRow.githubReactionId) {
+        try {
+          releaseLifecycleLock.signal.throwIfAborted();
+          token ??= await createTaskRunGitHubToken(run);
+
+          await deleteReaction(token, {
+            reaction_id: prRow.githubReactionId,
+            owner,
+            repo,
+            issue_number: prRow.prNumber,
+            request: { signal: releaseLifecycleLock.signal },
+          });
+          releaseLifecycleLock.signal.throwIfAborted();
+
+          await db
+            .update(taskPullRequests)
+            .set({ githubReactionId: null, updatedAt: new Date() })
+            .where(eq(taskPullRequests.id, prRow.id));
+        } catch (error) {
+          console.error(
+            `[finishRun] Failed to delete reaction for run ${run.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+
+      // GitHub PR review summary comment finalization (safety net).
+      // The review-code skill is responsible for patching the summary comment's
+      // in-progress status to a terminal result, but when it doesn't (the run
+      // failed before the agent ran, the agent skipped the update, or posted the
+      // result as a separate comment) the starting line stays forever. This
+      // ensures the comment reflects the terminal run outcome without clobbering
+      // a real agent completion (it only patches comments still showing an
+      // in-progress status line).
+      if (status !== RunStatus.Idle) {
+        let reviewSummary: { finalized: boolean; body?: string } = {
+          finalized: false,
+        };
+
+        try {
+          releaseLifecycleLock.signal.throwIfAborted();
+          token = await createTaskRunGitHubToken(run);
+          releaseLifecycleLock.signal.throwIfAborted();
+          // A user-stopped run arrives here already normalized to Canceled (see
+          // finishRun), so the review outcome maps naturally.
+          const outcome =
+            status === RunStatus.Completed
+              ? 'completed'
+              : status === RunStatus.Failed
+                ? 'failed'
+                : 'canceled';
+          const terminalStatus = buildTerminalReviewStatus({
+            outcome,
+            taskUrl: getTaskUrl({
+              taskId: run.taskId,
+              utm: {
+                source: 'github-comment',
+                medium: 'link',
+                campaign: 'github.pr.review',
+              },
+            }),
+          });
+
+          reviewSummary = await finalizeGithubPrReviewComment({
+            gitHubToken: token,
+            owner,
+            repo,
+            prNumber: prRow.prNumber,
+            commentId: prRow.githubReviewCommentId,
+            terminalStatus,
+            signal: releaseLifecycleLock.signal,
+          });
+          releaseLifecycleLock.signal.throwIfAborted();
+
+          if (reviewSummary.finalized) {
+            console.log(
+              `[finishRun] Finalized stale PR review summary comment for run ${run.id} on ${prRow.repository}#${prRow.prNumber}`,
+            );
+          }
+        } catch (error) {
+          console.error(
+            `[finishRun] Failed to finalize PR review summary comment for run ${run.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+
+        if (checkRunId) {
+          try {
+            releaseLifecycleLock.signal.throwIfAborted();
+            token ??= await createTaskRunGitHubToken(run);
+            const checkResult = getGithubPrReviewCheckResult({
+              runStatus: status,
+              reviewSummaryBody: reviewSummary.body,
+              safetyNetFinalized: reviewSummary.finalized,
+              expectedHeadSha:
+                'latestObservedHeadSha' in run.payload &&
+                typeof run.payload.latestObservedHeadSha === 'string'
+                  ? run.payload.latestObservedHeadSha
+                  : 'headSha' in run.payload &&
+                      typeof run.payload.headSha === 'string'
+                    ? run.payload.headSha
+                    : undefined,
+            });
+            const taskUrl = getTaskUrl({
+              taskId: run.taskId,
+              utm: {
+                source: 'github-check',
+                medium: 'link',
+                campaign: 'github.pr.review',
+              },
+            });
+
+            releaseLifecycleLock.signal.throwIfAborted();
+            await updateCheckRun(token, {
+              owner,
+              repo,
+              check_run_id: checkRunId,
+              status: 'completed',
+              conclusion: checkResult.conclusion,
+              completed_at: new Date().toISOString(),
+              details_url: taskUrl,
+              output: {
+                title: checkResult.title,
+                summary: `${checkResult.summary} [Open the task](${taskUrl}).`,
+              },
+              request: { signal: releaseLifecycleLock.signal },
+            });
+          } catch (error) {
+            console.error(
+              `[finishRun] Failed to complete PR review check for run ${run.id}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error(
+        `[finishRun] Aborted PR review cleanup for run ${run.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } finally {
+      await releaseLifecycleLock();
     }
   }
 }
@@ -908,15 +1151,7 @@ async function sendSlackFailureNotification(
         utm: { campaign: run.payloadKind, source: 'slack' },
       });
 
-  // Remove the cancel button from the started message.
   const slackStartedMessageTs = await getSlackStartedMessageTs(run.id);
-  if (slackStartedMessageTs && task.slackThreadTs) {
-    await slack.removeCancelButton({
-      channel,
-      messageTs: slackStartedMessageTs,
-      threadTs: task.slackThreadTs,
-    });
-  }
 
   if (!isSetupOnboarding) {
     const threadReplyTs = threadTs ?? task.slackThreadTs!;
@@ -929,15 +1164,12 @@ async function sendSlackFailureNotification(
       ? `\n\n*Error details:* ${escapedError}`
       : '';
 
-    const failureMessage =
-      run.payloadKind === TaskPayloadKind.SlackAppMention
-        ? buildTaskFailedMessage({
-            runId: run.id,
-            messageText: `${retryableFailureText}${failureDetails}`,
-          })
-        : {
-            text: `${restartFailureText}${failureDetails}`,
-          };
+    const failureMessage = {
+      text:
+        run.payloadKind === TaskPayloadKind.SlackAppMention
+          ? `${retryableFailureText}${failureDetails}`
+          : `${restartFailureText}${failureDetails}`,
+    };
 
     const shouldUpdateStartedMessage =
       slackStartedMessageTs != null && !runtimeAlreadyStarted;
@@ -1235,77 +1467,6 @@ async function maybeSendSlackQuestionChannelInvite(
         ),
       ),
     );
-}
-
-async function cleanupSlackSetupCompletion(run: FinishedRun) {
-  const { channel, threadTs, route } = await resolveSlackTaskRunRouting(run);
-
-  if (route.kind !== 'setup-onboarding' || !threadTs || !channel) {
-    return;
-  }
-
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    where: and(eq(slackInstallations.isActive, true)),
-  });
-
-  if (!slackInstallation) {
-    return;
-  }
-
-  const slackStartedMessageTs = await getSlackStartedMessageTs(run.id);
-
-  if (!slackStartedMessageTs) {
-    return;
-  }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
-  await slack.removeCancelButton({
-    channel,
-    messageTs: slackStartedMessageTs,
-    threadTs,
-  });
-}
-
-/**
- * Setup-onboarding resumes carry the environment definition id somewhere in
- * the payloads of the task's run chain. Instead of walking sourceRunId links,
- * scan the sibling runs of the task from newest to oldest.
- */
-async function resolveSetupCompletionEnvironmentDefinitionId(
-  run: Pick<FinishedRun, 'id' | 'payload' | 'taskId'>,
-): Promise<string | null> {
-  const environmentDefinitionId = getEnvironmentDefinitionIdFromPayload(
-    run.payload,
-  );
-
-  if (environmentDefinitionId) {
-    return environmentDefinitionId;
-  }
-
-  const siblingRuns = await db.query.taskRuns.findMany({
-    columns: {
-      id: true,
-      payload: true,
-    },
-    where: eq(taskRuns.taskId, run.taskId),
-    orderBy: [asc(taskRuns.id)],
-  });
-
-  for (const siblingRun of siblingRuns) {
-    if (siblingRun.id === run.id) {
-      continue;
-    }
-
-    const fromSibling = getEnvironmentDefinitionIdFromPayload(
-      siblingRun.payload,
-    );
-
-    if (fromSibling) {
-      return fromSibling;
-    }
-  }
-
-  return null;
 }
 
 function buildSlackWebPathUrl(webPath: string, campaign: string): string {

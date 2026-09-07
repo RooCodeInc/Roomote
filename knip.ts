@@ -10,6 +10,8 @@ const config: KnipConfig = {
     // ── Apps ──────────────────────────────────────────────
     'apps/api': {
       project: ['src/**/*.ts'],
+      // Externalized by tsup and loaded from the runtime dependency tree.
+      ignoreDependencies: ['dompurify'],
     },
     'apps/bullmq': {
       project: ['src/**/*.ts'],
@@ -72,15 +74,11 @@ const config: KnipConfig = {
       project: ['src/**/*.ts'],
     },
     'packages/cloud-agents': {
-      entry: ['evals/router/**/*.ts'],
       project: ['src/**/*.ts'],
       // The feature-demo skill bundles a standalone Remotion render project
       // that runs from a sandbox work dir, not from this package's graph.
       ignore: ['src/server/workflows/skills/standard/feature-demo/**'],
-      ignoreBinaries: [
-        'evals/router/promptfooconfig.ts',
-        'evals/router/promptfooconfig.followup.ts',
-      ],
+      ignoreBinaries: [],
     },
     'packages/communication': {
       project: ['src/**/*.ts'],

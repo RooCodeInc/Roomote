@@ -4,8 +4,10 @@ import {
   type SourceControlProvider,
   ALL_REPOSITORIES,
   getSourceControlProviderLabel,
+  isCommunicationProvider,
   isSourceControlTaskSurface,
   PRODUCT_NAME,
+  type TaskReportConsumer,
 } from '@roomote/types';
 import { isRepoSkipped } from '@roomote/github';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
@@ -20,6 +22,7 @@ import {
 import { isRecognizedInitialSkillInvocation } from './skillInvocationRouting';
 import { renderLinkedWorkItemsSection } from './pr-linked-work-items';
 import { buildGitHubMessageInstructions } from '../github-message-instructions';
+import { buildTherapistModeInstructions } from '../therapist-mode';
 
 const DEFAULT_ATTRIBUTION: ResolvedTaskCommitAuthor = {
   kind: 'roomote',
@@ -81,6 +84,8 @@ export function standardTask({
   codeReviewReviewDraftPrs = true,
   sourceControlProvider,
   prAction,
+  reportConsumer = 'direct-user',
+  therapistModeEnabled = false,
 }: {
   description: string;
   repo: string;
@@ -139,15 +144,20 @@ export function standardTask({
   codeReviewReviewDraftPrs?: boolean;
   sourceControlProvider?: SourceControlProvider;
   prAction?: PrAction;
+  reportConsumer?: TaskReportConsumer;
+  therapistModeEnabled?: boolean;
 }) {
   const hintedDescription = description;
   const isAllRepositoriesSelection = repo === ALL_REPOSITORIES;
   const usesSharedWorkspaceRoot =
     isAllRepositoriesSelection || (repoFullNames?.length ?? 0) > 0;
+  const attributionSurface = isCommunicationProvider(sourceProvider)
+    ? sourceProvider
+    : taskSurface;
   const prBodyAttributionLine = getPrBodyAttributionLine({
     attribution,
     taskUrl: _taskRunUrl,
-    taskSurface,
+    taskSurface: attributionSurface,
     slackTeamDomain,
     slackTeamId,
     slackConversationUrl,
@@ -182,8 +192,11 @@ export function standardTask({
       );
     }
     if (attribution.prAssigneeLogin) {
+      const providerLabel = sourceControlProvider
+        ? getSourceControlProviderLabel(sourceControlProvider)
+        : 'GitHub';
       delegatedPrMetadataInstructions.push(
-        `For this run, because the creating user has linked GitHub login \`${attribution.prAssigneeLogin}\`, the delegated PR-delivery skill must pass \`assignees: ['${attribution.prAssigneeLogin}']\` in its \`mcp__roomote__manage_source_control\` calls so the created or refreshed pull request is assigned to that user when the provider supports it.`,
+        `For this run, because the creating user has linked ${providerLabel} login \`${attribution.prAssigneeLogin}\`, the delegated PR-delivery skill must pass \`assignees: ['${attribution.prAssigneeLogin}']\` in its \`mcp__roomote__manage_source_control\` calls so the created or refreshed pull request is assigned to that user when the provider supports it.`,
       );
     }
   }
@@ -192,7 +205,7 @@ export function standardTask({
       ? ` ${delegatedPrMetadataInstructions.join(' ')}`
       : '';
   const fixPrOwnershipInstruction =
-    "If the run later transitions into `fix-pr`, that child skill owns branch push state, any required delegated `capture-visual-proof` handoff before PR metadata refresh, PR metadata refresh itself, and PR-fixer closeout instead of inheriting the parent workflow's default PR-delivery finish.";
+    "If the run later transitions into `fix-pr`, that child skill owns branch push state, any required `capture-visual-proof` step before PR metadata refresh, PR metadata refresh itself, and PR-fixer closeout instead of inheriting the parent workflow's default PR-delivery finish.";
   const autonomousFinishSummary =
     deliverySkill === 'push'
       ? 'finish through the delegated `push` skill so it owns commit and push execution'
@@ -242,12 +255,15 @@ export function standardTask({
     ? 'enabled'
     : 'disabled';
   const autonomousProofInstruction =
-    'For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must transition into `capture-visual-proof` for one constrained proof step. The parent must not load or directly use browser tooling; carry the delegated screenshot or screencast proof result, or an explicit no-op or blocker result, into the later delivery step instead of bypassing proof or improvising another browser path. If the run later transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence.';
+    'For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must load `capture-visual-proof` for one bounded proof step and capture any applicable screenshots or screencasts itself with `agent-browser`. Carry the proof result, or an explicit no-op or blocker result, into the judge pass and the later delivery step instead of bypassing proof. If the run later transitions into `fix-pr`, let that child skill own any required proof step before PR metadata refresh instead of inheriting this parent-owned delivery sequence.';
   const primaryImplementationExpectation = interactiveMode
-    ? 'In Interactive mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before any final delivery pause, any repository-file change transitions into `capture-visual-proof`, then continue through validation and self-review and pause before push or pull request actions. If the run later transitions into `fix-pr`, let that child skill own push state, delegated proof before PR metadata refresh, and PR-fixer closeout.'
+    ? 'In Interactive mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before any final delivery pause, any repository-file change transitions into `capture-visual-proof`, then continue through validation and self-review and pause before push or pull request actions. If the run later transitions into `fix-pr`, let that child skill own push state, proof before PR metadata refresh, and PR-fixer closeout.'
     : `In Autonomous mode, repository-changing runs keep the active \`implement-changes\` workflow open so that, after implementation and before delivery, any repository-file change transitions into \`capture-visual-proof\`, then ${autonomousFinishSummary}. ${fixPrOwnershipInstruction}`;
-  const requestUserInputGuidance = getRequestUserInputGuidance();
+  const requestUserInputGuidance =
+    reportConsumer === 'direct-user' ? getRequestUserInputGuidance() : '';
   const linkedWorkItemSection = renderLinkedWorkItemsSection(linkedWorkItems);
+  const therapistModeInstructions =
+    buildTherapistModeInstructions(therapistModeEnabled);
   const linkedWorkItemInstructions = linkedWorkItemSection
     ? `
 <pr_linked_work_items>
@@ -364,8 +380,28 @@ ${buildGitHubMessageInstructions()}`
     }
   </source_control_context>`
     : '';
+  const reportingContext =
+    reportConsumer === 'orchestrator'
+      ? `
+  <reporting_context>
+    <consumer>orchestrator</consumer>
+    <role>You are the coding executor for an orchestrator-owned task.</role>
+    <destination>All task communication is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.</destination>
+    <delivery>Before settlement, send one report to the parent Session using \`report_to_parent_session\` with purpose \`closeout\`.</delivery>
+    <final_report_contract>
+      <section name="Outcome">State what was accomplished or the precise blocker.</section>
+      <section name="Changes">List changed files or components and important behavioral decisions.</section>
+      <section name="Validation">List commands and checks run, their outcomes, and material checks that remain.</section>
+      <section name="Artifacts">List available commits, branches, pull requests, previews, screenshots, and other outputs.</section>
+      <section name="Risks and caveats">State unresolved uncertainty, regressions to watch, assumptions, and confidence gaps.</section>
+      <section name="Recommended follow-ups">When follow-up work is warranted, give concrete next actions and the reason for each.</section>
+      <scope>The report covers the final consequential state and gives the orchestrator enough factual context to close out the task without further inspection.</scope>
+      <scope>The report is a concise factual summary organized by the required sections.</scope>
+    </final_report_contract>
+  </reporting_context>`
+      : '';
   const codeReviewSelfReviewCloseoutContext =
-    automaticSelfReviewNoticeGuidanceEnabled
+    automaticSelfReviewNoticeGuidanceEnabled && reportConsumer === 'direct-user'
       ? `
   <code_review_self_review_closeout>
     <rule>Code Reviewer is enabled for this deployment, and automatic open/push self-reviews on ${sourceControlPlatformLabel} can run for eligible pull requests. Draft automatic review is ${draftAutoReviewStatus} for this deployment. Results can relay back into this conversation when configured.</rule>
@@ -376,17 +412,34 @@ ${buildGitHubMessageInstructions()}`
     <rule>Skip this expectation note when the closeout has no PR or merge request link, when you are only refreshing without re-sharing the link, or when the delivered PR/MR is not auto-review eligible (including draft PRs while draft automatic review is disabled).</rule>${skippedGitHubRepoNotice}
   </code_review_self_review_closeout>`
       : '';
+  const modeSwitchingContext =
+    reportConsumer === 'orchestrator'
+      ? `<mode_switching>
+      <rule>Allow switching between Autonomous and Interactive modes when the orchestrator explicitly directs a mode change.</rule>
+      <rule>Honor the most recent explicit mode instruction without sending a user-facing acknowledgement.</rule>
+      <rule>Autonomous-by-default applies unless the orchestrator explicitly requests Interactive execution.</rule>
+      <rule>If mode intent is unclear near push or pull-request actions, report the precise decision needed to the orchestrator instead of addressing the end user.</rule>
+    </mode_switching>`
+      : `<mode_switching>
+      <rule>Allow switching between Autonomous and Interactive modes at any time in the thread.</rule>
+      <rule>Honor the most recent explicit user instruction as the active mode.</rule>
+      <rule>Autonomous-by-default applies unless the user explicitly requests Interactive execution in the initial request or a later interjection.</rule>
+      <rule>When an explicit mode switch happens, acknowledge it immediately to the user before continuing task work.</rule>
+      <rule>Interactive-mode acknowledgment format: "Switched to Interactive mode. I will pause before final push/PR actions. Say \`resume autonomous\` to switch back."</rule>
+      <rule>Autonomous-mode acknowledgment format: "Switched to Autonomous mode. I will continue without waiting for extra confirmations. Say \`switch to interactive\` any time."</rule>
+      <rule>If mode intent is unclear near push/PR actions, ask one focused clarification question before proceeding.</rule>
+    </mode_switching>`;
   const proofStep =
-    'If the implementation changed repository files, transition into `capture-visual-proof` after implementation and before delivery or any final delivery pause so the delegated proof flow can decide whether screenshots, screencasts, both, or no browser proof apply, unless the active path has transitioned into `fix-pr`, in which case that child skill owns the proof handoff before PR metadata refresh';
+    'If the implementation changed repository files, load `capture-visual-proof` after implementation and before delivery or any final delivery pause so the proof step can decide whether screenshots, screencasts, both, or no browser proof apply and capture them, unless the active path has transitioned into `fix-pr`, in which case that child skill owns the proof step before PR metadata refresh';
   const deliveryStep = interactiveMode
     ? 'If the work changes repositories, keep the active implementation workflow open through validation and self-review, then pause before push or pull request actions and wait for user direction'
-    : `If the work changes repositories and Autonomous mode is still active, keep the active \`implement-changes\` workflow open through any required delegated proof and ${autonomousFinishSummary}, unless the run has transitioned into \`fix-pr\`, which owns its own push, proof, PR metadata refresh, and PR-fixer closeout sequence`;
+    : `If the work changes repositories and Autonomous mode is still active, keep the active \`implement-changes\` workflow open through any required proof step and ${autonomousFinishSummary}, unless the run has transitioned into \`fix-pr\`, which owns its own push, proof, PR metadata refresh, and PR-fixer closeout sequence`;
   const postValidationDeliveryRule =
     'After validation and self-review, the next required action for repository-changing work is delegated delivery, not final reporting. Failed, skipped, or unavailable validation is reviewer-facing context for delegated delivery; it does not replace the required push or pull-request state when the implementation is still the intended shipped diff.';
   const deliveryTransitionRule =
-    'For repository-changing `implement-changes` runs that stay on the parent delivery path, after implementation and before the policy-selected delivery skill, if repository files changed the active workflow must transition into `capture-visual-proof` as one constrained proof step, and the parent workflow must not load or directly use browser tooling.';
+    'For repository-changing `implement-changes` runs that stay on the parent delivery path, after implementation and before the policy-selected delivery skill, if repository files changed the active workflow must load `capture-visual-proof` as one bounded proof step. Browser capture belongs inside that step and follows its `agent-browser` rules.';
   const proofCompletionRule =
-    'For repository-changing `implement-changes` runs that stay on the parent delivery path, the workflow must not proceed to the delivery skill until `capture-visual-proof` has run or explicitly returned a no-op or blocker result. A proof no-op, non-applicable result, unnecessary result, or blocker is not a final closeout; it must be carried into delegated delivery when repository files changed and Autonomous mode still requires push or pull-request delivery. The wrapper sets the delivery policy, but that active workflow owns both child transitions and must not split them into a second post-completion sequence. When the run transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh and the rest of the PR-fixer closeout.';
+    'For repository-changing `implement-changes` runs that stay on the parent delivery path, the workflow must not proceed to the judge pass or the delivery skill until `capture-visual-proof` has run or explicitly returned a no-op or blocker result. A proof no-op, non-applicable result, unnecessary result, or blocker is not a final closeout; it must be carried into delegated delivery when repository files changed and Autonomous mode still requires push or pull-request delivery. The wrapper sets the delivery policy, but that active workflow owns both the proof step and the delivery transition and must not split them into a second post-completion sequence. When the run transitions into `fix-pr`, let that child skill own any required proof step before PR metadata refresh and the rest of the PR-fixer closeout.';
   const initialTodoSeed = `- Read and understand the request and enter the correct initial workflow
 - Explore the repository and gather the needed context
 - Execute the selected workflow end-to-end
@@ -408,6 +461,8 @@ ${buildGitHubMessageInstructions()}`
   ${sourceContext}
   ${sourceControlContext}
   ${codeReviewSelfReviewCloseoutContext}
+  ${reportingContext}
+  ${therapistModeInstructions}
 
   <todo_policy>
     <purpose>The shared todo discipline lives in the global system prompt. This workflow-owned policy adds the seeding, routing, delegation, and delivery-specific todo semantics that the generic prompt cannot infer on its own.</purpose>
@@ -452,6 +507,7 @@ ${initialTodoSeed}
     <default_mode>${defaultMode}</default_mode>
     <autonomous_mode>
       <behavior>Autonomous mode carries the request through the selected skill's workflow without waiting for extra confirmations, and executes the default branch/push/PR path for repository-changing work.</behavior>
+      <scope>Autonomy applies to Roomote and authorized agents within the user request and permissions, not assuming authority over humans. Respect Human Ownership and Coordinate Agents Within Scope still apply; delegation does not expand authority.</scope>
       <proof_handoff_path>${autonomousProofInstruction}</proof_handoff_path>
       <branch_push_pr_path>${autonomousFinishInstruction}</branch_push_pr_path>
       <post_validation_delivery_rule>${postValidationDeliveryRule}</post_validation_delivery_rule>
@@ -461,15 +517,7 @@ ${initialTodoSeed}
       <behavior>In Interactive mode, stop at meaningful checkpoints and wait for user direction before irreversible actions such as push or pull request creation.${interactiveMode ? ' Interactive mode is active for this run unless the user explicitly switches back.' : ''}</behavior>
       <explicit_command_override>When the user explicitly invokes a Roomote-shipped packaged-skill command (for example "$push", "$create-pr", or "$create-draft-pr"), treat that invocation as explicit user approval for all actions defined in that skill's workflow, including push and PR creation. Do not gate those actions behind an additional Interactive-mode confirmation — the user already requested them directly.</explicit_command_override>
     </interactive_mode>
-    <mode_switching>
-      <rule>Allow switching between Autonomous and Interactive modes at any time in the thread.</rule>
-      <rule>Honor the most recent explicit user instruction as the active mode.</rule>
-      <rule>Autonomous-by-default applies unless the user explicitly requests Interactive execution in the initial request or a later interjection.</rule>
-      <rule>When an explicit mode switch happens, acknowledge it immediately to the user before continuing task work.</rule>
-      <rule>Interactive-mode acknowledgment format: "Switched to Interactive mode. I will pause before final push/PR actions. Say \`resume autonomous\` to switch back."</rule>
-      <rule>Autonomous-mode acknowledgment format: "Switched to Autonomous mode. I will continue without waiting for extra confirmations. Say \`switch to interactive\` any time."</rule>
-      <rule>If mode intent is unclear near push/PR actions, ask one focused clarification question before proceeding.</rule>
-    </mode_switching>
+    ${modeSwitchingContext}
   </execution_mode_policy>
 
   <skill_delegation>

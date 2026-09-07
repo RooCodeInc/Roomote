@@ -3,9 +3,11 @@ import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
+import { handleMergeAnnouncerPush } from '@roomote/sdk/server';
 
 import { apiLogger, logApiError } from '../../logging';
 import { recordWebhook } from '../github/recordWebhook';
+import { normalizeGiteaPush } from '../merge-announcer-push';
 import { handleGiteaComment } from './handleComment';
 import { handleGiteaIssue } from './handleIssue';
 import { handleGiteaPullRequest } from './handlePullRequest';
@@ -14,6 +16,7 @@ import {
   giteaIssueWebhookSchema,
   giteaPullRequestCommentWebhookSchema,
   giteaPullRequestWebhookSchema,
+  giteaPushWebhookSchema,
   giteaWorkflowRunWebhookSchema,
 } from './types';
 import { verifyGiteaWebhook } from './verifyWebhook';
@@ -113,6 +116,20 @@ gitea.post('/', async (c) => {
         `workflow_run.${payload.action ?? 'unknown'}`,
         payload,
         () => handleGiteaWorkflowRun(payload),
+        { provider: 'gitea' },
+      );
+
+      return c.json({ message: 'webhook_processed' });
+    }
+
+    if (eventName === 'push') {
+      const payload = giteaPushWebhookSchema.parse(parsedJson);
+
+      await recordWebhook(
+        deliveryId,
+        'push',
+        payload,
+        () => handleMergeAnnouncerPush(normalizeGiteaPush(payload)),
         { provider: 'gitea' },
       );
 

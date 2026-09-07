@@ -16,10 +16,12 @@ const mocks = vi.hoisted(() => ({
   findMappedUserId: vi.fn(),
   evaluateGate: vi.fn(),
   processAttachments: vi.fn(),
-  startNewTask: vi.fn(),
   createDirectMessage: vi.fn(),
   postMessage: vi.fn(),
   addReaction: vi.fn(),
+  processFast: vi.fn(),
+  startFastResponse: vi.fn(),
+  findInstallation: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -37,6 +39,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUserId,
+  findDiscordInstallationByGuildId: mocks.findInstallation,
 }));
 
 vi.mock('../../shared/channel-launch-gate.js', async (importOriginal) => ({
@@ -50,8 +53,14 @@ vi.mock('../attachments.js', () => ({
   processDiscordAttachments: mocks.processAttachments,
 }));
 
-vi.mock('../task-orchestration.js', () => ({
-  startNewDiscordTask: mocks.startNewTask,
+vi.mock('../fast-agent.js', () => ({
+  getDiscordFastConversationId: (
+    channel: DiscordChannelContext,
+    eventId: string,
+  ) =>
+    channel.isDirectMessage || channel.isThread ? channel.channelId : eventId,
+  processDiscordFastAgentMessage: mocks.processFast,
+  startDiscordFastAgentResponse: mocks.startFastResponse,
 }));
 
 vi.mock('../../../logging.js', () => ({
@@ -103,6 +112,24 @@ function messagePayload(overrides: Record<string, unknown> = {}) {
     attachments: [],
     ...overrides,
   };
+}
+
+const IMAGE_ATTACHMENT = {
+  id: 'attachment-1',
+  filename: 'context.png',
+  content_type: 'image/png',
+  size: 1234,
+  url: 'https://cdn.discordapp.com/attachments/context.png',
+};
+
+// Fast mode always answers linked-human text messages, so launch-path tests
+// use an attachment-only human message (no text for Fast mode to answer).
+function attachmentOnlyPayload(overrides: Record<string, unknown> = {}) {
+  return messagePayload({
+    content: '',
+    attachments: [IMAGE_ATTACHMENT],
+    ...overrides,
+  });
 }
 
 function gatewayEvent(payload: Record<string, unknown>): DiscordGatewayEvent {
@@ -176,6 +203,15 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       ]),
     );
     mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
+    mocks.findInstallation.mockResolvedValue({
+      installedByUserId: 'installer-1',
+    });
+    // Bot-authored coverage below exercises the not-accepted path unless a
+    // test opts into an accepted Fast turn explicitly.
+    mocks.startFastResponse.mockResolvedValue({
+      accepted: false,
+      reason: 'Fast session is busy.',
+    });
     mocks.evaluateGate.mockResolvedValue({
       shouldLaunch: true,
       debug: { llmDecision: 'launch', reason: 'ok' },
@@ -185,10 +221,25 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       attachmentTexts: [],
       warnings: [],
     });
-    mocks.startNewTask.mockResolvedValue({ status: 'started' });
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-message-1' });
     mocks.addReaction.mockResolvedValue(undefined);
+    mocks.processFast.mockResolvedValue(true);
+  });
+
+  it('routes a linked-human text message to Fast mode before channel auto-start launch', async () => {
+    await expect(runHandler({})).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.processFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'The login page 500s on refresh',
+        senderUserId: 'roomote-user-1',
+        conversationId: 'message-1',
+      }),
+    );
+    expect(mocks.evaluateGate).not.toHaveBeenCalled();
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
   });
 
   describe('qualification', () => {
@@ -210,7 +261,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     ])('ignores %s without touching Redis', async (_label, input) => {
       await expect(runHandler(input)).resolves.toBe(false);
       expect(mocks.redis.sismember).not.toHaveBeenCalled();
-      expect(mocks.startNewTask).not.toHaveBeenCalled();
+      expect(mocks.startFastResponse).not.toHaveBeenCalled();
     });
 
     it('accepts reply-type messages (type 19)', async () => {
@@ -232,6 +283,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
         runHandler({
           payload: messagePayload({
             content: '',
+            author: { id: 'alert-bot', username: 'alerts', bot: true },
             message_snapshots: [
               {
                 message: {
@@ -247,11 +299,9 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       await flushBackgroundWork();
 
       expect(mocks.processAttachments).toHaveBeenCalledWith([attachment]);
-      expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect(mocks.startFastResponse).toHaveBeenCalledWith(
         expect.objectContaining({
-          queuedMessage: expect.objectContaining({
-            text: 'Forwarded request\n\nImage: context.png',
-          }),
+          question: 'Forwarded request\n\nImage: context.png',
         }),
       );
     });
@@ -278,58 +328,33 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
         channelIds: ['400000000000000999'],
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
   });
 
-  it('launches a linked-human message with instructions as the prompt prefix', async () => {
-    await expect(runHandler({})).resolves.toBe(true);
-    await flushBackgroundWork();
-
-    expect(mocks.addReaction).toHaveBeenCalledWith({
-      channelId: MONITORED_CHANNEL_ID,
-      messageId: 'message-1',
-      name: '👀',
+  it('enters Fast for a linked-human attachment message with the channel instructions as context', async () => {
+    mocks.processAttachments.mockResolvedValue({
+      images: ['data:image/png;base64,AAAA'],
+      attachmentTexts: [],
+      warnings: [],
     });
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        skipRoutingConfirmation: true,
-        launchOwnerUserId: 'roomote-user-1',
-        intakeAckPinned: true,
-        channelAutoStart: {
-          agentPromptPrefix: 'Treat each message as a bug report.',
-          initiator: {
-            kind: 'user',
-            externalId: 'discord-user-1',
-            displayName: 'matt',
-            matchedUserId: 'roomote-user-1',
-          },
-        },
-      }),
-    );
-    // The gate is not consulted when no launch criteria are configured.
-    expect(mocks.evaluateGate).not.toHaveBeenCalled();
-  });
 
-  it('forwards message_reference into startNewDiscordTask for reply launches', async () => {
     await expect(
-      runHandler({
-        payload: messagePayload({
-          type: 19,
-          message_reference: {
-            message_id: 'parent-message-1',
-            channel_id: MONITORED_CHANNEL_ID,
-          },
-        }),
-      }),
+      runHandler({ payload: attachmentOnlyPayload() }),
     ).resolves.toBe(true);
     await flushBackgroundWork();
 
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
+    expect(mocks.processFast).toHaveBeenCalledWith(
       expect.objectContaining({
-        replyToMessageId: 'parent-message-1',
-        replyToChannelId: MONITORED_CHANNEL_ID,
+        question: expect.stringContaining('context.png'),
+        images: ['data:image/png;base64,AAAA'],
+        agentContext: 'Treat each message as a bug report.',
+        senderUserId: 'roomote-user-1',
+        directedAtRoomote: true,
       }),
     );
+    expect(mocks.addReaction).not.toHaveBeenCalled();
+    // The gate is not consulted when no launch criteria are configured.
+    expect(mocks.evaluateGate).not.toHaveBeenCalled();
   });
 
   it('DMs an unlinked human a link nudge and never launches', async () => {
@@ -357,7 +382,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       expect.any(String),
       String(10 * 60),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
     expect(mocks.addReaction).not.toHaveBeenCalled();
   });
 
@@ -386,7 +411,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     expect(mocks.redis.del).toHaveBeenCalledWith(
       'discord:account-link-dm:discord-user-1',
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -404,24 +429,76 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       }),
     ],
   ])(
-    'launches %s as an automation-owned task without a launch owner',
+    'enters Fast for %s under the automation identity without a launch owner',
     async (_label, payload) => {
       await expect(runHandler({ payload })).resolves.toBe(true);
       await flushBackgroundWork();
 
       expect(mocks.findMappedUserId).not.toHaveBeenCalled();
-      const call = mocks.startNewTask.mock.calls[0]?.[0];
-      expect(call.launchOwnerUserId).toBeUndefined();
-      expect(call.channelAutoStart.initiator).toEqual({
-        kind: 'automation',
-        key: 'slack_channel_auto_start',
-        actor: {
-          externalId: payload.author.id,
-          displayName: payload.author.username,
-        },
-      });
+      expect(mocks.startFastResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          senderUserId: 'installer-1',
+          delegatedTaskInitiator: {
+            kind: 'automation',
+            key: 'slack_channel_auto_start',
+            actor: {
+              externalId: payload.author.id,
+              displayName: payload.author.username,
+            },
+          },
+        }),
+      );
     },
   );
+
+  it('routes a bot-authored message to Fast under the installer identity when the turn is accepted', async () => {
+    mocks.startFastResponse.mockResolvedValue({
+      accepted: true,
+      abort: vi.fn(),
+    });
+
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          author: { id: 'alert-bot', username: 'alerts', bot: true },
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.startFastResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        senderUserId: 'installer-1',
+        directedAtRoomote: true,
+        delegatedTaskInitiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          actor: { externalId: 'alert-bot', displayName: 'alerts' },
+        },
+      }),
+    );
+    expect(mocks.processFast).not.toHaveBeenCalled();
+  });
+
+  it('stays silent and releases the lock when no installer identity exists', async () => {
+    mocks.findInstallation.mockResolvedValue(null);
+
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          author: { id: 'alert-bot', username: 'alerts', bot: true },
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
+    expect(mocks.processFast).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.redis.del).toHaveBeenCalledWith(
+      'discord:auto-start-lock:message-1',
+    );
+  });
 
   it('consults the launch gate when criteria are configured and stays silent on skip', async () => {
     mocks.getBackgroundAgentSettings.mockResolvedValue(
@@ -438,7 +515,9 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       debug: { llmDecision: 'skip', reason: 'not an incident' },
     });
 
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.evaluateGate).toHaveBeenCalledWith(
@@ -449,12 +528,12 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
         isBotAuthored: false,
       }),
     );
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
     expect(mocks.addReaction).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
     // The routing lock is released so a redelivery can re-evaluate.
     expect(mocks.redis.del).toHaveBeenCalledWith(
-      'discord:routing-lock:message-1',
+      'discord:auto-start-lock:message-1',
     );
   });
 
@@ -473,10 +552,12 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       debug: { llmDecision: 'error', reason: 'provider unavailable' },
     });
 
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
     expect(mocks.postMessage).toHaveBeenCalledWith({
       channelId: MONITORED_CHANNEL_ID,
       replyToMessageId: 'message-1',
@@ -484,10 +565,12 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     });
   });
 
-  it('replies when task startup throws', async () => {
-    mocks.startNewTask.mockRejectedValue(new Error('task queue unavailable'));
+  it('replies when the Fast turn throws', async () => {
+    mocks.processFast.mockRejectedValue(new Error('task queue unavailable'));
 
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.postMessage).toHaveBeenCalledWith({
@@ -521,12 +604,14 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     ).resolves.toBe(true);
     await flushBackgroundWork();
 
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
-  it('stays silent when task startup throws for a bot-authored message', async () => {
-    mocks.startNewTask.mockRejectedValue(new Error('task queue unavailable'));
+  it('stays silent when the Fast turn throws for a bot-authored message', async () => {
+    mocks.startFastResponse.mockRejectedValue(
+      new Error('task queue unavailable'),
+    );
 
     await expect(
       runHandler({
@@ -540,40 +625,30 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     expect(mocks.postMessage).not.toHaveBeenCalled();
     // The routing lock is still released so a redelivery can re-evaluate.
     expect(mocks.redis.del).toHaveBeenCalledWith(
-      'discord:routing-lock:message-1',
+      'discord:auto-start-lock:message-1',
     );
   });
 
-  it('dedupes concurrent deliveries via the routing lock', async () => {
+  it('dedupes concurrent deliveries via the launch lock', async () => {
     mocks.redis.set.mockResolvedValue(null); // lock already held
 
     await expect(runHandler({})).resolves.toBe(true);
     await flushBackgroundWork();
 
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.processFast).not.toHaveBeenCalled();
+    expect(mocks.startFastResponse).not.toHaveBeenCalled();
   });
 
-  it('never lets a reaction failure abort the launch', async () => {
-    mocks.addReaction.mockRejectedValue(new Error('rate limited'));
+  it('releases the launch lock when the Fast turn fails', async () => {
+    mocks.processFast.mockRejectedValue(new Error('boom'));
 
-    await expect(runHandler({})).resolves.toBe(true);
-    await flushBackgroundWork();
-
-    expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
-    const startArgs = mocks.startNewTask.mock.calls[0]![0] as {
-      intakeAckPinned?: boolean;
-    };
-    expect(startArgs.intakeAckPinned).toBeUndefined();
-  });
-
-  it('releases the routing lock when the launch fails', async () => {
-    mocks.startNewTask.mockRejectedValue(new Error('boom'));
-
-    await expect(runHandler({})).resolves.toBe(true);
+    await expect(
+      runHandler({ payload: attachmentOnlyPayload() }),
+    ).resolves.toBe(true);
     await flushBackgroundWork();
 
     expect(mocks.redis.del).toHaveBeenCalledWith(
-      'discord:routing-lock:message-1',
+      'discord:auto-start-lock:message-1',
     );
   });
 });

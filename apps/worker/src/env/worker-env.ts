@@ -3,8 +3,8 @@ import * as os from 'node:os';
 import { configureAuthClientEnv } from '@roomote/auth/client';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   parseModelProviderEnvKeys,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
 } from '@roomote/types';
 
 /**
@@ -21,6 +21,7 @@ interface WorkerConfig {
   previewAuthPublicKey?: string;
   previewAuthCookieName?: string;
   appEnv?: string;
+  sandboxOpenRouterApiKey?: string;
 }
 
 const PRESET_SYSTEM_ENV: Record<string, string> = {
@@ -59,6 +60,7 @@ const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'PREVIEW_AUTH_COOKIE_NAME',
   'PREVIEW_PROXY_BASE_URL',
   'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
 ]);
 const MODEL_RUNTIME_ENV_KEYS = [
   'R_MODEL',
@@ -76,7 +78,6 @@ const MODEL_RUNTIME_ENV_KEYS = [
   'R_MODEL_ENV_KEYS',
   'OPENCODE_CONFIG_CONTENT',
   'OPENCODE_COMMAND',
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
 ] as const;
 function buildLauncherOpenCodeEnv(
   processEnv: NodeJS.ProcessEnv,
@@ -224,6 +225,8 @@ export class WorkerEnv {
       previewAuthCookieName: processEnv.PREVIEW_AUTH_COOKIE_NAME,
       roomoteAppUrl: processEnv.R_APP_URL!,
       appEnv: processEnv.R_APP_ENV ?? processEnv.APP_ENV,
+      sandboxOpenRouterApiKey:
+        processEnv[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME],
     };
 
     const env = new WorkerEnv({
@@ -248,6 +251,7 @@ export class WorkerEnv {
       'JOB_AUTH_PUBLIC_KEY',
       'PREVIEW_PROXY_BASE_URL',
       'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+      SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
     ];
 
     for (const key of workerSecretKeys) {
@@ -363,6 +367,10 @@ export class WorkerEnv {
     return { ...this.runtimeEnv };
   }
 
+  getUserEnv(): Record<string, string> {
+    return { ...this.userEnv };
+  }
+
   /** Set a single system base var. */
   setSystemBase(key: string, value: string): void {
     this.systemBase[key] = value;
@@ -404,5 +412,9 @@ export class WorkerEnv {
 
   get appEnv(): string | undefined {
     return this.workerConfig.appEnv;
+  }
+
+  get sandboxOpenRouterApiKey(): string | undefined {
+    return this.workerConfig.sandboxOpenRouterApiKey;
   }
 }

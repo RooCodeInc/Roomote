@@ -5,6 +5,7 @@ import { createAuthToken } from '@roomote/auth';
 import * as GitHub from '@roomote/github';
 import { createClient } from '@roomote/sdk/client';
 import { enqueueAutomationSignalPrefetch } from '@roomote/sdk/server/automation-recommendations';
+import { requestBrainBackfill } from '@roomote/sdk/server/request-instance-ping';
 import { isLoopbackHostname } from '@roomote/types';
 import {
   db,
@@ -674,6 +675,8 @@ export async function enableGitHubAppCommand(
       );
 
       if (results.some((result) => result.success)) {
+        // Repositories just came back online for Memory ingestion.
+        void requestBrainBackfill('github-connected');
         return { success: true, mode: 'synced' };
       }
     }
@@ -823,6 +826,12 @@ export async function resolvePendingGitHubInstallationsCommand(
       userId: auth.userId,
     });
 
+    if (result.completed > 0) {
+      // A pending installation just resolved into live repositories — start
+      // Memory ingestion now rather than waiting out the 15-minute schedules.
+      void requestBrainBackfill('github-connected');
+    }
+
     return { success: true, ...result };
   } catch (error) {
     console.error(
@@ -866,16 +875,14 @@ export async function startAuthenticateGitHubAccountCommand(
     });
 
     if (baseUrl) {
-      const redirectUri = new URL('/github/callback', baseUrl);
-
-      if (
-        callbackBackground === 'accent' ||
-        callbackBackground === 'background'
-      ) {
-        redirectUri.searchParams.set('bg', callbackBackground);
-      }
-
-      params.set('redirect_uri', redirectUri.toString());
+      // GitHub Apps require `redirect_uri` to match a registered callback URL
+      // exactly, with no extra query parameters; anything else is rejected
+      // with "The redirect_uri is not associated with this application".
+      // The callback background hint travels in the signed state instead.
+      params.set(
+        'redirect_uri',
+        new URL('/github/callback', baseUrl).toString(),
+      );
     }
 
     return {

@@ -1,12 +1,29 @@
 // pnpm --filter @roomote/cloud-agents test src/server/workflows/__tests__/githubPrReviewSync.test.ts
 
 import * as utils from '../utils';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 describe('githubPrReviewSync', () => {
+  it('forwards therapist mode to the Standard Task prompt', () => {
+    const thisFilePath = fileURLToPath(import.meta.url);
+    const workflowPath = path.resolve(
+      path.dirname(thisFilePath),
+      '../githubPrReviewSync.ts',
+    );
+    const workflowContent = fs.readFileSync(workflowPath, 'utf8');
+
+    expect(workflowContent).toContain('therapistModeEnabled?: boolean;');
+    expect(workflowContent).toContain(
+      'linkedWorkItems,\n    therapistModeEnabled,',
+    );
+  });
+
   describe('getMarkdownChecklist unit tests', () => {
     it('should extract checklist items and preserve checked state', () => {
       const markdown = `
-<!-- roomote-review-summary sha=abc123 mode=initial agent=agent_123 -->
+<!-- roomote-review-summary sha=abc1234 mode=initial agent=agent_123 -->
 Outstanding review items:
 - [ ] Add regression coverage
 - [x] Preserve existing wording
@@ -21,7 +38,7 @@ Outstanding review items:
 
     it('should preserve dismissed history bullets alongside checklist items', () => {
       const markdown = `
-<!-- roomote-review-summary sha=abc123 mode=sync agent=agent_123 -->
+<!-- roomote-review-summary sha=abc1234 mode=sync agent=agent_123 -->
 1 issue outstanding.
 - [ ] Keep unresolved issue visible
 - ~~Ignore optional skipped checks~~ — dismissed: checks already passed.
@@ -36,7 +53,7 @@ Outstanding review items:
 
     it('should ignore hidden status and checklist markers while extracting checklist history', () => {
       const markdown = `
-<!-- roomote-review-summary sha=abc123 mode=sync agent=agent_123 -->
+<!-- roomote-review-summary sha=abc1234 mode=sync agent=agent_123 -->
 <!-- roomote-review-status:start -->
 No actionable issues found.
 <!-- roomote-review-status:end -->

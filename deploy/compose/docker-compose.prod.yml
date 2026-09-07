@@ -24,6 +24,11 @@ x-roomote-base-env: &roomote-base-env
   R_BRAIN_MODEL: ${R_BRAIN_MODEL:-}
   R_BRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
   R_BRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
+  # Optional self-run inference: point embeddings at the bundled
+  # `infinity` service (profile local-inference) or any OpenAI-compatible
+  # server. Chat synthesis keeps flowing to the configured model provider.
+  R_BRAIN_EMBEDDINGS_UPSTREAM_URL: ${R_BRAIN_EMBEDDINGS_UPSTREAM_URL:-}
+  R_BRAIN_INFERENCE_UPSTREAM_API_KEY: ${R_BRAIN_INFERENCE_UPSTREAM_API_KEY:-}
   R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
   R_GBRAIN_ADMIN_TOKEN_FILE: /gbrain-data/admin-bootstrap-token
   # Written by the Brain on first boot when no token was supplied, so a stack
@@ -40,6 +45,7 @@ x-roomote-base-env: &roomote-base-env
   R_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
+  R_GITHUB_ADDITIONAL_APP_SLUGS: ${R_GITHUB_ADDITIONAL_APP_SLUGS:-}
   TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
   # Azure Container Apps sandbox provider. In the base anchor so controller,
   # api, and bullmq all see it — credentials can also come from the
@@ -212,6 +218,7 @@ x-roomote-api-env: &roomote-api-env
 
 x-roomote-controller-env: &roomote-controller-env
   <<: *roomote-base-env
+  SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
@@ -288,7 +295,9 @@ x-roomote-service: &roomote-service
   restart: unless-stopped
   read_only: true
   tmpfs:
-    - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    # HOME=/tmp carries OpenCode's Fast runtime, local sessions, logs, and
+    # caches. Keep the cap configurable and large enough for Fast-by-default.
+    - /tmp:rw,noexec,nosuid,nodev,size=${ROOMOTE_APP_TMPFS_SIZE:-512m},mode=1777
   cap_drop:
     - ALL
   security_opt:
@@ -296,7 +305,7 @@ x-roomote-service: &roomote-service
 
 services:
   postgres:
-    image: postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302
+    image: pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf
     profiles:
       - local-postgres
     restart: unless-stopped
@@ -307,11 +316,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-roomote-postgres-password}
       POSTGRES_DB: ${POSTGRES_DB:-roomote}
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 30s
       retries: 5
-      start_period: 30s
+      start_period: 120s
 
   redis:
     image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
@@ -404,7 +413,7 @@ services:
       ROOMOTE_SERVICE: web
       PORT: 3000
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /tmp:rw,noexec,nosuid,nodev,size=${ROOMOTE_APP_TMPFS_SIZE:-512m},mode=1777
       - /roomote/apps/web/.next/cache:rw,noexec,nosuid,nodev,size=128m,uid=10000,gid=10000,mode=700
     healthcheck:
       test:
@@ -516,9 +525,9 @@ services:
   # COMPOSE_PROFILES=brain (local-postgres precedent); deployments
   # that never enable the profile see no infrastructure change. Internal-only:
   # no published ports and no Caddy route; the API fronts it at
-  # /api/mcp/gbrain. Set GBRAIN_IMAGE to the pinned published image once the
-  # publish workflow ships it; until then the installer builds from
-  # .docker/gbrain. Wire R_GBRAIN_URL plus static tokens into api/bullmq
+  # /api/mcp/gbrain. By default it uses the same registry, namespace, and
+  # release tag as the app image; GBRAIN_IMAGE can override the complete ref.
+  # Wire R_GBRAIN_URL plus static tokens into api/bullmq
   # (operator-pinned), or the normal path: set GBRAIN_ADMIN_BOOTSTRAP_TOKEN
   # (>= 32 chars of [A-Za-z0-9_-]) and paste http://gbrain:8931 plus that
   # same token into Settings > Integrations > Brain; Roomote then
@@ -527,10 +536,15 @@ services:
   gbrain:
     profiles:
       - brain
-    image: ${GBRAIN_IMAGE:-roomote-gbrain:local}
+    image: ${GBRAIN_IMAGE:-${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMESPACE:-roocodeinc}/roomote-gbrain:${ROOMOTE_VERSION:?ROOMOTE_VERSION is required}}
     restart: unless-stopped
     networks: [default]
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
     environment:
+      GBRAIN_DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
       GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}
       # The Brain holds no provider key. It calls back into this deployment,
       # which injects whichever provider key an admin configured in Settings,
@@ -547,6 +561,57 @@ services:
       GBRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
     volumes:
       - gbrain_data:/data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # The image is bun-based and ships no curl or wget.
+      test:
+        [
+          'CMD-SHELL',
+          'bun -e "const r = await fetch(\"http://127.0.0.1:8931/health\"); process.exit(r.ok ? 0 : 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  # Self-run embedding model for the Brain (opt-in, CPU).
+  # Enable with the `local-inference` compose profile. The upstream URLs are
+  # NOT sufficient on their own: R_BRAIN_EMBEDDING_MODEL and
+  # R_BRAIN_EMBEDDING_DIMENSIONS must name what this server serves (gbrain's
+  # defaults name a provider model it does not serve), and the embedding pair
+  # is create-time — the full set is documented together in
+  # .env.production.example. Serve models by pinned name and keep serving old
+  # names: every Brain is locked to its embedding model at creation.
+  infinity:
+    profiles:
+      - local-inference
+    image: michaelf34/infinity:0.0.76-cpu@sha256:2a464dcc06e659a277bc841b4be196100489076446482925481b2c5c120fce57
+    restart: unless-stopped
+    networks: [default]
+    environment:
+      INFINITY_ANONYMOUS_USAGE_STATS: '0'
+      # Standard opt-out honored by Infinity (and many other tools); keeps
+      # the stack quiet even if the Infinity-specific variable is renamed.
+      DO_NOT_TRACK: '1'
+    command:
+      - v2
+      - --device
+      - cpu
+      - --url-prefix
+      - /v1
+      - --port
+      - '7997'
+      # Multilingual defaults: memories arrive in whatever language the
+      # workspace speaks, and cross-lingual recall (an English query hitting
+      # a German Slack thread) needs a multilingual embedding space. On a
+      # smaller CPU host, Alibaba-NLP/gte-multilingual-base (768 dims) is a
+      # lighter alternative with close retrieval quality — pick before the
+      # Brain's first boot; the embedding choice is create-time.
+      - --model-id
+      - ${INFINITY_EMBEDDING_MODEL:-BAAI/bge-m3}
+    volumes:
+      - infinity_cache:/app/.cache
     security_opt:
       - no-new-privileges:true
 
@@ -605,6 +670,7 @@ volumes:
   caddy_data:
   caddy_config:
   gbrain_data:
+  infinity_cache:
 
 networks:
   default:

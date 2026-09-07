@@ -25,6 +25,6 @@ export type SlackWebhookEvent =
   | SlackReactionAddedEvent;
 
 export type AutomatedSlackAppMentionEvent = SlackEvent & {
-  type: 'app_mention';
-  app_id?: string;
+  type: 'app_mention' | 'message';
+  app_id: string;
 };

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Brain bootstrap: init-once, then serve.
+# Brain bootstrap: init-once, then run the HTTP server and durable job worker.
 #
 # Credential provisioning happens over gbrain's admin HTTP API at connect
 # time (Roomote registers its own scoped OAuth clients), so nothing is
@@ -14,6 +14,9 @@ DATA_DIR="${GBRAIN_DATA_DIR:-/data}"
 BRAIN_DIR="$DATA_DIR/brain"
 TOKEN_FILE="$DATA_DIR/admin-bootstrap-token"
 CONFIG_FILE="$DATA_DIR/.gbrain/config.json"
+STORAGE_LAYOUT_FILE="$DATA_DIR/roomote-brain-storage-layout"
+STORAGE_LAYOUT_VERSION="filesystem-v1"
+STORAGE_LAYOUT_RESETTING="${STORAGE_LAYOUT_VERSION}-resetting"
 PORT="${GBRAIN_PORT:-8931}"
 # Width of the vector column, fixed when the brain is created. Defaults to
 # text-embedding-3-small, which is what both providers serve by default.
@@ -24,14 +27,94 @@ EMBEDDING_DIMENSIONS="${GBRAIN_EMBEDDING_DIMENSIONS:-1536}"
 
 mkdir -p "$DATA_DIR"
 
+write_storage_layout() {
+  layout="$1"
+  temporary_layout_file="${STORAGE_LAYOUT_FILE}.tmp"
+  printf '%s\n' "$layout" > "$temporary_layout_file"
+  mv -f "$temporary_layout_file" "$STORAGE_LAYOUT_FILE"
+}
+
 # gbrain keeps its registration in $HOME/.gbrain, not in the data dir.
 # Anchor HOME on the volume so a rebuilt container still knows its brain.
 export HOME="$DATA_DIR"
 
-# A lock present at entrypoint time is always stale: this container runs
-# exactly one gbrain process, and a killed container leaves a lock recording
-# PID 1, which a fresh container's serve (also PID 1) mistakes for live.
-rm -rf "$BRAIN_DIR/.gbrain-lock"
+# Hosted deployments reuse their existing Postgres service while keeping the
+# Brain in its own database. gbrain installs database-wide maintenance and RLS
+# machinery in public, so pointing it at Roomote's application database would
+# let its migrations affect application tables. Creating a sibling database
+# gives it an independent public schema without another Railway service.
+if [ -z "${GBRAIN_DATABASE_URL:-}" ]; then
+  echo "[gbrain-entrypoint] GBRAIN_DATABASE_URL is required (gbrain maintenance needs Postgres)" >&2
+  exit 2
+fi
+
+GBRAIN_DATABASE_NAME="${GBRAIN_DATABASE_NAME:-gbrain}"
+case "$GBRAIN_DATABASE_NAME" in
+  *[!A-Za-z0-9_]* | '')
+    echo "[gbrain-entrypoint] GBRAIN_DATABASE_NAME must contain only letters, numbers, and underscores" >&2
+    exit 2
+    ;;
+esac
+
+DATABASE_SEED_URL="${GBRAIN_DATABASE_BOOTSTRAP_URL:-$GBRAIN_DATABASE_URL}"
+if [ -n "${GBRAIN_DATABASE_BOOTSTRAP_URL:-}" ]; then
+  DATABASE_BOOTSTRAP_URL="$GBRAIN_DATABASE_BOOTSTRAP_URL"
+else
+  DATABASE_BOOTSTRAP_URL="$(DATABASE_BOOTSTRAP_URL="$DATABASE_SEED_URL" \
+    bun -e '
+      const url = new URL(Bun.env.DATABASE_BOOTSTRAP_URL);
+      url.pathname = "/postgres";
+      console.log(url.toString());
+    ')"
+fi
+
+GBRAIN_DATABASE_URL="$(DATABASE_SEED_URL="$DATABASE_SEED_URL" \
+  GBRAIN_DATABASE_NAME="$GBRAIN_DATABASE_NAME" \
+  bun -e '
+    const url = new URL(Bun.env.DATABASE_SEED_URL);
+    url.pathname = `/${Bun.env.GBRAIN_DATABASE_NAME}`;
+    console.log(url.toString());
+  ')"
+export GBRAIN_DATABASE_URL
+
+CURRENT_STORAGE_LAYOUT="$(cat "$STORAGE_LAYOUT_FILE" 2>/dev/null || true)"
+
+if [ "$CURRENT_STORAGE_LAYOUT" != "$STORAGE_LAYOUT_VERSION" ]; then
+  echo "[gbrain-entrypoint] initializing filesystem-backed Brain (existing Brain content will be rebuilt)"
+  # Only the reset itself may repeat after an interruption. Once it completes,
+  # persist the final layout before gbrain init and the remaining config steps,
+  # so a later bootstrap failure resumes instead of dropping the fresh Brain.
+  if [ "$CURRENT_STORAGE_LAYOUT" != "$STORAGE_LAYOUT_RESETTING" ]; then
+    write_storage_layout "$STORAGE_LAYOUT_RESETTING"
+  fi
+  psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
+    -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
+SELECT pg_advisory_lock(hashtext('roomote-gbrain-database-bootstrap')) AS locked \gset
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'brain_database' AND pid <> pg_backend_pid();
+SELECT format('DROP DATABASE IF EXISTS %I', :'brain_database') \gexec
+SELECT format('CREATE DATABASE %I', :'brain_database') \gexec
+SELECT pg_advisory_unlock(hashtext('roomote-gbrain-database-bootstrap')) AS unlocked \gset
+SQL
+
+  # The target is fixed under DATA_DIR. Keep deployment credentials alongside
+  # it, but remove the old corpus/config so gbrain cannot mix storage layouts.
+  rm -rf "$BRAIN_DIR"
+  rm -f "$CONFIG_FILE"
+  write_storage_layout "$STORAGE_LAYOUT_VERSION"
+else
+  echo "[gbrain-entrypoint] ensuring isolated Postgres database $GBRAIN_DATABASE_NAME"
+  psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
+    -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
+SELECT pg_advisory_lock(hashtext('roomote-gbrain-database-bootstrap')) AS locked \gset
+SELECT format('CREATE DATABASE %I', :'brain_database')
+WHERE NOT EXISTS (
+  SELECT FROM pg_database WHERE datname = :'brain_database'
+) \gexec
+SELECT pg_advisory_unlock(hashtext('roomote-gbrain-database-bootstrap')) AS unlocked \gset
+SQL
+fi
 
 if [ -z "${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}" ]; then
   if [ ! -s "$TOKEN_FILE" ]; then
@@ -92,11 +175,24 @@ elif [ -n "${OPENAI_API_KEY:-}" ]; then
   DEFAULT_CHAT_MODEL="openai:gpt-5.6-luna"
 else
   # No credential: the server still boots and serves, it just cannot embed or
-  # synthesize. Roomote gates every Brain code path on the same keys, so it
+  # synthesize. Roomote gates every Brain code path on the same signal, so it
   # will not talk to this container either.
   BRAIN_PROVIDER="none"
   DEFAULT_EMBEDDING_MODEL=""
   DEFAULT_CHAT_MODEL=""
+fi
+
+# Gateway mode holds no real provider key, so chat defaults to the
+# `roomote/helper` sentinel: the Roomote gateway answers it with the
+# deployment's helper model instead of forwarding to a provider, which is what
+# frees synthesis from needing a Brain provider key. Convergence rule: the
+# chat model is a plain env export re-derived on every boot (env wins over
+# anything the brain stored at init), so a brain that previously defaulted to
+# gpt-5.6-luna picks this up on its next boot — while an operator's explicit
+# GBRAIN_MODEL (below) or R_BRAIN_MODEL (applied by the gateway per request)
+# still wins over the default.
+if [ -n "${OPENAI_BASE_URL:-}" ] && [ "$BRAIN_PROVIDER" != "none" ]; then
+  DEFAULT_CHAT_MODEL="${BRAIN_PROVIDER}:roomote/helper"
 fi
 
 # An operator-chosen embedding model arrives as a bare id (text-embedding-3-large)
@@ -149,16 +245,22 @@ fi
 # with --no-embedding writes a permanent `embedding_disabled: true` sentinel
 # that blocks every embed callsite, which silently degrades retrieval to
 # lexical-only no matter what model variables are set later.
+if grep -q '"engine": *"pglite"' "$CONFIG_FILE" 2>/dev/null; then
+  echo "[gbrain-entrypoint] replacing the legacy PGLite brain with Postgres"
+  rm -rf "$BRAIN_DIR"
+  rm -f "$CONFIG_FILE"
+fi
+
 if [ ! -s "$CONFIG_FILE" ]; then
   if [ "$BRAIN_PROVIDER" = "none" ]; then
-    echo "[gbrain-entrypoint] initializing brain at $BRAIN_DIR (PGLite, no provider key: embedding deferred)"
-    gbrain init --pglite --no-embedding --non-interactive --path "$BRAIN_DIR"
+    echo "[gbrain-entrypoint] initializing brain (Postgres, no provider key: embedding deferred)"
+    gbrain init --no-embedding --non-interactive
   else
-    echo "[gbrain-entrypoint] initializing brain at $BRAIN_DIR (PGLite, embedding: $DEFAULT_EMBEDDING_MODEL)"
+    echo "[gbrain-entrypoint] initializing brain (Postgres, embedding: $DEFAULT_EMBEDDING_MODEL)"
     # --skip-embed-check: the key is not exercised at init time, so a brain
     # still comes up on a temporarily unreachable provider instead of leaving
     # the volume half-initialized.
-    gbrain init --pglite \
+    gbrain init \
       --embedding-model "$DEFAULT_EMBEDDING_MODEL" \
       --embedding-dimensions "$EMBEDDING_DIMENSIONS" \
       --skip-embed-check \
@@ -166,6 +268,39 @@ if [ ! -s "$CONFIG_FILE" ]; then
       --path "$BRAIN_DIR"
   fi
 fi
+
+# Roomote's collectors write through gbrain's MCP API. Pointing the default
+# source at a real directory makes every successful put_page also render a
+# Markdown artifact there. Roomote performs one bounded, cited daily digest
+# through its provider-neutral gateway; native dream reflection/pattern pages
+# remain disabled because they do not refresh existing entity prose. That
+# missing supported capability is tracked upstream:
+# https://github.com/garrytan/gbrain/issues/4294
+mkdir -p "$BRAIN_DIR"
+gbrain config set sync.repo_path "$BRAIN_DIR" >/dev/null
+gbrain config set dream.synthesize.session_corpus_dir "$BRAIN_DIR" >/dev/null
+gbrain config set dream.synthesize.enabled false >/dev/null
+gbrain config set dream.patterns.enabled false >/dev/null
+# Pin the latest native synthesis contract even while the phase is disabled,
+# so enabling it later uses one bounded validated completion rather than the
+# legacy multi-turn child loop.
+gbrain config set dream.synthesize.mode oneshot >/dev/null
+gbrain config set dream.synthesize.link_manifest true >/dev/null
+# Roomote routes synthesis through an OpenAI-compatible gateway. gbrain's
+# legacy subagent loop only supports Anthropic directly, so non-Anthropic
+# models need the provider-neutral gateway loop or every dream child is
+# rejected before inference.
+gbrain config set agent.use_gateway_loop true >/dev/null
+echo "[gbrain-entrypoint] corpus checkout: $BRAIN_DIR (filesystem + Postgres index)"
+
+# The Brain does not use a reranker. gbrain's own init already writes
+# `search.reranker.enabled false` for installs keyed the way ours are, but
+# make the choice explicit so every brain — including ones created before
+# this line and ones hit by upstream mode-bundle default flips — converges
+# on the same shipped behavior. Retrieval is hybrid RRF; autocut no-ops
+# without rerank scores by design.
+gbrain config set search.reranker.enabled false >/dev/null
+echo "[gbrain-entrypoint] reranker: disabled"
 
 # Adding a key to a brain created without one is a first-class flow rather
 # than an edge case: on hosts whose compose parser ignores `profiles` the
@@ -179,10 +314,9 @@ fi
 # invalidated"). Page content is preserved either way, and Roomote refuses to
 # ingest into a keyless brain at all, so there is rarely anything here yet.
 #
-# The middle step is not a typo. In gbrain 0.45.10.0 `config set
-# embedding_disabled false` prints "Set embedding_disabled = false" and does
-# not write the file, so the sentinel survives and keeps blocking embed. The
-# file edit is what actually clears it. Re-check on upgrade.
+# The middle step keeps the repair compatible with brains initialized by
+# older gbrain releases whose `config set embedding_disabled false` command
+# did not persist the change. The file edit is idempotent on newer releases.
 if [ "$BRAIN_PROVIDER" != "none" ] &&
   grep -q '"embedding_disabled": *true' "$CONFIG_FILE" 2>/dev/null; then
   echo "[gbrain-entrypoint] this brain predates its provider key; enabling semantic recall"
@@ -223,8 +357,152 @@ if [ -n "$CONFIGURED_DIMENSIONS" ] && [ "$CONFIGURED_DIMENSIONS" != "$EMBEDDING_
   echo "[gbrain-entrypoint] WARNING:   gbrain migrate embeddings --to <provider:model> --yes"
 fi
 
+# The supervisor holds a queue-scoped lock row in Postgres with a 5-minute
+# TTL. On a rolling deploy the container being replaced can still hold it
+# (or have died without releasing it), and this gbrain exits with code 2
+# (LOCK_HELD) the moment it sees that. Treating that exit as fatal took the
+# server down too and crash-looped three fresh Brains past Railway's restart
+# budget before the TTL had even lapsed (2026-09-02). Retry within the TTL
+# plus a margin instead; anything else the supervisor exits with stays fatal.
+SUPERVISOR_LOCK_HELD_EXIT=2
+SUPERVISOR_LOCK_RETRY_SECONDS="${GBRAIN_SUPERVISOR_LOCK_RETRY_SECONDS:-30}"
+SUPERVISOR_LOCK_RETRY_LIMIT="${GBRAIN_SUPERVISOR_LOCK_RETRY_LIMIT:-14}"
+run_job_worker() {
+  attempt=0
+  while :; do
+    rm -f "$DATA_DIR/gbrain-worker-supervisor.pid"
+    gbrain jobs supervisor \
+      --concurrency "${GBRAIN_WORKER_CONCURRENCY:-1}" \
+      --pid-file "$DATA_DIR/gbrain-worker-supervisor.pid" &
+    supervisor_pid=$!
+    # Shutdown must end the wrapper too, whether it is waiting on a live
+    # supervisor or sleeping between retries; otherwise the loop outlives the
+    # entrypoint's stop and starts another supervisor mid-shutdown. Waiting
+    # for the forwarded signal to land lets the supervisor release its lock
+    # row, which is what spares the next container this whole retry.
+    trap 'kill -TERM "$supervisor_pid" 2>/dev/null; wait "$supervisor_pid" 2>/dev/null; exit 0' TERM INT
+    if wait "$supervisor_pid"; then
+      status=0
+    else
+      status=$?
+    fi
+    if [ "$status" -ne "$SUPERVISOR_LOCK_HELD_EXIT" ] \
+      || [ "$attempt" -ge "$SUPERVISOR_LOCK_RETRY_LIMIT" ]; then
+      return "$status"
+    fi
+    attempt=$((attempt + 1))
+    echo "[gbrain-entrypoint] job worker found the queue lock held; retrying in ${SUPERVISOR_LOCK_RETRY_SECONDS}s ($attempt/$SUPERVISOR_LOCK_RETRY_LIMIT)"
+    # Backgrounded so the trap fires during the pause rather than after it.
+    sleep "$SUPERVISOR_LOCK_RETRY_SECONDS" &
+    wait $! || true
+  done
+}
+
+echo "[gbrain-entrypoint] starting durable job worker"
+run_job_worker &
+WORKER_PID=$!
+
 echo "[gbrain-entrypoint] starting gbrain serve on :$PORT (full surface)"
 # gbrain binds loopback by default, which no container network can reach.
 # 0.0.0.0 covers Docker/compose; platforms whose private network is IPv6-only
 # (Railway) set GBRAIN_BIND=:: so the service is reachable there.
-exec gbrain serve --http --port "$PORT" --bind "${GBRAIN_BIND:-0.0.0.0}" --surface full
+gbrain serve --http --port "$PORT" --bind "${GBRAIN_BIND:-0.0.0.0}" --surface full &
+SERVER_PID=$!
+
+# The brain repo's git mirror (gbrain's durability hardening: a post-commit
+# auto-push plus a repo-scoped credential helper) is set up by
+# `gbrain sources harden`, which reads the PAT from GBRAIN_GITHUB_PAT. It
+# writes the credential file under $HOME/.gbrain. Run by hand in an ssh
+# session that meant /root, which the next deploy rebuilt, and every commit
+# since sat local-only (observed: 9.7k unpushed commits, three days of
+# silent "LOCAL-ONLY, NEEDS ATTENTION" in the push log). Re-run it on every
+# boot, under the volume-anchored HOME above, so the credential survives
+# redeploys and a freshly provisioned brain is hardened as soon as the PAT
+# is set. Idempotent by design, DB-backed (needs the server's registry, so
+# it runs after startup), and never fatal.
+if [ -n "${GBRAIN_GITHUB_PAT:-}" ]; then
+  (
+    sleep 30
+    echo "[gbrain-entrypoint] hardening the brain repo mirror (GBRAIN_GITHUB_PAT is set)"
+    gbrain sources harden --all --no-cron 2>&1 \
+      | sed 's/^/[gbrain-entrypoint] mirror: /' || true
+  ) &
+  HARDEN_PID=$!
+else
+  HARDEN_PID=""
+fi
+
+# Hot-memory facts that gbrain's own put_page backstop extracts land in the
+# database without a markdown fence (row_num NULL). The nightly extract_facts
+# phase refuses to run while such rows exist for live entity pages, reading
+# them as an interrupted v0.32.2 upgrade, so on any brain that is written to
+# every day the phase jams permanently and consolidation starves. gbrain's
+# sanctioned drain is re-running the v0.32.2 fence backfill, which is
+# idempotent (only row_num IS NULL rows, de-duplicated against the page's
+# existing fence), so run it at boot and once a day ahead of Roomote's
+# 07:00 UTC maintenance cycle. Targeted with --migration on purpose: a
+# brain created on a recent gbrain still lists every older data
+# orchestrator as pending, and a bare apply-migrations would run them all.
+# Never fatal: a failed drain leaves the phase skipped, which is today's
+# behavior, and the log says why.
+FENCE_BACKFILL_UTC_SECONDS=$((6 * 3600 + 30 * 60))
+# The backfill refuses to write into a dirty working tree (it expects a human
+# to review the diff), but in a hosted brain nothing reviews: gbrain commits
+# its own write-through page writes, while the pages its maintenance phases
+# touch sit uncommitted until something commits them. Commit the tree on
+# both sides of the drain so it can run tonight and again tomorrow. The
+# identity matches gbrain's bootstrap commits; an unchanged tree is a no-op.
+commit_brain_tree() {
+  git -C "$BRAIN_DIR" add -A 2>/dev/null \
+    && git -C "$BRAIN_DIR" -c user.name=gbrain-bootstrap \
+      -c user.email=bootstrap@localhost commit -q -m "$1" 2>/dev/null \
+    || true
+}
+fence_backfill() {
+  echo "[gbrain-entrypoint] fencing unfenced facts (v0.32.2 backfill)"
+  commit_brain_tree "roomote: commit maintenance-written pages before fence backfill"
+  # Facts whose entity page does not exist can never be fenced, so the run
+  # reports "partial" every time, and three partials wedge the ledger. The
+  # retry marker clears that each night; on its own it only writes the marker.
+  gbrain apply-migrations --force-retry 0.32.2 --non-interactive >/dev/null 2>&1 || true
+  gbrain apply-migrations --migration 0.32.2 --non-interactive 2>&1 \
+    | sed 's/^/[gbrain-entrypoint] fence-backfill: /' || true
+  commit_brain_tree "roomote: fence backfill (v0.32.2)"
+}
+(
+  # Let the server and worker settle before the first drain.
+  sleep 60
+  fence_backfill
+  while :; do
+    now="$(date -u +%s)"
+    delay=$((FENCE_BACKFILL_UTC_SECONDS - now % 86400))
+    if [ "$delay" -le 0 ]; then
+      delay=$((delay + 86400))
+    fi
+    sleep "$delay"
+    fence_backfill
+  done
+) &
+FENCE_PID=$!
+
+TERMINATING=0
+stop_processes() {
+  kill -TERM "$SERVER_PID" "$WORKER_PID" "$FENCE_PID" ${HARDEN_PID:+"$HARDEN_PID"} 2>/dev/null || true
+}
+trap 'TERMINATING=1; stop_processes' TERM INT
+
+while kill -0 "$SERVER_PID" 2>/dev/null && kill -0 "$WORKER_PID" 2>/dev/null; do
+  sleep 1 &
+  wait $! || true
+done
+
+stop_processes
+wait "$SERVER_PID" 2>/dev/null || true
+wait "$WORKER_PID" 2>/dev/null || true
+
+if [ "$TERMINATING" -eq 1 ]; then
+  exit 0
+fi
+
+echo "[gbrain-entrypoint] server or job worker exited unexpectedly" >&2
+exit 1

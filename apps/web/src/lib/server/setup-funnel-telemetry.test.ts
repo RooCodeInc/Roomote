@@ -53,7 +53,7 @@ describe('setup funnel telemetry', () => {
     const setupNewState = {
       ...createEmptySetupNewState(),
       authProvider: 'slack' as const,
-      modelProvider: 'openai' as const,
+      modelProvider: 'roomote' as const,
       sourceControlProvider: 'github' as const,
       computeProvider: 'modal' as const,
     };
@@ -64,9 +64,9 @@ describe('setup funnel telemetry', () => {
     } as unknown as SetupAuthStatus;
     const modelSetup = {
       setupSatisfied: true,
-      persistedProviderId: 'openai',
+      persistedProviderId: 'roomote',
       runtimeProviderId: null,
-      preselectedProvider: 'openai',
+      preselectedProvider: 'roomote',
     } as unknown as SetupModelStatus;
     const sourceControlSetup = {
       selectedProvider: 'github',
@@ -107,7 +107,7 @@ describe('setup funnel telemetry', () => {
       },
       {
         milestone: 'inference_configured',
-        provider: 'openai',
+        provider: 'roomote',
         preexisting: false,
       },
       {
@@ -186,6 +186,39 @@ describe('setup funnel telemetry', () => {
           milestone: 'sandbox_configured',
           preexisting: true,
         }),
+      ]),
+    );
+  });
+
+  it('does not derive source-control configuration from selection alone', () => {
+    const milestones = evaluateSetupFunnelMilestones({
+      setupNewState: {
+        ...createEmptySetupNewState(),
+        sourceControlProvider: 'github',
+      },
+      hasSlack: false,
+      authSetup: {
+        providers: [],
+      } as unknown as SetupAuthStatus,
+      modelSetup: { setupSatisfied: false } as unknown as SetupModelStatus,
+      computeSetup: {
+        providers: [],
+      } as unknown as SetupComputeStatus,
+      sourceControlSetup: {
+        providers: [
+          {
+            provider: 'github',
+            configStepSatisfied: false,
+            connected: false,
+          },
+        ],
+        setupSatisfied: false,
+      } as unknown as SetupSourceControlStatus,
+    });
+
+    expect(milestones).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ milestone: 'source_control_configured' }),
       ]),
     );
   });

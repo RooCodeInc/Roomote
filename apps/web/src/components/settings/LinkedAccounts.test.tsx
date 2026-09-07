@@ -723,7 +723,7 @@ describe('LinkedAccounts settings', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('keeps GitHub first, Slack second, and sorts the remaining accounts alphabetically', () => {
+  it('keeps GitHub first, Slack second, hides deployment integrations, and sorts the remaining accounts alphabetically', () => {
     state.deploymentEnablements = createMcpEnablements(
       new Set(['braintrust', 'notion']),
     );
@@ -752,7 +752,7 @@ describe('LinkedAccounts settings', () => {
     expect(
       screen
         .getAllByText(
-          /^(GitHub|Slack|Azure DevOps|Braintrust|Linear|Microsoft Teams|Notion)$/,
+          /^(GitHub|Slack|Azure DevOps|Braintrust|Linear|Microsoft Teams)$/,
         )
         .map((element) => element.textContent),
     ).toEqual([
@@ -762,7 +762,6 @@ describe('LinkedAccounts settings', () => {
       'Braintrust',
       'Linear',
       'Microsoft Teams',
-      'Notion',
     ]);
   });
 

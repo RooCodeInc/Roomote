@@ -97,12 +97,11 @@ redirect and webhook URLs.
 
 ### Public DNS and port forwarding
 
-Create DNS records for the application, preview root, and wildcard previews:
+Create DNS records for the application and wildcard previews:
 
 ```text
-roomote.example.com            A/AAAA  <home public address>
-preview.roomote.example.com    A/AAAA  <home public address>
-*.preview.roomote.example.com  A/AAAA  <home public address>
+roomote.example.com    A/AAAA  <home public address>
+*.roomote.example.com  A/AAAA  <home public address>
 ```
 
 Forward TCP ports 80 and 443 from the router to the VM, then run:
@@ -112,10 +111,13 @@ curl -fsSL https://get.roomote.dev | sudo bash -s -- \
   --domain roomote.example.com
 ```
 
-The installer defaults the preview root to `preview.<domain>`. Use
-`--preview-domain <host>` when your DNS layout differs. If the public address
-changes, configure DDNS for all three records. This path does not work behind
-carrier-grade NAT unless the ISP supplies a public address.
+The installer defaults to flat preview hostnames such as
+`task-port-preview.<domain>`, covered by the `*.<domain>` wildcard record. Pass
+`--preview-domain preview.<domain>` when you prefer the dedicated
+`task-port.preview.<domain>` namespace; that layout needs
+`preview.<domain>` and `*.preview.<domain>` records instead of `*.<domain>`.
+If the public address changes, configure DDNS for both records. This path does
+not work behind carrier-grade NAT unless the ISP supplies a public address.
 
 ### Cloudflare Tunnel
 
@@ -131,13 +133,11 @@ curl -fsSL https://get.roomote.dev | sudo bash -s -- \
 
 Route both the application hostname and preview wildcard through the same Caddy
 instance rather than routing directly to individual Roomote containers. Standard
-Cloudflare certificates require Roomote's flat preview-hostname layout; follow
-the canonical
+Cloudflare certificates require Roomote's flat preview-hostname layout, which
+the install command above already produces by default. Follow the canonical
 [Cloudflare Tunnel and flat preview hostname configuration](https://github.com/RooCodeInc/Roomote/blob/main/SELF_HOSTING.md#flat-preview-hostnames)
-for the required environment values, tunnel ingress, origin TLS setting, and
-**Match SNI to Host** option. Apply those values in `/opt/roomote/.env` and run
-`sudo roomote up` before testing or exposing task previews; the install command
-above otherwise retains the default nested preview hostname layout.
+for the tunnel ingress, origin TLS setting, and **Match SNI to Host** option
+before testing or exposing task previews.
 
 ### Tailscale Funnel
 
@@ -176,8 +176,9 @@ Process:
 3. Ask whether to install Tailscale for private SSH/admin access. If approved,
    use Tailscale's official Linux package instructions and confirm access. Do
    not treat the tailnet hostname as Roomote's public application origin.
-4. For public DNS, tell me the exact app, preview, and wildcard DNS records and
-   router forwards I must create, then wait for me. Verify public DNS and ports
+4. For public DNS, tell me the exact app and wildcard DNS records (plus any
+   dedicated preview records if I chose a separate preview domain) and router
+   forwards I must create, then wait for me. Verify public DNS and ports
    from outside the LAN where possible. For Cloudflare Tunnel, guide me through
    creating the app and wildcard public hostnames without asking me to reveal a
    tunnel token, and use Roomote's documented internal-TLS and flat-preview

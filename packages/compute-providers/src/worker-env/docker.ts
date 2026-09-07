@@ -11,7 +11,6 @@ export function buildDockerWorkerEnv({
   image,
 }: BuildWorkerEnvOptions & {
   deploymentSlug?: string;
-  environmentId?: string;
   image?: string;
 }): Record<string, string> {
   return {
@@ -19,6 +18,7 @@ export function buildDockerWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
+      environmentId,
     }),
     ...buildWorkerContextEnv({
       provider: 'docker',
