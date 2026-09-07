@@ -5,6 +5,7 @@ import {
   useSessionViewers,
   type SessionViewer,
 } from '@/hooks/useSessionViewers';
+import { useAuthorizedUser } from '@/hooks/useUser';
 
 export function SessionViewerAvatars({
   viewers,
@@ -43,5 +44,12 @@ export function SessionViewerAvatars({
 }
 
 export function SessionViewers({ sessionId }: { sessionId: string }) {
-  return <SessionViewerAvatars viewers={useSessionViewers(sessionId)} />;
+  const { userId } = useAuthorizedUser();
+  const viewers = useSessionViewers(sessionId);
+
+  return (
+    <SessionViewerAvatars
+      viewers={viewers.filter((viewer) => viewer.id !== userId)}
+    />
+  );
 }
