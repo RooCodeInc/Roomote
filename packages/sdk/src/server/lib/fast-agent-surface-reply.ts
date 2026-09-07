@@ -68,6 +68,14 @@ import {
   buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
+import {
+  appendFastAutomationSuggestionInstruction,
+  postFastAutomationSuggestionsToSlack,
+  postFastAutomationSuggestionsToDiscord,
+  postFastAutomationSuggestionsToTeams,
+  postFastAutomationSuggestionsToTelegram,
+  requireFastSuggestionOriginSessionId,
+} from './fast-automation-suggestions';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -313,7 +321,16 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           channelId: conversation.replyTarget.channelId,
           threadTs: threadId,
         }),
-        postReply: async ({ message, imageArtifactIds = [] }) => {
+        postReply: async ({
+          message,
+          imageArtifactIds = [],
+          suggestions = [],
+        }) => {
+          message = appendFastAutomationSuggestionInstruction(
+            message,
+            'slack',
+            suggestions.length > 0,
+          );
           const quote = pendingQuote;
           pendingQuote = null;
           const images = await resolveFastAgentSessionImages({
@@ -356,6 +373,19 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             conversation,
             messageId: messageTs,
           });
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToSlack({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
+              slack,
+              channelId: conversation.replyTarget.channelId,
+              threadTs: threadId,
+              eventId: `fast:${session.id}:${params.currentMessageId ?? messageTs}`,
+              createdByUserId: params.userId,
+              suggestions,
+            });
+          }
           return { messageId: messageTs };
         },
         replaceReply: createSlackFastReplyReplacer({
@@ -391,7 +421,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         userId: params.userId,
         conversation,
       }),
-      postReply: async ({ message }) => {
+      postReply: async ({ message, suggestions = [] }) => {
+        message = appendFastAutomationSuggestionInstruction(
+          message,
+          'discord',
+          suggestions.length > 0,
+        );
         const quote = pendingQuote;
         pendingQuote = null;
         const footerText = buildFastSessionReplyFooterText({
@@ -441,6 +476,18 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           conversation,
           messageId: posted.messageId,
         });
+        if (suggestions.length > 0) {
+          await postFastAutomationSuggestionsToDiscord({
+            originSessionId: await requireFastSuggestionOriginSessionId(
+              session.id,
+            ),
+            provider,
+            ...conversation.replyTarget,
+            eventId: `fast:${session.id}:${params.currentMessageId ?? posted.messageId}`,
+            createdByUserId: params.userId,
+            suggestions,
+          });
+        }
         return { messageId: posted.messageId };
       },
     };
@@ -478,7 +525,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           conversation,
           serviceUrl,
         }),
-        postReply: async ({ message }) => {
+        postReply: async ({ message, suggestions = [] }) => {
+          message = appendFastAutomationSuggestionInstruction(
+            message,
+            'teams',
+            suggestions.length > 0,
+          );
           const posted = await provider.postMessage({
             channelId: conversation.replyTarget.channelId,
             serviceUrl,
@@ -496,6 +548,19 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             conversation,
             messageId: posted.messageId,
           });
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToTeams({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
+              provider,
+              ...conversation.replyTarget,
+              serviceUrl,
+              eventId: `fast:${session.id}:${params.currentMessageId ?? posted.messageId}`,
+              createdByUserId: params.userId,
+              suggestions,
+            });
+          }
           return { messageId: posted.messageId };
         },
         replaceReply: createTeamsFastReplyReplacer({
@@ -577,7 +642,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           userId: params.userId,
           conversation,
         }),
-        postReply: async ({ message }) => {
+        postReply: async ({ message, suggestions = [] }) => {
+          message = appendFastAutomationSuggestionInstruction(
+            message,
+            'telegram',
+            suggestions.length > 0,
+          );
           const posted = await provider.postMessage({
             channelId: conversation.replyTarget.channelId,
             ...(conversation.replyTarget.threadId
@@ -592,6 +662,18 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             conversation,
             messageId: posted.lastTextMessageId ?? posted.messageId,
           });
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToTelegram({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
+              provider,
+              ...conversation.replyTarget,
+              eventId: `fast:${session.id}:${params.currentMessageId ?? posted.messageId}`,
+              createdByUserId: params.userId,
+              suggestions,
+            });
+          }
           return { messageId: posted.messageId };
         },
         replaceReply: createTelegramFastReplyReplacer({

@@ -2613,7 +2613,7 @@ export async function answerFastAgentQuestion({
    */
   const postRecordedSystemCloseout = async (
     message: string,
-    post: () => Promise<void>,
+    post: () => Promise<unknown>,
   ) => {
     const call = await beginCanonicalToolEvent({
       title: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
@@ -3195,10 +3195,12 @@ export async function answerFastAgentQuestion({
         true,
         () => diagnostics.recordVisibleReply(),
       );
+      let needsSuggestionPost = replacedRetry;
+      let suggestionWarning: string | undefined;
       if (!replacedRetry) {
-        const posted =
-          (await surfaceReplyStream.deliver(replyWithImages)) ??
-          (await adapter.postReply(replyWithImages));
+        const streamed = await surfaceReplyStream.deliver(replyWithImages);
+        needsSuggestionPost = Boolean(streamed);
+        const posted = streamed ?? (await adapter.postReply(replyWithImages));
         diagnostics.recordVisibleReply();
         turnVisibleMessages.push(
           buildAssistantTextMessage(replyWithImages.message),
@@ -3211,6 +3213,23 @@ export async function answerFastAgentQuestion({
           platformMessageId: posted?.messageId,
           nativeMessage,
         });
+      }
+      if (needsSuggestionPost && replyWithImages.suggestions?.length) {
+        // Edits and stream commits deliver text, not cards. Do not replay the
+        // delivered narrative if this separate, potentially partial post fails.
+        try {
+          await adapter.postReply({
+            purpose: 'closeout',
+            message: 'Suggested next steps:',
+            suggestions: replyWithImages.suggestions,
+          });
+        } catch (error) {
+          suggestionWarning =
+            'The reply was delivered, but suggested task cards could not be posted. Do not resend the reply.';
+          console.warn(
+            `[Fast Agent] Failed to post suggestions after delivering the reply: ${formatErrorForLog(error)}`,
+          );
+        }
       }
       inferenceRetryReply = undefined;
       inferenceRetryMessageIndex = undefined;
@@ -3230,6 +3249,9 @@ export async function answerFastAgentQuestion({
       if (mirrorImmediately) {
         await mirrorPendingMessages(true);
       }
+      return suggestionWarning
+        ? { suggestionsDelivered: false as const, warning: suggestionWarning }
+        : undefined;
     };
     const recordChatReaction = async (
       name: string,
@@ -3734,8 +3756,6 @@ export async function answerFastAgentQuestion({
             if (
               args.suggestions?.length &&
               (args.purpose !== 'closeout' ||
-                !platformEvent ||
-                (platformEventKind !== 'automation' && !automationReport) ||
                 !['slack', 'discord', 'teams', 'telegram'].includes(
                   conversation.surface,
                 ))
@@ -3743,7 +3763,7 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error:
-                  'Launchable suggestions are available only on chat automation closeouts.',
+                  'Launchable suggestions are available only on Slack, Discord, Teams, or Telegram closeouts.',
               };
             }
             const validSuggestionEnvironmentIds = new Set([
@@ -3817,7 +3837,7 @@ export async function answerFastAgentQuestion({
             // whether the call restates that text or leaves it implicit.
             replyTextTracker.consumeUnconsumed();
             const streamedEvent = await takeStreamedReplyEvent();
-            await postReply(
+            const delivery = await postReply(
               {
                 purpose: args.purpose,
                 message,
@@ -3838,6 +3858,7 @@ export async function answerFastAgentQuestion({
               success: true,
               delivered: true,
               closed: isInstructionClosed(instructionVersion),
+              ...delivery,
             };
           }
 

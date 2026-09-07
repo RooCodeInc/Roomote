@@ -1205,6 +1205,93 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
+    'publishes nonautomation %s settle and queued human suggestions with stable keys',
+    async (surface) => {
+      const ordinaryParent = {
+        ...parent,
+        conversation: {
+          surface,
+          workspaceId: 'workspace-1',
+          conversationId: 'thread-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+        },
+      };
+      const suggestions = [
+        { title: 'Verify retries', brief: 'Exercise failure handling.' },
+      ];
+      mocks.answerQuestion.mockImplementation(async ({ adapter }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Next steps.',
+          suggestions,
+        }),
+      );
+      await deliverFastAgentParentEvent({
+        parent: ordinaryParent,
+        event: {
+          type: 'task_settled',
+          taskId: 'child-task-1',
+          runId: 42,
+          status: 'completed',
+          taskUrl: 'https://roomote.example/task/child-task-1',
+          pullRequests: [],
+        },
+      });
+      const publish = {
+        slack: mocks.postSlackSuggestions,
+        discord: mocks.postDiscordSuggestions,
+        teams: mocks.postTeamsSuggestions,
+        telegram: mocks.postTelegramSuggestions,
+      }[surface];
+      expect(publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          originSessionId,
+          channelId: 'channel-1',
+          ...(surface === 'slack'
+            ? { threadTs: 'thread-1' }
+            : { threadId: 'thread-1' }),
+          eventId: `fast:${parent.sessionId}:fast-parent-settle:42`,
+          createdByUserId: 'u1',
+          suggestions,
+        }),
+      );
+      await deliverFastAgentParentEvent({
+        parent: ordinaryParent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'queue-event-1',
+          currentMessageId: 'inbound-1',
+          userId: 'actor-1',
+          question: 'Next?',
+        },
+      });
+      expect(publish).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          eventId: `fast:${parent.sessionId}:inbound-1`,
+          createdByUserId: 'actor-1',
+          originSessionId,
+          suggestions,
+        }),
+      );
+      await deliverFastAgentParentEvent({
+        parent: ordinaryParent,
+        event: {
+          type: 'human_follow_up',
+          eventId: 'reaction-queue-event',
+          currentMessageId: 'slack-reaction:102.000',
+          userId: 'actor-1',
+          question: 'Follow up',
+        },
+      });
+      expect(publish).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          eventId: `fast:${parent.sessionId}:slack-reaction:102.000`,
+        }),
+      );
+    },
+  );
+
   it('posts suggestions beneath the Slack report when an automation task settles', async () => {
     const pendingParent = {
       sessionId: parent.sessionId,
@@ -1349,7 +1436,11 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ automationReport: false }),
     );
-    expect(mocks.appendSuggestionInstruction).not.toHaveBeenCalled();
+    expect(mocks.appendSuggestionInstruction).toHaveBeenCalledWith(
+      'Done.',
+      'slack',
+      false,
+    );
     expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
   });
 

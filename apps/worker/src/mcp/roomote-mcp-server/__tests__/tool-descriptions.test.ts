@@ -8,7 +8,10 @@ import {
   SHOW_WIDGET_HEIGHT_DESCRIPTION,
   SHOW_WIDGET_THEME_GUIDANCE,
 } from '@roomote/cloud-agents/show-widget';
-import { MANAGE_CUSTOM_AUTOMATIONS_TOOL } from '@roomote/types';
+import {
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
 const thisDirPath = path.dirname(thisFilePath);
@@ -73,6 +76,7 @@ async function importRoomoteMcpServer(
   delete process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID;
   delete process.env.ROOMOTE_COMMUNICATION_THREAD_ID;
   delete process.env.ROOMOTE_AUTOMATION_TASK;
+  delete process.env.ROOMOTE_TASK_TYPE;
   delete process.env.ROOMOTE_FAST_AGENT_CHILD;
   // Registration gates read ROOMOTE_TASK_ID; drop any value inherited from
   // the runner (e.g. when this suite itself runs inside a Roomote task) so
@@ -534,7 +538,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(replyTool.config.description).toContain(
       'Write the message so its content clearly matches the selected purpose.',
     );
-    expect(replyTool.config.description).not.toContain(
+    expect(replyTool.config.description).toContain(
       'optional suggestions parameter',
     );
     expect(messageField.description).toBe(
@@ -546,7 +550,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(replyTool.config.inputSchema.findings).toBeUndefined();
     expect(replyTool.config.inputSchema.questions).toBeUndefined();
     expect(replyTool.config.inputSchema.suggestedNextSteps).toBeUndefined();
-    expect(replyTool.config.inputSchema.suggestions).toBeUndefined();
+    expect(replyTool.config.inputSchema.suggestions).toBeDefined();
   });
 
   it('documents the Teams chat reply tool when Teams communication context exists', async () => {
@@ -577,7 +581,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(getInputSchemaField(replyTool, 'purpose').description).toContain(
       'Teams-visible reply',
     );
-    expect(replyTool.config.inputSchema.suggestions).toBeUndefined();
+    expect(replyTool.config.inputSchema.suggestions).toBeDefined();
     const reactionTool = getRegisteredTool(
       registeredTools,
       'send_chat_reaction_emoji',
@@ -590,65 +594,111 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
-  it('keeps the rich suggestion contract for scheduled scan workflows', async () => {
-    const { registeredTools } = await importRoomoteMcpServer({
-      ROOMOTE_SLACK_CHANNEL: 'C123',
-      ROOMOTE_SLACK_THREAD_TS: '123.456',
-      ROOMOTE_TASK_TYPE: 'scan',
-      ROOMOTE_AUTOMATION_TASK: 'true',
-    });
-    const replyTool = getRegisteredTool(registeredTools, 'send_chat_reply');
-    const suggestionItem = (
-      unwrapSchema(
-        replyTool.config.inputSchema.suggestions as unknown as z.ZodTypeAny,
-      ) as z.ZodArray<z.ZodObject<z.ZodRawShape>>
-    ).element;
+  it.each(['false', 'true'])(
+    'keeps the rich suggestion contract for scan workflows (automation=%s)',
+    async (automation) => {
+      const { registeredTools } = await importRoomoteMcpServer({
+        ROOMOTE_SLACK_CHANNEL: 'C123',
+        ROOMOTE_SLACK_THREAD_TS: '123.456',
+        ROOMOTE_TASK_TYPE: 'scan',
+        ROOMOTE_AUTOMATION_TASK: automation,
+      });
+      const replyTool = getRegisteredTool(registeredTools, 'send_chat_reply');
+      const suggestionItem = (
+        unwrapSchema(
+          replyTool.config.inputSchema.suggestions as unknown as z.ZodTypeAny,
+        ) as z.ZodArray<z.ZodObject<z.ZodRawShape>>
+      ).element;
 
-    expect(Object.keys(suggestionItem.shape)).toEqual([
-      'title',
-      'brief',
-      'category',
-      'priority',
-      'investigationContext',
-      'targetRepositoryFullName',
-      'targetEnvironmentId',
-      'workspaceReadiness',
-      'readinessMessage',
-    ]);
-    expect(getInputSchemaField(replyTool, 'suggestions').description).toContain(
-      'scheduled suggestion workflow must include its verified target repository',
-    );
-    expect(replyTool.config.description).toContain(
-      'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions',
-    );
-  });
+      expect(Object.keys(suggestionItem.shape)).toEqual([
+        'title',
+        'brief',
+        'category',
+        'priority',
+        'investigationContext',
+        'targetRepositoryFullName',
+        'targetEnvironmentId',
+        'workspaceReadiness',
+        'readinessMessage',
+      ]);
+      expect(
+        getInputSchemaField(replyTool, 'suggestions').description,
+      ).toContain(
+        'scheduled suggestion workflow must include its verified target repository',
+      );
+      expect(replyTool.config.description).toContain(
+        'Use the optional suggestions parameter for relevant, concrete follow-up tasks',
+      );
+    },
+  );
 
-  it('exposes the compact suggestion contract for channel-backed custom automations', async () => {
-    const { registeredTools } = await importRoomoteMcpServer({
-      ROOMOTE_SLACK_CHANNEL: 'C123',
-      ROOMOTE_SLACK_THREAD_TS: '123.456',
-      ROOMOTE_TASK_TYPE: 'standard',
-      ROOMOTE_AUTOMATION_TASK: 'true',
-    });
-    const replyTool = getRegisteredTool(registeredTools, 'send_chat_reply');
-    const suggestionItem = (
-      unwrapSchema(
-        replyTool.config.inputSchema.suggestions as unknown as z.ZodTypeAny,
-      ) as z.ZodArray<z.ZodObject<z.ZodRawShape>>
-    ).element;
+  it.each(['slack', 'discord', 'teams', 'telegram'])(
+    'exposes suggestions with %s chat context, but not with a missing channel',
+    async (provider) => {
+      const context = {
+        ROOMOTE_COMMUNICATION_PROVIDER: provider,
+        ROOMOTE_COMMUNICATION_CHANNEL_ID: 'channel-1',
+        ROOMOTE_TASK_TYPE: TaskPayloadKind.GithubPrReview,
+      };
+      const { registeredTools } = await importRoomoteMcpServer(context);
+      expect(
+        getRegisteredTool(registeredTools, 'send_chat_reply').config.inputSchema
+          .suggestions,
+      ).toBeDefined();
 
-    expect(Object.keys(suggestionItem.shape)).toEqual([
-      'title',
-      'brief',
-      'targetRepositoryFullName',
-    ]);
-    expect(getInputSchemaField(replyTool, 'suggestions').description).toContain(
-      'when the automation prompt explicitly asks for task suggestions',
-    );
-    expect(getInputSchemaField(replyTool, 'suggestions').description).toContain(
-      'For org-wide runs, include the concrete targetRepositoryFullName',
-    );
-  });
+      const withoutChannel = await importRoomoteMcpServer({
+        ...context,
+        ROOMOTE_COMMUNICATION_CHANNEL_ID: ' ',
+        ROOMOTE_AUTOMATION_TASK: 'true',
+      });
+      expect(
+        withoutChannel.registeredTools.find(
+          ({ name }) => name === 'send_chat_reply',
+        ),
+      ).toBeUndefined();
+    },
+  );
+
+  it.each(
+    Object.values(TaskPayloadKind)
+      .filter((kind) => kind !== TaskPayloadKind.Scan)
+      .flatMap((kind) =>
+        ['false', 'true'].map((automation) => [kind, automation]),
+      ),
+  )(
+    'exposes compact chat suggestions for %s (automation=%s)',
+    async (kind, automation) => {
+      const { registeredTools } = await importRoomoteMcpServer({
+        ROOMOTE_SLACK_CHANNEL: 'C123',
+        ROOMOTE_SLACK_THREAD_TS: '123.456',
+        ROOMOTE_TASK_TYPE: kind,
+        ROOMOTE_AUTOMATION_TASK: automation,
+      });
+      const replyTool = getRegisteredTool(registeredTools, 'send_chat_reply');
+      const suggestionItem = (
+        unwrapSchema(
+          replyTool.config.inputSchema.suggestions as unknown as z.ZodTypeAny,
+        ) as z.ZodArray<z.ZodObject<z.ZodRawShape>>
+      ).element;
+
+      expect(Object.keys(suggestionItem.shape)).toEqual([
+        'title',
+        'brief',
+        'targetRepositoryFullName',
+      ]);
+      expect(
+        getInputSchemaField(replyTool, 'suggestions').description,
+      ).toContain('relevant, concrete follow-up tasks');
+      expect(replyTool.config.description).toContain(
+        'Suggestions are optional, not required on every reply',
+      );
+      expect(
+        getInputSchemaField(replyTool, 'suggestions').description,
+      ).toContain(
+        'For org-wide runs, include the concrete targetRepositoryFullName',
+      );
+    },
+  );
 
   it('documents the Telegram chat reply tool when Telegram communication context exists', async () => {
     const { registeredTools } = await importRoomoteMcpServer({
@@ -787,52 +837,58 @@ describe('roomote MCP tool descriptions', () => {
     expect(latestField.description).toContain('message snowflake');
   });
 
-  it('gives delegated coding tasks only the private parent Session report tool', async () => {
-    const { registeredTools } = await importRoomoteMcpServer({
-      ROOMOTE_FAST_AGENT_CHILD: 'true',
-      ROOMOTE_SLACK_CHANNEL: 'C123',
-      ROOMOTE_SLACK_THREAD_TS: '123.456',
-      ROOMOTE_TASK_ID: 'task_123',
-    });
-    const names = registeredTools.map(({ name }) => name);
+  it.each(['false', 'true'])(
+    'gives delegated coding tasks only the private parent Session report tool (automation=%s)',
+    async (automation) => {
+      const { registeredTools } = await importRoomoteMcpServer({
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+        ROOMOTE_AUTOMATION_TASK: automation,
+        ROOMOTE_SLACK_CHANNEL: 'C123',
+        ROOMOTE_SLACK_THREAD_TS: '123.456',
+        ROOMOTE_TASK_ID: 'task_123',
+      });
+      const names = registeredTools.map(({ name }) => name);
 
-    expect(names).toContain('report_to_parent_session');
-    expect(names).not.toContain('send_chat_reply');
-    for (const name of [
-      'list_chat_channels',
-      'get_chat_channel_messages',
-      'get_chat_message_context',
-      'send_chat_reaction_emoji',
-      'post_to_channel',
-    ]) {
-      expect(names).not.toContain(name);
-    }
-    const reportTool = getRegisteredTool(
-      registeredTools,
-      'report_to_parent_session',
-    );
-    const description = reportTool.config.description;
-    expect(reportTool.config.title).toBe('Report to Parent Session');
-    expect(description).toContain('Session-internal');
-    expect(description).toContain('complete engineering handoff');
-    expect(description).toContain('do not send another generic ack');
-    expect(description).toContain('meaningful work milestones');
-    expect(description).toContain('roughly 10 minutes of silence');
-    expect(description).toContain(
-      'without labeling the message as a progress update',
-    );
-    expect(description).toContain('is never posted directly to the user');
-    expect(getInputSchemaField(reportTool, 'message').description).toContain(
-      'Non-empty Markdown report for the parent Session.',
-    );
-    expect(reportTool.config.inputSchema.suggestions).toBeUndefined();
-    expect(
-      getRegisteredTool(registeredTools, 'manage_artifacts').config.description,
-    ).toContain(
-      'pass returned artifact IDs to `report_to_parent_session` via `imageArtifactIds`',
-    );
-    expect(names).toContain('manage_artifacts');
-  });
+      expect(names).toContain('report_to_parent_session');
+      expect(names).not.toContain('send_chat_reply');
+      for (const name of [
+        'list_chat_channels',
+        'get_chat_channel_messages',
+        'get_chat_message_context',
+        'send_chat_reaction_emoji',
+        'post_to_channel',
+      ]) {
+        expect(names).not.toContain(name);
+      }
+      const reportTool = getRegisteredTool(
+        registeredTools,
+        'report_to_parent_session',
+      );
+      const description = reportTool.config.description;
+      expect(reportTool.config.title).toBe('Report to Parent Session');
+      expect(description).toContain('Session-internal');
+      expect(description).toContain('complete engineering handoff');
+      expect(description).toContain('do not send another generic ack');
+      expect(description).toContain('meaningful work milestones');
+      expect(description).toContain('roughly 10 minutes of silence');
+      expect(description).toContain(
+        'without labeling the message as a progress update',
+      );
+      expect(description).toContain('is never posted directly to the user');
+      expect(getInputSchemaField(reportTool, 'message').description).toContain(
+        'Non-empty Markdown report for the parent Session.',
+      );
+      expect(reportTool.config.inputSchema.suggestions).toBeUndefined();
+      expect(description).not.toContain('optional suggestions parameter');
+      expect(
+        getRegisteredTool(registeredTools, 'manage_artifacts').config
+          .description,
+      ).toContain(
+        'pass returned artifact IDs to `report_to_parent_session` via `imageArtifactIds`',
+      );
+      expect(names).toContain('manage_artifacts');
+    },
+  );
 
   it('keeps Slack communication tools for independently launched Slack tasks', async () => {
     const { registeredTools } = await importRoomoteMcpServer({
@@ -1042,8 +1098,8 @@ describe('roomote MCP tool descriptions', () => {
     });
     const chatReplyTool = getRegisteredTool(registeredTools, 'send_chat_reply');
 
-    expect(chatReplyTool.config.description).toBe(
-      `Slack-visible: posts a lifecycle reply in the originating Slack thread. Choose the current Slack turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the Slack turn open. Use it again on later Slack turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. Supports the modern Slack Markdown contract from the Slack instructions. Use rich Markdown when it improves scanability. When the reply mentions actionable code references, follow the Slack prompt source-linking rule. Write the message so its content clearly matches the selected purpose.`,
+    expect(chatReplyTool.config.description).toContain(
+      'Slack-visible: posts a lifecycle reply in the originating Slack thread.',
     );
     expect(getInputSchemaField(chatReplyTool, 'message').description).toBe(
       "Non-empty Markdown text to post in the Slack thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.",

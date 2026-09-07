@@ -1293,13 +1293,7 @@ export async function submitTaskSuggestions(
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    const isCurrentThreadDelivery =
-      parsedBody.data.delivery === 'current_thread';
-    const isCurrentThreadTask =
-      isCurrentThreadDelivery &&
-      (run.payloadKind === TaskPayloadKind.StandardTask ||
-        run.payloadKind === TaskPayloadKind.Scan ||
-        run.payloadKind === TaskPayloadKind.SlackAppMention);
+    const isCurrentThreadTask = parsedBody.data.delivery === 'current_thread';
     const usesRouterLaunchContract =
       isCurrentThreadTask && run.payloadKind !== TaskPayloadKind.Scan;
 

@@ -141,7 +141,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('environmentId: z.string().min(1)');
     expect(replySource).toContain('__all_repositories__');
     expect(replySource).toContain('__fast__');
-    expect(replySource).toContain('Launchable follow-ups');
+    expect(replySource).toContain(
+      'Optional concrete launchable follow-ups for a Slack, Discord, Teams, or Telegram closeout only',
+    );
+    expect(replySource).toContain(
+      'Closeouts may optionally attach useful concrete launchable suggested tasks on Slack, Discord, Teams, or Telegram',
+    );
+    expect(replySource).not.toContain('automation report');
     expect(replySource).toContain(
       'Never claim an image or screenshot is attached, shown, or included unless this list is non-empty',
     );

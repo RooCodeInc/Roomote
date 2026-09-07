@@ -28,6 +28,9 @@ import {
 } from '@roomote/communication';
 import {
   admitFastAgentHumanFollowUp,
+  appendFastAutomationSuggestionInstruction,
+  postFastAutomationSuggestionsToDiscord,
+  requireFastSuggestionOriginSessionId,
   createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
@@ -493,9 +496,30 @@ export async function processDiscordFastAgentMessage(
             kickoffDelivered: true,
           };
         },
-        postReply: async ({ message: text }) => {
-          const posted = await postFastReplyWithFooter(text);
+        postReply: async ({ message: text, suggestions = [] }) => {
+          const posted = await postFastReplyWithFooter(
+            appendFastAutomationSuggestionInstruction(
+              text,
+              'discord',
+              suggestions.length > 0,
+            ),
+          );
           didSendVisibleResponse = true;
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToDiscord({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
+              provider: input.provider,
+              channelId: conversation.replyTarget.channelId,
+              ...(conversation.replyTarget.threadId
+                ? { threadId: conversation.replyTarget.threadId }
+                : {}),
+              eventId: `fast:${session.id}:${humanFollowUpEvent.currentMessageId}`,
+              createdByUserId: input.senderUserId,
+              suggestions,
+            });
+          }
           return { messageId: posted.messageId };
         },
         replaceReply: async ({ messageId }, { message: text }) => {

@@ -487,63 +487,169 @@ describe('submitTaskSuggestions', () => {
     });
   });
 
-  it('posts standard task suggestions inside the task thread without a second root message', async () => {
+  it.each(
+    Object.values(TaskPayloadKind)
+      .filter((kind) => kind !== TaskPayloadKind.Scan)
+      .flatMap((kind) =>
+        [null, 'custom_automation'].map((automation) => ({ kind, automation })),
+      ),
+  )(
+    'posts $kind suggestions (automation=$automation) in the task thread using router launch',
+    async ({ kind, automation }) => {
+      mockTaskRunFindFirst.mockResolvedValue({
+        id: 1,
+        payloadKind: kind,
+        actingUserId: 'user-1',
+        payload: {
+          repo: 'acme/app',
+        },
+      });
+      mockTaskFindFirst.mockResolvedValue({
+        initiatorUserId: 'user-1',
+        initiatorAutomation: automation,
+        slackChannelId: 'C123',
+        slackThreadTs: '111.222',
+      });
+      const app = createApp({
+        runId: 1,
+        userId: 'user-1',
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      });
+
+      const response = await requestCurrentThreadSuggestions(app);
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        success: true,
+        suggestionCount: 1,
+      });
+      expect(mockPostMessage).toHaveBeenCalledTimes(1);
+      expect(mockPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'C123',
+          thread_ts: '111.222',
+        }),
+      );
+      expect(insertedTrackedMessageValues).toHaveLength(1);
+      expect(insertedTrackedMessageValues[0]).toMatchObject({
+        channelId: 'C123',
+        metadata: {
+          suggestionType: 'suggested_tasks',
+          launchRouting: 'router',
+        },
+      });
+      expect(insertedWorkItemValues[0]).toMatchObject({
+        title: 'Fix the parser',
+        brief: 'Nil access is crashing the parser.',
+        category: null,
+        priority: null,
+        investigationContext: null,
+        targetRepositoryFullName: null,
+        targetEnvironmentId: null,
+        workspaceReadiness: null,
+        readinessMessage: null,
+      });
+    },
+  );
+
+  it.each(
+    Object.values(TaskPayloadKind).filter(
+      (kind) => kind !== TaskPayloadKind.Scan,
+    ),
+  )('rejects non-current-thread suggestions for %s', async (kind) => {
     mockTaskRunFindFirst.mockResolvedValue({
       id: 1,
-      payloadKind: TaskPayloadKind.StandardTask,
-      actingUserId: 'user-1',
-      payload: {
-        repo: 'acme/app',
-      },
+      payloadKind: kind,
+      payload: { repo: 'acme/app' },
     });
-    mockTaskFindFirst.mockResolvedValue({
-      initiatorUserId: 'user-1',
-      initiatorAutomation: null,
-      slackChannelId: 'C123',
-      slackThreadTs: '111.222',
-    });
-    const app = createApp({
-      runId: 1,
-      userId: 'user-1',
-      principal: 'user',
-      tokenType: 'run',
-      version: 1,
-    });
-
-    const response = await requestCurrentThreadSuggestions(app);
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      success: true,
-      suggestionCount: 1,
-    });
-    expect(mockPostMessage).toHaveBeenCalledTimes(1);
-    expect(mockPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'C123',
-        thread_ts: '111.222',
+    const response = await requestSuggestions(
+      createApp({
+        runId: 1,
+        userId: 'user-1',
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
       }),
     );
-    expect(insertedTrackedMessageValues).toHaveLength(1);
-    expect(insertedTrackedMessageValues[0]).toMatchObject({
-      channelId: 'C123',
-      metadata: {
-        suggestionType: 'suggested_tasks',
-        launchRouting: 'router',
-      },
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Task is not a Suggested Tasks task',
     });
-    expect(insertedWorkItemValues[0]).toMatchObject({
-      title: 'Fix the parser',
-      brief: 'Nil access is crashing the parser.',
-      category: null,
-      priority: null,
-      investigationContext: null,
-      targetRepositoryFullName: null,
-      targetEnvironmentId: null,
-      workspaceReadiness: null,
-      readinessMessage: null,
-    });
+    expect(insertedWorkItemValues).toHaveLength(0);
+    expect(mockPostMessage).not.toHaveBeenCalled();
   });
+
+  it.each(Object.values(TaskPayloadKind))(
+    'requires a current-thread submission key for %s',
+    async (kind) => {
+      mockTaskRunFindFirst.mockResolvedValue({
+        id: 1,
+        payloadKind: kind,
+        payload: { repo: 'acme/app' },
+      });
+      const response = await requestCurrentThreadSuggestions(
+        createApp({
+          runId: 1,
+          userId: 'user-1',
+          principal: 'user',
+          tokenType: 'run',
+          version: 1,
+        }),
+        '',
+      );
+
+      expect(response.status).toBe(400);
+      expect(insertedWorkItemValues).toHaveLength(0);
+      expect(mockPostMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { kind: TaskPayloadKind.StandardTask, automation: null },
+    { kind: TaskPayloadKind.StandardTask, automation: 'custom_automation' },
+    { kind: TaskPayloadKind.GithubPrReview, automation: null },
+    { kind: TaskPayloadKind.SnapshotResume, automation: null },
+  ])(
+    'requires a repository and originating destination for $kind (automation=$automation)',
+    async ({ kind, automation }) => {
+      mockTaskRunFindFirst.mockResolvedValue({
+        id: 1,
+        payloadKind: kind,
+        payload: { repo: 'acme/app' },
+      });
+      mockTaskFindFirst.mockResolvedValue({
+        initiatorUserId: 'user-1',
+        initiatorAutomation: automation,
+      });
+      const app = createApp({
+        runId: 1,
+        userId: 'user-1',
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      });
+
+      repositoryRows = [];
+      expect((await requestCurrentThreadSuggestions(app)).status).toBe(400);
+      expect(insertedWorkItemValues).toHaveLength(0);
+
+      repositoryRows = [{ id: 'repo-1', fullName: 'acme/app' }];
+      const response = await requestCurrentThreadSuggestions(app);
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({
+        success: false,
+        error:
+          'Failed to post task suggestions in the originating conversation.',
+      });
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(postScheduledSuggestionsToDiscord).not.toHaveBeenCalled();
+      expect(postScheduledSuggestionsToTelegram).not.toHaveBeenCalled();
+      expect(postScheduledSuggestionsToTeams).not.toHaveBeenCalled();
+    },
+  );
 
   it('allows Slack app mention replies to attach suggestions', async () => {
     mockTaskRunFindFirst.mockResolvedValue({

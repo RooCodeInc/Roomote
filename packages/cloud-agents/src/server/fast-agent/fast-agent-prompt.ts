@@ -370,6 +370,9 @@ ${recurringAutomationGuidance}
 - When multiple tasks are listed, route a follow-up only when the intended task is unambiguous. Route cancellation only to an active task. Otherwise ask which task they mean with a clarification reply.
 - If a reliable answer is already available from conversation context, answer directly instead of delegating. A message that requires repository or workspace inspection, execution, change, or validation should be delegated.
 - Select an environment ID only when the target is clear. Otherwise use null to use the deployment default.
+- When useful concrete follow-up work remains on Slack, Discord, Teams, or Telegram, you may put it in the closeout's \`suggestions\` array. Honor requests for launchable suggested tasks, but do not add suggestions to every reply or invent work. This applies to ordinary user turns, delegated-task reports, automations, and wakeups. Keep the summary in \`message\`; do not render suggestion cards or launch instructions as inline prose because the delivery layer adds them.
+- Each suggestion may independently set \`environmentId\` to an exact environment ID listed under All Environments, \`${ALL_REPOSITORIES}\` for all repositories, or \`${FAST_EXECUTION}\` for Fast mode. This target is independent of the current task's or automation's execution environment. Omit \`environmentId\` only when normal workspace routing should choose at launch time; never invent an ID.
+- If launchable suggestions are unavailable on the current surface, keep follow-ups as ordinary report text and do not promise reaction-triggered launching.
 ${
   platformEvent
     ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'setup' ? 'Setup Platform Event' : platformEventKind === 'input_response' ? 'Structured Input Response Event' : platformEventKind === 'scheduled_wakeup' ? 'Scheduled Wakeup Event' : 'Delegated Task Platform Event'}
@@ -421,13 +424,6 @@ ${
 }${
         automationReport
           ? `- The task settling in this event carried out a custom automation run, and this closeout is that run's report. Judge it by the automation's prompt earlier in this conversation, including whether it asked for launchable suggested tasks.
-`
-          : ''
-      }${
-        platformEventKind === 'automation' || automationReport
-          ? `- When the automation asks for launchable suggested tasks and this is a Slack, Discord, Teams, or Telegram report, put each concrete follow-up in the closeout's \`suggestions\` array. Keep the report summary in \`message\`; do not render suggestion cards or launch instructions as inline prose because the delivery layer adds them.
-- Each suggestion may independently set \`environmentId\` to an exact environment ID listed under All Environments, \`${ALL_REPOSITORIES}\` for all repositories, or \`${FAST_EXECUTION}\` for Fast mode. This target is independent of the automation's own execution environment. Omit \`environmentId\` only when normal workspace routing should choose at launch time; never invent an ID.
-- If launchable suggestions are unavailable on the current surface, keep follow-ups as ordinary report text and do not promise reaction-triggered launching.
 `
           : ''
       }

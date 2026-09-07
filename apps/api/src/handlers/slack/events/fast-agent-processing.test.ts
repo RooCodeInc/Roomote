@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   resolveFooterContext: vi.fn(),
   createConversationArtifact: vi.fn(),
   resolveSessionImages: vi.fn(),
+  postSuggestions: vi.fn(),
+  requireOrigin: vi.fn(async () => 'canonical-session-1'),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -65,6 +67,13 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  appendFastAutomationSuggestionInstruction: (
+    text: string,
+    _surface: string,
+    hasSuggestions: boolean,
+  ) => (hasSuggestions ? `${text}\nStart below` : text),
+  postFastAutomationSuggestionsToSlack: mocks.postSuggestions,
+  requireFastSuggestionOriginSessionId: mocks.requireOrigin,
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
@@ -295,6 +304,68 @@ describe('processFastAgentMessage', () => {
       }),
     );
   });
+
+  it.each(['posted', 'suppressed', 'failed'])(
+    'publishes suggestions only after a visible reply: %s',
+    async (status) => {
+      const suggestions = [
+        {
+          title: 'Fix it',
+          brief: 'Investigate and fix',
+          environmentId: '__fast__',
+        },
+      ];
+      mocks.postThreadMessage.mockResolvedValueOnce(
+        status === 'posted' ? { messageId: '101.001' } : status,
+      );
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+        const reply = adapter.postReply({ message: 'Next steps', suggestions });
+        if (status === 'failed')
+          await expect(reply).rejects.toThrow('Slack did not accept');
+        else await reply;
+        return '';
+      });
+      const slack = {
+        fetchThreadMessages: vi.fn(async () => []),
+        normalizeIncomingText: vi.fn(async (text: string) => text),
+      };
+      await processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'C1',
+          user: 'U1',
+          text: 'Help',
+          ts: '100.004',
+          thread_ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T1',
+        isExistingConversation: true,
+      });
+      expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: 'Next steps\nStart below',
+          sourceMessageTs: '100.004',
+        }),
+      );
+      if (status === 'posted') {
+        expect(mocks.requireOrigin).toHaveBeenCalledWith('fast-session-1');
+        expect(mocks.postSuggestions).toHaveBeenCalledWith({
+          originSessionId: 'canonical-session-1',
+          slack,
+          channelId: 'C1',
+          threadTs: '100.001',
+          eventId: 'fast:fast-session-1:100.004',
+          createdByUserId: 'user-1',
+          suggestions,
+        });
+      } else {
+        expect(mocks.postSuggestions).not.toHaveBeenCalled();
+        expect(mocks.requireOrigin).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('durably steers an active Fast generation instead of waiting for its lock', async () => {
     const abort = vi.fn().mockResolvedValue(undefined);

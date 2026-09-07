@@ -24,6 +24,9 @@ import {
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   admitFastAgentHumanFollowUp,
+  appendFastAutomationSuggestionInstruction,
+  postFastAutomationSuggestionsToSlack,
+  requireFastSuggestionOriginSessionId,
   createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
   wakeFastAgentParentEventAt,
@@ -372,7 +375,12 @@ export async function processFastAgentMessage(params: {
                 ),
             }
           : {}),
-        postReply: async ({ message, kickoff, imageArtifactIds = [] }) => {
+        postReply: async ({
+          message,
+          kickoff,
+          imageArtifactIds = [],
+          suggestions = [],
+        }) => {
           const replyImages = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,
@@ -381,7 +389,11 @@ export async function processFastAgentMessage(params: {
             slack,
             channel: event.channel,
             threadTs: threadId,
-            text: message,
+            text: appendFastAutomationSuggestionInstruction(
+              message,
+              'slack',
+              suggestions.length > 0,
+            ),
             sourceMessageTs: event.ts,
             conversationLog: {
               userId,
@@ -417,6 +429,19 @@ export async function processFastAgentMessage(params: {
             conversation,
             messageId: posted.messageId,
           });
+          if (suggestions.length > 0) {
+            await postFastAutomationSuggestionsToSlack({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
+              slack,
+              channelId: event.channel,
+              threadTs: threadId,
+              eventId: `fast:${session.id}:${event.ts}`,
+              createdByUserId: userId,
+              suggestions,
+            });
+          }
           return { messageId: posted.messageId };
         },
         replaceReply: async ({ messageId }, { message }) => {
