@@ -1,9 +1,11 @@
 import { and, eq } from 'drizzle-orm';
 
+import { resolveAppEnv } from '@roomote/env';
 import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
 
 import type { CreateUser } from '../types';
 import {
+  taskMessages,
   taskRuns,
   deploymentSettings,
   environments,
@@ -33,6 +35,15 @@ const demoSeedUserEmail = 'demo@roomote.dev';
 const demoSeedGithubAccountLogin = 'roomote-demo';
 export const demoSeedEnvironmentName = 'Roomote Demo Environment';
 
+export const demoSeedWaitingTask = {
+  id: 'demo-seed-task-waiting-input',
+  title: 'Choose a webhook retry policy',
+  harnessSessionId: 'demo-standard-waiting-input',
+  promptMessageId: '00000000-0000-4000-8000-000000000201',
+  requestMessageId: '00000000-0000-4000-8000-000000000202',
+  requestId: 'demo-standard-retry-policy',
+};
+
 export const demoSeedFastSession = {
   conversationId: '00000000-0000-4000-8000-000000000101',
   sessionId: '00000000-0000-4000-8000-000000000102',
@@ -60,6 +71,24 @@ export const demoSeedFastSession = {
       eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
       role: 'assistant' as const,
       text: 'The launch checklist is complete. Authentication, billing, and rollback checks passed, and there are no open blockers.',
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000111',
+      eventId: 'demo-fast-session-followup-prompt',
+      turnId: 'demo-fast-session-followup-turn',
+      turnSeq: 0,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user' as const,
+      text: 'What should I check on mobile before opening the launch PR?',
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000112',
+      eventId: 'demo-fast-session-followup-message',
+      turnId: 'demo-fast-session-followup-turn',
+      turnSeq: 1,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant' as const,
+      text: '### Mobile checks\n\n1. Open an existing Session and read both turns without horizontal scrolling.\n2. Focus the composer and confirm the keyboard does not hide the send action.\n3. Return to the Session list and reopen the same conversation.\n\nThe checklist above is a recommendation, not a claim that these mobile checks have already passed.',
     },
   ],
 } as const;
@@ -148,6 +177,10 @@ interface DemoSeedSummary {
  * fields from older seed versions are backfilled in place.
  */
 export async function seedDemoData(): Promise<DemoSeedSummary> {
+  if (resolveAppEnv(process.env) === 'production') {
+    throw new Error('Refusing to seed demo data in production.');
+  }
+
   const summary: DemoSeedSummary = { created: [], skipped: [] };
 
   const record = (label: string, created: boolean) => {
@@ -219,13 +252,22 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
       workspaceId: demoSeedFastSession.workspaceId,
       conversationId: demoSeedFastSession.providerConversationId,
       currentReplyChannelId: demoSeedFastSession.channelId,
-      currentReplyThreadId: demoSeedFastSession.threadId,
-      replyTargetVerified: true,
+      currentReplyThreadId: null,
+      replyTargetVerified: false,
       title: demoSeedFastSession.title,
       llmTitleCheckpoint: 1,
       createdAt: now,
       updatedAt: now,
     });
+  } else if (
+    existingFastConversation.currentReplyThreadId !== null ||
+    existingFastConversation.replyTargetVerified
+  ) {
+    // A missing thread prevents delivery even if a Slack installation is added.
+    await db
+      .update(fastAgentConversations)
+      .set({ currentReplyThreadId: null, replyTargetVerified: false })
+      .where(eq(fastAgentConversations.id, demoSeedFastSession.conversationId));
   }
 
   record('Fast conversation demo', !existingFastConversation);
@@ -242,8 +284,10 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
         eventId: message.eventId,
         turnId: message.turnId,
         turnSeq: message.turnSeq,
+        // Anchor added turns to the original seed, including on reused databases.
         ts:
-          now.getTime() - (demoSeedFastSession.messages.length - index) * 1_000,
+          (existingFastConversation?.createdAt ?? now).getTime() +
+          (index - 2) * 1_000,
         eventType: message.eventType,
         role: message.role,
         contentBlocks: [{ type: 'text', text: message.text }],
@@ -441,6 +485,107 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
     }
 
     record(`task run for ${task.id}`, taskRunChanged);
+  }
+
+  // Render the real Standard input card without provisioning or enqueueing work.
+  // No sandbox binding: submitting an answer is intentionally unsupported.
+  const existingWaitingTask = await db.query.tasks.findFirst({
+    where: eq(tasks.id, demoSeedWaitingTask.id),
+  });
+  if (!existingWaitingTask) {
+    await taskFactory.create({
+      id: demoSeedWaitingTask.id,
+      harnessSessionId: demoSeedWaitingTask.harnessSessionId,
+      initiatorUserId: demoSeedUserId,
+      title: demoSeedWaitingTask.title,
+      prompt: demoSeedWaitingTask.title,
+      mode: 'ask',
+      state: 'active',
+      repositoryName: 'roomote-demo/demo-api',
+      repositoryUrl: 'https://github.com/roomote-demo/demo-api',
+      defaultBranch: 'main',
+    });
+  }
+  record(`task ${demoSeedWaitingTask.id}`, !existingWaitingTask);
+
+  let waitingRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, demoSeedWaitingTask.id),
+  });
+  const waitingRunCreated = !waitingRun;
+  if (!waitingRun) {
+    waitingRun = await runFactory.create({
+      taskId: demoSeedWaitingTask.id,
+      actingUserId: demoSeedUserId,
+      status: RunStatus.Running,
+      taskPhase: 'waiting_for_user_input',
+      startedAt: now,
+      payload: {
+        repo: 'roomote-demo/demo-api',
+        description: demoSeedWaitingTask.title,
+      },
+    });
+  }
+  record(`task run for ${demoSeedWaitingTask.id}`, waitingRunCreated);
+
+  const waitingMessages: (typeof taskMessages.$inferInsert)[] = [
+    {
+      id: demoSeedWaitingTask.promptMessageId,
+      taskId: demoSeedWaitingTask.id,
+      runId: waitingRun.id,
+      ts: (waitingRun.startedAt ?? waitingRun.createdAt).getTime(),
+      protocol: 'roomote_runtime',
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      userId: demoSeedUserId,
+      contentBlocks: [{ type: 'text', text: demoSeedWaitingTask.title }],
+      payload: {},
+      source: 'web',
+    },
+    {
+      id: demoSeedWaitingTask.requestMessageId,
+      taskId: demoSeedWaitingTask.id,
+      runId: waitingRun.id,
+      ts: (waitingRun.startedAt ?? waitingRun.createdAt).getTime() + 1_000,
+      protocol: 'roomote_runtime',
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      role: 'assistant',
+      contentBlocks: [],
+      payload: {
+        requestId: demoSeedWaitingTask.requestId,
+        status: 'pending',
+        sessionId: demoSeedWaitingTask.harnessSessionId,
+        turnId: 'demo-standard-turn',
+        callId: 'demo-standard-input-call',
+        questions: [
+          {
+            id: 'retry-policy',
+            header: 'Retry policy',
+            question: 'Which retry policy should webhook delivery use?',
+            isOther: true,
+            isSecret: false,
+            options: [
+              {
+                label: 'Exponential backoff',
+                description: 'Increase the delay after each attempt.',
+              },
+              {
+                label: 'Fixed delay',
+                description: 'Use the same delay between attempts.',
+              },
+            ],
+          },
+        ],
+      },
+      source: 'web',
+    },
+  ];
+  for (const message of waitingMessages) {
+    const inserted = await db
+      .insert(taskMessages)
+      .values(message)
+      .onConflictDoNothing()
+      .returning({ id: taskMessages.id });
+    record(`Standard message ${message.id}`, inserted.length > 0);
   }
 
   // A single-PR task and a split task keep the seeded dashboard useful for
