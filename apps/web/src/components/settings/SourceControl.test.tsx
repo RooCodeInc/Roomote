@@ -307,8 +307,13 @@ vi.mock('@/components/system', () => ({
   SelectItem: ({ children, value }: { children: ReactNode; value: string }) => (
     <div data-value={value}>{children}</div>
   ),
-  SelectTrigger: ({ children }: { children: ReactNode }) => (
-    <div>{children}</div>
+  SelectTrigger: ({
+    children,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button type="button" role="combobox" {...props}>
+      {children}
+    </button>
   ),
   SelectValue: () => <span />,
   Settings2: (props: SVGProps<SVGSVGElement>) => (
@@ -613,6 +618,9 @@ describe('SourceControl settings', () => {
     render(<SourceControl />);
 
     expect(screen.getByText('Pull request delivery')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Pull request delivery' }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId('pr-action-select')).toHaveAttribute(
       'data-value',
       'draft',
