@@ -50,6 +50,10 @@ validate_image_part() {
   [[ "$1" =~ ^[A-Za-z0-9._/-]+$ ]] || die "invalid image registry or namespace value: $1"
 }
 
+validate_image_registry() {
+  [[ "$1" =~ ^[A-Za-z0-9._-]+:[0-9]+(/[A-Za-z0-9._/-]+)?$ ]] || validate_image_part "$1"
+}
+
 validate_tag() {
   [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid image tag: $1"
 }
