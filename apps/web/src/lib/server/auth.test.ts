@@ -172,6 +172,19 @@ describe('getAuth', () => {
     expect(options?.session?.freshAge).toBe(0);
   });
 
+  it('uses a 30-day rolling session without caching revoked sessions', async () => {
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0];
+    expect(options.session).toEqual({
+      modelName: 'authSessions',
+      expiresIn: 30 * 24 * 60 * 60,
+      updateAge: 24 * 60 * 60,
+      freshAge: 0,
+    });
+    expect(options.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
+  });
+
   it('keys the Entra linked-account identity on the normalized uniqueName', async () => {
     const fetchMock = vi.fn(async (url: string | URL | Request) => {
       const href = String(url);

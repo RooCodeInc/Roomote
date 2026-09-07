@@ -28,3 +28,20 @@ export function normalizeAuthRedirect(
     return undefined;
   }
 }
+
+export function getSafeRedirectUrl(
+  rawRedirectUrl: string | null,
+  fallback = '/setup',
+): string {
+  if (
+    !rawRedirectUrl?.startsWith('/') ||
+    rawRedirectUrl.startsWith('//') ||
+    // URL parsers strip control characters; reject them before navigation.
+    // eslint-disable-next-line no-control-regex
+    /[\\\u0000-\u001f\u007f]/.test(rawRedirectUrl)
+  ) {
+    return fallback;
+  }
+
+  return rawRedirectUrl;
+}

@@ -9,6 +9,7 @@ import {
 } from '@roomote/types';
 
 import { authClient } from '@/lib/auth-client';
+import { getSafeRedirectUrl } from '@/lib/auth-redirect';
 import { getAuthProviderCallbackUrl } from '@/lib/auth-provider-callback';
 import { cn } from '@/lib/utils';
 import { OriginMismatchAlert } from '@/components/layout';
@@ -43,18 +44,6 @@ function AuthProviderIcon({ provider }: { provider: AuthProvider }) {
   }
 
   return <BrandIcon icon={provider} name="" className="size-4" />;
-}
-
-function getSafeRedirectUrl(rawRedirectUrl: string | null): string {
-  if (!rawRedirectUrl) {
-    return '/setup';
-  }
-
-  if (!rawRedirectUrl.startsWith('/') || rawRedirectUrl.startsWith('//')) {
-    return '/setup';
-  }
-
-  return rawRedirectUrl;
 }
 
 function getAuthErrorMessage(
@@ -93,6 +82,7 @@ export function AuthForm({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const passwordReset = searchParams.get('password_reset') === '1';
   const redirectUrl = useMemo(
     () => getSafeRedirectUrl(searchParams.get('redirect_url')),
     [searchParams],
@@ -107,7 +97,7 @@ export function AuthForm({
   const hasVisibleProviders = visibleProviders.length > 0;
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isEmailAuthVisible, setIsEmailAuthVisible] = useState(false);
+  const [isEmailAuthVisible, setIsEmailAuthVisible] = useState(passwordReset);
   const [submittingProvider, setSubmittingProvider] =
     useState<AuthProvider | null>(null);
   const showEmailAuth = !hasVisibleProviders || isEmailAuthVisible;
@@ -161,6 +151,13 @@ export function AuthForm({
         <div className="max-w-xl space-y-4">
           <div className="space-y-2">
             <OriginMismatchAlert />
+            {passwordReset && (
+              <Alert role="status">
+                <AlertDescription>
+                  Your password has been reset. Sign in with your new password.
+                </AlertDescription>
+              </Alert>
+            )}
             {noticeMessage && (
               <Alert variant="destructive">
                 <AlertCircle />
@@ -218,7 +215,7 @@ export function AuthForm({
           ) : null}
 
           {showEmailAuth ? (
-            <div className="max-w-sm">
+            <div className="max-w-sm space-y-3">
               <EmailPasswordAuth
                 redirectUrl={redirectUrl}
                 accountLinkHelpText={accountLinkHelpText}
@@ -228,11 +225,24 @@ export function AuthForm({
                   hideModeSwitchMessage || inviteRole !== null
                 }
                 defaultMode={
-                  canSignUp && searchParams.get('invited')
+                  !passwordReset && canSignUp && searchParams.get('invited')
                     ? 'sign-up'
                     : 'sign-in'
                 }
               />
+              {hasVisibleProviders && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setErrorMessage(null);
+                    setIsEmailAuthVisible(false);
+                  }}
+                >
+                  Other sign-in options
+                </Button>
+              )}
             </div>
           ) : null}
         </div>

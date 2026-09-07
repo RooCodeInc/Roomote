@@ -54,6 +54,8 @@ type SignedInAuthContext = {
 
 type SignedInAuthContextOptions = {
   treatPendingAsSignedOut?: boolean;
+  /** Only enable in a Route Handler that can send renewed cookies. */
+  allowSessionRefresh?: boolean;
 };
 
 async function loadDeploymentIdentityState(userId: string) {
@@ -314,12 +316,15 @@ function isMatchingUserEntity(
   );
 }
 
-async function getBetterAuthSession() {
+async function getBetterAuthSession(allowSessionRefresh = false) {
   const auth = await getAuth();
 
   try {
     return await auth.api.getSession({
       headers: await headers(),
+      // Rendering cannot write cookies. Renewing only the database here would
+      // prevent a later browser request from renewing the cookie for 24 hours.
+      query: { disableRefresh: !allowSessionRefresh },
     });
   } catch (error) {
     // Invalid or expired auth cookies should behave like a signed-out
@@ -333,11 +338,11 @@ async function getBetterAuthSession() {
 }
 
 export async function getSignedInAuthContext(
-  _options?: SignedInAuthContextOptions,
+  options?: SignedInAuthContextOptions,
 ): Promise<SignedInAuthContext | AuthError> {
   await bootstrapWebRuntimeEnv();
 
-  const session = await getBetterAuthSession();
+  const session = await getBetterAuthSession(options?.allowSessionRefresh);
 
   if (!session) {
     return { success: false, error: 'Unauthorized: User required' };
@@ -414,8 +419,10 @@ export async function getSignedInAuthContext(
   };
 }
 
-export async function authorize(): Promise<UserAuthSuccess | AuthError> {
-  const authContext = await getSignedInAuthContext();
+export async function authorize(
+  options?: SignedInAuthContextOptions,
+): Promise<UserAuthSuccess | AuthError> {
+  const authContext = await getSignedInAuthContext(options);
 
   if (!authContext.success) {
     return authContext;
