@@ -1869,6 +1869,54 @@ describe('prReviewNotificationJob', () => {
     expect(mockRequeuePending).not.toHaveBeenCalled();
   });
 
+  it.each([0, 1, 2])(
+    'retains a canonical preparation claim only while queue retries remain (prior failures: %s)',
+    async (attemptsMade) => {
+      mockPrepareDelivery.mockRejectedValue(new Error('model unavailable'));
+      const job = {
+        ...makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId: '11111111-1111-4111-8111-111111111111',
+          deliveryState: 'claimed',
+          deliveryIds: ['11111111-1111-4111-8111-111111111111'],
+          leaseToken: '22222222-2222-4222-8222-222222222222',
+          events,
+        }),
+        attemptsMade,
+        opts: { attempts: 3 },
+      };
+
+      await expect(prReviewNotificationJob(job as never)).rejects.toThrow(
+        'model unavailable',
+      );
+      expect(mockRequeuePending).toHaveBeenCalledTimes(
+        attemptsMade === 2 ? 1 : 0,
+      );
+      expect(mockPostMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('releases a canonical claim when its preparation transition fails despite remaining retries', async () => {
+    mockPrepareCanonical.mockRejectedValue(new Error('transition failed'));
+    const job = {
+      ...makeJob({
+        ownershipVersion: 'canonical',
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        deliveryState: 'claimed',
+        deliveryIds: ['11111111-1111-4111-8111-111111111111'],
+        leaseToken: '22222222-2222-4222-8222-222222222222',
+        events,
+      }),
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    await expect(prReviewNotificationJob(job as never)).rejects.toThrow(
+      'transition failed',
+    );
+    expect(mockRequeuePending).toHaveBeenCalledOnce();
+  });
+
   it('uses the canonical delivery id as the sole interactive action owner', async () => {
     const deliveryId = '11111111-1111-4111-8111-111111111111';
     mockPrepareDelivery.mockResolvedValue({

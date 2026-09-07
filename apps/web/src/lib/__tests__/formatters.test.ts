@@ -1,6 +1,30 @@
 // pnpm test src/lib/__tests__/formatters.test.ts
 
-import { formatNumber, formatCurrency, formatTimeZone } from '../formatters';
+import {
+  formatNumber,
+  formatCurrency,
+  formatInferenceCost,
+  formatTimeZone,
+} from '../formatters';
+
+describe('formatInferenceCost', () => {
+  it.each([
+    [999_990_000, '999.99'],
+    [1_000_000_000, '1,000.00'],
+    [1_234_560_000, '1,234.56'],
+    [1_234_567_890_000, '1,234,567.89'],
+    [1_235_000, '1.24'],
+    [1_000, '0.00'],
+    [0, '0.00'],
+    [-1, '0.00'],
+    [null, '0.00'],
+    [undefined, '0.00'],
+    [NaN, '0.00'],
+    [Infinity, '0.00'],
+  ])('formats %s micro-USD as %s', (value, expected) => {
+    expect(formatInferenceCost(value)).toBe(expected);
+  });
+});
 
 describe('formatNumber', () => {
   it('should return empty string for undefined values', () => {
@@ -61,6 +85,8 @@ describe('formatCurrency', () => {
     expect(formatCurrency(0)).toBe('$0.00');
     expect(formatCurrency(1)).toBe('$1.00');
     expect(formatCurrency(1.5)).toBe('$1.50');
+    expect(formatCurrency(999.99)).toBe('$999.99');
+    expect(formatCurrency(1000)).toBe('$1,000.00');
     expect(formatCurrency(1234.56)).toBe('$1,234.56');
     expect(formatCurrency(1000000)).toBe('$1,000,000.00');
   });

@@ -35,17 +35,25 @@ Full details: `.changeset/README.md` and `CONTRIBUTING.md#product-releases`.
 
 ### 1. Establish the last release reference point
 
-Cross-check three signals; they should normally agree:
+Fetch the release-bearing refs and tags before checking any boundary signal, then
+cross-check all four signals; they should normally agree:
 
 ```bash
+git fetch --tags origin \
+  refs/heads/main:refs/remotes/origin/main \
+  refs/heads/develop:refs/remotes/origin/develop
 git tag --sort=-creatordate | head -5
 node -p "require('./package.json').version"
 head -10 CHANGELOG.md
+gh release view v<version> --json tagName,isDraft,isPrerelease,publishedAt
 ```
 
-Use the `v<version>` tag as the diff base when it exists. If the root version is
-ahead of the newest tag because a release PR merged but its Promote PR has not
-shipped yet, use the version-bump commit on `develop` as the next diff base:
+Use the exact newest published `v<version>` tag as the diff base. Verify that its
+GitHub Release is published and that the tag is reachable from `origin/main`; a
+local-only tag or an unmerged Promote candidate is not a release boundary. If
+the root version is ahead of the newest published tag because a release PR
+merged but its Promote PR has not shipped yet, use the version-bump commit on
+`develop` as the next diff base:
 
 ```bash
 node scripts/release/find-version-commit.mjs <version> origin/develop
@@ -66,6 +74,9 @@ git fetch origin develop
 git log v<last>..origin/develop --oneline --first-parent
 ```
 
+Here `v<last>` is the exact published tag established in step 1, never an
+earlier version-bump commit for the same release.
+
 For anything ambiguous, read the PR body with `gh pr view <number>` to identify
 the user-facing or operator-facing impact.
 
@@ -77,12 +88,13 @@ of every returned issue with
 `gh issue view <issue-url> --json author,authorAssociation,url`. Classify PR
 authors and issue reporters as external only when they are not bots and are not
 code owners. Also require an issue reporter's `authorAssociation` to be outside
-`OWNER`, `MEMBER`, and `COLLABORATOR`. Read the applicable `CODEOWNERS` file and
-resolve its individual GitHub-owner entries and organization-team entries before
-classifying them; if this repository has no `CODEOWNERS` file, no author or
-reporter is excluded on that basis, but the issue-author association check still
-applies. Do not treat someone as external merely because another person merged
-the PR or implemented the fix.
+`OWNER`, `MEMBER`, and `COLLABORATOR`. Read `.github/CODEOWNERS` directly rather
+than inferring its presence from recursive discovery or glob results, and resolve
+its individual GitHub-owner entries and organization-team entries before
+classifying them. If `.github/CODEOWNERS` does not exist, no author or reporter
+is excluded on that basis, but the issue-author association check still applies.
+Do not treat someone as external merely because another person merged the PR or
+implemented the fix.
 
 - Treat GitHub App and bot accounts as bots; never add contributor thanks for
   them.
@@ -265,6 +277,10 @@ Treat that as a release-process gate even when repository rules do not require
 status checks.
 
 ### 10. Open the release PR
+
+Read `.github/CODEOWNERS` directly again and use its current entries as the
+source of truth for release PR ownership and reviewer handling; do not infer
+reviewers from PR authorship or a recursive file search.
 
 Commit the generated release artifacts on a feature branch and open a PR against
 `develop` titled **Release Roomote X.Y.Z**. The PR body should include:

@@ -3,6 +3,7 @@
 import {
   type TaskPayload,
   DEFAULT_CODING_HARNESS,
+  getTaskInitiatorLinkedUserId,
   DEFAULT_LAUNCH_CODING_HARNESS,
   getCommunicationChannelFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
@@ -41,6 +42,37 @@ import {
 } from '../task-runs';
 import { ALL_REPOSITORIES } from '../constants';
 import { getSnapshotExpiresAt } from '../compute-providers/snapshot-retention';
+
+describe('getTaskInitiatorLinkedUserId', () => {
+  it('links a user initiator to its user', () => {
+    expect(getTaskInitiatorLinkedUserId({ kind: 'user', userId: 'u1' })).toBe(
+      'u1',
+    );
+    expect(
+      getTaskInitiatorLinkedUserId({
+        kind: 'user',
+        externalId: 'U1',
+        matchedUserId: 'u2',
+      }),
+    ).toBe('u2');
+    expect(
+      getTaskInitiatorLinkedUserId({ kind: 'user', externalId: 'U1' }),
+    ).toBeNull();
+  });
+
+  it('links an automation initiator only through its acting user', () => {
+    expect(
+      getTaskInitiatorLinkedUserId({ kind: 'automation', key: 'suggester' }),
+    ).toBeNull();
+    expect(
+      getTaskInitiatorLinkedUserId({
+        kind: 'automation',
+        key: 'custom_automation',
+        actingUserId: 'u3',
+      }),
+    ).toBe('u3');
+  });
+});
 
 describe('isSourceControlTaskSurface', () => {
   it.each(['github', 'gitlab', 'gitea', 'bitbucket', 'ado'] as const)(

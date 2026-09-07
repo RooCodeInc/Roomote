@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { FAST_AGENT_NATIVE_TOOL_NAMES } from '@roomote/types';
+import {
+  CALL_INTEGRATION_TOOL_TOOL,
+  FAST_AGENT_NATIVE_TOOL_NAMES,
+} from '@roomote/types';
+import { z } from 'zod';
+import { Ajv2020 } from 'ajv/dist/2020.js';
 
 import { getFastAgentNativeToolRuntime } from '../fast-agent-native-tool-bridge';
 
@@ -12,8 +17,9 @@ import { getFastAgentNativeToolRuntime } from '../fast-agent-native-tool-bridge'
  * Guards the JSON schema OpenAI receives for every Fast native tool.
  *
  * OpenCode loads each generated tool module with its own zod 4, treats
- * `args` as a record of field schemas (wrapping it in `z.object`), and ships
- * `z.toJSONSchema` of that to the provider. A tool that declares `args` as a
+ * `args` as a record of field schemas (wrapping it in `z.object`), and
+ * normalizes `z.toJSONSchema` before sending it to the provider. A tool
+ * that declares `args` as a
  * bare schema instead of a record (a `z.union`, say) turns into a schema
  * carrying zod internals, which OpenAI rejects with
  * `invalid_function_parameters` on every request, taking down every Fast turn
@@ -192,12 +198,22 @@ function toOpenCodeJsonSchema(zod: ZodV4, args: unknown) {
         )} ${nonZod.length === 1 ? 'is' : 'are'} not. OpenCode wraps args in z.object itself; a bare schema (z.union, z.object) as args ships its internals to the provider.`,
     );
   }
-  return zod.z.toJSONSchema(zod.z.object(args as Record<string, never>), {
-    io: 'input',
-  });
+  const schema = zod.z.toJSONSchema(
+    zod.z.object(args as Record<string, never>),
+    {
+      io: 'input',
+    },
+  );
+  // OpenCode v1.18.10 tool/registry.ts zodJsonSchema renames the dictionary
+  // without rewriting refs. Testing raw Zod output missed this boundary.
+  const { $defs, ...rest } = schema;
+  return JSON.parse(
+    JSON.stringify($defs ? { ...rest, definitions: $defs } : rest),
+  );
 }
 
 describe('Fast native tool schemas as OpenAI receives them', () => {
+  const validator = new Ajv2020({ strict: false });
   let workDir: string;
   let zod: ZodV4;
   let tools: LoadedTool[];
@@ -224,7 +240,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     );
     await writeFile(
       join(workDir, 'roomote-fast-tool-bridge.js'),
-      'export const invoke = async () => ({ title: "", output: "", metadata: {} });\n',
+      'export const invoke = async (name, args) => ({ name, args });\n',
     );
     await cp(sourceToolsDir, join(workDir, 'tools'), { recursive: true });
     zod = await import(pathToFileURL(zodV4Entry).href);
@@ -266,6 +282,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       let schema: unknown;
       try {
         schema = toOpenCodeJsonSchema(zod, tool.args ?? {});
+        validator.compile(schema as object);
       } catch (error) {
         failures.push(
           `${tool.name}: ${error instanceof Error ? error.message : String(error)}`,
@@ -282,6 +299,131 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       failures.push(...problems);
     }
     expect(failures).toEqual([]);
+  });
+
+  it('accepts only canonical pull request review overrides', () => {
+    const reviewTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.reviewPullRequest,
+    );
+    const schema = zod.z.object(reviewTool?.args as Record<string, never>);
+
+    expect(
+      schema.safeParse({
+        kickoffMessage: 'Reviewing this now.',
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'xhigh',
+      }).success,
+    ).toBe(true);
+    expect(
+      schema.safeParse({
+        kickoffMessage: 'Reviewing this now.',
+        reasoningEffort: 'extreme',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('exposes integration call args as an object with arbitrary JSON values', () => {
+    const callTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+    );
+    const schema = toOpenCodeJsonSchema(zod, callTool?.args ?? {}) as {
+      properties?: Record<string, unknown>;
+    };
+    const argsSchema = schema.properties?.args as
+      | { type?: string; additionalProperties?: { anyOf?: unknown[] } }
+      | undefined;
+
+    expect(argsSchema?.type).toBe('object');
+    expect(argsSchema?.additionalProperties?.anyOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'string' }),
+        expect.objectContaining({ type: 'object' }),
+        expect.objectContaining({ type: 'array' }),
+      ]),
+    );
+  });
+
+  it('detects dangling refs after OpenCode normalizes recursive Zod schemas', () => {
+    const args = {
+      args: zod.z.record(zod.z.string(), zod.z.json()).optional(),
+    };
+    expect(() =>
+      validator.compile(
+        zod.z.toJSONSchema(zod.z.object(args), { io: 'input' }),
+      ),
+    ).not.toThrow();
+    expect(() => validator.compile(toOpenCodeJsonSchema(zod, args))).toThrow(
+      /can't resolve reference #\/\$defs\//,
+    );
+  });
+
+  it('preserves nested JSON through serialized native schema validation and server parsing', () => {
+    const callTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+    )!;
+    const validate = validator.compile(
+      toOpenCodeJsonSchema(zod, callTool.args),
+    );
+    const nativeSchema = zod.z.object(callTool.args as Record<string, never>);
+    const serverSchema = z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema);
+    const base = { integrationId: 'example', toolName: 'nested_tool' };
+    for (const args of [
+      undefined,
+      {},
+      {
+        text: 'value',
+        number: 1.5,
+        enabled: true,
+        nullable: null,
+        list: [
+          null,
+          false,
+          42,
+          'text',
+          [],
+          {},
+          { nested: [{ 'arbitrary/key': { values: [1, null] } }] },
+        ],
+        object: { nested: { list: [[{ value: 'preserved' }]] } },
+      },
+    ]) {
+      const input = JSON.parse(JSON.stringify({ ...base, args }));
+      expect(validate(input), JSON.stringify(validate.errors)).toBe(true);
+      expect(nativeSchema.parse(input)).toEqual(input);
+      expect(serverSchema.parse(input)).toEqual(input);
+    }
+    for (const args of [null, 'text', [], 42, false]) {
+      expect(validate({ ...base, args })).toBe(false);
+    }
+  });
+
+  it('preserves required Sentry organization scope through generated tool execution and server parsing', async () => {
+    const callTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+    )!;
+    const request = {
+      integrationId: 'sentry',
+      toolName: 'search_issues',
+      args: {
+        organizationSlug: 'example-org',
+        query: 'lastSeen:-24h',
+        projectSlugOrId: 'example-project',
+      },
+    };
+    const parsed = zod.z
+      .object(callTool.args as Record<string, never>)
+      .parse(request);
+    const execute = callTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    const forwarded = await execute(parsed, {});
+    expect(forwarded.name).toBe(
+      FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+    );
+    expect(
+      z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse(forwarded.args),
+    ).toEqual(request);
   });
 
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {

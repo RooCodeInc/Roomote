@@ -1925,6 +1925,7 @@ export function generateOpenCodeConfig({
   const config = {
     share: 'disabled',
     autoupdate: false,
+    subagent_depth: 2,
     ...(promptModel
       ? {
           model: promptModel,

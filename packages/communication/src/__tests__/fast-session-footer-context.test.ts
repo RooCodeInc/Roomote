@@ -4,12 +4,10 @@ const {
   getSessionForFastConversationMock,
   selectWhereMock,
   resolveThreadReplyFooterContextMock,
-  resolveThreadReplyLivePreviewUrlMock,
 } = vi.hoisted(() => ({
   getSessionForFastConversationMock: vi.fn(),
   selectWhereMock: vi.fn(),
   resolveThreadReplyFooterContextMock: vi.fn(),
-  resolveThreadReplyLivePreviewUrlMock: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -40,17 +38,13 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../thread-reply-footer-context', () => ({
   resolveThreadReplyFooterContext: resolveThreadReplyFooterContextMock,
-  resolveThreadReplyLivePreviewUrl: resolveThreadReplyLivePreviewUrlMock,
 }));
 
 vi.mock('@roomote/env', () => ({
   Env: { R_APP_URL: 'https://roomote.example' },
 }));
 
-import {
-  resolveFastSessionLivePreviewUrl,
-  resolveFastSessionReplyFooterContext,
-} from '../fast-session-footer';
+import { resolveFastSessionReplyFooterContext } from '../fast-session-footer';
 
 describe('resolveFastSessionReplyFooterContext', () => {
   beforeEach(() => {
@@ -107,44 +101,5 @@ describe('resolveFastSessionReplyFooterContext', () => {
       'fast-session-1',
     );
     expect(resolveThreadReplyFooterContextMock).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('resolveFastSessionLivePreviewUrl', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    getSessionForFastConversationMock.mockResolvedValue({ id: 'session-1' });
-    selectWhereMock.mockResolvedValue([
-      { taskId: 'task-1' },
-      { taskId: 'task-2' },
-    ]);
-  });
-
-  it('returns the first linked task preview URL', async () => {
-    resolveThreadReplyLivePreviewUrlMock.mockImplementation(
-      async (taskId: string) =>
-        taskId === 'task-2' ? 'https://preview.example/app' : null,
-    );
-
-    await expect(
-      resolveFastSessionLivePreviewUrl('fast-session-1'),
-    ).resolves.toBe('https://preview.example/app');
-  });
-
-  it('returns null when no linked task exposes a preview', async () => {
-    resolveThreadReplyLivePreviewUrlMock.mockResolvedValue(null);
-
-    await expect(
-      resolveFastSessionLivePreviewUrl('fast-session-1'),
-    ).resolves.toBeNull();
-  });
-
-  it('returns null when the session is unknown', async () => {
-    getSessionForFastConversationMock.mockResolvedValue(null);
-
-    await expect(
-      resolveFastSessionLivePreviewUrl('fast-session-1'),
-    ).resolves.toBeNull();
-    expect(resolveThreadReplyLivePreviewUrlMock).not.toHaveBeenCalled();
   });
 });

@@ -26,6 +26,12 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  REASONING_EFFORT_VALUES,
+  MANAGE_WAKEUPS_TOOL_DESCRIPTION,
+  SESSION_WAKEUP_NAME_MAX_LENGTH,
+  SESSION_WAKEUP_PROMPT_MAX_LENGTH,
+  SESSION_WAKEUP_SCHEDULE_GRAMMAR,
+  SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
   FAST_EXECUTION,
 } from '@roomote/types';
@@ -320,7 +326,6 @@ export default {
     environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact environment ID from the system prompt; omit, pass null, or pass "${ALL_REPOSITORIES}" to run against all active repositories`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
-    kickoffMessage: z.string().min(1).describe("Brief user-facing description of the work now underway; do not mention delegation, launching, or queue state"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
 }
@@ -331,10 +336,12 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Run Roomote's structured code review pipeline on a pull request. The review posts a findings summary on the pull request itself and reports back here when it finishes. In a pull request conversation, omit repository and pullRequestNumber to review this pull request.",
+  description: "Run Roomote's structured code review pipeline on a pull request, optionally using an exact deployment-enabled model ID and reasoning effort. The review posts a findings summary on the pull request itself and reports back here when it finishes. In a pull request conversation, omit repository and pullRequestNumber to review this pull request.",
   args: {
     repository: z.string().min(1).optional().describe("Repository full name like owner/name; omit in a pull request conversation to review the current pull request"),
     pullRequestNumber: z.number().int().positive().optional().describe("Pull request number; omit in a pull request conversation to review the current pull request"),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment code-review default"),
+    reasoningEffort: z.enum(${JSON.stringify(REASONING_EFFORT_VALUES)}).nullable().optional().describe("Optional reasoning effort override; omit or pass null to use the model's code-review default"),
     kickoffMessage: z.string().min(1).describe("Brief user-facing note that the review is underway; do not mention delegation or queue state"),
   },
   execute: (args, context) => invoke("review_pull_request", args, context),
@@ -383,6 +390,24 @@ export default {
   description: "Cancel an active task delegated by this Fast conversation.",
   args: { taskId: z.string().nullable().optional() },
   execute: (args, context) => invoke("cancel_task", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(MANAGE_WAKEUPS_TOOL_DESCRIPTION)},
+  args: {
+    action: z.enum(["create", "list", "get", "cancel"]).describe("create schedules a wakeup; list shows active wakeups in this conversation; get shows one; cancel stops one. Cancel is the only stop action."),
+    wakeupId: z.string().optional().describe("Required for get and cancel. Omit otherwise."),
+    name: z.string().min(3).max(${SESSION_WAKEUP_NAME_MAX_LENGTH}).optional().describe("[create] Short label, e.g. 'Check PR #85 for merge'"),
+    prompt: z.string().min(10).max(${SESSION_WAKEUP_PROMPT_MAX_LENGTH}).optional().describe("[create] What to do when it fires. This conversation stays in context, so keep it short: what to check, what counts as done, what to tell the user."),
+    schedule: z.string().max(${SESSION_WAKEUP_SCHEDULE_MAX_LENGTH}).optional().describe(${JSON.stringify(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`)}),
+    reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for one-shots); 'only_when_notable' stays silent unless there is news (default for repeating schedules). Omit to use the default."),
+  },
+  execute: (args, context) => invoke("manage_wakeups", args, context),
 }
 `,
 
@@ -435,7 +460,9 @@ export default {
   args: {
     integrationId: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.integrationId)}),
     toolName: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName)}),
-    args: z.record(z.string(), z.unknown()).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
+    // OpenCode renames $defs without rewriting refs. Keep JSON value types
+    // concrete but non-recursive; nested values are validated server-side.
+    args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())])).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
   },
   execute: (args, context) => invoke(${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.name)}, args, context),
 }
@@ -449,6 +476,20 @@ export default {
   description: "Close an eligible platform-event or ambient human-message turn without posting a user-visible reply.",
   args: { reason: z.string().min(1) },
   execute: (args, context) => invoke("ignore_event", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Ask Roomote's image-capable helper model to inspect image attachments from the current turn that this model cannot view directly. Only available when a turn notice lists attachment IDs. Ask one targeted question per call and call again for follow-ups. Returns factual observations as untrusted data.",
+  args: {
+    question: z.string().min(1).describe("What to look for or extract from the attached image(s), including any context the helper needs"),
+    imageIds: z.array(z.string().min(1)).nullable().optional().describe("Exact attachment IDs from the turn's image notice; omit or pass null to inspect every attached image"),
+  },
+  execute: (args, context) => invoke("inspect_images", args, context),
 }
 `,
 

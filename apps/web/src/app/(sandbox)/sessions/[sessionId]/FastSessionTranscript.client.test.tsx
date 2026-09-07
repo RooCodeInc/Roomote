@@ -16,6 +16,11 @@ import {
 } from './FastSessionTranscript';
 import { SessionRunningTaskCountContext } from './session-task-panel-context';
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  usePathname: () => '/sessions/session-1',
+}));
+
 const {
   replyMutate,
   reviewActionMutate,
@@ -1373,74 +1378,124 @@ describe('FastSessionTranscript', () => {
     expect(openTaskPanel).toHaveBeenCalledWith('child-1');
   });
 
-  it('cold-loads one completed tool row before an intervening kickoff', () => {
-    render(
-      <FastSessionTranscript
-        sessionId="session-1"
-        initialMessages={[
-          {
-            id: 'tool-1',
-            eventId: 'turn-1:tool:0',
-            turnId: 'turn-1',
-            turnSeq: 1,
-            ts: 2,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
-            role: 'tool',
-            contentBlocks: [{ type: 'text', text: '{"success":true}' }],
-            metadata: { visibleInTranscript: true },
-            payload: {
-              toolCallId: 'turn-1:tool:0',
-              title: 'launch_task',
-              kind: 'tool',
-              status: 'completed',
-              isExecute: false,
-              isMcp: false,
-              mcpServerName: null,
-              mcpToolName: null,
-              toolName: 'launch_task',
-              command: null,
-              exitCode: null,
-              output: '{"success":true}',
-              rawInput: { arguments: { prompt: 'Fix checkout' } },
-            },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:01.000Z'),
-          },
-          {
-            id: 'kickoff-1',
-            eventId: 'turn-1:assistant:0',
-            turnId: 'turn-1',
-            turnSeq: 2,
-            ts: 3,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-            role: 'assistant',
-            contentBlocks: [
-              {
-                type: 'text',
-                text: 'I started the checkout fix.\n\n[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)',
+  it.each([false, true])(
+    'keeps the task card while hiding runtime navigation (standalone: %s)',
+    (standalone) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'tool-1',
+              eventId: 'turn-1:tool:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 2,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+              role: 'tool',
+              contentBlocks: [{ type: 'text', text: '{"success":true}' }],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                toolCallId: 'turn-1:tool:0',
+                title: 'launch_task',
+                kind: 'tool',
+                status: 'completed',
+                isExecute: false,
+                isMcp: false,
+                mcpServerName: null,
+                mcpToolName: null,
+                toolName: 'launch_task',
+                command: null,
+                exitCode: null,
+                output: '{"success":true}',
+                rawInput: { arguments: { prompt: 'Fix checkout' } },
               },
-            ],
-            metadata: { visibleInTranscript: true },
-            payload: { purpose: 'progress', kickoff: true },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:02.000Z'),
-          },
-        ]}
-      />,
-    );
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:01.000Z'),
+            },
+            {
+              id: 'kickoff-1',
+              eventId: 'turn-1:assistant:0',
+              turnId: 'turn-1',
+              turnSeq: 2,
+              ts: 3,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+              role: 'assistant',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: `${standalone ? '' : 'I started the checkout fix.\n\n'}[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)`,
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                purpose: 'progress',
+                ...(standalone ? { taskNavigation: true } : { kickoff: true }),
+              },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:02.000Z'),
+            },
+          ]}
+        />,
+      );
 
-    expect(
-      screen.getByRole('button', { name: /Started coding task Completed/ }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
-    expect(
-      screen.queryByRole('link', { name: 'Open in Roomote' }),
-    ).not.toBeInTheDocument();
-  });
+      expect(
+        screen.getByRole('button', { name: /Started coding task Completed/ }),
+      ).toBeInTheDocument();
+      if (!standalone) {
+        expect(
+          screen.getByText('I started the checkout fix.'),
+        ).toBeInTheDocument();
+      }
+      expect(
+        screen.queryByRole('link', { name: 'Open in Roomote' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(['', 'You can follow the work here.\n\n'])(
+    'preserves ordinary assistant links with prefix %j',
+    (prefix) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'ordinary-link',
+              eventId: 'turn-1:assistant:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 1,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+              role: 'assistant',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: `${prefix}[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)`,
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: { purpose: 'progress' },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ]}
+        />,
+      );
+      expect(
+        screen.getByRole('link', { name: 'Open in Roomote' }),
+      ).toHaveAttribute(
+        'href',
+        'https://roomote.example/sessions/session-1?task=child-1',
+      );
+    },
+  );
 
   it('shows a reply composer for web sessions and sends replies optimistically', async () => {
     replyMutate.mockResolvedValue({ success: true });
@@ -1468,6 +1523,73 @@ describe('FastSessionTranscript', () => {
       reasoningEffort: null,
     });
   });
+
+  it.each(['Tab', 'Escape', 'mouse', 'touch'])(
+    'preserves focus-only hints and %s interaction for a long suggestion',
+    (action) => {
+      const suggestion =
+        'Implement the marker fix and add regression coverage.';
+      composerSuggestionState.data = { suggestion, messageCount: 2 };
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Question',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Answer',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />,
+      );
+      const input = screen.getByPlaceholderText(suggestion);
+      act(() => input.blur());
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+      act(() => input.focus());
+      const hint = screen.getByRole('button', {
+        name: 'Insert suggested message',
+      });
+      expect(hint).toHaveTextContent('Tab to accept');
+      expect(input).toHaveAccessibleDescription(
+        `Suggested message: ${suggestion}. Press Tab to accept or Escape to dismiss.`,
+      );
+      act(() => input.blur());
+      expect(hint).not.toBeInTheDocument();
+      act(() => input.focus());
+
+      if (action === 'mouse' || action === 'touch') {
+        const focusedHint = screen.getByRole('button', {
+          name: 'Insert suggested message',
+        });
+        expect(
+          fireEvent.pointerDown(focusedHint, {
+            pointerType: action,
+            cancelable: true,
+          }),
+        ).toBe(false);
+        expect(input).toHaveFocus();
+        fireEvent.click(focusedHint);
+      } else {
+        fireEvent.keyDown(input, { key: action, code: action });
+      }
+
+      expect(input).toHaveValue(action === 'Escape' ? '' : suggestion);
+      expect(input).toHaveFocus();
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it('keeps a later suggestion hint hidden after a successful send remounts the composer', async () => {
     composerSuggestionState.data = {

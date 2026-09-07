@@ -246,7 +246,12 @@ export async function launchTask(
     // The review pipeline has its own target resolution (a PR, not a prompt
     // and workspace), so it branches before the standard launch machinery.
     if (requestedType === 'pr-review') {
-      return await handlePrReviewLaunch(c, { userId: auth.userId }, body);
+      return await handlePrReviewLaunch(
+        c,
+        { userId: auth.userId },
+        body,
+        harnessSelection.harnessModelOverrides,
+      );
     }
 
     const repositoryValidationError = shouldValidateRepositorySelection

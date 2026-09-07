@@ -933,7 +933,7 @@ describe('enqueueTask Session linkage', () => {
     expect(links[0]?.origin).toBe('direct_launch');
   });
 
-  it('does not create Session links for hidden tasks', async () => {
+  it('creates exactly one hidden canonical Session for a hidden fresh task', async () => {
     const userId = await createUser();
     const run = await launchFresh({
       initiator: { kind: 'user', userId },
@@ -943,9 +943,53 @@ describe('enqueueTask Session linkage', () => {
       visibility: 'hidden',
     });
 
+    const links = await db
+      .select()
+      .from(sessionTasks)
+      .where(eq(sessionTasks.taskId, run.taskId));
+    expect(links).toHaveLength(1);
+    expect(links[0]?.origin).toBe('direct_launch');
+
     await expect(
-      db.select().from(sessionTasks).where(eq(sessionTasks.taskId, run.taskId)),
-    ).resolves.toEqual([]);
+      db.query.sessions.findFirst({
+        where: eq(sessions.id, links[0]!.sessionId),
+      }),
+    ).resolves.toMatchObject({
+      visibility: 'hidden',
+      ownerKind: 'user',
+      ownerUserId: userId,
+      fastConversationId: null,
+    });
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
+    ).resolves.toMatchObject({ visibility: 'hidden' });
+  });
+
+  it('seeds the acting user from an automation initiator without re-attributing the task', async () => {
+    const userId = await createUser();
+
+    const run = await launchFresh({
+      initiator: {
+        kind: 'automation',
+        key: 'custom_automation',
+        actor: { externalId: 'automation-1', displayName: 'Flaky tests' },
+        actingUserId: userId,
+      },
+      workflow: 'standard',
+      surface: 'system',
+      trigger: 'schedule',
+    });
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+    });
+
+    expect(task!.initiatorKind).toBe('automation');
+    expect(task!.initiatorAutomation).toBe('custom_automation');
+    expect(task!.initiatorUserId).toBeNull();
+    expect(task!.actorExternalId).toBe('automation-1');
+    expect(task!.commitAuthorKind).toBe('roomote');
+    expect(run.actingUserId).toBe(userId);
   });
 
   it('attaches an ownerless automation task to a Fast Session without a human actor', async () => {

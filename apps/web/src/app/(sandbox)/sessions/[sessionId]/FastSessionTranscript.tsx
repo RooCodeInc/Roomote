@@ -553,6 +553,11 @@ export function FastSessionTranscript({
       messages
         .filter(
           (message) =>
+            !(
+              message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+              (message.payload as { taskNavigation?: unknown } | null)
+                ?.taskNavigation === true
+            ) &&
             message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput &&
             message.eventType !==
               ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,

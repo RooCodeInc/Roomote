@@ -2,6 +2,7 @@ import {
   mkdtemp,
   mkdir,
   readdir,
+  readFile,
   rm,
   symlink,
   writeFile,
@@ -126,6 +127,36 @@ describe('FastAgentSkillStore', () => {
     );
     expect(reference.resource).toBe('references/authentication.md');
     expect(reference.content).toContain('Authentication');
+  });
+
+  it('loads the shipped implement-changes default workflow as a separate resource', async () => {
+    const skillRoot = resolve(
+      import.meta.dirname,
+      '../../workflows/skills/standard',
+    );
+    const store = new FastAgentSkillStore(skillRoot);
+    const resource = 'resources/default-workflow.md';
+    const expectedContent = await readFile(
+      join(skillRoot, 'implement-changes', resource),
+      'utf8',
+    );
+
+    const root = await store.read('packaged:implement-changes');
+    expect(root.resources).toContain(resource);
+    expect(root.content).toContain(resource);
+    expect(root.content).not.toContain(expectedContent);
+
+    const workflow = await store.read('packaged:implement-changes', resource);
+    expect(expectedContent.trim().length).toBeGreaterThan(0);
+    expect(workflow).toMatchObject({
+      id: 'packaged:implement-changes',
+      invocation: 'implement-changes',
+      name: 'implement-changes',
+      source: 'packaged',
+      resource,
+      content: expectedContent,
+      byteLength: Buffer.byteLength(expectedContent, 'utf8'),
+    });
   });
 
   it('combines packaged and repository-defined skill catalogs', async () => {

@@ -71,7 +71,6 @@ export function resolveSuggestedTaskLaunchMode(input: {
   }
 
   return resolveFastAgentEntryMode({
-    explicitInvocation: false,
     userDefaultEnabled: input.userDefaultEnabled,
     fastAvailable: input.fastAvailable,
   })

@@ -440,7 +440,6 @@ export async function startFastSessionCommand(
   if (scheduleKickoff) {
     const launchTask = createFastAgentWebTaskLauncher({
       userId: auth.userId,
-      conversation,
     });
 
     scheduleWebFastAgentTurn({
@@ -552,7 +551,6 @@ export async function startSetupFastSessionCommand(
           createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
-            conversation,
           }),
           postReply: async () => {},
         },
@@ -855,7 +853,6 @@ export async function submitFastSessionUserInputCommand(
           createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
-            conversation,
           }),
           postReply: async () => {},
         },

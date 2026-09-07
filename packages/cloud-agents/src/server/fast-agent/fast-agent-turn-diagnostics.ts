@@ -89,6 +89,8 @@ export class FastAgentTurnDiagnostics {
   private visibleReplyCount = 0;
   private firstAssistantResponseAt: number | undefined;
   private resolvedModel: string | undefined;
+  private imageDelivery: 'direct' | 'helper' | 'unsupported' | undefined;
+  private imageHelperModel: string | undefined;
   private sessionPath: FastAgentSessionPath | undefined;
   private openCodeSessionId: string | undefined;
   private inferenceQueuedAt: number | undefined;
@@ -206,6 +208,16 @@ export class FastAgentTurnDiagnostics {
 
   recordModelResolved(model: string): void {
     this.resolvedModel = model;
+  }
+
+  recordImageDelivery(
+    input:
+      | { delivery: 'direct' | 'unsupported' }
+      | { delivery: 'helper'; helperModel: string },
+  ): void {
+    this.imageDelivery = input.delivery;
+    this.imageHelperModel =
+      input.delivery === 'helper' ? input.helperModel : undefined;
   }
 
   recordSessionPath(path: FastAgentSessionPath): void {
@@ -518,6 +530,8 @@ export class FastAgentTurnDiagnostics {
           : undefined,
       visibleReplyCount: this.visibleReplyCount,
       hasImages: this.context.hasImages,
+      imageDelivery: this.imageDelivery,
+      imageHelperModel: this.imageHelperModel,
       error: this.failed ? formatTerminalError(this.terminalError) : undefined,
     });
 

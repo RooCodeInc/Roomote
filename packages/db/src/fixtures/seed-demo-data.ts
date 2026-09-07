@@ -144,7 +144,8 @@ interface DemoSeedSummary {
  *
  * Every entity is keyed by a stable identifier and only inserted when missing,
  * so the seed is safe to re-run on every sandbox boot or preview deploy.
- * Existing demo rows are never updated or deleted.
+ * Existing demo rows are not overwritten; missing setup and task-run lifecycle
+ * fields from older seed versions are backfilled in place.
  */
 export async function seedDemoData(): Promise<DemoSeedSummary> {
   const summary: DemoSeedSummary = { created: [], skipped: [] };
@@ -406,19 +407,40 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
       where: eq(taskRuns.taskId, task.id),
     });
 
+    let taskRunChanged = !existingTaskRun;
+
     if (!existingTaskRun) {
       await runFactory.create({
         taskId: task.id,
         actingUserId: demoSeedUserId,
         status: task.taskRunStatus,
+        startedAt: now,
+        completedAt:
+          task.taskRunStatus === RunStatus.Completed ? now : undefined,
         payload: {
           repo: task.repositoryFullName,
           description: task.title,
         },
       });
+    } else {
+      const lifecycleBackfill = {
+        ...(existingTaskRun.startedAt == null ? { startedAt: now } : {}),
+        ...(existingTaskRun.status === RunStatus.Completed &&
+        existingTaskRun.completedAt == null
+          ? { completedAt: now }
+          : {}),
+      };
+
+      if (Object.keys(lifecycleBackfill).length > 0) {
+        await db
+          .update(taskRuns)
+          .set(lifecycleBackfill)
+          .where(eq(taskRuns.id, existingTaskRun.id));
+        taskRunChanged = true;
+      }
     }
 
-    record(`task run for ${task.id}`, !existingTaskRun);
+    record(`task run for ${task.id}`, taskRunChanged);
   }
 
   // A single-PR task and a split task keep the seeded dashboard useful for

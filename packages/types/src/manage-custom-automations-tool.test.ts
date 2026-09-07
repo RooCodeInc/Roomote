@@ -25,6 +25,12 @@ describe('manage custom automations tool contract', () => {
       'Admin-only management of deployment custom automations.',
     );
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      "inspect one automation's configured prompt by exact ID",
+    );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      'List results omit prompts',
+    );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
       'run the automation in Fast mode',
     );
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
@@ -111,6 +117,46 @@ describe('manage custom automations tool contract', () => {
           lastError: `${'x'.repeat(497)}...`,
         },
       ],
+    });
+  });
+
+  it('returns only the identified automation and prompt for inspection', () => {
+    expect(
+      compactManageCustomAutomationsResult('inspect', {
+        automation: {
+          id: 'automation-1',
+          name: 'Daily report',
+          prompt: 'Inspect this stored prompt.',
+          enabled: true,
+          scheduleMode: 'daily',
+          environmentId: 'environment-1',
+          createdByUser: { email: 'admin@example.com' },
+          lastError: 'previous failure',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      }),
+    ).toEqual({
+      automation: {
+        id: 'automation-1',
+        name: 'Daily report',
+        prompt: 'Inspect this stored prompt.',
+      },
+    });
+  });
+
+  it('builds a bounded inspection request and requires an automation ID', () => {
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'inspect',
+        automationId: 'automation/1',
+      }),
+    ).toEqual({
+      ok: true,
+      request: { path: '/automation%2F1', method: 'GET' },
+    });
+    expect(buildManageCustomAutomationsRequest({ action: 'inspect' })).toEqual({
+      ok: false,
+      error: 'automationId is required for inspect',
     });
   });
 

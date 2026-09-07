@@ -32,6 +32,7 @@ import {
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
+import { resolveFastAgentSessionImages } from './fast-agent-session-images';
 import { findSlackConversationSubjectByUserId } from './slack-conversation-log';
 import {
   createFastAgentCommunicationTaskLauncher,
@@ -224,7 +225,6 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         createArtifact,
         launchTask: createFastAgentWebTaskLauncher({
           userId: params.userId,
-          conversation,
         }),
         postReply: async () => {},
       },
@@ -281,6 +281,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                   recipientUserId: senderSubject.subjectSlackUserId,
                   sessionId: session.id,
                   footerContext,
+                  resolveImages: (artifactIds) =>
+                    resolveFastAgentSessionImages({
+                      artifactIds,
+                      sessionId: session.id,
+                    }),
                   getQuote: () => pendingQuote,
                   onDelivered: () => {
                     pendingQuote = null;
@@ -308,9 +313,13 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           channelId: conversation.replyTarget.channelId,
           threadTs: threadId,
         }),
-        postReply: async ({ message }) => {
+        postReply: async ({ message, imageArtifactIds = [] }) => {
           const quote = pendingQuote;
           pendingQuote = null;
+          const images = await resolveFastAgentSessionImages({
+            artifactIds: imageArtifactIds,
+            sessionId: session.id,
+          });
           const messageTs = await postSlackThreadMessageWithFooterText({
             slack,
             channel: conversation.replyTarget.channelId,
@@ -327,6 +336,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                   ]
                 : []),
               { type: 'markdown' as const, text: message },
+              ...images.map((image) => ({
+                type: 'image' as const,
+                image_url: image.url,
+                alt_text: image.altText,
+              })),
             ],
             footerText: buildFastSessionReplyFooterText({
               provider: 'slack',

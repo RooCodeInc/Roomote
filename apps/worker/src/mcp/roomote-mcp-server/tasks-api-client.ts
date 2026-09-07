@@ -14,6 +14,7 @@ import type {
   RoomoteSessionMessagesResponse,
   RoomoteSessionSummary,
   RoomoteStartSessionResponse,
+  RoomoteRelayUpdatesResponse,
 } from '@roomote/types';
 import type {
   RoomoteConfig,
@@ -127,6 +128,20 @@ export async function getSessionMessages(
     `/api/mcp/sessions/${encodeURIComponent(sessionId)}/messages${qs}`,
     {},
     'Failed to get session messages',
+  );
+}
+
+export async function getSessionUpdates(
+  config: RoomoteConfig,
+  sessionId: string,
+  params: { limit?: number; cursor?: string },
+): Promise<RoomoteRelayUpdatesResponse> {
+  const qs = buildSearchParams(params);
+  return apiFetch(
+    config,
+    `/api/mcp/sessions/${encodeURIComponent(sessionId)}/updates${qs}`,
+    {},
+    'Failed to get session updates',
   );
 }
 
@@ -291,6 +306,20 @@ export async function getTaskMessages(
     `/api/mcp/tasks/${encodeURIComponent(taskId)}/messages${qs}`,
     {},
     'Failed to get task messages',
+  );
+}
+
+export async function getTaskUpdates(
+  config: RoomoteConfig,
+  taskId: string,
+  params: { limit?: number; cursor?: string },
+): Promise<RoomoteRelayUpdatesResponse> {
+  const qs = buildSearchParams(params);
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/updates${qs}`,
+    {},
+    'Failed to get task updates',
   );
 }
 

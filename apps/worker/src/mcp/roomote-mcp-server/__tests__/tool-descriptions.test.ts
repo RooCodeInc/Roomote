@@ -320,6 +320,7 @@ describe('roomote MCP tool descriptions', () => {
       'search',
       'get_summary',
       'get_messages',
+      'get_updates',
       'send_message',
       'search_tasks',
       'get_compute_logs',
@@ -330,10 +331,10 @@ describe('roomote MCP tool descriptions', () => {
       'update_models',
     ]);
     expect(taskIdField.description).toBe(
-      'Optional concrete task ID. When provided to get_summary, get_messages, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
+      'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
     );
     expect(limitField.description).toBe(
-      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages (task or Fast session)',
+      'Positive result limit: 1 to 100 for search/get_updates (default 20), or 1 to 1000 for get_messages (task or Fast session)',
     );
     expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
       'targetTasks',
@@ -359,6 +360,15 @@ describe('roomote MCP tool descriptions', () => {
 
     expect(tool.config.description).toContain(
       'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript',
+    );
+    expect(tool.config.description).toContain(
+      'Use action "get_updates" with sessionId or taskId and its returned cursor',
+    );
+    expect(tool.config.description).toContain('Codex → Roomote');
+    expect(tool.config.description).toContain('Roomote → Codex');
+    expect(tool.config.description).toContain('do not narrate unchanged polls');
+    expect(tool.config.description).toContain(
+      'keep the final answer self-contained',
     );
     expect(tool.config.description).toContain(
       'Use start to begin new work in a Session',

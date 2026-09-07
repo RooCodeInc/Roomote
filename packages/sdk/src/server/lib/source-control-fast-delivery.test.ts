@@ -1,8 +1,6 @@
 const mocks = vi.hoisted(() => ({
+  redisStore: new Map<string, string>(),
   createFastAgentTaskLauncher: vi.fn(),
-  resolveFastSessionLivePreviewUrl: vi.fn(
-    async (): Promise<string | null> => null,
-  ),
   repositoriesFindMany: vi.fn(),
   getInstallationOctokit: vi.fn(),
   gitlabCreateIssueNote: vi.fn(),
@@ -35,18 +33,19 @@ vi.mock('@roomote/db/server', () => ({
   repositories: {},
 }));
 
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({
+    get: async (key: string) => mocks.redisStore.get(key) ?? null,
+    set: async (key: string, value: string) => {
+      mocks.redisStore.set(key, value);
+      return 'OK';
+    },
+  }),
+}));
+
 vi.mock('@roomote/communication', () => ({
-  buildFastSessionReplyFooterText: ({
-    provider,
-    livePreviewUrl,
-  }: {
-    provider: string;
-    livePreviewUrl?: string | null;
-  }) =>
-    livePreviewUrl
-      ? `[footer:${provider}:${livePreviewUrl}]`
-      : `[footer:${provider}]`,
-  resolveFastSessionLivePreviewUrl: mocks.resolveFastSessionLivePreviewUrl,
+  buildFastSessionReplyFooterText: ({ provider }: { provider: string }) =>
+    `[footer:${provider}]`,
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -308,6 +307,7 @@ describe('GitHub Fast delivery', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.redisStore.clear();
     createComment.mockResolvedValue({ data: { id: 5001 } });
     request.mockResolvedValue({ data: { id: 5002 } });
     pullsGet.mockResolvedValue({
@@ -380,65 +380,7 @@ describe('GitHub Fast delivery', () => {
     });
   });
 
-  it('includes the session live preview link in the comment footer when one exists', async () => {
-    mocks.resolveFastSessionLivePreviewUrl.mockResolvedValueOnce(
-      'https://preview.example/app',
-    );
-    const conversation = buildSourceControlFastConversation({
-      provider: 'github',
-      host: 'github.com',
-      repositoryFullName: 'acme/api',
-      kind: 'pull',
-      number: 42,
-    });
-    const delivery = await buildSourceControlFastDelivery(conversation);
-    const adapter = buildSourceControlFastAdapter({
-      conversation,
-      delivery: delivery!,
-      userId: 'user-1',
-      sessionId: 'fast-1',
-    });
-
-    await adapter.postReply({ message: 'On it.' });
-
-    expect(mocks.resolveFastSessionLivePreviewUrl).toHaveBeenCalledWith(
-      'fast-1',
-    );
-    expect(createComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        body: 'On it.\n\n[footer:github:https://preview.example/app]',
-      }),
-    );
-  });
-
-  it('still posts the comment when the live preview lookup fails', async () => {
-    mocks.resolveFastSessionLivePreviewUrl.mockRejectedValueOnce(
-      new Error('db down'),
-    );
-    const conversation = buildSourceControlFastConversation({
-      provider: 'github',
-      host: 'github.com',
-      repositoryFullName: 'acme/api',
-      kind: 'pull',
-      number: 42,
-    });
-    const delivery = await buildSourceControlFastDelivery(conversation);
-    const adapter = buildSourceControlFastAdapter({
-      conversation,
-      delivery: delivery!,
-      userId: 'user-1',
-      sessionId: 'fast-1',
-    });
-
-    await expect(adapter.postReply({ message: 'On it.' })).resolves.toEqual({
-      messageId: '5001',
-    });
-    expect(createComment).toHaveBeenCalledWith(
-      expect.objectContaining({ body: 'On it.\n\n[footer:github]' }),
-    );
-  });
-
-  it('edits the turn comment in place for later replies instead of posting again', async () => {
+  function mockGitHubTurnEditing() {
     const updateComment = vi.fn().mockResolvedValue({});
     mocks.getInstallationOctokit.mockResolvedValue({
       rest: {
@@ -452,6 +394,11 @@ describe('GitHub Fast delivery', () => {
       },
       request,
     });
+    return updateComment;
+  }
+
+  it('edits the turn comment in place for later replies, keeping one footer at the bottom', async () => {
+    const updateComment = mockGitHubTurnEditing();
     const conversation = buildSourceControlFastConversation({
       provider: 'github',
       host: 'github.com',
@@ -469,26 +416,299 @@ describe('GitHub Fast delivery', () => {
     });
 
     await adapter.postReply({ message: 'On it.' });
-    const second = await adapter.postReply({
-      message: 'Rebased; running checks.',
-    });
+    await adapter.postReply({ message: 'Rebased; running checks.' });
+    const last = await adapter.postReply({ message: 'Rebased and green.' });
 
     expect(createComment).toHaveBeenCalledTimes(1);
-    expect(updateComment).toHaveBeenCalledWith(
+    expect(createComment).toHaveBeenCalledWith(
       expect.objectContaining({
-        comment_id: 6001,
-        body: expect.stringContaining('On it.\n\nRebased; running checks.'),
+        body: '> @roomote please rebase this\n\nOn it.\n\n[footer:github]',
       }),
     );
-    // The turn opened with the quote and appends keep it at the top.
-    const firstBody = createComment.mock.calls[0]?.[0].body as string;
-    const editedBody = updateComment.mock.calls[0]?.[0].body as string;
-    expect(firstBody.startsWith('> @roomote please rebase this')).toBe(true);
-    expect(editedBody.startsWith('> @roomote please rebase this')).toBe(true);
-    // Footer appears once, at the bottom of the edited body.
-    const body = updateComment.mock.calls[0]?.[0].body as string;
-    expect(body.match(/footer:github/g)).toHaveLength(1);
-    expect(second).toEqual({ messageId: '6001' });
+    expect(updateComment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        comment_id: 6001,
+        body: '> @roomote please rebase this\n\nOn it.\n\nRebased; running checks.\n\n[footer:github]',
+      }),
+    );
+    expect(updateComment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        comment_id: 6001,
+        body: '> @roomote please rebase this\n\nOn it.\n\nRebased; running checks.\n\nRebased and green.\n\n[footer:github]',
+      }),
+    );
+    expect(last).toEqual({ messageId: '6001' });
+  });
+
+  it('does not quote the answered comment when replying inside its review thread', async () => {
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      quote: '> @roomote is this loop bounded?',
+    });
+
+    await adapter.postReply({ message: 'Yes, it stops after three tries.' });
+
+    expect(request).toHaveBeenCalledWith(
+      'POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies',
+      expect.objectContaining({
+        comment_id: 800,
+        body: 'Yes, it stops after three tries.\n\n[footer:github]',
+      }),
+    );
+  });
+
+  it('extends the last human comment in a review thread when a delegated task reports back', async () => {
+    const updateReviewComment = vi.fn().mockResolvedValue({});
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+
+    // The human turn opens the thread's comment.
+    const humanTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    });
+    await humanTurn.postReply({ message: 'Rebasing now.' });
+
+    // A later platform-event turn (fresh adapter, no in-memory state)
+    // appends to that comment instead of posting a new one.
+    const taskTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+    await expect(
+      taskTurn.postReply({ message: 'Rebased and pushed.' }),
+    ).resolves.toEqual({ messageId: '5002' });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(updateReviewComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        comment_id: 5002,
+        body: 'Rebasing now.\n\nRebased and pushed.\n\n[footer:github]',
+      }),
+    );
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it('posts a new comment when the remembered thread comment can no longer be edited', async () => {
+    const updateReviewComment = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Not Found'), { status: 404 }),
+      );
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    await buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    }).postReply({ message: 'Rebasing now.' });
+    request.mockResolvedValue({ data: { id: 5003 } });
+
+    const taskTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+    await expect(
+      taskTurn.postReply({ message: 'Rebased and pushed.' }),
+    ).resolves.toEqual({ messageId: '5003' });
+    await taskTurn.postReply({ message: 'Checks are green.' });
+
+    // The stale comment was tried once, then this turn posted its own reply
+    // and kept editing that one.
+    expect(updateReviewComment).toHaveBeenCalledTimes(2);
+    expect(updateReviewComment).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ comment_id: 5002 }),
+    );
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenLastCalledWith(
+      'POST /repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies',
+      expect.objectContaining({
+        body: 'Rebased and pushed.\n\n[footer:github]',
+      }),
+    );
+    expect(updateReviewComment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        comment_id: 5003,
+        body: 'Rebased and pushed.\n\nChecks are green.\n\n[footer:github]',
+      }),
+    );
+
+    // The record now points at the new comment, so the next task turn
+    // adopts it rather than the deleted one.
+    const nextTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+    await nextTurn.postReply({ message: 'Merged.' });
+    expect(updateReviewComment).toHaveBeenLastCalledWith(
+      expect.objectContaining({ comment_id: 5003 }),
+    );
+  });
+
+  it('rethrows an indeterminate failure on the remembered thread comment instead of posting twice', async () => {
+    const updateReviewComment = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Bad Gateway'), { status: 502 }),
+      );
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    await buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+    }).postReply({ message: 'Rebasing now.' });
+
+    const taskTurn = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+    await expect(
+      taskTurn.postReply({ message: 'Rebased and pushed.' }),
+    ).rejects.toThrow('Bad Gateway');
+
+    // The edit may have landed; no second comment is posted.
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens a new comment for the next human message in the thread', async () => {
+    const updateReviewComment = vi.fn().mockResolvedValue({});
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '800',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const build = (continuesThreadComment: boolean) =>
+      buildSourceControlFastAdapter({
+        conversation,
+        delivery: delivery!,
+        userId: 'user-1',
+        sessionId: 'fast-1',
+        continuesThreadComment,
+      });
+
+    await build(false).postReply({ message: 'First answer.' });
+    await build(false).postReply({ message: 'Second answer.' });
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(updateReviewComment).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a new comment when the thread has no remembered comment', async () => {
+    const updateReviewComment = vi.fn().mockResolvedValue({});
+    mocks.getInstallationOctokit.mockResolvedValue({
+      rest: {
+        issues: { createComment },
+        pulls: { get: pullsGet, updateReviewComment },
+      },
+      request,
+    });
+    const conversation = buildSourceControlFastConversation({
+      provider: 'github',
+      host: 'github.com',
+      repositoryFullName: 'acme/api',
+      kind: 'pull',
+      number: 42,
+      reviewCommentId: '801',
+    });
+    const delivery = await buildSourceControlFastDelivery(conversation);
+    const adapter = buildSourceControlFastAdapter({
+      conversation,
+      delivery: delivery!,
+      userId: 'user-1',
+      sessionId: 'fast-1',
+      continuesThreadComment: true,
+    });
+
+    await adapter.postReply({ message: 'Task finished.' });
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(updateReviewComment).not.toHaveBeenCalled();
   });
 
   it('replaces a resumed turn comment by id and keeps appending into it', async () => {
@@ -535,9 +755,7 @@ describe('GitHub Fast delivery', () => {
       2,
       expect.objectContaining({
         comment_id: 7001,
-        body: expect.stringContaining(
-          'Recovered; here is the result.\n\nAnd one more detail.',
-        ),
+        body: 'Recovered; here is the result.\n\nAnd one more detail.\n\n[footer:github]',
       }),
     );
   });

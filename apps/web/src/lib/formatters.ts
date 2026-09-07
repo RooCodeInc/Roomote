@@ -142,7 +142,7 @@ export function formatInferenceCost(
 
   const costUsd = normalizedCostMicroUsd / 1_000_000;
 
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(costUsd);

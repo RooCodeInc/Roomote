@@ -1,3 +1,4 @@
+import { resolveWorkerReleaseMetadata } from '../monitoring/worker-release-metadata';
 import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
@@ -1050,6 +1051,8 @@ export const runTask = async ({
           ),
           {
             reportConsumer: getTaskReportConsumerFromPayload(taskRun.payload),
+            commitSha: resolveWorkerReleaseMetadata().workerCommit,
+            appEnv: process.env.ROOMOTE_RELEASE_APP_ENV,
           },
         ),
         harnessInstructions,

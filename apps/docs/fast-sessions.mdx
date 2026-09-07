@@ -14,7 +14,10 @@ automations, and the web dashboard.
 
 A Session can also run Roomote's structured code review on demand. Ask it to
 review a pull request and the Review Code pipeline runs as a task inside the
-Session; in a pull request discussion, it reviews that pull request.
+Session; in a pull request discussion, it reviews that pull request. You can
+name an enabled model and reasoning effort in the request when a review needs a
+specific balance of speed and depth. If you omit either choice, the review uses
+the deployment's code review defaults.
 
 When a task in a Session opens a pull request, that pull request belongs to the
 Session. A mention on it joins the Session instead of starting a new one, and
@@ -49,6 +52,11 @@ task, you can reply, attach files, use commands, answer pending requests, cancel
 work, or wake a sleeping task without leaving the Session. Choose **Open full
 workspace** for terminal, logs, diff, and preview tools.
 
+On desktop, you can keep several task workspaces open beside the Session,
+resize them, and switch between the conversation and task panels without losing
+your place. On smaller screens, Roomote shows one workspace at a time so the
+active conversation or task remains usable.
+
 When delegated tasks keep working after the conversation becomes idle, the
 timeline shows the live task count. Select that activity to open the **Tasks**
 panel. The **Artifacts** panel combines the latest uploaded outputs from every
@@ -58,7 +66,9 @@ Links to a Session-created artifact, including the link the Session shares when
 it creates one, open that artifact directly in the Artifacts panel. Individual
 task details continue to show their own artifacts. When a reply attaches
 screenshots or other images captured by a task, they appear inline with that
-reply in the transcript.
+reply in the transcript. Delegated tasks also report their completion, blockers,
+and relevant results back into the parent Session; open the task workspace when
+you need its full logs or diff.
 
 **Session info** shows the total inference cost for the conversation and its
 attached tasks. Open the cost breakdown to separate direct Session orchestration
@@ -133,7 +143,40 @@ requested.
 
 In shared Slack and Discord conversations, Fast can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,
-an explicit Fast command, or a direct message still requires a response.
+or a direct message still requires a response.
+
+## Reminders and monitors
+
+A Session can schedule a message to itself. Ask Fast to "remind me in twenty
+minutes", "check every ten minutes whether CI is green", or "every weekday at
+nine, summarize the open pull requests", and it creates a wakeup for that
+Session. When the wakeup fires, Fast picks the conversation back up with its
+full history in context, does what was asked, and replies on the same surface
+the Session lives on: the transcript in the dashboard, or the originating Slack,
+Discord, Teams, or Telegram thread.
+
+A one-shot wakeup is a reminder and always replies. A recurring wakeup is a
+monitor and stays quiet unless it has something to report, such as a change, a
+result, a blocker, or a decision you need to make. When the monitored condition
+resolves, Fast tells you and cancels the wakeup itself. You can also ask Fast to
+list or cancel wakeups at any time; archiving a Session cancels all of its
+wakeups.
+
+Wakeups belong to the conversation and do not require an administrator. A
+Session may hold up to ten active wakeups, intervals range from one second to
+seven days, and recurring wakeups can be bounded by a run count or an end time.
+Intervals under five minutes must carry one of those bounds. A recurring wakeup
+whose turns fail five times in a row is retired. Deployment-wide recurring work
+that should run outside a conversation or report to a channel is an
+[automation](/automations) instead.
+
+Relative and interval schedules use `in <positive integer>s|m|h|d` and
+`every <positive integer>s|m|h|d`: seconds, minutes, hours, or days. Use `in 30s`,
+not fractional `in 0.5m`. For a short recurring check, use `every 30s x3` or an
+`until` end time; recurring intervals under five minutes still require a bound.
+Cron schedules remain five-field expressions, such as `cron 0 9 * * 1-5`.
+Delivery is best effort: `in 30s` does not guarantee a reply exactly 30 seconds
+later.
 
 ## Session and execution access
 

@@ -98,6 +98,7 @@ import {
   handleSendSessionMessage,
   handleStartSession,
 } from './sessions.js';
+import { handleGetRelayUpdates } from './relay-updates.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -542,6 +543,7 @@ const manageTasksToolDescription =
   `Use action "get_summary" with taskId to inspect a specific task's latest status, failure details, and uploaded image artifact IDs and viewer links. Use those stable IDs to attach a delegated task's images to a later reply. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
   'Use action "get_messages" with sessionId for Session history, or taskId for a specific task transcript; results are newest first. ' +
+  'Use action "get_updates" with sessionId or taskId and its returned cursor for compact, chronological relay narrative and state deltas; unchanged polls return no narrative. ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
   'Use action "send_message" with sessionId to continue a Session, or taskId to message a specific task. ' +
@@ -719,6 +721,22 @@ roomoteMcpServer.registerTool(
         }
         return handleGetSessionMessages(
           { sessionId: target.id, limit: params.limit },
+          config,
+        );
+      }
+      case 'get_updates': {
+        const target = resolveRoomoteCommunicationTarget(params);
+        if (!target) {
+          return errorResult(
+            'sessionId is required for get_updates when taskId is omitted',
+          );
+        }
+        return handleGetRelayUpdates(
+          {
+            target,
+            limit: params.limit,
+            cursor: params.cursor,
+          },
           config,
         );
       }

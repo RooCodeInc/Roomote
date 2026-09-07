@@ -16,10 +16,7 @@ import {
   type ThreadReplyLinkedPr,
 } from './chat-messages';
 import { chunkDiscordMessage } from './discord-provider';
-import {
-  resolveThreadReplyFooterContext,
-  resolveThreadReplyLivePreviewUrl,
-} from './thread-reply-footer-context';
+import { resolveThreadReplyFooterContext } from './thread-reply-footer-context';
 
 export type FastSessionFooterProvider =
   | 'slack'
@@ -85,20 +82,6 @@ async function getFastSessionLinkedTaskIds(
         .orderBy(asc(sessionTasks.attachedAt), asc(sessionTasks.taskId))
     : [];
   return linkedTasks.map(({ taskId }) => taskId);
-}
-
-/**
- * The live preview URL of the first session-linked task that exposes one, for
- * footers that skip the full linked-PR context (source-control comments).
- */
-export async function resolveFastSessionLivePreviewUrl(
-  sessionId: string,
-): Promise<string | null> {
-  const taskIds = await getFastSessionLinkedTaskIds(sessionId);
-  const urls = await Promise.all(
-    taskIds.map((taskId) => resolveThreadReplyLivePreviewUrl(taskId)),
-  );
-  return urls.find((url) => url) ?? null;
 }
 
 export async function resolveFastSessionReplyFooterContext(params: {
@@ -186,7 +169,12 @@ export function buildFastSessionReplyFooterText(params: {
             formatLink: formatMarkdownLink,
             formatFooterText: (text: string) => `-# ${text}`,
           }
-        : { formatLink: formatMarkdownLink }),
+        : params.provider === 'github'
+          ? {
+              formatLink: formatMarkdownLink,
+              formatFooterText: (text: string) => `<sub>${text}</sub>`,
+            }
+          : { formatLink: formatMarkdownLink }),
   });
 }
 

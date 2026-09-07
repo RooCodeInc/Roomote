@@ -8,7 +8,10 @@ import {
   type PreviewTokenContext,
 } from '@roomote/types';
 import { taskRuns, and, eq, inArray } from '@roomote/db/server';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  SnapshotResumeAlreadyExistsError,
+} from '@roomote/cloud-agents/server';
 
 import { db } from '../lib/db';
 import { logger, escapeForLog } from '../lib/logger';
@@ -140,6 +143,14 @@ export async function triggerAutoResume(
 
     return { success: true, newRunId: resumeLaunch.id };
   } catch (error) {
+    if (error instanceof SnapshotResumeAlreadyExistsError) {
+      logger.info(
+        { ...identifierLog, existingRunId: error.existingRunId },
+        'Concurrent resume task run already created',
+      );
+      return { success: true, newRunId: error.existingRunId };
+    }
+
     logger.error({ error, ...identifierLog }, 'Failed to trigger auto-resume');
 
     return {

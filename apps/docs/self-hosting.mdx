@@ -237,6 +237,11 @@ start one from the starter list. A healthy deployment should let you:
   variables, setup commands, or tool versions to the environment.
 - **Chat messages do not reach Roomote.** Confirm the app is installed, invited
   to the channel, and using the current callback URL.
+- **Fast reports that local working storage is full.** Clean up container
+  storage, then recreate the affected application containers. Installer-managed
+  Compose deployments can raise `ROOMOTE_APP_TMPFS_SIZE` above its `512m`
+  default before recreating them; keep the limit within the host's available
+  memory.
 - **Memory climbs for hours, or a service is OOM-killed under a container
   memory limit.** Node sizes its heap from the memory it can see (the host's,
   not the container's), so it defers garbage collection and lets memory drift

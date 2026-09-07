@@ -83,6 +83,9 @@ import type {
   FastAgentSurface,
   ReasoningEffort,
   SessionStatus,
+  SessionWakeupReportPolicy,
+  SessionWakeupSchedule,
+  SessionWakeupStatus,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -3362,6 +3365,76 @@ export const fastAgentConversationsRelations = relations(
     session: one(sessions),
   }),
 );
+
+/**
+ * session_wakeups
+ *
+ * Messages a Fast conversation scheduled for itself. A row stays `active`
+ * until it has fired for the last time, was cancelled, or failed too many
+ * turns in a row; terminal rows are retained for history. `next_run_at` is
+ * the source of truth for firing: the BullMQ delayed job is only a wakeup
+ * hint, and claiming an occurrence is a compare-and-set on that column.
+ */
+export const sessionWakeups = pgTable(
+  'session_wakeups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    name: text('name').notNull(),
+    prompt: text('prompt').notNull(),
+    /** Whitespace-collapsed, lower-cased prompt used to detect duplicates. */
+    promptSignature: text('prompt_signature').notNull(),
+    schedule: jsonb('schedule').notNull().$type<SessionWakeupSchedule>(),
+    reportPolicy: text('report_policy')
+      .notNull()
+      .$type<SessionWakeupReportPolicy>(),
+    status: text('status')
+      .notNull()
+      .default('active')
+      .$type<SessionWakeupStatus>(),
+    runCount: integer('run_count').notNull().default(0),
+    maxRuns: integer('max_runs'),
+    until: timestamp('until'),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    nextRunAt: timestamp('next_run_at'),
+    lastFiredAt: timestamp('last_fired_at'),
+    lastError: text('last_error'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_wakeups_due_idx').on(table.status, table.nextRunAt),
+    index('session_wakeups_conversation_idx').on(
+      table.conversationId,
+      table.status,
+    ),
+    check(
+      'session_wakeups_status_check',
+      sql`${table.status} in ('active', 'completed', 'cancelled', 'failed')`,
+    ),
+    check(
+      'session_wakeups_report_policy_check',
+      sql`${table.reportPolicy} in ('always', 'only_when_notable')`,
+    ),
+  ],
+);
+
+export const sessionWakeupsRelations = relations(sessionWakeups, ({ one }) => ({
+  conversation: one(fastAgentConversations, {
+    fields: [sessionWakeups.conversationId],
+    references: [fastAgentConversations.id],
+  }),
+  createdByUser: one(users, {
+    fields: [sessionWakeups.createdByUserId],
+    references: [users.id],
+  }),
+}));
 
 export const fastAgentParentEventsRelations = relations(
   fastAgentParentEvents,

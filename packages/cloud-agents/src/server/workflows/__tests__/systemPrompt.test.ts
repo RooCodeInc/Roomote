@@ -23,7 +23,7 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
 
   it('includes a resolved release identifier after the opening paragraph', () => {
     expect(buildRoomoteSystemPrompt('0.40.2')).toContain(
-      'until their goal is genuinely handled.\n\nRoomote release 0.40.2\n\n# Roomote Identity',
+      'until their goal is genuinely handled.\n\nRoomote release 0.40.2 (commit unknown)\n\n# Roomote Identity',
     );
   });
 

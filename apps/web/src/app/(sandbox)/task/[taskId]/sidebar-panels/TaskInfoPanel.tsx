@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import Image from 'next/image';
 import { Streamdown } from 'streamdown';
 
@@ -23,6 +24,7 @@ import { getTaskRunDisplayError } from '@/lib/task-run-errors';
 import { formatInferenceCost } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
 import { cn } from '@/lib/utils';
+import { useTRPC } from '@/trpc/client';
 
 import {
   BrandIcon,
@@ -226,6 +228,21 @@ export function TaskInfoPanel({
   harness,
   onClose,
 }: TaskInfoPanelProps) {
+  const trpc = useTRPC();
+  // Live usage events only carry context tokens. Refresh persisted cost when
+  // Info opens, even if the workspace's cached session is still fresh, and
+  // keep catching up with asynchronous usage writes while the panel is open.
+  const { data: session } = useQuery(
+    trpc.sandboxSession.byTaskId.queryOptions(
+      { taskId: task.id },
+      {
+        enabled: active,
+        staleTime: 0,
+        refetchOnMount: 'always',
+        refetchInterval: active ? 10_000 : false,
+      },
+    ),
+  );
   const { messages } = useSandboxMessages();
   const {
     enabled: summaryEnabled,
@@ -271,7 +288,7 @@ export function TaskInfoPanel({
         .join(' • ')
     : null;
   const inferenceCostLabel = formatInferenceCost(
-    task.inferenceUsage?.costMicroUsd,
+    (session?.task ?? task).inferenceUsage?.costMicroUsd,
   );
   const showRuntimeRow = false;
   const participants = useMemo(

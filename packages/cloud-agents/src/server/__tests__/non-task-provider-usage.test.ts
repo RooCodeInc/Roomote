@@ -1166,7 +1166,7 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it('exposes native prompt_async steering only while the Fast prompt is active', async () => {
+  it('leaves native steering unavailable while the Fast prompt is active', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',
     });
@@ -1178,13 +1178,7 @@ describe('resolveOpenCodeSmallModel', () => {
         }),
     );
     const onNativeSteerClosed = vi.fn();
-    let steer:
-      | ((input: {
-          messageId: string;
-          text: string;
-          files?: Array<{ mime: string; url: string }>;
-        }) => Promise<void>)
-      | undefined;
+    const onNativeSteerReady = vi.fn();
     const { generateTrackedNonTaskTextInOpenCodeSession } =
       await import('../non-task-provider-usage.js');
 
@@ -1194,35 +1188,14 @@ describe('resolveOpenCodeSmallModel', () => {
       {
         directory: '/tmp/roomote-fast-native-test',
         tools: { '*': false, send_chat_reply: true },
-        onNativeSteerReady: (inject) => {
-          steer = inject;
-        },
+        onNativeSteerReady,
         onNativeSteerClosed,
       },
     );
-    await vi.waitFor(() => expect(steer).toBeTypeOf('function'));
-    await steer!({
-      messageId: 'msg_019cf00dbabe00000000000000',
-      text: 'Use the corrected requirement.',
-      files: [{ mime: 'image/png', url: 'data:image/png;base64,aGVsbG8=' }],
-    });
-
-    expect(sessionPromptAsyncMock).toHaveBeenCalledWith(
-      {
-        sessionID: 'session-1',
-        directory: '/tmp/roomote-fast-native-test',
-        messageID: 'msg_019cf00dbabe00000000000000',
-        parts: [
-          { type: 'text', text: 'Use the corrected requirement.' },
-          {
-            type: 'file',
-            mime: 'image/png',
-            url: 'data:image/png;base64,aGVsbG8=',
-          },
-        ],
-      },
-      expect.any(Object),
-    );
+    await vi.waitFor(() => expect(finishPrompt).toBeTypeOf('function'));
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(onNativeSteerClosed).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
 
     finishPrompt?.({
       data: {
@@ -1233,6 +1206,86 @@ describe('resolveOpenCodeSmallModel', () => {
     });
     await expect(result).resolves.toBe('updated answer');
     expect(onNativeSteerClosed).toHaveBeenCalledOnce();
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('does not advertise or dispatch native steering at assistant completion', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((finish) => {
+        resolve = finish;
+      });
+      return { promise, resolve };
+    }
+    const initialPrompt = deferred<unknown>();
+    const initialCompletion = deferred<void>();
+    sessionPromptMock.mockReturnValue(initialPrompt.promise);
+    let eventSignal: AbortSignal | undefined;
+    const initialInfo = {
+      id: 'msg_initial_answer',
+      sessionID: 'session-1',
+      parentID: 'msg_initial_request',
+      role: 'assistant',
+      time: { created: 1, completed: 2 },
+    };
+    eventSubscribeMock.mockImplementation(async (_query, { signal }) => {
+      eventSignal = signal;
+      return {
+        stream: (async function* () {
+          await initialCompletion.promise;
+          yield {
+            type: 'message.updated',
+            properties: { info: initialInfo },
+          };
+        })(),
+      };
+    });
+    const onNativeSteerClosed = vi.fn();
+    const onNativeSteerReady = vi.fn();
+    const onMessageCompleted = vi.fn();
+    const onAssistantMessageCompleted = vi.fn();
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+    const result = generateTrackedNonTaskTextInOpenCodeSession(
+      { surface: 'fast_agent', prompt: 'Initial request.' },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        tools: { '*': false, send_chat_reply: true },
+        onNativeSteerReady,
+        onNativeSteerClosed,
+        onMessageCompleted,
+        onAssistantMessageCompleted,
+      },
+    );
+    await vi.waitFor(() => expect(sessionPromptMock).toHaveBeenCalledOnce());
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    initialCompletion.resolve();
+    await vi.waitFor(() =>
+      expect(onAssistantMessageCompleted).toHaveBeenCalledOnce(),
+    );
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
+    expect(eventSignal?.aborted).toBe(false);
+    initialPrompt.resolve({
+      data: {
+        info: initialInfo,
+        parts: [{ type: 'text', text: 'Original answer only.' }],
+      },
+      error: undefined,
+    });
+    await expect(result).resolves.toBe('Original answer only.');
+    expect(onMessageCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: initialInfo.id }),
+    );
+    expect(onNativeSteerClosed).toHaveBeenCalledOnce();
+    expect(eventSignal?.aborted).toBe(true);
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
   });
 
   it('classifies a missing held OpenCode session for cold bootstrap recovery', async () => {
@@ -2209,6 +2262,47 @@ describe('resolveOpenCodeSmallModel', () => {
     ).toMatchObject({ retryable: false });
   });
 
+  it.each([
+    [{ statusCode: ' 429 ', status: 401 }, 'rate_limited', true],
+    [
+      { statusCode: 'invalid', status: 402, code: 401 },
+      'insufficient_credits',
+      false,
+    ],
+    [{ statusCode: 399, status: 600, code: '404' }, 'model_unavailable', false],
+    [{ statusCode: 401.5, status: '0401', code: 429 }, 'rate_limited', true],
+    [{ extra: '[{"code":"401"}]' }, 'invalid_credentials', false],
+    [
+      { a: { nested: { status: 401 } }, b: { status: 429 } },
+      'rate_limited',
+      true,
+    ],
+    [{ status: 429, extra: { isRetryable: false } }, 'provider_error', false],
+    [{ status: 429, isRetryable: 'false' }, 'rate_limited', true],
+    [{ status: 429, isRetryable: 0 }, 'rate_limited', true],
+    [
+      { status: 401, isRetryable: false, extra: 'CONTENT_FILTER' },
+      'content_filter',
+      false,
+    ],
+    [
+      new Error('{"statusCode":418,"isRetryable":false}'),
+      'provider_error',
+      true,
+    ],
+    [{ error: new Error('ContentFilterError') }, 'content_filter', false],
+  ])(
+    'preserves classification policy for %j',
+    async (error, reason, retryable) => {
+      const { classifyNonTaskInferenceError } =
+        await import('../non-task-provider-usage.js');
+      expect(classifyNonTaskInferenceError(error)).toMatchObject({
+        reason,
+        retryable,
+      });
+    },
+  );
+
   it('continues observing provider errors when retry reporting fails', async () => {
     process.env = {
       ...originalEnv,
@@ -2642,6 +2736,160 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
     ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
     expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a native Fast session on its own model when it can view attached images', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_ORCHESTRATION_MODEL: 'openrouter/openai/gpt-5.6-sol',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-5.6-sol': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.8-flash': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'orchestration',
+      }),
+    ).resolves.toEqual({
+      delivery: 'direct',
+      model: 'openrouter/openai/gpt-5.6-sol',
+    });
+  });
+
+  it('hands images to the vision model as a helper when the session model cannot view them', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_ORCHESTRATION_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.6-pro',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'z-ai/glm-5.2': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.6-pro': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.8-flash': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'orchestration',
+      }),
+    ).resolves.toEqual({
+      delivery: 'helper',
+      model: 'openrouter/z-ai/glm-5.2',
+      helperModel: 'openrouter/google/gemini-3.6-pro',
+      helperReasoningEffort: 'low',
+    });
+  });
+
+  it('rejects image delivery when no configured model accepts images', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_VISION_MODEL: 'openrouter/z-ai/glm-5.2',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'z-ai/glm-5.2': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const {
+      resolveNonTaskInputModalityDelivery,
+      NonTaskInputModalityUnsupportedError,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'primary',
+      }),
+    ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
   });
 
   it('rejects when the plain SDK prompt reports a message error', async () => {

@@ -61,6 +61,12 @@ Container builds and services share the task sandbox's CPU and memory.
 4. confirm the task starts, streams logs, and can run project commands
 5. try resuming or following up on a task that can use a saved snapshot
 
+Modal-backed task snapshots remain eligible for resume until Modal removes the
+underlying snapshot; Roomote does not apply its seven-day application expiry to
+them. Provider availability and capacity can still prevent a resume. Other
+providers may use a bounded retention window, so treat a restorable snapshot in
+the task view as the source of truth.
+
 ## Common issues
 
 - **Tasks fail immediately after launch.** Check `MODAL_TOKEN_ID`,

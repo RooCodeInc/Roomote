@@ -643,6 +643,40 @@ describe('ModelSettingsSection', () => {
     ).toBeNull();
   });
 
+  it('stops retrying a rejected save and allows a deliberate retry', async () => {
+    const { toast } = await import('sonner');
+    settingsData.current = buildSettingsData({
+      orchestrationEffectiveModelId: 'openrouter/openai/gpt-5.4',
+      orchestrationPersistedModelId: 'openrouter/openai/gpt-5.4',
+    });
+    updateMutateAsyncMock
+      .mockRejectedValueOnce(new Error('Network unavailable'))
+      // Bound a regression to one extra attempt instead of an infinite loop.
+      .mockImplementationOnce(() => new Promise(() => {}));
+    const { container } = renderModelSettingsSection();
+    const orchestrationTrigger = () =>
+      container.querySelectorAll<HTMLButtonElement>(
+        '[data-slot="select-trigger"]',
+      )[2]!;
+    const originalSelection = orchestrationTrigger().textContent;
+
+    fireEvent.click(orchestrationTrigger());
+    fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'Failed to update model settings.',
+      );
+    });
+    expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    expect(orchestrationTrigger().textContent).toBe(originalSelection);
+
+    updateMutateAsyncMock.mockReset().mockResolvedValue({ success: true });
+    fireEvent.click(orchestrationTrigger());
+    fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
+    await waitFor(() => expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1));
+    expect(orchestrationTrigger()).toHaveTextContent('GLM 5.2');
+  });
+
   it('renders model metadata in the available models list', () => {
     const data = buildSettingsData();
     (data.models[0]!.metadata as TaskModelMetadata).lastRefreshedAt =

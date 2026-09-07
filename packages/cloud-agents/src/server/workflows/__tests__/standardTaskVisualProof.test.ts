@@ -9,7 +9,10 @@ const thisDirPath = path.dirname(thisFilePath);
 
 function readImplementChangesSkill() {
   return fs.readFileSync(
-    path.resolve(thisDirPath, '../skills/standard/implement-changes/SKILL.md'),
+    path.resolve(
+      thisDirPath,
+      '../skills/standard/implement-changes/resources/default-workflow.md',
+    ),
     'utf8',
   );
 }
@@ -65,7 +68,7 @@ describe('Standard Task visual-proof step', () => {
     const skillContent = readImplementChangesSkill();
 
     expect(skillContent).toContain(
-      'If the current implementation pass changed repository files, keep this workflow active by loading `capture-visual-proof` after implementation. That step decides whether visual proof applies, snapshots the diff, captures any applicable screenshots or screencasts with `agent-browser`, uploads them, and returns a proof result before the judge pass and branch/push/PR completion continue.',
+      'Otherwise, load `capture-visual-proof` in the current task/session for the final shipped change before the judge pass or delivery.',
     );
     expect(skillContent).toContain(
       'After implementation, check whether repository files actually changed, including newly added files.',
@@ -74,10 +77,10 @@ describe('Standard Task visual-proof step', () => {
       'Do not launch a separate task or subagent for this step.',
     );
     expect(skillContent).toContain(
-      'When the implementation changed repository files, the workflow continued in the current task/session by loading `capture-visual-proof` for the shipped change, kept browser capture inside that step on the `agent-browser` path, and returned artifacts or blockers honestly.',
+      'The proof skill decides applicability, snapshots the diff, captures any applicable screenshots or screencasts with `agent-browser`, uploads them, and returns its result.',
     );
     expect(skillContent).toContain(
-      'implement the current change -> check whether repository files changed -> if yes continue in the current task/session by loading `capture-visual-proof` and capturing proof there -> consume any uploaded-artifact evidence or latest proof links for PR embeds when screenshots or screencasts are kept -> refresh PR evidence to the latest relevant proof result for each later UI iteration',
+      'For later repository-file-changing iterations, rerun this step on the newer shipped state. Replace prior PR proof evidence with the latest relevant result instead of accumulating stale batches.',
     );
     expect(skillContent).toContain(
       'Do not substitute Playwright, browser devtools, ad hoc localhost scripts, or any other browser automation for the `agent-browser` path defined in `capture-visual-proof`.',

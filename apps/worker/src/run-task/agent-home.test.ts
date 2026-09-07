@@ -115,6 +115,17 @@ describe('generateOpenCodeConfig provider support', () => {
     return homeDir;
   }
 
+  it('limits standard task subagent depth to two', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      },
+    });
+
+    expect(JSON.parse(result.configContent).subagent_depth).toBe(2);
+  });
+
   it('installs the Roomote identity plugin for standard task sessions', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

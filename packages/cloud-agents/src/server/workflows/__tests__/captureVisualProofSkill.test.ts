@@ -36,7 +36,7 @@ describe('Capture visual proof skill', () => {
     expect(skillContent).not.toContain('proof-runner');
     expect(skillContent).not.toContain('<subagent_contract>');
     expect(skillContent).not.toContain('<background_delegation>');
-    expect(skillContent).not.toContain('Task tool');
+    expect(skillContent).toContain('before the Task tool invokes `judge`');
     expect(skillContent).not.toContain('proof brief');
   });
 
@@ -143,6 +143,19 @@ describe('Capture visual proof skill', () => {
       'return a blocked proof result with blocker type `proof capture timed out`',
     );
     expect(skillContent).toContain('proof_capture_timed_out');
+  });
+
+  it('ends proof at the judge handoff, not at artifact upload', () => {
+    expect(skillContent).toContain(
+      'Finish the report (including no-op or blocked results)',
+    );
+    expect(skillContent).toContain('this ends the proof deadline, not uploads');
+    expect(skillContent).toContain(
+      'Without a judge, load the next workflow skill before continuing.',
+    );
+    expect(skillContent).toContain(
+      'Reload `capture-visual-proof` after judge-driven source changes.',
+    );
   });
 
   it('treats manage_artifacts upload results as the only canonical proof links', () => {

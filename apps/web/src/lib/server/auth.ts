@@ -52,7 +52,10 @@ type AuthSessionResult = {
 
 type RoomoteAuth = {
   api: {
-    getSession(input: { headers: Headers }): Promise<AuthSessionResult>;
+    getSession(input: {
+      headers: Headers;
+      query?: { disableRefresh?: boolean };
+    }): Promise<AuthSessionResult>;
     requestPasswordReset(input: {
       body: {
         email: string;
@@ -1044,6 +1047,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
     },
     session: {
       modelName: 'authSessions',
+      expiresIn: 30 * 24 * 60 * 60,
+      updateAge: 24 * 60 * 60,
       // Better Auth gates account unlinking (and similar operations) behind a
       // "fresh session" check that defaults to one day, which makes
       // Settings > Linked Accounts unlink fail with "Session is not fresh"

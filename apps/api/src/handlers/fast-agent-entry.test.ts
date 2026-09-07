@@ -60,7 +60,6 @@ describe('resolveFastAgentEntryMode', () => {
   it('uses Fast for an available configured default', () => {
     expect(
       resolveFastAgentEntryMode({
-        explicitInvocation: false,
         userDefaultEnabled: true,
         fastAvailable: true,
       }),
@@ -70,9 +69,16 @@ describe('resolveFastAgentEntryMode', () => {
   it('keeps coding behavior when Fast is unavailable', () => {
     expect(
       resolveFastAgentEntryMode({
-        explicitInvocation: false,
         userDefaultEnabled: true,
         fastAvailable: false,
+      }),
+    ).toBeNull();
+  });
+
+  it('keeps coding behavior when Fast is not the configured default', () => {
+    expect(
+      resolveFastAgentEntryMode({
+        userDefaultEnabled: false,
       }),
     ).toBeNull();
   });

@@ -346,6 +346,61 @@ function userInputResponseMessage(params: {
 }
 
 describe('buildAcpRenderBlocks', () => {
+  it('shows patch filenames and counts consistently inside expanded groups', () => {
+    const messages = [
+      '*** Update File: /sandbox/repos/project/app.ts',
+      '*** Delete File: old.ts\n*** Add File: new.ts',
+      null,
+    ].map((patchText, ts) =>
+      explorationToolMessage({
+        id: `patch-${ts}`,
+        ts,
+        kind: 'apply_patch',
+        mcp: false,
+        title: 'Success. Updated the following files: D not-a-target.ts',
+        payload: { toolName: 'apply_patch', rawInput: { patchText } },
+      }),
+    );
+    expect(buildAcpRenderBlocks(messages)[0]).toMatchObject({
+      kind: 'tool_group',
+      objectSummary: '3 edits',
+      items: [
+        { objectLabel: 'Edited project/app.ts' },
+        { objectLabel: 'Edited 2 files' },
+        { objectLabel: 'Edited' },
+      ],
+    });
+  });
+  it.each([
+    ['apply_patch', 'Edited', '2 edits'],
+    ['skill', 'Loaded skill capture-visual-proof', '2 skill calls'],
+    [
+      'custom_formatter',
+      'Completed Custom Formatter call',
+      '2 custom formatter calls',
+    ],
+  ])(
+    'keeps grouped %s item labels free of result prose',
+    (toolName, objectLabel, objectSummary) => {
+      const messages = [1, 2].map((ts) =>
+        explorationToolMessage({
+          id: `native-${ts}`,
+          ts,
+          kind: toolName,
+          mcp: false,
+          title: 'Success. Updated the following files: D old.ts',
+          payload: { toolName, rawInput: { name: 'capture-visual-proof' } },
+        }),
+      );
+      const blocks = buildAcpRenderBlocks(messages);
+      expect(blocks).toHaveLength(1);
+      expect(blocks[0]).toMatchObject({
+        kind: 'tool_group',
+        objectSummary,
+        items: [{ objectLabel }, { objectLabel }],
+      });
+    },
+  );
   it('groups consecutive file reads into one exploration block', () => {
     const entries = buildAcpRenderBlocks([
       readFileToolMessage({
@@ -846,7 +901,7 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[0]).toMatchObject({
       kind: 'tool_group',
       action: 'Edited',
-      objectSummary: '2 files',
+      objectSummary: '2 edits',
       displayKind: 'edit',
     });
   });

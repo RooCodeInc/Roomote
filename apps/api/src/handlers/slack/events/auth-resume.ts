@@ -99,7 +99,6 @@ export async function resumePendingSlackAuthRequest(
       slack,
       userId: activeMapping.userId,
       teamId: authToken.slackTeamId,
-      continuation: true,
       directedAtRoomote: true,
       processingReactionName: ackEmoji,
       errorLogPrefix: `Failed to resume pending Slack request in thread ${authToken.threadTs}:`,

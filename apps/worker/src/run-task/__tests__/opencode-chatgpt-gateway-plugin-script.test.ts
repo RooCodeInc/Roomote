@@ -91,6 +91,7 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
     const models = await modelsHook({
       models: {
         'gpt-5.4': createModel('gpt-5.4'),
+        'gpt-6-astra': createModel('gpt-6-astra'),
         'gpt-5.6-luna': createModel('gpt-5.6-luna'),
         'gpt-5.6': createModel('gpt-5.6'),
         'gpt-5.5-pro': createModel('gpt-5.5-pro'),
@@ -103,6 +104,7 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
 
     expect(Object.keys(models)).toEqual([
       'gpt-5.4',
+      'gpt-6-astra',
       'gpt-5.6-luna',
       'gpt-5.6',
       'gpt-5.5-pro',
@@ -112,6 +114,17 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
       input: 0,
       output: 0,
       cache: { read: 0, write: 0 },
+    });
+    expect(models['gpt-6-astra']).toMatchObject({
+      cost: {
+        input: 0,
+        output: 0,
+        cache: { read: 0, write: 0 },
+      },
+      limit: {
+        context: 200_000,
+        output: 64_000,
+      },
     });
     expect(models['gpt-5.6-luna']).toMatchObject({
       cost: {

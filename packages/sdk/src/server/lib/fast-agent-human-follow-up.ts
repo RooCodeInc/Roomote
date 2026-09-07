@@ -49,10 +49,27 @@ export type FastAgentHumanFollowUpAdmission =
  * row is persisted under a claim lease before any work starts, so the turn
  * survives the accepting process: if that process is interrupted before the
  * turn has posted its closeout, it releases the claim and the parent-event
- * queue resumes the turn, telling it what the earlier attempt already did. The queue is not woken here; a live owner runs
- * the turn itself. An older pending inline row for the same conversation is
- * an interrupted turn this newer message supersedes.
+ * queue resumes the turn, telling it what the earlier attempt already did.
+ * The queue is not woken here; a live owner runs the turn itself.
+ *
+ * A typed human message supersedes an older pending inline row for the same
+ * conversation: that row is an interrupted or parked turn, and the new turn
+ * is told about the request it still owes. A reaction or a platform event
+ * admitted through this path does not supersede anything: neither answers
+ * the earlier request, so the earlier turn keeps its row and resumes once
+ * the conversation is idle again.
  */
+/**
+ * Only a typed human message stands in for the request an older pending turn
+ * still owes. A reaction (`input`) or a platform event admitted through the
+ * human path (`turnSource`) is a side conversation: discarding the older row
+ * for it would silently drop a question that was parked for a retry or
+ * waiting to resume.
+ */
+function supersedesPendingTurns(event: FastAgentHumanFollowUpEvent): boolean {
+  return !event.input && event.turnSource !== 'platform_event';
+}
+
 export async function persistFastAgentInlineHumanTurn(params: {
   parent: FastAgentParent;
   event: FastAgentHumanFollowUpEvent;
@@ -101,22 +118,24 @@ export async function persistFastAgentInlineHumanTurn(params: {
         .where(eq(fastAgentParentEvents.id, row.id));
     }
 
-    await tx
-      .update(fastAgentParentEvents)
-      .set({
-        discardedAt: new Date(),
-        lastError: 'Superseded by a newer human message.',
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(fastAgentParentEvents.conversationId, params.parent.sessionId),
-          eq(fastAgentParentEvents.admission, 'inline'),
-          ne(fastAgentParentEvents.eventKey, eventKey),
-          isNull(fastAgentParentEvents.deliveredAt),
-          isNull(fastAgentParentEvents.discardedAt),
-        ),
-      );
+    if (supersedesPendingTurns(params.event)) {
+      await tx
+        .update(fastAgentParentEvents)
+        .set({
+          discardedAt: new Date(),
+          lastError: 'Superseded by a newer human message.',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(fastAgentParentEvents.conversationId, params.parent.sessionId),
+            eq(fastAgentParentEvents.admission, 'inline'),
+            ne(fastAgentParentEvents.eventKey, eventKey),
+            isNull(fastAgentParentEvents.deliveredAt),
+            isNull(fastAgentParentEvents.discardedAt),
+          ),
+        );
+    }
 
     return { id: row.id, eventKey, ...(resumed ? { resumed: true } : {}) };
   });

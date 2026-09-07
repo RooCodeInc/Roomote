@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   findCustomAutomation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
+  findWakeup: vi.fn(),
+  findWakeupSession: vi.fn(),
   findTaskRuns: vi.fn(),
   getConversationLookupIds: vi.fn(),
   findTaskPullRequests: vi.fn(),
@@ -138,6 +140,8 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: mocks.findCustomAutomation,
+  getSessionWakeupById: mocks.findWakeup,
+  getSessionForFastConversation: mocks.findWakeupSession,
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
@@ -1108,6 +1112,187 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).toHaveBeenCalledOnce();
   });
 
+  it('posts a fixed failure report when a Fast automation task fails', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        title: 'Flaky tests',
+        status: 'failed',
+        error: 'sandbox exited before reporting',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        text: '"Flaky tests" failed: sandbox exited before reporting',
+      }),
+    );
+  });
+
+  it('posts suggestions beneath the Slack report when an automation task settles', async () => {
+    const pendingParent = {
+      sessionId: parent.sessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: 'automation-1:occurrence-1',
+        replyTarget: { channelId: 'C123' },
+      },
+    };
+    const suggestions = [
+      { title: 'Quarantine the flaky spec', brief: 'Skip it until fixed.' },
+    ];
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Two flaky specs found.',
+          suggestions,
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: pendingParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformEventKind: 'delegated_task',
+        automationReport: true,
+      }),
+    );
+    expect(mocks.appendSuggestionInstruction).toHaveBeenCalledWith(
+      'Two flaky specs found.',
+      'slack',
+      true,
+    );
+    expect(mocks.postSlackSuggestions).toHaveBeenCalledWith({
+      slack: expect.any(Object),
+      channelId: 'C123',
+      threadTs: '101.001',
+      eventId: 'automation-1:task:child-task-1',
+      createdByUserId: 'u1',
+      suggestions,
+    });
+  });
+
+  it('posts Discord suggestions when an automation task settles', async () => {
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    };
+    const suggestions = [
+      { title: 'Verify retry behavior', brief: 'Exercise the failure path.' },
+    ];
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Retry failures increased.',
+          suggestions,
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: discordParent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-2',
+        runId: 43,
+        customAutomationId: 'automation-2',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-2',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.appendSuggestionInstruction).toHaveBeenCalledWith(
+      'Retry failures increased.',
+      'discord',
+      true,
+    );
+    expect(mocks.postDiscordSuggestions).toHaveBeenCalledWith({
+      provider: expect.any(Object),
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      eventId: 'automation-2:task:child-task-2',
+      createdByUserId: 'u1',
+      suggestions,
+    });
+  });
+
+  it('does not treat an ordinary delegated-task settle as an automation report', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Done.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-3',
+        runId: 44,
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-3',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ automationReport: false }),
+    );
+    expect(mocks.appendSuggestionInstruction).not.toHaveBeenCalled();
+    expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
+  });
+
   it('creates the first Slack message when a pending Fast automation settles', async () => {
     const pendingParent = {
       sessionId: parent.sessionId,
@@ -1178,36 +1363,6 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it('keeps a failed pending Fast automation silent in Slack', async () => {
-    const pendingParent = {
-      sessionId: parent.sessionId,
-      conversation: {
-        surface: 'slack' as const,
-        workspaceId: 'T123',
-        conversationId: 'automation-1:occurrence-1',
-        replyTarget: { channelId: 'C123' },
-      },
-    };
-
-    await deliverFastAgentParentEvent({
-      parent: pendingParent,
-      event: {
-        type: 'task_settled',
-        taskId: 'child-task-1',
-        runId: 42,
-        customAutomationId: 'automation-1',
-        status: 'failed',
-        error: 'Sandbox startup failed.',
-        taskUrl: 'https://roomote.example/task/child-task-1',
-        pullRequests: [],
-      },
-    });
-
-    expect(mocks.postMessage).not.toHaveBeenCalled();
-    expect(mocks.updateMessage).not.toHaveBeenCalled();
-    expect(mocks.bindConversation).not.toHaveBeenCalled();
-  });
-
   it('replaces an input root with the completed automation result', async () => {
     await deliverFastAgentParentEvent({
       parent,
@@ -1275,66 +1430,83 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
-  it('delegates a task with the stored automation conversation as its Fast parent', async () => {
-    const automationParent = {
-      sessionId: parent.sessionId,
-      conversation: {
-        surface: 'automation' as const,
-        workspaceId: 'automation-1',
-        conversationId: 'occurrence-1',
-      },
-    };
-    mocks.answerQuestion.mockImplementationOnce(
-      async ({
-        adapter,
-      }: {
-        adapter: {
-          launchTask: typeof mocks.launchTask;
-          resolveMcpServerConfigs: () => Promise<unknown>;
-        };
-      }) => {
-        await adapter.resolveMcpServerConfigs();
-        return adapter.launchTask({
-          prompt: 'Inspect the repository.',
-          environmentId: null,
-          parentSessionId: automationParent.sessionId,
-          postKickoff: vi.fn(),
-        });
-      },
-    );
+  it.each([undefined, 'anthropic/claude-sonnet-5'])(
+    'keeps child model selection independent of the automation session: %s',
+    async (childModel) => {
+      const automationParent = {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'automation' as const,
+          workspaceId: 'automation-1',
+          conversationId: 'occurrence-1',
+        },
+      };
+      mocks.findSession.mockResolvedValueOnce({
+        id: automationParent.sessionId,
+        userId: 'u1',
+        conversation: automationParent.conversation,
+        model: 'openai/gpt-5.6-luna',
+        reasoningEffort: 'high',
+      });
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: {
+            launchTask: typeof mocks.launchTask;
+            resolveMcpServerConfigs: () => Promise<unknown>;
+          };
+        }) => {
+          await adapter.resolveMcpServerConfigs();
+          return adapter.launchTask({
+            prompt: 'Inspect the repository.',
+            environmentId: null,
+            ...(childModel
+              ? { model: childModel, reasoningEffort: 'low' }
+              : {}),
+            parentSessionId: automationParent.sessionId,
+            postKickoff: vi.fn(),
+          });
+        },
+      );
 
-    await deliverFastAgentParentEvent({
-      parent: automationParent,
-      event: {
-        type: 'automation_triggered',
-        eventId: 'occurrence-1',
-        automationId: 'automation-1',
-        automationName: 'Weekly scan',
-        prompt: 'Find actionable regressions.',
-        trigger: 'schedule',
-        defaultTaskModel: 'openai/gpt-5.6-luna',
-        defaultTaskReasoningEffort: 'high',
-      },
-    });
+      await deliverFastAgentParentEvent({
+        parent: automationParent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger: 'schedule',
+        },
+      });
 
-    expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith({
-      userId: 'u1',
-      apiBaseUrl: 'https://roomote.example.com',
-      includeRoomoteMemberTools: true,
-    });
-    expect(mocks.enqueueTask).toHaveBeenCalledWith({
-      task: expect.objectContaining({
-        payload: expect.objectContaining({
-          fastAgentSessionId: automationParent.sessionId,
-          fastAgentParent: automationParent,
-          harnessModelOverrides: {
-            'opencode-server': 'openai/gpt-5.6-luna',
-          },
-          reasoningEffort: 'high',
+      expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith({
+        userId: 'u1',
+        apiBaseUrl: 'https://roomote.example.com',
+        includeRoomoteMemberTools: true,
+      });
+      expect(mocks.enqueueTask).toHaveBeenCalledWith({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            fastAgentSessionId: automationParent.sessionId,
+            fastAgentParent: automationParent,
+          }),
         }),
-      }),
-    });
-  });
+      });
+      const payload = mocks.enqueueTask.mock.calls[0]![0].task.payload;
+      if (childModel) {
+        expect(payload.harnessModelOverrides).toEqual({
+          'opencode-server': childModel,
+        });
+        expect(payload.reasoningEffort).toBe('low');
+      } else {
+        expect(payload).not.toHaveProperty('harnessModelOverrides');
+        expect(payload).not.toHaveProperty('reasoningEffort');
+      }
+    },
+  );
 
   it('uses a stable delivery key when the same child update is retried', async () => {
     const childEvent = {
@@ -1825,6 +1997,192 @@ describe('deliverFastAgentParentEvent', () => {
       taskId: 'child-task-1',
       taskUrl: 'https://roomote.example/task/child-task-1',
     });
+  });
+
+  it.each([
+    {
+      surface: 'discord' as const,
+      workspaceId: 'dm',
+      channelId: 'discord-dm-1',
+      threadId: undefined,
+      serviceUrl: undefined,
+    },
+    {
+      surface: 'teams' as const,
+      workspaceId: 'tenant-1',
+      channelId: 'teams-channel-1',
+      threadId: 'teams-root-1',
+      serviceUrl: 'https://smba.example.com/amer/',
+    },
+    {
+      surface: 'telegram' as const,
+      workspaceId: 'telegram-chat-1',
+      channelId: 'telegram-chat-1',
+      threadId: undefined,
+      serviceUrl: undefined,
+    },
+  ])(
+    'marks a $surface automation delegation with the automation id',
+    async ({ surface, workspaceId, channelId, threadId, serviceUrl }) => {
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { launchTask: (input: unknown) => unknown };
+        }) =>
+          adapter.launchTask({
+            prompt: 'Inspect the repository.',
+            environmentId: null,
+            model: null,
+            parentSessionId: parent.sessionId,
+            postKickoff: vi.fn().mockResolvedValue(undefined),
+          }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: {
+          ...parent,
+          conversation: {
+            surface,
+            workspaceId,
+            conversationId: 'automation-1:occurrence-1',
+            replyTarget: {
+              channelId,
+              ...(threadId ? { threadId } : {}),
+              ...(serviceUrl ? { serviceUrl } : {}),
+            },
+          },
+        },
+        event: {
+          type: 'automation_triggered',
+          eventId: 'automation-1:occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger: 'schedule',
+        },
+      });
+
+      expect(mocks.enqueueTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task: expect.objectContaining({
+            payload: expect.objectContaining({
+              customAutomationId: 'automation-1',
+              communicationProvider: surface,
+              fastAgentSessionId: parent.sessionId,
+            }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it('keeps delegating as the automation after its task settles on Teams', async () => {
+    mocks.findTeamsConversationRoute.mockResolvedValueOnce({
+      serviceUrl: 'https://smba.example.com/amer/',
+      workspaceId: 'tenant-1',
+    });
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { launchTask: (input: unknown) => unknown };
+      }) =>
+        adapter.launchTask({
+          prompt: 'Fix the regression the scan found.',
+          environmentId: null,
+          model: null,
+          parentSessionId: parent.sessionId,
+          postKickoff: vi.fn().mockResolvedValue(undefined),
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'teams',
+          workspaceId: 'tenant-1',
+          conversationId: 'teams-conversation-1',
+          replyTarget: {
+            channelId: 'teams-channel-1',
+            threadId: 'teams-root-1',
+            serviceUrl: 'https://smba.example.com/amer/',
+          },
+        },
+      },
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            customAutomationId: 'automation-1',
+            communicationProvider: 'teams',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('marks Slack live launches in a bound automation thread with the automation id', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { launchTask: (input: unknown) => unknown };
+      }) =>
+        adapter.launchTask({
+          prompt: 'Fix the regression the scan found.',
+          environmentId: null,
+          model: null,
+          parentSessionId: parent.sessionId,
+          postKickoff: vi.fn().mockResolvedValue(undefined),
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T123',
+          conversationId: 'automation-1:occurrence-1',
+          replyTarget: { channelId: 'C123', threadId: '100.001' },
+        },
+      },
+      event: {
+        type: 'task_settled',
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+    });
+
+    expect(mocks.createLauncher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'C123',
+        threadTs: '100.001',
+        customAutomationId: 'automation-1',
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'custom_automation',
+          actingUserId: 'u1',
+        }),
+      }),
+    );
   });
 
   it.each([
@@ -2381,6 +2739,139 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
 
+  it('skips a scheduled wakeup that was cancelled after its occurrence was admitted', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'cancelled' });
+    const result = await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'always',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(result).toBe('skipped');
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('skips a scheduled wakeup whose Session was archived even if the row is still active', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'active' });
+    mocks.findWakeupSession.mockResolvedValueOnce({
+      archivedAt: new Date('2026-09-04T17:05:00.000Z'),
+    });
+    const result = await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'always',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(result).toBe('skipped');
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('drops the reply and cancels the turn when the wakeup is cancelled mid-turn', async () => {
+    // Deliverable at the start of the turn, cancelled by the time the model
+    // wants to post.
+    mocks.findWakeup
+      .mockResolvedValueOnce({ status: 'active' })
+      .mockResolvedValueOnce({ status: 'cancelled' });
+    mocks.findWakeupSession.mockResolvedValue({ archivedAt: null });
+    let signalAbortedAfterPost: boolean | undefined;
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+        signal,
+        turnLockSignal,
+      }: {
+        adapter: { postReply: (reply: unknown) => Promise<unknown> };
+        signal: AbortSignal;
+        turnLockSignal: AbortSignal;
+      }) => {
+        expect(signal.aborted).toBe(false);
+        expect(turnLockSignal).toBe(mocks.releaseTurnLock.signal);
+        expect(signal).not.toBe(turnLockSignal);
+        await adapter.postReply({
+          purpose: 'closeout',
+          message: 'Time to check the deploy.',
+        });
+        signalAbortedAfterPost = signal.aborted;
+        return 'Time to check the deploy.';
+      },
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'always',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(signalAbortedAfterPost).toBe(true);
+  });
+
+  it('still runs a scheduled wakeup whose one-shot row completed at claim time', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'completed' });
+    mocks.findWakeupSession.mockResolvedValueOnce({ archivedAt: null });
+    const result = await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-1:1',
+        wakeupId: 'wakeup-1',
+        name: 'Check the deploy',
+        prompt: 'Tell the user to check the deploy.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'always',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(result).toBe('delivered');
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnSource: 'platform_event',
+        platformEventKind: 'scheduled_wakeup',
+        platformEventVisibility: 'required',
+        userId: 'user-1',
+      }),
+    );
+  });
+
   it('answers a pull request mention routed into a Slack Session on both the thread and the pull request', async () => {
     mocks.buildSourceControlFastDelivery.mockResolvedValue({
       postComment: async (input: unknown) => {
@@ -2447,8 +2938,8 @@ describe('deliverFastAgentParentEvent', () => {
       conversationId: 'pull/42',
       replyTarget: { channelId: 'pull/42', threadId: '800' },
     });
-    // The pull request gets the answer under the quoted mention, in the
-    // review thread the mention came from.
+    // The pull request gets the answer in the review thread the mention
+    // came from; the reply sits under the mention, so it is not quoted.
     expect(mocks.postSourceControlComment).toHaveBeenCalledOnce();
     const comment = mocks.postSourceControlComment.mock.calls[0]?.[0] as {
       discussion: { number: number; reviewCommentId?: string };
@@ -2457,7 +2948,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(comment.discussion).toEqual(
       expect.objectContaining({ number: 42, reviewCommentId: '800' }),
     );
-    expect(comment.body).toContain('> Can you also update the changelog?');
+    expect(comment.body).not.toContain('> Can you also update the changelog?');
     expect(comment.body).toContain('Done: the changelog now mentions the fix.');
     // The Slack thread gets the same answer with attribution to the mention.
     const slackPosts = JSON.stringify(mocks.postMessage.mock.calls);

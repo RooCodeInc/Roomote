@@ -27,6 +27,7 @@ export async function postSlackThreadMarkdownMessage({
   sourceMessageTs,
   conversationLog,
   fastSessionFooter,
+  images = [],
 }: {
   slack: SlackNotifier;
   channel: string;
@@ -40,6 +41,7 @@ export async function postSlackThreadMarkdownMessage({
   };
   /** Attach the sticky Fast session reply footer to this message. */
   fastSessionFooter?: { sessionId: string } & FastSessionReplyFooterContext;
+  images?: Array<{ url: string; altText: string }>;
 }): Promise<SlackThreadMarkdownPostResult> {
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
@@ -64,7 +66,14 @@ export async function postSlackThreadMarkdownMessage({
         channel,
         threadTs,
         text,
-        bodyBlocks: [{ type: 'markdown', text }],
+        bodyBlocks: [
+          { type: 'markdown', text },
+          ...images.map((image) => ({
+            type: 'image' as const,
+            image_url: image.url,
+            alt_text: image.altText,
+          })),
+        ],
         footerText: buildFastSessionReplyFooterText({
           provider: 'slack',
           ...fastSessionFooter,
@@ -79,6 +88,11 @@ export async function postSlackThreadMarkdownMessage({
             type: 'markdown',
             text,
           },
+          ...images.map((image) => ({
+            type: 'image' as const,
+            image_url: image.url,
+            alt_text: image.altText,
+          })),
         ],
       });
 

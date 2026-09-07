@@ -40,6 +40,9 @@ export function createSlackFastReplyStream(params: {
   footerContext: FastSessionReplyFooterContext;
   /** The pending quote a first reply leads with, cleared after delivery. */
   getQuote?: () => string | null;
+  resolveImages?: (
+    artifactIds: string[],
+  ) => Promise<Array<{ url: string; altText: string }>>;
   onDelivered?: () => void;
 }): FastAgentReplyStream {
   let messageTs: string | null = null;
@@ -75,8 +78,17 @@ export function createSlackFastReplyStream(params: {
       const ts = messageTs;
       if (!ts) return undefined;
       messageTs = null;
-      await params.slack.stopMessageStream({ channel: params.channelId, ts });
+      // Message completion (even a closeout) is not turn completion.
+      // The registered turn activity cleanup owns the final idle transition.
+      await params.slack.stopMessageStream({
+        channel: params.channelId,
+        ts,
+        sessionStatus: 'processing',
+      });
       const quote = params.getQuote?.() ?? null;
+      const images = reply.imageArtifactIds?.length
+        ? ((await params.resolveImages?.(reply.imageArtifactIds)) ?? [])
+        : [];
       let updated = false;
       try {
         updated = await updateSlackThreadMessageWithFooterText({
@@ -96,6 +108,11 @@ export function createSlackFastReplyStream(params: {
                 ]
               : []),
             { type: 'markdown' as const, text: reply.message },
+            ...images.map((image) => ({
+              type: 'image' as const,
+              image_url: image.url,
+              alt_text: image.altText,
+            })),
           ],
           footerText: buildFastSessionReplyFooterText({
             provider: 'slack',
@@ -134,7 +151,11 @@ export function createSlackFastReplyStream(params: {
       const ts = messageTs;
       if (!ts) return;
       messageTs = null;
-      await params.slack.stopMessageStream({ channel: params.channelId, ts });
+      await params.slack.stopMessageStream({
+        channel: params.channelId,
+        ts,
+        sessionStatus: 'processing',
+      });
     },
   };
 }

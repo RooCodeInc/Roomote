@@ -249,6 +249,7 @@ async function launchTaskSuggestionTaskFromReaction({
   const directCard = await db.query.trackedMessages.findFirst({
     where: and(
       eq(trackedMessages.kind, 'suggestion_card'),
+      eq(trackedMessages.surface, 'slack'),
       eq(trackedMessages.channelId, channelId),
       eq(trackedMessages.messageTs, messageTs),
     ),
@@ -280,6 +281,7 @@ async function launchTaskSuggestionTaskFromReaction({
     const fallbackCard = await db.query.trackedMessages.findFirst({
       where: and(
         eq(trackedMessages.kind, 'suggestion_card'),
+        eq(trackedMessages.surface, 'slack'),
         eq(trackedMessages.workItemId, suggestionIdFromMetadata),
       ),
       columns: cardColumns,
@@ -561,8 +563,6 @@ async function launchTaskSuggestionTaskFromReaction({
   const originSessionId = await resolveSuggestionOriginSessionId(
     workItem.sourceTaskId,
   );
-  // The Session that produced the suggestion announces the launch in its own
-  // thread; only a suggestion with no Slack-visible origin seeds a new one.
   const originThread = originSessionId
     ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
     : null;
@@ -614,6 +614,21 @@ async function launchTaskSuggestionTaskFromReaction({
           if (!activeUserMapping) {
             return { accepted: false, reason: 'Fast mode is unavailable.' };
           }
+          if (originSessionId) {
+            await fastAgentConversationRepository.getOrCreate({
+              userId: activeUserMapping.userId,
+              sessionId: originSessionId,
+              conversation: {
+                surface: 'slack',
+                workspaceId: teamId,
+                conversationId: launchThreadTs,
+                replyTarget: {
+                  channelId: announceChannelId,
+                  threadId: launchThreadTs,
+                },
+              },
+            });
+          }
           const fastStart = await startFastAgentResponse({
             event: {
               type: 'app_mention',
@@ -629,7 +644,6 @@ async function launchTaskSuggestionTaskFromReaction({
             slack,
             userId: activeUserMapping.userId,
             teamId,
-            continuation: true,
             processingReactionName: ackEmoji,
             errorLogPrefix: `Failed to start Fast suggestion response for work item ${workItemId}:`,
           });
@@ -754,7 +768,13 @@ async function launchTaskSuggestionTaskFromReaction({
     await db
       .update(trackedMessages)
       .set({ threadTs: launchThreadTs, updatedAt: new Date() })
-      .where(eq(trackedMessages.id, suggestionCard.id))
+      .where(
+        and(
+          eq(trackedMessages.id, suggestionCard.id),
+          eq(trackedMessages.surface, 'slack'),
+          eq(trackedMessages.channelId, announceChannelId),
+        ),
+      )
       .catch((error) => {
         apiLogger.warn(
           `${logPrefix} failed to record launched suggestion thread: ${formatErrorForLog(error)}`,
