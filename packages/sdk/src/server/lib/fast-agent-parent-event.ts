@@ -102,6 +102,7 @@ import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-c
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
+import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
 import {
@@ -1275,7 +1276,12 @@ async function createDiscordFastAgentParentTurn(
     event: params.event,
     conversation,
   });
+  const activity = createFastAgentTypingActivity({
+    sendTyping: () => provider.triggerTyping(conversation.replyTarget),
+    intervalMs: 8_000,
+  });
   const adapter: FastAgentTurnAdapter = {
+    activity,
     launchTask: createFastAgentDiscordTaskLauncher({
       provider,
       userId: actorUserId,
@@ -1340,6 +1346,7 @@ async function createDiscordFastAgentParentTurn(
             'Discord did not return a Fast automation report message id.',
           );
         }
+        activity.reassert();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -1359,6 +1366,7 @@ async function createDiscordFastAgentParentTurn(
             createdByUserId: actorUserId,
             suggestions,
           });
+          activity.reassert();
         }
         params.onReplyPosted();
         return;
@@ -1442,6 +1450,7 @@ async function createDiscordFastAgentParentTurn(
               : {}),
           }),
       });
+      activity.reassert();
       await recordFastAgentConversationMessageBestEffort({
         sessionId: session.id,
         conversation,
@@ -1461,6 +1470,7 @@ async function createDiscordFastAgentParentTurn(
           createdByUserId: actorUserId,
           suggestions,
         });
+        activity.reassert();
       }
       if (action) {
         const { superseded } =
@@ -1480,7 +1490,7 @@ async function createDiscordFastAgentParentTurn(
   };
   // A resumed turn edits the retry notice its predecessor posted; an
   // oversized replacement falls back to a fresh reply through this adapter.
-  adapter.replaceReply = createDiscordFastReplyReplacer({
+  const replaceReply = createDiscordFastReplyReplacer({
     provider,
     conversation,
     channelId: conversation.replyTarget.channelId,
@@ -1490,6 +1500,11 @@ async function createDiscordFastAgentParentTurn(
     postReplacement: (text) =>
       adapter.postReply({ purpose: 'closeout', message: text }),
   });
+  adapter.replaceReply = async (handle, reply) => {
+    const result = await replaceReply(handle, reply);
+    activity.reassert();
+    return result;
+  };
   return { userId: actorUserId, conversation, adapter };
 }
 
@@ -1674,10 +1689,22 @@ async function createTelegramFastAgentParentTurn(
   }
   const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
+  const activity = createFastAgentTypingActivity({
+    sendTyping: () => provider.sendChatAction(conversation.replyTarget),
+    intervalMs: 4_000,
+  });
+  const replaceReply = createTelegramFastReplyReplacer({
+    provider,
+    conversation,
+    channelId: conversation.replyTarget.channelId,
+    sessionId: session.id,
+    footerContext: params.footerContext,
+  });
   return {
     userId: actorUserId,
     conversation,
     adapter: {
+      activity,
       launchTask: createFastAgentCommunicationTaskLauncher({
         userId: actorUserId,
         conversation,
@@ -1686,13 +1713,11 @@ async function createTelegramFastAgentParentTurn(
           conversation,
         }),
       }),
-      replaceReply: createTelegramFastReplyReplacer({
-        provider,
-        conversation,
-        channelId: conversation.replyTarget.channelId,
-        sessionId: session.id,
-        footerContext: params.footerContext,
-      }),
+      replaceReply: async (handle, reply) => {
+        const result = await replaceReply(handle, reply);
+        activity.reassert();
+        return result;
+      },
       postReply: async ({
         message,
         imageArtifactIds = [],
@@ -1721,6 +1746,7 @@ async function createTelegramFastAgentParentTurn(
           textFormat: 'markdown',
           images,
         });
+        activity.reassert();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -1744,6 +1770,7 @@ async function createTelegramFastAgentParentTurn(
             createdByUserId: actorUserId,
             suggestions,
           });
+          activity.reassert();
         }
         params.onReplyPosted();
         return { messageId: posted.messageId };
