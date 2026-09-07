@@ -17,8 +17,10 @@ import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
+  Skeleton,
 } from '@/components/system';
 
+import { useTaskSummary } from '../../hooks/use-task-summary';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 import { isSubagentToolPayload } from './subagent-tool';
 import {
@@ -45,6 +47,7 @@ export function AcpToolDetails({
   const sanitizedToolData = sanitizeSandboxPathsForDisplay(msg.data);
   const visibleToolInput = getVisibleToolInput(msg.data);
   const taskReference = getTaskMessageReference(msg.data);
+  const summaryTaskId = getSummaryTaskId(msg);
   const isSubagent = isSubagentToolPayload(msg.data);
   const subagentPrompt = getSubagentPrompt(msg);
   const subagentLastMessage = getSubagentLastMessage(msg);
@@ -107,9 +110,12 @@ export function AcpToolDetails({
     Boolean(formattedInput),
   );
 
-  if (formattedInput || formattedResult || taskReference) {
+  if (formattedInput || formattedResult || taskReference || summaryTaskId) {
     return (
       <div className="space-y-3">
+        {summaryTaskId ? (
+          <TaskSummaryDetails taskId={summaryTaskId} maxHeight={maxHeight} />
+        ) : null}
         {taskReference ? (
           <section className="space-y-1.5">
             <div className="text-xs font-medium text-muted-foreground">
@@ -166,6 +172,84 @@ export function AcpToolDetails({
         overflow: 'auto',
       }}
     />
+  );
+}
+
+function getSummaryTaskId(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+): string | null {
+  if (msg.kind !== 'tool_result' || msg.data.status !== 'completed')
+    return null;
+
+  const toolName = (msg.data.toolName ?? msg.data.mcpToolName ?? '')
+    .toLowerCase()
+    .replace(/^.*[.:/]/, '');
+  const serverName = (
+    msg.data.serverName ??
+    msg.data.mcpServerName ??
+    ''
+  ).toLowerCase();
+  if (
+    !(toolName === 'manage_tasks' && serverName === 'roomote') &&
+    toolName !== 'roomote_manage_tasks' &&
+    toolName !== 'mcp__roomote__manage_tasks'
+  )
+    return null;
+
+  const rawInput = (msg.data as unknown as Record<string, unknown>).rawInput;
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput))
+    return null;
+  const input = rawInput as Record<string, unknown>;
+  const args = input.arguments ?? input;
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
+  const { action, taskId } = args as Record<string, unknown>;
+  return action === 'get_summary' && typeof taskId === 'string' && taskId.trim()
+    ? taskId.trim()
+    : null;
+}
+
+function TaskSummaryDetails({
+  taskId,
+  maxHeight,
+}: {
+  taskId: string;
+  maxHeight: number;
+}) {
+  const { enabled, summary, isLoadingSummary, errorMessage } =
+    useTaskSummary(taskId);
+  if (!enabled) return null;
+
+  return (
+    <section className="space-y-1.5">
+      <div className="text-xs font-medium text-muted-foreground">
+        Current task summary
+      </div>
+      {summary?.trim() ? (
+        <div
+          className="ph-no-capture text-sm font-light text-muted-foreground"
+          style={{ maxHeight, overflow: 'auto' }}
+        >
+          <MessageResponse>
+            {sanitizeSandboxPathString(redactSecrets(summary))}
+          </MessageResponse>
+        </div>
+      ) : isLoadingSummary ? (
+        <div
+          role="status"
+          aria-label="Loading task summary"
+          className="space-y-2"
+        >
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {errorMessage
+            ? 'Summary is temporarily unavailable.'
+            : 'No summary available yet.'}
+        </p>
+      )}
+    </section>
   );
 }
 

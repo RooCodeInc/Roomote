@@ -7,6 +7,13 @@ import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
 
 const codeBlockSpy = vi.fn();
 const toolInputSpy = vi.fn();
+const { useTaskSummaryMock } = vi.hoisted(() => ({
+  useTaskSummaryMock: vi.fn(),
+}));
+
+vi.mock('../../../hooks/use-task-summary', () => ({
+  useTaskSummary: useTaskSummaryMock,
+}));
 
 vi.mock('../../../hooks', () => ({
   useArtifactLink: () => ({ artifacts: [], getArtifactById: () => undefined }),
@@ -70,6 +77,138 @@ describe('AcpToolDetails', () => {
   beforeEach(() => {
     codeBlockSpy.mockClear();
     toolInputSpy.mockClear();
+    useTaskSummaryMock.mockReset();
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary: 'Fixed the retry race and verified the regression tests.',
+      isLoadingSummary: false,
+      errorMessage: null,
+    });
+  });
+
+  function summaryMessage(
+    rawInput: unknown = { action: 'get_summary', taskId: 'task-2' },
+  ) {
+    return buildMessage({
+      kind: 'tool',
+      toolName: 'manage_tasks',
+      serverName: 'roomote',
+      isMcp: true,
+      title: 'manage_tasks',
+      rawInput,
+      output: JSON.stringify({
+        success: true,
+        result: { id: 'task-2', title: 'Fix retries', state: 'completed' },
+      }),
+    } as Partial<AcpToolResultUiMessage['data']>);
+  }
+
+  it('loads the actual summary only on expansion and keeps the result metadata', () => {
+    render(<AcpToolMessage msg={summaryMessage()} />);
+    const trigger = screen.getByRole('button', {
+      name: 'Heard back from task Completed',
+    });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(useTaskSummaryMock).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    expect(useTaskSummaryMock).toHaveBeenCalledWith('task-2');
+    expect(screen.getByText('Current task summary')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Fixed the retry race and verified the regression tests.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Result')).toBeInTheDocument();
+    expect(codeBlockSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: expect.stringContaining('title: Fix retries'),
+      }),
+    );
+    fireEvent.click(trigger);
+    expect(screen.queryByText('Current task summary')).not.toBeInTheDocument();
+  });
+
+  it('supports nested MCP arguments, preferring taskId over sessionId, and sanitizes narrative', () => {
+    useTaskSummaryMock.mockReturnValue({
+      enabled: true,
+      summary:
+        'Updated /sandbox/repos/project/src/retry.ts using token=secret-value',
+      isLoadingSummary: false,
+    });
+    render(
+      <AcpToolDetails
+        msg={summaryMessage({
+          arguments: {
+            action: 'get_summary',
+            taskId: 'task-2',
+            sessionId: 'session-2',
+          },
+        })}
+      />,
+    );
+    expect(useTaskSummaryMock).toHaveBeenCalledWith('task-2');
+    expect(screen.queryByText(/secret-value/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\/sandbox\/repos/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Updated.*retry.ts/)).toBeInTheDocument();
+  });
+
+  it.each([
+    { action: 'get_messages', taskId: 'task-2' },
+    { action: 'get_summary', sessionId: 'session-2' },
+    { action: 'get_summary', taskId: ' ' },
+    { action: 'get_summary', taskId: 123 },
+    { arguments: [] },
+    null,
+  ])('does not fetch a task summary for unsupported input %j', (input) => {
+    render(<AcpToolDetails msg={summaryMessage(input)} />);
+    expect(useTaskSummaryMock).not.toHaveBeenCalled();
+    expect(screen.getByText('Result')).toBeInTheDocument();
+  });
+
+  it.each(['failed', 'in_progress'] as const)(
+    'does not fetch summary for %s calls',
+    (status) => {
+      const msg = summaryMessage();
+      render(
+        <AcpToolDetails msg={{ ...msg, data: { ...msg.data, status } }} />,
+      );
+      expect(useTaskSummaryMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      { enabled: true, summary: null, isLoadingSummary: true },
+      'Loading task summary',
+    ],
+    [
+      { enabled: true, summary: ' ', isLoadingSummary: false },
+      'No summary available yet.',
+    ],
+    [
+      { enabled: true, summary: null, errorMessage: 'private error detail' },
+      'Summary is temporarily unavailable.',
+    ],
+  ])(
+    'handles unavailable summary states without losing metadata',
+    (state, label) => {
+      useTaskSummaryMock.mockReturnValue(state);
+      render(<AcpToolDetails msg={summaryMessage()} />);
+      expect(screen.getByText('Result')).toBeInTheDocument();
+      if ('isLoadingSummary' in state && state.isLoadingSummary)
+        expect(screen.getByRole('status', { name: label })).toBeInTheDocument();
+      else expect(screen.getByText(label)).toBeInTheDocument();
+      expect(
+        screen.queryByText('private error detail'),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it('leaves existing details intact when summaries are disabled or there are too few messages', () => {
+    useTaskSummaryMock.mockReturnValue({ enabled: false, summary: null });
+    render(<AcpToolDetails msg={summaryMessage()} />);
+    expect(screen.queryByText('Current task summary')).not.toBeInTheDocument();
+    expect(screen.getByText('Result')).toBeInTheDocument();
   });
 
   it.each([
