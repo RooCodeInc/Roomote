@@ -174,6 +174,22 @@ describe('authorize', () => {
     mockUpdateWhere.mockResolvedValue([]);
   });
 
+  it('does not consume rolling renewal during server rendering', async () => {
+    await authorize();
+    expect(mockGetSession).toHaveBeenCalledWith({
+      headers: expect.any(Headers),
+      query: { disableRefresh: true },
+    });
+  });
+
+  it('allows cookie-writable route handlers to renew sessions', async () => {
+    await authorize({ allowSessionRefresh: true });
+    expect(mockGetSession).toHaveBeenCalledWith({
+      headers: expect.any(Headers),
+      query: { disableRefresh: false },
+    });
+  });
+
   it('exposes an existing cookie acceptance timestamp', async () => {
     mockUsersFindFirst.mockResolvedValue({
       id: 'user-1',
