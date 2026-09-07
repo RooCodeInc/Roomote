@@ -133,6 +133,15 @@ export function AcpToolMessage({
                 <TaskRobotIcon taskId={referencedTaskId} />
               ) : undefined
             }
+            iconAction={
+              !isFailed && referencedTaskId && taskIconContext?.onOpenTask
+                ? {
+                    label: 'Focus task prompt',
+                    onClick: () =>
+                      taskIconContext.onOpenTask?.(referencedTaskId),
+                  }
+                : undefined
+            }
             state={toolState}
             params={sanitizedToolData}
             collapsible={showCollapsibleContent}
@@ -181,23 +190,22 @@ function resolveReferencedTaskId(
   const toolName = (msg.data.toolName ?? msg.data.mcpToolName)
     ?.trim()
     .toLowerCase();
-  if (
-    !toolName ||
-    ![
-      'launch_task',
-      'review_pull_request',
-      'send_task_message',
-      'cancel_task',
-      'retry_task_start',
-    ].includes(toolName)
-  ) {
-    return null;
-  }
+  if (!toolName) return null;
 
   const rawInput = asRecord(
     (msg.data as unknown as Record<string, unknown>).rawInput,
   );
   const argumentsRecord = asRecord(rawInput?.arguments);
+  const isManageTasksTool = toolName === 'manage_tasks';
+  const isDirectTaskTool = [
+    'launch_task',
+    'review_pull_request',
+    'send_task_message',
+    'cancel_task',
+    'retry_task_start',
+  ].includes(toolName);
+  if (!isManageTasksTool && !isDirectTaskTool) return null;
+
   const inputTaskId = argumentsRecord?.taskId;
   if (typeof inputTaskId === 'string' && inputTaskId.trim()) {
     return inputTaskId.trim();
@@ -217,7 +225,9 @@ function resolveReferencedTaskId(
     }
   }
 
-  return orderedTaskIds?.length === 1 ? orderedTaskIds[0]! : null;
+  return isDirectTaskTool && orderedTaskIds?.length === 1
+    ? orderedTaskIds[0]!
+    : null;
 }
 
 interface SubagentActivity {

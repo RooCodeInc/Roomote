@@ -101,6 +101,36 @@ describe('ToolHeader', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  it('keeps a custom icon action separate from the expansion trigger', () => {
+    const onIconClick = vi.fn();
+    render(
+      <Tool>
+        <ToolHeader
+          action="Sent"
+          object="message to task"
+          icon={Search}
+          iconElement={<span data-testid="task-icon" />}
+          iconAction={{ label: 'Focus task prompt', onClick: onIconClick }}
+          state="output-available"
+        />
+      </Tool>,
+    );
+
+    const iconButton = screen.getByRole('button', {
+      name: 'Focus task prompt',
+    });
+    const expansionTrigger = screen.getByRole('button', {
+      name: 'Sent message to task Completed',
+    });
+
+    fireEvent.click(iconButton);
+    expect(onIconClick).toHaveBeenCalledOnce();
+    expect(expansionTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(expansionTrigger);
+    expect(expansionTrigger).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('keeps long action-only labels truncatable inside the header row', () => {
     const action =
       'Read /tmp/roomote-tool-header-regression-path-with-a-very-long-file-name.txt';

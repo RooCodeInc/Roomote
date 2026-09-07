@@ -49,6 +49,10 @@ type ToolHeaderProps = {
   suffixPrefix?: string;
   icon: LucideIcon;
   iconElement?: ReactNode;
+  iconAction?: {
+    label: string;
+    onClick: () => void;
+  };
   state: ToolState;
   params?: AcpToolCallPayload | AcpToolResultPayload;
   additions?: number;
@@ -64,6 +68,7 @@ export const ToolHeader = ({
   suffixPrefix = 'from',
   icon: ActionIcon,
   iconElement,
+  iconAction,
   state,
   params: _params,
   additions,
@@ -83,26 +88,26 @@ export const ToolHeader = ({
     state === 'output-error';
   const isRunning = state === 'input-streaming' || state === 'input-available';
 
-  const inner = (
-    <div
-      className={cn(
-        'flex min-w-0 items-center gap-2 py-1',
-        !collapsible && 'cursor-default',
-      )}
-    >
-      {iconElement ? (
-        <span className="flex shrink-0 items-center gap-1">
+  const customIcon = iconElement ? (
+    <span className="flex shrink-0 items-center gap-1">
+      {iconAction ? (
+        <button
+          type="button"
+          aria-label={iconAction.label}
+          className="cursor-pointer rounded-full transition-opacity hover:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          onClick={iconAction.onClick}
+        >
           {iconElement}
-          {isRunning ? <Spinner size="sm" /> : null}
-        </span>
-      ) : isRunning ? (
-        <Spinner size="sm" className="shrink-0" />
-      ) : collapsible ? (
-        <CollapsibleIconTrigger icon={ActionIcon} />
+        </button>
       ) : (
-        <ActionIcon className="size-3 shrink-0" />
+        iconElement
       )}
+      {isRunning ? <Spinner size="sm" /> : null}
+    </span>
+  ) : null;
 
+  const details = (
+    <>
       <span className="flex min-w-0 gap-1 overflow-hidden text-sm whitespace-nowrap">
         {action && (
           <span
@@ -144,6 +149,24 @@ export const ToolHeader = ({
       >
         {statusLabel}
       </span>
+    </>
+  );
+  const inner = (
+    <div
+      className={cn(
+        'flex min-w-0 items-center gap-2 py-1',
+        !collapsible && 'cursor-default',
+      )}
+    >
+      {customIcon ??
+        (isRunning ? (
+          <Spinner size="sm" className="shrink-0" />
+        ) : collapsible ? (
+          <CollapsibleIconTrigger icon={ActionIcon} />
+        ) : (
+          <ActionIcon className="size-3 shrink-0" />
+        ))}
+      {details}
     </div>
   );
 
@@ -156,6 +179,27 @@ export const ToolHeader = ({
         )}
       >
         {inner}
+      </div>
+    );
+  }
+
+  if (iconElement && iconAction) {
+    return (
+      <div
+        className={cn(
+          'flex w-full items-center gap-2 text-muted-foreground',
+          className,
+        )}
+      >
+        {customIcon}
+        <CollapsibleTrigger
+          className="flex min-w-0 flex-1 cursor-pointer items-center justify-between transition-opacity hover:opacity-50"
+          {...props}
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-2 py-1">
+            {details}
+          </div>
+        </CollapsibleTrigger>
       </div>
     );
   }

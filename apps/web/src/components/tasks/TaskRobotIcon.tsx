@@ -11,6 +11,7 @@ import { Avatar } from '@/components/system';
 type TaskRobotIconContextValue = {
   sessionId: string;
   orderedTaskIds: readonly string[];
+  onOpenTask?: (taskId: string) => void;
 };
 
 const TaskRobotIconContext = createContext<TaskRobotIconContextValue | null>(
@@ -20,11 +21,12 @@ const TaskRobotIconContext = createContext<TaskRobotIconContextValue | null>(
 export function TaskRobotIconProvider({
   sessionId,
   orderedTaskIds,
+  onOpenTask,
   children,
 }: TaskRobotIconContextValue & { children: ReactNode }) {
   const value = useMemo(
-    () => ({ sessionId, orderedTaskIds }),
-    [orderedTaskIds, sessionId],
+    () => ({ sessionId, orderedTaskIds, onOpenTask }),
+    [onOpenTask, orderedTaskIds, sessionId],
   );
 
   return (

@@ -1055,6 +1055,7 @@ export function SessionWorkspace({
             <TaskRobotIconProvider
               sessionId={session.id}
               orderedTaskIds={taskIds}
+              onOpenTask={openTaskPanel}
             >
               <ResponsiveWorkspacePanels
                 isPanelOpen={panelOpen}
