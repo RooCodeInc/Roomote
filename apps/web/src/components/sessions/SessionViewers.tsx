@@ -19,30 +19,25 @@ export function SessionViewerAvatars({
       role="group"
       aria-label="Current session viewers"
     >
-      {viewers.map((viewer, index) => (
-        <BasicTooltip
-          key={viewer.id}
-          content={
-            <>
-              <div>{viewer.name}</div>
-              <div>{viewer.email}</div>
-            </>
-          }
-        >
-          <Avatar
-            imageUrl={viewer.imageUrl}
-            name={viewer.name}
-            email={viewer.email}
-            alt={`${viewer.name} (${viewer.email})`}
-            size="sm"
-            tabIndex={0}
-            className="transition-[margin] duration-200 motion-reduce:transition-none hover:z-10 focus:z-10"
-            style={{
-              marginLeft: index === 0 ? 0 : viewers.length > 3 ? -4 : 2,
-            }}
-          />
-        </BasicTooltip>
-      ))}
+      {viewers.map((viewer, index) => {
+        const label = `${viewer.name?.trim() || viewer.email.trim()} is viewing`;
+        return (
+          <BasicTooltip key={viewer.id} content={label}>
+            <Avatar
+              imageUrl={viewer.imageUrl}
+              name={viewer.name}
+              email={viewer.email}
+              alt={label}
+              size="sm"
+              tabIndex={0}
+              className="transition-[margin] duration-200 motion-reduce:transition-none hover:z-10 focus:z-10"
+              style={{
+                marginLeft: index === 0 ? 0 : viewers.length > 3 ? -4 : 2,
+              }}
+            />
+          </BasicTooltip>
+        );
+      })}
     </div>
   );
 }

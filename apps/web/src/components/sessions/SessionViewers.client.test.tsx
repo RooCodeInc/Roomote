@@ -19,10 +19,20 @@ it('hides an empty group and renders every viewer, including above three', () =>
   }
 });
 
-it('shows name and email in a keyboard-accessible tooltip', async () => {
-  render(<SessionViewerAvatars viewers={viewers.slice(0, 1)} />);
-  fireEvent.focus(screen.getByLabelText('Viewer 0 (viewer0@example.com)'));
-  const tooltip = await screen.findByRole('tooltip');
-  expect(tooltip).toHaveTextContent('Viewer 0');
-  expect(tooltip).toHaveTextContent('viewer0@example.com');
-});
+it.each([
+  ['Viewer 0', 'Viewer 0'],
+  ['  Viewer 0  ', 'Viewer 0'],
+  ['', 'viewer0@example.com'],
+  ['   ', 'viewer0@example.com'],
+])(
+  'uses name %j in a keyboard-accessible viewing tooltip',
+  async (name, identity) => {
+    render(<SessionViewerAvatars viewers={[{ ...viewers[0]!, name }]} />);
+    const label = `${identity} is viewing`;
+    fireEvent.focus(screen.getByLabelText(label));
+    const tooltip = await screen.findByRole('tooltip');
+    expect(tooltip.textContent).toBe(label);
+    if (name.trim())
+      expect(tooltip).not.toHaveTextContent('viewer0@example.com');
+  },
+);

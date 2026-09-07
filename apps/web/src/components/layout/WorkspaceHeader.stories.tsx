@@ -34,12 +34,24 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-function SessionHeader({ count }: { count: number }) {
+function SessionHeader({
+  count,
+  blankName = false,
+}: {
+  count: number;
+  blankName?: boolean;
+}) {
   return (
     <WorkspaceHeader
       className="py-3.25"
       contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
-      actions={<SessionViewerAvatars viewers={viewers.slice(0, count)} />}
+      actions={
+        <SessionViewerAvatars
+          viewers={viewers
+            .slice(0, count)
+            .map((viewer) => (blankName ? { ...viewer, name: '   ' } : viewer))}
+        />
+      }
     >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <h1 className={SESSION_HEADER_TITLE_CLASS_NAME}>
@@ -56,6 +68,25 @@ export const SessionEmpty: Story = {
 };
 export const SessionOneViewer: Story = {
   render: () => <SessionHeader count={1} />,
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'Tooltip: Alex Morgan is viewing. Email is omitted when a name exists.',
+      },
+    },
+  },
+};
+export const SessionEmailFallback: Story = {
+  render: () => <SessionHeader count={1} blankName />,
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'Blank names fall back to the full email: alex.morgan@example.com is viewing.',
+      },
+    },
+  },
 };
 export const SessionThreeViewers: Story = {
   render: () => <SessionHeader count={3} />,
