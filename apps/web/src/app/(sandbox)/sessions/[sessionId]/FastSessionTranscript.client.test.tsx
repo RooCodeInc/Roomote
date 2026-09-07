@@ -82,6 +82,12 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useQuery: () => ({ data: composerSuggestionState.data }),
 }));
 
+// Wakeup polling has dedicated provider-backed tests. Keep this suite's query
+// mocks scoped to composer suggestions rather than mounting the live poller.
+vi.mock('./SessionWakeups', () => ({
+  SessionWakeups: () => null,
+}));
+
 vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
