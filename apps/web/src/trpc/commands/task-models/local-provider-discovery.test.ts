@@ -328,12 +328,24 @@ describe('qualifyProviderModel', () => {
   it('validates tool calls over HTTP, including fragmented names and multiline SSE data', async () => {
     vi.unstubAllGlobals();
     let body = 'data: {"error":{"tool_calls":"ping"}}\r\n\r\n';
-    const requests: Array<{ url?: string; method?: string }> = [];
+    const requests: Array<{ url?: string; method?: string; body: unknown }> =
+      [];
     const server = createServer((request, response) => {
-      requests.push({ url: request.url, method: request.method });
-      response.writeHead(200, { 'content-type': 'text/event-stream' });
-      response.write(body.slice(0, 17));
-      setImmediate(() => response.end(body.slice(17)));
+      let requestBody = '';
+      request.setEncoding('utf8');
+      request.on('data', (chunk) => {
+        requestBody += chunk;
+      });
+      request.on('end', () => {
+        requests.push({
+          url: request.url,
+          method: request.method,
+          body: JSON.parse(requestBody),
+        });
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.write(body.slice(0, 17));
+        setImmediate(() => response.end(body.slice(17)));
+      });
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -357,8 +369,16 @@ describe('qualifyProviderModel', () => {
       ].join('');
       await expect(qualify()).resolves.toEqual({ success: true });
       expect(requests).toEqual([
-        { url: '/v1/chat/completions', method: 'POST' },
-        { url: '/v1/chat/completions', method: 'POST' },
+        {
+          url: '/v1/chat/completions',
+          method: 'POST',
+          body: expect.objectContaining({ tool_choice: 'required' }),
+        },
+        {
+          url: '/v1/chat/completions',
+          method: 'POST',
+          body: expect.objectContaining({ tool_choice: 'required' }),
+        },
       ]);
     } finally {
       await new Promise<void>((resolve, reject) =>
