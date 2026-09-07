@@ -29,10 +29,10 @@ describe('memory MCP task guidance', () => {
     const instructions = createMemoryMcpInstructions('supermemory');
 
     expect(instructions).toContain(
-      'make one normal Supermemory tool call before any other context or work tool call',
+      'make exactly one normal Supermemory tool call before any other context or work tool call',
     );
     expect(instructions).toContain(
-      'first normal context or work tool call and remain visible in the session',
+      'Once that call returns, the initial memory preflight is satisfied for the task; tool results, runtime continuations, retries, and continued work on the same topic do not reset it',
     );
     expect(instructions).toContain(
       'At task completion, proactively save concise durable learnings',
@@ -44,7 +44,13 @@ describe('memory MCP task guidance', () => {
     const instructions = createMemoryMcpInstructions('gbrain');
 
     expect(instructions).toContain(
-      'first normal context or work tool call and remain visible in the session',
+      'The Brain-specific guidance below owns the required initial recall',
+    );
+    expect(instructions).toContain(
+      'Do not perform an additional generic memory preflight',
+    );
+    expect(instructions).not.toContain(
+      'make exactly one normal Brain tool call',
     );
     expect(instructions.endsWith(BRAIN_MCP_INSTRUCTIONS)).toBe(true);
   });
@@ -98,6 +104,9 @@ describe('memory MCP conversation guidance', () => {
 
     expect(instructions).toContain(
       "save it using this server's own memory-writing tool",
+    );
+    expect(instructions).toContain(
+      'Once that call returns, the initial memory preflight is satisfied for the request; tool results, runtime continuations, retries, and continued work on the same topic do not reset it',
     );
     expect(instructions).not.toContain('save_memory');
     expect(instructions).not.toContain('At task completion');
