@@ -38,6 +38,7 @@ export const demoSeedFastSession = {
   sessionId: '00000000-0000-4000-8000-000000000102',
   participantId: '00000000-0000-4000-8000-000000000103',
   title: 'Summarize launch readiness',
+  surface: 'slack' as const,
   workspaceId: 'TROOMOTEDEMO',
   providerConversationId: 'demo-fast-session',
   channelId: 'CROOMOTEDEMO',
@@ -70,10 +71,9 @@ export const demoSeedPendingInputFastSession = {
   sessionId: '00000000-0000-4000-8000-000000000107',
   participantId: '00000000-0000-4000-8000-000000000108',
   title: 'Choose the launch validation scope',
-  workspaceId: 'TROOMOTEDEMO',
+  surface: 'web' as const,
+  workspaceId: demoSeedUserId,
   providerConversationId: 'demo-fast-session-pending-input',
-  channelId: 'CROOMOTEDEMO',
-  threadId: '1700000000.000200',
   cachedStatus: 'needs_input' as const,
   messages: [
     {
@@ -98,13 +98,18 @@ export const demoSeedPendingInputFastSession = {
       turnSeq: 1,
       eventType: 'roomote_runtime.request_user_input' as const,
       role: 'assistant' as const,
-      contentBlocks: [],
+      contentBlocks: [
+        {
+          type: 'text' as const,
+          text: 'Which launch path should I validate first?',
+        },
+      ],
       payload: {
         requestId: 'rui:demo-fast-session-pending-input',
         status: 'pending' as const,
-        sessionId: '00000000-0000-4000-8000-000000000107',
+        sessionId: '00000000-0000-4000-8000-000000000106',
         turnId: 'demo-fast-session-pending-input-turn',
-        callId: 'demo-fast-session-pending-input-call',
+        callId: 'rui:demo-fast-session-pending-input',
         questions: [
           {
             id: 'validation-scope',
@@ -284,12 +289,14 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
       await db.insert(fastAgentConversations).values({
         id: fastSessionSeed.conversationId,
         userId: demoSeedUserId,
-        surface: 'slack',
+        surface: fastSessionSeed.surface,
         workspaceId: fastSessionSeed.workspaceId,
         conversationId: fastSessionSeed.providerConversationId,
-        currentReplyChannelId: fastSessionSeed.channelId,
-        currentReplyThreadId: fastSessionSeed.threadId,
-        replyTargetVerified: true,
+        currentReplyChannelId:
+          'channelId' in fastSessionSeed ? fastSessionSeed.channelId : null,
+        currentReplyThreadId:
+          'threadId' in fastSessionSeed ? fastSessionSeed.threadId : null,
+        replyTargetVerified: fastSessionSeed.surface !== 'web',
         title: fastSessionSeed.title,
         llmTitleCheckpoint: 1,
         createdAt: now,
@@ -326,7 +333,7 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
             ...(message.role === 'user' ? { userId: demoSeedUserId } : {}),
           },
           payload: 'payload' in message ? message.payload : {},
-          source: 'slack',
+          source: fastSessionSeed.surface,
           createdAt: now,
           updatedAt: now,
         });
@@ -349,7 +356,7 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
           llmTitleCheckpoint: 1,
           ownerKind: 'user',
           ownerUserId: demoSeedUserId,
-          sourceSurface: 'slack',
+          sourceSurface: fastSessionSeed.surface,
           sourceTrigger: 'message',
           fastConversationId: fastSessionSeed.conversationId,
           visibility: 'visible',

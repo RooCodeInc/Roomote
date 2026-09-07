@@ -1,6 +1,10 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
-import { createEmptySetupNewState, RunStatus } from '@roomote/types';
+import {
+  createEmptySetupNewState,
+  parseAcpRequestUserInputPayload,
+  RunStatus,
+} from '@roomote/types';
 
 import {
   taskRuns,
@@ -189,6 +193,22 @@ describe('seedDemoData', () => {
       title: demoSeedPendingInputFastSession.title,
       fastConversationId: demoSeedPendingInputFastSession.conversationId,
       cachedStatus: 'needs_input',
+      sourceSurface: 'web',
+    });
+
+    const pendingInputConversation =
+      await db.query.fastAgentConversations.findFirst({
+        where: eq(
+          fastAgentConversations.id,
+          demoSeedPendingInputFastSession.conversationId,
+        ),
+      });
+    expect(pendingInputConversation).toMatchObject({
+      surface: 'web',
+      workspaceId: demoSeedUserId,
+      conversationId: demoSeedPendingInputFastSession.providerConversationId,
+      currentReplyChannelId: null,
+      currentReplyThreadId: null,
     });
 
     const pendingInputMessages = await db.query.fastAgentMessages.findMany({
@@ -207,6 +227,16 @@ describe('seedDemoData', () => {
         requestId: 'rui:demo-fast-session-pending-input',
         status: 'pending',
       },
+    });
+    expect(
+      parseAcpRequestUserInputPayload(
+        pendingInputMessages.at(-1)?.payload ?? null,
+      ),
+    ).toMatchObject({
+      requestId: 'rui:demo-fast-session-pending-input',
+      sessionId: demoSeedPendingInputFastSession.conversationId,
+      turnId: 'demo-fast-session-pending-input-turn',
+      callId: 'rui:demo-fast-session-pending-input',
     });
 
     const installation = await db.query.githubInstallations.findFirst({
