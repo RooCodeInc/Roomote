@@ -22,11 +22,16 @@ for command in deploy upgrade; do
     fi
   }
 
-  for registry in ghcr.io registry.example:5000 localhost:5000 registry.example:5000/team/images; do
+  for registry in ghcr.io registry.example/team/images \
+    registry.example:5000 localhost:5000 registry.example:5000/team/images \
+    registry.example:1 registry.example:65535 localhost:65535/team/images \
+    registry.example:00001 registry.example:00065535; do
     assert_validation '--image-retention-releases must be a positive integer' --image-registry "$registry"
   done
 
   for registry in 'registry.example:abc' 'registry.example:' 'registry.example:5000:6000' \
+    'registry.example:0' 'registry.example:65536' 'registry.example:999999999999999999999999999999' \
+    'registry.example:00000' 'registry.example:00065536' 'localhost:65536/team/images' \
     'https://registry.example:5000' 'registry.example/team:5000' \
     'registry.example:5000/bad path' 'registry.example;true' '$(true)' \
     'registry.example`true`' $'registry.example\nOTHER=value'; do

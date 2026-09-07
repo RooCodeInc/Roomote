@@ -51,7 +51,9 @@ validate_image_part() {
 }
 
 validate_image_registry() {
-  [[ "$1" =~ ^[A-Za-z0-9._-]+:[0-9]+(/[A-Za-z0-9._/-]+)?$ ]] || validate_image_part "$1"
+  # Bound significant digits before arithmetic to avoid overflow on oversized ports.
+  [[ "$1" =~ ^[A-Za-z0-9._-]+:0*([1-9][0-9]{0,4})(/[A-Za-z0-9._/-]+)?$ ]] &&
+    ((10#${BASH_REMATCH[1]} <= 65535)) || validate_image_part "$1"
 }
 
 validate_tag() {
