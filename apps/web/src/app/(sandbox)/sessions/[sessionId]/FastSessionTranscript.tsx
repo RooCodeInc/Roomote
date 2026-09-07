@@ -760,6 +760,7 @@ export function FastSessionTranscript({
                 <ModelBadge
                   model={effectiveSessionModel}
                   displayName={getTaskModelDisplayName(effectiveSessionModel)}
+                  showIcon={false}
                   iconClassName="text-muted-foreground"
                 />
               ) : null}

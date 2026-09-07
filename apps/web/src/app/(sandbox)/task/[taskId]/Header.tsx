@@ -146,14 +146,14 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
         <TaskSessionReadTracker sessionId={parentSession.sessionId} />
       ) : null}
       <WorkspaceHeader contentClassName="!flex-col !items-stretch !gap-1">
-        <div className="flex min-w-0 items-start gap-2">
+        <div className="flex min-w-0 items-start">
           {sessionHref ? (
             <BasicTooltip content="Back to session">
               <Button
                 asChild
                 variant="ghost"
                 size="icon"
-                className="size-5 shrink-0 hover:scale-120 hover:text-accent-foreground"
+                className="size-5 shrink-0 hover:scale-120 hover:text-accent-foreground mt-1"
               >
                 <Link href={sessionHref} aria-label="Back to session">
                   <ArrowLeft className="size-3.5" />
@@ -190,7 +190,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
               pullRequests={pullRequests}
               prRepo={prRepo}
               prNumber={prNumber}
-              className="pl-7"
+              className="pl-8"
             />
           </TaskHeaderContent>
         </div>

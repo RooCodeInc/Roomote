@@ -106,6 +106,7 @@ export function TaskHeaderMetadata({
         <ModelBadge
           model={model}
           displayName={getTaskModelDisplayName(model)}
+          showIcon={false}
           iconClassName="text-muted-foreground"
         />
       ) : null}
