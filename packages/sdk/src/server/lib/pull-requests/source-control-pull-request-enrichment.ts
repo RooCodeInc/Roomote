@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createGitHubToken } from '@roomote/auth';
 import { getOctokit } from '@roomote/github';
 import type { SourceControlProvider } from '@roomote/types';
 
@@ -13,7 +14,6 @@ import {
   buildAdoBasicAuthHeader,
   buildApiUrl,
   buildGitLabTokenHeader,
-  createGitHubRepositoryToken,
   splitRepositoryFullName,
   type FetchImpl,
   type RepositoryRow,
@@ -97,8 +97,18 @@ async function readGitHubEnrichment(
   repository: RepositoryRow,
   prNumber: number,
 ): Promise<PullRequestEnrichment> {
+  if (!repository.installationId) {
+    throw new Error(
+      `GitHub repository ${repository.fullName} is missing an installation id.`,
+    );
+  }
   const [owner, repo] = splitRepositoryFullName(repository.fullName, 'github');
-  const octokit = getOctokit(await createGitHubRepositoryToken(repository));
+  const octokit = getOctokit(
+    await createGitHubToken({
+      type: 'installationId',
+      installationId: repository.installationId,
+    }),
+  );
 
   const files: PullRequestChangedFile[] = [];
   let filesTruncated = false;

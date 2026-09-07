@@ -56,7 +56,6 @@ export * from './lib/tasks';
 export * from './lib/sessions';
 export * from './lib/task-goals';
 export * from './lib/source-control-provider';
-export * from './lib/task-run-writable-repositories';
 export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
 export * from './lib/automations';

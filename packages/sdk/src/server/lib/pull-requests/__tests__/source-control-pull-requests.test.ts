@@ -5,17 +5,14 @@ import {
   TaskPayloadKind,
   formatPrBodyAttribution,
 } from '@roomote/types';
-import {
-  resolveTaskRunWritableRepositories,
-  type Repository,
-  type TaskRun,
-} from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
   mockGetDeploymentPrAction,
   mockGetDeploymentGitHubRoomoteMentionEnabled,
   mockGetOctokit,
+  mockResolveEnvironmentGitHubRepositories,
   mockRepositoriesFindFirst,
   mockEnvironmentsFindFirst,
   mockResolveGitLabToken,
@@ -41,6 +38,7 @@ const {
   mockGetDeploymentPrAction: vi.fn(),
   mockGetDeploymentGitHubRoomoteMentionEnabled: vi.fn().mockResolvedValue(true),
   mockGetOctokit: vi.fn(),
+  mockResolveEnvironmentGitHubRepositories: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
   mockResolveGitLabToken: vi.fn(),
@@ -98,6 +96,8 @@ vi.mock('@roomote/env', () => ({
 }));
 
 vi.mock('@roomote/github', () => ({
+  resolveTaskRunEnvironmentGitHubRepositories: (...args: unknown[]) =>
+    mockResolveEnvironmentGitHubRepositories(...args),
   getOctokit: (...args: unknown[]) => mockGetOctokit(...args),
   resolveConfiguredGitHubAppSlugIfConfigured: (...args: unknown[]) =>
     mockResolveConfiguredGitHubAppSlugIfConfigured(...args),
@@ -133,7 +133,6 @@ const { mockTaskPullRequestUpsert, mockTaskRunAssociationUpdate } = vi.hoisted(
 );
 
 vi.mock('@roomote/db/server', () => ({
-  resolveTaskRunWritableRepositories: vi.fn(async () => null),
   getDeploymentGitHubRoomoteMentionEnabled: (...args: unknown[]) =>
     mockGetDeploymentGitHubRoomoteMentionEnabled(...args),
   getDeploymentPrAction: (...args: unknown[]) =>
@@ -166,16 +165,7 @@ vi.mock('@roomote/db/server', () => ({
         // row (or null), adapted here to the list shape it expects.
         findMany: async (...args: unknown[]) => {
           const row = await mockRepositoriesFindFirst(...args);
-          const query = args[0] as {
-            where: { conditions: Array<{ left: string; right: unknown }> };
-          };
-          const provider = query.where.conditions.find(
-            (condition) =>
-              condition.left === 'repositories.sourceControlProvider',
-          )?.right;
-          return row == null
-            ? []
-            : [{ sourceControlProvider: provider, githubRepoId: 101, ...row }];
+          return row == null ? [] : [row];
         },
       },
       environments: {
@@ -323,68 +313,6 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
       'https://dev.azure.com/acme',
     );
   });
-
-  it.each([false, true])(
-    'creates a cross-environment repository PR using its actual provider, mapped=%s',
-    async (mapped) => {
-      vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
-        {
-          id: 'target',
-          fullName: 'acme/backend',
-          sourceControlProvider: 'gitlab',
-          host: 'gitlab.com',
-          externalRepoId: '101',
-          isActive: true,
-        } as Repository,
-      ]);
-      const fetchImpl = vi
-        .fn()
-        .mockResolvedValueOnce(jsonResponse([]))
-        .mockResolvedValueOnce(
-          jsonResponse({
-            iid: 42,
-            title: 'Draft: Test',
-            web_url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
-            draft: true,
-          }),
-        );
-      const result = await createOrUpdateSourceControlPullRequestForTaskRun({
-        taskRun: makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          sourceControlProvider: 'github',
-          repositoryProviders: {
-            'acme/prepared': 'github',
-            ...(mapped ? { 'acme/backend': 'github' } : {}),
-          },
-        }),
-        input: {
-          action: 'create_or_update_pull_request',
-          repositoryFullName: 'acme/backend',
-          sourceBranch: 'feature',
-          targetBranch: 'main',
-          title: 'Test',
-          body: '',
-          labels: [],
-          assignees: [],
-          sourceControlProvider: 'gitlab',
-        },
-        fetchImpl,
-      });
-      expect(result).toMatchObject({
-        success: true,
-        provider: 'gitlab',
-        action: 'created',
-      });
-      expect(fetchImpl).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'https://gitlab.com/api/v4/projects/101/merge_requests',
-        ),
-        expect.anything(),
-      );
-      expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
-    },
-  );
 
   it('creates a GitLab merge request with the linked public handle', async () => {
     mockGetDeploymentPrAction.mockResolvedValue('create');
@@ -625,57 +553,6 @@ describe('platform-managed draft state', () => {
     assignees: [],
     sourceControlProvider: 'github' as const,
   };
-
-  it.each([202, null])(
-    'requires the exact writable GitHub repository ID for cross-environment creation: %s',
-    async (githubRepoId) => {
-      makeOctokit({
-        created: {
-          number: 9,
-          node_id: 'node-9',
-          html_url: 'https://github.com/acme/web/pull/9',
-          title: 'Test',
-          draft: true,
-        },
-      });
-      vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
-        {
-          id: 'target',
-          fullName: 'acme/web',
-          sourceControlProvider: 'github',
-          host: 'github.com',
-          installationId: 'target-installation',
-          githubRepoId,
-          isActive: true,
-        } as Repository,
-      ]);
-      const operation = createOrUpdateSourceControlPullRequestForTaskRun({
-        taskRun: makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          sourceControlProvider: 'gitlab',
-          repositoryProviders: { 'acme/prepared': 'gitlab' },
-        }),
-        input: { ...githubInput },
-      });
-      if (githubRepoId === null) {
-        await expect(operation).rejects.toThrow(
-          'missing a valid GitHub repository id',
-        );
-        expect(mockCreateGitHubToken).not.toHaveBeenCalled();
-      } else {
-        await expect(operation).resolves.toMatchObject({
-          success: true,
-          provider: 'github',
-        });
-        expect(mockCreateGitHubToken).toHaveBeenCalledExactlyOnceWith({
-          type: 'installationId',
-          installationId: 'target-installation',
-          repositoryIds: [202],
-        });
-      }
-    },
-  );
 
   it('creates GitHub PRs as drafts after durable parent-event admission', async () => {
     const octokit = makeOctokit({
@@ -1174,6 +1051,56 @@ describe('optional targetBranch', () => {
     });
     return octokit;
   }
+
+  it.each([true, false])(
+    'creates an unlisted environment GitHub PR only after scope verification: %s',
+    async (allowed) => {
+      const octokit = makeOctokit({
+        created: {
+          number: 11,
+          node_id: 'node-11',
+          html_url: 'https://github.com/acme/web/pull/11',
+          title: '[Feature] X',
+          draft: true,
+          base: { ref: 'develop' },
+        },
+      });
+      mockEnvironmentsFindFirst.mockResolvedValue({
+        config: {
+          name: 'Environment',
+          repositories: [{ repository: 'acme/anchor' }],
+        },
+      });
+      mockResolveEnvironmentGitHubRepositories.mockResolvedValue(
+        allowed ? [{ fullName: 'acme/web' }] : [],
+      );
+      const taskRun = makeTaskRun({
+        repo: 'acme/anchor',
+        environmentId: 'environment',
+        sourceControlProvider: 'github',
+        repositoryProviders: { 'acme/anchor': 'github' },
+      });
+      const result = createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun,
+        input: { ...baseInput, targetBranch: 'develop' },
+      });
+      if (allowed) {
+        await expect(result).resolves.toMatchObject({
+          action: 'created',
+          provider: 'github',
+          number: 11,
+        });
+        expect(octokit.rest.pulls.create).toHaveBeenCalledTimes(1);
+      } else {
+        await expect(result).rejects.toThrow('outside this task');
+        expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+        expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
+      }
+      expect(mockResolveEnvironmentGitHubRepositories).toHaveBeenCalledWith(
+        taskRun,
+      );
+    },
+  );
 
   it('updates the existing GitHub pull request and keeps its base when targetBranch is omitted', async () => {
     const existing = {

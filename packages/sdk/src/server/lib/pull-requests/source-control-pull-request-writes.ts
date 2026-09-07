@@ -1,3 +1,4 @@
+import { createGitHubToken } from '@roomote/auth';
 import { getOctokit, Schemas as GitHubSchemas } from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
@@ -19,13 +20,15 @@ import {
   resolveGitLabProviderContext,
 } from './source-control-pull-request-provider-context';
 import {
+  assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   buildGitLabTokenHeader,
-  createGitHubRepositoryToken,
   formatResponseBody,
   getPayloadRecord,
-  resolveTaskRunSourceControlRepository,
+  resolveRepositoryRow,
+  resolveSourceControlHostForRepositoryFromPayload,
+  resolveSourceControlProviderForRepositoryFromPayload,
   splitRepositoryFullName,
   type FetchImpl,
   type RepositoryRow,
@@ -293,11 +296,32 @@ export async function writeSourceControlPullRequestForTaskRun({
   const input = normalizeOptionalWriteIds(rawInput);
   assertWriteInputFields(input);
 
-  const repository = await resolveTaskRunSourceControlRepository(
-    taskRun,
-    input,
+  const payloadRecord = getPayloadRecord(taskRun.payload);
+  const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
+    payloadRecord,
+    input.repositoryFullName,
   );
-  const provider = repository.sourceControlProvider;
+  const payloadHost = resolveSourceControlHostForRepositoryFromPayload(
+    payloadRecord,
+    input.repositoryFullName,
+  );
+  const provider = input.sourceControlProvider ?? payloadProvider;
+
+  if (provider !== payloadProvider) {
+    throw new Error(
+      `Source control provider mismatch: task uses ${getSourceControlProviderLabel(
+        payloadProvider,
+      )}, but request specified ${getSourceControlProviderLabel(provider)}.`,
+    );
+  }
+
+  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
+
+  const repository = await resolveRepositoryRow({
+    provider,
+    repositoryFullName: input.repositoryFullName,
+    host: payloadHost,
+  });
 
   let result: SourceControlPullRequestWriteResult;
   switch (provider) {
@@ -347,7 +371,7 @@ export async function writeSourceControlPullRequestForTaskRun({
     input,
     result,
     provider,
-    host: repository.host ?? undefined,
+    host: payloadHost,
     fetchImpl,
   });
   return result;
@@ -1007,8 +1031,17 @@ async function createGitHubWriteClient(
   owner: string;
   repo: string;
 }> {
+  if (!repository.installationId) {
+    throw new Error(
+      `GitHub repository ${repository.fullName} is missing an installation id.`,
+    );
+  }
+
   const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
-  const token = await createGitHubRepositoryToken(repository);
+  const token = await createGitHubToken({
+    type: 'installationId',
+    installationId: repository.installationId,
+  });
 
   return {
     octokit: getOctokit(token, { retryRateLimits: true }),

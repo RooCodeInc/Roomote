@@ -6,7 +6,6 @@ import type { TaskRun } from '@roomote/db/server';
 const {
   mockEnvironmentVariablesFindMany,
   mockRepositoriesFindMany,
-  mockResolveTaskRunWritableRepositories,
   mockEnvironmentsFindFirst,
   mockGitLabOAuthAccessToken,
   mockGitLabOAuthAccessTokenWithMetadata,
@@ -14,7 +13,6 @@ const {
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
-  mockResolveTaskRunWritableRepositories: vi.fn().mockResolvedValue(null),
   mockEnvironmentsFindFirst: vi.fn(),
   mockGitLabOAuthAccessToken: vi.fn(),
   mockGitLabOAuthAccessTokenWithMetadata: vi.fn(),
@@ -22,8 +20,6 @@ const {
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  resolveTaskRunWritableRepositories: (...args: unknown[]) =>
-    mockResolveTaskRunWritableRepositories(...args),
   db: {
     query: {
       environmentVariables: {
@@ -475,7 +471,6 @@ describe('createTaskRunScopedGitLabTokens', () => {
     delete process.env.GITLAB_BASE_URL;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
-    mockResolveTaskRunWritableRepositories.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
       {
         fullName: 'group/project',
@@ -546,89 +541,6 @@ describe('createTaskRunScopedGitLabTokens', () => {
         body: expect.stringContaining('"write_repository"'),
       }),
     );
-  });
-
-  it('uses cross-environment writable rows without restoring excluded inactive repositories', async () => {
-    mockResolveTaskRunWritableRepositories.mockResolvedValue([
-      {
-        fullName: 'group/cross-env',
-        externalRepoId: '84',
-        sourceControlProvider: 'gitlab',
-      },
-      {
-        fullName: 'group/cross-env',
-        externalRepoId: '999',
-        sourceControlProvider: 'gitea',
-      },
-    ]);
-    mockRepositoriesFindMany.mockResolvedValue([
-      { fullName: 'group/inactive', externalRepoId: '21' },
-    ]);
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({ id: 999, token: 'scoped', username: 'oauth2' }),
-            { status: 201 },
-          ),
-      );
-    const taskRun = makeTaskRun({
-      environmentId: 'env-1',
-      repo: 'group/inactive',
-      selectedRepositories: ['group/inactive'],
-      repositoryProviders: { 'group/cross-env': 'gitea' },
-      description: 'Cross-environment work',
-    } as TaskRun['payload']);
-
-    const result = await createTaskRunScopedGitLabTokens(taskRun, {
-      fetchImpl: fetchMock,
-    });
-
-    expect(
-      result.credentials.map(({ repositoryFullName }) => repositoryFullName),
-    ).toEqual(['group/cross-env']);
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://gitlab.com/api/v4/projects/84/access_tokens',
-      expect.anything(),
-    );
-    expect(mockResolveTaskRunWritableRepositories).toHaveBeenCalledWith(
-      expect.anything(),
-      taskRun,
-    );
-    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
-    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
-  });
-
-  it('validates project IDs returned by the writable boundary', async () => {
-    mockResolveTaskRunWritableRepositories.mockResolvedValue([
-      {
-        fullName: 'group/cross-env',
-        externalRepoId: ' ',
-        sourceControlProvider: 'gitlab',
-      },
-    ]);
-    await expect(
-      createTaskRunScopedGitLabTokens(
-        makeTaskRun({
-          environmentId: 'env-1',
-          description: 'Cross-environment work',
-        } as TaskRun['payload']),
-      ),
-    ).rejects.toThrow('missing an external project id');
-  });
-
-  it('does not fall back when the writable boundary returns no repositories', async () => {
-    mockResolveTaskRunWritableRepositories.mockResolvedValue([]);
-    const result = await createTaskRunScopedGitLabTokens(
-      makeTaskRun({
-        environmentId: 'env-1',
-        repo: 'group/project',
-        description: 'No writable repositories',
-      } as TaskRun['payload']),
-    );
-    expect(result.credentials).toEqual([]);
-    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
   });
 
   it('ignores selected repositories mapped to another provider', async () => {

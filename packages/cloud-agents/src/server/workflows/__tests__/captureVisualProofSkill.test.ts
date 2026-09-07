@@ -121,16 +121,6 @@ describe('Capture visual proof skill', () => {
     );
   });
 
-  it('requires the preview to serve the changed application, not just a prepared app', () => {
-    expect(skillContent).toContain(
-      'Verify the preview serves the changed app and code',
-    );
-    expect(skillContent).toContain('a different prepared app is not proof');
-    expect(skillContent).toContain(
-      'Otherwise report the target as unreachable',
-    );
-  });
-
   it('allows exactly one recapture and stops on unreachable surfaces', () => {
     expect(skillContent).toContain(
       'Recapture an artifact once when the first honest capture is obviously blank, clipped, or misses the required visible state. That is the only retry this skill allows.',

@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import {
-  resolveTaskRunWritableRepositories,
-  type Repository,
-  type TaskRun,
-} from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -84,7 +80,6 @@ vi.mock('@roomote/ado', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  resolveTaskRunWritableRepositories: vi.fn(async () => null),
   db: {
     query: {
       repositories: {
@@ -92,16 +87,7 @@ vi.mock('@roomote/db/server', () => ({
         // row (or null), adapted here to the list shape it expects.
         findMany: async (...args: unknown[]) => {
           const row = await mockRepositoriesFindFirst(...args);
-          const query = args[0] as {
-            where: { conditions: Array<{ left: string; right: unknown }> };
-          };
-          const provider = query.where.conditions.find(
-            (condition) =>
-              condition.left === 'repositories.sourceControlProvider',
-          )?.right;
-          return row == null
-            ? []
-            : [{ sourceControlProvider: provider, githubRepoId: 101, ...row }];
+          return row == null ? [] : [row];
         },
       },
       environments: {
@@ -164,98 +150,6 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     );
     mockGetGitHubRateLimitRetryAfterMs.mockReturnValue(null);
   });
-
-  it.each([false, true])(
-    'reads a cross-environment repository using its actual provider, mapped=%s',
-    async (mapped) => {
-      vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
-        {
-          id: 'target',
-          fullName: 'acme/backend',
-          sourceControlProvider: 'gitlab',
-          host: 'gitlab.com',
-          externalRepoId: '101',
-          isActive: true,
-        } as Repository,
-      ]);
-      const fetchImpl = vi.fn().mockResolvedValue(jsonResponse([]));
-      const result = await readSourceControlPullRequestForTaskRun({
-        taskRun: makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          sourceControlProvider: 'github',
-          repositoryProviders: {
-            'acme/prepared': 'github',
-            ...(mapped ? { 'acme/backend': 'github' } : {}),
-          },
-        }),
-        input: {
-          action: 'list_pull_requests',
-          repositoryFullName: 'acme/backend',
-          sourceControlProvider: 'gitlab',
-        },
-        fetchImpl,
-      });
-      expect(result).toMatchObject({ success: true, provider: 'gitlab' });
-      expect(fetchImpl).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'https://gitlab.com/api/v4/projects/101/merge_requests',
-        ),
-        expect.anything(),
-      );
-      expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([202, null])(
-    'requires the exact writable GitHub repository ID for cross-environment reads: %s',
-    async (githubRepoId) => {
-      vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
-        {
-          id: 'target',
-          fullName: 'acme/backend',
-          sourceControlProvider: 'github',
-          host: 'github.com',
-          installationId: 'target-installation',
-          githubRepoId,
-          isActive: true,
-        } as Repository,
-      ]);
-      mockCreateGitHubToken.mockResolvedValue('github-token');
-      mockGetOctokit.mockReturnValue({
-        paginate: vi.fn().mockResolvedValue([]),
-        rest: { pulls: { list: vi.fn().mockResolvedValue({ data: [] }) } },
-      });
-      const operation = readSourceControlPullRequestForTaskRun({
-        taskRun: makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          sourceControlProvider: 'gitlab',
-          repositoryProviders: { 'acme/prepared': 'gitlab' },
-        }),
-        input: {
-          action: 'list_pull_requests',
-          repositoryFullName: 'acme/backend',
-        },
-      });
-      if (githubRepoId === null) {
-        await expect(operation).rejects.toThrow(
-          'missing a valid GitHub repository id',
-        );
-        expect(mockCreateGitHubToken).not.toHaveBeenCalled();
-      } else {
-        await expect(operation).resolves.toMatchObject({
-          success: true,
-          provider: 'github',
-        });
-        expect(mockCreateGitHubToken).toHaveBeenCalledExactlyOnceWith({
-          type: 'installationId',
-          installationId: 'target-installation',
-          repositoryIds: [202],
-        });
-      }
-    },
-  );
 
   it('uses ETags for review-drain GitHub comment polling reads', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
@@ -445,7 +339,6 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     expect(mockCreateGitHubToken).toHaveBeenCalledWith({
       type: 'installationId',
       installationId: 'installation-1',
-      repositoryIds: [101],
     });
     expect(mockGetOctokit).toHaveBeenCalledWith('github-token');
     expect(pullsGet).toHaveBeenCalledWith({
@@ -2252,7 +2145,6 @@ describe('listMergedSourceControlPullRequestsForRepository', () => {
       repository: makeRepositoryRow({
         sourceControlProvider: 'github',
         installationId: 'installation-1',
-        githubRepoId: 101,
         fullName: 'acme/backend',
       }),
       provider: 'github',

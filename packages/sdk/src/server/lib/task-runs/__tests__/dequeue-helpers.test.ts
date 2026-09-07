@@ -1,5 +1,5 @@
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
-import type { Repository, TaskRun } from '@roomote/db/server';
+import type { TaskRun } from '@roomote/db/server';
 
 const {
   mockDecryptSecrets,
@@ -34,7 +34,6 @@ vi.mock('@roomote/db/encryption', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  resolveTaskRunWritableRepositories: vi.fn(async () => null),
   db: {
     query: {
       environmentVariables: {
@@ -115,10 +114,7 @@ vi.mock('../notify-fast-agent-parent-on-settle', () => ({
   notifyFastAgentParentOnSettle: vi.fn().mockResolvedValue(undefined),
 }));
 
-import {
-  resolveWorkspaceSourceControlProvider,
-  resolveTaskRunWritableRepositories,
-} from '@roomote/db/server';
+import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
 
 import {
   createSourceControlTokenForTaskRun,
@@ -126,7 +122,6 @@ import {
   notifyCanceledTaskRunOnSettle,
   redactControlPlaneEnvVars,
   redactSourceControlProviderEnvVars,
-  resolveTaskRunSourceControlProviders,
 } from '../dequeue-helpers';
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
@@ -141,88 +136,6 @@ function makeTaskRun(payload: TaskRun['payload']): TaskRun {
     result: null,
   } as TaskRun;
 }
-
-describe('resolveTaskRunSourceControlProviders environment scope', () => {
-  it('includes every writable provider and keeps the prepared primary first', async () => {
-    vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
-      { sourceControlProvider: 'gitlab' },
-      { sourceControlProvider: 'github' },
-      { sourceControlProvider: 'gitea' },
-      { sourceControlProvider: 'gitlab' },
-      { sourceControlProvider: 'ado' },
-      { sourceControlProvider: 'bitbucket' },
-    ] as Repository[]);
-    await expect(
-      resolveTaskRunSourceControlProviders(
-        makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          sourceControlProvider: 'github',
-          repositoryProviders: { 'acme/prepared': 'github' },
-        }),
-      ),
-    ).resolves.toEqual(['github', 'gitlab', 'gitea', 'ado', 'bitbucket']);
-  });
-
-  it('does not mint credentials for a stale prepared provider', async () => {
-    vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
-      { sourceControlProvider: 'gitlab' },
-    ] as Repository[]);
-    await expect(
-      resolveTaskRunSourceControlProviders(
-        makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          sourceControlProvider: 'github',
-        }),
-      ),
-    ).resolves.toEqual(['gitlab']);
-  });
-
-  it('uses the prepared primary repository map when no scalar provider is stamped', async () => {
-    vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
-      { sourceControlProvider: 'gitlab' },
-      { sourceControlProvider: 'gitea' },
-    ] as Repository[]);
-    await expect(
-      resolveTaskRunSourceControlProviders(
-        makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          repositoryProviders: { 'acme/prepared': 'gitea' },
-        }),
-      ),
-    ).resolves.toEqual(['gitea', 'gitlab']);
-  });
-
-  it('does not fall back to payload credentials when no repository remains writable', async () => {
-    vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([]);
-    await expect(
-      resolveTaskRunSourceControlProviders(
-        makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          sourceControlProvider: 'github',
-        }),
-      ),
-    ).resolves.toEqual([]);
-  });
-
-  it('propagates the membership boundary failure', async () => {
-    vi.mocked(resolveTaskRunWritableRepositories).mockRejectedValueOnce(
-      new Error('Actor is no longer active'),
-    );
-    await expect(
-      resolveTaskRunSourceControlProviders(
-        makeTaskRun({
-          environmentId: 'env',
-          repo: 'acme/prepared',
-          sourceControlProvider: 'github',
-        }),
-      ),
-    ).rejects.toThrow('Actor is no longer active');
-  });
-});
 
 describe('createSourceControlTokenForTaskRun', () => {
   beforeEach(() => {
@@ -361,41 +274,6 @@ describe('createSourceControlTokenForTaskRun', () => {
         }),
       }),
     );
-  });
-
-  it('mints credentials for unprepared environment providers while keeping GitHub direct', async () => {
-    vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
-      { sourceControlProvider: 'gitlab' },
-      { sourceControlProvider: 'github' },
-      { sourceControlProvider: 'gitea' },
-      { sourceControlProvider: 'ado' },
-      { sourceControlProvider: 'bitbucket' },
-    ] as Repository[]);
-    const run = makeTaskRun({
-      environmentId: 'env',
-      repo: 'acme/prepared',
-      sourceControlProvider: 'github',
-      repositoryProviders: { 'acme/prepared': 'github' },
-    });
-    const result = await createSourceControlTokenForTaskRun(run, '[test]', {
-      maxRetries: 1,
-    });
-    expect(result).toMatchObject({
-      provider: 'github',
-      envVars: { GH_TOKEN: 'ghs_app_token' },
-    });
-    expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
-      run,
-    );
-    expect(mockCreateTaskRunScopedGitLabTokens).toHaveBeenCalledWith(run);
-    expect(mockCreateTaskRunGiteaCredentials).toHaveBeenCalledWith(run);
-    expect(mockCreateTaskRunAdoCredentials).toHaveBeenCalledWith(run);
-    expect(mockCreateTaskRunBitbucketCredentials).toHaveBeenCalledWith(run);
-    expect(
-      result?.gitProxyCredentials?.some(
-        (credential) => credential.provider === 'github',
-      ),
-    ).toBe(false);
   });
 
   it('maps GitLab deployment-token fallback credentials into proxy credentials', async () => {

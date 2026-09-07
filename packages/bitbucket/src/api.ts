@@ -9,7 +9,7 @@ import {
 import {
   type TaskRun,
   db,
-  resolveTaskRunWritableRepositories,
+  environments,
   repositories,
   and,
   eq,
@@ -774,6 +774,26 @@ async function resolveBitbucketRepositoryNamesForTaskRun(
     );
   };
 
+  if (taskRun.payload.environmentId) {
+    const environment = await db.query.environments.findFirst({
+      where: eq(environments.id, taskRun.payload.environmentId),
+    });
+
+    if (!environment) {
+      throw new Error(
+        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
+      );
+    }
+
+    return filterForBitbucket(
+      normalizeRepositorySelection(
+        environment.config.repositories.map(
+          (repository) => repository.repository,
+        ),
+      ),
+    );
+  }
+
   if (Array.isArray(taskRun.payload.selectedRepositories)) {
     const selectedRepositories = normalizeRepositorySelection(
       taskRun.payload.selectedRepositories,
@@ -792,18 +812,6 @@ async function resolveBitbucketRepositoryNamesForTaskRun(
 }
 
 async function resolveBitbucketRepositoryRowsForTaskRun(taskRun: TaskRun) {
-  const writableRepositories = await resolveTaskRunWritableRepositories(
-    db,
-    taskRun,
-  );
-  if (writableRepositories !== null) {
-    return writableRepositories
-      .filter(
-        (repository) => repository.sourceControlProvider === BITBUCKET_PROVIDER,
-      )
-      .map(({ fullName }) => ({ fullName }));
-  }
-
   const repositoryNames =
     await resolveBitbucketRepositoryNamesForTaskRun(taskRun);
   const queryConditions = [
