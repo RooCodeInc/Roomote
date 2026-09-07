@@ -45,7 +45,7 @@ export function DelegatedTaskCard({
       onClick={() => onOpen(taskId)}
       aria-label={`View coding task: ${title}`}
     >
-      <TaskRobotIcon taskId={taskId} />
+      <TaskRobotIcon taskId={taskId} size="sm" />
       <span className="min-w-0 flex-1">
         <span className="block text-xs text-muted-foreground group-hover:text-accent-foreground">
           Coding agent

@@ -42,10 +42,12 @@ export function TaskRobotIcon({
   taskId,
   sessionId,
   orderedTaskIds,
+  size = 'xs',
 }: {
   taskId: string;
   sessionId?: string | null;
   orderedTaskIds?: readonly string[];
+  size?: 'xs' | 'sm';
 }) {
   const context = useTaskRobotIconContext();
   const iconId = resolveTaskRobotIconId({
@@ -57,7 +59,7 @@ export function TaskRobotIcon({
   return (
     <Avatar
       imageUrl={getTaskRobotIconPath(iconId)}
-      size="xs"
+      size={size}
       alt=""
       data-task-robot-icon={iconId}
     />
