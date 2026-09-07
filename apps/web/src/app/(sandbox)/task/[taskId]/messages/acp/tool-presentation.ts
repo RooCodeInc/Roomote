@@ -483,7 +483,7 @@ function resolveReceiptLanguage(
   return null;
 }
 
-function readToolArguments(data: ToolData): ToolArguments | null {
+export function readToolArguments(data: ToolData): ToolArguments | null {
   const rawInput = (data as unknown as Record<string, unknown>).rawInput;
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
     return null;

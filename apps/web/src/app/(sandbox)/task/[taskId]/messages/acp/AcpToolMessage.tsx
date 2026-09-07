@@ -8,10 +8,7 @@ import {
 } from '@/lib';
 
 import { AlertCircle } from '@/components/system';
-import {
-  TaskRobotIcon,
-  useTaskRobotIconContext,
-} from '@/components/tasks/TaskRobotIcon';
+import { useTaskRobotIconContext } from '@/components/tasks/TaskRobotIcon';
 import {
   Message,
   MessageContent,
@@ -33,6 +30,8 @@ import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-resul
 import { resolveToolPresentation } from './tool-presentation';
 import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
 import { resolveToolPresentationPolicy } from './tool-presentation-policy';
+import { resolveTaskToolReference } from './task-tool-reference';
+import { useTaskToolIcon } from './task-tool-icon';
 
 interface AcpToolMessageProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
@@ -62,9 +61,9 @@ export function AcpToolMessage({
 
   const presentation = resolveToolPresentation(msg.data, msg.partial);
   const taskIconContext = useTaskRobotIconContext();
-  const referencedTaskId = resolveReferencedTaskId(
-    msg,
-    taskIconContext?.orderedTaskIds,
+  const taskIcon = useTaskToolIcon(
+    resolveTaskToolReference(msg, taskIconContext),
+    isFailed,
   );
   const ToolIcon = isFailed
     ? AlertCircle
@@ -128,20 +127,7 @@ export function AcpToolMessage({
             suffix={suffix}
             suffixPrefix={suffixPrefix}
             icon={ToolIcon}
-            iconElement={
-              !isFailed && referencedTaskId ? (
-                <TaskRobotIcon taskId={referencedTaskId} />
-              ) : undefined
-            }
-            iconAction={
-              !isFailed && referencedTaskId && taskIconContext?.onOpenTask
-                ? {
-                    label: 'Focus task prompt',
-                    onClick: () =>
-                      taskIconContext.onOpenTask?.(referencedTaskId),
-                  }
-                : undefined
-            }
+            {...taskIcon}
             state={toolState}
             params={sanitizedToolData}
             collapsible={showCollapsibleContent}
@@ -175,59 +161,6 @@ export function AcpToolMessage({
       </MessageContent>
     </Message>
   );
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function resolveReferencedTaskId(
-  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-  orderedTaskIds?: readonly string[],
-): string | null {
-  const toolName = (msg.data.toolName ?? msg.data.mcpToolName)
-    ?.trim()
-    .toLowerCase();
-  if (!toolName) return null;
-
-  const rawInput = asRecord(
-    (msg.data as unknown as Record<string, unknown>).rawInput,
-  );
-  const argumentsRecord = asRecord(rawInput?.arguments);
-  const isManageTasksTool = toolName === 'manage_tasks';
-  const isDirectTaskTool = [
-    'launch_task',
-    'review_pull_request',
-    'send_task_message',
-    'cancel_task',
-    'retry_task_start',
-  ].includes(toolName);
-  if (!isManageTasksTool && !isDirectTaskTool) return null;
-
-  const inputTaskId = argumentsRecord?.taskId;
-  if (typeof inputTaskId === 'string' && inputTaskId.trim()) {
-    return inputTaskId.trim();
-  }
-
-  if (msg.kind === 'tool_result') {
-    try {
-      const output = asRecord(JSON.parse(msg.data.output));
-      const result =
-        asRecord(output?.result) ?? asRecord(output?.data) ?? output;
-      const outputTaskId = result?.taskId;
-      if (typeof outputTaskId === 'string' && outputTaskId.trim()) {
-        return outputTaskId.trim();
-      }
-    } catch {
-      // Keep the normal tool icon when a result is not structured JSON.
-    }
-  }
-
-  return isDirectTaskTool && orderedTaskIds?.length === 1
-    ? orderedTaskIds[0]!
-    : null;
 }
 
 interface SubagentActivity {

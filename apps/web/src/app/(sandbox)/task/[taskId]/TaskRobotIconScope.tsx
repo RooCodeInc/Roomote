@@ -34,12 +34,16 @@ export function TaskRobotIconScope({
     ),
   );
 
-  if (inheritedContext || !sessionId) return children;
-
   return (
     <TaskRobotIconProvider
-      sessionId={sessionId}
-      orderedTaskIds={iconSession?.tasks.map((task) => task.taskId) ?? []}
+      sessionId={inheritedContext ? inheritedContext.sessionId : sessionId}
+      orderedTaskIds={
+        inheritedContext?.orderedTaskIds ??
+        iconSession?.tasks.map((task) => task.taskId) ??
+        []
+      }
+      onOpenTask={inheritedContext?.onOpenTask}
+      currentTaskId={taskId}
     >
       {children}
     </TaskRobotIconProvider>

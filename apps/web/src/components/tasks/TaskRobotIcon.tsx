@@ -9,8 +9,9 @@ import {
 import { Avatar } from '@/components/system';
 
 type TaskRobotIconContextValue = {
-  sessionId: string;
+  sessionId?: string | null;
   orderedTaskIds: readonly string[];
+  currentTaskId?: string;
   onOpenTask?: (taskId: string) => void;
 };
 
@@ -22,11 +23,12 @@ export function TaskRobotIconProvider({
   sessionId,
   orderedTaskIds,
   onOpenTask,
+  currentTaskId,
   children,
 }: TaskRobotIconContextValue & { children: ReactNode }) {
   const value = useMemo(
-    () => ({ sessionId, orderedTaskIds, onOpenTask }),
-    [onOpenTask, orderedTaskIds, sessionId],
+    () => ({ sessionId, orderedTaskIds, onOpenTask, currentTaskId }),
+    [onOpenTask, orderedTaskIds, sessionId, currentTaskId],
   );
 
   return (
@@ -46,17 +48,19 @@ export function TaskRobotIcon({
   orderedTaskIds,
   size = 'xs',
 }: {
-  taskId: string;
+  taskId?: string | null;
   sessionId?: string | null;
   orderedTaskIds?: readonly string[];
   size?: 'xs' | 'sm';
 }) {
   const context = useTaskRobotIconContext();
-  const iconId = resolveTaskRobotIconId({
-    taskId,
-    sessionId: sessionId ?? context?.sessionId,
-    orderedTaskIds: orderedTaskIds ?? context?.orderedTaskIds,
-  });
+  const iconId = taskId
+    ? resolveTaskRobotIconId({
+        taskId,
+        sessionId: sessionId ?? context?.sessionId,
+        orderedTaskIds: orderedTaskIds ?? context?.orderedTaskIds,
+      })
+    : 'robot-001';
 
   return (
     <Avatar
