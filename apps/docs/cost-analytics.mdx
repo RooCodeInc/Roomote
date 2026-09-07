@@ -34,6 +34,11 @@ model and provider. The source also appears in the detail drilldown. Choose a
 time range before comparing periods so the chart and breakdown use the same
 window.
 
+Analytics date presets and daily chart buckets use the web server's timezone,
+including daylight-saving transitions. Costs, Tasks, and PR analytics use the
+same calendar-day boundaries; these are not based on each viewer's browser
+timezone or the deployment's automation scheduling timezone.
+
 ## Exporting data
 
 Select **Download data** to export the currently filtered detail rows as a CSV
