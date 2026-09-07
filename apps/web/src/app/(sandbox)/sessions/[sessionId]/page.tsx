@@ -177,6 +177,9 @@ export default async function SessionDetailPage({
                   headerExtras={
                     <SessionHeaderPullRequests key="session-pull-requests" />
                   }
+                  headerActions={
+                    <SessionViewers sessionId={unifiedSession.id} />
+                  }
                   {...(isSetupSession
                     ? { timelineExtras: setupTimelineExtras }
                     : {})}

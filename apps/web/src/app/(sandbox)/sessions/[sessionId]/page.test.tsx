@@ -9,6 +9,7 @@ const {
   transcriptMock,
   sessionTaskTimelineMock,
   sessionWorkspaceMock,
+  sessionReadTrackerMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   getFastSessionByIdMock: vi.fn(),
@@ -17,11 +18,18 @@ const {
   transcriptMock: vi.fn(
     ({
       footer,
+      headerActions,
     }: {
       messages: unknown[];
       footer?: ReactNode;
       headerExtras?: ReactNode;
-    }) => <div data-testid="transcript">{footer}</div>,
+      headerActions?: ReactNode;
+    }) => (
+      <div data-testid="transcript">
+        {headerActions}
+        {footer}
+      </div>
+    ),
   ),
   sessionTaskTimelineMock: vi.fn(() => (
     <div data-testid="session-task-timeline" />
@@ -29,6 +37,7 @@ const {
   sessionWorkspaceMock: vi.fn(({ children }: { children: ReactNode }) => (
     <main data-testid="workspace-surface">{children}</main>
   )),
+  sessionReadTrackerMock: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/server/auth-context', () => ({ authorize: authorizeMock }));
@@ -89,7 +98,7 @@ vi.mock('./SessionWorkspace', () => ({
   ),
 }));
 vi.mock('./SessionReadTracker', () => ({
-  SessionReadTracker: () => null,
+  SessionReadTracker: sessionReadTrackerMock,
 }));
 vi.mock('@/components/sessions/SessionViewers', () => ({
   SessionViewers: ({ sessionId }: { sessionId: string }) => (
@@ -298,7 +307,7 @@ describe('Session detail page', () => {
       hasOlderMessages: false,
     });
 
-    renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       await SessionDetailPage({
         params: Promise.resolve({
           sessionId: '6a1f8f1e-0000-4000-8000-000000000002',
@@ -315,6 +324,17 @@ describe('Session detail page', () => {
       '6a1f8f1e-0000-4000-8000-000000000005',
     );
     expect(getFastSessionTasksMock).not.toHaveBeenCalled();
+    expect(html).toContain('data-testid="session-viewers"');
+    expect(html).toContain(
+      'data-session-id="6a1f8f1e-0000-4000-8000-000000000002"',
+    );
+    expect(html).not.toContain(
+      'data-session-id="6a1f8f1e-0000-4000-8000-000000000005"',
+    );
+    expect(sessionReadTrackerMock).toHaveBeenCalledWith(
+      { sessionId: '6a1f8f1e-0000-4000-8000-000000000002' },
+      undefined,
+    );
     expect(sessionWorkspaceMock).toHaveBeenCalledWith(
       expect.objectContaining({
         session: expect.objectContaining({
@@ -467,7 +487,7 @@ describe('Session detail page', () => {
       },
     ]);
 
-    renderToStaticMarkup(
+    const html = renderToStaticMarkup(
       await SessionDetailPage({
         params: Promise.resolve({
           sessionId: '6a1f8f1e-0000-4000-8000-000000000005',
@@ -475,6 +495,11 @@ describe('Session detail page', () => {
       }),
     );
 
+    expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      'headerActions',
+    );
+    expect(html).not.toContain('data-testid="session-viewers"');
+    expect(sessionReadTrackerMock).not.toHaveBeenCalled();
     expect(getSessionByIdCommandMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       '6a1f8f1e-0000-4000-8000-000000000005',

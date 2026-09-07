@@ -39,7 +39,6 @@ import {
   type SlackMentionScope,
 } from '@/components/ai-elements/slack-mention-context';
 import { WorkspaceHeader } from '@/components/layout';
-import { SessionViewers } from '@/components/sessions/SessionViewers';
 import {
   SessionPromptInput,
   type SessionPromptSubmission,
@@ -273,6 +272,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort = null,
   owner,
   headerExtras,
+  headerActions,
   timelineExtras,
 }: {
   sessionId: string;
@@ -287,6 +287,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort?: ReasoningEffort | null;
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
+  headerActions?: ReactNode;
   timelineExtras?: ReactNode;
 }) {
   const trpcClient = useTRPCClient();
@@ -741,7 +742,7 @@ export function FastSessionTranscript({
         <WorkspaceHeader
           className="py-3.25"
           contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
-          actions={<SessionViewers sessionId={sessionId} />}
+          actions={headerActions}
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>

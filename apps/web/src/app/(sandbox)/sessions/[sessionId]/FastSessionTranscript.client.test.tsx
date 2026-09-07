@@ -16,8 +16,6 @@ import {
 } from './FastSessionTranscript';
 import { SessionRunningTaskCountContext } from './session-task-panel-context';
 
-vi.mock('@/hooks/useSessionViewers', () => ({ useSessionViewers: () => [] }));
-
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
   usePathname: () => '/sessions/session-1',
@@ -1901,15 +1899,16 @@ describe('FastSessionTranscript', () => {
     );
   });
 
-  it('uses content-driven wrapping for header extras', () => {
+  it('renders header extras and actions while preserving the Fast stream ID', () => {
     render(
       <FastSessionTranscript
-        sessionId="session-1"
+        sessionId="fast-conversation-1"
         initialMessages={[]}
         initialTitle="Short session title"
         headerExtras={
           <a href="https://github.com/acme/widgets/pull/42">widgets#42</a>
         }
+        headerActions={<button type="button">Session viewers</button>}
       />,
     );
 
@@ -1918,6 +1917,13 @@ describe('FastSessionTranscript', () => {
     });
     expect(heading.closest('header')).toContainElement(
       screen.getByRole('link', { name: 'widgets#42' }),
+    );
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('button', { name: 'Session viewers' }),
+    );
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toBe(
+      '/api/sessions/fast-conversation-1/stream',
     );
   });
 
