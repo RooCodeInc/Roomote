@@ -784,7 +784,7 @@ export async function findAccessibleSession(
   return session ?? null;
 }
 
-async function findAccessibleSessionByFastConversationId(
+export async function findAccessibleSessionByFastConversationId(
   auth: SessionAuth,
   fastConversationId: string,
 ) {

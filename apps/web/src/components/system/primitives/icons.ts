@@ -197,6 +197,7 @@ export {
   ThumbsDown,
   ThumbsDownIcon,
   ThumbsUpIcon,
+  Timer,
   ToggleLeft,
   ToggleRight,
   Trash,
