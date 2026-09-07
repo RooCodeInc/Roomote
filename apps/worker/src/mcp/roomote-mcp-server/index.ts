@@ -25,7 +25,6 @@ import {
   shouldSearchTasks,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
-  workspaceReadinessSchema,
 } from '@roomote/types';
 import {
   captureWorkerException,
@@ -87,7 +86,6 @@ import { ABOUT_ME_CONTENT } from './about-me.js';
 import { INTEGRATION_SETUP_CONTENT } from './integration-setup.js';
 import type { ToolResult } from './types.js';
 import { errorResult } from './tool-result.js';
-import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
@@ -100,10 +98,7 @@ import {
 } from './sessions.js';
 import { handleGetRelayUpdates } from './relay-updates.js';
 
-export {
-  taskSuggestionResultHasSubmittedSuggestions,
-  automationWorkItemsResultHasSubmittedWorkItems,
-} from './automation-slack-summary-state.js';
+export { automationWorkItemsResultHasSubmittedWorkItems } from './automation-slack-summary-state.js';
 
 export const roomoteMcpServer = new NullableOptionalsMcpServer({
   name: 'roomote-mcp-server',
@@ -115,17 +110,6 @@ const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);
 const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
   message: 'Value must be non-empty.',
 });
-const boundedNonEmptyStringSchema = (maximumLength: number) =>
-  z
-    .string()
-    .refine((value) => value.length > 0 && value.length <= maximumLength, {
-      message: `Value must contain 1 to ${maximumLength} characters.`,
-    });
-const uuidStringSchema = z
-  .string()
-  .refine((value) => z.string().uuid().safeParse(value).success, {
-    message: 'Value must be a UUID.',
-  });
 
 roomoteMcpServer.registerTool(
   MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
@@ -1467,53 +1451,6 @@ if (
   const lifecycleToolName = reportsToParentSession
     ? 'report_to_parent_session'
     : 'send_chat_reply';
-  const supportsChatReplySuggestions =
-    process.env.ROOMOTE_AUTOMATION_TASK === 'true';
-  const usesPinnedSuggestionContract =
-    process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
-  const chatReplySuggestionSchema = usesPinnedSuggestionContract
-    ? z.object({
-        title: boundedNonEmptyStringSchema(140).describe(
-          'Non-empty suggestion title of at most 140 characters.',
-        ),
-        brief: boundedNonEmptyStringSchema(2000).describe(
-          'Non-empty suggestion brief of at most 2,000 characters.',
-        ),
-        category: z
-          .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
-          .optional(),
-        priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
-        investigationContext: boundedNonEmptyStringSchema(4000)
-          .optional()
-          .describe(
-            'Optional non-empty investigation context of at most 4,000 characters.',
-          ),
-        targetRepositoryFullName: nonEmptyStringSchema.describe(
-          'Non-empty target repository full name.',
-        ),
-        targetEnvironmentId: uuidStringSchema
-          .optional()
-          .describe('Optional target environment UUID.'),
-        workspaceReadiness: workspaceReadinessSchema.optional(),
-        readinessMessage: boundedNonEmptyStringSchema(500)
-          .optional()
-          .describe(
-            'Optional non-empty readiness message of at most 500 characters.',
-          ),
-      })
-    : z.object({
-        title: boundedNonEmptyStringSchema(140).describe(
-          'Non-empty suggestion title of at most 140 characters.',
-        ),
-        brief: boundedNonEmptyStringSchema(2000).describe(
-          'Non-empty suggestion brief of at most 2,000 characters.',
-        ),
-        targetRepositoryFullName: nonEmptyStringSchema
-          .optional()
-          .describe(
-            'Repository full name for org-wide runs. Required when the task workspace covers all repositories.',
-          ),
-      });
   const chatReplyMarkdownGuidance =
     chatReplySurfaceLabel === 'Slack'
       ? 'Supports the modern Slack Markdown contract from the Slack instructions. Use rich Markdown when it improves scanability. '
@@ -1526,12 +1463,11 @@ if (
     chatReplySurfaceLabel === 'Slack'
       ? 'Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.'
       : 'Use Markdown when it makes the reply clearer.';
-  const chatReplySuggestionGuidance = supportsChatReplySuggestions
-    ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
-    : '';
+  const chatReplyRecommendationGuidance =
+    'Offer recommendations in ordinary prose. If the user accepts, use the normal task start flow. ';
   const chatReplyDescription = reportsToParentSession
     ? 'Session-internal: reports lifecycle information privately to the parent Session, which owns any user-visible reply. The report may be a complete engineering handoff and is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
-    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
+    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplyRecommendationGuidance}Write the message so its content clearly matches the selected purpose.`;
   roomoteMcpServer.registerTool(
     lifecycleToolName,
     {
@@ -1566,25 +1502,6 @@ if (
           .describe(
             'Optional already-uploaded artifact IDs for images to attach. A reply must not claim an image or screenshot is attached, shown, or included unless the matching imageArtifactIds or imagePaths are supplied. If attachment delivery fails, provide an accessible artifact viewer link and say that the image could not be attached.',
           ),
-        ...(supportsChatReplySuggestions && !reportsToParentSession
-          ? {
-              suggestions: z
-                .array(chatReplySuggestionSchema)
-                .refine(
-                  (suggestions) =>
-                    suggestions.length >= 1 && suggestions.length <= 10,
-                  {
-                    message: 'Provide between 1 and 10 suggestions.',
-                  },
-                )
-                .optional()
-                .describe(
-                  usesPinnedSuggestionContract
-                    ? `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
-                    : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.`,
-                ),
-            }
-          : {}),
       },
       annotations: {
         readOnlyHint: false,
@@ -1629,20 +1546,11 @@ if (
                 summary: params.message,
                 imagePaths: params.imagePaths,
                 imageArtifactIds: params.imageArtifactIds,
-                suggestions: params.suggestions,
-                chatReplySurface: chatReplySurfaceLabel,
               },
               artifactConfig,
               roomoteConfig,
             );
           })();
-
-      if (
-        params.suggestions &&
-        taskSuggestionResultHasSubmittedSuggestions(result)
-      ) {
-        hasSubmittedAutomationSlackSummary = true;
-      }
 
       recordSuccessfulSlackTurnSatisfactionResult(result, lifecycleToolName, {
         replyPurpose: params.purpose,

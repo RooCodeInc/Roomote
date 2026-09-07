@@ -464,6 +464,13 @@ ${buildGitHubMessageInstructions()}`
   ${reportingContext}
   ${therapistModeInstructions}
 
+  <follow_up_recommendations>
+    <rule>Recommend independent follow-up work in ordinary prose with concrete scope and evidence, then ask what the user wants started. Do not emit suggestion cards, structured suggestions, or call suggestion-submission tools.</rule>
+    <rule>These execution rules take precedence over older saved automation instructions asking for suggestion tools or cards: preserve the useful recommendation intent in report text instead. Do not pass suggestions to \`send_chat_reply\`.</rule>
+    <rule>Wait for acceptance before starting recommended work, then use the normal task-start flow. This does not add an approval gate to work already explicitly authorized by the user or to autonomous automation \`act\` workflows.</rule>
+    <rule>For orchestrator-owned tasks, include recommendations in the parent report; the orchestrator owns asking the user and starting accepted follow-ups.</rule>
+  </follow_up_recommendations>
+
   <todo_policy>
     <purpose>The shared todo discipline lives in the global system prompt. This workflow-owned policy adds the seeding, routing, delegation, and delivery-specific todo semantics that the generic prompt cannot infer on its own.</purpose>
     <creation>

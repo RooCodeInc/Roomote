@@ -44,9 +44,14 @@ After connecting the provider, run a small task from chat and confirm that:
 
 ## Start suggested tasks
 
-When a task or automation report identifies independent follow-up work, Roomote
-can post each action as a suggested task in the originating conversation. Start
-the exact suggestion you want by reacting to its message:
+New task and automation reports describe actionable recommendations in ordinary
+prose rather than posting new suggested-task cards. Roomote asks what you want
+started. Reply with the work you accept, and Roomote starts it through the normal
+task-start flow. Explicitly authorized autonomous work continues without fresh
+acceptance.
+
+Suggested-task cards that were already posted remain usable. Start the exact
+suggestion you want by reacting to its message:
 
 - on Slack, add a thumbs-up reaction
 - on Discord, add a 👍 reaction
@@ -83,8 +88,8 @@ silent; it does not react to the reaction event itself.
 
 These reaction paths apply only to Roomote replies that were recorded for the
 current Fast conversation. Reactions on older or unrelated messages do not gain
-access to that conversation. Suggested-task reactions keep their dedicated
-launch behavior described above.
+access to that conversation. Reactions on previously posted suggested-task cards
+keep their dedicated launch behavior described above.
 
 Use the same stable public URL for every provider app setting that requires a
 callback or webhook. If you change that URL, update those provider settings and

@@ -34,7 +34,6 @@ import type {
   UpdateEnvironmentResponse,
   RecordVerificationResponse,
   SubmitAutomationWorkItemsResponse,
-  SubmitTaskSuggestionsResponse,
   SourceControlPullRequestReadResponse,
   SourceControlPullRequestResponse,
   SourceControlIssueResponse,
@@ -555,42 +554,6 @@ export async function manageSourceControlIssue(
       body: JSON.stringify(params),
     },
     'Failed to manage source control issue',
-  );
-}
-
-/**
- * Submit task suggestions for the current task via the platform API.
- */
-export type TaskSuggestionInput = {
-  title: string;
-  brief: string;
-  category?: SuggestionCategory;
-  priority?: SuggestionPriority;
-  investigationContext?: string;
-  targetRepositoryFullName?: string;
-  targetEnvironmentId?: string;
-  workspaceReadiness?: WorkspaceReadiness;
-  readinessMessage?: string;
-};
-
-export async function submitTaskSuggestions(
-  config: RoomoteConfig,
-  taskId: string,
-  params: {
-    suggestions: TaskSuggestionInput[];
-    delivery?: 'current_thread';
-    submissionKey?: string;
-  },
-): Promise<SubmitTaskSuggestionsResponse> {
-  return apiFetch(
-    config,
-    `/api/mcp/tasks/${encodeURIComponent(taskId)}/task_suggestions`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    },
-    'Failed to submit task suggestions',
   );
 }
 

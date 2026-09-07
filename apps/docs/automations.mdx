@@ -133,17 +133,17 @@ Use **View previous runs** on an automation card to open the task list
 filtered to that automation's runs. For a custom automation, the history is
 scoped to that specific automation rather than all custom automations.
 
-When creating an automation through Roomote chat, ask for **suggested tasks** or
-**launchable follow-ups** if qualifying findings should become tasks that
-teammates can start from the report. Asking only for a summary or list of action
-items keeps those actions as report text. Launchable suggestions require a chat
-report destination. Each suggestion can select its own named environment,
-**All repositories**, or **Fast** target, so one report can offer follow-ups for
-different workspaces and execution modes. Runs scoped to **All repositories**
-pin each suggestion to a concrete repository, then start it in a matching named
-environment when one is available. Those runs prepare every active repository,
-so they can take longer in large deployments. Use a named environment when the
-automation only needs a specific repository set.
+When creating an automation through Roomote chat, ask for actionable
+recommendations if qualifying findings should lead to follow-up work. New
+reports describe concrete follow-ups in ordinary prose and ask what you want
+started, rather than posting new suggested-task cards. Reply with the work you
+want Roomote to take on; after you accept, Roomote starts it through the normal
+task-start flow. Work you explicitly authorized the automation to perform
+autonomously continues without fresh acceptance.
+
+Suggested-task cards posted by earlier runs remain usable. Their existing
+reactions and **Start** buttons still start the selected work; see
+[Start suggested tasks](/communications#start-suggested-tasks).
 
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
@@ -266,7 +266,7 @@ Provider support differs slightly:
 Telegram reactions on Roomote Fast replies are supported, but Telegram is not
 available for **Call Roomote via emoji** on arbitrary messages. Its Bot API
 reaction updates are handled only for user-attributed reactions on Roomote
-replies and suggested-task cards.
+replies and previously posted suggested-task cards.
 
 ## Channel automations
 

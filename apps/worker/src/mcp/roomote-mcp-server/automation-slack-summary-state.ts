@@ -23,18 +23,6 @@ function parseToolResultPayload(
   }
 }
 
-export function taskSuggestionResultHasSubmittedSuggestions(
-  result: ToolResult,
-): boolean {
-  const payload = parseToolResultPayload(result);
-
-  return (
-    payload?.success === true &&
-    typeof payload.suggestionCount === 'number' &&
-    payload.suggestionCount > 0
-  );
-}
-
 export function automationWorkItemsResultHasSubmittedWorkItems(
   result: ToolResult,
 ): boolean {

@@ -7628,7 +7628,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
-    'passes structured suggestions through a %s automation closeout',
+    'drops legacy structured suggestions from a %s automation closeout',
     async (surface) => {
       const adapter = callbacks();
       const suggestions = [
@@ -7664,12 +7664,45 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(adapter.postReply).toHaveBeenCalledWith({
         purpose: 'closeout',
         message: 'Checkout latency increased this week.',
-        suggestions,
       });
+      expect(adapter.postReply).toHaveBeenCalledOnce();
+      expect(adapter.launchTask).not.toHaveBeenCalled();
     },
   );
 
-  it('rejects a suggestion target outside the authorized environment catalog', async () => {
+  it('deduplicates replies independently of legacy suggestions', async () => {
+    const adapter = callbacks();
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'progress',
+          message: 'Inspecting the issue.',
+          suggestions: [{ title: 'Follow up', brief: 'Inspect it.' }],
+        });
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Inspecting the issue.',
+            suggestions: [{ title: 'Different follow-up', brief: 'Fix it.' }],
+          }),
+        ).resolves.toMatchObject({ success: true, duplicate: true });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'What would you like to start?',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+    expect(adapter.postReply).toHaveBeenCalledTimes(2);
+    expect(adapter.postReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({ suggestions: expect.any(Array) }),
+    );
+  });
+
+  it('ignores legacy suggestion targets without validating their environment', async () => {
     const adapter = callbacks();
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -7686,10 +7719,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               },
             ],
           }),
-        ).resolves.toEqual({
-          success: false,
-          error: 'A suggested task selected an environment that was not found.',
-        });
+        ).resolves.toMatchObject({ success: true, closed: true });
         return '';
       },
     );
@@ -7707,7 +7737,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('passes structured suggestions through an automation task-settled closeout', async () => {
+  it('drops legacy structured suggestions from an automation task-settled closeout', async () => {
     const adapter = callbacks();
     const suggestions = [
       { title: 'Quarantine the flaky spec', brief: 'Skip it until fixed.' },
@@ -7737,11 +7767,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'closeout',
       message: 'Two flaky specs found.',
-      suggestions,
     });
   });
 
-  it('rejects structured suggestions outside automation reports', async () => {
+  it('drops legacy structured suggestions outside automation reports', async () => {
+    const adapter = callbacks();
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -7751,19 +7781,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             message: 'Try this next.',
             suggestions: [{ title: 'Follow up', brief: 'Inspect the issue.' }],
           }),
-        ).resolves.toEqual({
-          success: false,
-          error:
-            'Launchable suggestions are available only on chat automation closeouts.',
-        });
+        ).resolves.toMatchObject({ success: true, closed: true });
         return '';
       },
     );
 
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Try this next.',
+    });
   });
 
-  it('rejects structured suggestions on an automation clarification', async () => {
+  it('drops legacy structured suggestions on an automation clarification', async () => {
+    const adapter = callbacks();
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -7773,17 +7804,21 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             message: 'Which follow-up should run?',
             suggestions: [{ title: 'Follow up', brief: 'Inspect the issue.' }],
           }),
-        ).resolves.toMatchObject({ success: false });
+        ).resolves.toMatchObject({ success: true });
         return '';
       },
     );
 
     await answerFastAgentQuestion({
       ...baseParams,
-      adapter: callbacks(),
+      adapter,
       turnSource: 'platform_event',
       platformEventKind: 'automation',
       platformEventVisibility: 'required',
+    });
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'clarification',
+      message: 'Which follow-up should run?',
     });
   });
 

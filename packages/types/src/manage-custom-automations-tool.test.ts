@@ -47,6 +47,26 @@ describe('manage custom automations tool contract', () => {
     ).toContain('Do not mention internal tool names or parameters.');
   });
 
+  it.each([
+    ['tool', MANAGE_CUSTOM_AUTOMATIONS_TOOL.description],
+    ['prompt', MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.prompt.description],
+  ])(
+    'describes prose follow-ups and preserves autonomous work in the %s descriptor',
+    (_, description) => {
+      expect(description).toContain('concrete follow-ups in ordinary prose');
+      expect(description).toContain('ask what the user wants started');
+      expect(description).toContain(
+        'After acceptance, start the accepted work through the normal task-start flow.',
+      );
+      expect(description).toContain(
+        'Keep explicitly authorized autonomous work unchanged; it does not need fresh acceptance.',
+      );
+      expect(description).not.toMatch(
+        /launchable|suggested tasks|suggested-task|cards/i,
+      );
+    },
+  );
+
   it('compacts list records to operational fields', () => {
     expect(
       compactManageCustomAutomationsResult('list', {
