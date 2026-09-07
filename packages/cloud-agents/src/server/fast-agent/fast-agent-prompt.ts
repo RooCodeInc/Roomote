@@ -19,6 +19,7 @@ import {
 import type { FastAgentActiveTask } from './fast-agent-session';
 import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
+import { buildRoomoteReleaseIdentifier } from '../../release-version';
 import { buildTherapistModeInstructions } from '../therapist-mode';
 
 function formatRepositoriesForPrompt(
@@ -125,6 +126,8 @@ export function buildFastAgentSystemPrompt({
   isCurrentUserAdmin = false,
   implicitAutomationOffersEnabled = true,
   releaseVersion,
+  commitSha,
+  appEnv,
   setupSnapshot,
   setupSession = false,
   therapistModeEnabled = false,
@@ -148,6 +151,8 @@ export function buildFastAgentSystemPrompt({
   isCurrentUserAdmin?: boolean;
   implicitAutomationOffersEnabled?: boolean;
   releaseVersion?: string;
+  commitSha?: string;
+  appEnv?: string;
   /** Trusted structured setup facts injected into every setup-session turn.
    * Contains readiness facts and catalog metadata only — never credentials. */
   setupSnapshot?: string;
@@ -205,7 +210,7 @@ export function buildFastAgentSystemPrompt({
     ? ''
     : '- When the current input includes a `<resumed_turn>` marker, your previous attempt at this same request did not finish (a service restart interrupted it, or a temporary inference provider failure is being retried automatically), and any acknowledgement or progress note you already posted is still visible to the user. Do not acknowledge the request again. When the marker carries a `<previous_attempt_transcript>` block, that is the transcript of your earlier attempt up to the cut: its replies reached the user and its completed tool calls ran, so continue from the last entry rather than starting over or repeating them; a call whose result is marked failed returned an error, so read it before retrying: a timeout or a lost response can mean the call still took effect. A tool result that reads "Tool result lost due to restart" means the process died before the outcome of that call was recorded: check whether it took effect (for example, look up the task) before repeating it. Deliver the answer from that point.\n';
   const releaseIdentifier = releaseVersion
-    ? `Roomote release ${releaseVersion}\n\n`
+    ? `${buildRoomoteReleaseIdentifier(releaseVersion, { commitSha, appEnv })}\n\n`
     : '';
   const recurringAutomationGuidance = `## Recurring Work and Automations
 - When an admin explicitly asks for recurring work, recognize a real cadence expression such as "every Monday", "daily", "weekly", "whenever X happens", "from now on", or "on a schedule". Do not treat preference words such as "always use tabs" as a cadence.

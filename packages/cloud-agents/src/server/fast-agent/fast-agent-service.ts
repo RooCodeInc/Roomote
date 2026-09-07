@@ -3132,6 +3132,8 @@ export async function answerFastAgentQuestion({
       isCurrentUserAdmin: currentUser.isAdmin,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
+      commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
+      appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       therapistModeEnabled,

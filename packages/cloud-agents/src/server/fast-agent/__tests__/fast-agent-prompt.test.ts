@@ -2,8 +2,31 @@ import { ALL_REPOSITORIES, RunStatus } from '@roomote/types';
 
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
+import { buildRoomoteSystemPrompt } from '../../../system-prompt';
 
 describe('buildFastAgentSystemPrompt', () => {
+  it.each(['production', 'preview', 'development', undefined])(
+    'shares build identity with normal prompts for %s',
+    (appEnv) => {
+      const metadata = {
+        commitSha: '0123456789abcdef0123456789abcdef01234567',
+        appEnv,
+      };
+      const fast = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        releaseVersion: '1.3.2',
+        ...metadata,
+      });
+      const normal = buildRoomoteSystemPrompt('1.3.2', metadata);
+      const identity = normal
+        .split('\n')
+        .find((line) => line.startsWith('Roomote release'));
+      expect(identity).toBeDefined();
+      expect(fast.split('\n')).toContain(identity);
+      expect(identity).toContain(metadata.commitSha);
+    },
+  );
+
   it('adds safe memory disclosure guidance only when therapist mode is enabled', () => {
     const enabledPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
