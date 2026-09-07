@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useReducedMotion } from 'motion/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -225,9 +224,7 @@ function ThinkingMessage() {
   return (
     <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
-        <Shimmer className="text-sm font-light" direction="rl" duration={1}>
-          Thinking
-        </Shimmer>
+        <Shimmer className="text-sm font-light">Thinking</Shimmer>
       </MessageContent>
     </Message>
   );
@@ -240,7 +237,6 @@ function RunningTasksMessage({
   count: number;
   onOpenTasks: () => void;
 }) {
-  const shouldReduceMotion = useReducedMotion();
   const label = `${count} ${count === 1 ? 'task' : 'tasks'} running`;
 
   return (
@@ -253,20 +249,9 @@ function RunningTasksMessage({
             aria-label={`${label}. Open ${count === 1 ? 'task' : 'tasks'}`}
             onClick={onOpenTasks}
           >
-            {shouldReduceMotion ? (
-              <span className="text-sm font-light text-muted-foreground">
-                {label}
-              </span>
-            ) : (
-              <Shimmer
-                as="span"
-                className="text-sm font-light"
-                duration={3}
-                spread={1}
-              >
-                {label}
-              </Shimmer>
-            )}
+            <Shimmer as="span" className="text-sm font-light" spread={1}>
+              {label}
+            </Shimmer>
           </button>
         </span>
       </MessageContent>
