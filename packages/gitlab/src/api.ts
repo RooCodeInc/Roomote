@@ -10,7 +10,7 @@ import {
 import {
   type TaskRun,
   db,
-  environments,
+  resolveTaskRunWritableRepositories,
   repositories,
   and,
   eq,
@@ -930,27 +930,6 @@ function filterRepositorySelectionForGitLab(
 async function resolveGitLabRepositoryNamesForTaskRun(
   taskRun: TaskRun,
 ): Promise<string[]> {
-  if (taskRun.payload.environmentId) {
-    const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, taskRun.payload.environmentId),
-    });
-
-    if (!environment) {
-      throw new Error(
-        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
-      );
-    }
-
-    return filterRepositorySelectionForGitLab(
-      taskRun,
-      normalizeRepositorySelection(
-        environment.config.repositories.map(
-          (repository) => repository.repository,
-        ),
-      ),
-    );
-  }
-
   if (Array.isArray(taskRun.payload.selectedRepositories)) {
     const selectedRepositories = normalizeRepositorySelection(
       taskRun.payload.selectedRepositories,
@@ -984,6 +963,28 @@ async function resolveGitLabRepositoryNamesForTaskRun(
 }
 
 async function resolveGitLabRepositoryRowsForTaskRun(taskRun: TaskRun) {
+  const writableRepositories = await resolveTaskRunWritableRepositories(
+    db,
+    taskRun,
+  );
+  if (writableRepositories !== null) {
+    return writableRepositories
+      .filter(
+        (repository) => repository.sourceControlProvider === GITLAB_PROVIDER,
+      )
+      .map((repository) => {
+        if (!repository.externalRepoId?.trim()) {
+          throw new Error(
+            `GitLab repository ${repository.fullName} is missing an external project id.`,
+          );
+        }
+        return {
+          repositoryFullName: repository.fullName,
+          projectId: repository.externalRepoId,
+        };
+      });
+  }
+
   const repositoryNames = await resolveGitLabRepositoryNamesForTaskRun(taskRun);
 
   const repositoryRows = await db.query.repositories.findMany({

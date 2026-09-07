@@ -11,7 +11,7 @@ import {
   type TaskRun,
   and,
   db,
-  environments,
+  resolveTaskRunWritableRepositories,
   repositories,
   eq,
   inArray,
@@ -1493,26 +1493,6 @@ async function resolveAdoRepositoryNamesForTaskRun(
     );
   };
 
-  if (taskRun.payload.environmentId) {
-    const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, taskRun.payload.environmentId),
-    });
-
-    if (!environment) {
-      throw new Error(
-        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
-      );
-    }
-
-    return filterForAdo(
-      normalizeRepositorySelection(
-        environment.config.repositories.map(
-          (repository) => repository.repository,
-        ),
-      ),
-    );
-  }
-
   if (Array.isArray(taskRun.payload.selectedRepositories)) {
     const selectedRepositories = normalizeRepositorySelection(
       taskRun.payload.selectedRepositories,
@@ -1531,6 +1511,23 @@ async function resolveAdoRepositoryNamesForTaskRun(
 }
 
 async function resolveAdoRepositoryRowsForTaskRun(taskRun: TaskRun) {
+  const writableRepositories = await resolveTaskRunWritableRepositories(
+    db,
+    taskRun,
+  );
+  if (writableRepositories !== null) {
+    return writableRepositories
+      .filter((repository) => repository.sourceControlProvider === ADO_PROVIDER)
+      .map(({ fullName, cloneUrl }) => {
+        if (!cloneUrl?.trim()) {
+          throw new Error(
+            `Azure DevOps repository ${fullName} is missing a clone URL.`,
+          );
+        }
+        return { fullName, cloneUrl };
+      });
+  }
+
   const repositoryNames = await resolveAdoRepositoryNamesForTaskRun(taskRun);
   const queryConditions = [
     eq(repositories.sourceControlProvider, ADO_PROVIDER),

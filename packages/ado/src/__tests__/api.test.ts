@@ -6,18 +6,22 @@ import type { TaskRun } from '@roomote/db/server';
 const {
   mockEnvironmentVariablesFindMany,
   mockRepositoriesFindMany,
+  mockResolveTaskRunWritableRepositories,
   mockEnvironmentsFindFirst,
   mockAuthAccountsFindFirst,
   mockAuthAccountsUpdate,
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
+  mockResolveTaskRunWritableRepositories: vi.fn().mockResolvedValue(null),
   mockEnvironmentsFindFirst: vi.fn(),
   mockAuthAccountsFindFirst: vi.fn(),
   mockAuthAccountsUpdate: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  resolveTaskRunWritableRepositories: (...args: unknown[]) =>
+    mockResolveTaskRunWritableRepositories(...args),
   db: {
     query: {
       environmentVariables: {
@@ -167,6 +171,7 @@ describe('Azure DevOps API helpers', () => {
     delete process.env.ADO_LINKED_ACCOUNT_ID;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
+    mockResolveTaskRunWritableRepositories.mockResolvedValue(null);
     mockAuthAccountsFindFirst.mockResolvedValue(null);
     mockAuthAccountsUpdate.mockReturnValue({
       set: vi
@@ -836,6 +841,68 @@ describe('Azure DevOps API helpers', () => {
         columns: { fullName: true, cloneUrl: true },
       }),
     );
+  });
+
+  it('uses cross-environment writable rows without restoring excluded inactive repositories', async () => {
+    mockResolveTaskRunWritableRepositories.mockResolvedValue([
+      {
+        fullName: 'acme/Other/cross-env',
+        cloneUrl: 'https://dev.azure.com/acme/Other/_git/cross-env',
+        sourceControlProvider: 'ado',
+      },
+      { fullName: 'acme/other-provider', sourceControlProvider: 'gitlab' },
+    ]);
+    mockRepositoriesFindMany.mockResolvedValue([
+      { fullName: 'acme/Platform/inactive' },
+    ]);
+    const taskRun = makeTaskRun({
+      environmentId: 'env-1',
+      repo: 'acme/Platform/inactive',
+      selectedRepositories: ['acme/Platform/inactive'],
+      repositoryProviders: { 'acme/Other/cross-env': 'gitlab' },
+      description: 'Cross-environment work',
+    } as TaskRun['payload']);
+    const result = await createTaskRunAdoCredentials(taskRun);
+    expect(
+      result.credentials.map(({ repositoryFullName }) => repositoryFullName),
+    ).toEqual(['acme/Other/_git/cross-env']);
+    expect(mockResolveTaskRunWritableRepositories).toHaveBeenCalledWith(
+      expect.anything(),
+      taskRun,
+    );
+    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
+    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('validates clone URLs returned by the writable boundary', async () => {
+    mockResolveTaskRunWritableRepositories.mockResolvedValue([
+      {
+        fullName: 'acme/Other/cross-env',
+        cloneUrl: ' ',
+        sourceControlProvider: 'ado',
+      },
+    ]);
+    await expect(
+      createTaskRunAdoCredentials(
+        makeTaskRun({
+          environmentId: 'env-1',
+          description: 'Cross-environment work',
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow('missing a clone URL');
+  });
+
+  it('does not fall back when the writable boundary returns no repositories', async () => {
+    mockResolveTaskRunWritableRepositories.mockResolvedValue([]);
+    const result = await createTaskRunAdoCredentials(
+      makeTaskRun({
+        environmentId: 'env-1',
+        repo: 'acme/Platform/backend',
+        description: 'No writable repositories',
+      } as TaskRun['payload']),
+    );
+    expect(result.credentials).toEqual([]);
+    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
   });
 
   it('strips the Azure DevOps base-path prefix before building proxy-backed credentials', async () => {

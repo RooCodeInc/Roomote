@@ -31,6 +31,7 @@ import {
   inArray,
   or,
   resolveDeploymentEnvVar,
+  resolveTaskRunWritableRepositories,
 } from '@roomote/db/server';
 
 const CONCURRENCY = 10;
@@ -45,29 +46,35 @@ async function resolveTokenOptionsForRepositoryNames({
   repositoryNames,
   missingMessagePrefix,
   spanningMessagePrefix,
+  repositoryRows,
 }: {
   taskRun: TaskRun;
   repositoryNames: string[];
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
+  repositoryRows?: Repository[];
 }): Promise<CreateGitHubTokenOptions> {
   const uniqueRepositoryNames = [
     ...new Set(
-      filterRepositoryNamesForSourceControlProvider(
-        taskRun.payload,
-        repositoryNames.filter(Boolean),
-        DEFAULT_SOURCE_CONTROL_PROVIDER,
-      ),
+      repositoryRows
+        ? repositoryNames
+        : filterRepositoryNamesForSourceControlProvider(
+            taskRun.payload,
+            repositoryNames.filter(Boolean),
+            DEFAULT_SOURCE_CONTROL_PROVIDER,
+          ),
     ),
   ];
 
-  const selectedRepoRows = await db.query.repositories.findMany({
-    where: and(
-      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
-      eq(repositories.isActive, true),
-      inArray(repositories.fullName, uniqueRepositoryNames),
-    ),
-  });
+  const selectedRepoRows =
+    repositoryRows ??
+    (await db.query.repositories.findMany({
+      where: and(
+        eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+        eq(repositories.isActive, true),
+        inArray(repositories.fullName, uniqueRepositoryNames),
+      ),
+    }));
 
   const foundRepositories = new Set(
     selectedRepoRows.map((repository) => repository.fullName),
@@ -82,6 +89,15 @@ async function resolveTokenOptionsForRepositoryNames({
     );
   }
 
+  if (
+    new Set(selectedRepoRows.map((row) => row.fullName)).size !==
+    selectedRepoRows.length
+  ) {
+    throw new Error(
+      `Ambiguous GitHub repositories for task run ${taskRun.id}.`,
+    );
+  }
+
   const installationIds = [
     ...new Set(
       selectedRepoRows
@@ -91,8 +107,8 @@ async function resolveTokenOptionsForRepositoryNames({
   ];
 
   if (installationIds.length === 1 && installationIds[0]) {
-    // Scope the token to exactly the task's repositories instead of the whole
-    // installation, so a task cannot reach unrelated repos in the org.
+    // Always pass explicit deployment-enabled repository IDs, never the whole
+    // installation (which can contain repositories disabled in Roomote).
     const repositoryIds = selectedRepoRows
       .map((repository) => repository.githubRepoId)
       .filter((id): id is number => id != null);
@@ -103,6 +119,15 @@ async function resolveTokenOptionsForRepositoryNames({
     if (repositoryIds.length === 0) {
       throw new Error(
         `${spanningMessagePrefix} for task run ${taskRun.id} resolved no GitHub repository ids for selected repositories: ${uniqueRepositoryNames.join(', ')}`,
+      );
+    }
+    if (
+      selectedRepoRows.some(
+        (row) => !row.installationId || row.githubRepoId == null,
+      )
+    ) {
+      throw new Error(
+        `GitHub repositories for task run ${taskRun.id} have incomplete installation or repository ids.`,
       );
     }
 
@@ -188,29 +213,60 @@ type Checks = RestEndpointMethodTypes['checks'];
 async function resolveTaskRunGitHubTokenOptions(
   taskRun: TaskRun,
 ): Promise<CreateGitHubTokenOptions> {
-  if (taskRun.payload.environmentId) {
+  const writableRepositories = await resolveTaskRunWritableRepositories(
+    db,
+    taskRun,
+  );
+  if (writableRepositories !== null) {
+    const githubRepositories = writableRepositories.filter(
+      (row) =>
+        row.isActive &&
+        row.sourceControlProvider === DEFAULT_SOURCE_CONTROL_PROVIDER,
+    );
     const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, taskRun.payload.environmentId),
+      where: eq(environments.id, taskRun.payload.environmentId!),
+      columns: { config: true },
     });
-
     if (!environment) {
       throw new Error(
         `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
       );
     }
-
-    const environmentRepositories = environment.config.repositories.map(
-      (repository) => repository.repository,
+    const preparedNames = new Set(
+      environment.config.repositories.map(
+        (repository) => repository.repository,
+      ),
     );
-
-    if (environmentRepositories.length > 0) {
-      return resolveTokenOptionsForRepositoryNames({
-        taskRun,
-        repositoryNames: environmentRepositories,
-        missingMessagePrefix: 'Environment repositories not found',
-        spanningMessagePrefix: 'Environment repositories',
-      });
+    const preparedRepositories = githubRepositories.filter((repository) =>
+      preparedNames.has(repository.fullName),
+    );
+    // The worker has one GH_TOKEN. Anchor its installation to preparation, but
+    // include all enabled repositories on that installation for follow-up work.
+    const installationIds = [
+      ...new Set(
+        (preparedRepositories.length > 0
+          ? preparedRepositories
+          : githubRepositories
+        ).map((repository) => repository.installationId),
+      ),
+    ];
+    if (installationIds.length !== 1 || !installationIds[0]) {
+      throw new Error(
+        preparedRepositories.length > 0
+          ? `Environment repositories for task run ${taskRun.id} must resolve to one GitHub installation.`
+          : `Task run ${taskRun.id} has no prepared GitHub repository anchor and must resolve to one active GitHub installation.`,
+      );
     }
+    const repositoryRows = githubRepositories.filter(
+      (repository) => repository.installationId === installationIds[0],
+    );
+    return resolveTokenOptionsForRepositoryNames({
+      taskRun,
+      repositoryNames: repositoryRows.map((row) => row.fullName),
+      repositoryRows,
+      missingMessagePrefix: 'Writable repositories not found',
+      spanningMessagePrefix: 'Writable repositories',
+    });
   }
 
   const selectedRepositories = Array.isArray(
@@ -228,25 +284,28 @@ async function resolveTaskRunGitHubTokenOptions(
     });
   }
 
-  const repo =
-    taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES
-      ? await db.query.repositories.findFirst({
-          where: and(
-            eq(
-              repositories.sourceControlProvider,
-              DEFAULT_SOURCE_CONTROL_PROVIDER,
-            ),
-            eq(repositories.fullName, taskRun.payload.repo),
-            eq(repositories.isActive, true),
-          ),
-        })
-      : undefined;
+  if (taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES) {
+    return resolveTokenOptionsForRepositoryNames({
+      taskRun,
+      repositoryNames: [taskRun.payload.repo],
+      missingMessagePrefix: 'Selected repositories not found',
+      spanningMessagePrefix: 'Selected repositories',
+    });
+  }
 
-  const installationId = repo?.installationId;
-
-  return installationId
-    ? { type: 'installationId', installationId }
-    : { type: 'activeInstallation' };
+  const repositoryRows = await db.query.repositories.findMany({
+    where: and(
+      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+      eq(repositories.isActive, true),
+    ),
+  });
+  return resolveTokenOptionsForRepositoryNames({
+    taskRun,
+    repositoryNames: repositoryRows.map((row) => row.fullName),
+    repositoryRows,
+    missingMessagePrefix: 'Active repositories not found',
+    spanningMessagePrefix: 'Active repositories',
+  });
 }
 
 export async function createTaskRunGitHubTokenWithMetadata(

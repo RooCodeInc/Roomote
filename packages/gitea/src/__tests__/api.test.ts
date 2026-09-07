@@ -6,18 +6,22 @@ import type { TaskRun } from '@roomote/db/server';
 const {
   mockEnvironmentVariablesFindMany,
   mockRepositoriesFindMany,
+  mockResolveTaskRunWritableRepositories,
   mockEnvironmentsFindFirst,
   mockGetGiteaOAuthConnection,
   mockResolveGiteaOAuthAccessToken,
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
+  mockResolveTaskRunWritableRepositories: vi.fn().mockResolvedValue(null),
   mockEnvironmentsFindFirst: vi.fn(),
   mockGetGiteaOAuthConnection: vi.fn(),
   mockResolveGiteaOAuthAccessToken: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  resolveTaskRunWritableRepositories: (...args: unknown[]) =>
+    mockResolveTaskRunWritableRepositories(...args),
   db: {
     query: {
       environmentVariables: {
@@ -121,6 +125,7 @@ describe('Gitea API helpers', () => {
     process.env.GITEA_BASE_URL = 'https://git.example.com/';
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
+    mockResolveTaskRunWritableRepositories.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
       {
         fullName: 'acme/backend',
@@ -566,6 +571,48 @@ describe('Gitea API helpers', () => {
       ],
       expiresAt: null,
     });
+  });
+
+  it('uses cross-environment writable rows without restoring excluded inactive repositories', async () => {
+    mockResolveTaskRunWritableRepositories.mockResolvedValue([
+      { fullName: 'acme/cross-env', sourceControlProvider: 'gitea' },
+      { fullName: 'acme/other-provider', sourceControlProvider: 'gitlab' },
+    ]);
+    mockRepositoriesFindMany.mockResolvedValue([{ fullName: 'acme/inactive' }]);
+    const taskRun = makeTaskRun({
+      environmentId: 'env-1',
+      repo: 'acme/inactive',
+      selectedRepositories: ['acme/inactive'],
+      repositoryProviders: { 'acme/cross-env': 'gitlab' },
+      description: 'Cross-environment work',
+    } as TaskRun['payload']);
+    const result = await createTaskRunGiteaCredentials(taskRun, {
+      username: 'bot',
+      token: 'token',
+    });
+    expect(
+      result.credentials.map(({ repositoryFullName }) => repositoryFullName),
+    ).toEqual(['acme/cross-env']);
+    expect(mockResolveTaskRunWritableRepositories).toHaveBeenCalledWith(
+      expect.anything(),
+      taskRun,
+    );
+    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
+    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back when the writable boundary returns no repositories', async () => {
+    mockResolveTaskRunWritableRepositories.mockResolvedValue([]);
+    const result = await createTaskRunGiteaCredentials(
+      makeTaskRun({
+        environmentId: 'env-1',
+        repo: 'acme/backend',
+        description: 'No writable repositories',
+      } as TaskRun['payload']),
+      { username: 'bot', token: 'token' },
+    );
+    expect(result.credentials).toEqual([]);
+    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
   });
 
   it('carries the matching OAuth token expiry into task credentials', async () => {

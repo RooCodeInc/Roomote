@@ -619,6 +619,18 @@ describe('request_user_input guidance in workflow prompts', () => {
       'Use the workspace root as your base directory for operations',
     );
     expect(harnessInstructions).toContain('Available repositories:');
+    expect(harnessInstructions).toContain(
+      'prepared repositories describe runtime setup, not the repository write boundary',
+    );
+    expect(harnessInstructions).toContain(
+      'GitHub App visibility alone is not authorization',
+    );
+    expect(harnessInstructions).toContain(
+      'An additional authorized repository does not require a new task',
+    );
+    expect(harnessInstructions).toContain(
+      'never claim preview or visual proof from a different prepared app',
+    );
     expect(harnessInstructions).not.toContain(
       '<workspace_context>Single repository workspace.</workspace_context>',
     );

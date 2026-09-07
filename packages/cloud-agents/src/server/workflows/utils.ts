@@ -307,18 +307,23 @@ When working with multiple repositories:
 - Use relative paths from the workspace root
 - Consider the impact of changes across repositories
 - Create multiple PRs in different repositories as necessary to complete your task
+
+For environment-backed tasks, prepared repositories describe runtime setup, not the repository write boundary. You may clone, change, push, and open PRs in other deployment-active repositories the acting user is authorized to access when the user's request calls for it. GitHub App visibility alone is not authorization. Use the existing source-control credentials and server-side checks; never bypass an authorization failure.
+An additional authorized repository does not require a new task or a change to shared environment membership. Inspect its own repository guidance and prepare the dependencies needed for the requested work. The current environment's services, secrets, setup commands, and previews are not automatically suitable for that repository. Validate the changed application itself; never claim preview or visual proof from a different prepared app. Report any runtime or proof limitations honestly.
+Only deliver changes intended for this task; a repository's presence in the workspace is not permission to commit unrelated changes.
 `;
 
   if (repoFullNames && repoFullNames.length > 0) {
     instructions += `
 
 Available repositories:
+(Prepared workspace repositories; for environment-backed tasks this is not an exhaustive list of authorized write targets.)
 `;
     for (const fullName of repoFullNames) {
       instructions += `- ${fullName}\n`;
     }
     instructions += `
-When creating pull requests, use the full repository name (owner/repo) from the list above.
+When creating pull requests, use the actual authorized target's full repository name (owner/repo), not necessarily a prepared repository from the list above.
 For example, target \`${repoFullNames[0] || 'owner/repo'}\` as the repository identifier when a delegated PR-delivery skill asks for the repository.
 `;
   }

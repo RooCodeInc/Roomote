@@ -24,6 +24,7 @@ import {
   markTaskStartParallelCountEndedAt,
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
+  resolveTaskRunWritableRepositories,
   resolveWorkspaceSourceControlHost,
   workspaceAllowsPrivateAttribution,
   workspaceUsesOnlySourceControlProvider,
@@ -455,7 +456,7 @@ export type SourceControlRuntimeToken = SourceControlTokenMetadata & {
 
 /**
  * Resolve the ordered providers for a run's source-control tokens. A repository
- * map is authoritative and keeps the primary repository's provider first.
+ * map describes prepared repositories; environment runs use writable rows.
  * Legacy payloads retain the existing scalar, workspace, and default fallback.
  */
 export async function resolveTaskRunSourceControlProviders(
@@ -467,6 +468,29 @@ export async function resolveTaskRunSourceControlProviders(
     repositoryProviders?: Record<string, unknown>;
     sourceControlProvider?: unknown;
   };
+
+  const writableRepositories = await resolveTaskRunWritableRepositories(
+    dbOrTx,
+    taskRun,
+  );
+  if (writableRepositories !== null) {
+    const providers = [
+      ...new Set(writableRepositories.map((row) => row.sourceControlProvider)),
+    ];
+    const primaryProvider = payload.sourceControlProvider
+      ? resolveSourceControlProviderFromPayload(payload)
+      : payload.repo && payload.repositoryProviders?.[payload.repo]
+        ? normalizeSourceControlProvider(
+            payload.repositoryProviders[payload.repo],
+          )
+        : undefined;
+    return primaryProvider && providers.includes(primaryProvider)
+      ? [
+          primaryProvider,
+          ...providers.filter((provider) => provider !== primaryProvider),
+        ]
+      : providers;
+  }
 
   if (
     payload.repositoryProviders &&

@@ -1,4 +1,3 @@
-import { createGitHubToken } from '@roomote/auth';
 import {
   DEFAULT_ROOMOTE_COMMIT_AUTHOR,
   getPrBodyAttributionLine,
@@ -73,16 +72,14 @@ import {
   resolveGitLabProviderContext,
 } from './source-control-pull-request-provider-context';
 import {
-  assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   buildGitLabTokenHeader,
+  createGitHubRepositoryToken,
   getPayloadRecord,
   isDraftTitle,
   isGitLabDraft,
-  resolveRepositoryRow,
-  resolveSourceControlHostForRepositoryFromPayload,
-  resolveSourceControlProviderForRepositoryFromPayload,
+  resolveTaskRunSourceControlRepository,
   splitRepositoryFullName,
   type FetchImpl,
   type RepositoryRow,
@@ -320,31 +317,12 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
   const payloadRecord = getPayloadRecord(taskRun.payload);
-  const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
-    payloadRecord,
-    input.repositoryFullName,
+  const repository = await resolveTaskRunSourceControlRepository(
+    taskRun,
+    input,
   );
-  const payloadHost = resolveSourceControlHostForRepositoryFromPayload(
-    payloadRecord,
-    input.repositoryFullName,
-  );
-  const provider = input.sourceControlProvider ?? payloadProvider;
-
-  if (provider !== payloadProvider) {
-    throw new Error(
-      `Source control provider mismatch: task uses ${getSourceControlProviderLabel(
-        payloadProvider,
-      )}, but request specified ${getSourceControlProviderLabel(provider)}.`,
-    );
-  }
-
-  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
-
-  const repository = await resolveRepositoryRow({
-    provider,
-    repositoryFullName: input.repositoryFullName,
-    host: payloadHost,
-  });
+  const provider = repository.sourceControlProvider;
+  const host = repository.host ?? undefined;
 
   const prAction = await resolveEffectivePrAction(taskRun);
   const createDraft = prAction !== 'create';
@@ -358,7 +336,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   ]);
   const liveAttribution = await resolveRunCommitAuthor(db, taskRun, {
     provider,
-    host: repository.host ?? payloadHost,
+    host,
   });
   const durableOwnerUserIds =
     input.prAttribution !== undefined || !taskRun.actingUserId
@@ -371,7 +349,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
       ? await resolveRunCommitAuthor(
           db,
           { taskId: taskRun.taskId, actingUserId: durableOwnerUserIds[0]! },
-          { provider, host: repository.host ?? payloadHost },
+          { provider, host },
         )
       : liveAttribution;
   const task = await db.query.tasks.findFirst({
@@ -389,7 +367,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
           selector: input.prAttribution,
           taskRun,
           provider,
-          host: repository.host ?? payloadHost,
+          host,
           liveAttribution,
           durableOwnerUserIds,
         });
@@ -715,17 +693,8 @@ async function createOrUpdateGitHubPullRequest({
   createDraft: boolean;
   staleLaunchAssignee?: string;
 }): Promise<SourceControlPullRequestMutationResult> {
-  if (!repository.installationId) {
-    throw new Error(
-      `GitHub repository ${repository.fullName} is missing an installation id.`,
-    );
-  }
-
   const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
-  const token = await createGitHubToken({
-    type: 'installationId',
-    installationId: repository.installationId,
-  });
+  const token = await createGitHubRepositoryToken(repository);
   const octokit = getOctokit(token, { retryRateLimits: true });
 
   const { data: existingPullRequests } = await octokit.rest.pulls.list({

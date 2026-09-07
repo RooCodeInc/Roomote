@@ -109,6 +109,29 @@ beforeEach(() => {
 });
 
 describe('readSourceControlPullRequestEnrichment', () => {
+  it.each([
+    { installationId: null, githubRepoId: 101 },
+    { installationId: 'inst-1', githubRepoId: null },
+    { installationId: 'inst-1', githubRepoId: undefined },
+    { installationId: 'inst-1', githubRepoId: 0 },
+    { installationId: 'inst-1', githubRepoId: -1 },
+  ])(
+    'rejects missing or invalid GitHub identity before minting a token: %j',
+    async (identity) => {
+      await expect(
+        readSourceControlPullRequestEnrichment({
+          repository: repositoryRow({
+            sourceControlProvider: 'github',
+            ...identity,
+          }),
+          provider: 'github',
+          prNumber: 42,
+        }),
+      ).rejects.toThrow('is missing');
+      expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+    },
+  );
+
   it('reads GitHub files and reviews through the installation client', async () => {
     const listFiles = vi.fn().mockResolvedValue({
       data: [
@@ -142,6 +165,7 @@ describe('readSourceControlPullRequestEnrichment', () => {
       repository: repositoryRow({
         sourceControlProvider: 'github',
         installationId: 'inst-1',
+        githubRepoId: 101,
         fullName: 'acme/widgets',
       }),
       provider: 'github',
@@ -151,6 +175,7 @@ describe('readSourceControlPullRequestEnrichment', () => {
     expect(mockCreateGitHubToken).toHaveBeenCalledWith({
       type: 'installationId',
       installationId: 'inst-1',
+      repositoryIds: [101],
     });
     expect(listFiles).toHaveBeenCalledWith(
       expect.objectContaining({

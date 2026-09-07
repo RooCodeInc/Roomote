@@ -1,14 +1,14 @@
+import { createGitHubToken } from '@roomote/auth';
 import {
   and,
   db,
-  environments,
   eq,
   repositories,
+  resolveTaskRunWritableRepositories,
   type TaskRun,
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
-  environmentConfigSchema,
   getSourceControlProviderLabel,
   normalizeSourceControlProvider,
   resolveRepositoryProvidersFromPayload,
@@ -34,11 +34,36 @@ export type RepositoryRow = {
   sourceControlProvider: SourceControlProvider;
   host: string | null;
   installationId: string | null;
+  githubRepoId?: number | null;
   externalRepoId: string | null;
   fullName: string;
   htmlUrl: string;
   private?: boolean;
 };
+
+export async function createGitHubRepositoryToken(
+  repository: RepositoryRow,
+): Promise<string> {
+  if (!repository.installationId) {
+    throw new Error(
+      `GitHub repository ${repository.fullName} is missing an installation id.`,
+    );
+  }
+  if (
+    !repository.githubRepoId ||
+    !Number.isSafeInteger(repository.githubRepoId) ||
+    repository.githubRepoId < 1
+  ) {
+    throw new Error(
+      `GitHub repository ${repository.fullName} is missing a valid GitHub repository id.`,
+    );
+  }
+  return createGitHubToken({
+    type: 'installationId',
+    installationId: repository.installationId,
+    repositoryIds: [repository.githubRepoId],
+  });
+}
 
 export function resolveSourceControlProviderForRepositoryFromPayload(
   payload: Record<string, unknown>,
@@ -125,6 +150,7 @@ export async function resolveRepositoryRow({
       sourceControlProvider: true,
       host: true,
       installationId: true,
+      githubRepoId: true,
       externalRepoId: true,
       fullName: true,
       htmlUrl: true,
@@ -195,38 +221,85 @@ export async function assertRepositoryInTaskRunScope(
   }
 }
 
+export async function resolveTaskRunSourceControlRepository(
+  taskRun: TaskRun,
+  input: {
+    repositoryFullName: string;
+    sourceControlProvider?: SourceControlProvider;
+  },
+): Promise<RepositoryRow> {
+  const payload = getPayloadRecord(taskRun.payload);
+  const writableRepositories = await resolveTaskRunWritableRepositories(
+    db,
+    taskRun,
+  );
+  let repository: RepositoryRow | undefined;
+  let provider: SourceControlProvider;
+  let host: string | undefined;
+
+  if (writableRepositories !== null) {
+    let candidates = writableRepositories.filter(
+      (row) => row.isActive && row.fullName === input.repositoryFullName,
+    );
+    // The prepared host is only a disambiguator for its own provider, never
+    // an authority for selecting a different repository's provider or host.
+    if (candidates.length > 1) {
+      const host = resolveSourceControlHostFromPayload(payload);
+      const primaryProvider = resolveSourceControlProviderFromPayload(payload);
+      if (
+        host &&
+        candidates.every((row) => row.sourceControlProvider === primaryProvider)
+      ) {
+        candidates = candidates.filter((row) => row.host === host);
+      }
+    }
+    if (candidates.length === 0) {
+      throw new Error(
+        `Repository ${input.repositoryFullName} is not found, inactive, or outside this task's source-control scope.`,
+      );
+    }
+    if (candidates.length !== 1) {
+      throw new Error(
+        `Repository ${input.repositoryFullName} matches more than one writable repository.`,
+      );
+    }
+    repository = candidates[0]!;
+    provider = repository.sourceControlProvider;
+  } else {
+    provider = resolveSourceControlProviderForRepositoryFromPayload(
+      payload,
+      input.repositoryFullName,
+    );
+    host = resolveSourceControlHostForRepositoryFromPayload(
+      payload,
+      input.repositoryFullName,
+    );
+  }
+
+  if (input.sourceControlProvider && input.sourceControlProvider !== provider) {
+    throw new Error(
+      `Source control provider mismatch: task uses ${getSourceControlProviderLabel(provider)}, but request specified ${getSourceControlProviderLabel(input.sourceControlProvider)}.`,
+    );
+  }
+  if (repository) return repository;
+  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
+  return resolveRepositoryRow({
+    provider,
+    repositoryFullName: input.repositoryFullName,
+    host,
+  });
+}
+
 async function resolveTaskRunRepositoryScope(
   taskRun: TaskRun,
 ): Promise<string[] | null> {
   const payload = getPayloadRecord(taskRun.payload);
-  const environmentId =
-    typeof payload.environmentId === 'string'
-      ? payload.environmentId.trim()
-      : '';
-
-  if (environmentId) {
-    const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, environmentId),
-      columns: { config: true },
-    });
-
-    if (!environment) {
-      throw new Error(
-        `Environment not found for task run ${taskRun.id}: ${environmentId}`,
-      );
-    }
-
-    const parsed = environmentConfigSchema.safeParse(environment.config);
-
-    if (!parsed.success) {
-      throw new Error(
-        `Environment ${environmentId} has an invalid repository configuration.`,
-      );
-    }
-
-    return normalizeRepositoryScope(
-      parsed.data.repositories.map((repository) => repository.repository),
-    );
+  const writableRepositories = await resolveTaskRunWritableRepositories(
+    db,
+    taskRun,
+  );
+  if (writableRepositories !== null) {
+    return writableRepositories.map((repository) => repository.fullName);
   }
 
   if (Array.isArray(payload.selectedRepositories)) {

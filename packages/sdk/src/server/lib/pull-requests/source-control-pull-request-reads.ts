@@ -1,4 +1,3 @@
-import { createGitHubToken } from '@roomote/auth';
 import {
   getGitHubRateLimitRetryAfterMs,
   getOctokit,
@@ -7,7 +6,6 @@ import {
 import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
-  getSourceControlProviderLabel,
   sourceControlProviderSchema,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -24,16 +22,13 @@ import {
   resolveGitLabProviderContext,
 } from './source-control-pull-request-provider-context';
 import {
-  assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   buildGitLabTokenHeader,
-  getPayloadRecord,
+  createGitHubRepositoryToken,
   isDraftTitle,
   isGitLabDraft,
-  resolveRepositoryRow,
-  resolveSourceControlHostForRepositoryFromPayload,
-  resolveSourceControlProviderForRepositoryFromPayload,
+  resolveTaskRunSourceControlRepository,
   splitRepositoryFullName,
   type FetchImpl,
   type RepositoryRow,
@@ -675,32 +670,11 @@ export async function readSourceControlPullRequestForTaskRun({
   /** Optional task-scoped token reused by a larger GitHub read workflow. */
   githubToken?: string;
 }): Promise<SourceControlPullRequestReadResult> {
-  const payloadRecord = getPayloadRecord(taskRun.payload);
-  const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
-    payloadRecord,
-    input.repositoryFullName,
+  const repository = await resolveTaskRunSourceControlRepository(
+    taskRun,
+    input,
   );
-  const payloadHost = resolveSourceControlHostForRepositoryFromPayload(
-    payloadRecord,
-    input.repositoryFullName,
-  );
-  const provider = input.sourceControlProvider ?? payloadProvider;
-
-  if (provider !== payloadProvider) {
-    throw new Error(
-      `Source control provider mismatch: task uses ${getSourceControlProviderLabel(
-        payloadProvider,
-      )}, but request specified ${getSourceControlProviderLabel(provider)}.`,
-    );
-  }
-
-  await assertRepositoryInTaskRunScope(taskRun, input.repositoryFullName);
-
-  const repository = await resolveRepositoryRow({
-    provider,
-    repositoryFullName: input.repositoryFullName,
-    host: payloadHost,
-  });
+  const provider = repository.sourceControlProvider;
 
   if (input.action === 'list_pull_requests') {
     return listOpenSourceControlPullRequestsForRepository({
@@ -1191,17 +1165,8 @@ async function createGitHubReadClient(
   owner: string;
   repo: string;
 }> {
-  if (!repository.installationId) {
-    throw new Error(
-      `GitHub repository ${repository.fullName} is missing an installation id.`,
-    );
-  }
-
   const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
-  const token = await createGitHubToken({
-    type: 'installationId',
-    installationId: repository.installationId,
-  });
+  const token = await createGitHubRepositoryToken(repository);
 
   return { octokit: getOctokit(token), owner, repo };
 }

@@ -5,7 +5,11 @@ import {
   TaskPayloadKind,
   formatPrBodyAttribution,
 } from '@roomote/types';
-import type { TaskRun } from '@roomote/db/server';
+import {
+  resolveTaskRunWritableRepositories,
+  type Repository,
+  type TaskRun,
+} from '@roomote/db/server';
 
 const {
   mockCreateGitHubToken,
@@ -129,6 +133,7 @@ const { mockTaskPullRequestUpsert, mockTaskRunAssociationUpdate } = vi.hoisted(
 );
 
 vi.mock('@roomote/db/server', () => ({
+  resolveTaskRunWritableRepositories: vi.fn(async () => null),
   getDeploymentGitHubRoomoteMentionEnabled: (...args: unknown[]) =>
     mockGetDeploymentGitHubRoomoteMentionEnabled(...args),
   getDeploymentPrAction: (...args: unknown[]) =>
@@ -161,7 +166,16 @@ vi.mock('@roomote/db/server', () => ({
         // row (or null), adapted here to the list shape it expects.
         findMany: async (...args: unknown[]) => {
           const row = await mockRepositoriesFindFirst(...args);
-          return row == null ? [] : [row];
+          const query = args[0] as {
+            where: { conditions: Array<{ left: string; right: unknown }> };
+          };
+          const provider = query.where.conditions.find(
+            (condition) =>
+              condition.left === 'repositories.sourceControlProvider',
+          )?.right;
+          return row == null
+            ? []
+            : [{ sourceControlProvider: provider, githubRepoId: 101, ...row }];
         },
       },
       environments: {
@@ -309,6 +323,68 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
       'https://dev.azure.com/acme',
     );
   });
+
+  it.each([false, true])(
+    'creates a cross-environment repository PR using its actual provider, mapped=%s',
+    async (mapped) => {
+      vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
+        {
+          id: 'target',
+          fullName: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+          host: 'gitlab.com',
+          externalRepoId: '101',
+          isActive: true,
+        } as Repository,
+      ]);
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse([]))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            iid: 42,
+            title: 'Draft: Test',
+            web_url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+            draft: true,
+          }),
+        );
+      const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          environmentId: 'env',
+          repo: 'acme/prepared',
+          sourceControlProvider: 'github',
+          repositoryProviders: {
+            'acme/prepared': 'github',
+            ...(mapped ? { 'acme/backend': 'github' } : {}),
+          },
+        }),
+        input: {
+          action: 'create_or_update_pull_request',
+          repositoryFullName: 'acme/backend',
+          sourceBranch: 'feature',
+          targetBranch: 'main',
+          title: 'Test',
+          body: '',
+          labels: [],
+          assignees: [],
+          sourceControlProvider: 'gitlab',
+        },
+        fetchImpl,
+      });
+      expect(result).toMatchObject({
+        success: true,
+        provider: 'gitlab',
+        action: 'created',
+      });
+      expect(fetchImpl).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'https://gitlab.com/api/v4/projects/101/merge_requests',
+        ),
+        expect.anything(),
+      );
+      expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
+    },
+  );
 
   it('creates a GitLab merge request with the linked public handle', async () => {
     mockGetDeploymentPrAction.mockResolvedValue('create');
@@ -549,6 +625,57 @@ describe('platform-managed draft state', () => {
     assignees: [],
     sourceControlProvider: 'github' as const,
   };
+
+  it.each([202, null])(
+    'requires the exact writable GitHub repository ID for cross-environment creation: %s',
+    async (githubRepoId) => {
+      makeOctokit({
+        created: {
+          number: 9,
+          node_id: 'node-9',
+          html_url: 'https://github.com/acme/web/pull/9',
+          title: 'Test',
+          draft: true,
+        },
+      });
+      vi.mocked(resolveTaskRunWritableRepositories).mockResolvedValueOnce([
+        {
+          id: 'target',
+          fullName: 'acme/web',
+          sourceControlProvider: 'github',
+          host: 'github.com',
+          installationId: 'target-installation',
+          githubRepoId,
+          isActive: true,
+        } as Repository,
+      ]);
+      const operation = createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          environmentId: 'env',
+          repo: 'acme/prepared',
+          sourceControlProvider: 'gitlab',
+          repositoryProviders: { 'acme/prepared': 'gitlab' },
+        }),
+        input: { ...githubInput },
+      });
+      if (githubRepoId === null) {
+        await expect(operation).rejects.toThrow(
+          'missing a valid GitHub repository id',
+        );
+        expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+      } else {
+        await expect(operation).resolves.toMatchObject({
+          success: true,
+          provider: 'github',
+        });
+        expect(mockCreateGitHubToken).toHaveBeenCalledExactlyOnceWith({
+          type: 'installationId',
+          installationId: 'target-installation',
+          repositoryIds: [202],
+        });
+      }
+    },
+  );
 
   it('creates GitHub PRs as drafts after durable parent-event admission', async () => {
     const octokit = makeOctokit({
