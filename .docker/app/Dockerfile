@@ -318,8 +318,9 @@ ARG OPENCODE_CLI_VERSION=1.18.10
 
 # Fast mode uses bounded, temporary partial Git fetches to discover
 # repository-defined skills without exposing a checkout to the model.
+# Native Slack video delivery converts WebM copies to H.264/AAC MP4.
 RUN apt -qq update && \
-  apt -qq install -y git && \
+  apt -qq install -y git ffmpeg util-linux && \
   rm -rf /var/lib/apt/lists/*
 
 # The install and version check run as root; with the image's HOME=/tmp they

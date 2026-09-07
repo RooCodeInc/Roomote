@@ -241,6 +241,7 @@ export {
   resolveFastAgentSessionImages,
   type FastAgentReplyImage,
 } from './lib/fast-agent-session-images';
+export { deliverFastAgentSessionVideos } from './lib/fast-agent-session-videos';
 
 export {
   getCommunicationProviderAdapter,

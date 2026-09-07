@@ -33,6 +33,7 @@ import {
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
 import { resolveFastAgentSessionImages } from './fast-agent-session-images';
+import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
 import { findSlackConversationSubjectByUserId } from './slack-conversation-log';
 import {
   createFastAgentCommunicationTaskLauncher,
@@ -314,13 +315,26 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           channelId: conversation.replyTarget.channelId,
           threadTs: threadId,
         }),
-        postReply: async ({ message, imageArtifactIds = [] }) => {
+        postReply: async ({
+          message,
+          imageArtifactIds = [],
+          videoArtifactIds = [],
+        }) => {
           const quote = pendingQuote;
           pendingQuote = null;
           const images = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,
           });
+          const videoFallback = videoArtifactIds.length
+            ? await deliverFastAgentSessionVideos({
+                artifactIds: videoArtifactIds,
+                sessionId: session.id,
+                channelId: conversation.replyTarget.channelId,
+                threadTs: threadId,
+              })
+            : '';
+          message = [message, videoFallback].filter(Boolean).join('\n\n');
           const messageTs = await postSlackThreadMessageWithFooterText({
             slack,
             channel: conversation.replyTarget.channelId,

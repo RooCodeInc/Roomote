@@ -77,6 +77,7 @@ export interface TaskSummaryResponse {
     contentType: string;
     viewUrl: string;
   }>;
+  videoArtifacts?: TaskSummaryResponse['imageArtifacts'];
 }
 
 export interface TaskComputeLog {

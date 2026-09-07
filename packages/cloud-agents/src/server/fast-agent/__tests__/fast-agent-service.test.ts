@@ -777,6 +777,68 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('preserves explicit video selections in delivery, canonical persistence, and reply deduplication', async () => {
+    const imageArtifactIds = ['11111111-1111-4111-8111-111111111111'];
+    const videos = [
+      '22222222-2222-4222-8222-222222222222',
+      '33333333-3333-4333-8333-333333333333',
+    ];
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        for (const video of [videos[0], videos[0], videos[1]]) {
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Here is the recording.',
+            videoArtifactIds: [video],
+          });
+        }
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Both recordings are ready.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultImageArtifactIds: imageArtifactIds,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledTimes(3);
+    for (const [index, video] of videos.entries()) {
+      expect(adapter.postReply).toHaveBeenNthCalledWith(index + 1, {
+        purpose: 'progress',
+        message: 'Here is the recording.',
+        imageArtifactIds,
+        videoArtifactIds: [video],
+      });
+    }
+    expect(adapter.postReply).toHaveBeenLastCalledWith({
+      purpose: 'closeout',
+      message: 'Both recordings are ready.',
+      imageArtifactIds,
+    });
+    const assistantMessages = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessages.map((message) => message.payload)).toEqual([
+      ...videos.map((video) => ({
+        purpose: 'progress',
+        imageArtifactIds,
+        videoArtifactIds: [video],
+      })),
+      { purpose: 'closeout', imageArtifactIds },
+    ]);
+  });
+
   it('persists child-selected image IDs when the parent omits the optional attachment argument', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {

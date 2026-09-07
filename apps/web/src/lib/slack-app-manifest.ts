@@ -12,6 +12,7 @@ export const SLACK_MANIFEST_BOT_SCOPES = [
   'channels:join',
   'chat:write',
   'files:read',
+  'files:write',
   'groups:read',
   'groups:history',
   'im:read',

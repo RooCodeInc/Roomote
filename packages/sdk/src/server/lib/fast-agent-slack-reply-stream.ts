@@ -13,6 +13,7 @@ import {
 } from '@roomote/slack';
 
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
 
 /**
  * Streams a Fast reply into a Slack thread with Slack's message streaming
@@ -89,6 +90,18 @@ export function createSlackFastReplyStream(params: {
       const images = reply.imageArtifactIds?.length
         ? ((await params.resolveImages?.(reply.imageArtifactIds)) ?? [])
         : [];
+      // The transport deduplicates uploads if a failed rewrite falls back to postReply.
+      const videoFallback = reply.videoArtifactIds?.length
+        ? await deliverFastAgentSessionVideos({
+            artifactIds: reply.videoArtifactIds,
+            sessionId: params.sessionId,
+            channelId: params.channelId,
+            threadTs: params.threadTs,
+          })
+        : '';
+      const message = [reply.message, videoFallback]
+        .filter(Boolean)
+        .join('\n\n');
       let updated = false;
       try {
         updated = await updateSlackThreadMessageWithFooterText({
@@ -96,7 +109,7 @@ export function createSlackFastReplyStream(params: {
           channel: params.channelId,
           threadTs: params.threadTs,
           messageTs: ts,
-          text: quote ? `${quote}\n${reply.message}` : reply.message,
+          text: quote ? `${quote}\n${message}` : message,
           bodyBlocks: [
             ...(quote
               ? [
@@ -107,7 +120,7 @@ export function createSlackFastReplyStream(params: {
                   },
                 ]
               : []),
-            { type: 'markdown' as const, text: reply.message },
+            { type: 'markdown' as const, text: message },
             ...images.map((image) => ({
               type: 'image' as const,
               image_url: image.url,
@@ -129,9 +142,9 @@ export function createSlackFastReplyStream(params: {
         const deleted = await params.slack
           .deleteMessage({ channel: params.channelId, ts })
           .catch(() => false);
-        if (deleted) {
+        if (deleted || videoFallback) {
           console.warn(
-            `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}; removed the partial stream so the reply can post normally.`,
+            `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}; ${deleted ? 'removed the partial stream' : 'video fallback still needs visible delivery'} so the reply can post normally.`,
           );
           return undefined;
         }

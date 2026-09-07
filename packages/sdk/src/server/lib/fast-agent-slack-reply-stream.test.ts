@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   updateWithFooter: vi.fn(),
   recordMessage: vi.fn(),
+  deliverVideos: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -12,6 +13,9 @@ vi.mock('@roomote/communication', () => ({
 }));
 vi.mock('./fast-agent-provider-message', () => ({
   recordFastAgentConversationMessageBestEffort: mocks.recordMessage,
+}));
+vi.mock('./fast-agent-session-videos', () => ({
+  deliverFastAgentSessionVideos: mocks.deliverVideos,
 }));
 
 import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
@@ -68,6 +72,7 @@ describe('createSlackFastReplyStream', () => {
     vi.clearAllMocks();
     mocks.updateWithFooter.mockResolvedValue(true);
     mocks.recordMessage.mockResolvedValue(undefined);
+    mocks.deliverVideos.mockResolvedValue('');
   });
 
   it('starts on the first append, appends after, and finishes into the canonical reply body', async () => {
@@ -119,6 +124,7 @@ describe('createSlackFastReplyStream', () => {
     );
     expect(onDelivered).toHaveBeenCalledOnce();
     expect(getPendingQuote()).toBeNull();
+    expect(mocks.deliverVideos).not.toHaveBeenCalled();
     // Finishing twice or aborting afterwards does nothing more.
     await expect(
       stream.finish({ purpose: 'closeout', message: 'again' }),
@@ -155,6 +161,87 @@ describe('createSlackFastReplyStream', () => {
       }),
     );
   });
+
+  it.each([
+    '',
+    'Native upload failed. [View video](https://roomote.example/video)',
+  ])(
+    'delivers only selected videos and appends the transport fallback %j',
+    async (fallback) => {
+      mocks.deliverVideos.mockResolvedValue(fallback);
+      const { stream } = build(slackMock(), null);
+      await stream.append('Preparing');
+      const reply = {
+        purpose: 'closeout' as const,
+        message: 'Result.',
+        videoArtifactIds: ['video-1'],
+      };
+      await stream.finish(reply);
+      await stream.finish(reply);
+      expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
+        artifactIds: ['video-1'],
+        sessionId: 'session-1',
+        channelId: 'C1',
+        threadTs: '100.1',
+      });
+      const text = ['Result.', fallback].filter(Boolean).join('\n\n');
+      expect(mocks.updateWithFooter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text,
+          bodyBlocks: [{ type: 'markdown', text }],
+        }),
+      );
+    },
+  );
+
+  it('does not upload videos for an unopened or aborted stream', async () => {
+    const { stream } = build(slackMock(), null);
+    await stream.finish({
+      purpose: 'closeout',
+      message: 'Video.',
+      videoArtifactIds: ['video-1'],
+    });
+    await stream.append('Partial');
+    await stream.abort();
+    expect(mocks.deliverVideos).not.toHaveBeenCalled();
+  });
+
+  it('propagates video authorization rejection without applying a final reply', async () => {
+    mocks.deliverVideos.mockRejectedValueOnce(new Error('Unauthorized video'));
+    const { stream } = build(slackMock(), null);
+    await stream.append('Preparing');
+    await expect(
+      stream.finish({
+        purpose: 'closeout',
+        message: 'Result.',
+        videoArtifactIds: ['foreign-video'],
+      }),
+    ).rejects.toThrow('Unauthorized video');
+    expect(mocks.updateWithFooter).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'leaves video fallback to the normal post when finalization fails (deleted=%s)',
+    async (deleted) => {
+      const slack = slackMock();
+      slack.deleteMessage.mockResolvedValue(deleted);
+      mocks.updateWithFooter.mockResolvedValue(false);
+      mocks.deliverVideos.mockResolvedValue(
+        'Upload failed. [View video](https://roomote.example/video)',
+      );
+      const { stream, onDelivered } = build(slack, null);
+      await stream.append('Preparing');
+      await expect(
+        stream.finish({
+          purpose: 'closeout',
+          message: 'Result.',
+          videoArtifactIds: ['video-1'],
+        }),
+      ).resolves.toBeUndefined();
+      expect(mocks.deliverVideos).toHaveBeenCalledOnce();
+      expect(onDelivered).not.toHaveBeenCalled();
+    },
+  );
 
   it('yields nothing when the stream never opened so the caller posts normally', async () => {
     const slack = slackMock();

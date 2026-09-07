@@ -130,6 +130,7 @@ describe('Slack app manifest builder', () => {
         'channels:manage',
         'channels:join',
         'chat:write',
+        'files:write',
         'reactions:write',
         'users:read',
       ]),

@@ -18,6 +18,7 @@ import {
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveFastAgentSessionImages,
+  deliverFastAgentSessionVideos,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
   wakeFastAgentParentEventNow,
@@ -190,11 +191,31 @@ async function processFastAgentReaction(params: {
           threadTs,
           messageId: event.item.ts,
         }),
-        postReply: async ({ message, kickoff, imageArtifactIds = [] }) => {
+        postReply: async ({
+          message,
+          kickoff,
+          imageArtifactIds = [],
+          videoArtifactIds = [],
+        }) => {
           const replyImages = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,
           });
+          const videoFallback =
+            videoArtifactIds.length &&
+            (await context.slack.hasMessageInThread({
+              channel: event.item.channel,
+              threadTs,
+              messageTs: event.item.ts,
+            })) !== false
+              ? await deliverFastAgentSessionVideos({
+                  artifactIds: videoArtifactIds,
+                  sessionId: session.id,
+                  channelId: event.item.channel,
+                  threadTs,
+                })
+              : '';
+          message = [message, videoFallback].filter(Boolean).join('\n\n');
           const posted = await postSlackThreadMarkdownMessage({
             slack: context.slack,
             channel: event.item.channel,

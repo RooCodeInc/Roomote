@@ -129,6 +129,7 @@ channels:manage
 channels:join
 chat:write
 files:read
+files:write
 groups:read
 groups:history
 im:read
@@ -147,6 +148,24 @@ users:read
 After adding or changing scopes, reinstall the app from **OAuth & Permissions >
 Install to Workspace**. Slack does not apply new scopes to an existing
 installation until you reinstall.
+
+Native video replies require `files:write`. For an existing installation,
+reinstall the app and obtain workspace admin reapproval if required before
+expecting videos to appear as Slack files. Updating the manifest alone does not
+grant the installed bot this permission.
+
+## Video replies
+
+Roomote can share selected task recordings as native Slack video files in the
+conversation. Ask for the recording from a task, including an earlier task, and
+Roomote can recover its uploaded artifact and share it without recording again.
+Uploading a task artifact alone does not automatically post it to Slack.
+
+For WebM recordings, delivery converts a copy to MP4 for Slack playback while
+preserving the original task artifact. If permissions, conversion, or upload
+prevent native delivery, Roomote shares an artifact viewer link instead and
+reports that the video could not be attached. A viewer link is not a native
+Slack attachment.
 
 ## Events and interactivity
 

@@ -64,6 +64,7 @@ export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;
   imageArtifactIds?: string[];
+  videoArtifactIds?: string[];
   /** Launchable follow-ups attached to a Fast automation report. */
   suggestions?: FastAgentSuggestedTask[];
   /** True for the parent-owned task kickoff. Deliverers must treat anything

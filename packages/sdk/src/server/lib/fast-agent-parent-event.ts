@@ -98,6 +98,7 @@ import {
   resolveFastAgentSessionImages,
   type FastAgentReplyImage,
 } from './fast-agent-session-images';
+import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
@@ -813,6 +814,7 @@ async function createSlackFastAgentParentTurn(
       postReply: async ({
         message,
         imageArtifactIds = [],
+        videoArtifactIds = [],
         suggestions = [],
         kickoff,
         purpose,
@@ -839,6 +841,16 @@ async function createSlackFastAgentParentTurn(
               }
             : null;
 
+        const videoFallback =
+          threadId && videoArtifactIds.length
+            ? await deliverFastAgentSessionVideos({
+                artifactIds: videoArtifactIds,
+                sessionId: session.id,
+                channelId: conversation.replyTarget.channelId,
+                threadTs: threadId,
+              })
+            : '';
+        message = [message, videoFallback].filter(Boolean).join('\n\n');
         const reportMessage =
           isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
@@ -891,7 +903,9 @@ async function createSlackFastAgentParentTurn(
                 'Slack did not create the Fast automation result.',
               );
             }
-            params.onReplyPosted();
+            // Text-only roots are already delivered; selected videos still need a retry on failure.
+            if (!videoArtifactIds.length) params.onReplyPosted();
+            // Video delivery authorizes against the persisted Session destination.
             await fastAgentConversationRepository.getOrCreate({
               userId: actorUserId,
               conversation: {
@@ -902,6 +916,36 @@ async function createSlackFastAgentParentTurn(
                 },
               },
             });
+            if (videoArtifactIds.length) {
+              const fallback = await deliverFastAgentSessionVideos({
+                artifactIds: videoArtifactIds,
+                sessionId: session.id,
+                channelId: conversation.replyTarget.channelId,
+                threadTs: messageTs,
+              });
+              if (fallback) {
+                const updated = await slack.updateMessage({
+                  channel: conversation.replyTarget.channelId,
+                  ts: messageTs,
+                  message: buildCustomAutomationSlackMessage({
+                    automationId: customAutomationId,
+                    automationName,
+                    text: `${reportMessage}\n\n${fallback}`,
+                    contentBlocks: [
+                      ...contentBlocks,
+                      { type: 'markdown' as const, text: fallback },
+                    ],
+                    sessionId: params.parent.sessionId,
+                    ...(params.event.type === 'task_settled'
+                      ? { taskUrl: params.event.taskUrl }
+                      : {}),
+                  }),
+                });
+                if (!updated)
+                  throw new Error('Slack did not accept the video fallback.');
+              }
+            }
+            if (videoArtifactIds.length) params.onReplyPosted();
             await recordFastAgentConversationMessageBestEffort({
               sessionId: session.id,
               conversation: {
