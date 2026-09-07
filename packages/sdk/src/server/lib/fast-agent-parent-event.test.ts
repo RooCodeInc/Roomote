@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   createDiscordProvider: vi.fn(),
   discordPostMessage: vi.fn(),
   discordEditMessage: vi.fn(),
+  discordTyping: vi.fn(),
+  telegramTyping: vi.fn(),
+  telegramEditMessage: vi.fn(),
   createDiscordThread: vi.fn(),
   createTeamsProvider: vi.fn(),
   teamsPostMessage: vi.fn(),
@@ -369,6 +372,7 @@ describe('deliverFastAgentParentEvent', () => {
     mocks.createDiscordProvider.mockResolvedValue({
       postMessage: mocks.discordPostMessage,
       editMessage: mocks.discordEditMessage,
+      triggerTyping: mocks.discordTyping,
       createTaskThread: mocks.createDiscordThread,
     });
     mocks.teamsPostMessage.mockResolvedValue({
@@ -388,6 +392,8 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
+      sendChatAction: mocks.telegramTyping,
+      editMessageText: mocks.telegramEditMessage,
     });
     mocks.findTeamsConversationRoute.mockResolvedValue({
       serviceUrl: 'https://smba.example.com/amer/',
@@ -1594,6 +1600,58 @@ describe('deliverFastAgentParentEvent', () => {
     ).rejects.toThrow('turn lock did not become available');
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
+
+  it.each(['discord', 'telegram'] as const)(
+    'wires %s parent-turn typing and stops on parking',
+    async (surface) => {
+      const replyTarget = { channelId: '123', threadId: '456' };
+      const typing =
+        surface === 'discord' ? mocks.discordTyping : mocks.telegramTyping;
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+        expect(typing).not.toHaveBeenCalled();
+        vi.useFakeTimers();
+        try {
+          adapter.activity.start();
+          await vi.advanceTimersByTimeAsync(0);
+          expect(typing).toHaveBeenCalledWith(replyTarget);
+          await vi.advanceTimersByTimeAsync(
+            surface === 'discord' ? 8_000 : 4_000,
+          );
+          expect(typing).toHaveBeenCalledTimes(2);
+          if (surface === 'telegram') {
+            const reply = { purpose: 'progress', message: 'Working' };
+            await adapter.postReply(reply);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(typing).toHaveBeenCalledTimes(3);
+            await adapter.replaceReply({ messageId: '123' }, reply);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(typing).toHaveBeenCalledTimes(4);
+          }
+          await adapter.activity.settle({ keepProcessing: true });
+          adapter.activity.start();
+          if (surface === 'telegram')
+            await adapter.postReply({ purpose: 'progress', message: 'Late' });
+          await vi.advanceTimersByTimeAsync(16_000);
+          expect(typing).toHaveBeenCalledTimes(surface === 'discord' ? 2 : 4);
+        } finally {
+          await adapter.activity.dispose();
+          vi.useRealTimers();
+        }
+      });
+      await deliverFastAgentParentEvent({
+        parent: {
+          ...parent,
+          conversation: {
+            surface,
+            workspaceId: 'workspace',
+            conversationId: 'conversation',
+            replyTarget,
+          },
+        },
+        event,
+      });
+    },
+  );
 
   it('delivers a guild parent event to its routable channel, not its session identity', async () => {
     const discordParent = {

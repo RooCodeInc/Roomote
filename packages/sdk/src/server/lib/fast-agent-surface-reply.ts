@@ -68,6 +68,7 @@ import {
   buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
+import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -385,6 +386,10 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         });
 
     const adapter: FastAgentTurnAdapter = {
+      activity: createFastAgentTypingActivity({
+        sendTyping: () => provider.triggerTyping(conversation.replyTarget),
+        intervalMs: 8_000,
+      }),
       createArtifact,
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
@@ -569,9 +574,21 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const replyToMessageId = params.replyToMessageId ?? params.currentMessageId;
+    const activity = createFastAgentTypingActivity({
+      sendTyping: () => provider.sendChatAction(conversation.replyTarget),
+      intervalMs: 4_000,
+    });
+    const replaceReply = createTelegramFastReplyReplacer({
+      provider,
+      conversation,
+      channelId: conversation.replyTarget.channelId,
+      sessionId: session.id,
+      footerContext,
+    });
     return {
       conversation,
       adapter: {
+        activity,
         createArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
@@ -587,6 +604,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
+          activity.reassert();
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
@@ -594,13 +612,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: createTelegramFastReplyReplacer({
-          provider,
-          conversation,
-          channelId: conversation.replyTarget.channelId,
-          sessionId: session.id,
-          footerContext,
-        }),
+        replaceReply: async (handle, reply) => {
+          const result = await replaceReply(handle, reply);
+          activity.reassert();
+          return result;
+        },
       },
     };
   }
