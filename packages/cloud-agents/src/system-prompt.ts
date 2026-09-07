@@ -4,7 +4,10 @@
  * Workflow and tool-specific instructions are supplied by dedicated runtime
  * layers so this prompt remains portable across coding harnesses.
  */
-import { buildRoomoteStyleGuidanceSection } from './style-guidance';
+import {
+  buildRoomoteStyleGuidanceSection,
+  ROOMOTE_OWNERSHIP_GUIDANCE,
+} from './style-guidance';
 import { buildRoomoteReleaseIdentifier } from './release-version';
 import type { TaskReportConsumer } from '@roomote/types';
 
@@ -46,7 +49,7 @@ export function buildRoomoteSystemPrompt(
     buildRoomoteReleaseIdentifier(releaseVersion, options),
     ROOMOTE_IDENTITY_SECTION,
     orchestratorOwned
-      ? ORCHESTRATOR_ENGINEERING_SECTION
+      ? `${ORCHESTRATOR_ENGINEERING_SECTION}\n\n${ROOMOTE_OWNERSHIP_GUIDANCE}`
       : buildDirectUserGuidanceSection(),
   ]
     .filter((section): section is string => section !== null)

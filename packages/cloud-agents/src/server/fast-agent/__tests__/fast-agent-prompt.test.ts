@@ -3,8 +3,85 @@ import { ALL_REPOSITORIES, RunStatus } from '@roomote/types';
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
 import { buildRoomoteSystemPrompt } from '../../../system-prompt';
+import { ROOMOTE_OWNERSHIP_GUIDANCE } from '../../../style-guidance';
+
+// Prompt assembly regressions, not model-response behavior evaluations.
+describe.each([
+  ['Fast', buildFastAgentSystemPrompt({ availableEnvironments: [] })],
+  ['direct-user coding', buildRoomoteSystemPrompt()],
+  [
+    'orchestrator-owned coding',
+    buildRoomoteSystemPrompt(undefined, { reportConsumer: 'orchestrator' }),
+  ],
+])('%s ownership guidance', (_mode, prompt) => {
+  it('includes the shared rules exactly once', () => {
+    expect(prompt.split(ROOMOTE_OWNERSHIP_GUIDANCE)).toHaveLength(2);
+  });
+
+  it.each([
+    ['human assignment', 'do not assign humans work'],
+    ['indirect human assignment', 'ask one human to direct another'],
+    ['unagreed team commitments', 'commit humans to plans'],
+    ['accepted commitments', 'Preserve accepted commitments'],
+    [
+      'explicit human coordination',
+      'When explicitly asked to coordinate people',
+    ],
+    [
+      'no invented acceptance',
+      'without presenting proposed assignments or deadlines as accepted',
+    ],
+    [
+      'authorized agent work',
+      'within the user request and permissions without repeated approval',
+    ],
+    [
+      'decisive coding execution',
+      'Continue ordinary authorized coding work decisively through implementation, validation, and delivery',
+    ],
+    [
+      'mixed recipients',
+      'In mixed human/agent threads, distinguish recipients',
+    ],
+    [
+      'agent authority',
+      'require an established coordination relationship or user authorization',
+    ],
+    [
+      'delegation boundary',
+      'Do not use an agent to indirectly direct humans or perform unauthorized actions',
+    ],
+    ['direct evidence', 'Be direct about evidence, not excessively hedged'],
+    [
+      'ambient rules',
+      'do not override existing ambient-message or directedness rules',
+    ],
+    [
+      'own-action example',
+      'Authorized own action: "I\'ll start a task to check which build contains the fix."',
+    ],
+    [
+      'polite overstepping example',
+      'Still overstepping: "Alex, could you ask Casey to complete the update?"',
+    ],
+  ])('retains the %s instruction', (_case, instruction) => {
+    expect(prompt).toContain(instruction);
+  });
+});
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('bounds evidence-driven autonomy without weakening investigation', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain(
+      'act autonomously when the next action is clear and reversible',
+    );
+    expect(prompt).toContain(
+      'Investigation does not authorize assigning colleagues or customers follow-up',
+    );
+    expect(prompt).toContain(
+      'Do not stop at acknowledgement, agreement, speculation, restatement, or a plan when meaningful investigation or execution is possible',
+    );
+  });
   it.each(['production', 'preview', 'development', undefined])(
     'shares build identity with normal prompts for %s',
     (appEnv) => {
