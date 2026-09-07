@@ -640,6 +640,40 @@ describe('runDoctor', () => {
     );
   });
 
+  it.each([
+    'R_SLACK_CLIENT_ID',
+    'R_SLACK_CLIENT_SECRET',
+    'R_MICROSOFT_CLIENT_ID',
+    'R_MICROSOFT_CLIENT_SECRET',
+    'R_MICROSOFT_TENANT_ID',
+  ])('warns when %s contains only whitespace', async (key) => {
+    const isSlack = key.startsWith('R_SLACK_');
+    mockExeca({
+      includeDefaultAuth: false,
+      extraWebEnv: {
+        ...(isSlack
+          ? {
+              R_SLACK_CLIENT_ID: 'slack-client-id',
+              R_SLACK_CLIENT_SECRET: 'slack-client-secret',
+            }
+          : {
+              R_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+              R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+              R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+            }),
+        [key]: ' \t\n ',
+      },
+    });
+
+    expect(await runDoctor()).toContainEqual({
+      name: 'Auth providers',
+      status: 'warn',
+      detail: isSlack
+        ? 'incomplete Slack client ID/secret pair'
+        : 'incomplete Microsoft Teams client ID/secret/tenant set',
+    });
+  });
+
   it('fails when an HTTP health endpoint returns a non-2xx response', async () => {
     mockFetch(503);
 
