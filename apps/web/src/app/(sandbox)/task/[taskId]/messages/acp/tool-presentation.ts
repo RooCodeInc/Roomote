@@ -37,6 +37,7 @@ export type ToolIconKey =
   | 'roomote'
   | 'video'
   | 'target'
+  | 'list'
   | 'list-checks'
   | 'pull-request'
   | 'environment'
@@ -105,6 +106,7 @@ const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_custom_automations: 'task',
   get_about_me: 'roomote',
   describe_video: 'video',
+  request_user_input: 'list',
   manage_goal: 'target',
   manage_tasks: 'list-checks',
   manage_source_control: 'pull-request',
@@ -327,6 +329,11 @@ function resolveReceiptLanguage(
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
       object: 'chat reply',
     };
+  if (toolName === 'request_user_input')
+    return {
+      verb: byPhase('Asking for', 'Asked for', 'Failed to Ask for'),
+      object: 'human guidance',
+    };
   if (toolName === 'post_to_channel')
     return {
       verb: byPhase('Posting', 'Posted', 'Failed to Post'),
@@ -445,8 +452,12 @@ function manageTasksReceipt(
       object: 'sessions',
     },
     get_summary: {
-      verb: byPhase('Getting', 'Received', 'Failed to Get'),
-      object: `summary from ${target}`,
+      verb: byPhase(
+        'Waiting to hear from',
+        'Heard back from',
+        'Failed to hear from',
+      ),
+      object: 'task',
     },
     get_messages: {
       verb: byPhase('Getting', 'Received', 'Failed to Get'),

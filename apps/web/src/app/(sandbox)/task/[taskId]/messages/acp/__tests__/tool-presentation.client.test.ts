@@ -71,6 +71,7 @@ describe('tool presentation resolver', () => {
     ['list_chat_channels', 'messages'],
     ['get_chat_channel_messages', 'messages'],
     ['get_chat_message_context', 'messages'],
+    ['request_user_input', 'list'],
   ] as const)('uses the %s icon for %s', (toolName, iconKey) => {
     expect(resolveToolPresentation(toolData({ toolName }))).toMatchObject({
       iconKey,
@@ -135,6 +136,31 @@ describe('tool presentation resolver', () => {
     ).toMatchObject({ verb: 'Sent', object: 'message to session' });
   });
 
+  it('humanizes summaries received from a child session as hearing back from a task', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_tasks',
+          rawInput: {
+            arguments: { action: 'get_summary', sessionId: 'session-1' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Heard back from', object: 'task' });
+  });
+
+  it('humanizes requests for user input', () => {
+    expect(
+      resolveToolPresentation(toolData({ toolName: 'request_user_input' })),
+    ).toMatchObject({
+      verb: 'Asked for',
+      object: 'human guidance',
+      iconKey: 'list',
+    });
+  });
+
   it('describes saved memories with an optional subject', () => {
     expect(
       resolveToolPresentation(
@@ -173,7 +199,7 @@ describe('tool presentation resolver', () => {
   it.each([
     ['start', 'Started', 'session'],
     ['search', 'Searched', 'sessions'],
-    ['get_summary', 'Received', 'summary from task'],
+    ['get_summary', 'Heard back from', 'task'],
     ['get_messages', 'Received', 'message from task'],
     ['send_message', 'Sent', 'message to task'],
     ['search_tasks', 'Searched', 'tasks'],

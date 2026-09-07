@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { AlertCircle, FileIcon } from '@/components/system';
+import { AlertCircle, Telescope } from '@/components/system';
 
 import { AcpGroupedToolMessage } from '../AcpGroupedToolMessage';
 import type { GroupedToolCallRenderBlock } from '../render-blocks';
@@ -141,7 +141,7 @@ describe('AcpGroupedToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        icon: FileIcon,
+        icon: Telescope,
         state: 'input-available',
       }),
     );

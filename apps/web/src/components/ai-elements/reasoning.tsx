@@ -132,7 +132,7 @@ const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
     return <Shimmer duration={1}>Thinking...</Shimmer>;
   }
   if (duration === undefined) {
-    return <span>Thought</span>;
+    return <span>Thought for a bit</span>;
   }
   return <span>Thought for {duration}s</span>;
 };

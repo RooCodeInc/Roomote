@@ -191,6 +191,7 @@ export {
   Stethoscope,
   Sun,
   Target,
+  Telescope,
   Terminal,
   TerminalIcon,
   ThumbsDown,

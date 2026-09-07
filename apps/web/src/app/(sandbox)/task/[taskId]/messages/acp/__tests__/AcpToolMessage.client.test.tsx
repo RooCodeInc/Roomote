@@ -12,6 +12,7 @@ import {
   BookOpenText,
   Bot,
   FileIcon,
+  List,
   Search,
   SquarePen,
   Wrench,
@@ -229,6 +230,22 @@ describe('AcpToolMessage', () => {
       expect.objectContaining({
         icon: Bot,
         collapsible: false,
+      }),
+    );
+  });
+
+  it('renders requests for user input as human guidance with the List icon', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('tool', { toolName: 'request_user_input' })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Asked for',
+        object: 'human guidance',
+        icon: List,
       }),
     );
   });
