@@ -2,15 +2,10 @@ import { SlackNotifier } from '@roomote/slack';
 import type { BackgroundAutomationKey } from '@roomote/types';
 import {
   and,
-  asc,
   db,
   type DatabaseOrTransaction,
   eq,
-  findActiveSlackInstallationForChannel,
-  getAutomationRuntime,
   isNull,
-  slackInstallationChannels,
-  slackInstallations,
   sql,
   taskRuns,
   tasks,
@@ -20,6 +15,7 @@ import {
 
 import { buildSuggestionBadgePrefix } from '../../slack/helpers/suggestion-workspace.js';
 import type { ScheduledSuggestionSlackConfig } from '../background-automation-slack.js';
+import { resolveAutomationSlackTargetData } from '../automation-slack-target.js';
 import type { PersistedAutomationWorkItem } from './types.js';
 
 export async function resolveAutomationSlackTarget(params: {
@@ -28,50 +24,16 @@ export async function resolveAutomationSlackTarget(params: {
   slack: SlackNotifier;
   channelId: string;
 } | null> {
-  const runtime = await getAutomationRuntime(params.slackConfig.automationKey);
-  const configuredChannelId = runtime.slackChannelId;
-  const slackInstallation =
-    runtime.destination?.source === 'manager_channel' &&
-    runtime.destination.provider === 'slack'
-      ? await findActiveSlackInstallationForChannel(
-          runtime.destination.channelId,
-        )
-      : (
-          await db
-            .select({
-              id: slackInstallations.id,
-              botAccessToken: slackInstallations.botAccessToken,
-            })
-            .from(slackInstallations)
-            .where(eq(slackInstallations.isActive, true))
-            .limit(1)
-        )[0];
-
-  if (!slackInstallation) {
-    return null;
-  }
-
-  const [channel] = configuredChannelId
-    ? [{ channelId: configuredChannelId }]
-    : await db
-        .select({ channelId: slackInstallationChannels.channelId })
-        .from(slackInstallationChannels)
-        .where(
-          eq(
-            slackInstallationChannels.slackInstallationId,
-            slackInstallation.id,
-          ),
-        )
-        .orderBy(asc(slackInstallationChannels.createdAt))
-        .limit(1);
-
-  if (!channel) {
+  const target = await resolveAutomationSlackTargetData(
+    params.slackConfig.automationKey,
+  );
+  if (!target || target.channelId === undefined) {
     return null;
   }
 
   return {
-    slack: new SlackNotifier(slackInstallation.botAccessToken),
-    channelId: channel.channelId,
+    slack: new SlackNotifier(target.slackInstallation.botAccessToken),
+    channelId: target.channelId,
   };
 }
 

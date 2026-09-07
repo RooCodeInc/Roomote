@@ -81,24 +81,26 @@ describe('Capture visual proof skill', () => {
     );
   });
 
-  it('keeps the proof package classification contract', () => {
+  it('leaves proof selection to agent judgment while keeping package labels', () => {
     expect(skillContent).toContain(
-      'Classify the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`.',
+      'Report the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`.',
     );
     expect(skillContent).toContain(
-      "Only consider `screencast-only` or `both` when either the harness reports that screencast auto-classification is enabled for this task or the user's task request explicitly asks for a screencast, recording, or video. Otherwise restrict the choice to `screenshot-only` or `not applicable`.",
+      'Use your judgment to choose screenshots, video, both, or no visual proof',
     );
     expect(skillContent).toContain(
-      'Use `screenshot-only` when one or more stable visible browser states are enough to prove the claim',
+      'video is useful for motion and interactions and need not be explicitly requested',
     );
     expect(skillContent).toContain(
-      'Use `screencast-only` when the claim depends on interaction, timing, animation, navigation, redirect, persistence, revisit, resume, replay, or another temporal sequence',
+      'Skip visual proof when it would not add useful evidence.',
     );
-    expect(skillContent).toContain('coverage checklist');
     expect(skillContent).toContain(
-      'Do not silently narrow a broad claim to the first easy visible example.',
+      'coverage checklist listing every materially distinct visible state or treatment the stated claim spans',
     );
-    expect(skillContent).toContain('When in doubt, capture one screenshot.');
+    expect(skillContent).not.toContain('screencast auto-classification');
+    expect(skillContent).not.toContain(
+      'When in doubt, capture one screenshot.',
+    );
   });
 
   it('prefers real state but allows disclosed simulation without permitting fabricated evidence', () => {

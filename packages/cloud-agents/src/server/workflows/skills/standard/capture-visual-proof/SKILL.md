@@ -35,10 +35,9 @@ You capture visual proof of a shipped change yourself. Decide whether browser pr
         <title>Define the proof scope and decide applicability</title>
         <actions>
           <action>State the shipped change and the claim to prove in one or two sentences.</action>
-          <action>Classify browser proof as `applicable` when the change alters rendered UI, layout, styling, or user-visible interaction that the environment's local browser surface can show. Classify it as `not applicable` when the claim is about provenance, generation, transport, parsing, lifecycle, permissions, configuration, tests, documentation, or another non-visual system behavior with no visible browser state as part of the claim. When in doubt, capture one screenshot.</action>
+          <action>Use your judgment to choose screenshots, video, both, or no visual proof according to what best demonstrates the work. Screenshots suit stable appearance; video is useful for motion and interactions and need not be explicitly requested. Skip visual proof when it would not add useful evidence.</action>
           <action>When browser proof is not applicable, skip capture and return the proof result immediately with one short `Other evidence note` naming the strongest non-visual evidence already in context.</action>
-          <action>Classify the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`. Only consider `screencast-only` or `both` when either the harness reports that screencast auto-classification is enabled for this task or the user's task request explicitly asks for a screencast, recording, or video. Otherwise restrict the choice to `screenshot-only` or `not applicable`. Use `screenshot-only` when one or more stable visible browser states are enough to prove the claim. Use `screencast-only` when the claim depends on interaction, timing, animation, navigation, redirect, persistence, revisit, resume, replay, or another temporal sequence.</action>
-          <action>Write a coverage checklist of the materially distinct visible treatments or states the claim spans (for example each affected placement, each theme, each empty or error state). Do not silently narrow a broad claim to the first easy visible example.</action>
+          <action>Report the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`. For capture, keep a short coverage checklist listing every materially distinct visible state or treatment the stated claim spans.</action>
         </actions>
       </step>
     </steps>
