@@ -84,6 +84,10 @@ describe('MockTelegramServer', () => {
     expect(server.getState().botCommands).toEqual([
       { command: 'start', description: 'Show welcome and command help' },
       { command: 'new', description: 'Start a fresh task' },
+      {
+        command: 'sessionbot',
+        description: 'Create a bot for this existing Session',
+      },
     ]);
   });
 
@@ -457,6 +461,7 @@ describe('MockTelegramServer', () => {
       'message',
       'callback_query',
       'message_reaction',
+      'managed_bot',
     ]);
     expect(server.getState().webhook?.secretToken).toBe('webhook-secret');
   });

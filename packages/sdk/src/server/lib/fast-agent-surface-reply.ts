@@ -564,7 +564,10 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
 
   if (conversation.surface === 'telegram') {
     const provider =
-      await createTelegramCommunicationProviderFromRuntimeCredentials();
+      await createTelegramCommunicationProviderFromRuntimeCredentials({
+        workspaceId: conversation.workspaceId,
+        sessionId: session.id,
+      });
     if (!provider) {
       return null;
     }

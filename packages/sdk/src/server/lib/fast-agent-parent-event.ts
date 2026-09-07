@@ -1659,13 +1659,18 @@ async function createTelegramFastAgentParentTurn(
   if (fallbackConversation.surface !== 'telegram') {
     throw new Error('Expected a Telegram Fast parent conversation.');
   }
-  const [session, provider] = await Promise.all([
-    fastAgentConversationRepository.findById({
-      id: params.parent.sessionId,
-      fallbackConversation,
-    }),
-    createTelegramCommunicationProviderFromRuntimeCredentials(),
-  ]);
+  const session = await fastAgentConversationRepository.findById({
+    id: params.parent.sessionId,
+    fallbackConversation,
+  });
+  // A queued task may predate activation; choose credentials from the current route.
+  const provider =
+    session?.conversation.surface === 'telegram'
+      ? await createTelegramCommunicationProviderFromRuntimeCredentials({
+          workspaceId: session.conversation.workspaceId,
+          sessionId: session.id,
+        })
+      : null;
   if (!session || session.conversation.surface !== 'telegram' || !provider) {
     throw new FastAgentParentEventDeliveryError(
       'Fast parent session or Telegram credentials were not found.',
@@ -1704,13 +1709,16 @@ async function createTelegramFastAgentParentTurn(
           event: params.event,
           sessionId: params.parent.sessionId,
         });
+        const managedBot = conversation.workspaceId.startsWith('telegram-bot:');
         const reportMessage =
           isFastAutomationReportEvent(params.event) && !kickoff
-            ? appendFastAutomationSuggestionInstruction(
-                message,
-                'telegram',
-                suggestions.length > 0,
-              )
+            ? managedBot && suggestions.length > 0
+              ? `${message}\n\n${suggestions.map((suggestion) => `- ${suggestion.title}: ${suggestion.brief}`).join('\n')}\n\nReply with the task you want me to take on.`
+              : appendFastAutomationSuggestionInstruction(
+                  message,
+                  'telegram',
+                  suggestions.length > 0,
+                )
             : message;
         const posted = await provider.postMessage({
           channelId: conversation.replyTarget.channelId,
@@ -1731,19 +1739,20 @@ async function createTelegramFastAgentParentTurn(
           !kickoff &&
           suggestions.length > 0
         ) {
-          await postFastAutomationSuggestionsToTelegram({
-            originSessionId: await requireFastSuggestionOriginSessionId(
-              session.id,
-            ),
-            provider,
-            channelId: conversation.replyTarget.channelId,
-            ...(conversation.replyTarget.threadId
-              ? { threadId: conversation.replyTarget.threadId }
-              : {}),
-            eventId: buildFastAutomationSuggestionEventId(params.event),
-            createdByUserId: actorUserId,
-            suggestions,
-          });
+          if (!managedBot)
+            await postFastAutomationSuggestionsToTelegram({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
+              provider,
+              channelId: conversation.replyTarget.channelId,
+              ...(conversation.replyTarget.threadId
+                ? { threadId: conversation.replyTarget.threadId }
+                : {}),
+              eventId: buildFastAutomationSuggestionEventId(params.event),
+              createdByUserId: actorUserId,
+              suggestions,
+            });
         }
         params.onReplyPosted();
         return { messageId: posted.messageId };

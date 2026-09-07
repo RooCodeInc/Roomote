@@ -27,7 +27,7 @@ import { SlackNotifier } from '@roomote/slack';
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
-import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
+import { resolveTelegramTaskRunRouting } from './telegram-task-run-routing';
 import {
   escapeSlackMrkdwnText,
   formatChannelProviderError,
@@ -167,10 +167,14 @@ async function notifyThreadedMarkdownProvider(
   error: string,
   provider: 'discord' | 'telegram',
 ): Promise<boolean> {
+  const telegramRouting =
+    provider === 'telegram'
+      ? await resolveTelegramTaskRunRouting(run.payload)
+      : null;
   const adapter =
     provider === 'discord'
       ? await createDiscordCommunicationProviderFromRuntimeCredentials()
-      : await createTelegramCommunicationProviderFromRuntimeCredentials();
+      : telegramRouting?.provider;
 
   if (!adapter) {
     console.warn(
@@ -179,7 +183,9 @@ async function notifyThreadedMarkdownProvider(
     return false;
   }
 
-  const channelId = getCommunicationChannelFromTaskPayload(run.payload);
+  const channelId = telegramRouting
+    ? telegramRouting.channelId
+    : getCommunicationChannelFromTaskPayload(run.payload);
 
   if (!channelId) {
     console.warn(
@@ -188,8 +194,12 @@ async function notifyThreadedMarkdownProvider(
     return false;
   }
 
-  const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
-  const messageId = getCommunicationMessageIdFromTaskPayload(run.payload);
+  const threadId = telegramRouting
+    ? telegramRouting.threadId
+    : getCommunicationThreadIdFromTaskPayload(run.payload);
+  const messageId = telegramRouting
+    ? telegramRouting.messageId
+    : getCommunicationMessageIdFromTaskPayload(run.payload);
 
   await adapter.postMessage({
     channelId,

@@ -3157,6 +3157,62 @@ export const fastAgentConversations = pgTable(
   ],
 );
 
+/** Native Telegram bot pairing state. Additive for N-1 rollback. */
+export const telegramManagedBotPairings = pgTable(
+  'telegram_managed_bot_pairings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    ownerTelegramUserId: text('owner_telegram_user_id').notNull(),
+    state: text('state')
+      .notNull()
+      .$type<'pending' | 'provisioning' | 'ready' | 'active' | 'revoked'>(),
+    botId: text('bot_id'),
+    botUsername: text('bot_username'),
+    botToken: encryptedText('bot_token'),
+    webhookSecret: encryptedText('webhook_secret').notNull(),
+    ticketHash: text('ticket_hash'),
+    ticket: encryptedText('ticket'),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('telegram_managed_bot_pending_owner_unique')
+      .on(table.ownerTelegramUserId)
+      .where(sql`${table.state} in ('pending', 'provisioning', 'ready')`),
+    uniqueIndex('telegram_managed_bot_session_unique')
+      .on(table.sessionId)
+      .where(sql`${table.state} <> 'revoked'`),
+    uniqueIndex('telegram_managed_bot_bot_unique').on(table.botId),
+    check(
+      'telegram_managed_bot_state_check',
+      sql`${table.state} in ('pending', 'provisioning', 'ready', 'active', 'revoked')`,
+    ),
+  ],
+);
+
+export const telegramManagedBotCandidates = pgTable(
+  'telegram_managed_bot_candidates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    pairingId: uuid('pairing_id').references(
+      () => telegramManagedBotPairings.id,
+      { onDelete: 'set null' },
+    ),
+    botId: text('bot_id').notNull(),
+    botUsername: text('bot_username'),
+    ownerTelegramUserId: text('owner_telegram_user_id').notNull(),
+    managementUpdateId: integer('management_update_id'),
+    revoked: boolean('revoked').notNull().default(false),
+  },
+  (table) => [unique('telegram_managed_bot_candidate_unique').on(table.botId)],
+);
+
 /**
  * fast_agent_parent_events
  *

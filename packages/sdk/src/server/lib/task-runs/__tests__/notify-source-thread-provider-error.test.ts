@@ -1,9 +1,14 @@
-import { TaskPayloadKind, RunStatus } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  RunStatus,
+  buildFastAgentChildTaskMetadata,
+} from '@roomote/types';
 import type { Task, TaskRun } from '@roomote/db/server';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockFindFirstRun = vi.fn();
+const mockFindFastSession = vi.fn();
 const mockFindFirstSlackInstallation = vi.fn();
 const mockRedisSet = vi.fn().mockResolvedValue('OK');
 const mockRedisDel = vi.fn().mockResolvedValue(1);
@@ -38,6 +43,9 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  fastAgentConversationRepository: {
+    findById: (...args: unknown[]) => mockFindFastSession(...args),
+  },
   getTaskUrl: vi.fn().mockReturnValue('https://example.com/task'),
 }));
 
@@ -126,6 +134,16 @@ const telegramPayload = payload({
   communicationChannelId: '12345',
   communicationThreadId: '99',
 });
+
+const telegramParent = {
+  sessionId: '11111111-1111-4111-8111-111111111111',
+  conversation: {
+    surface: 'telegram' as const,
+    workspaceId: 'telegram-main',
+    conversationId: 'old-chat',
+    replyTarget: { channelId: 'old-chat', threadId: 'old-topic' },
+  },
+};
 
 const teamsPayload = payload({
   communicationProvider: 'teams',
@@ -303,6 +321,8 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
     await notify(makeEnvelope());
 
     expect(mockTelegramPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockCreateTelegramProvider).toHaveBeenCalledWith();
+    expect(mockFindFastSession).not.toHaveBeenCalled();
     expect(mockTelegramPostMessage.mock.calls[0]?.[0]).toMatchObject({
       channelId: '12345',
       threadId: '99',
@@ -310,6 +330,97 @@ describe('maybeNotifySourceThreadOfTerminalProviderError', () => {
       textFormat: 'markdown',
     });
   });
+
+  it.each(['current-topic', undefined])(
+    'rebases a queued pre-activation child onto the current Telegram route (%s)',
+    async (threadId) => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          payload: payload({
+            ...telegramPayload,
+            communicationMessageId: 'stale-message',
+            ...buildFastAgentChildTaskMetadata(telegramParent),
+          }),
+        }),
+      );
+      mockFindFastSession.mockResolvedValue({
+        id: telegramParent.sessionId,
+        conversation: {
+          ...telegramParent.conversation,
+          workspaceId: 'telegram-bot:123',
+          replyTarget: { channelId: 'owner-chat', threadId },
+        },
+      });
+
+      await notify(makeEnvelope());
+
+      expect(mockFindFastSession).toHaveBeenCalledWith({
+        id: telegramParent.sessionId,
+        fallbackConversation: telegramParent.conversation,
+      });
+      expect(mockCreateTelegramProvider).toHaveBeenCalledExactlyOnceWith({
+        workspaceId: 'telegram-bot:123',
+        sessionId: telegramParent.sessionId,
+      });
+      expect(mockTelegramPostMessage).toHaveBeenCalledExactlyOnceWith({
+        channelId: 'owner-chat',
+        ...(threadId ? { threadId } : {}),
+        text: expect.any(String),
+        textFormat: 'markdown',
+      });
+    },
+  );
+
+  it.each(['missing', 'changed', 'non-telegram', 'revoked'])(
+    'fails closed and releases the claim for a %s Fast parent',
+    async (state) => {
+      const parent =
+        state === 'non-telegram'
+          ? {
+              ...telegramParent,
+              conversation: {
+                ...telegramParent.conversation,
+                surface: 'slack' as const,
+              },
+            }
+          : telegramParent;
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          payload: payload({
+            ...telegramPayload,
+            ...buildFastAgentChildTaskMetadata(parent),
+          }),
+        }),
+      );
+      mockFindFastSession.mockResolvedValue(
+        state === 'missing'
+          ? null
+          : {
+              id: parent.sessionId,
+              conversation: {
+                ...parent.conversation,
+                workspaceId: 'telegram-bot:123',
+                surface: state === 'changed' ? 'slack' : 'telegram',
+              },
+            },
+      );
+      if (state === 'revoked')
+        mockCreateTelegramProvider.mockResolvedValue(null);
+
+      await notify(makeEnvelope());
+
+      expect(mockTelegramPostMessage).not.toHaveBeenCalled();
+      expect(mockRedisDel).toHaveBeenCalledTimes(1);
+      if (state === 'revoked') {
+        expect(mockCreateTelegramProvider).toHaveBeenCalledExactlyOnceWith({
+          workspaceId: 'telegram-bot:123',
+          sessionId: parent.sessionId,
+        });
+      } else {
+        expect(mockCreateTelegramProvider).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('posts into the originating Teams conversation', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun({ payload: teamsPayload }));

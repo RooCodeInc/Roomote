@@ -99,6 +99,7 @@ const telegramMessageSchema = z
     entities: z.array(telegramMessageEntitySchema).optional(),
     caption_entities: z.array(telegramMessageEntitySchema).optional(),
     forum_topic_created: telegramForumTopicCreatedSchema.optional(),
+    managed_bot_created: z.object({ bot: telegramUserSchema }).optional(),
   })
   .passthrough();
 
@@ -138,6 +139,9 @@ export const telegramUpdateSchema = z
     edited_message: telegramMessageSchema.optional(),
     callback_query: telegramCallbackQuerySchema.optional(),
     message_reaction: telegramMessageReactionSchema.optional(),
+    managed_bot: z
+      .object({ user: telegramUserSchema, bot: telegramUserSchema })
+      .optional(),
   })
   .passthrough();
 
