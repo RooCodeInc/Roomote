@@ -82,10 +82,7 @@ export const ToolHeader = ({
     (deletions !== undefined && deletions > 0);
   const hasSecondaryLabel = Boolean(object || suffix);
   const statusLabel = TOOL_STATE_LABELS[state];
-  const showStatus =
-    state === 'input-streaming' ||
-    state === 'input-available' ||
-    state === 'output-error';
+  const showStatus = state === 'output-error';
   const isRunning = state === 'input-streaming' || state === 'input-available';
 
   const customIcon = iconElement ? (
@@ -144,7 +141,6 @@ export const ToolHeader = ({
         aria-live="polite"
         className={cn(
           showStatus ? 'shrink-0 text-xs' : 'sr-only',
-          isRunning && 'relative top-px',
           state === 'output-error' && 'text-destructive',
         )}
       >

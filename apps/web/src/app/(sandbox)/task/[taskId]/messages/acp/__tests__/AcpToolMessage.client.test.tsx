@@ -18,6 +18,7 @@ import {
   Wrench,
 } from '@/components/system';
 import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
+import { resolveTaskRobotIconId } from '@/lib/task-robot-icons';
 
 import { AcpToolMessage } from '../AcpToolMessage';
 import { mcpIntegrationIconFor } from '../tool-icons';
@@ -653,6 +654,135 @@ describe('AcpToolMessage', () => {
     ).not.toBeInTheDocument();
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({ icon: SquarePen, iconElement: undefined }),
+    );
+  });
+
+  it('shares outgoing, incoming, and parent-report identity in a task scope', () => {
+    const openTask = vi.fn();
+    const outgoing = buildResultMessage('task', {
+      toolName: 'send_task_message',
+      output: JSON.stringify({ result: { taskId: 'child-42' } }),
+    });
+    const incoming = buildResultMessage('task', {
+      toolName: 'receive_task_report',
+      ...{ rawInput: { taskId: 'child-42' } },
+    });
+    const report = buildResultMessage('mcp', {
+      isMcp: true,
+      serverName: 'roomote',
+      toolName: 'report_to_parent_session',
+    });
+    const { container } = render(
+      <TaskRobotIconProvider
+        sessionId="session-1"
+        orderedTaskIds={['other', 'child-42']}
+        currentTaskId="child-42"
+        onOpenTask={openTask}
+      >
+        <AcpToolMessage msg={outgoing} />
+        <AcpToolMessage msg={incoming} />
+        <AcpToolMessage msg={report} />
+      </TaskRobotIconProvider>,
+    );
+    const expected = resolveTaskRobotIconId({
+      sessionId: 'session-1',
+      taskId: 'child-42',
+      orderedTaskIds: ['other', 'child-42'],
+    });
+    expect(
+      container.querySelectorAll(`[data-task-robot-icon="${expected}"]`),
+    ).toHaveLength(3);
+    for (const button of screen.getAllByRole('button', {
+      name: 'Focus task prompt',
+    }))
+      fireEvent.click(button);
+    expect(openTask.mock.calls).toEqual([
+      ['child-42'],
+      ['child-42'],
+      ['child-42'],
+    ]);
+  });
+
+  it('renders a stable nonclickable invader when an eligible identity is unknown', () => {
+    const openTask = vi.fn();
+    const { container, rerender } = render(
+      <TaskRobotIconProvider
+        sessionId="session-1"
+        orderedTaskIds={['sole-child']}
+        onOpenTask={openTask}
+      >
+        <AcpToolMessage
+          msg={buildResultMessage('task', { toolName: 'receive_task_report' })}
+        />
+      </TaskRobotIconProvider>,
+    );
+    const iconId = container
+      .querySelector('[data-task-robot-icon]')
+      ?.getAttribute('data-task-robot-icon');
+    expect(iconId).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: 'Focus task prompt' }),
+    ).not.toBeInTheDocument();
+    rerender(
+      <AcpToolMessage
+        msg={buildResultMessage('task', {
+          toolName: 'report_to_parent_session',
+        })}
+      />,
+    );
+    expect(container.querySelector('[data-task-robot-icon]')).toHaveAttribute(
+      'data-task-robot-icon',
+      iconId,
+    );
+    expect(openTask).not.toHaveBeenCalled();
+  });
+
+  it.each(['in_progress', 'failed'] as const)(
+    'preserves %s state for eligible task tools',
+    (status) => {
+      const msg = buildResultMessage('task', {
+        toolName: 'receive_task_report',
+        status,
+        ...{ rawInput: { taskId: 'child-42' } },
+      });
+      const { container } = render(<AcpToolMessage msg={msg} />);
+      expect(toolHeaderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: status === 'failed' ? 'output-error' : 'input-available',
+          ...(status === 'failed'
+            ? {
+                icon: AlertCircle,
+                iconElement: undefined,
+                iconAction: undefined,
+              }
+            : {}),
+        }),
+      );
+      expect(container.querySelectorAll('[data-task-robot-icon]')).toHaveLength(
+        status === 'failed' ? 0 : 1,
+      );
+    },
+  );
+
+  it('preserves a foreign integration icon for a same-named receipt', () => {
+    const { container } = render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          toolName: 'receive_task_report',
+          isMcp: true,
+          serverName: 'linear',
+          ...{ rawInput: { taskId: 'child-42' } },
+        })}
+      />,
+    );
+    expect(
+      container.querySelector('[data-task-robot-icon]'),
+    ).not.toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: mcpIntegrationIconFor('linear'),
+        iconElement: undefined,
+      }),
     );
   });
 

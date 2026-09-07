@@ -27,11 +27,77 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-import { TaskRobotIcon } from '@/components/tasks/TaskRobotIcon';
+import {
+  TaskRobotIcon,
+  TaskRobotIconProvider,
+  useTaskRobotIconContext,
+} from '@/components/tasks/TaskRobotIcon';
 import { resolveTaskRobotIconId } from '@/lib/task-robot-icons';
 import { TaskRobotIconScope } from './TaskRobotIconScope';
 
 describe('TaskRobotIconScope', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('preserves inherited Session identity, ordering and navigation while exposing the source task', () => {
+    const contextSpy = vi.fn();
+    function Probe() {
+      contextSpy(useTaskRobotIconContext());
+      return null;
+    }
+    const onOpenTask = vi.fn();
+    const orderedTaskIds = ['first', 'source-task'];
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TaskRobotIconProvider
+          sessionId="session-1"
+          orderedTaskIds={orderedTaskIds}
+          onOpenTask={onOpenTask}
+          currentTaskId="outer-task"
+        >
+          <TaskRobotIconScope
+            taskId="source-task"
+            fastAgentSessionId="legacy-session"
+          >
+            <Probe />
+          </TaskRobotIconScope>
+        </TaskRobotIconProvider>
+      </QueryClientProvider>,
+    );
+    expect(contextSpy).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      orderedTaskIds,
+      onOpenTask,
+      currentTaskId: 'source-task',
+    });
+    expect(parentSessionQueryMock).not.toHaveBeenCalled();
+    expect(iconSessionQueryMock).not.toHaveBeenCalled();
+  });
+
+  it('provides source identity even without a parent Session', async () => {
+    parentSessionQueryMock.mockResolvedValue(null);
+    const contextSpy = vi.fn();
+    function Probe() {
+      contextSpy(useTaskRobotIconContext());
+      return null;
+    }
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <TaskRobotIconScope taskId="source-task">
+          <Probe />
+        </TaskRobotIconScope>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(parentSessionQueryMock).toHaveBeenCalled());
+    expect(contextSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentTaskId: 'source-task',
+        sessionId: null,
+        orderedTaskIds: [],
+      }),
+    );
+    expect(iconSessionQueryMock).not.toHaveBeenCalled();
+  });
+
   it('gives standalone transcript activity the parent Session assignment', async () => {
     parentSessionQueryMock.mockResolvedValue({ sessionId: 'session-1' });
     iconSessionQueryMock.mockResolvedValue({
