@@ -19,6 +19,7 @@ import {
   verifyPkceChallenge,
 } from '@/lib/server/mcp-remote-oauth';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { logger } from '@/lib/server/logger';
 
 export const runtime = 'nodejs';
 
@@ -112,9 +113,16 @@ export async function POST(request: NextRequest) {
       session,
     );
     if (rotation.status !== 'ok') return oauthError('invalid_grant');
-    // Only a successful, bound refresh counts as client activity. Reuse the
-    // atomic admission logic without extending the refresh session's lifetime.
-    await promoteRemoteMcpOAuthClient(session.clientId, session.userId);
+    // Rotation already committed: renewal must not withhold the new token,
+    // since retrying the old token would revoke the session as a replay.
+    try {
+      await promoteRemoteMcpOAuthClient(session.clientId, session.userId);
+    } catch {
+      logger.warn(
+        { event: 'mcp_remote_oauth_client_renewal_failed' },
+        'Could not renew MCP OAuth client registration after token rotation',
+      );
+    }
     return tokenResponse(accessToken, rotation.refreshToken);
   }
 

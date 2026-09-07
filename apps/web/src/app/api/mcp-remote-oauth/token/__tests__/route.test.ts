@@ -12,6 +12,7 @@ const {
   mockGetClient,
   mockCreateToken,
   mockBootstrapWebRuntimeEnv,
+  mockWarn,
 } = vi.hoisted(() => ({
   mockGetCode: vi.fn(),
   mockConsumeCode: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockGetClient: vi.fn(),
   mockCreateToken: vi.fn(),
   mockBootstrapWebRuntimeEnv: vi.fn(),
+  mockWarn: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', async (importOriginal) => ({
@@ -44,6 +46,10 @@ vi.mock('@/lib/server/mcp-remote-oauth', async (importOriginal) => ({
 
 vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
   bootstrapWebRuntimeEnv: mockBootstrapWebRuntimeEnv,
+}));
+
+vi.mock('@/lib/server/logger', () => ({
+  logger: { warn: mockWarn },
 }));
 
 import { POST } from '../route';
@@ -274,6 +280,43 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     const response = await POST(refreshRequest());
     expect(response.status).toBe(200);
     expect(mockCreateRefreshSession).not.toHaveBeenCalled();
+  });
+
+  it('delivers the rotated token when registration renewal throws and allows the next refresh', async () => {
+    mockPromoteClient.mockRejectedValueOnce(new Error('Redis renewal failed'));
+    const response = await POST(refreshRequest());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const body = await response.json();
+    expect(body).toMatchObject({
+      access_token: 'access-token',
+      refresh_token: 'rotated-refresh-token',
+    });
+    expect(mockRevokeOnReplay).not.toHaveBeenCalled();
+    expect(mockCreateRefreshSession).not.toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledExactlyOnceWith(
+      { event: 'mcp_remote_oauth_client_renewal_failed' },
+      'Could not renew MCP OAuth client registration after token rotation',
+    );
+
+    mockRotateRefreshToken.mockResolvedValueOnce({
+      status: 'ok',
+      refreshToken: 'next-refresh-token',
+    });
+    const next = await POST(
+      refreshRequest({ refresh_token: body.refresh_token }),
+    );
+    expect(next.status).toBe(200);
+    expect(mockRotateRefreshToken).toHaveBeenLastCalledWith(
+      'rotated-refresh-token',
+      expect.objectContaining({ userId: 'user-1' }),
+    );
+    await expect(next.json()).resolves.toMatchObject({
+      refresh_token: 'next-refresh-token',
+    });
+    expect(mockPromoteClient).toHaveBeenCalledTimes(2);
+    expect(mockRevokeOnReplay).not.toHaveBeenCalled();
   });
 
   it('revokes the session family when a rotated refresh token is replayed', async () => {

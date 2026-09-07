@@ -201,6 +201,7 @@ function consentKey(token: string): string {
 }
 
 function refreshClientSessionKey(userId: string, clientId: string): string {
+  // Public identifiers form a stable Redis lookup key, not a password verifier.
   const clientHash = createHash('sha256')
     .update(`${userId}\0${clientId}`)
     .digest('hex');
