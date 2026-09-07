@@ -267,7 +267,7 @@ describe('NestedTaskSidePanel', () => {
     );
 
     const trigger = screen.getByRole('button', {
-      name: /Task:.*Fix checkout/,
+      name: 'Fix checkout',
     });
     fireEvent.keyDown(trigger, { key: 'Enter' });
     expect(

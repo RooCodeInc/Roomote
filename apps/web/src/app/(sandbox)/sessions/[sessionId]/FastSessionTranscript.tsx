@@ -748,7 +748,7 @@ export function FastSessionTranscript({
     >
       <SlackMentionProvider scope={slackMentionScope}>
         <WorkspaceHeader
-          className="py-4.25"
+          className="py-3.25"
           contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-col !items-stretch !gap-1`}
         >
           <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>

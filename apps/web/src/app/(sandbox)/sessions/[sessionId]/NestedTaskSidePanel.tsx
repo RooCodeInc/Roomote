@@ -327,7 +327,6 @@ export function NestedTaskSidePanel({
                     <TaskTitle
                       taskId={taskId}
                       title={title}
-                      prefix="Task:"
                       className="flex-1 text-left font-medium"
                     />
                     <ChevronDown className="size-3.5 shrink-0" />
@@ -341,7 +340,11 @@ export function NestedTaskSidePanel({
                       className="cursor-pointer text-xs"
                       onClick={() => onSelectTask?.(task.taskId)}
                     >
-                      <span className="max-w-72 truncate">{task.title}</span>
+                      <TaskTitle
+                        taskId={task.taskId}
+                        title={task.title}
+                        className="max-w-72"
+                      />
                       {task.taskId === taskId ? (
                         <span className="ml-auto text-muted-foreground">
                           &bull;

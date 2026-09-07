@@ -190,7 +190,7 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
               pullRequests={pullRequests}
               prRepo={prRepo}
               prNumber={prNumber}
-              className="pl-8"
+              className="pl-9"
             />
           </TaskHeaderContent>
         </div>

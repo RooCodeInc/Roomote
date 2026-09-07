@@ -65,7 +65,7 @@ export function TaskHeaderContent({
           orderedTaskIds={orderedTaskIds}
         />
       ) : null}
-      <div className="flex min-w-0 flex-1 flex-col gap-1">{children}</div>
+      <div className="flex min-w-0 flex-1 flex-col gap-0">{children}</div>
     </div>
   );
 }
