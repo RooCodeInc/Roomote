@@ -108,30 +108,7 @@ function formatIntegrationsForPrompt(
   return sections.join('\n\n');
 }
 
-export function buildFastAgentSystemPrompt({
-  availableEnvironments,
-  availableTaskModels = [],
-  defaultTaskModelId,
-  availableIntegrations = [],
-  activeTasks = [],
-  surface = 'slack',
-  turnSource = 'human',
-  input,
-  platformEventHandling = 'default',
-  platformEventVisibility = 'optional',
-  platformEventKind = 'delegated_task',
-  automationReport = false,
-  retryTaskStartAvailable = false,
-  allowSilentAmbientReply = false,
-  isCurrentUserAdmin = false,
-  implicitAutomationOffersEnabled = true,
-  releaseVersion,
-  commitSha,
-  appEnv,
-  setupSnapshot,
-  setupSession = false,
-  therapistModeEnabled = false,
-}: {
+export type FastAgentSystemPromptOptions = {
   availableEnvironments: RoutableEnvironment[];
   availableTaskModels?: TaskModelOption[];
   defaultTaskModelId?: string;
@@ -161,7 +138,35 @@ export function buildFastAgentSystemPrompt({
   therapistModeEnabled?: boolean;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
-}): string {
+};
+
+export function buildFastAgentSystemPrompt(
+  options: FastAgentSystemPromptOptions,
+): string {
+  const {
+    availableEnvironments,
+    availableTaskModels = [],
+    defaultTaskModelId,
+    availableIntegrations = [],
+    activeTasks = [],
+    surface = 'slack',
+    turnSource = 'human',
+    input,
+    platformEventHandling = 'default',
+    platformEventVisibility = 'optional',
+    platformEventKind = 'delegated_task',
+    automationReport = false,
+    retryTaskStartAvailable = false,
+    allowSilentAmbientReply = false,
+    isCurrentUserAdmin = false,
+    implicitAutomationOffersEnabled = true,
+    releaseVersion,
+    commitSha,
+    appEnv,
+    setupSnapshot,
+    setupSession = false,
+    therapistModeEnabled = false,
+  } = options;
   const platformEvent = turnSource === 'platform_event';
   const reactionInput =
     !platformEvent && input?.type === FAST_AGENT_REACTION_INPUT_TYPE;

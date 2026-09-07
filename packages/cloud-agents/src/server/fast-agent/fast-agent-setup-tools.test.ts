@@ -5,7 +5,10 @@ import {
   FAST_AGENT_NATIVE_TOOL_FILTER,
 } from './fast-agent-tool-policy';
 import { FAST_AGENT_NATIVE_TOOL_NAMES } from '@roomote/types';
-import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
+import {
+  buildFastAgentSystemPrompt,
+  type FastAgentSystemPromptOptions,
+} from './fast-agent-prompt';
 
 describe('Fast structured input tool filtering', () => {
   it('keeps request_user_input generic without setup-only launch tools', () => {
@@ -36,9 +39,9 @@ describe('Fast structured input tool filtering', () => {
 });
 
 describe('setup prompt guidance and snapshot injection', () => {
-  const baseInput = {
+  const baseInput: FastAgentSystemPromptOptions = {
     availableEnvironments: [],
-  } as Parameters<typeof buildFastAgentSystemPrompt>[0];
+  };
 
   it('includes first-interaction and plain-language guidance for setup sessions', () => {
     const prompt = buildFastAgentSystemPrompt({
