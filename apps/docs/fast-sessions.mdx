@@ -148,33 +148,38 @@ or a direct message still requires a response.
 ## Reminders and monitors
 
 A Session can schedule a message to itself. Ask Fast to "remind me in twenty
-minutes", "check every ten minutes whether CI is green", or "every weekday at
-nine, summarize the open pull requests", and it creates a wakeup for that
-Session. When the wakeup fires, Fast picks the conversation back up with its
-full history in context, does what was asked, and replies on the same surface
-the Session lives on: the transcript in the dashboard, or the originating Slack,
-Discord, Teams, or Telegram thread.
+minutes", "check every ten minutes for two hours whether CI is green", or
+"every weekday at nine, summarize the open pull requests", and it creates a
+wakeup for that Session. When the wakeup fires, Fast picks the conversation back
+up with its full history in context, does what was asked, and replies on the same
+surface the Session lives on: the transcript in the dashboard, or the
+originating Slack, Discord, Teams, or Telegram thread.
 
-A one-shot wakeup is a reminder and always replies. A recurring wakeup is a
-monitor and stays quiet unless it has something to report, such as a change, a
-result, a blocker, or a decision you need to make. When the monitored condition
-resolves, Fast tells you and cancels the wakeup itself. You can also ask Fast to
-list or cancel wakeups at any time; archiving a Session cancels all of its
-wakeups.
+A reminder normally uses a one-shot wakeup and always replies. A monitoring
+check, whether one-shot or recurring, stays quiet unless it has something to
+report, such as a change, a result, a blocker, or a decision you need to make.
+Ongoing-process monitors must include a finite run count or end time, such as
+`every 10m x12` or
+`every 10m until 2026-09-07T18:00:00Z`. Monitoring stops at that bound without
+automatic renewal, or earlier when the condition resolves, becomes irrelevant,
+loses a required capability, or is cancelled. Reaching the bound without
+evidence of resolution is not success. You can ask Fast to list or cancel
+wakeups at any time; archiving a Session cancels all of its wakeups.
 
 Wakeups belong to the conversation and do not require an administrator. A
 Session may hold up to ten active wakeups, intervals range from one second to
 seven days, and recurring wakeups can be bounded by a run count or an end time.
-Intervals under five minutes must carry one of those bounds. A recurring wakeup
-whose turns fail five times in a row is retired. Deployment-wide recurring work
-that should run outside a conversation or report to a channel is an
-[automation](/automations) instead.
+All ongoing-process monitors and any interval under five minutes must carry one
+of those bounds. Unbounded schedules remain available for explicitly requested
+recurring reminders or reports. A recurring wakeup whose turns fail five times
+in a row is retired. Deployment-wide recurring work that should run outside a
+conversation or report to a channel is an [automation](/automations) instead.
 
 Relative and interval schedules use `in <positive integer>s|m|h|d` and
 `every <positive integer>s|m|h|d`: seconds, minutes, hours, or days. Use `in 30s`,
 not fractional `in 0.5m`. For a short recurring check, use `every 30s x3` or an
-`until` end time; recurring intervals under five minutes still require a bound.
-Cron schedules remain five-field expressions, such as `cron 0 9 * * 1-5`.
+`until` end time. Cron schedules remain five-field expressions, such as
+`cron 0 9 * * 1-5`.
 Delivery is best effort: `in 30s` does not guarantee a reply exactly 30 seconds
 later.
 
