@@ -33,6 +33,7 @@ import { PendingUserInputRequestStateProvider } from './PendingUserInputRequestP
 import { TaskInputStack } from './TaskInputStack';
 import { OnboardingCompletionMessage } from './OnboardingCompletionMessage';
 import { ProductTips, Startup } from './startup';
+import { TaskRobotIconScope } from './TaskRobotIconScope';
 
 interface LiveContentProps {
   session: TaskSession;
@@ -252,47 +253,52 @@ function LiveContentInner({
         >
           <ArtifactLinkProvider session={session}>
             <PreviewCommand taskRun={session.taskRun ?? null} asleep={asleep} />
-            <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
-              <Header session={session} />
-              <ConnectionStatusBanner session={session} />
-              <Messages
-                session={session}
-                scrollRef={messagesRef}
-                initialScrollBehavior={messagesInitialScrollBehavior}
-                footer={
-                  <>
-                    {session.onboardingEnvironment && (
-                      <OnboardingCompletionMessage
-                        environment={session.onboardingEnvironment}
-                      />
-                    )}
-                    {bootingTaskRun && (
-                      <>
-                        <Startup
-                          runId={bootingTaskRun.id}
-                          initialTaskRun={bootingTaskRun}
-                          newTaskHref={newTaskHref}
-                          onStatusChange={onBootStatusChange}
+            <TaskRobotIconScope
+              taskId={session.taskId}
+              fastAgentSessionId={session.taskRun?.payload?.fastAgentSessionId}
+            >
+              <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
+                <Header session={session} />
+                <ConnectionStatusBanner session={session} />
+                <Messages
+                  session={session}
+                  scrollRef={messagesRef}
+                  initialScrollBehavior={messagesInitialScrollBehavior}
+                  footer={
+                    <>
+                      {session.onboardingEnvironment && (
+                        <OnboardingCompletionMessage
+                          environment={session.onboardingEnvironment}
                         />
-                        <ProductTips />
-                      </>
-                    )}
-                  </>
-                }
-              />
-              <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-[background-color,border-color,outline-width] border-2 border-background rounded-b-3xl outline-0 outline-offset-[-2px] outline-accent-foreground has-[textarea:focus]:outline-2">
-                <PendingUserInputRequestStateProvider taskId={session.taskId}>
-                  <TaskInputStack
-                    session={session}
-                    promptInputRef={promptInputRef}
-                    onFileSearchOpen={handleFileSearchOpen}
-                    onCommandSearchOpen={handleCommandSearchOpen}
-                    scrollToBottom={scrollToBottom}
-                    autoFocus
-                  />
-                </PendingUserInputRequestStateProvider>
+                      )}
+                      {bootingTaskRun && (
+                        <>
+                          <Startup
+                            runId={bootingTaskRun.id}
+                            initialTaskRun={bootingTaskRun}
+                            newTaskHref={newTaskHref}
+                            onStatusChange={onBootStatusChange}
+                          />
+                          <ProductTips />
+                        </>
+                      )}
+                    </>
+                  }
+                />
+                <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-[background-color,border-color,outline-width] border-2 border-background rounded-b-3xl outline-0 outline-offset-[-2px] outline-accent-foreground has-[textarea:focus]:outline-2">
+                  <PendingUserInputRequestStateProvider taskId={session.taskId}>
+                    <TaskInputStack
+                      session={session}
+                      promptInputRef={promptInputRef}
+                      onFileSearchOpen={handleFileSearchOpen}
+                      onCommandSearchOpen={handleCommandSearchOpen}
+                      scrollToBottom={scrollToBottom}
+                      autoFocus
+                    />
+                  </PendingUserInputRequestStateProvider>
+                </div>
               </div>
-            </div>
+            </TaskRobotIconScope>
           </ArtifactLinkProvider>
           <FileSearch
             open={fileSearchOpen}

@@ -1,6 +1,6 @@
 import { sanitizeSandboxPathString } from '@/lib';
 
-import { type LucideIcon, AlertCircle } from '@/components/system';
+import { type LucideIcon, AlertCircle, Telescope } from '@/components/system';
 import {
   Message,
   MessageContent,
@@ -62,6 +62,7 @@ export function AcpGroupedToolMessage({
   const ToolIcon = groupedToolIcon({
     presentation: firstPresentation,
     hasFailed,
+    isExploration: group.action === 'Exploring',
   });
 
   return (
@@ -128,8 +129,10 @@ export function AcpGroupedToolMessage({
 function groupedToolIcon(params: {
   presentation: ReturnType<typeof resolveToolPresentation>;
   hasFailed: boolean;
+  isExploration: boolean;
 }): LucideIcon {
   if (params.hasFailed) return AlertCircle;
+  if (params.isExploration) return Telescope;
   return params.presentation.integrationIcon
     ? mcpIntegrationIconFor(params.presentation.integrationIcon)
     : toolIconForKey(params.presentation.iconKey);

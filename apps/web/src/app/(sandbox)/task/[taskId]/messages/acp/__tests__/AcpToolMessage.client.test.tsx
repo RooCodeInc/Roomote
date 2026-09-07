@@ -12,10 +12,12 @@ import {
   BookOpenText,
   Bot,
   FileIcon,
+  List,
   Search,
   SquarePen,
   Wrench,
 } from '@/components/system';
+import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
 
 import { AcpToolMessage } from '../AcpToolMessage';
 import { mcpIntegrationIconFor } from '../tool-icons';
@@ -55,9 +57,23 @@ vi.mock('@/components/ai-elements', () => ({
     state?: string;
     params?: unknown;
     collapsible?: boolean;
+    iconElement?: ReactNode;
+    iconAction?: { label: string; onClick: () => void };
   }) => {
     toolHeaderSpy(props);
-    return <div>{props.action}</div>;
+    return (
+      <div>
+        {props.iconAction ? (
+          <button type="button" onClick={props.iconAction.onClick}>
+            {props.iconElement}
+            {props.iconAction.label}
+          </button>
+        ) : (
+          props.iconElement
+        )}
+        {props.action}
+      </div>
+    );
   },
   ToolContent: ({ children }: { children?: ReactNode }) => (
     <div>{children}</div>
@@ -256,6 +272,22 @@ describe('AcpToolMessage', () => {
       expect.objectContaining({
         icon: Bot,
         collapsible: false,
+      }),
+    );
+  });
+
+  it('renders requests for user input as human guidance with the List icon', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('tool', { toolName: 'request_user_input' })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Asked for',
+        object: 'human guidance',
+        icon: List,
       }),
     );
   });
@@ -533,6 +565,94 @@ describe('AcpToolMessage', () => {
       expect.objectContaining({
         icon: Wrench,
       }),
+    );
+  });
+
+  it('shows the referenced task robot for task-message activity', () => {
+    const msg = buildResultMessage('task', {
+      toolName: 'send_task_message',
+      output: JSON.stringify({ success: true, taskId: 'child-42' }),
+    });
+    (
+      msg.data as AcpToolResultUiMessage['data'] & {
+        rawInput: Record<string, unknown>;
+      }
+    ).rawInput = {
+      arguments: { taskId: 'child-42', message: 'Check the tests' },
+    };
+
+    render(<AcpToolMessage msg={msg} />);
+
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
+  });
+
+  it('opens and focuses a task from its Roomote MCP activity icon', () => {
+    const openTask = vi.fn();
+    const msg = buildMessage('mcp', {
+      isMcp: true,
+      mcpServerName: 'roomote',
+      mcpToolName: 'manage_tasks',
+      toolName: 'manage_tasks',
+      rawInput: {
+        arguments: {
+          action: 'get_messages',
+          taskId: 'child-42',
+        },
+      },
+    } as never);
+
+    render(
+      <TaskRobotIconProvider
+        sessionId="session-1"
+        orderedTaskIds={['child-42']}
+        onOpenTask={openTask}
+      >
+        <AcpToolMessage msg={msg} />
+      </TaskRobotIconProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Focus task prompt' }));
+    expect(openTask).toHaveBeenCalledWith('child-42');
+  });
+
+  it('keeps the normal icon for Session-targeted Roomote MCP activity', () => {
+    const msg = buildMessage('mcp', {
+      isMcp: true,
+      mcpServerName: 'roomote',
+      mcpToolName: 'manage_tasks',
+      toolName: 'manage_tasks',
+      rawInput: {
+        arguments: {
+          action: 'send_message',
+          sessionId: 'session-1',
+        },
+      },
+    } as never);
+
+    render(
+      <TaskRobotIconProvider
+        sessionId="session-1"
+        orderedTaskIds={['child-42']}
+      >
+        <AcpToolMessage msg={msg} />
+      </TaskRobotIconProvider>,
+    );
+
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not replace generic tool icons with task robots', () => {
+    render(<AcpToolMessage msg={buildMessage('edit')} />);
+
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).not.toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ icon: SquarePen, iconElement: undefined }),
     );
   });
 

@@ -12,6 +12,7 @@
     "test:server": "vitest run --project server",
     "test:client": "vitest run --project client",
     "automation:icons": "node ./scripts/generate-automation-icons.mjs",
+    "task-robot:icons": "node ./scripts/generate-task-robot-icons.mjs",
     "docs:assets": "node ./scripts/sync-docs-assets.mjs",
     "dev:prepare": "rimraf .next && pnpm docs:assets && pnpm automation:icons",
     "dev": "pnpm docs:assets && pnpm automation:icons && dotenvx run -f ../../.env.local -- next dev --turbopack",

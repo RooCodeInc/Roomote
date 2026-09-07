@@ -50,7 +50,7 @@ const AcpReasoningMessageBase = ({
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm font-light text-muted-foreground">
               <Lightbulb className="size-4" />
-              <span>Thought</span>
+              <span>Thought for a bit</span>
             </div>
             <Reasoning
               isStreaming={msg.partial}

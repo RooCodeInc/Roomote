@@ -11,6 +11,7 @@ import {
   GalleryVerticalEnd,
   GitPullRequest,
   HardDriveUpload,
+  List,
   ListChecks,
   MessageSquareText,
   MessagesSquare,
@@ -43,6 +44,7 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'roomote') return RoomoteR;
   if (key === 'video') return Video;
   if (key === 'target') return Target;
+  if (key === 'list') return List;
   if (key === 'list-checks') return ListChecks;
   if (key === 'pull-request') return GitPullRequest;
   if (key === 'environment') return VectorSquare;

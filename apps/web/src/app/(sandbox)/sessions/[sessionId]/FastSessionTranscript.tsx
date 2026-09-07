@@ -17,6 +17,7 @@ import {
   getTextFromContentBlocks,
   inferAcpMessageKind,
   parsePrReviewActionOffer,
+  getTaskModelDisplayName,
   type AcpMessage,
   type PrReviewActionChoice,
   type AcpEventType,
@@ -68,6 +69,7 @@ import {
   AcpTranscriptBlockList,
   useAcpTranscriptBlocks,
 } from '../../task/[taskId]/messages/acp';
+import { ModelBadge } from '@/components/sandbox';
 import {
   AcpProtocolService,
   toAcpUiMessage,
@@ -308,6 +310,7 @@ export function FastSessionTranscript({
   const taskStateRevision = useSessionTaskStateRevision();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
+  const effectiveSessionModel = sessionModel ?? defaultModelId;
   const slackMentionScope = useMemo<SlackMentionScope>(
     () => ({ kind: 'session', sessionId }),
     [sessionId],
@@ -750,13 +753,25 @@ export function FastSessionTranscript({
     >
       <SlackMentionProvider scope={slackMentionScope}>
         <WorkspaceHeader
-          className="py-4.25"
-          contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}
+          className="py-3.25"
+          contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-col !items-stretch !gap-1`}
         >
           <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>
             {title ?? fallbackTitle}
           </h1>
-          {headerExtras}
+          {(effectiveSessionModel || headerExtras) && (
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+              {effectiveSessionModel ? (
+                <ModelBadge
+                  model={effectiveSessionModel}
+                  displayName={getTaskModelDisplayName(effectiveSessionModel)}
+                  showIcon={false}
+                  iconClassName="text-muted-foreground"
+                />
+              ) : null}
+              {headerExtras}
+            </div>
+          )}
         </WorkspaceHeader>
         <Conversation className="min-h-0 flex-1" initial="instant">
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
