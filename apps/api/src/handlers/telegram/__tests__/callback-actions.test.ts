@@ -8,6 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
+import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
 
 const {
   answerCallbackMock,
@@ -269,12 +270,23 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
   });
 
   it('starts a suggestion in a fresh topic while preserving its source topic for fallback', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
+    claimTelegramSuggestionLaunchMock.mockResolvedValueOnce({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: '__all_repositories__',
+      launchTarget: '__all_repositories__',
+      sourceTaskId: null,
+      originSessionId: 'session-card',
+      launchClaimedAt: CLAIMED_AT,
+    });
     await handleTelegramCallbackQuery(buildSuggestionQuery(44));
 
-    expect(getSessionForTaskMock).toHaveBeenCalledWith(
-      expect.anything(),
-      'scan-task-1',
-    );
+    expect(resolveOrigin).toHaveBeenCalledWith(null, 'session-card');
     expect(launchPinnedMock).toHaveBeenCalledWith(
       expect.objectContaining({ originSessionId: 'session-origin' }),
     );

@@ -420,6 +420,16 @@ function buildFastAutomationSuggestionEventId(
     : `${event.customAutomationId}:task:${event.taskId}`;
 }
 
+async function requireFastAutomationOriginSessionId(
+  fastConversationId: string,
+): Promise<string> {
+  const session = await getSessionForFastConversation(db, fastConversationId);
+  if (!session) {
+    throw new Error('Fast automation origin Session was not found.');
+  }
+  return session.id;
+}
+
 function buildPrReviewActionNonce(event: FastAgentParentEvent): string {
   return buildSlackClientMessageId(
     `${buildEventClientMessageSeed(event)}:pr-review-action`,
@@ -919,6 +929,9 @@ async function createSlackFastAgentParentTurn(
             suggestions.length > 0
           ) {
             await postFastAutomationSuggestionsToSlack({
+              originSessionId: await requireFastAutomationOriginSessionId(
+                session.id,
+              ),
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: messageTs,
@@ -961,6 +974,9 @@ async function createSlackFastAgentParentTurn(
             suggestions.length > 0
           ) {
             await postFastAutomationSuggestionsToSlack({
+              originSessionId: await requireFastAutomationOriginSessionId(
+                session.id,
+              ),
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: rootMessageId,
@@ -1340,6 +1356,9 @@ async function createDiscordFastAgentParentTurn(
         });
         if (suggestions.length > 0) {
           await postFastAutomationSuggestionsToDiscord({
+            originSessionId: await requireFastAutomationOriginSessionId(
+              session.id,
+            ),
             provider,
             channelId: conversation.replyTarget.channelId,
             ...(conversation.replyTarget.threadId
@@ -1439,6 +1458,9 @@ async function createDiscordFastAgentParentTurn(
       });
       if (settleReport && suggestions.length > 0) {
         await postFastAutomationSuggestionsToDiscord({
+          originSessionId: await requireFastAutomationOriginSessionId(
+            session.id,
+          ),
           provider,
           channelId: conversation.replyTarget.channelId,
           ...(conversation.replyTarget.threadId
@@ -1577,6 +1599,9 @@ async function createTeamsFastAgentParentTurn(
           });
           if (suggestions.length > 0) {
             await postFastAutomationSuggestionsToTeams({
+              originSessionId: await requireFastAutomationOriginSessionId(
+                session.id,
+              ),
               provider,
               channelId: conversation.replyTarget.channelId,
               serviceUrl,
@@ -1610,6 +1635,9 @@ async function createTeamsFastAgentParentTurn(
           suggestions.length > 0
         ) {
           await postFastAutomationSuggestionsToTeams({
+            originSessionId: await requireFastAutomationOriginSessionId(
+              session.id,
+            ),
             provider,
             channelId: conversation.replyTarget.channelId,
             serviceUrl,
@@ -1713,6 +1741,9 @@ async function createTelegramFastAgentParentTurn(
           suggestions.length > 0
         ) {
           await postFastAutomationSuggestionsToTelegram({
+            originSessionId: await requireFastAutomationOriginSessionId(
+              session.id,
+            ),
             provider,
             channelId: conversation.replyTarget.channelId,
             ...(conversation.replyTarget.threadId

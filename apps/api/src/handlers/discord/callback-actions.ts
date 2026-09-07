@@ -435,6 +435,7 @@ async function launchClaimedDiscordSuggestion(input: {
         });
         const originSessionId = await resolveSuggestionOriginSessionId(
           suggestion.sourceTaskId,
+          suggestion.originSessionId,
         );
         let launchedRunId: number | null = null;
         const pinned = await launchPinnedFastSessionTask({

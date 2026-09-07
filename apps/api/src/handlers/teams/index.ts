@@ -1564,6 +1564,7 @@ async function launchPinnedTeamsSuggestionTask(input: {
   suggestionId: string;
   /** The task that produced the suggestion; its Session hosts the launch. */
   sourceTaskId?: string | null;
+  originSessionId?: unknown;
   queuedMessage: QueuedTeamsCommunicationMessage;
   workspace: TeamsWorkspaceSelection;
 }) {
@@ -1578,6 +1579,7 @@ async function launchPinnedTeamsSuggestionTask(input: {
   }
   const originSessionId = await resolveSuggestionOriginSessionId(
     input.sourceTaskId,
+    input.originSessionId,
   );
   let launchResult: { id: number; taskId: string } | null = null;
   const pinned = await launchPinnedFastSessionTask({
@@ -2163,6 +2165,7 @@ teams.post('/', async (c) => {
           mappedUserId: mappedUserId!,
           suggestionId: claimedSuggestionReaction.id,
           sourceTaskId: claimedSuggestionReaction.sourceTaskId,
+          originSessionId: claimedSuggestionReaction.originSessionId,
           queuedMessage: {
             ...queuedMessage!,
             text: promptText,
@@ -2412,6 +2415,7 @@ teams.post('/', async (c) => {
               mappedUserId,
               suggestionId: resolution.suggestion.id,
               sourceTaskId: resolution.suggestion.sourceTaskId,
+              originSessionId: resolution.suggestion.originSessionId,
               queuedMessage: { ...queuedMessage!, text: promptText },
               workspace: workspaceOverride!,
             }),

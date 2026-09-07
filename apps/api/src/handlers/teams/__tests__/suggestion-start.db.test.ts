@@ -26,6 +26,7 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
     channelId?: string;
     threadId?: string;
     oneMessagePerSuggestion?: boolean;
+    originSessionId?: string;
   }): Promise<string[]> {
     const channelId = params.channelId ?? conversationId;
     const rows = await db
@@ -58,6 +59,9 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
         metadata: {
           suggestionType: 'suggested_tasks',
           suggestionKey: `source-task:${workItemId}`,
+          ...(params.originSessionId
+            ? { originSessionId: params.originSessionId }
+            : {}),
           ...(params.oneMessagePerSuggestion
             ? { suggestionGroupKey: 'source-task' }
             : {}),
@@ -182,11 +186,13 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
   it('resolves against the newest suggestion group, not an older post', async () => {
     await seedSuggestionGroup({
       introMessageId: 'intro-old',
+      originSessionId: 'session-old',
       titles: ['Old idea one', 'Old idea two'],
       createdAt: new Date(Date.now() - 60 * 60 * 1000),
     });
     const [newFirstId] = await seedSuggestionGroup({
       introMessageId: 'intro-new',
+      originSessionId: 'session-new',
       titles: ['New idea one'],
       createdAt: new Date(),
     });
@@ -204,6 +210,8 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
 
     expect(resolution.suggestion.id).toBe(newFirstId);
     expect(resolution.suggestion.title).toBe('New idea one');
+    expect(resolution.suggestion.originSessionId).toBe('session-new');
+    expect(resolution.suggestion.sourceTaskId).toBeNull();
 
     // Idea 2 exists only in the old group, so against the newest (1-item)
     // group it is out of range rather than a stale-list launch.

@@ -3,10 +3,13 @@ const mocks = vi.hoisted(() => ({
   release: vi.fn(),
   cancel: vi.fn(),
   getSessionForTask: vi.fn(),
+  findSession: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: {},
+  db: { query: { sessions: { findFirst: mocks.findSession } } },
+  eq: vi.fn(),
+  sessions: { id: 'sessions.id' },
   finalizeWorkItemLaunched: mocks.finalize,
   releaseWorkItemClaim: mocks.release,
   getSessionForTask: mocks.getSessionForTask,
@@ -245,6 +248,21 @@ describe('launchClaimedSuggestedTask', () => {
 });
 
 describe('resolveSuggestionOriginSessionId', () => {
+  it('uses the persisted canonical origin for a taskless Fast suggestion', async () => {
+    mocks.findSession.mockResolvedValue({ id: 'session-fast-origin' });
+    await expect(
+      resolveSuggestionOriginSessionId(null, 'session-fast-origin'),
+    ).resolves.toBe('session-fast-origin');
+    expect(mocks.getSessionForTask).not.toHaveBeenCalled();
+  });
+
+  it('does not silently create a new origin when the persisted Session is missing', async () => {
+    mocks.findSession.mockResolvedValue(null);
+    await expect(
+      resolveSuggestionOriginSessionId(null, 'deleted-session'),
+    ).rejects.toThrow('origin Session is no longer available');
+  });
+
   it('returns the Session that owns the source task', async () => {
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
 

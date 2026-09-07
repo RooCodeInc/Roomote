@@ -3,6 +3,8 @@ import {
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
   getSessionForTask,
+  eq,
+  sessions,
 } from '@roomote/db/server';
 import { isDeploymentReadOnlyError } from '@roomote/types';
 
@@ -181,13 +183,24 @@ export async function launchClaimedSuggestedTask(input: {
 }
 
 /**
- * The Session that owns the task which produced a suggestion, so a launch
- * lands next to that scan instead of opening a new Session. Null when the
- * suggestion has no source task or that task has no Session.
+ * Fast reports can produce suggestions without a source task. Their tracked
+ * cards retain the canonical Session; older task-backed cards resolve via the
+ * task instead. Neither path derives ownership from message timestamps.
  */
 export async function resolveSuggestionOriginSessionId(
   sourceTaskId: string | null | undefined,
+  originSessionId?: unknown,
 ): Promise<string | null> {
+  if (typeof originSessionId === 'string' && originSessionId.trim()) {
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.id, originSessionId),
+      columns: { id: true },
+    });
+    if (!session) {
+      throw new Error('The suggestion origin Session is no longer available.');
+    }
+    return session.id;
+  }
   if (!sourceTaskId) {
     return null;
   }

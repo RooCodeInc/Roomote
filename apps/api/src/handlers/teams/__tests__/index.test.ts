@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
 
 const {
   authAccountsFindFirstMock,
@@ -599,6 +600,9 @@ describe('Teams webhook handler', () => {
   });
 
   it('launches a pinned suggestion through the owning Fast Session without a model turn', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
     trackedSuggestionMessageFindFirstMock.mockResolvedValue({
       workItemId: 'suggestion-1',
     });
@@ -615,6 +619,7 @@ describe('Teams webhook handler', () => {
         targetRepositoryFullName: 'acme/app',
         targetEnvironmentId: null,
         sourceTaskId: 'scan-task-1',
+        originSessionId: 'session-card',
         launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
       },
     });
@@ -713,6 +718,7 @@ describe('Teams webhook handler', () => {
         kickoffMessage: 'Started a task in acme/app.',
       }),
     );
+    expect(resolveOrigin).toHaveBeenCalledWith('scan-task-1', 'session-card');
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         initiator: { kind: 'user', userId: 'mapped-user-1' },

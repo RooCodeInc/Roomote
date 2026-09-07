@@ -18,6 +18,7 @@ import {
 } from './fast-automation-suggestions';
 
 describe('Fast automation suggestions', () => {
+  const originSessionId = '22222222-2222-4222-8222-222222222222';
   it('persists and tracks reaction-launchable Slack suggestion cards idempotently', async () => {
     const user = await userFactory.create();
     const postMessage = vi.fn().mockResolvedValue('200.001');
@@ -31,6 +32,7 @@ describe('Fast automation suggestions', () => {
       channelId: 'C123',
       threadTs: '100.001',
       eventId: 'automation-1:2026-08-25T00:00:00.000Z',
+      originSessionId,
       createdByUserId: user.id,
       suggestions,
     };
@@ -78,6 +80,7 @@ describe('Fast automation suggestions', () => {
       createdByUserId: user.id,
       metadata: expect.objectContaining({
         suggestionType: 'suggested_tasks',
+        originSessionId,
         launchRouting: 'router',
       }),
     });
@@ -97,6 +100,7 @@ describe('Fast automation suggestions', () => {
       channelId: 'C-targets',
       threadTs: 'targets-root',
       eventId: 'automation-targets',
+      originSessionId,
       createdByUserId: user.id,
       suggestions: [
         {
@@ -173,6 +177,7 @@ describe('Fast automation suggestions', () => {
         channelId: 'C-invalid',
         threadTs: 'invalid-root',
         eventId: 'automation-invalid-target',
+        originSessionId,
         createdByUserId: user.id,
         suggestions: [
           {
@@ -201,6 +206,7 @@ describe('Fast automation suggestions', () => {
         channelId: 'C-user-scoped',
         threadTs: 'user-scoped-root',
         eventId: 'automation-user-scoped-target',
+        originSessionId,
         createdByUserId: user.id,
         suggestions: [
           {
@@ -228,6 +234,7 @@ describe('Fast automation suggestions', () => {
       channelId: 'channel-1',
       threadId: 'thread-1',
       eventId: 'automation-2:2026-08-25T00:00:00.000Z',
+      originSessionId,
       createdByUserId: user.id,
       suggestions: [
         {
@@ -261,6 +268,7 @@ describe('Fast automation suggestions', () => {
       metadata: expect.objectContaining({
         suggestionType: 'suggested_tasks',
         launchRouting: 'router',
+        originSessionId,
       }),
     });
   });
@@ -280,6 +288,7 @@ describe('Fast automation suggestions', () => {
       serviceUrl: 'https://smba.example.com/amer/',
       threadId: 'thread-1',
       eventId: 'automation-teams',
+      originSessionId,
       createdByUserId: user.id,
       suggestions: [
         { title: 'Verify Teams retries', brief: 'Exercise the failure path.' },
@@ -302,7 +311,10 @@ describe('Fast automation suggestions', () => {
       messageTs: 'message-1',
       threadTs: 'thread-1',
       createdByUserId: user.id,
-      metadata: expect.objectContaining({ launchRouting: 'router' }),
+      metadata: expect.objectContaining({
+        launchRouting: 'router',
+        originSessionId,
+      }),
     });
   });
 
@@ -318,6 +330,7 @@ describe('Fast automation suggestions', () => {
       provider: { postMessage },
       channelId: 'chat-1',
       eventId: 'automation-telegram',
+      originSessionId,
       createdByUserId: user.id,
       suggestions: [
         {
@@ -348,7 +361,10 @@ describe('Fast automation suggestions', () => {
       channelId: 'chat-1',
       messageTs: 'message-1',
       createdByUserId: user.id,
-      metadata: expect.objectContaining({ launchRouting: 'router' }),
+      metadata: expect.objectContaining({
+        launchRouting: 'router',
+        originSessionId,
+      }),
     });
   });
 
@@ -387,6 +403,7 @@ describe('Fast automation suggestions', () => {
         provider: { postMessage },
         channelId: 'conversation-retry',
         eventId: `automation-retry-${providerResult.provider}`,
+        originSessionId,
         createdByUserId: user.id,
         suggestions: [
           {
@@ -416,7 +433,10 @@ describe('Fast automation suggestions', () => {
         channelId: 'conversation-retry',
         messageTs: null,
         createdByUserId: user.id,
-        metadata: expect.objectContaining({ launchRouting: 'router' }),
+        metadata: expect.objectContaining({
+          launchRouting: 'router',
+          originSessionId,
+        }),
       });
     },
   );
@@ -429,6 +449,7 @@ describe('Fast automation suggestions', () => {
       channelId: 'C456',
       threadTs: '300.001',
       eventId: 'automation-3:2026-08-25T00:00:00.000Z',
+      originSessionId,
       createdByUserId: user.id,
       suggestions: [
         {

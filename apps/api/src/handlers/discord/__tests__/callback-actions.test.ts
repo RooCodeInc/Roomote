@@ -1,4 +1,5 @@
 import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
 
 const mocks = vi.hoisted(() => ({
   findRun: vi.fn(),
@@ -270,6 +271,9 @@ describe('Discord component callbacks', () => {
   });
 
   it('starts a coding task for a pinned suggestion', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
     const claimedAt = new Date('2026-08-28T00:00:00.000Z');
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
     mocks.claimSuggestionByMessage.mockResolvedValue({
@@ -283,6 +287,7 @@ describe('Discord component callbacks', () => {
         targetEnvironmentId: null,
         usesRouterLaunch: false,
         sourceTaskId: 'scan-task-1',
+        originSessionId: 'session-card',
         launchClaimedAt: claimedAt,
       },
     });
@@ -321,10 +326,7 @@ describe('Discord component callbacks', () => {
     });
 
     expect(mocks.startNewTask).toHaveBeenCalled();
-    expect(mocks.getSessionForTask).toHaveBeenCalledWith(
-      expect.anything(),
-      'scan-task-1',
-    );
+    expect(resolveOrigin).toHaveBeenCalledWith('scan-task-1', 'session-card');
     expect(mocks.launchPinned).toHaveBeenCalledWith(
       expect.objectContaining({ originSessionId: 'session-origin' }),
     );

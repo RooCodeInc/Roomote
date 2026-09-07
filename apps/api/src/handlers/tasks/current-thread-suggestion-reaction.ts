@@ -18,6 +18,7 @@ export type ClaimedCurrentThreadSuggestion = {
   launchTarget?: string;
   /** The scan or onboarding task that produced the suggestion. */
   sourceTaskId?: string | null;
+  originSessionId?: unknown;
   launchClaimedAt: Date;
 };
 
@@ -99,6 +100,9 @@ export async function claimCurrentThreadSuggestionByMessage(
         ? { launchTarget: trackedCard.metadata.launchTarget }
         : {}),
       sourceTaskId: claimed.sourceTaskId,
+      ...(typeof trackedCard.metadata?.originSessionId === 'string'
+        ? { originSessionId: trackedCard.metadata.originSessionId }
+        : {}),
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };

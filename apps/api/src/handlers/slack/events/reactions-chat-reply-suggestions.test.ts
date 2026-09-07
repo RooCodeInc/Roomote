@@ -178,6 +178,7 @@ describe('chat reply suggestion reactions', () => {
     mocks.parseSuggestionMetadata.mockReturnValue(null);
     mocks.getConfiguration.mockResolvedValue(null);
     workItem.targetRepositoryFullName = 'acme/app';
+    workItem.sourceTaskId = 'scan-task-1';
     workItem.targetEnvironmentId = 'environment-1';
     mocks.routeFastReaction.mockResolvedValue(false);
     mocks.trackedMessageFindFirst.mockResolvedValue({
@@ -436,157 +437,184 @@ describe('chat reply suggestion reactions', () => {
     expect(slack.deleteMessage).not.toHaveBeenCalled();
   });
 
-  it('binds a router-backed suggestion to the automation Session before starting Fast in its report thread', async () => {
-    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
-    mocks.sessionsFindFirst.mockResolvedValue({
-      fastConversationId: 'fast-origin',
-    });
-    mocks.conversationFindById.mockResolvedValue({
-      conversation: {
-        surface: 'slack',
-        workspaceId: 'T1',
-        conversationId: 'report-thread-ts',
-        replyTarget: { channelId: 'C1', threadId: 'report-thread-ts' },
-      },
-    });
-    mocks.trackedMessageFindFirst.mockResolvedValue({
-      id: 'tracked-message-1',
-      workItemId: 'work-item-1',
-      threadTs: 'report-thread-ts',
-      surface: 'slack',
-      channelId: 'C1',
-      metadata: { suggestionType: 'suggested_tasks', launchRouting: 'router' },
-    });
-    mocks.lookupSlackUserMapping.mockResolvedValue({
-      hasInactiveMapping: false,
-      activeMapping: {
-        userId: 'user-1',
-      },
-    });
-    const slack = {
-      postMessage: vi.fn(async () => 'seeded-thread-ts'),
-      deleteMessage: vi.fn(async () => undefined),
-      getMessageMetadata: vi.fn(),
-    };
-
-    await handleReactionAddedEvent({
-      context: {
-        teamId: 'T1',
-        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
-        slack,
-      } as never,
-      event: {
-        type: 'reaction_added',
-        user: 'U1',
-        reaction: 'thumbsup',
-        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
-        event_ts: 'event-ts',
-      },
-    });
-
-    expect(mocks.conversationGetOrCreate).toHaveBeenCalledWith({
-      userId: 'user-1',
-      sessionId: 'session-origin',
-      conversation: {
-        surface: 'slack',
-        workspaceId: 'T1',
-        conversationId: 'report-thread-ts',
-        replyTarget: { channelId: 'C1', threadId: 'report-thread-ts' },
-      },
-    });
-    expect(
-      mocks.conversationGetOrCreate.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.startFastAgentResponse.mock.invocationCallOrder[0]!);
-    expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-1',
-        event: expect.objectContaining({
-          channel: 'C1',
-          thread_ts: 'report-thread-ts',
-          agentContext: 'implementation prompt',
-        }),
-      }),
-    );
-    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
-      expect.anything(),
-      { id: 'work-item-1', taskId: null, claimedAt },
-    );
-  });
-
-  it("announces a pinned launch in the origin Session's own thread instead of seeding one", async () => {
-    mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
-    mocks.sessionsFindFirst.mockResolvedValue({
-      fastConversationId: 'fast-origin',
-    });
-    mocks.conversationFindById.mockResolvedValue({
-      id: 'fast-origin',
-      conversation: {
-        surface: 'slack',
-        workspaceId: 'T1',
-        conversationId: 'report-thread-ts',
-        replyTarget: { channelId: 'C_REPORTS', threadId: 'report-thread-ts' },
-      },
-    });
-    mocks.trackedMessageFindFirst.mockResolvedValue({
-      id: 'tracked-message-1',
-      workItemId: 'work-item-1',
-      metadata: { suggestionType: 'suggested_tasks' },
-    });
-    mocks.lookupSlackUserMapping.mockResolvedValue({
-      hasInactiveMapping: false,
-      activeMapping: { userId: 'user-1' },
-    });
-    const postMessage = vi.fn(async () => 'announce-ts');
-    const slack = {
-      postMessage,
-      deleteMessage: vi.fn(async () => undefined),
-      getMessageMetadata: vi.fn(),
-    };
-
-    await handleReactionAddedEvent({
-      context: {
-        teamId: 'T1',
-        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
-        slack,
-      } as never,
-      event: {
-        type: 'reaction_added',
-        user: 'U1',
-        reaction: 'thumbsup',
-        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
-        event_ts: 'event-ts',
-      },
-    });
-
-    // The announcement is a reply in the automation's report thread.
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'C_REPORTS',
-        thread_ts: 'report-thread-ts',
-      }),
-    );
-    expect(mocks.launchPinned).toHaveBeenCalledWith(
-      expect.objectContaining({
-        originSessionId: 'session-origin',
+  it.each(['task', 'fast-report'])(
+    'binds a router-backed %s suggestion to the automation Session before starting Fast in its report thread',
+    async (source) => {
+      if (source === 'fast-report') workItem.sourceTaskId = null;
+      mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
+      mocks.sessionsFindFirst.mockResolvedValue({
+        id: 'session-origin',
+        fastConversationId: 'fast-origin',
+      });
+      mocks.conversationFindById.mockResolvedValue({
         conversation: {
           surface: 'slack',
           workspaceId: 'T1',
           conversationId: 'report-thread-ts',
-          replyTarget: {
-            channelId: 'C_REPORTS',
-            threadId: 'report-thread-ts',
-          },
+          replyTarget: { channelId: 'C1', threadId: 'report-thread-ts' },
         },
-      }),
-    );
-    expect(mocks.liveTaskLauncher).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: 'C_REPORTS',
+      });
+      mocks.trackedMessageFindFirst.mockResolvedValue({
+        id: 'tracked-message-1',
+        workItemId: 'work-item-1',
         threadTs: 'report-thread-ts',
-        messageId: 'announce-ts',
-      }),
-    );
-  });
+        surface: 'slack',
+        channelId: 'C1',
+        metadata: {
+          suggestionType: 'suggested_tasks',
+          launchRouting: 'router',
+          ...(source === 'fast-report'
+            ? { originSessionId: 'session-origin' }
+            : {}),
+        },
+      });
+      mocks.lookupSlackUserMapping.mockResolvedValue({
+        hasInactiveMapping: false,
+        activeMapping: {
+          userId: 'user-1',
+        },
+      });
+      const slack = {
+        postMessage: vi.fn(async () => 'seeded-thread-ts'),
+        deleteMessage: vi.fn(async () => undefined),
+        getMessageMetadata: vi.fn(),
+      };
+
+      await handleReactionAddedEvent({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+          slack,
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'U1',
+          reaction: 'thumbsup',
+          item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+          event_ts: 'event-ts',
+        },
+      });
+
+      expect(slack.postMessage).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          channel: 'C1',
+          thread_ts: 'report-thread-ts',
+        }),
+      );
+      expect(mocks.conversationGetOrCreate).toHaveBeenCalledWith({
+        userId: 'user-1',
+        sessionId: 'session-origin',
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T1',
+          conversationId: 'report-thread-ts',
+          replyTarget: { channelId: 'C1', threadId: 'report-thread-ts' },
+        },
+      });
+      expect(
+        mocks.conversationGetOrCreate.mock.invocationCallOrder[0],
+      ).toBeLessThan(mocks.startFastAgentResponse.mock.invocationCallOrder[0]!);
+      expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          event: expect.objectContaining({
+            channel: 'C1',
+            thread_ts: 'report-thread-ts',
+            agentContext: 'implementation prompt',
+          }),
+        }),
+      );
+      expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
+        expect.anything(),
+        { id: 'work-item-1', taskId: null, claimedAt },
+      );
+    },
+  );
+
+  it.each(['task', 'fast-report'])(
+    "announces a pinned %s launch in the origin Session's own thread instead of seeding one",
+    async (source) => {
+      if (source === 'fast-report') workItem.sourceTaskId = null;
+      mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
+      mocks.sessionsFindFirst.mockResolvedValue({
+        id: 'session-origin',
+        fastConversationId: 'fast-origin',
+      });
+      mocks.conversationFindById.mockResolvedValue({
+        id: 'fast-origin',
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T1',
+          conversationId: 'report-thread-ts',
+          replyTarget: { channelId: 'C_REPORTS', threadId: 'report-thread-ts' },
+        },
+      });
+      mocks.trackedMessageFindFirst.mockResolvedValue({
+        id: 'tracked-message-1',
+        workItemId: 'work-item-1',
+        metadata: {
+          suggestionType: 'suggested_tasks',
+          ...(source === 'fast-report'
+            ? { originSessionId: 'session-origin' }
+            : {}),
+        },
+      });
+      mocks.lookupSlackUserMapping.mockResolvedValue({
+        hasInactiveMapping: false,
+        activeMapping: { userId: 'user-1' },
+      });
+      const postMessage = vi.fn(async () => 'announce-ts');
+      const slack = {
+        postMessage,
+        deleteMessage: vi.fn(async () => undefined),
+        getMessageMetadata: vi.fn(),
+      };
+
+      await handleReactionAddedEvent({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+          slack,
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'U1',
+          reaction: 'thumbsup',
+          item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+          event_ts: 'event-ts',
+        },
+      });
+
+      // The announcement is a reply in the automation's report thread.
+      expect(postMessage).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          channel: 'C_REPORTS',
+          thread_ts: 'report-thread-ts',
+        }),
+      );
+      expect(mocks.launchPinned).toHaveBeenCalledWith(
+        expect.objectContaining({
+          originSessionId: 'session-origin',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T1',
+            conversationId: 'report-thread-ts',
+            replyTarget: {
+              channelId: 'C_REPORTS',
+              threadId: 'report-thread-ts',
+            },
+          },
+        }),
+      );
+      expect(mocks.liveTaskLauncher).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId: 'C_REPORTS',
+          threadTs: 'report-thread-ts',
+          messageId: 'announce-ts',
+        }),
+      );
+    },
+  );
 
   it('launches through the automation Session bound when its report was published', async () => {
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
