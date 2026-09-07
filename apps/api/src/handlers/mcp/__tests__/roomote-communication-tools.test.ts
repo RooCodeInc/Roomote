@@ -1,11 +1,27 @@
 const {
+  findSlackUserMappingMock,
   listCommunicationChannelsMock,
   maybeAddCommunicationReactionMock,
   sendCommunicationChannelPostMock,
 } = vi.hoisted(() => ({
+  findSlackUserMappingMock: vi.fn(),
   listCommunicationChannelsMock: vi.fn(),
   maybeAddCommunicationReactionMock: vi.fn(),
   sendCommunicationChannelPostMock: vi.fn(),
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  and: vi.fn((...conditions: unknown[]) => conditions),
+  db: {
+    query: {
+      slackUserMappings: { findFirst: findSlackUserMappingMock },
+    },
+  },
+  eq: vi.fn((column: string, value: string) => ({ column, value })),
+  slackUserMappings: {
+    userId: 'userId',
+    slackTeamId: 'slackTeamId',
+  },
 }));
 
 vi.mock('../communication-channel-discovery', () => ({
@@ -44,6 +60,7 @@ function registerTools(): RegisteredTool[] {
 describe('Roomote member communication tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    findSlackUserMappingMock.mockResolvedValue({ id: 'mapping-1' });
     listCommunicationChannelsMock.mockResolvedValue({ channelCount: 0 });
     sendCommunicationChannelPostMock.mockResolvedValue(
       Response.json({ channelId: 'C2', messageTs: '200.1' }),
@@ -94,6 +111,41 @@ describe('Roomote member communication tools', () => {
         images: [],
       },
     });
+  });
+
+  it('rejects posting to a workspace that is not linked to the acting member', async () => {
+    findSlackUserMappingMock.mockImplementation(
+      async ({ where }: { where: Array<{ value: string }> }) =>
+        where.some(({ value }) => value === 'T1')
+          ? { id: 'mapping-1' }
+          : undefined,
+    );
+    const post = registerTools().find(
+      ({ name }) => name === 'post_to_channel',
+    )!;
+
+    const result = await post.handler({
+      provider: 'slack',
+      slackTeamId: 'T2',
+      channel: '#private-team',
+      text: 'Cross-workspace post',
+    });
+
+    expect(result).toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: 'Slack workspace is not linked to the acting Roomote member.',
+        status: 403,
+      },
+    });
+    expect(findSlackUserMappingMock).toHaveBeenCalledWith({
+      columns: { id: true },
+      where: [
+        { column: 'userId', value: 'user-1' },
+        { column: 'slackTeamId', value: 'T2' },
+      ],
+    });
+    expect(sendCommunicationChannelPostMock).not.toHaveBeenCalled();
   });
 
   it('routes reactions through the shared communication handler', async () => {

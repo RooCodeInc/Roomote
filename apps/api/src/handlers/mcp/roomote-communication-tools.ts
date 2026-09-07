@@ -1,4 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { and, db, eq, slackUserMappings } from '@roomote/db/server';
 import {
   CHAT_CHANNEL_POST_TOOL_NAME,
   CHAT_CHANNELS_TOOL,
@@ -19,6 +20,25 @@ async function responseToToolResult(response: Response) {
     : toolError({ ...payload, status: response.status });
 }
 
+async function authorizeSlackWorkspace(
+  actingUserId: string,
+  slackTeamId: string,
+) {
+  const mapping = await db.query.slackUserMappings.findFirst({
+    columns: { id: true },
+    where: and(
+      eq(slackUserMappings.userId, actingUserId),
+      eq(slackUserMappings.slackTeamId, slackTeamId),
+    ),
+  });
+  return mapping
+    ? null
+    : toolError({
+        error: 'Slack workspace is not linked to the acting Roomote member.',
+        status: 403,
+      });
+}
+
 export function registerRoomoteCommunicationTools(
   server: McpServer,
   actingUserId: string,
@@ -31,8 +51,8 @@ export function registerRoomoteCommunicationTools(
       inputSchema: {
         slackTeamId: z
           .string()
-          .optional()
-          .describe('Optional Slack workspace ID to limit channel discovery.'),
+          .min(1)
+          .describe('Slack workspace ID to use for channel discovery.'),
       },
       annotations: {
         readOnlyHint: true,
@@ -41,10 +61,18 @@ export function registerRoomoteCommunicationTools(
         openWorldHint: false,
       },
     },
-    async ({ slackTeamId }) =>
-      toMcpToolResult(
-        await listCommunicationChannels({ actingUserId, slackTeamId }),
-      ),
+    async ({ slackTeamId }) => {
+      const accessError = await authorizeSlackWorkspace(
+        actingUserId,
+        slackTeamId,
+      );
+      return (
+        accessError ??
+        toMcpToolResult(
+          await listCommunicationChannels({ actingUserId, slackTeamId }),
+        )
+      );
+    },
   );
 
   server.registerTool(
@@ -67,26 +95,34 @@ export function registerRoomoteCommunicationTools(
         openWorldHint: false,
       },
     },
-    async ({ provider, slackTeamId, channel, threadTs, text }) =>
-      responseToToolResult(
-        await sendCommunicationChannelPost({
-          taskRun: {
-            id: 0,
-            taskId: `member:${actingUserId}`,
-            actingUserId,
-            payload: {
-              communicationProvider: provider,
-              communicationTeamId: slackTeamId,
+    async ({ provider, slackTeamId, channel, threadTs, text }) => {
+      const accessError = await authorizeSlackWorkspace(
+        actingUserId,
+        slackTeamId,
+      );
+      return (
+        accessError ??
+        responseToToolResult(
+          await sendCommunicationChannelPost({
+            taskRun: {
+              id: 0,
+              taskId: `member:${actingUserId}`,
+              actingUserId,
+              payload: {
+                communicationProvider: provider,
+                communicationTeamId: slackTeamId,
+              },
             },
-          },
-          parsedBody: {
-            channel,
-            ...(threadTs ? { threadTs } : {}),
-            text,
-            images: [],
-          },
-        }),
-      ),
+            parsedBody: {
+              channel,
+              ...(threadTs ? { threadTs } : {}),
+              text,
+              images: [],
+            },
+          }),
+        )
+      );
+    },
   );
 
   server.registerTool(
@@ -110,6 +146,12 @@ export function registerRoomoteCommunicationTools(
       },
     },
     async ({ slackTeamId, channel, messageId, name }) => {
+      const accessError = await authorizeSlackWorkspace(
+        actingUserId,
+        slackTeamId,
+      );
+      if (accessError) return accessError;
+
       const normalizedName = name.trim().replace(/^:+|:+$/g, '');
       if (!normalizedName || /\s/.test(normalizedName)) {
         return toolError({ error: 'Invalid reaction name.' });
