@@ -80,9 +80,12 @@ vi.mock('@roomote/db/server', () => ({
   getCustomAutomationFrequency: vi.fn(),
   listEnabledCustomAutomations: vi.fn(),
   recordCustomAutomationRunOutcome: vi.fn(),
-  slackInstallationChannels: { channelId: 'slack_channels.channel_id' },
+  slackInstallationChannels: {
+    channelId: 'slack_channels.channel_id',
+    slackInstallationId: 'slack_channels.installation_id',
+  },
   tryClaimCustomAutomationLaunch: vi.fn(),
-  slackInstallations: {},
+  slackInstallations: { teamId: 'slack.team_id', isActive: 'slack.is_active' },
 }));
 
 vi.mock('../destination', () => ({
@@ -309,6 +312,72 @@ describe('customAutomationsJob', () => {
       }),
     );
   });
+
+  it.each([true, false])(
+    'honors the persisted Slack owner when active=%s',
+    async (active) => {
+      vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+        {
+          ...automation,
+          executionMode: 'fast',
+          environmentId: null,
+          target: {
+            ...automation.target,
+            metadata: { slackTeamId: 'T-OWNER' },
+          },
+        } as never,
+      ]);
+      vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue(
+        active
+          ? ({
+              id: 'installation-owner',
+              botAccessToken: 'token-owner',
+              teamId: 'T-OWNER',
+            } as never)
+          : undefined,
+      );
+      vi.mocked(db.query.slackInstallationChannels.findFirst).mockResolvedValue(
+        {
+          id: 'channel',
+          slackInstallation: { isActive: true, teamId: 'T-OWNER' },
+        } as never,
+      );
+      await customAutomationsJob();
+      expect(db.query.slackInstallations.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: [
+            ['slack.team_id', 'T-OWNER'],
+            ['slack.is_active', true],
+          ],
+        }),
+      );
+      if (active) {
+        expect(
+          db.query.slackInstallationChannels.findFirst,
+        ).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: [
+              ['slack_channels.channel_id', 'C123'],
+              ['slack_channels.installation_id', 'installation-owner'],
+            ],
+          }),
+        );
+        expect(fastMocks.getSession).toHaveBeenCalledWith(
+          expect.objectContaining({
+            conversation: expect.objectContaining({
+              surface: 'slack',
+              workspaceId: 'T-OWNER',
+            }),
+          }),
+        );
+      } else {
+        expect(
+          db.query.slackInstallationChannels.findFirst,
+        ).not.toHaveBeenCalled();
+        expect(fastMocks.getSession).not.toHaveBeenCalled();
+      }
+    },
+  );
 
   it('posts a Fast Slack startup failure to the destination', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([

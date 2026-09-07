@@ -86,7 +86,9 @@ describe('resolveSetupAutomationReportTarget', () => {
   });
 
   it('does not select a destination just because providers are connected', async () => {
-    mocks.installations.mockResolvedValue([{ botAccessToken: 'token' }]);
+    mocks.installations.mockResolvedValue([
+      { botAccessToken: 'token', teamId: 'T123' },
+    ]);
     mocks.discord.mockResolvedValue({ channelId: 'arbitrary' });
     mocks.teams.mockResolvedValue({
       serviceUrl: 'https://example.test',
@@ -116,12 +118,15 @@ describe('resolveSetupAutomationReportTarget', () => {
       managerDiscordChannelId: '123',
       setupNewState: {},
     });
-    mocks.installations.mockResolvedValue([{ botAccessToken: 'owning-token' }]);
+    mocks.installations.mockResolvedValue([
+      { botAccessToken: 'owning-token', teamId: 'T123' },
+    ]);
     mocks.membership.mockResolvedValue(true);
     await expect(resolveSetupAutomationReportTarget()).resolves.toEqual({
       provider: 'slack',
       targetKind: 'slack_channel',
       externalRef: 'C123',
+      metadata: { slackTeamId: 'T123' },
     });
     expect(mocks.notifier).toHaveBeenCalledWith('owning-token');
     expect(mocks.membership).toHaveBeenCalledWith('C123');
@@ -137,7 +142,9 @@ describe('resolveSetupAutomationReportTarget', () => {
     'rejects inaccessible/unknown Slack membership (%s)',
     async (membership) => {
       mocks.settings.mockResolvedValue({ managerSlackChannelId: 'C123' });
-      mocks.installations.mockResolvedValue([{ botAccessToken: 'token' }]);
+      mocks.installations.mockResolvedValue([
+        { botAccessToken: 'token', teamId: 'T123' },
+      ]);
       mocks.membership.mockResolvedValue(membership);
       await expect(resolveSetupAutomationReportTarget()).resolves.toBeNull();
     },
@@ -160,12 +167,15 @@ describe('resolveSetupAutomationReportTarget', () => {
     mocks.settings.mockResolvedValue({
       setupNewState: { slackChannel: 'C123', slackTeamId: 'T123' },
     });
-    mocks.installations.mockResolvedValue([{ botAccessToken: 'token' }]);
+    mocks.installations.mockResolvedValue([
+      { botAccessToken: 'token', teamId: 'T123' },
+    ]);
     mocks.membership.mockResolvedValue(true);
     await expect(resolveSetupAutomationReportTarget()).resolves.toEqual({
       provider: 'slack',
       targetKind: 'slack_channel',
       externalRef: 'C123',
+      metadata: { slackTeamId: 'T123' },
     });
     expect(mocks.where).toHaveBeenCalledWith([
       ['active', true],

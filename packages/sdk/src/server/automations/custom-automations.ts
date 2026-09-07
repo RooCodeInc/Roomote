@@ -115,8 +115,27 @@ async function resolveDestination(
   }
 
   if (provider === 'slack') {
+    const teamId =
+      typeof target.metadata?.slackTeamId === 'string'
+        ? target.metadata.slackTeamId.trim()
+        : null;
+    const installation = teamId
+      ? await db.query.slackInstallations.findFirst({
+          where: and(
+            eq(slackInstallations.teamId, teamId),
+            eq(slackInstallations.isActive, true),
+          ),
+          columns: { id: true },
+        })
+      : null;
+    if (teamId && !installation) return null;
     const channel = await db.query.slackInstallationChannels.findFirst({
-      where: eq(slackInstallationChannels.channelId, target.externalRef),
+      where: and(
+        eq(slackInstallationChannels.channelId, target.externalRef),
+        ...(installation
+          ? [eq(slackInstallationChannels.slackInstallationId, installation.id)]
+          : []),
+      ),
       columns: { id: true },
       with: {
         slackInstallation: {
@@ -124,7 +143,8 @@ async function resolveDestination(
         },
       },
     });
-    return channel?.slackInstallation.isActive
+    return channel?.slackInstallation.isActive &&
+      (!teamId || channel.slackInstallation.teamId === teamId)
       ? {
           provider,
           channelId: target.externalRef,

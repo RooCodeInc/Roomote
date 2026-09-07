@@ -4,6 +4,24 @@ import {
 } from './automation-recommendations';
 
 describe('buildAutomationRecommendationFingerprint', () => {
+  it('invalidates a cached Slack target when its workspace binding changes', () => {
+    const target = {
+      provider: 'slack' as const,
+      targetKind: 'slack_channel' as const,
+      externalRef: 'C123',
+    };
+    expect(
+      buildAutomationRecommendationFingerprint(['repo'], 'github', {
+        ...target,
+        metadata: { slackTeamId: 'T1' },
+      }),
+    ).not.toBe(
+      buildAutomationRecommendationFingerprint(['repo'], 'github', {
+        ...target,
+        metadata: { slackTeamId: 'T2' },
+      }),
+    );
+  });
   it('invalidates cached recommendations when the configured destination changes', () => {
     const withoutDelivery = buildAutomationRecommendationFingerprint(
       ['repo'],

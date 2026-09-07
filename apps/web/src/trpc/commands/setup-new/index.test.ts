@@ -1188,6 +1188,7 @@ describe('setup recommendation commands', () => {
     provider: 'slack',
     targetKind: 'slack_channel',
     externalRef: 'C-reports',
+    metadata: { slackTeamId: 'T123' },
   } satisfies AutomationTarget;
 
   function recommendationBatch(

@@ -253,16 +253,15 @@ export async function resolveAutomationRuntimeDestination(params: {
 
 /**
  * Communication payload fields to stamp onto an automation-launched scan
- * task so the surface-generic worker tools (send_chat_reply,
- * post_to_channel) target the destination conversation. Slack destinations
- * stay unstamped because their scan tasks use the same generic tool with
- * Slack channel normalization and membership checks.
+ * task so the surface-generic worker tools target the destination conversation.
+ * Slack keeps its channel normalization and membership checks, but must carry
+ * the owning workspace so downstream token selection cannot choose another bot.
  */
 export function buildDestinationTaskPayloadFields(
   destination: ResolvedAutomationDestination,
 ): Record<string, string> {
   if (destination.provider === 'slack') {
-    return {};
+    return destination.teamId ? { teamId: destination.teamId } : {};
   }
 
   return {

@@ -87,7 +87,10 @@ export async function resolveSetupAutomationReportTarget(
           // Setup historically opened a user DM. Do not turn it into a channel target.
           if (!/^[CG][A-Z0-9]+$/.test(channelId)) break;
           const installations = await client
-            .select({ botAccessToken: slackInstallations.botAccessToken })
+            .select({
+              botAccessToken: slackInstallations.botAccessToken,
+              teamId: slackInstallations.teamId,
+            })
             .from(slackInstallations)
             .innerJoin(
               slackInstallationChannels,
@@ -113,11 +116,15 @@ export async function resolveSetupAutomationReportTarget(
             installations.length === 1 ? installations[0] : null;
           if (
             installation?.botAccessToken &&
+            installation.teamId &&
             (await new SlackNotifier(
               installation.botAccessToken,
             ).isAppInChannel(channelId)) === true
           )
-            return target;
+            return {
+              ...target,
+              metadata: { slackTeamId: installation.teamId },
+            };
           break;
         }
         case 'discord':

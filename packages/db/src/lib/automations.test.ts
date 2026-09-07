@@ -42,6 +42,36 @@ describe('normalizeReviewCodeAutomationSettings', () => {
 });
 
 describe('resolveAutomationDestination', () => {
+  it('retains the workspace bound to the selected Slack channel', () => {
+    expect(
+      resolveAutomationDestination(
+        {
+          targets: [
+            {
+              provider: 'slack',
+              targetKind: 'slack_user',
+              externalRef: 'user',
+              metadata: { slackTeamId: 'T-WRONG' },
+            },
+            {
+              provider: 'slack',
+              targetKind: 'slack_channel',
+              externalRef: 'C123',
+              metadata: { slackTeamId: 'T-OWNER' },
+            },
+          ],
+        },
+        'C-MANAGER',
+        null,
+      ),
+    ).toEqual({
+      provider: 'slack',
+      channelId: 'C123',
+      teamId: 'T-OWNER',
+      source: 'automation_target',
+    });
+  });
+
   it('prefers an automation target over either manager channel', () => {
     const destination = resolveAutomationDestination(
       {

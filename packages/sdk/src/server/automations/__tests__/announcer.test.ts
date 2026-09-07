@@ -97,9 +97,12 @@ vi.mock('../destination', () => ({
     provider: string;
     channelId: string;
     serviceUrl?: string;
+    teamId?: string;
   }) =>
     destination.provider === 'slack'
-      ? {}
+      ? destination.teamId
+        ? { teamId: destination.teamId }
+        : {}
       : {
           communicationProvider: destination.provider,
           communicationChannelId: destination.channelId,
@@ -145,6 +148,7 @@ vi.mock('../custom-automation-schedule', () => ({
 }));
 
 import { announcerJob } from '../announcer';
+import { isRunDue } from '../scheduling-utils';
 
 const MERGED_PR_ROWS = [
   {
@@ -233,6 +237,96 @@ describe('announcerJob non-Slack posting', () => {
       expect.objectContaining({ key: 'announcer', status: 'succeeded' }),
     );
   });
+
+  it.each([false, true])(
+    'runs only the bound Slack owner (manual=%s)',
+    async (manualTrigger) => {
+      const destination = {
+        provider: 'slack' as const,
+        channelId: 'C123MANAGER',
+        teamId: 'T-2',
+        source: 'automation_target' as const,
+      };
+      mockSlackInstallationRows.mockResolvedValue([
+        { slackBotToken: 'xoxb-wrong', slackTeamId: 'T-1' },
+        { slackBotToken: 'xoxb-owner', slackTeamId: 'T-2' },
+      ]);
+      mockResolveAutomationRuntimeDestination.mockResolvedValue(destination);
+
+      const result = await announcerJob(
+        manualTrigger ? { manualTrigger, destination } : {},
+      );
+
+      expect(result.completed).toBe(true);
+      expect(result.errors).toEqual([]);
+      expect(isRunDue).toHaveBeenCalledTimes(manualTrigger ? 0 : 1);
+      expect(mockMergedPullRequestRows).toHaveBeenCalledTimes(1);
+      expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+      expect(mockEnqueueTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task: expect.objectContaining({
+            payload: expect.objectContaining({ teamId: 'T-2' }),
+          }),
+          trigger: manualTrigger ? 'manual' : 'schedule',
+        }),
+      );
+      expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
+      expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ key: 'announcer', status: 'succeeded' }),
+      );
+      if (manualTrigger)
+        expect(mockResolveAutomationRuntimeDestination).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([false, true])(
+    'skips a missing bound Slack owner before work (manual=%s)',
+    async (manualTrigger) => {
+      const destination = {
+        provider: 'slack' as const,
+        channelId: 'C123MANAGER',
+        teamId: 'T-2',
+        source: 'automation_target' as const,
+      };
+      mockSlackInstallationRows.mockResolvedValue([
+        { slackBotToken: 'xoxb-wrong', slackTeamId: 'T-1' },
+      ]);
+      mockResolveAutomationRuntimeDestination.mockResolvedValue(destination);
+
+      const result = await announcerJob(
+        manualTrigger ? { manualTrigger, destination } : {},
+      );
+
+      expect(result.completed).toBe(false);
+      expect(result.errors).toEqual([]);
+      expect(isRunDue).not.toHaveBeenCalled();
+      expect(mockMergedPullRequestRows).not.toHaveBeenCalled();
+      expect(mockLoadAutomationThreadFeedbackContext).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+      expect(mockRecordAutomationRunOutcome).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['slack', 'telegram'] as const)(
+    'preserves multi-install behavior for unbound %s destinations',
+    async (provider) => {
+      mockSlackInstallationRows.mockResolvedValue([
+        { slackBotToken: 'xoxb-first', slackTeamId: 'T-1' },
+        { slackBotToken: 'xoxb-second', slackTeamId: 'T-2' },
+      ]);
+      mockResolveAutomationRuntimeDestination.mockResolvedValue({
+        provider,
+        channelId: 'channel-1',
+      });
+
+      await announcerJob();
+
+      expect(isRunDue).toHaveBeenCalledTimes(2);
+      expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
+      expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it('stamps the Teams destination onto the task', async () => {
     mockListConnectedCommunicationProviders.mockResolvedValue(['teams']);

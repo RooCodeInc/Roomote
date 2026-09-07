@@ -179,6 +179,9 @@ export function buildAutomationRecommendationFingerprint(
           ? {
               provider: reportTarget.provider,
               externalRef: reportTarget.externalRef,
+              ...(reportTarget.provider === 'slack'
+                ? { slackTeamId: reportTarget.metadata?.slackTeamId }
+                : {}),
             }
           : null,
         catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,

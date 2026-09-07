@@ -106,6 +106,20 @@ describe('listConnectedCommunicationProviders', () => {
 });
 
 describe('resolveAutomationRuntimeDestination', () => {
+  it('preserves the persisted Slack owner for report execution', async () => {
+    const destination = {
+      provider: 'slack' as const,
+      channelId: 'C123',
+      teamId: 'T-OWNER',
+      source: 'automation_target' as const,
+    };
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: { destination },
+        slackConnected: true,
+      }),
+    ).resolves.toEqual(destination);
+  });
   it('resolves an explicit cross-provider user target before manager fallback', async () => {
     mockFindUserDirectMessageDestination.mockResolvedValue({
       channelId: 'discord-dm-1',
@@ -330,6 +344,16 @@ describe('resolveAutomationRuntimeDestination', () => {
 });
 
 describe('payload fields and prompt context', () => {
+  it('carries the Slack owner into automation task token selection', () => {
+    expect(
+      buildDestinationTaskPayloadFields({
+        provider: 'slack',
+        channelId: 'C123',
+        teamId: 'T-OWNER',
+        source: 'automation_target',
+      }),
+    ).toEqual({ teamId: 'T-OWNER' });
+  });
   it('stamps nothing for slack destinations', () => {
     expect(
       buildDestinationTaskPayloadFields({

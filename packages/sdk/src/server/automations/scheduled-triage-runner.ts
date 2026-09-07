@@ -142,6 +142,15 @@ export function createScheduledTriageJob(
           continue;
         }
 
+        if (
+          destination.provider === 'slack' &&
+          destination.teamId &&
+          destination.teamId !== deployment.slackTeamId
+        ) {
+          skipped++;
+          continue;
+        }
+
         const channelId = destination.channelId;
         const timezone = (await resolveDeploymentTimeZone()).timeZone;
 

@@ -341,6 +341,8 @@ export function resolveAutomationSlackChannelId(
 export type AutomationDestination = {
   provider: 'slack' | 'teams' | 'telegram' | 'discord';
   channelId: string;
+  /** Slack workspace owning an explicitly bound channel target. */
+  teamId?: string;
   /** Which waterfall level produced this destination. */
   source: 'automation_target' | 'manager_channel';
 };
@@ -392,7 +394,22 @@ export function resolveAutomationDestination(
     )[0];
 
     if (channelId) {
-      return { provider, channelId, source: 'automation_target' };
+      const target = automation?.targets.find(
+        (item) =>
+          item.provider === provider &&
+          item.targetKind === targetKind &&
+          item.externalRef === channelId,
+      );
+      const teamId =
+        provider === 'slack'
+          ? asString(asObject(target?.metadata).slackTeamId)?.trim()
+          : undefined;
+      return {
+        provider,
+        channelId,
+        source: 'automation_target',
+        ...(teamId ? { teamId } : {}),
+      };
     }
   }
 
