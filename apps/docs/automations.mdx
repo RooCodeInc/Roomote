@@ -110,6 +110,25 @@ Other announcements link to the provider's compare view.
 
 ## Custom automations
 
+During setup, Roomote recommends automations based on connected repositories and
+their activity. Without a usable report destination, recommendations focus on
+source-control outcomes such as PR reviews and conflict resolution. Setup does
+not require a chat connection.
+
+When an already-configured manager channel or supported setup conversation can
+receive reports, recommendations can also include **Summarize Merged PRs**,
+**Weekly Manager Stats**, and the existing repository maintenance review. Roomote
+validates that destination again when enabling recommendations and saves it on
+the enabled automations. Connecting a chat provider alone is not enough. If the
+destination is no longer usable, those recommendations are omitted while
+repository-only setup can continue.
+
+These recommendations retain the existing automations' repository scope. Merged
+PR summaries cover merged PRs tracked by Roomote, not an exhaustive history of
+every connected repository. Repository maintenance reviews use **All repositories**.
+Telegram setup conversations are not used for automatic report recommendations;
+their current configuration does not establish a verified bot-bound report route.
+
 Create arbitrary scheduled agent runs with:
 
 - a clear **name**

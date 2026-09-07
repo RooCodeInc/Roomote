@@ -35,6 +35,7 @@ export {
   type AutomationRecommendationInitialRunJob,
   type AutomationSignalPrefetchJob,
 } from './lib/automation-recommendations';
+export { resolveSetupAutomationReportTarget } from './lib/setup-automation-delivery';
 export {
   recordLlmUsage,
   type RecordLlmUsageInput,

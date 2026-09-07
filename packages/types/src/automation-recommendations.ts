@@ -1,4 +1,5 @@
 import type { CustomAutomationScheduleMode } from './background-agents';
+import type { CommunicationProvider } from './communication';
 import type { TriggerableBackgroundAutomationKey } from './background-automation-registry';
 import { getTriggerableBackgroundAutomationDescriptorByKey } from './background-automation-registry';
 import {
@@ -6,7 +7,7 @@ import {
   type SourceControlProvider,
 } from './source-control';
 
-export const AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION = 1;
+export const AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION = 2;
 
 export type RecommendationCategory =
   | 'quality'
@@ -32,7 +33,10 @@ export type RecommendationScoringRule = {
   explanation: (value: number, repositoryCount: number) => string;
 };
 
-export type AutomationRecommendationCandidate =
+export type AutomationRecommendationCandidate = {
+  outcome: 'source_control' | 'report';
+  requiresReportDestination: boolean;
+} & (
   | {
       id: string;
       source: 'built_in';
@@ -54,13 +58,14 @@ export type AutomationRecommendationCandidate =
         prompt: string;
         scheduleMode: CustomAutomationScheduleMode;
         workspace: 'all_repositories';
-        destination: 'none';
+        destination: 'configured';
       };
       environmentPolicy: 'not_required' | 'optional';
       category: RecommendationCategory;
       alwaysRecommend?: boolean;
       scoringRules: RecommendationScoringRule[];
-    };
+    }
+);
 
 export type RepositoryAutomationSignals = {
   repositoryId: string;
@@ -155,6 +160,8 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
   [
     {
       id: 'built-in.review-code',
+      outcome: 'source_control',
+      requiresReportDestination: false,
       source: 'built_in',
       automationKey: 'review_code',
       title: 'Review Code',
@@ -166,6 +173,8 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
     },
     {
       id: 'built-in.code-quality-auditor',
+      outcome: 'source_control',
+      requiresReportDestination: true,
       source: 'built_in',
       automationKey: 'code_quality_auditor',
       title: 'Code Quality Auditor',
@@ -176,6 +185,8 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
     },
     {
       id: 'built-in.security-auditor',
+      outcome: 'source_control',
+      requiresReportDestination: true,
       source: 'built_in',
       automationKey: 'security_auditor',
       title: 'Security Auditor',
@@ -186,6 +197,8 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
     },
     {
       id: 'built-in.resolve-pr-conflicts',
+      outcome: 'source_control',
+      requiresReportDestination: false,
       source: 'built_in',
       automationKey: 'conflict_resolver',
       title: 'Resolve PR Conflicts',
@@ -205,6 +218,8 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
     },
     {
       id: 'built-in.dependabot-triage',
+      outcome: 'source_control',
+      requiresReportDestination: true,
       source: 'built_in',
       automationKey: 'dependabot_triage',
       title: 'Triage Dependabot Alerts',
@@ -228,6 +243,8 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
     },
     {
       id: 'built-in.codeql-triage',
+      outcome: 'source_control',
+      requiresReportDestination: true,
       source: 'built_in',
       automationKey: 'codeql_triage',
       title: 'Triage CodeQL Alerts',
@@ -245,6 +262,8 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
     },
     {
       id: 'built-in.ci-failure-triage',
+      outcome: 'source_control',
+      requiresReportDestination: true,
       source: 'built_in',
       automationKey: 'ci_failure_triage',
       title: 'CI Failure Triage',
@@ -262,7 +281,33 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
       ],
     },
     {
+      id: 'built-in.summarize-merged-prs',
+      outcome: 'report',
+      requiresReportDestination: true,
+      source: 'built_in',
+      automationKey: 'announcer',
+      title: 'Summarize Merged PRs',
+      defaultScheduleMode: 'weekly',
+      environmentPolicy: 'not_required',
+      category: 'communication',
+      scoringRules: [mergedPrRule(6)],
+    },
+    {
+      id: 'built-in.weekly-manager-stats',
+      outcome: 'report',
+      requiresReportDestination: true,
+      source: 'built_in',
+      automationKey: 'manager_stats',
+      title: 'Weekly Manager Stats',
+      defaultScheduleMode: 'weekly',
+      environmentPolicy: 'not_required',
+      category: 'communication',
+      scoringRules: [activePrRule(4)],
+    },
+    {
       id: 'cookbook.scheduled-housekeeping',
+      outcome: 'report',
+      requiresReportDestination: true,
       source: 'cookbook',
       cookbookSlug: 'scheduled-housekeeping',
       title: 'Schedule maintenance',
@@ -272,7 +317,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
           'Review these repositories for dependency drift, stale feature flags, and flaky-test maintenance opportunities. Report only concrete, actionable findings with file paths and concise next steps.',
         scheduleMode: 'weekly',
         workspace: 'all_repositories',
-        destination: 'none',
+        destination: 'configured',
       },
       environmentPolicy: 'not_required',
       category: 'maintenance',
@@ -286,12 +331,30 @@ export type ScoredAutomationRecommendation = {
   explanation: string;
 };
 
+export function isAutomationRecommendationDeliveryEligible(
+  candidate: AutomationRecommendationCandidate,
+  reportProvider: CommunicationProvider | null | undefined,
+): boolean {
+  if (!candidate.requiresReportDestination) return true;
+  if (!reportProvider) return false;
+  return (
+    candidate.source === 'cookbook' ||
+    (getTriggerableBackgroundAutomationDescriptorByKey(
+      candidate.automationKey,
+    )?.supportedCommunicationProviders.some(
+      (provider) => provider === reportProvider,
+    ) ??
+      false)
+  );
+}
+
 export function scoreAutomationRecommendations(
   signals: MergedAutomationRecommendationSignals,
   options: {
     enabledCandidateIds?: ReadonlySet<string>;
     catalog?: readonly AutomationRecommendationCandidate[];
     minScore?: number;
+    reportProvider?: CommunicationProvider | null;
   } = {},
 ): ScoredAutomationRecommendation[] {
   const catalog = options.catalog ?? AUTOMATION_RECOMMENDATION_CATALOG;
@@ -302,6 +365,12 @@ export function scoreAutomationRecommendations(
   const allowFallbackCandidates = signals.partial !== false;
   const scored = catalog
     .filter((candidate) => !enabled.has(candidate.id))
+    .filter((candidate) =>
+      isAutomationRecommendationDeliveryEligible(
+        candidate,
+        options.reportProvider,
+      ),
+    )
     .filter((candidate) => {
       if (candidate.source !== 'built_in') return true;
       const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(

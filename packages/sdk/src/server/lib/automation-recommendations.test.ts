@@ -1,4 +1,48 @@
-import { canRecoverAutomationRecommendationInitialRunClaim } from './automation-recommendations';
+import {
+  buildAutomationRecommendationFingerprint,
+  canRecoverAutomationRecommendationInitialRunClaim,
+} from './automation-recommendations';
+
+describe('buildAutomationRecommendationFingerprint', () => {
+  it('invalidates cached recommendations when the configured destination changes', () => {
+    const withoutDelivery = buildAutomationRecommendationFingerprint(
+      ['repo'],
+      'github',
+    );
+    const target = {
+      provider: 'slack' as const,
+      targetKind: 'slack_channel' as const,
+      externalRef: 'C123',
+    };
+    expect(
+      buildAutomationRecommendationFingerprint(['repo'], 'github', target),
+    ).not.toBe(withoutDelivery);
+    expect(
+      buildAutomationRecommendationFingerprint(['repo'], 'github', {
+        ...target,
+        externalRef: 'C456',
+      }),
+    ).not.toBe(
+      buildAutomationRecommendationFingerprint(['repo'], 'github', target),
+    );
+  });
+
+  it('does not invalidate the batch for refreshed routing metadata', () => {
+    const target = {
+      provider: 'teams' as const,
+      targetKind: 'teams_channel' as const,
+      externalRef: 'conversation',
+    };
+    expect(
+      buildAutomationRecommendationFingerprint(['repo'], 'github', target),
+    ).toBe(
+      buildAutomationRecommendationFingerprint(['repo'], 'github', {
+        ...target,
+        metadata: { serviceUrl: 'https://route.test' },
+      }),
+    );
+  });
+});
 
 describe('canRecoverAutomationRecommendationInitialRunClaim', () => {
   const now = Date.parse('2026-08-14T18:00:00.000Z');

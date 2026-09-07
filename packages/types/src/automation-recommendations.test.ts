@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 
 import {
   AUTOMATION_RECOMMENDATION_CATALOG,
+  isAutomationRecommendationDeliveryEligible,
   scoreAutomationRecommendations,
   type MergedAutomationRecommendationSignals,
 } from './automation-recommendations';
@@ -23,8 +24,12 @@ const signals: MergedAutomationRecommendationSignals = {
 
 describe('scoreAutomationRecommendations', () => {
   it('is deterministic and pins Review Code first', () => {
-    const first = scoreAutomationRecommendations(signals);
-    const second = scoreAutomationRecommendations(signals);
+    const first = scoreAutomationRecommendations(signals, {
+      reportProvider: 'slack',
+    });
+    const second = scoreAutomationRecommendations(signals, {
+      reportProvider: 'slack',
+    });
 
     expect(first).toEqual(second);
     expect(first.length).toBeGreaterThanOrEqual(3);
@@ -36,6 +41,7 @@ describe('scoreAutomationRecommendations', () => {
   it('removes enabled candidates and caps categories', () => {
     const result = scoreAutomationRecommendations(signals, {
       enabledCandidateIds: new Set(['built-in.resolve-pr-conflicts']),
+      reportProvider: 'slack',
     });
 
     expect(
@@ -56,16 +62,19 @@ describe('scoreAutomationRecommendations', () => {
   });
 
   it('supports sparse data with candidate-specific fallback copy', () => {
-    const result = scoreAutomationRecommendations({
-      ...signals,
-      mergedPrs30d: 0,
-      openPrs: 0,
-      conflicts: 0,
-      ciFailures30d: 0,
-      dependabotAlerts: 0,
-      dependencyManifests: 0,
-      docs: 0,
-    });
+    const result = scoreAutomationRecommendations(
+      {
+        ...signals,
+        mergedPrs30d: 0,
+        openPrs: 0,
+        conflicts: 0,
+        ciFailures30d: 0,
+        dependabotAlerts: 0,
+        dependencyManifests: 0,
+        docs: 0,
+      },
+      { reportProvider: 'slack' },
+    );
 
     expect(result.length).toBeGreaterThanOrEqual(3);
     expect(result.length).toBeLessThanOrEqual(6);
@@ -92,18 +101,21 @@ describe('scoreAutomationRecommendations', () => {
   });
 
   it('always includes the baseline workflows after complete collection', () => {
-    const result = scoreAutomationRecommendations({
-      ...signals,
-      partial: false,
-      mergedPrs30d: 0,
-      openPrs: 0,
-      conflicts: 0,
-      ciFailures30d: 0,
-      dependabotAlerts: 0,
-      codeqlAlerts: 0,
-      dependencyManifests: 0,
-      docs: 0,
-    });
+    const result = scoreAutomationRecommendations(
+      {
+        ...signals,
+        partial: false,
+        mergedPrs30d: 0,
+        openPrs: 0,
+        conflicts: 0,
+        ciFailures30d: 0,
+        dependabotAlerts: 0,
+        codeqlAlerts: 0,
+        dependencyManifests: 0,
+        docs: 0,
+      },
+      { reportProvider: 'slack' },
+    );
 
     expect(result.map(({ candidate }) => candidate.id)).toEqual(
       expect.arrayContaining([
@@ -115,16 +127,19 @@ describe('scoreAutomationRecommendations', () => {
   });
 
   it('keeps baseline workflows in the result when other signals rank higher', () => {
-    const result = scoreAutomationRecommendations({
-      ...signals,
-      mergedPrs30d: 20,
-      openPrs: 20,
-      conflicts: 20,
-      ciFailures30d: 20,
-      dependabotAlerts: 20,
-      codeqlAlerts: 20,
-      dependencyManifests: 20,
-    });
+    const result = scoreAutomationRecommendations(
+      {
+        ...signals,
+        mergedPrs30d: 20,
+        openPrs: 20,
+        conflicts: 20,
+        ciFailures30d: 20,
+        dependabotAlerts: 20,
+        codeqlAlerts: 20,
+        dependencyManifests: 20,
+      },
+      { reportProvider: 'slack' },
+    );
 
     expect(result.map(({ candidate }) => candidate.id)).toEqual(
       expect.arrayContaining([
@@ -136,7 +151,85 @@ describe('scoreAutomationRecommendations', () => {
   });
 });
 
+describe('recommendation delivery', () => {
+  it('recommends only native review and conflict resolution without communications', () => {
+    for (const options of [{}, { reportProvider: null }]) {
+      expect(
+        scoreAutomationRecommendations(signals, options).map(
+          ({ candidate }) => candidate.id,
+        ),
+      ).toEqual(['built-in.review-code', 'built-in.resolve-pr-conflicts']);
+    }
+  });
+
+  it.each(['gitlab', 'gitea', 'ado', 'bitbucket'] as const)(
+    'does not recommend GitHub-only alerts for %s',
+    (provider) => {
+      const catalog = AUTOMATION_RECOMMENDATION_CATALOG.filter(({ id }) =>
+        ['built-in.dependabot-triage', 'built-in.codeql-triage'].includes(id),
+      );
+      expect(
+        scoreAutomationRecommendations(
+          { ...signals, sourceControlProviders: [provider] },
+          { catalog, reportProvider: 'slack' },
+        ),
+      ).toEqual([]);
+      expect(
+        scoreAutomationRecommendations(signals, {
+          catalog,
+          reportProvider: 'slack',
+        }),
+      ).toHaveLength(2);
+    },
+  );
+
+  it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
+    'makes reports eligible with a configured %s destination',
+    (provider) => {
+      const catalog = AUTOMATION_RECOMMENDATION_CATALOG.filter(
+        ({ outcome }) => outcome === 'report',
+      );
+      expect(catalog.map(({ id }) => id)).toEqual([
+        'built-in.summarize-merged-prs',
+        'built-in.weekly-manager-stats',
+        'cookbook.scheduled-housekeeping',
+      ]);
+      for (const candidate of catalog) {
+        expect(candidate.requiresReportDestination).toBe(true);
+        expect(
+          isAutomationRecommendationDeliveryEligible(candidate, null),
+        ).toBe(false);
+        expect(
+          isAutomationRecommendationDeliveryEligible(candidate, provider),
+        ).toBe(true);
+      }
+      expect(
+        scoreAutomationRecommendations(signals, {
+          catalog,
+          reportProvider: provider,
+        }),
+      ).toHaveLength(3);
+    },
+  );
+});
+
 describe('catalog', () => {
+  it.each([
+    ['built-in.summarize-merged-prs', 'announcer'],
+    ['built-in.weekly-manager-stats', 'manager_stats'],
+  ])('maps %s to its weekly built-in', (id, automationKey) => {
+    expect(
+      AUTOMATION_RECOMMENDATION_CATALOG.find(
+        (candidate) => candidate.id === id,
+      ),
+    ).toMatchObject({
+      source: 'built_in',
+      automationKey,
+      defaultScheduleMode: 'weekly',
+      outcome: 'report',
+      requiresReportDestination: true,
+    });
+  });
   it('maps every curated slug to an existing recipe and matching frontmatter', () => {
     for (const candidate of AUTOMATION_RECOMMENDATION_CATALOG) {
       if (candidate.source !== 'cookbook') continue;

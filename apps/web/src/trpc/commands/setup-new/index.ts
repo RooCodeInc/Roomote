@@ -44,6 +44,7 @@ import {
   buildAutomationRecommendationFingerprint,
   enqueueAutomationRecommendationInitialRun,
   enqueueAutomationRecommendations,
+  resolveSetupAutomationReportTarget,
 } from '@roomote/sdk/server';
 import {
   buildRecommendedDeploymentModelConfig,
@@ -105,6 +106,8 @@ import {
   type TaskModelSettings,
   AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
   AUTOMATION_RECOMMENDATION_CATALOG,
+  isAutomationRecommendationDeliveryEligible,
+  communicationAutomationTargetKinds,
   ALL_REPOSITORIES,
 } from '@roomote/types';
 
@@ -2549,12 +2552,26 @@ export async function setSetupRecommendationEnabledCommand(
     );
     if (!candidate) throw new Error('Recommendation candidate was not found.');
 
+    const reportTarget = await resolveSetupAutomationReportTarget(tx);
+    if (
+      input.enabled &&
+      !isAutomationRecommendationDeliveryEligible(
+        candidate,
+        reportTarget?.provider,
+      )
+    ) {
+      throw new Error(
+        'This recommendation no longer has a usable report destination.',
+      );
+    }
+
     const automationId = await applySetupRecommendationInTx(
       tx,
       auth,
       recommendation,
       input.enabled,
       candidate,
+      reportTarget,
     );
 
     const nextBatch = {
@@ -2596,6 +2613,7 @@ async function applySetupRecommendationInTx(
   recommendation: AutomationRecommendationBatch['recommendations'][number],
   enabled: boolean,
   candidate: (typeof AUTOMATION_RECOMMENDATION_CATALOG)[number],
+  reportTarget: Awaited<ReturnType<typeof resolveSetupAutomationReportTarget>>,
 ): Promise<string | null> {
   if (candidate.source === 'built_in') {
     await upsertAutomation(tx, {
@@ -2604,6 +2622,14 @@ async function applySetupRecommendationInTx(
       schedule: {
         mode: enabled ? candidate.defaultScheduleMode : 'off',
       },
+      ...(enabled && candidate.requiresReportDestination && reportTarget
+        ? {
+            targets: [reportTarget],
+            managedTargetKinds: Object.values(
+              communicationAutomationTargetKinds,
+            ).flatMap((kinds) => [kinds.channel, kinds.direct_message]),
+          }
+        : {}),
     });
     return null;
   }
@@ -2620,7 +2646,7 @@ async function applySetupRecommendationInTx(
           enabled,
           scheduleMode: candidate.template.scheduleMode,
           environmentId: ALL_REPOSITORIES,
-          target: {},
+          target: reportTarget ?? existing.target,
         },
         tx,
       )
@@ -2631,7 +2657,7 @@ async function applySetupRecommendationInTx(
           enabled,
           scheduleMode: candidate.template.scheduleMode,
           environmentId: ALL_REPOSITORIES,
-          target: {},
+          target: reportTarget ?? {},
           createdByUserId: auth.userId,
         },
         tx,
@@ -2649,6 +2675,7 @@ export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
     const batch = state.automationRecommendations;
     if (!batch || batch.status !== 'ready') return batch;
 
+    const reportTarget = await resolveSetupAutomationReportTarget(tx);
     const recommendations = [];
     for (const recommendation of batch.recommendations) {
       const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
@@ -2657,12 +2684,21 @@ export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
       if (!candidate) {
         throw new Error('Recommendation candidate was not found.');
       }
+      // A removed destination must not block the remaining repo-only setup.
+      if (
+        !isAutomationRecommendationDeliveryEligible(
+          candidate,
+          reportTarget?.provider,
+        )
+      )
+        continue;
       const automationId = await applySetupRecommendationInTx(
         tx,
         auth,
         recommendation,
         recommendation.enabled,
         candidate,
+        reportTarget,
       );
       recommendations.push({
         ...recommendation,
@@ -2762,7 +2798,24 @@ export async function skipSetupRecommendationsCommand(auth: UserAuthSuccess) {
 export async function listSetupRecommendationsCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
   const state = await getPersistedSetupNewState();
-  return state.automationRecommendations;
+  const batch = state.automationRecommendations;
+  if (!batch) return batch;
+  const reportTarget = await resolveSetupAutomationReportTarget();
+  return {
+    ...batch,
+    recommendations: batch.recommendations.filter((recommendation) => {
+      const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
+        (item) => item.id === recommendation.candidateId,
+      );
+      return (
+        candidate &&
+        isAutomationRecommendationDeliveryEligible(
+          candidate,
+          reportTarget?.provider,
+        )
+      );
+    }),
+  };
 }
 
 export async function startSetupRecommendationsCommand(auth: UserAuthSuccess) {
@@ -2776,9 +2829,11 @@ export async function startSetupRecommendationsCommand(auth: UserAuthSuccess) {
       sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
     );
     const state = await getPersistedSetupNewState(tx);
+    const reportTarget = await resolveSetupAutomationReportTarget(tx);
     const fingerprint = buildAutomationRecommendationFingerprint(
       recommendationRepositoryIds,
       connectedRepositories[0]?.sourceControlProvider ?? null,
+      reportTarget,
     );
     const existingBatch = state.automationRecommendations;
     if (

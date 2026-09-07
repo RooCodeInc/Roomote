@@ -23,6 +23,10 @@ const {
   mockEnqueueAutomationRecommendations,
   mockEnqueueAutomationRecommendationInitialRun,
   mockUpsertAutomation,
+  mockResolveSetupAutomationReportTarget,
+  mockCreateCustomAutomation,
+  mockUpdateCustomAutomation,
+  mockGetCustomAutomationById,
   mockCaptureActivationAutomationChanged,
   mockTriggerAutomationCommand,
   mockTriggerCustomAutomationCommand,
@@ -56,6 +60,10 @@ const {
   mockEnqueueAutomationRecommendations: vi.fn(async () => undefined),
   mockEnqueueAutomationRecommendationInitialRun: vi.fn(async () => undefined),
   mockUpsertAutomation: vi.fn(async () => undefined),
+  mockResolveSetupAutomationReportTarget: vi.fn(),
+  mockCreateCustomAutomation: vi.fn(),
+  mockUpdateCustomAutomation: vi.fn(),
+  mockGetCustomAutomationById: vi.fn(),
   mockCaptureActivationAutomationChanged: vi.fn(async () => undefined),
   mockTriggerAutomationCommand: vi.fn(async () => ({
     outcome: 'launched' as const,
@@ -142,6 +150,7 @@ vi.mock('../automations/custom-automations', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   AUTOMATION_RECOMMENDATION_REPOSITORY_CAP: 10,
+  resolveSetupAutomationReportTarget: mockResolveSetupAutomationReportTarget,
   buildAutomationRecommendationFingerprint: vi.fn(
     (repositoryIds: string[], provider: string | null) =>
       `${provider ?? 'none'}:${repositoryIds.join(',')}`,
@@ -188,6 +197,9 @@ vi.mock('@roomote/db/server', () => ({
     updatedAtRemote: 'pull_request_facts.updated_at_remote',
   },
   upsertAutomation: mockUpsertAutomation,
+  createCustomAutomation: mockCreateCustomAutomation,
+  updateCustomAutomation: mockUpdateCustomAutomation,
+  getCustomAutomationById: mockGetCustomAutomationById,
   isChatGptSubscriptionConnected: vi.fn(async () => false),
   isGitHubCopilotSubscriptionConnected: vi.fn(async () => false),
   isXaiSubscriptionConnected: vi.fn(async () => false),
@@ -274,6 +286,8 @@ import {
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
   startSetupRecommendationsCommand,
+  listSetupRecommendationsCommand,
+  setSetupRecommendationEnabledCommand,
   applySetupRecommendationsCommand,
   skipSetupRecommendationsCommand,
   trackSetupBootstrapWelcomeSeenCommand,
@@ -288,7 +302,12 @@ import {
   TASK_MODEL_ROLES,
   WORKER_RUNTIME_SCHEMA_VERSION,
   type SetupNewState,
+  type AutomationRecommendationBatch,
+  type AutomationTarget,
+  communicationAutomationTargetKinds,
+  ALL_REPOSITORIES,
 } from '@roomote/types';
+import { buildAutomationRecommendationFingerprint } from '@roomote/sdk/server';
 import { invalidateTeamsBotRuntimeCredentialsCache } from '@roomote/db/server';
 import { TeamsBotCredentialValidationError } from '@roomote/communication/teams-credential-validation';
 import { getRepositories } from '@/lib/server';
@@ -1165,6 +1184,40 @@ describe('setup-new compute config commands', () => {
 });
 
 describe('setup recommendation commands', () => {
+  const reportTarget = {
+    provider: 'slack',
+    targetKind: 'slack_channel',
+    externalRef: 'C-reports',
+  } satisfies AutomationTarget;
+
+  function recommendationBatch(
+    candidateIds: string[],
+  ): AutomationRecommendationBatch {
+    return {
+      version: 1,
+      catalogVersion: 1,
+      inputFingerprint: 'recommendation-fingerprint',
+      status: 'ready',
+      startedAt: '2026-09-01T00:00:00Z',
+      completedAt: '2026-09-01T00:00:01Z',
+      partial: false,
+      errorCode: null,
+      dismissed: false,
+      applicationState: 'pending',
+      recommendations: candidateIds.map((candidateId, rank) => ({
+        id: `${candidateId}:${rank}`,
+        candidateId,
+        rank: rank + 1,
+        score: 1,
+        explanation: 'Recommended workflow.',
+        enabled: true,
+        applied: false,
+        lastRunTaskId: null,
+        automationId: null,
+      })),
+    };
+  }
+
   const insertOnConflictMock = vi.fn(async () => undefined);
   const insertValuesMock = vi.fn(() => ({
     onConflictDoUpdate: insertOnConflictMock,
@@ -1202,6 +1255,14 @@ describe('setup recommendation commands', () => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
     mockTxSelect.mockReturnValue(createGroupBySelectChain([]));
+    mockResolveSetupAutomationReportTarget.mockReset().mockResolvedValue(null);
+    mockCreateCustomAutomation
+      .mockReset()
+      .mockResolvedValue({ id: 'custom-1' });
+    mockUpdateCustomAutomation
+      .mockReset()
+      .mockResolvedValue({ id: 'custom-1' });
+    mockGetCustomAutomationById.mockReset().mockResolvedValue(null);
     vi.mocked(getRepositories).mockResolvedValue([
       {
         id: 'repo-1',
@@ -1262,6 +1323,7 @@ describe('setup recommendation commands', () => {
   });
 
   it('applies enabled recommendations before setup continues', async () => {
+    mockResolveSetupAutomationReportTarget.mockResolvedValue(reportTarget);
     mockRecommendationTransaction({
       automationRecommendations: {
         version: 1,
@@ -1306,7 +1368,11 @@ describe('setup recommendation commands', () => {
     );
     expect(mockUpsertAutomation).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ key: 'ci_failure_triage', enabled: true }),
+      expect.objectContaining({
+        key: 'ci_failure_triage',
+        enabled: true,
+        targets: [reportTarget],
+      }),
     );
     expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
       'enabled',
@@ -1325,6 +1391,209 @@ describe('setup recommendation commands', () => {
     );
     expect(result?.applicationState).toBe('applied');
   });
+
+  it.each([null, reportTarget])(
+    'fingerprints the resolved report target %j',
+    async (target) => {
+      mockResolveSetupAutomationReportTarget.mockResolvedValue(target);
+      mockRecommendationTransaction();
+      await startSetupRecommendationsCommand(buildMockAuth());
+      expect(buildAutomationRecommendationFingerprint).toHaveBeenCalledWith(
+        ['repo-1'],
+        'github',
+        target,
+      );
+    },
+  );
+
+  it.each([null, reportTarget])(
+    'filters persisted reports by current delivery eligibility %j',
+    async (target) => {
+      const batch = recommendationBatch([
+        'built-in.review-code',
+        'built-in.resolve-pr-conflicts',
+        'built-in.ci-failure-triage',
+        'built-in.summarize-merged-prs',
+        'built-in.weekly-manager-stats',
+        'cookbook.scheduled-housekeeping',
+      ]);
+      mockResolveSetupAutomationReportTarget.mockResolvedValue(target);
+      mockTxSelect.mockReturnValueOnce(
+        createSelectChain([
+          { setupNewState: { automationRecommendations: batch } },
+        ]),
+      );
+      const result = await listSetupRecommendationsCommand(buildMockAuth());
+      expect(
+        result?.recommendations.map(({ candidateId }) => candidateId),
+      ).toEqual(
+        batch.recommendations
+          .slice(0, target ? undefined : 2)
+          .map(({ candidateId }) => candidateId),
+      );
+      expect(mockUpsertAutomation).not.toHaveBeenCalled();
+      expect(mockDbTransaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    'built-in.ci-failure-triage',
+    'built-in.summarize-merged-prs',
+    'cookbook.scheduled-housekeeping',
+  ])('rejects enabling %s when delivery is lost', async (candidateId) => {
+    const batch = recommendationBatch([candidateId]);
+    mockRecommendationTransaction({ automationRecommendations: batch });
+    await expect(
+      setSetupRecommendationEnabledCommand(buildMockAuth(), {
+        id: batch.recommendations[0]!.id,
+        enabled: true,
+      }),
+    ).rejects.toThrow('no longer has a usable report destination');
+    expect(mockUpsertAutomation).not.toHaveBeenCalled();
+    expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+    expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
+    expect(insertValuesMock).not.toHaveBeenCalled();
+  });
+
+  it('continues native repo setup when report delivery is lost before bulk apply', async () => {
+    mockRecommendationTransaction({
+      automationRecommendations: recommendationBatch([
+        'built-in.review-code',
+        'built-in.resolve-pr-conflicts',
+        'built-in.ci-failure-triage',
+        'built-in.summarize-merged-prs',
+        'cookbook.scheduled-housekeeping',
+      ]),
+    });
+    const result = await applySetupRecommendationsCommand(buildMockAuth());
+    expect(result?.applicationState).toBe('applied');
+    expect(
+      result?.recommendations.map(({ candidateId }) => candidateId),
+    ).toEqual(['built-in.review-code', 'built-in.resolve-pr-conflicts']);
+    expect(mockUpsertAutomation).toHaveBeenCalledTimes(2);
+    expect(mockUpsertAutomation).toHaveBeenCalledWith(expect.anything(), {
+      key: 'review_code',
+      enabled: true,
+      schedule: { mode: 'off' },
+    });
+    expect(mockUpsertAutomation).toHaveBeenCalledWith(expect.anything(), {
+      key: 'conflict_resolver',
+      enabled: true,
+      schedule: { mode: 'daily' },
+    });
+    expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+    expect(mockEnqueueAutomationRecommendationInitialRun).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(mockEnqueueAutomationRecommendationInitialRun).toHaveBeenCalledWith(
+      {
+        fingerprint: 'recommendation-fingerprint',
+        recommendationId: 'built-in.resolve-pr-conflicts:1',
+      },
+      300_000,
+    );
+  });
+
+  it.each([
+    ['built-in.summarize-merged-prs', 'announcer'],
+    ['built-in.weekly-manager-stats', 'manager_stats'],
+  ])(
+    'propagates the report target to %s without managing noncommunications targets',
+    async (candidateId, key) => {
+      mockResolveSetupAutomationReportTarget.mockResolvedValue(reportTarget);
+      const batch = recommendationBatch([candidateId]);
+      mockRecommendationTransaction({ automationRecommendations: batch });
+      await setSetupRecommendationEnabledCommand(buildMockAuth(), {
+        id: batch.recommendations[0]!.id,
+        enabled: true,
+      });
+      expect(mockUpsertAutomation).toHaveBeenCalledWith(expect.anything(), {
+        key,
+        enabled: true,
+        schedule: { mode: 'weekly' },
+        targets: [reportTarget],
+        managedTargetKinds: Object.values(
+          communicationAutomationTargetKinds,
+        ).flatMap((kinds) => [kinds.channel, kinds.direct_message]),
+      });
+    },
+  );
+
+  it.each([false, true])(
+    'propagates the resolved target when cookbook automation exists=%s',
+    async (existing) => {
+      mockResolveSetupAutomationReportTarget.mockResolvedValue(reportTarget);
+      const batch = recommendationBatch(['cookbook.scheduled-housekeeping']);
+      if (existing) {
+        batch.recommendations[0]!.automationId = 'custom-1';
+        mockGetCustomAutomationById.mockResolvedValue({
+          id: 'custom-1',
+          target: {
+            provider: 'discord',
+            targetKind: 'discord_channel',
+            externalRef: 'old-channel',
+          },
+        });
+      }
+      mockRecommendationTransaction({ automationRecommendations: batch });
+      const result = await applySetupRecommendationsCommand(buildMockAuth());
+      const expected = expect.objectContaining({
+        target: reportTarget,
+        enabled: true,
+        scheduleMode: 'weekly',
+        environmentId: ALL_REPOSITORIES,
+      });
+      if (existing) {
+        expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+          'custom-1',
+          expected,
+          expect.anything(),
+        );
+        expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+      } else {
+        expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+          expected,
+          expect.anything(),
+        );
+        expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
+      }
+      expect(result?.recommendations[0]?.automationId).toBe('custom-1');
+    },
+  );
+
+  it.each(['built-in.summarize-merged-prs', 'cookbook.scheduled-housekeeping'])(
+    'allows disabling stale report %s without a destination',
+    async (candidateId) => {
+      const batch = recommendationBatch([candidateId]);
+      batch.recommendations[0]!.automationId = 'custom-1';
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'custom-1',
+        target: reportTarget,
+      });
+      mockRecommendationTransaction({ automationRecommendations: batch });
+      const result = await setSetupRecommendationEnabledCommand(
+        buildMockAuth(),
+        { id: batch.recommendations[0]!.id, enabled: false },
+      );
+      expect(result?.enabled).toBe(false);
+      if (candidateId.startsWith('built-in')) {
+        expect(mockUpsertAutomation).toHaveBeenCalledWith(expect.anything(), {
+          key: 'announcer',
+          enabled: false,
+          schedule: { mode: 'off' },
+        });
+      } else {
+        expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+          'custom-1',
+          expect.objectContaining({ enabled: false, target: reportTarget }),
+          expect.anything(),
+        );
+      }
+      expect(
+        mockEnqueueAutomationRecommendationInitialRun,
+      ).not.toHaveBeenCalled();
+    },
+  );
 
   it('keeps a skipped pending batch unapplied and disabled', async () => {
     mockRecommendationTransaction({

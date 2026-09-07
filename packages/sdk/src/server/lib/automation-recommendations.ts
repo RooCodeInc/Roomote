@@ -26,10 +26,12 @@ import {
   type AutomationRecommendationBatch,
   type RepositoryAutomationSignals,
   type SourceControlProvider,
+  type AutomationTarget,
   normalizeSetupNewState,
 } from '@roomote/types';
 import {
   db,
+  automations,
   deploymentSettings,
   githubInstallations,
   pullRequestFacts,
@@ -46,6 +48,7 @@ import { getRedis } from '@roomote/redis';
 
 import { runCustomAutomationNow } from '../automations/custom-automations';
 import { runAutomationNow } from '../automations/run-now';
+import { resolveSetupAutomationReportTarget } from './setup-automation-delivery';
 
 export const AUTOMATION_RECOMMENDATIONS_QUEUE_NAME =
   'automation-recommendations';
@@ -165,12 +168,19 @@ function getRecommendationInitialRunQueue() {
 export function buildAutomationRecommendationFingerprint(
   repositoryIds: readonly string[],
   provider: SourceControlProvider | null,
+  reportTarget: AutomationTarget | null = null,
 ): string {
   return createHash('sha256')
     .update(
       JSON.stringify({
         repositoryIds: [...repositoryIds].sort(),
         provider,
+        reportTarget: reportTarget
+          ? {
+              provider: reportTarget.provider,
+              externalRef: reportTarget.externalRef,
+            }
+          : null,
         catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
       }),
     )
@@ -809,8 +819,21 @@ async function buildRecommendationBatch(
       docs: 0,
     },
   );
+  const reportTarget = await resolveSetupAutomationReportTarget();
+  const enabledAutomations = await db
+    .select({ key: automations.key })
+    .from(automations)
+    .where(eq(automations.enabled, true));
   const scored = scoreAutomationRecommendations(merged, {
     catalog: AUTOMATION_RECOMMENDATION_CATALOG,
+    reportProvider: reportTarget?.provider,
+    enabledCandidateIds: new Set(
+      AUTOMATION_RECOMMENDATION_CATALOG.filter(
+        (candidate) =>
+          candidate.source === 'built_in' &&
+          enabledAutomations.some(({ key }) => key === candidate.automationKey),
+      ).map((candidate) => candidate.id),
+    ),
   });
   const now = new Date().toISOString();
 
