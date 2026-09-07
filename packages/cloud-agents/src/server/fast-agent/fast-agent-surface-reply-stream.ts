@@ -37,13 +37,21 @@ export function createFastAgentSurfaceReplyStreamer(options: {
   let appendTimer: NodeJS.Timeout | undefined;
   let lastAppendAtMs = 0;
   let chain: Promise<void> = Promise.resolve();
+  let closed = false;
+  let disposed = false;
+  let closePromise: Promise<void> | undefined;
 
   const run = (step: () => Promise<void>) => {
-    chain = chain.then(step).catch((error) => {
-      console.warn(
-        `[Fast Agent] Surface reply stream step failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
+    chain = chain
+      .then(() => {
+        if (!disposed) return step();
+      })
+      .catch((error) => {
+        console.warn(
+          `[Fast Agent] Surface reply stream step failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    return chain;
   };
   const clearTimers = () => {
     if (startTimer) clearTimeout(startTimer);
@@ -78,10 +86,15 @@ export function createFastAgentSurfaceReplyStreamer(options: {
     latestIncomplete = false;
     return active;
   };
+  const abort = (): Promise<void> => {
+    const active = reset();
+    return active ? run(() => active.abort()) : chain;
+  };
 
   return {
     /** The undelivered reply text so far and whether it is still growing. */
     update(text: string, incomplete: boolean): void {
+      if (closed) return;
       const createStream = options.createStream;
       if (!createStream) return;
       latestText = text;
@@ -111,28 +124,27 @@ export function createFastAgentSurfaceReplyStreamer(options: {
     async deliver(
       reply: FastAgentReply,
     ): Promise<FastAgentReplyHandle | undefined> {
+      if (closed) return undefined;
       const active = reset();
       if (!active) return undefined;
-      await chain;
-      try {
-        return await active.finish(reply);
-      } catch (error) {
-        console.warn(
-          `[Fast Agent] Failed to finish a surface reply stream: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return undefined;
-      }
+      let delivered: FastAgentReplyHandle | undefined;
+      await run(async () => {
+        delivered = await active.finish(reply);
+      });
+      return delivered;
     },
     /** Ends the active stream without a reply, leaving its text as is. */
-    async abort(): Promise<void> {
-      const active = reset();
-      if (!active) return;
-      await chain;
-      await active.abort().catch((error) => {
-        console.warn(
-          `[Fast Agent] Failed to end a surface reply stream: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
+    abort,
+    /** Stop admission and drain every issued/queued stream operation before activity settles. */
+    close(): Promise<void> {
+      closed = true;
+      closePromise ??= abort();
+      return closePromise;
+    },
+    /** Fence queued and future writes synchronously; issued HTTP cannot be recalled. */
+    dispose(): void {
+      closed = disposed = true;
+      reset();
     },
   };
 }

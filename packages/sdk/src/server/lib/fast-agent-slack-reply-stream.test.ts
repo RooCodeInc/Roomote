@@ -95,6 +95,7 @@ describe('createSlackFastReplyStream', () => {
     expect(slack.stopMessageStream).toHaveBeenCalledWith({
       channel: 'C1',
       ts: '200.1',
+      sessionStatus: 'processing',
     });
     expect(mocks.updateWithFooter).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -259,7 +260,23 @@ describe('createSlackFastReplyStream', () => {
     expect(slack.stopMessageStream).toHaveBeenCalledWith({
       channel: 'C1',
       ts: '200.1',
+      sessionStatus: 'processing',
     });
     expect(mocks.updateWithFooter).not.toHaveBeenCalled();
   });
+
+  it.each(['ack', 'progress', 'closeout', 'clarification'] as const)(
+    'keeps processing after a %s message',
+    async (purpose) => {
+      const slack = slackMock();
+      const { stream } = build(slack, null);
+      await stream.append('Working');
+      await stream.finish({ purpose, message: 'Working' });
+      expect(slack.stopMessageStream).toHaveBeenCalledWith({
+        channel: 'C1',
+        ts: '200.1',
+        sessionStatus: 'processing',
+      });
+    },
+  );
 });

@@ -2623,7 +2623,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect(activity.dispose).toHaveBeenCalled();
         expect(activity.settle).not.toHaveBeenCalled();
       } else {
-        expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
+        await vi.waitFor(() =>
+          expect(activity.settle).toHaveBeenCalledWith({
+            keepProcessing: false,
+          }),
+        );
       }
       finishInference();
       await rejected;
@@ -9975,6 +9979,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     it('streams a long reply into the surface and delivers through the stream', async () => {
       const streamCalls: string[] = [];
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
       const createReplyStream = vi.fn(() => ({
         append: vi.fn(async (text: string) => {
           streamCalls.push(`append:${text}`);
@@ -10009,16 +10018,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
           });
+          expect(activity.settle).not.toHaveBeenCalled();
           return 'Looking at the deploy history.';
         },
       );
 
       await answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply, createReplyStream }),
+        adapter: callbacks({ postReply, createReplyStream, activity }),
       });
 
       expect(createReplyStream).toHaveBeenCalledTimes(1);
+      expect(activity.settle).toHaveBeenCalledOnce();
       expect(streamCalls).toEqual([
         'append:Looking at',
         'append: the deploy history.',
@@ -10029,6 +10040,214 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         platformMessageId: 'slack-ts-1',
       });
     });
+
+    it('keeps turn activity alive after a streamed ack while a dispatched integration tool is pending', async () => {
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+      const createReplyStream = vi.fn(() => ({
+        append: vi.fn().mockResolvedValue(undefined),
+        finish: vi.fn(async () => ({
+          messageId: `slack-${createReplyStream.mock.calls.length}`,
+        })),
+        abort: vi.fn().mockResolvedValue(undefined),
+      }));
+      const postReply = vi.fn();
+      let releaseTool!: () => void;
+      const toolGate = new Promise<void>((resolve) => {
+        releaseTool = resolve;
+      });
+      let toolCompleted = false;
+      mocks.listIntegrations.mockResolvedValueOnce([
+        {
+          id: 'github',
+          name: 'GitHub',
+          tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
+        },
+      ]);
+      mocks.callIntegration.mockImplementationOnce(async () => {
+        await toolGate;
+        toolCompleted = true;
+        return { matches: ['fast-agent.ts'] };
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'ack-message',
+            partId: 'ack-text',
+            text: 'Searching the repository.',
+            completed: false,
+          });
+          await vi.waitFor(() =>
+            expect(
+              createReplyStream.mock.results[0]?.value.append,
+            ).toHaveBeenCalled(),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, { purpose: 'ack' });
+          expect(
+            await invokeTool(nativeToolNames.callIntegrationTool, {
+              integrationId: 'github',
+              toolName: 'search_code',
+              args: { query: 'fast agent' },
+            }),
+          ).toEqual({ success: true, result: { matches: ['fast-agent.ts'] } });
+          options.onAssistantTextUpdated?.({
+            messageId: 'closeout-message',
+            partId: 'closeout-text',
+            text: 'Found fast-agent.ts.',
+            completed: false,
+          });
+          await vi.waitFor(() =>
+            expect(
+              createReplyStream.mock.results[1]?.value.append,
+            ).toHaveBeenCalled(),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+          });
+          expect(activity.settle).not.toHaveBeenCalled();
+          return '';
+        },
+      );
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ activity, createReplyStream, postReply }),
+      });
+      try {
+        await vi.waitFor(() =>
+          expect(mocks.callIntegration).toHaveBeenCalledOnce(),
+        );
+        expect(mocks.callIntegration).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'conversation-1' }),
+          expect.any(Array),
+          {
+            integrationId: 'github',
+            toolName: 'search_code',
+            args: { query: 'fast agent' },
+          },
+        );
+        expect(
+          createReplyStream.mock.results[0]!.value.finish,
+        ).toHaveBeenCalledWith({
+          purpose: 'ack',
+          message: 'Searching the repository.',
+        });
+        // The gate is inside the dispatched tool, not an unrelated stand-in for work.
+        for (let i = 0; i < 3; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          expect(toolCompleted).toBe(false);
+          expect(activity.start).toHaveBeenCalledOnce();
+          expect(activity.settle).not.toHaveBeenCalled();
+          expect(activity.dispose).not.toHaveBeenCalled();
+          expect(createReplyStream).toHaveBeenCalledOnce();
+          expect(postReply).not.toHaveBeenCalled();
+        }
+      } finally {
+        releaseTool();
+        await result;
+      }
+      expect(toolCompleted).toBe(true);
+      expect(createReplyStream).toHaveBeenCalledTimes(2);
+      const closeout = createReplyStream.mock.results[1]!.value;
+      expect(closeout.finish).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Found fast-agent.ts.',
+      });
+      expect(activity.settle).toHaveBeenCalledExactlyOnceWith({
+        keepProcessing: false,
+      });
+      expect(closeout.finish.mock.invocationCallOrder[0]).toBeLessThan(
+        activity.settle.mock.invocationCallOrder[0]!,
+      );
+      expect(postReply).not.toHaveBeenCalled();
+    });
+
+    it.each(['cancel', 'shutdown', 'lost', 'dispose'] as const)(
+      'drains or fences a stream on %s before activity cleanup and late inference writes',
+      async (mode) => {
+        const controller = new AbortController();
+        const interruption =
+          mode === 'lost'
+            ? new FastAgentTurnLockLostError()
+            : mode === 'shutdown'
+              ? new FastAgentProcessShutdownError('SIGTERM')
+              : new Error('cancelled');
+        let releaseAppend!: () => void;
+        let releaseInference!: () => void;
+        const stream = {
+          append: vi.fn(
+            () =>
+              new Promise<void>((resolve) => {
+                releaseAppend = resolve;
+              }),
+          ),
+          finish: vi.fn(),
+          abort: vi.fn().mockResolvedValue(undefined),
+        };
+        const activity = {
+          start: vi.fn(),
+          settle: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn().mockResolvedValue(undefined),
+        };
+        mocks.generateText.mockImplementationOnce(
+          async (_params, _session, options) => {
+            options.onAssistantTextUpdated?.({
+              messageId: 'assistant-message-1',
+              partId: 'text-1',
+              text: 'Working',
+              completed: false,
+            });
+            await new Promise<void>((resolve) => {
+              releaseInference = resolve;
+            });
+            options.onAssistantTextUpdated?.({
+              messageId: 'assistant-message-1',
+              partId: 'text-1',
+              text: 'Working late',
+              completed: false,
+            });
+            throw interruption;
+          },
+        );
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ activity, createReplyStream: () => stream }),
+          signal: controller.signal,
+        });
+        const rejected = expect(result).rejects.toBe(interruption);
+        await vi.waitFor(() => expect(releaseAppend).toBeTypeOf('function'));
+        const cleanup = vi
+          .mocked(registerFastAgentTurnActivity)
+          .mock.calls.at(-1)![1];
+        controller.abort(interruption);
+        expect(activity.settle).not.toHaveBeenCalled();
+        if (mode === 'dispose') await cleanup.dispose();
+        releaseAppend();
+        await cleanup.settle();
+        if (mode === 'lost' || mode === 'dispose') {
+          expect(activity.dispose).toHaveBeenCalled();
+          expect(activity.settle).not.toHaveBeenCalled();
+        } else {
+          expect(activity.settle).toHaveBeenCalledOnce();
+          expect(stream.abort).toHaveBeenCalledOnce();
+          expect(stream.abort.mock.invocationCallOrder[0]).toBeLessThan(
+            activity.settle.mock.invocationCallOrder[0]!,
+          );
+        }
+        releaseInference();
+        await rejected;
+        expect(stream.abort).toHaveBeenCalledTimes(
+          mode === 'lost' || mode === 'dispose' ? 0 : 1,
+        );
+        expect(stream.append).toHaveBeenCalledOnce();
+        expect(activity.settle).toHaveBeenCalledTimes(
+          mode === 'lost' || mode === 'dispose' ? 0 : 1,
+        );
+      },
+    );
 
     it('posts a reply that finished writing before the stream opened', async () => {
       const createReplyStream = vi.fn();

@@ -925,6 +925,22 @@ export class MockSlackServer {
           },
           ephemeral: false,
         });
+        // Slack starts (or resumes) the thread's agent session with each stream.
+        const threadTs = String(jsonBody.thread_ts ?? '');
+        const sessions = (this.state.agentSessions ??= []);
+        const session = sessions.find(
+          (entry) =>
+            entry.channel === message.channel && entry.threadTs === threadTs,
+        );
+        if (session) {
+          session.status = 'processing';
+        } else {
+          sessions.push({
+            channel: message.channel,
+            threadTs,
+            status: 'processing',
+          });
+        }
         json(response, 200, { ok: true, channel: message.channel, ts });
         return;
       }
@@ -945,6 +961,16 @@ export class MockSlackServer {
         message.text += String(jsonBody.markdown_text ?? '');
         if (Array.isArray(jsonBody.blocks)) {
           message.blocks = [...(message.blocks ?? []), ...jsonBody.blocks];
+        }
+        if (path === 'chat.stopStream') {
+          const session = this.state.agentSessions?.find(
+            (entry) =>
+              entry.channel === channel && entry.threadTs === message.thread_ts,
+          );
+          if (session) {
+            // Finishing a message clears Working unless the caller opts to keep it.
+            session.status = String(jsonBody.session_status ?? 'active');
+          }
         }
         json(response, 200, { ok: true, channel, ts });
         return;
