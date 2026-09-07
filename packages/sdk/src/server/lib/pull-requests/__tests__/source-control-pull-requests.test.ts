@@ -12,6 +12,7 @@ const {
   mockGetDeploymentPrAction,
   mockGetDeploymentGitHubRoomoteMentionEnabled,
   mockGetOctokit,
+  mockResolveEnvironmentGitHubRepositories,
   mockRepositoriesFindFirst,
   mockEnvironmentsFindFirst,
   mockResolveGitLabToken,
@@ -37,6 +38,7 @@ const {
   mockGetDeploymentPrAction: vi.fn(),
   mockGetDeploymentGitHubRoomoteMentionEnabled: vi.fn().mockResolvedValue(true),
   mockGetOctokit: vi.fn(),
+  mockResolveEnvironmentGitHubRepositories: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
   mockResolveGitLabToken: vi.fn(),
@@ -94,6 +96,8 @@ vi.mock('@roomote/env', () => ({
 }));
 
 vi.mock('@roomote/github', () => ({
+  resolveTaskRunEnvironmentGitHubRepositories: (...args: unknown[]) =>
+    mockResolveEnvironmentGitHubRepositories(...args),
   getOctokit: (...args: unknown[]) => mockGetOctokit(...args),
   resolveConfiguredGitHubAppSlugIfConfigured: (...args: unknown[]) =>
     mockResolveConfiguredGitHubAppSlugIfConfigured(...args),
@@ -1047,6 +1051,56 @@ describe('optional targetBranch', () => {
     });
     return octokit;
   }
+
+  it.each([true, false])(
+    'creates an unlisted environment GitHub PR only after scope verification: %s',
+    async (allowed) => {
+      const octokit = makeOctokit({
+        created: {
+          number: 11,
+          node_id: 'node-11',
+          html_url: 'https://github.com/acme/web/pull/11',
+          title: '[Feature] X',
+          draft: true,
+          base: { ref: 'develop' },
+        },
+      });
+      mockEnvironmentsFindFirst.mockResolvedValue({
+        config: {
+          name: 'Environment',
+          repositories: [{ repository: 'acme/anchor' }],
+        },
+      });
+      mockResolveEnvironmentGitHubRepositories.mockResolvedValue(
+        allowed ? [{ fullName: 'acme/web' }] : [],
+      );
+      const taskRun = makeTaskRun({
+        repo: 'acme/anchor',
+        environmentId: 'environment',
+        sourceControlProvider: 'github',
+        repositoryProviders: { 'acme/anchor': 'github' },
+      });
+      const result = createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun,
+        input: { ...baseInput, targetBranch: 'develop' },
+      });
+      if (allowed) {
+        await expect(result).resolves.toMatchObject({
+          action: 'created',
+          provider: 'github',
+          number: 11,
+        });
+        expect(octokit.rest.pulls.create).toHaveBeenCalledTimes(1);
+      } else {
+        await expect(result).rejects.toThrow('outside this task');
+        expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+        expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
+      }
+      expect(mockResolveEnvironmentGitHubRepositories).toHaveBeenCalledWith(
+        taskRun,
+      );
+    },
+  );
 
   it('updates the existing GitHub pull request and keeps its base when targetBranch is omitted', async () => {
     const existing = {

@@ -17,6 +17,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import { isGitLabOAuthAccessToken } from '@roomote/gitlab';
+import { resolveTaskRunEnvironmentGitHubRepositories } from '@roomote/github';
 
 export type FetchImpl = typeof fetch;
 
@@ -50,6 +51,14 @@ export function resolveSourceControlProviderForRepositoryFromPayload(
     const repositoryProvider = repositoryProviders[repositoryFullName];
 
     if (repositoryProvider === undefined) {
+      if (
+        typeof payload.environmentId === 'string' &&
+        payload.environmentId.trim() &&
+        payload.sourceControlProvider === 'github'
+      ) {
+        // Provisional selection; the subsequent scope assertion verifies the active same-installation target.
+        return 'github';
+      }
       throw new Error(
         `Repository ${repositoryFullName} is not mapped to a source control provider.`,
       );
@@ -189,6 +198,20 @@ export async function assertRepositoryInTaskRunScope(
   }
 
   if (!scopedRepositories.includes(repositoryFullName)) {
+    const payload = getPayloadRecord(taskRun.payload);
+    const targetProvider =
+      resolveRepositoryProvidersFromPayload(payload)?.[repositoryFullName] ??
+      resolveSourceControlProviderFromPayload(payload);
+    if (
+      typeof payload.environmentId === 'string' &&
+      payload.environmentId.trim() &&
+      targetProvider === 'github' &&
+      (await resolveTaskRunEnvironmentGitHubRepositories(taskRun))?.some(
+        (repository) => repository.fullName === repositoryFullName,
+      )
+    ) {
+      return;
+    }
     throw new Error(
       `Repository ${repositoryFullName} is outside this task's source-control scope.`,
     );
