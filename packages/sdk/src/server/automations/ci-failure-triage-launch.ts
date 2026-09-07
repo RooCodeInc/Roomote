@@ -10,6 +10,7 @@ import {
   type FailedCiRun,
 } from '@roomote/cloud-agents/server';
 import {
+  and,
   db,
   eq,
   getAutomationRuntime,
@@ -74,11 +75,18 @@ function buildAnnouncementText(params: {
   ].join('\n');
 }
 
-async function resolveActiveSlackNotifier(): Promise<SlackNotifier | null> {
+async function resolveActiveSlackNotifier(
+  teamId?: string,
+): Promise<SlackNotifier | null> {
   const [installation] = await db
     .select({ botAccessToken: slackInstallations.botAccessToken })
     .from(slackInstallations)
-    .where(eq(slackInstallations.isActive, true))
+    .where(
+      and(
+        eq(slackInstallations.isActive, true),
+        ...(teamId ? [eq(slackInstallations.teamId, teamId)] : []),
+      ),
+    )
     .limit(1);
 
   if (!installation?.botAccessToken) {
@@ -94,7 +102,7 @@ async function postSlackInvestigationAnnouncement(params: {
   automationLabel: string;
 }): Promise<{ messageTs: string; slack: SlackNotifier } | null> {
   try {
-    const slack = await resolveActiveSlackNotifier();
+    const slack = await resolveActiveSlackNotifier(params.destination.teamId);
     if (!slack) {
       return null;
     }

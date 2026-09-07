@@ -337,6 +337,12 @@ Set **Automation output** first. This is the shared Slack or Discord Manager
 Channel for manager-facing posts, suggestions, summaries, and setup alerts.
 Make sure the Roomote app can access the channel before you save it.
 
+For Slack, the first account connection after app installation automatically
+sets up public `#roomote-managers` if no Slack or Discord Manager Channel is
+configured. Existing automation destinations are unchanged, and no automations
+are enabled by channel setup. See [Slack setup](/providers/communications/slack#automatic-manager-channel)
+for required permissions and retry instructions.
+
 **Inference Provider Usage Alerts** is enabled at an hourly cadence with an 85% threshold
 when it first appears, preserving the provider warning behavior from earlier
 Roomote releases. Admins can disable it, choose a Slack or Discord destination,

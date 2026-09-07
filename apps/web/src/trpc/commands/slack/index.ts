@@ -39,6 +39,7 @@ import { getTaskByIdCommand } from '../tasks/by-id';
 import { getSlackRedirectUri } from '@/lib/server/slack-redirect-uri';
 import { syncUser } from '@/lib/server/sync-internal';
 import { buildSlackInstallUrl } from '@/lib/slack-install-url';
+import { provisionSlackManagerChannel } from './provision-manager-channel';
 import {
   createSignedSlackInstallState,
   createSignedSlackLinkAccountState,
@@ -292,42 +293,39 @@ async function upsertSlackUserMapping({
   userMapping: SlackUserMapping;
   status: SlackUserMappingUpsertStatus;
 }> {
-  let userMapping = await db.query.slackUserMappings.findFirst({
-    where: and(
-      eq(slackUserMappings.slackUserId, slackUserId),
-      eq(slackUserMappings.slackTeamId, slackTeamId),
-    ),
-  });
-  let status: SlackUserMappingUpsertStatus = 'unchanged';
-
-  if (!userMapping) {
-    await db.insert(slackUserMappings).values({
+  const [created] = await db
+    .insert(slackUserMappings)
+    .values({
       slackUserId,
       slackTeamId,
       userId,
-    });
-    status = 'created';
-  } else if (userMapping.userId !== userId) {
-    // Refuse re-link of existing mappings owned by another user. Silent
-    // takeover enables OAuth CSRF / account takeover when a victim completes
-    // an attacker's callback URL.
-    throw new Error(
-      'This Slack account is already linked to another Roomote user. Unlink it there before reconnecting.',
-    );
-  }
+    })
+    .onConflictDoNothing({
+      target: [slackUserMappings.slackUserId, slackUserMappings.slackTeamId],
+    })
+    .returning();
 
-  userMapping = await db.query.slackUserMappings.findFirst({
-    where: and(
-      eq(slackUserMappings.slackUserId, slackUserId),
-      eq(slackUserMappings.slackTeamId, slackTeamId),
-    ),
-  });
+  const userMapping =
+    created ??
+    (await db.query.slackUserMappings.findFirst({
+      where: and(
+        eq(slackUserMappings.slackUserId, slackUserId),
+        eq(slackUserMappings.slackTeamId, slackTeamId),
+      ),
+    }));
 
   if (!userMapping) {
     throw new Error('Unable to connect Slack account');
   }
 
-  return { userMapping, status };
+  // A competing insert may belong to another user; never overwrite it.
+  if (userMapping.userId !== userId) {
+    throw new Error(
+      'This Slack account is already linked to another Roomote user. Unlink it there before reconnecting.',
+    );
+  }
+
+  return { userMapping, status: created ? 'created' : 'unchanged' };
 }
 
 async function handleSlackAuthentication({
@@ -364,6 +362,8 @@ async function handleSlackAuthentication({
   if (!slackInstallation) {
     throw new Error('Slack installation not found');
   }
+
+  await provisionSlackManagerChannel(slackInstallation);
 
   const slack = new SlackNotifier(slackInstallation.botAccessToken);
   const resumedOriginalThread = shouldResumeSlackAuthThread(
@@ -765,6 +765,8 @@ export async function finishAuthenticateSlackAccountCommand(
       slackTeamId,
       userId: auth.userId,
     });
+
+    await provisionSlackManagerChannel(installation);
 
     await enqueueSlackAccountLinkEducationIfNeeded({
       status,

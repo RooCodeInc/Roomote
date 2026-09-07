@@ -8,6 +8,8 @@ export const SLACK_MANIFEST_BOT_SCOPES = [
   'assistant:write',
   'channels:read',
   'channels:history',
+  'channels:manage',
+  'channels:join',
   'chat:write',
   'files:read',
   'groups:read',

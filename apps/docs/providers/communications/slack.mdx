@@ -72,6 +72,26 @@ During OAuth install, Roomote also records the installed bot display name when
 Slack exposes it, so setup and automation guidance can show the actual Slack
 app users should mention instead of assuming `@Roomote`.
 
+## Automatic manager channel
+
+After the app is installed, the first user who links their Slack account to
+Roomote triggers setup of a public `#roomote-managers` channel in that workspace.
+Installing the app alone does not trigger setup. Roomote creates the channel or
+reuses an existing public, unarchived, nonshared channel with that exact name,
+ensures the bot is a member, and sets it as the shared **Manager Channel** under
+**Settings > Automations > Automation output**.
+
+Existing Slack or Discord Manager Channel settings and explicit automation
+destinations are preserved. This setup does not create or enable automations.
+Private channels are not selected, converted, or read by automatic setup; they
+remain available for manual configuration with the appropriate bot access.
+
+Automatic setup requires the bot scopes `channels:manage` and `channels:join`.
+For an existing installation, use **Update app**, then **Reinstall in Slack** to
+approve these permissions. If workspace restrictions, unavailable permissions,
+or Slack errors prevent setup, account authentication still succeeds. Link your
+Slack account again to retry, or configure the Manager Channel manually.
+
 ## Redirect URLs
 
 Slack sign-in uses Slack OpenID Connect. Add the sign-in redirect URL:
@@ -105,6 +125,8 @@ app_mentions:read
 assistant:write
 channels:read
 channels:history
+channels:manage
+channels:join
 chat:write
 files:read
 groups:read
