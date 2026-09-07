@@ -547,6 +547,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ).toEqual([
       { providerId: 'baseten', modelId: 'baseten/zai-org/GLM-5.2' },
       { providerId: 'togetherai', modelId: 'togetherai/zai-org/GLM-5.2' },
+      {
+        providerId: 'cloudflare-ai-gateway',
+        modelId: 'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+      },
+      {
+        providerId: 'cloudflare-workers-ai',
+        modelId: 'cloudflare-workers-ai/@cf/zai-org/glm-5.2',
+      },
       { providerId: 'opencode', modelId: 'opencode/glm-5.2' },
     ]);
   });
