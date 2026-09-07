@@ -1333,6 +1333,7 @@ export function ModelSettingsSection({
 
     saveInFlightRef.current = true;
     setIsSaving(true);
+    let saveFailed = false;
 
     try {
       const result = await updateMutation.mutateAsync({
@@ -1361,6 +1362,7 @@ export function ModelSettingsSection({
       });
 
       if (!result.success) {
+        saveFailed = true;
         if (lastSyncedDraftRef.current) {
           applyDraftLocally(lastSyncedDraftRef.current);
         }
@@ -1394,12 +1396,20 @@ export function ModelSettingsSection({
           queryKey: trpc.taskModels.launchOptions.queryKey(),
         }),
       ]);
+    } catch {
+      saveFailed = true;
+      if (lastSyncedDraftRef.current) {
+        applyDraftLocally(lastSyncedDraftRef.current);
+      }
+      saveQueuedRef.current = false;
+      toast.error('Failed to update model settings.');
     } finally {
       saveInFlightRef.current = false;
 
       const shouldRunAgain =
-        saveQueuedRef.current ||
-        !draftsEqual(draftStateRef.current, lastSyncedDraftRef.current);
+        !saveFailed &&
+        (saveQueuedRef.current ||
+          !draftsEqual(draftStateRef.current, lastSyncedDraftRef.current));
 
       saveQueuedRef.current = false;
 
