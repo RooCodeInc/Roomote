@@ -1058,6 +1058,7 @@ export function SessionWorkspace({
               onOpenTask={openTaskPanel}
             >
               <ResponsiveWorkspacePanels
+                layoutWidth={workspaceWidth}
                 isPanelOpen={panelOpen}
                 dimUnfocusedPanelIds={[
                   'main',
