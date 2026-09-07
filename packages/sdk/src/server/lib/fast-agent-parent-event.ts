@@ -1276,11 +1276,12 @@ async function createDiscordFastAgentParentTurn(
     event: params.event,
     conversation,
   });
+  const activity = createFastAgentTypingActivity({
+    sendTyping: () => provider.triggerTyping(conversation.replyTarget),
+    intervalMs: 8_000,
+  });
   const adapter: FastAgentTurnAdapter = {
-    activity: createFastAgentTypingActivity({
-      sendTyping: () => provider.triggerTyping(conversation.replyTarget),
-      intervalMs: 8_000,
-    }),
+    activity,
     launchTask: createFastAgentDiscordTaskLauncher({
       provider,
       userId: actorUserId,
@@ -1345,6 +1346,7 @@ async function createDiscordFastAgentParentTurn(
             'Discord did not return a Fast automation report message id.',
           );
         }
+        activity.reassert();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -1364,6 +1366,7 @@ async function createDiscordFastAgentParentTurn(
             createdByUserId: actorUserId,
             suggestions,
           });
+          activity.reassert();
         }
         params.onReplyPosted();
         return;
@@ -1447,6 +1450,7 @@ async function createDiscordFastAgentParentTurn(
               : {}),
           }),
       });
+      activity.reassert();
       await recordFastAgentConversationMessageBestEffort({
         sessionId: session.id,
         conversation,
@@ -1466,6 +1470,7 @@ async function createDiscordFastAgentParentTurn(
           createdByUserId: actorUserId,
           suggestions,
         });
+        activity.reassert();
       }
       if (action) {
         const { superseded } =
@@ -1485,7 +1490,7 @@ async function createDiscordFastAgentParentTurn(
   };
   // A resumed turn edits the retry notice its predecessor posted; an
   // oversized replacement falls back to a fresh reply through this adapter.
-  adapter.replaceReply = createDiscordFastReplyReplacer({
+  const replaceReply = createDiscordFastReplyReplacer({
     provider,
     conversation,
     channelId: conversation.replyTarget.channelId,
@@ -1495,6 +1500,11 @@ async function createDiscordFastAgentParentTurn(
     postReplacement: (text) =>
       adapter.postReply({ purpose: 'closeout', message: text }),
   });
+  adapter.replaceReply = async (handle, reply) => {
+    const result = await replaceReply(handle, reply);
+    activity.reassert();
+    return result;
+  };
   return { userId: actorUserId, conversation, adapter };
 }
 

@@ -1618,21 +1618,46 @@ describe('deliverFastAgentParentEvent', () => {
             surface === 'discord' ? 8_000 : 4_000,
           );
           expect(typing).toHaveBeenCalledTimes(2);
-          if (surface === 'telegram') {
-            const reply = { purpose: 'progress', message: 'Working' };
-            await adapter.postReply(reply);
-            await vi.advanceTimersByTimeAsync(0);
-            expect(typing).toHaveBeenCalledTimes(3);
-            await adapter.replaceReply({ messageId: '123' }, reply);
-            await vi.advanceTimersByTimeAsync(0);
-            expect(typing).toHaveBeenCalledTimes(4);
-          }
+          const reply = { purpose: 'closeout', message: 'Working' };
+          await adapter.postReply(reply);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(typing).toHaveBeenCalledTimes(3);
+          await adapter.replaceReply({ messageId: '123' }, reply);
+          await vi.advanceTimersByTimeAsync(0);
+          expect(typing).toHaveBeenCalledTimes(4);
+          const editMessage =
+            surface === 'discord'
+              ? mocks.discordEditMessage
+              : mocks.telegramEditMessage;
+          editMessage.mockRejectedValueOnce(new Error('edit failed'));
+          await expect(
+            adapter.replaceReply({ messageId: '123' }, reply),
+          ).rejects.toThrow('edit failed');
+          expect(typing).toHaveBeenCalledTimes(4);
+          const postMessage =
+            surface === 'discord'
+              ? mocks.discordPostMessage
+              : mocks.telegramPostMessage;
+          postMessage.mockRejectedValueOnce(new Error('post failed'));
+          await expect(
+            adapter.postReply({ purpose: 'progress', message: 'Failed' }),
+          ).rejects.toThrow('post failed');
+          expect(typing).toHaveBeenCalledTimes(4);
+          let resolveLate!: (value: { messageId: string }) => void;
+          const late = new Promise<{ messageId: string }>((resolve) => {
+            resolveLate = resolve;
+          });
+          postMessage.mockReturnValueOnce(late);
+          const posting = adapter.postReply({
+            purpose: 'progress',
+            message: 'Late',
+          });
           await adapter.activity.settle({ keepProcessing: true });
           adapter.activity.start();
-          if (surface === 'telegram')
-            await adapter.postReply({ purpose: 'progress', message: 'Late' });
+          resolveLate({ messageId: '789' });
+          await posting;
           await vi.advanceTimersByTimeAsync(16_000);
-          expect(typing).toHaveBeenCalledTimes(surface === 'discord' ? 2 : 4);
+          expect(typing).toHaveBeenCalledTimes(4);
         } finally {
           await adapter.activity.dispose();
           vi.useRealTimers();
@@ -1649,6 +1674,71 @@ describe('deliverFastAgentParentEvent', () => {
           },
         },
         event,
+      });
+    },
+  );
+
+  it.each(['new report', 'existing report', 'task settled'] as const)(
+    'reasserts Discord typing after %s and its suggestion messages',
+    async (scenario) => {
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) => {
+        vi.useFakeTimers();
+        try {
+          adapter.activity.start();
+          await vi.advanceTimersByTimeAsync(0);
+          mocks.postDiscordSuggestions.mockImplementationOnce(async () => {
+            await vi.advanceTimersByTimeAsync(0);
+            expect(mocks.discordTyping).toHaveBeenCalledTimes(2);
+          });
+          await adapter.postReply({
+            purpose: 'closeout',
+            message: 'Report ready',
+            suggestions: [
+              { title: 'Check retries', brief: 'Exercise retries.' },
+            ],
+          });
+          await vi.advanceTimersByTimeAsync(0);
+          expect(mocks.discordTyping).toHaveBeenCalledTimes(3);
+          await adapter.activity.settle({ keepProcessing: true });
+          await vi.advanceTimersByTimeAsync(16_000);
+          expect(mocks.discordTyping).toHaveBeenCalledTimes(3);
+        } finally {
+          await adapter.activity.dispose();
+          vi.useRealTimers();
+        }
+      });
+      await deliverFastAgentParentEvent({
+        parent: {
+          ...parent,
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'guild-1',
+            conversationId: 'thread-1',
+            replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+          },
+        },
+        event:
+          scenario === 'task settled'
+            ? {
+                type: 'task_settled',
+                taskId: 'child-task-2',
+                runId: 43,
+                customAutomationId: 'automation-2',
+                status: 'completed',
+                taskUrl: 'https://roomote.example/task/child-task-2',
+                pullRequests: [],
+              }
+            : {
+                type: 'automation_triggered',
+                eventId: 'occurrence-2',
+                automationId: 'automation-2',
+                automationName: 'Retry scan',
+                prompt: 'Find retry failures.',
+                trigger: 'schedule',
+                ...(scenario === 'existing report'
+                  ? { rootMessageId: 'root-1' }
+                  : {}),
+              },
       });
     },
   );

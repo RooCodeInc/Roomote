@@ -385,11 +385,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           text: params.question,
         });
 
+    const activity = createFastAgentTypingActivity({
+      sendTyping: () => provider.triggerTyping(conversation.replyTarget),
+      intervalMs: 8_000,
+    });
     const adapter: FastAgentTurnAdapter = {
-      activity: createFastAgentTypingActivity({
-        sendTyping: () => provider.triggerTyping(conversation.replyTarget),
-        intervalMs: 8_000,
-      }),
+      activity,
       createArtifact,
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
@@ -425,6 +426,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
               text: textWithFooter,
               textFormat: 'markdown',
             });
+            activity.reassert();
             return {
               messageId: result.lastTextMessageId ?? result.messageId,
               textWithoutFooter: getDiscordFooterlessFinalChunk({
@@ -449,7 +451,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         return { messageId: posted.messageId };
       },
     };
-    adapter.replaceReply = createDiscordFastReplyReplacer({
+    const replaceReply = createDiscordFastReplyReplacer({
       provider,
       conversation,
       channelId: conversation.replyTarget.channelId,
@@ -459,6 +461,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       postReplacement: (text) =>
         adapter.postReply({ purpose: 'closeout', message: text }),
     });
+    adapter.replaceReply = async (handle, reply) => {
+      const result = await replaceReply(handle, reply);
+      activity.reassert();
+      return result;
+    };
     return { conversation, adapter };
   }
 
