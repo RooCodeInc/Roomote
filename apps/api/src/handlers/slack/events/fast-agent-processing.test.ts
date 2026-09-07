@@ -66,6 +66,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSlackConversationSubjectByUserId: vi.fn(async () => null),
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
   persistFastAgentInlineHumanTurn: vi.fn(async () => null),
@@ -244,6 +245,15 @@ describe('processFastAgentMessage', () => {
   ] as const)(
     'attaches selected images and videos on a later human follow-up with fallback %j (source present=%s)',
     async (fallback, sourcePresent) => {
+      const { postSlackThreadMarkdownMessage } = await vi.importActual<
+        typeof import('../helpers/thread-posting.js')
+      >('../helpers/thread-posting.js');
+      let sourceDeleted = false;
+      mocks.postThreadMessage.mockImplementationOnce((params) => {
+        // Deletion after adapter preflight but before the posting guard.
+        sourceDeleted = !sourcePresent;
+        return postSlackThreadMarkdownMessage(params);
+      });
       mocks.deliverVideos.mockResolvedValueOnce(fallback);
       mocks.resolveSessionImages.mockResolvedValueOnce([
         {
@@ -268,7 +278,10 @@ describe('processFastAgentMessage', () => {
         },
       );
       const slack = {
-        hasMessageInThread: vi.fn(async () => sourcePresent),
+        hasMessageInThread: vi.fn(async () => !sourceDeleted),
+        postMessage: vi.fn(async () => '101.001'),
+        updateMessage: vi.fn(async () => true),
+        getMessageBlocks: vi.fn(async () => []),
         addReaction: vi.fn().mockResolvedValue(true),
         removeReaction: vi.fn().mockResolvedValue(true),
         normalizeIncomingText: vi.fn(async (text: string) => text),
@@ -294,19 +307,23 @@ describe('processFastAgentMessage', () => {
         artifactIds: ['artifact-1'],
         sessionId: 'fast-session-1',
       });
-      if (sourcePresent)
+      if (sourcePresent) {
         expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
           artifactIds: ['video-1'],
           sessionId: 'fast-session-1',
           channelId: 'C123',
           threadTs: '100.001',
         });
-      else expect(mocks.deliverVideos).not.toHaveBeenCalled();
+        expect(slack.postMessage.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.deliverVideos.mock.invocationCallOrder[0]!,
+        );
+      } else {
+        expect(mocks.deliverVideos).not.toHaveBeenCalled();
+        expect(slack.postMessage).not.toHaveBeenCalled();
+      }
       expect(mocks.postThreadMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          text: ['Here is the requested result.', fallback]
-            .filter(Boolean)
-            .join('\n\n'),
+          text: 'Here is the requested result.',
           images: [
             {
               url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
@@ -315,6 +332,21 @@ describe('processFastAgentMessage', () => {
           ],
         }),
       );
+      if (fallback) {
+        expect(slack.updateMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.objectContaining({
+              text: `Here is the requested result.\n\n${fallback}`,
+              blocks: expect.arrayContaining([
+                expect.objectContaining({
+                  type: 'image',
+                  alt_text: 'result.png',
+                }),
+              ]),
+            }),
+          }),
+        );
+      }
     },
   );
 

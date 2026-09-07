@@ -184,6 +184,15 @@ describe('createSlackFastReplyStream', () => {
         channelId: 'C1',
         threadTs: '100.1',
       });
+      expect(mocks.updateWithFooter).toHaveBeenCalledTimes(fallback ? 2 : 1);
+      expect(mocks.updateWithFooter.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.deliverVideos.mock.invocationCallOrder[0]!,
+      );
+      if (fallback) {
+        expect(mocks.deliverVideos.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.updateWithFooter.mock.invocationCallOrder[1]!,
+        );
+      }
       const text = ['Result.', fallback].filter(Boolean).join('\n\n');
       expect(mocks.updateWithFooter).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -206,7 +215,7 @@ describe('createSlackFastReplyStream', () => {
     expect(mocks.deliverVideos).not.toHaveBeenCalled();
   });
 
-  it('propagates video authorization rejection without applying a final reply', async () => {
+  it('propagates video authorization rejection after applying the text reply', async () => {
     mocks.deliverVideos.mockRejectedValueOnce(new Error('Unauthorized video'));
     const { stream } = build(slackMock(), null);
     await stream.append('Preparing');
@@ -217,19 +226,17 @@ describe('createSlackFastReplyStream', () => {
         videoArtifactIds: ['foreign-video'],
       }),
     ).rejects.toThrow('Unauthorized video');
-    expect(mocks.updateWithFooter).not.toHaveBeenCalled();
+    expect(mocks.updateWithFooter).toHaveBeenCalledOnce();
+    expect(mocks.recordMessage).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])(
-    'leaves video fallback to the normal post when finalization fails (deleted=%s)',
-    async (deleted) => {
-      const slack = slackMock();
-      slack.deleteMessage.mockResolvedValue(deleted);
-      mocks.updateWithFooter.mockResolvedValue(false);
-      mocks.deliverVideos.mockResolvedValue(
-        'Upload failed. [View video](https://roomote.example/video)',
-      );
-      const { stream, onDelivered } = build(slack, null);
+  it.each([false, new Error('rewrite failed')])(
+    'does not upload videos when the initial rewrite fails (%s)',
+    async (failure) => {
+      if (failure instanceof Error)
+        mocks.updateWithFooter.mockRejectedValueOnce(failure);
+      else mocks.updateWithFooter.mockResolvedValueOnce(failure);
+      const { stream, onDelivered } = build(slackMock(), null);
       await stream.append('Preparing');
       await expect(
         stream.finish({
@@ -238,8 +245,90 @@ describe('createSlackFastReplyStream', () => {
           videoArtifactIds: ['video-1'],
         }),
       ).resolves.toBeUndefined();
-      expect(mocks.deliverVideos).toHaveBeenCalledOnce();
+      expect(mocks.deliverVideos).not.toHaveBeenCalled();
+      expect(mocks.recordMessage).not.toHaveBeenCalled();
       expect(onDelivered).not.toHaveBeenCalled();
+    },
+  );
+
+  it('retries video delivery normally when a failed text rewrite leaves an undeletable partial stream', async () => {
+    mocks.updateWithFooter.mockResolvedValueOnce(false);
+    const slack = slackMock();
+    slack.deleteMessage.mockResolvedValueOnce(false);
+    const { stream, onDelivered } = build(slack, null);
+    await stream.append('Preparing');
+    await expect(
+      stream.finish({
+        purpose: 'closeout',
+        message: 'Result.',
+        videoArtifactIds: ['video-1'],
+      }),
+    ).resolves.toBeUndefined();
+    expect(mocks.deliverVideos).not.toHaveBeenCalled();
+    expect(onDelivered).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'keeps accepted text and leaves video fallback to the normal post when its rewrite fails (throws=%s)',
+    async (throws) => {
+      const slack = slackMock();
+      mocks.updateWithFooter.mockResolvedValueOnce(true);
+      if (throws)
+        mocks.updateWithFooter.mockRejectedValueOnce(
+          new Error('rewrite failed'),
+        );
+      else mocks.updateWithFooter.mockResolvedValueOnce(false);
+      mocks.deliverVideos.mockResolvedValue(
+        'Upload failed. [View video](https://roomote.example/video)',
+      );
+      const { stream, onDelivered, getPendingQuote } = build(
+        slack,
+        '> Matt: hi',
+      );
+      await stream.append('Preparing');
+      await expect(
+        stream.finish({
+          purpose: 'closeout',
+          message: 'Result.',
+          imageArtifactIds: ['artifact-1'],
+          videoArtifactIds: ['video-1'],
+        }),
+      ).resolves.toBeUndefined();
+      expect(mocks.deliverVideos).toHaveBeenCalledOnce();
+      expect(mocks.updateWithFooter).toHaveBeenCalledTimes(2);
+      expect(slack.deleteMessage).not.toHaveBeenCalled();
+      expect(mocks.updateWithFooter).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          text: '> Matt: hi\nResult.\n\nUpload failed. [View video](https://roomote.example/video)',
+          bodyBlocks: [
+            {
+              type: 'section',
+              block_id: 'quote',
+              text: { type: 'mrkdwn', text: '> Matt: hi' },
+            },
+            {
+              type: 'markdown',
+              text: 'Result.\n\nUpload failed. [View video](https://roomote.example/video)',
+            },
+            {
+              type: 'image',
+              image_url:
+                'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+              alt_text: 'result.png',
+            },
+          ],
+          footerText: 'footer',
+        }),
+      );
+      expect(mocks.recordMessage).not.toHaveBeenCalled();
+      expect(onDelivered).not.toHaveBeenCalled();
+      expect(getPendingQuote()).toBe('> Matt: hi');
+      await stream.finish({
+        purpose: 'closeout',
+        message: 'Result.',
+        videoArtifactIds: ['video-1'],
+      });
+      expect(mocks.deliverVideos).toHaveBeenCalledOnce();
     },
   );
 

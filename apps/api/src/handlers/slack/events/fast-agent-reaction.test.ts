@@ -36,6 +36,7 @@ vi.mock('@roomote/communication', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSlackConversationSubjectByUserId: vi.fn(async () => null),
   buildFastAgentArtifactCreator: vi.fn(() => mocks.createArtifact),
   findFastAgentSessionForProviderMessage: mocks.findSession,
   persistFastAgentInlineHumanTurn: mocks.persistAdmission,
@@ -48,6 +49,27 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/slack', () => ({
+  postSlackThreadMessageWithFooterText: vi.fn(
+    async ({
+      slack,
+      channel,
+      threadTs,
+      text,
+      bodyBlocks,
+    }: {
+      slack: { postMessage: (params: unknown) => Promise<string> };
+      channel: string;
+      threadTs: string;
+      text: string;
+      bodyBlocks: unknown[];
+    }) =>
+      slack.postMessage({
+        channel,
+        thread_ts: threadTs,
+        text,
+        blocks: bodyBlocks,
+      }),
+  ),
   buildSlackThreadReplyFooterBlock: vi.fn(() => ({ type: 'context' })),
   createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
   createFastAgentSlackSessionActivity: mocks.createActivity,
@@ -233,6 +255,15 @@ describe('Fast Slack reaction input', () => {
   ] as const)(
     'attaches selected images and videos in a reaction reply with fallback %j (source present=%s)',
     async (fallback, sourcePresent) => {
+      const { postSlackThreadMarkdownMessage } = await vi.importActual<
+        typeof import('../helpers/thread-posting.js')
+      >('../helpers/thread-posting.js');
+      let sourceDeleted = false;
+      mocks.postThreadMessage.mockImplementationOnce((params) => {
+        // Deletion after adapter preflight but before the posting guard.
+        sourceDeleted = !sourcePresent;
+        return postSlackThreadMarkdownMessage(params);
+      });
       mocks.deliverVideos.mockResolvedValueOnce(fallback);
       mocks.resolveSessionImages.mockResolvedValueOnce([
         {
@@ -256,18 +287,15 @@ describe('Fast Slack reaction input', () => {
           return '';
         },
       );
-      mocks.postThreadMessage.mockResolvedValueOnce({
-        status: 'posted',
-        messageId: '103.000',
-      });
       const slack = {
         getMessage: vi.fn(async () => ({
           text: 'Please attach the earlier screenshot.',
           thread_ts: '100.000',
         })),
         normalizeIncomingText: vi.fn(async () => '@alice'),
-        hasMessageInThread: vi.fn(async () => sourcePresent),
-        updateMessage: vi.fn(),
+        hasMessageInThread: vi.fn(async () => !sourceDeleted),
+        postMessage: vi.fn(async () => '103.000'),
+        updateMessage: vi.fn(async () => true),
       };
 
       await expect(
@@ -286,27 +314,29 @@ describe('Fast Slack reaction input', () => {
           },
         }),
       ).resolves.toBe(true);
-      await vi.waitFor(() =>
-        expect(mocks.answerQuestion).toHaveBeenCalledOnce(),
-      );
+      await vi.waitFor(() => expect(mocks.releaseLock).toHaveBeenCalledOnce());
 
       expect(mocks.resolveSessionImages).toHaveBeenCalledWith({
         artifactIds: ['artifact-1'],
         sessionId: 'session-1',
       });
-      if (sourcePresent)
+      if (sourcePresent) {
         expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
           artifactIds: ['video-1'],
           sessionId: 'session-1',
           channelId: 'C1',
           threadTs: '100.000',
         });
-      else expect(mocks.deliverVideos).not.toHaveBeenCalled();
+        expect(slack.postMessage.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.deliverVideos.mock.invocationCallOrder[0]!,
+        );
+      } else {
+        expect(mocks.deliverVideos).not.toHaveBeenCalled();
+        expect(slack.postMessage).not.toHaveBeenCalled();
+      }
       expect(mocks.postThreadMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          text: ['Here is the requested result.', fallback]
-            .filter(Boolean)
-            .join('\n\n'),
+          text: 'Here is the requested result.',
           images: [
             {
               url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
@@ -315,6 +345,21 @@ describe('Fast Slack reaction input', () => {
           ],
         }),
       );
+      if (fallback) {
+        expect(slack.updateMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.objectContaining({
+              text: `Here is the requested result.\n\n${fallback}`,
+              blocks: expect.arrayContaining([
+                expect.objectContaining({
+                  type: 'image',
+                  alt_text: 'result.png',
+                }),
+              ]),
+            }),
+          }),
+        );
+      }
     },
   );
 

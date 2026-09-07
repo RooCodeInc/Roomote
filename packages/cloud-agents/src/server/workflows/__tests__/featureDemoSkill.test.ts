@@ -94,6 +94,21 @@ describe('feature-demo skill', () => {
     expect(narrationScript).not.toContain('xi-api-key');
   });
 
+  it('converts the native recording to playback-compatible MP4', () => {
+    const captureRunner = fs.readFileSync(
+      path.join(skillDirPath, 'capture/capture.mjs'),
+      'utf8',
+    );
+    expect(captureRunner).toMatch(/'-c:v',\s*'libx264'/);
+    expect(captureRunner).toMatch(/'-pix_fmt',\s*'yuv420p'/);
+    expect(captureRunner).toMatch(/'-movflags',\s*'\+faststart'/);
+    expect(skillContent).toContain('Keep the native `raw.webm` source');
+    expect(skillContent).toContain('-c copy -movflags +faststart');
+    expect(skillContent).toContain(
+      'do not retime or alter content for format conversion',
+    );
+  });
+
   it('never commits pipeline outputs into the repository', () => {
     expect(skillContent).toContain(
       'Never commit recordings, renders, node_modules, or props into the repository.',

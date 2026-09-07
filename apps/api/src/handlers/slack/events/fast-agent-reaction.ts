@@ -201,27 +201,21 @@ async function processFastAgentReaction(params: {
             artifactIds: imageArtifactIds,
             sessionId: session.id,
           });
-          const videoFallback =
-            videoArtifactIds.length &&
-            (await context.slack.hasMessageInThread({
-              channel: event.item.channel,
-              threadTs,
-              messageTs: event.item.ts,
-            })) !== false
-              ? await deliverFastAgentSessionVideos({
-                  artifactIds: videoArtifactIds,
-                  sessionId: session.id,
-                  channelId: event.item.channel,
-                  threadTs,
-                })
-              : '';
-          message = [message, videoFallback].filter(Boolean).join('\n\n');
           const posted = await postSlackThreadMarkdownMessage({
             slack: context.slack,
             channel: event.item.channel,
             threadTs,
             text: message,
             sourceMessageTs: event.item.ts,
+            deliverVideos: videoArtifactIds.length
+              ? () =>
+                  deliverFastAgentSessionVideos({
+                    artifactIds: videoArtifactIds,
+                    sessionId: session.id,
+                    channelId: event.item.channel,
+                    threadTs,
+                  })
+              : undefined,
             conversationLog: {
               userId: actorUserId,
               slackTeamId: context.teamId,

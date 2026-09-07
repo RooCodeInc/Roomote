@@ -383,27 +383,21 @@ export async function processFastAgentMessage(params: {
             artifactIds: imageArtifactIds,
             sessionId: session.id,
           });
-          const videoFallback =
-            videoArtifactIds.length &&
-            (await slack.hasMessageInThread({
-              channel: event.channel,
-              threadTs: threadId,
-              messageTs: event.ts,
-            })) !== false
-              ? await deliverFastAgentSessionVideos({
-                  artifactIds: videoArtifactIds,
-                  sessionId: session.id,
-                  channelId: event.channel,
-                  threadTs: threadId,
-                })
-              : '';
-          message = [message, videoFallback].filter(Boolean).join('\n\n');
           const posted = await postSlackThreadMarkdownMessage({
             slack,
             channel: event.channel,
             threadTs: threadId,
             text: message,
             sourceMessageTs: event.ts,
+            deliverVideos: videoArtifactIds.length
+              ? () =>
+                  deliverFastAgentSessionVideos({
+                    artifactIds: videoArtifactIds,
+                    sessionId: session.id,
+                    channelId: event.channel,
+                    threadTs: threadId,
+                  })
+              : undefined,
             conversationLog: {
               userId,
               slackTeamId: teamId,
