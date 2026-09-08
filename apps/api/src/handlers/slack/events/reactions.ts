@@ -708,7 +708,7 @@ async function launchTaskSuggestionTaskFromReaction({
                 : {}),
               channelId: announceChannelId,
               threadTs: launchThreadTs,
-              messageId: announceMessageTs,
+              messageId: launchThreadTs,
               initiator,
               repoForPayload:
                 launchTarget.kind === 'all_repositories'
@@ -745,9 +745,11 @@ async function launchTaskSuggestionTaskFromReaction({
       launchResult.status === 'rejected' ||
       launchResult.status === 'failed'
     ) {
-      await slack
-        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
-        .catch(() => {});
+      if (!isSuggestedTask) {
+        await slack
+          .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
+          .catch(() => {});
+      }
       await postSuggestionLaunchFailureMessage({
         slack,
         channelId,
@@ -768,9 +770,11 @@ async function launchTaskSuggestionTaskFromReaction({
       apiLogger.warn(
         `${logPrefix} failed to finalize work item ${workItemId}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
       );
-      await slack
-        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
-        .catch(() => {});
+      if (!isSuggestedTask) {
+        await slack
+          .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
+          .catch(() => {});
+      }
       return true;
     }
 
@@ -796,7 +800,7 @@ async function launchTaskSuggestionTaskFromReaction({
     );
     return true;
   } catch (error) {
-    if (announceMessageTs) {
+    if (announceMessageTs && !isSuggestedTask) {
       await slack
         .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
         .catch(() => {});

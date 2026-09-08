@@ -601,7 +601,7 @@ describe('chat reply suggestion reactions', () => {
         expect.objectContaining({
           channelId: 'C_REPORTS',
           threadTs: 'report-thread-ts',
-          messageId: 'card-ts',
+          messageId: 'report-thread-ts',
         }),
       );
     },
@@ -979,10 +979,7 @@ describe('chat reply suggestion reactions', () => {
       claimedAt,
     });
     expect(mocks.finalizeWorkItemLaunched).not.toHaveBeenCalled();
-    expect(slack.deleteMessage).toHaveBeenCalledWith({
-      channel: 'C1',
-      ts: 'card-ts',
-    });
+    expect(slack.deleteMessage).not.toHaveBeenCalled();
     expect(slack.postMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: expect.stringContaining('busy') }),
     );
