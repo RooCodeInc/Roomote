@@ -36,6 +36,7 @@ import {
 import {
   BRAIN_COLLECTOR_IDS,
   BRAIN_PAGE_TYPES,
+  type PullRequestStatus,
   RunStatus,
   brainNamespacePrefix,
   getLinkedEnvironmentIdFromPayload,
@@ -234,6 +235,67 @@ export async function postToBrain(
 }
 
 /**
+ * One word for what became of a task's pull requests, for the page
+ * frontmatter. Merged wins because shipped work is what later recall should
+ * weight; a task whose every PR closed unmerged is the failure worth
+ * remembering; anything still open is not an outcome yet.
+ */
+type TaskPullRequestOutcome = 'merged' | 'closed' | 'open';
+
+export function summarizePullRequestOutcome(
+  pullRequests: Array<{ status?: PullRequestStatus | null }>,
+): TaskPullRequestOutcome | null {
+  if (pullRequests.length === 0) {
+    return null;
+  }
+
+  if (pullRequests.some((pr) => pr.status === 'merged')) {
+    return 'merged';
+  }
+
+  if (pullRequests.every((pr) => pr.status === 'closed')) {
+    return 'closed';
+  }
+
+  return 'open';
+}
+
+function describePullRequestStatus(
+  status: PullRequestStatus | null | undefined,
+): string {
+  switch (status) {
+    case 'merged':
+      return 'merged';
+    case 'closed':
+      return 'closed without merging';
+    case 'draft':
+      return 'still open as a draft';
+    case 'open':
+      return 'still open';
+    default:
+      return 'status unknown';
+  }
+}
+
+function describePullRequestOutcome(
+  outcome: TaskPullRequestOutcome | null,
+  count: number,
+): string {
+  const noun = count === 1 ? 'The pull request' : 'The pull requests';
+
+  switch (outcome) {
+    case 'merged':
+      return count === 1
+        ? 'Outcome: the pull request was merged, so this work shipped.'
+        : 'Outcome: at least one pull request was merged, so this work shipped.';
+    case 'closed':
+      return `Outcome: ${noun.toLowerCase()} closed without merging, so this work did not ship as written. Treat the approach with that in mind.`;
+    default:
+      return `Outcome: ${noun.toLowerCase()} ${count === 1 ? 'was' : 'were'} still open when this memory was last refreshed.`;
+  }
+}
+
+/**
  * Build the memory page for a completed run. Deliberately deterministic and
  * conservative: only structured, known-safe fields (title, repos, PRs,
  * timestamps, provenance). LLM distillation of decisions/rationale layers on
@@ -251,18 +313,20 @@ export function buildMemoryPage(input: {
     prNumber: number | null;
     prTitle: string | null;
     prUrl: string;
+    status?: PullRequestStatus | null;
   }>;
 }): IngestPage {
   const completedAtIso = input.completedAt?.toISOString();
   const completed = completedAtIso ?? 'unknown';
   const completedDate = completedAtIso?.slice(0, 10);
+  const outcome = summarizePullRequestOutcome(input.pullRequests);
   const prLines = input.pullRequests.map((pr) => {
     const label =
       pr.repository && pr.prNumber
         ? `${pr.repository}#${pr.prNumber}`
         : pr.prUrl;
 
-    return `- ${label}${pr.prTitle ? `: ${pr.prTitle}` : ''} (${pr.prUrl})`;
+    return `- ${label}${pr.prTitle ? `: ${pr.prTitle}` : ''} (${pr.prUrl}): ${describePullRequestStatus(pr.status)}`;
   });
 
   const content = [
@@ -285,6 +349,11 @@ export function buildMemoryPage(input: {
         // retrieval (gbrain sources) or admin triage later without
         // re-ingesting.
         input.environmentName && `environment: ${input.environmentName}`,
+        // What became of the work, as of the latest ingestion. The agent's
+        // summary is written at completion and cannot know this; the page is
+        // re-put when a linked pull request merges or closes so recall can
+        // tell shipped work from abandoned work.
+        outcome && `pr_outcome: ${outcome}`,
         'provenance: roomote-task-memory',
       ],
     }),
@@ -296,7 +365,16 @@ export function buildMemoryPage(input: {
     ...(input.agentSummary
       ? [input.agentSummary, '']
       : ['## Outcome', '', `Task completed at ${completed}.`, '']),
-    ...(prLines.length > 0 ? ['## Pull requests', '', ...prLines, ''] : []),
+    ...(prLines.length > 0
+      ? [
+          '## Pull requests',
+          '',
+          ...prLines,
+          '',
+          describePullRequestOutcome(outcome, input.pullRequests.length),
+          '',
+        ]
+      : []),
   ].join('\n');
 
   return {
@@ -594,6 +672,7 @@ async function drainOneBatch(connection: {
             prNumber: pr.prNumber,
             prTitle: pr.prTitle,
             prUrl: pr.prUrl,
+            status: pr.status,
           })),
         });
 

@@ -9,6 +9,7 @@ import {
   inArray,
   ne,
   or,
+  requeueBrainMemoryEventsForTasks,
   syncTaskStateFromRuns,
 } from '@roomote/db/server';
 import { captureActivationPrMerged } from '@roomote/telemetry/server';
@@ -91,13 +92,16 @@ export async function updateTaskPrStatus(
     eq(taskPullRequests.repository, repository),
     eq(taskPullRequests.prNumber, prNumber),
   );
+  // Terminal statuses only update rows that are not already there, so the
+  // returned rows are the associations that actually transitioned and a
+  // replayed webhook does not re-trigger the downstream work below.
   const matchingStatus = and(
     matchingPullRequest,
-    ...(status === 'merged'
+    ...(status === 'merged' || status === 'closed'
       ? [
           or(
             isNull(taskPullRequests.status),
-            ne(taskPullRequests.status, 'merged'),
+            ne(taskPullRequests.status, status),
           ),
         ]
       : []),
@@ -146,6 +150,21 @@ export async function updateTaskPrStatus(
         error,
       );
     });
+  }
+
+  if ((status === 'merged' || status === 'closed') && updated.length > 0) {
+    // The task's memory pages were written at completion, before anyone knew
+    // whether the work would ship. Re-ingest them so recall carries the
+    // outcome. Best-effort: a Memory hiccup must not fail the webhook.
+    const taskIds = [...new Set(updated.map((row) => row.taskId))].sort();
+    try {
+      await requeueBrainMemoryEventsForTasks(db, taskIds);
+    } catch (error) {
+      console.error(
+        `[updateTaskPrStatus] Failed to requeue memories for ${taskIds.join(', ')} after ${status} PR:`,
+        error,
+      );
+    }
   }
 
   if (status !== 'merged' || updated.length === 0) {

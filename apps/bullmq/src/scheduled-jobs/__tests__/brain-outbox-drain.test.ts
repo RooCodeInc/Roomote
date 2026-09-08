@@ -96,6 +96,7 @@ import {
   isBrainRateLimited,
   postToBrain,
   redactBrainText,
+  summarizePullRequestOutcome,
 } from '../brain-outbox-drain';
 
 describe('PR fact resume cursor', () => {
@@ -480,6 +481,84 @@ describe('task memory page identity', () => {
     expect(page.content).toMatch(
       /^---\ntype: task-memory\ntitle: "[^"]+"\ncreated: 2026-08-13T10:00:00\.000Z\n/,
     );
+  });
+});
+
+describe('task memory pull request outcomes', () => {
+  const base = {
+    runId: 7,
+    taskId: 'task-1',
+    taskTitle: 'Ship the fix',
+    completedAt: new Date('2026-08-13T10:00:00Z'),
+    environmentName: null,
+    agentSummary: 'Opened a PR with the durable approach.',
+  };
+  const pr = {
+    repository: 'owner/repo',
+    prNumber: 42,
+    prTitle: 'Serialize the writer',
+    prUrl: 'https://example.test/owner/repo/pull/42',
+  };
+
+  it('stamps a merged outcome the completion-time summary could not know', () => {
+    const page = buildMemoryPage({
+      ...base,
+      pullRequests: [{ ...pr, status: 'merged' }],
+    });
+
+    expect(page.content).toContain('\npr_outcome: merged\n');
+    expect(page.content).toContain(
+      '- owner/repo#42: Serialize the writer (https://example.test/owner/repo/pull/42): merged',
+    );
+    expect(page.content).toContain(
+      'Outcome: the pull request was merged, so this work shipped.',
+    );
+  });
+
+  it('records work that did not ship when every PR closed unmerged', () => {
+    const page = buildMemoryPage({
+      ...base,
+      pullRequests: [
+        { ...pr, status: 'closed' },
+        { ...pr, prNumber: 43, status: 'closed' },
+      ],
+    });
+
+    expect(page.content).toContain('\npr_outcome: closed\n');
+    expect(page.content).toContain(
+      'Outcome: the pull requests closed without merging, so this work did not ship as written.',
+    );
+  });
+
+  it('treats any merge as shipped even when a sibling PR was closed', () => {
+    expect(
+      summarizePullRequestOutcome([{ status: 'closed' }, { status: 'merged' }]),
+    ).toBe('merged');
+  });
+
+  it('does not claim an outcome for open, draft, or unknown status', () => {
+    expect(summarizePullRequestOutcome([{ status: 'open' }])).toBe('open');
+    expect(summarizePullRequestOutcome([{ status: 'draft' }])).toBe('open');
+    expect(summarizePullRequestOutcome([{ status: null }])).toBe('open');
+    expect(summarizePullRequestOutcome([])).toBeNull();
+
+    const page = buildMemoryPage({
+      ...base,
+      pullRequests: [{ ...pr, status: null }],
+    });
+
+    expect(page.content).toContain('\npr_outcome: open\n');
+    expect(page.content).toContain(': status unknown');
+    expect(page.content).toContain(
+      'Outcome: the pull request was still open when this memory was last refreshed.',
+    );
+  });
+
+  it('omits the outcome field entirely when the task opened no PR', () => {
+    const page = buildMemoryPage({ ...base, pullRequests: [] });
+
+    expect(page.content).not.toContain('pr_outcome');
+    expect(page.content).not.toContain('## Pull requests');
   });
 });
 
