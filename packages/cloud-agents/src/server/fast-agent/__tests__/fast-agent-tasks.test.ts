@@ -87,6 +87,55 @@ describe('fast-agent task operations', () => {
     );
   });
 
+  it('marks auth preflight failures as not accepted without sending a request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await sendFastAgentTaskMessageOnce(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://app.example.test/_roomote-api',
+        getAuthToken: async () => {
+          throw new Error('Auth token unavailable.');
+        },
+      },
+      {
+        taskId: 'task-42',
+        message: 'Resolve the review feedback.',
+        clientMessageId: 'pr-review-delivery:delivery-1',
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Auth token unavailable.',
+      delivery: 'not_accepted',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves transport failures without a delivery marker', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('Connection lost.'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await sendFastAgentTaskMessageOnce(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://app.example.test/_roomote-api',
+        getAuthToken: async () => 'auth-token',
+      },
+      {
+        taskId: 'task-42',
+        message: 'Resolve the review feedback.',
+        clientMessageId: 'pr-review-delivery:delivery-1',
+      },
+    );
+
+    expect(result).toEqual({ success: false, error: 'Connection lost.' });
+    expect(result).not.toHaveProperty('delivery');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards model and reasoning overrides for pull request reviews', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true, taskId: 'review-task' }), {

@@ -150,6 +150,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
   };
 });
 
+import { TRPCClientError } from '@trpc/client';
 import {
   EXPIRED_SNAPSHOT_RESUME_ERROR,
   type RunTokenContext,
@@ -293,6 +294,58 @@ describe('sendMessageToTask', () => {
       mockSteerTaskMutate.mock.invocationCallOrder[0]!,
     );
   });
+
+  it.each([
+    ['missing task', null, 404],
+    ['settled without snapshot', createActiveRun({ status: 'completed' }), 409],
+    ['worker still booting', createActiveRun({ sandboxServerUrl: null }), 409],
+  ])(
+    'marks a steer rejected before delivery: %s',
+    async (_name, run, status) => {
+      mockFindLatestTaskRun.mockResolvedValue(run);
+
+      const result = await steerMessageToTask({
+        taskId: 'task-1',
+        userId: 'user-1',
+        message: 'Include the additional context.',
+        senderMode: 'fast_agent',
+      });
+
+      expect(result).toMatchObject({
+        success: false,
+        status,
+        delivery: 'not_accepted',
+      });
+      expect(mockSteerTaskMutate).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [new TypeError('fetch failed'), 500, 'fetch failed'],
+    [new TRPCClientError('fetch failed'), 502, 'Sandbox error: fetch failed'],
+  ])(
+    'does not claim rejection or resume after an ambiguous steer: %s',
+    async (error, status, message) => {
+      mockFindLatestTaskRun
+        .mockResolvedValueOnce(createActiveRun())
+        .mockResolvedValue(
+          createActiveRun({ status: 'completed', snapshotId: 'snapshot-1' }),
+        );
+      mockSteerTaskMutate.mockRejectedValueOnce(error);
+
+      const result = await steerMessageToTask({
+        taskId: 'task-1',
+        userId: 'user-1',
+        message: 'Include the additional context.',
+        senderMode: 'fast_agent',
+      });
+
+      expect(result).toEqual({ success: false, status, error: message });
+      expect(mockSteerTaskMutate).toHaveBeenCalledOnce();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    },
+  );
 
   it('marks Fast child messages for worker-owned pending-input dispatch', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
@@ -1193,7 +1246,7 @@ describe('sendMessageToTask', () => {
     );
   });
 
-  it('resumes the same task when an active steer races with run settlement', async () => {
+  it('resumes the same task when settlement races with preparation before the steer is submitted', async () => {
     const activeRun = createActiveRun({ snapshotId: 'snap-race' });
     const completedRun = createActiveRun({
       status: 'completed',
@@ -1204,7 +1257,9 @@ describe('sendMessageToTask', () => {
     mockFindLatestTaskRun
       .mockResolvedValueOnce(activeRun)
       .mockResolvedValueOnce(completedRun);
-    mockSteerTaskMutate.mockRejectedValueOnce(new Error('worker exited'));
+    mockGetTaskGoalForRun.mockRejectedValueOnce(
+      new Error('preparation failed'),
+    );
 
     const result = await steerMessageToTask({
       taskId: 'task-1',
@@ -1217,6 +1272,7 @@ describe('sendMessageToTask', () => {
       result: { resumed: true, runId: 77, taskId: 'task-1' },
     });
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockSteerTaskMutate).not.toHaveBeenCalled();
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({

@@ -156,6 +156,7 @@ async function callFastAgentTaskApi({
     return {
       success: false,
       error: authContext.error,
+      delivery: 'not_accepted',
     };
   }
 

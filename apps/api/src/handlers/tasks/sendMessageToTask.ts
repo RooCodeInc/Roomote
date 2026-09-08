@@ -120,7 +120,12 @@ function resolveFollowUpPromptSource(options: {
 
 type SendMessageToTaskResult =
   | { success: true; result: unknown }
-  | { success: false; error: string; status: SendMessageErrorStatus };
+  | {
+      success: false;
+      error: string;
+      status: SendMessageErrorStatus;
+      delivery?: 'not_accepted';
+    };
 
 type LatestTaskRun = {
   id: number;
@@ -1189,7 +1194,12 @@ export async function steerMessageToTask({
     });
 
     if (!run) {
-      return { success: false, error: 'Task not found', status: 404 };
+      return {
+        success: false,
+        error: 'Task not found',
+        status: 404,
+        delivery: 'not_accepted',
+      };
     }
 
     const channelBindings = (await getTaskChannelBindings(taskId)) ?? null;
@@ -1214,6 +1224,7 @@ export async function steerMessageToTask({
         success: false,
         error: `Task is not active (status: ${run.status})`,
         status: 409,
+        delivery: 'not_accepted',
       };
     }
 
@@ -1222,10 +1233,12 @@ export async function steerMessageToTask({
         success: false,
         error: 'Task has no active sandbox. The worker may still be booting.',
         status: 409,
+        delivery: 'not_accepted',
       };
     }
 
     let didSwitchActingUser = false;
+    let promptSubmitted = false;
 
     try {
       await touchTaskActivity(db, taskId);
@@ -1260,6 +1273,7 @@ export async function steerMessageToTask({
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
           const goal = await getTaskGoalForRun(run.id);
+          promptSubmitted = true;
           return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
@@ -1302,7 +1316,13 @@ export async function steerMessageToTask({
         port: true,
         result: true,
       });
-      if (latestRun?.id === run.id && isExitedRunStatus(latestRun.status)) {
+      // A lost RPC response does not prove rejection. Resuming with the same
+      // prompt could repeat an instruction already accepted by the worker.
+      if (
+        !promptSubmitted &&
+        latestRun?.id === run.id &&
+        isExitedRunStatus(latestRun.status)
+      ) {
         const resumeResult = await resumeTaskFromSnapshot({
           taskId,
           userId,
