@@ -49,7 +49,7 @@ function validBranch(branch: string): boolean {
   );
 }
 
-export const fastAgentRepositoryInspectSchema = z
+const fastAgentRepositoryInspectSchema = z
   .object({
     action: z.enum(['list', 'read', 'search']),
     repositoryId: z.string().min(1).max(200),
@@ -227,6 +227,7 @@ export class FastAgentRepositorySource {
     // The shared helper includes process.env. Never inherit its Git overrides.
     const env: NodeJS.ProcessEnv = {
       PATH: '/usr/bin:/bin',
+      NODE_ENV: 'production',
       HOME: root,
       XDG_CONFIG_HOME: root,
       LANG: 'C.UTF-8',
