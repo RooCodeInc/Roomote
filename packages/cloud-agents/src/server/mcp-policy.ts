@@ -79,6 +79,9 @@ const ROUTER_GITHUB_ALLOWED_TOOLS = [
   'list_commits',
   'search_repositories',
   'list_branches',
+  'update_pull_request',
+  'add_issue_comment',
+  'add_reply_to_pull_request_comment',
 ] as const;
 
 const ROUTER_MCP_SERVER_POLICIES: Record<
@@ -106,7 +109,9 @@ const ROUTER_MCP_SERVER_POLICIES: Record<
     allowedTools: ROUTER_GITHUB_ALLOWED_TOOLS,
     requiredToolGroups: ['github-pr-context', 'github-issue-context'],
     upstreamConstraints: {
-      readonly: true,
+      // Discovery includes bounded writes; the GitHub proxy validates each
+      // invocation and keeps read calls and run tokens upstream-readonly.
+      readonly: false,
       toolsets: ['repos', 'pull_requests', 'issues', 'actions'],
     },
   },

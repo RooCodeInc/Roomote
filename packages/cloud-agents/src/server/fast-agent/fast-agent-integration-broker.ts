@@ -378,7 +378,7 @@ export async function listFastAgentIntegrations(
       id: 'github',
       name: 'GitHub',
       description:
-        'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
+        'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App. In active connected repositories, update PR titles, descriptions, or open/closed state, add issue or PR comments, and reply to PR review comments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },

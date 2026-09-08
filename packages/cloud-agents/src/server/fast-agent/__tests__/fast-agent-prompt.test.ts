@@ -688,6 +688,19 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('keeps bounded GitHub updates in Fast without bypassing denied writes', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain(
+      'these bounded actions do not require a coding task',
+    );
+    expect(prompt).toContain(
+      'Other repository writes still require a coding task',
+    );
+    expect(prompt).toContain(
+      "A permission denial is not a reason to bypass the integration's authorization",
+    );
+  });
+
   it('treats replies as continuations of the existing conversation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 

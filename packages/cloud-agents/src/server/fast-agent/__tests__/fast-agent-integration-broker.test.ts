@@ -161,12 +161,18 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
-  it('exposes the deployment GitHub App through its read-only router MCP', async () => {
+  it('exposes GitHub reads and bounded writes through the existing router MCP', async () => {
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     mocks.listMcpTools.mockResolvedValue([
       { name: 'actions_get', inputSchema: { type: 'object' } },
       { name: 'actions_list', inputSchema: { type: 'object' } },
       { name: 'get_job_logs', inputSchema: { type: 'object' } },
+      { name: 'update_pull_request', inputSchema: { type: 'object' } },
+      { name: 'add_issue_comment', inputSchema: { type: 'object' } },
+      {
+        name: 'add_reply_to_pull_request_comment',
+        inputSchema: { type: 'object' },
+      },
     ]);
 
     const integrations = await listFastAgentIntegrations({
@@ -181,6 +187,9 @@ describe('fast-agent integration broker', () => {
       'actions_get',
       'actions_list',
       'get_job_logs',
+      'update_pull_request',
+      'add_issue_comment',
+      'add_reply_to_pull_request_comment',
     ]);
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
