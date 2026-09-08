@@ -64,6 +64,8 @@ const ROUTER_LINEAR_ALLOWED_TOOLS = [
 ] as const;
 
 const ROUTER_GITHUB_ALLOWED_TOOLS = [
+  // Fast's bounded writes run in its audited broker with per-actor repository
+  // authorization. Never forward writes using this deployment-wide credential.
   'actions_get',
   'actions_list',
   'get_job_logs',

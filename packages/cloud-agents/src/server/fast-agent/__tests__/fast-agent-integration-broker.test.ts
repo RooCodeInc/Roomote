@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   beginIntegrationCall: vi.fn(),
   completeIntegrationCall: vi.fn(),
   findGithubInstallation: vi.fn(),
+  callGitHubWrite: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -35,6 +36,12 @@ vi.mock('../../mcp-policy', () => ({
 vi.mock('../../mcp-tool-client', () => ({
   listMcpTools: mocks.listMcpTools,
   callMcpTool: mocks.callMcpTool,
+}));
+
+vi.mock('@roomote/github', () => ({ getOctokit: vi.fn() }));
+vi.mock('../fast-agent-github-writes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../fast-agent-github-writes')>()),
+  callFastGitHubWrite: mocks.callGitHubWrite,
 }));
 
 import {
@@ -161,7 +168,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
-  it('exposes the deployment GitHub App through its read-only router MCP', async () => {
+  it('preserves proxy reads and adds bounded local GitHub writes', async () => {
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     mocks.listMcpTools.mockResolvedValue([
       { name: 'actions_get', inputSchema: { type: 'object' } },
@@ -181,12 +188,118 @@ describe('fast-agent integration broker', () => {
       'actions_get',
       'actions_list',
       'get_job_logs',
+      'update_pull_request',
+      'add_issue_comment',
     ]);
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('dispatches discovered PR close locally as the requesting actor and audits it', async () => {
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    const available = await listFastAgentIntegrations(auditContext);
+    const args = {
+      owner: 'example',
+      repo: 'repo',
+      pullNumber: 17,
+      state: 'closed',
+    };
+    mocks.callGitHubWrite.mockResolvedValue({ number: 17, state: 'closed' });
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'github',
+        toolName: 'update_pull_request',
+        args,
+      }),
+    ).resolves.toEqual({ number: 17, state: 'closed' });
+    expect(mocks.callGitHubWrite).toHaveBeenCalledWith({
+      userId: 'user-1',
+      toolName: 'update_pull_request',
+      args,
+      signal: expect.any(AbortSignal),
+    });
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1', arguments: args }),
+    );
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'succeeded' }),
+    );
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+  });
+
+  it('does not expose or invoke disabled writes or unlisted destructive tools', async () => {
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    mocks.configuredServers = {
+      github: {
+        url: 'https://api.example.com/api/mcp-routing/github',
+        headers: {},
+        disabledTools: ['update_pull_request'],
+      },
+    };
+    const available = await listFastAgentIntegrations(auditContext);
+    expect(available[0]?.tools.map((tool) => tool.name)).not.toContain(
+      'update_pull_request',
+    );
+    for (const toolName of [
+      'update_pull_request',
+      'merge_pull_request',
+      'delete_file',
+      'actions_run_trigger',
+    ]) {
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'github',
+          toolName,
+          args: {},
+        }),
+      ).rejects.toThrow('not available');
+    }
+    expect(mocks.callGitHubWrite).not.toHaveBeenCalled();
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+  });
+
+  it('records denied GitHub writes as failed, never successful', async () => {
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    const available = await listFastAgentIntegrations(auditContext);
+    mocks.callGitHubWrite.mockRejectedValue(
+      new Error('GitHub API returned HTTP 403'),
+    );
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'github',
+        toolName: 'add_issue_comment',
+        args: {},
+      }),
+    ).rejects.toThrow('HTTP 403');
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed' }),
+    );
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+  });
+
+  it('never dispatches a local GitHub write without its durable audit record', async () => {
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    const available = await listFastAgentIntegrations(auditContext);
+    mocks.beginIntegrationCall.mockRejectedValueOnce(
+      new Error('Audit unavailable'),
+    );
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'github',
+        toolName: 'update_pull_request',
+        args: {
+          owner: 'example',
+          repo: 'repo',
+          pullNumber: 17,
+          state: 'closed',
+        },
+      }),
+    ).rejects.toThrow('Audit unavailable');
+    expect(mocks.callGitHubWrite).not.toHaveBeenCalled();
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
   });
 
   it('exposes the read-only Brain proxy when the Brain is configured', async () => {

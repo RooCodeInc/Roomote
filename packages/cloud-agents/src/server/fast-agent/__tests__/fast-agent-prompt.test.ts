@@ -70,6 +70,16 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('accepts explicit PR updates and closing directly without a permission bypass', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain('these API actions do not require a coding task');
+    expect(prompt).toContain(
+      'An explicit request to close or update the identified PR is acceptance',
+    );
+    expect(prompt).toContain(
+      'report the permission blocker rather than delegating to bypass it',
+    );
+  });
   it('bounds evidence-driven autonomy without weakening investigation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
     expect(prompt).toContain(
@@ -413,7 +423,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('roomote_manage_tasks');
     expect(prompt).toContain("current user's deployment authorization");
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
-    expect(prompt).toContain('same actor-authorized remote');
+    expect(prompt).toContain('actor-resolved remote');
+    expect(prompt).toContain(
+      'bounded GitHub API writes with per-request repository authorization',
+    );
     expect(prompt).toContain('local stdio servers remain sandbox-only');
     expect(prompt).toContain(
       'Communicate first on a human-authored turn; platform events remain exempt',
