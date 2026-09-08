@@ -64,7 +64,9 @@ suggestion reactions.
 When the suggestion is not pinned to an execution target, Fast-capable chat
 surfaces start it in Fast so Roomote can answer or delegate as needed. A pinned
 environment, repository-only surface, or provider without Fast support starts
-the coding task directly.
+the coding task directly. The launch starts in a fresh provider thread or topic
+where the provider supports one, while remaining connected to the Session that
+produced the report.
 
 ## React to Roomote replies
 
