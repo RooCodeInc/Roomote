@@ -60,6 +60,66 @@ review in the mention (for example `@roomote review this`) and Roomote runs the
 Review Code automation's structured review on the current head, posts the
 findings on the pull request, and reports back in the same discussion.
 
+## API-first work in Fast
+
+With an active Bitbucket OAuth connection and a synced, active Bitbucket Cloud
+repository, deployment members and admins can use Fast for bounded API operations
+without a repository clone or coding task:
+
+| Operation | Available tools |
+| --- | --- |
+| Read files and directories at a ref | `get_file`, `list_directory` |
+| Search code in one connected repository | `search_code` |
+| Read commit history or a commit by hash | `list_commits`, `get_commit` |
+| Read a PR, its diff, or its comments | `get_pull_request`, `get_pull_request_diff`, `list_pull_request_comments` |
+| Change a PR title and/or description | `update_pull_request` |
+| Decline a PR | `decline_pull_request` |
+| Add a PR comment or reply | `add_pull_request_comment` |
+
+Every tool requires `repositoryFullName` as `workspace/repo`. PR operations also
+require `pullRequestNumber`. File and directory reads require `ref`; file reads
+also require `path`. Commit history requires `ref`, while a single commit requires
+`hash`. Reading commits does not create commits.
+
+Title/description updates accept only those fields, not state changes. Comments
+use `body`; a reply additionally uses `parentCommentId` belonging to the same PR.
+Writes must match the requested action, and reading a PR does not authorize changing it.
+
+Reads are bounded: file and diff responses are limited to 1 MiB, directory pages
+contain up to 50 entries, and supported list/search pagination accepts pages 1-100.
+One page is not an exhaustive result. Code search accepts up to 256 characters of
+plain terms (letters, digits, underscores, spaces, dots, and hyphens), not query
+operators, `AND`/`OR`/`NOT`, or user-supplied repository filters. Roomote fixes the
+search to the connected repository and rejects scope or identity mismatches.
+
+<Warning>
+Bitbucket's code search API is deprecated November 1, 2026. If search becomes
+unavailable or a request fails authorization, scope, or size checks, Roomote
+reports the limitation rather than broadening the search or silently cloning a
+repository. Supported API requests do not launch a coding task as a workaround.
+</Warning>
+
+The Fast API does not support reopening or merging PRs, writing files, creating
+commits or PRs, or review administration such as approvals, reviewer changes, and
+thread resolution. A request for an actual code review still uses Roomote's
+structured review workflow; reading or summarizing a diff does not require it.
+
+### Why no additional MCP server is needed
+
+Roomote reuses its native Bitbucket API client and existing deployment OAuth token
+refresh flow for these tools. No separately installed MCP server or additional
+authentication is required. This avoids treating another server's support for
+Bearer headers as proof that it can manage the existing connection's token lifecycle.
+
+The alternatives have different setup requirements:
+
+- **Atlassian Rovo MCP v2:** the [supported tools](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/) include Bitbucket file, commit, and PR operations. They require MCP authorization with `read:bitbucket:agent-interface` or `write:bitbucket:agent-interface` scopes and an organization-linked workspace, not Roomote's existing Bitbucket OAuth consumer token. Code search requires MCP OAuth 2.1 with `search:code:agent-interface`. The separate [API-token authentication](https://support.atlassian.com/atlassian-ai-gateway/docs/configure-authentication-via-api-token/) options use personal API tokens via Basic auth or service-account API keys via Bearer auth; neither is the existing Bitbucket OAuth connection.
+- **MatanYemini/bitbucket-mcp**, examined at commit `d3594e2cfaae879ae2aa2ef15b0139c0aa6dc0f6`: its [server source](https://github.com/MatanYemini/bitbucket-mcp/blob/d3594e2cfaae879ae2aa2ef15b0139c0aa6dc0f6/src/index.ts) supports Bearer authentication, but reads the token into an Axios client in the constructor and runs over stdio, with no OAuth refresh flow. Its tool catalog does not provide repository file reads or code search. It is not a drop-in replacement for these Fast operations.
+- **aashari/mcp-server-atlassian-bitbucket**, examined at commit `19b2b386c800c95cd7a7a44446f950ec661b0d91`: its [credential transport](https://github.com/aashari/mcp-server-atlassian-bitbucket/blob/19b2b386c800c95cd7a7a44446f950ec661b0d91/src/utils/transport.util.ts) constructs Basic authentication from email/API-token or username/app-password credentials. Its configured authentication path does not reuse Bitbucket OAuth Bearer tokens.
+
+These comparisons are based on public documentation and pinned source inspection,
+not live-credential tests or verified upstream MCP runtime sessions.
+
 ## Personal account linking
 
 Users may link personal Bitbucket accounts separately for commenter identity

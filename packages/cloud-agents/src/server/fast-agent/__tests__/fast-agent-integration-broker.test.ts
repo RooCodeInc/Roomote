@@ -9,6 +9,13 @@ const mocks = vi.hoisted(() => ({
   beginIntegrationCall: vi.fn(),
   completeIntegrationCall: vi.fn(),
   findGithubInstallation: vi.fn(),
+  getBitbucketOAuthConnection: vi.fn(),
+  findMember: vi.fn(),
+  findRepository: vi.fn(),
+}));
+
+vi.mock('@roomote/bitbucket', () => ({
+  getBitbucketOAuthConnection: mocks.getBitbucketOAuthConnection,
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -22,9 +29,19 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       githubInstallations: { findFirst: mocks.findGithubInstallation },
+      users: { findFirst: mocks.findMember },
+      repositories: { findFirst: mocks.findRepository },
     },
   },
   githubInstallations: { suspendedAt: 'suspendedAt' },
+  users: { id: 'user-id', deletedAt: 'deletedAt' },
+  repositories: {
+    sourceControlProvider: 'provider',
+    host: 'host',
+    isActive: 'active',
+  },
+  and: vi.fn((...conditions) => conditions),
+  eq: vi.fn((column, value) => [column, value]),
   isNull: vi.fn(() => 'not-suspended-filter'),
 }));
 
@@ -78,6 +95,9 @@ describe('fast-agent integration broker', () => {
     mocks.configuredServers = {};
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
+    mocks.getBitbucketOAuthConnection.mockResolvedValue(null);
+    mocks.findMember.mockResolvedValue({ role: 'member' });
+    mocks.findRepository.mockResolvedValue({ externalRepoId: 'repo-uuid' });
     mocks.beginIntegrationCall.mockResolvedValue({
       id: 'audit-1',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
@@ -187,6 +207,156 @@ describe('fast-agent integration broker', () => {
       headers: { Authorization: 'Bearer control-plane-token' },
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it.each([null, { status: 'reauthorization_required' }])(
+    'omits Bitbucket without an active deployment OAuth connection: %j',
+    async (connection) => {
+      mocks.getBitbucketOAuthConnection.mockResolvedValue(connection);
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+      expect(mocks.listMcpTools).not.toHaveBeenCalled();
+      expect(mocks.findMember).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, { externalRepoId: null }, { externalRepoId: '' }])(
+    'omits Bitbucket without an active connected Cloud repository: %j',
+    async (repository) => {
+      mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
+      mocks.findRepository.mockResolvedValue(repository);
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+      expect(mocks.listMcpTools).not.toHaveBeenCalled();
+      expect(mocks.findRepository).toHaveBeenCalledWith({
+        where: [
+          ['provider', 'bitbucket'],
+          ['host', 'bitbucket.org'],
+          ['active', true],
+        ],
+        columns: { externalRepoId: true },
+      });
+    },
+  );
+
+  it.each([undefined, { role: 'guest' }])(
+    'hides a cached Bitbucket catalog when current membership is revoked: %j',
+    async (member) => {
+      mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
+      expect(await listFastAgentIntegrations(auditContext)).toHaveLength(1);
+      mocks.findMember.mockResolvedValue(member);
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+      expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+      expect(mocks.findMember).toHaveBeenLastCalledWith({
+        where: [['user-id', 'user-1'], 'not-suspended-filter'],
+        columns: { role: true },
+      });
+    },
+  );
+
+  it.each(['admin', 'member'])(
+    'dispatches discovered Bitbucket tools as a %s with fresh Roomote auth and an audit',
+    async (role) => {
+      mocks.getBitbucketOAuthConnection.mockResolvedValue({
+        status: 'active',
+        accessToken: 'never-forward-upstream-token',
+      });
+      mocks.findMember.mockResolvedValue({ role });
+      const inputSchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          repositoryFullName: { type: 'string' },
+          pullRequestNumber: { type: 'integer' },
+          body: { type: 'string' },
+          parentCommentId: { type: 'integer' },
+        },
+        required: ['repositoryFullName', 'pullRequestNumber', 'body'],
+      };
+      mocks.listMcpTools.mockResolvedValue([
+        { name: 'add_pull_request_comment', inputSchema },
+      ]);
+      mocks.createAuthToken
+        .mockResolvedValueOnce('discovery-token')
+        .mockResolvedValueOnce('fresh-call-token');
+      const available = await listFastAgentIntegrations(auditContext);
+      const { tools } = matchIntegrationTools(
+        available.flatMap((integration) =>
+          integration.tools.map((tool) => ({
+            ...tool,
+            integrationId: integration.id,
+          })),
+        ),
+        { integrationId: 'bitbucket', toolName: 'add_pull_request_comment' },
+      );
+      expect(tools[0]?.inputSchema).toEqual(inputSchema);
+      expect(mocks.listMcpTools).toHaveBeenCalledWith({
+        url: 'https://api.example.com/api/mcp/bitbucket',
+        headers: { Authorization: 'Bearer discovery-token' },
+        signal: expect.any(AbortSignal),
+      });
+      const args = {
+        repositoryFullName: 'acme/repo',
+        pullRequestNumber: 12,
+        body: 'Reply',
+        parentCommentId: 4,
+      };
+      mocks.callMcpTool.mockResolvedValue({ result: { id: 5 } });
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'bitbucket',
+          toolName: 'add_pull_request_comment',
+          args,
+        }),
+      ).resolves.toEqual({ result: { id: 5 } });
+      expect(mocks.callMcpTool).toHaveBeenCalledWith({
+        url: 'https://api.example.com/api/mcp/bitbucket',
+        headers: { Authorization: 'Bearer fresh-call-token' },
+        toolName: 'add_pull_request_comment',
+        args,
+        toolCallId: 'fast:audit-1:bitbucket:add_pull_request_comment',
+        signal: expect.any(AbortSignal),
+      });
+      expect(mocks.createAuthToken).toHaveBeenLastCalledWith({
+        userId: 'user-1',
+        timeoutMs: 120_000,
+      });
+      expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          integrationId: 'bitbucket',
+          toolName: 'add_pull_request_comment',
+          arguments: args,
+          userId: 'user-1',
+        }),
+      );
+      expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'audit-1', status: 'succeeded' }),
+      );
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'bitbucket',
+          toolName: 'merge_pull_request',
+          args,
+        }),
+      ).rejects.toThrow('not available');
+      expect(mocks.callMcpTool).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('keeps endpoint authorization authoritative for a previously discovered Bitbucket tool', async () => {
+    mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
+    const available = await listFastAgentIntegrations(auditContext);
+    mocks.callMcpTool.mockRejectedValue(
+      new Error('Current deployment membership required'),
+    );
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'bitbucket',
+        toolName: 'search',
+        args: {},
+      }),
+    ).rejects.toThrow('Current deployment membership required');
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed' }),
+    );
   });
 
   it('exposes the read-only Brain proxy when the Brain is configured', async () => {
