@@ -11,13 +11,11 @@ import {
 import {
   clearFastAgentIntegrationToolCache,
   listFastAgentIntegrations,
-} from '../../../../../../packages/cloud-agents/src/server/fast-agent/fast-agent-integration-broker';
-import {
   buildFastAgentToolFilter,
   isFastAgentNativeIntegration,
-} from '../../../../../../packages/cloud-agents/src/server/fast-agent/fast-agent-tool-policy';
-import { getAllowedRouterMcpToolNames } from '../../../../../../packages/cloud-agents/src/server/mcp-policy';
-import { listMcpTools } from '../../../../../../packages/cloud-agents/src/server/mcp-tool-client';
+  listMcpTools,
+} from '@roomote/cloud-agents/server';
+import { getAllowedRouterMcpToolNames } from '@roomote/cloud-agents/router-mcp-policy';
 import type { Variables } from '../../../types';
 import { publicRoomoteMcp, roomoteMcp } from '../roomote';
 

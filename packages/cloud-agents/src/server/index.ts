@@ -24,6 +24,14 @@ export * from './automation-root-summary';
 export * from './audio-transcription';
 export * from './file-attachments';
 export * from './fast-agent';
+export {
+  clearFastAgentIntegrationToolCache,
+  listFastAgentIntegrations,
+} from './fast-agent/fast-agent-integration-broker';
+export {
+  buildFastAgentToolFilter,
+  isFastAgentNativeIntegration,
+} from './fast-agent/fast-agent-tool-policy';
 export * from './session-wakeups';
 // Canonical API base URL fallback chain (explicit -> TRPC_URL -> R_APP_URL).
 // Fast surfaces must derive apiBaseUrl through this so the broker's
