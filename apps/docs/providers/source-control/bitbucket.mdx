@@ -66,6 +66,29 @@ Users may link personal Bitbucket accounts separately for commenter identity
 and access-policy checks. Linked accounts do not provide deployment source
 control credentials.
 
+## Direct pull request actions
+
+In Fast, ask Roomote to update an identified pull request's title or
+description, add or edit a pull request discussion comment, or close it by **declining**
+it. These actions do not require a coding task. Reopening a declined pull request
+is not supported by these tools; Roomote does not substitute an undocumented
+state change.
+
+You must be an authenticated Roomote member, and the repository must be active
+and uniquely identifiable among the deployment's synced Bitbucket repositories.
+Specify the repository and pull request number. These actions do not require
+a linked personal Bitbucket account or Roomote administrator access.
+
+Writes use the deployment credential and appear under its identity, not your
+personal account. The credential must have the access Bitbucket requires for
+the requested action. Fast records these tool calls in its audit trail and
+reports provider errors or unsupported capabilities. Thread replies are not
+supported by these tools.
+
+These tools do not merge pull requests, change destination branches, delete
+branches, write code, administer repositories, add issue comments, or manage
+inline review threads. Existing mention replies and coding tasks are unchanged.
+
 ## CI Failure Triage
 
 When enabled, Roomote triages failed default-branch Bitbucket Pipelines via `repo:commit_status_created` / `repo:commit_status_updated` webhooks and Manual Run now. Only environment-mapped repositories are included.

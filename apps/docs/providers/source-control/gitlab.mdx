@@ -87,6 +87,26 @@ Roomote runs the Review Code automation's structured review on the current
 head, posts the findings on the merge request, and reports back in the same
 discussion.
 
+## Direct merge request actions
+
+In Fast, ask Roomote to update an identified merge request's title or description,
+close or reopen it, or add, edit, or reply to a merge request comment. These actions do
+not require a coding task.
+
+You must be an authenticated Roomote member, and the repository must be active
+and uniquely identifiable among the deployment's synced GitLab repositories.
+Specify the repository and merge request number. These actions do not require
+a linked personal GitLab account or Roomote administrator access.
+
+Writes use the deployment's GitLab credential and appear under that credential's
+identity, not as your personal account. The credential must have the access
+GitLab requires for the requested action. Fast records these tool calls in its
+audit trail and reports provider errors or unsupported capabilities.
+
+These tools do not merge requests, change target branches, delete branches,
+write code, or administer repositories. Existing mention replies and coding
+tasks are unchanged.
+
 ## Enable review automation
 
 GitLab merge-request reviews use the same Review Code automation targeting

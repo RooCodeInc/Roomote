@@ -328,6 +328,50 @@ describe('route policy enforcement', () => {
         };
       };
       expect(publicResponse.status).toBe(200);
+      const sourceControl = publicBody.result?.tools?.find(
+        (tool) => tool.name === 'manage_source_control',
+      );
+      expect(sourceControl?.inputSchema?.properties?.action?.enum).toEqual([
+        'update_pull_request_metadata',
+        'create_pull_request_comment',
+        'update_pull_request_comment',
+        'reply_to_pull_request_comment',
+      ]);
+      for (const args of [
+        {
+          action: 'update_pull_request_metadata',
+          repositoryFullName: 'owner/repo',
+          prNumber: 1,
+          state: 'closed',
+        },
+        {
+          action: 'update_pull_request_metadata',
+          sourceControlProvider: 'github',
+          repositoryFullName: 'owner/repo',
+          prNumber: 1,
+          state: 'closed',
+          base: 'main',
+        },
+        {
+          action: 'merge_pull_request',
+          sourceControlProvider: 'github',
+          repositoryFullName: 'owner/repo',
+          prNumber: 1,
+        },
+      ]) {
+        const invalid = await createApiApp().request('http://localhost/mcp', {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            method: 'tools/call',
+            params: { name: 'manage_source_control', arguments: args },
+          }),
+        });
+        expect(await invalid.json()).toMatchObject({
+          result: { isError: true },
+        });
+      }
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_tasks',
       );
@@ -483,6 +527,9 @@ describe('route policy enforcement', () => {
       };
       expect(legacyResponse.status).toBe(200);
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
+        'manage_source_control',
+      );
+      expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
         'manage_tasks',
       );
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).toContain(
@@ -522,6 +569,9 @@ describe('route policy enforcement', () => {
         result?: { tools?: Array<{ name: string }> };
       };
       expect(legacyRunTokenResponse.status).toBe(200);
+      expect(
+        legacyRunTokenBody.result?.tools?.map((tool) => tool.name),
+      ).not.toContain('manage_source_control');
       expect(
         legacyRunTokenBody.result?.tools?.map((tool) => tool.name),
       ).not.toContain('manage_tasks');

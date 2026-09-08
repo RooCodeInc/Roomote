@@ -90,6 +90,10 @@ export async function manageSourceControl(
         sourceControlIssueInputSchema,
       ])
       .parse(await c.req.json());
+    // Metadata writes are member-only; preserve the task endpoint's action set.
+    if (input.action === 'update_pull_request_metadata') {
+      return c.json({ error: 'Unsupported task source-control action' }, 400);
+    }
     const taskRun = await findTaskRunForSourceControlMutation({
       runId: auth.authContext.runId,
       taskId,

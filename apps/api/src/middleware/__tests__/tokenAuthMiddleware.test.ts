@@ -98,6 +98,45 @@ describe('tokenAuthMiddleware token extraction', () => {
     expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
   });
 
+  it.each(['auth', 'mcp'])(
+    'authenticates existing non-admin %s members on /mcp and rejects deleted or missing users',
+    async (tokenType) => {
+      const claims = {
+        tokenType,
+        userId: 'member-1',
+        version: 1,
+        ...(tokenType === 'mcp'
+          ? { resource: 'https://api.example.com/mcp', scopes: ['mcp:roomote'] }
+          : {}),
+      };
+      (tokenType === 'mcp'
+        ? mockValidateMcpAccessToken
+        : mockValidateAuthToken
+      ).mockResolvedValue(claims);
+      mockFindUser.mockResolvedValue({
+        id: 'member-1',
+        role: 'member',
+        deletedAt: null,
+      });
+      expect(
+        await requestAuthContext('/mcp', {
+          authorization: 'Bearer member-token',
+        }),
+      ).toEqual(claims);
+      for (const user of [
+        undefined,
+        { id: 'member-1', deletedAt: new Date() },
+      ]) {
+        mockFindUser.mockResolvedValue(user);
+        expect(
+          await requestAuthContext('/mcp', {
+            authorization: 'Bearer member-token',
+          }),
+        ).toBeNull();
+      }
+    },
+  );
+
   it('rejects a run token issued for a removed user on artifact routes', async () => {
     mockValidateRunToken.mockResolvedValue({
       ...RUN_TOKEN_CONTEXT,

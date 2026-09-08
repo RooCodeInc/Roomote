@@ -18,6 +18,7 @@ const {
   mockGetTerminalReviewSummaryResult,
   mockMarkPullRequestReady,
   mockEnqueuePrReviewNotification,
+  mockInstallationFindFirst,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetOctokit: vi.fn(),
@@ -33,6 +34,7 @@ const {
   mockGetTerminalReviewSummaryResult: vi.fn(),
   mockMarkPullRequestReady: vi.fn(),
   mockEnqueuePrReviewNotification: vi.fn(),
+  mockInstallationFindFirst: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -86,13 +88,24 @@ vi.mock('@roomote/db/server', () => ({
       repositories: {
         // resolveRepositoryRow queries with findMany; tests queue a single
         // row (or null), adapted here to the list shape it expects.
-        findMany: async (...args: unknown[]) => {
-          const row = await mockRepositoriesFindFirst(...args);
-          return row == null ? [] : [row];
+        findMany: async (query: {
+          where: { conditions: { left: string; right: unknown }[] };
+        }) => {
+          const row = await mockRepositoriesFindFirst(query);
+          const provider = query.where.conditions.find(
+            (condition) =>
+              condition.left === 'repositories.sourceControlProvider',
+          )?.right;
+          return row == null
+            ? []
+            : [{ sourceControlProvider: provider, ...row }];
         },
       },
       environments: {
         findFirst: (...args: unknown[]) => mockEnvironmentsFindFirst(...args),
+      },
+      githubInstallations: {
+        findFirst: (...args: unknown[]) => mockInstallationFindFirst(...args),
       },
     },
   },
@@ -104,6 +117,7 @@ vi.mock('@roomote/db/server', () => ({
   environments: {
     id: 'environments.id',
   },
+  githubInstallations: { id: 'githubInstallations.id' },
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
 }));
@@ -126,6 +140,7 @@ vi.mock('../../task-runs/pr-review-notification', () => ({
 import {
   sourceControlPullRequestWriteInputSchema,
   writeSourceControlPullRequestForTaskRun,
+  writeSourceControlPullRequestForRepository,
 } from '../source-control-pull-request-writes';
 
 function makeTaskRun(
@@ -155,6 +170,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe('writeSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockInstallationFindFirst.mockResolvedValue({ suspendedAt: null });
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
     mockResolveGiteaToken.mockResolvedValue('gitea-token');
@@ -169,6 +185,296 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     mockMarkPullRequestReady.mockResolvedValue('marked_ready');
     mockEnqueuePrReviewNotification.mockResolvedValue({ notifiedTaskCount: 1 });
   });
+
+  const repository = {
+    id: 'repo-1',
+    sourceControlProvider: 'github' as const,
+    installationId: 'installation-1',
+    externalRepoId: '123',
+    fullName: 'acme/backend',
+    htmlUrl: 'https://github.com/acme/backend',
+    host: null,
+  };
+
+  it('updates GitHub metadata by number without task context or side effects', async () => {
+    const update = vi.fn().mockResolvedValue({
+      data: { html_url: 'https://github.com/acme/backend/pull/55' },
+    });
+    mockGetOctokit.mockReturnValue({ rest: { pulls: { update } } });
+    const result = await writeSourceControlPullRequestForRepository({
+      repository,
+      input: {
+        action: 'update_pull_request_metadata',
+        repositoryFullName: repository.fullName,
+        prNumber: 55,
+        body: '',
+        title: 'New title',
+        state: 'closed',
+      },
+    });
+    expect(update).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      body: '',
+      title: 'New title',
+      state: 'closed',
+    });
+    expect(result.applied).toBe(true);
+    expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
+    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
+    expect(mockMarkPullRequestReady).not.toHaveBeenCalled();
+    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty metadata and mismatched repository/provider before writes', async () => {
+    const input = {
+      action: 'update_pull_request_metadata' as const,
+      repositoryFullName: repository.fullName,
+      prNumber: 55,
+    };
+    await expect(
+      writeSourceControlPullRequestForRepository({ repository, input }),
+    ).rejects.toThrow('At least one');
+    await expect(
+      writeSourceControlPullRequestForRepository({
+        repository,
+        input: { ...input, body: '', repositoryFullName: 'other/repo' },
+      }),
+    ).rejects.toThrow('mismatch');
+    await expect(
+      writeSourceControlPullRequestForRepository({
+        repository,
+        input: { ...input, body: '', sourceControlProvider: 'gitlab' },
+      }),
+    ).rejects.toThrow('mismatch');
+    expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects suspended GitHub installations before minting tokens', async () => {
+    mockInstallationFindFirst.mockResolvedValue({ suspendedAt: new Date() });
+    await expect(
+      writeSourceControlPullRequestForRepository({
+        repository,
+        input: {
+          action: 'update_pull_request_metadata',
+          repositoryFullName: repository.fullName,
+          prNumber: 55,
+          state: 'open',
+        },
+      }),
+    ).rejects.toMatchObject({ httpStatus: 403 });
+    expect(mockCreateGitHubToken).not.toHaveBeenCalled();
+  });
+
+  it.each(['open', 'closed'] as const)(
+    'maps GitLab %s to state_event by number',
+    async (state) => {
+      const fetchImpl = vi.fn().mockResolvedValue(
+        jsonResponse({
+          web_url: 'https://gitlab.com/acme/backend/-/merge_requests/55',
+        }),
+      );
+      const result = await writeSourceControlPullRequestForRepository({
+        repository: { ...repository, sourceControlProvider: 'gitlab' },
+        fetchImpl,
+        input: {
+          action: 'update_pull_request_metadata',
+          repositoryFullName: repository.fullName,
+          prNumber: 55,
+          body: '',
+          state,
+        },
+      });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(fetchImpl.mock.calls[0]?.[0]).toContain(
+        '/projects/123/merge_requests/55',
+      );
+      expect(JSON.parse(fetchImpl.mock.calls[0]?.[1].body)).toEqual({
+        description: '',
+        state_event: state === 'closed' ? 'close' : 'reopen',
+      });
+      expect(result.applied).toBe(true);
+    },
+  );
+
+  it('updates Bitbucket metadata before declining, never PUTs state', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(async () => jsonResponse({ id: 55 }));
+    await writeSourceControlPullRequestForRepository({
+      repository: { ...repository, sourceControlProvider: 'bitbucket' },
+      fetchImpl,
+      input: {
+        action: 'update_pull_request_metadata',
+        repositoryFullName: repository.fullName,
+        prNumber: 55,
+        title: 'New title',
+        body: '',
+        state: 'closed',
+      },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[0]?.[1].method).toBe('PUT');
+    expect(JSON.parse(fetchImpl.mock.calls[0]?.[1].body)).toEqual({
+      title: 'New title',
+      description: '',
+    });
+    expect(fetchImpl.mock.calls[1]?.[0]).toBe(
+      'https://api.bitbucket.org/2.0/repositories/acme/backend/pullrequests/55/decline',
+    );
+    expect(fetchImpl.mock.calls[1]?.[1].method).toBe('POST');
+  });
+
+  it('does not partially apply unsupported Bitbucket reopen requests', async () => {
+    const fetchImpl = vi.fn();
+    const result = await writeSourceControlPullRequestForRepository({
+      repository: { ...repository, sourceControlProvider: 'bitbucket' },
+      fetchImpl,
+      input: {
+        action: 'update_pull_request_metadata',
+        repositoryFullName: repository.fullName,
+        prNumber: 55,
+        title: 'New title',
+        state: 'open',
+      },
+    });
+    expect(result).toMatchObject({
+      applied: false,
+      warnings: [expect.stringContaining('reopen')],
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('reuses GitLab comment writes without task review-summary side effects', async () => {
+    mockGetTerminalReviewSummaryResult.mockReturnValue({
+      conclusion: 'success',
+      summary: 'Clean review',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(async () => jsonResponse({ id: 12 }));
+    const result = await writeSourceControlPullRequestForRepository({
+      repository: { ...repository, sourceControlProvider: 'gitlab' },
+      fetchImpl,
+      input: {
+        action: 'create_pull_request_comment',
+        repositoryFullName: repository.fullName,
+        prNumber: 55,
+        body: 'Clean review',
+      },
+    });
+    expect(result).toMatchObject({ applied: true, commentId: '12' });
+    expect(fetchImpl.mock.calls[0]?.[0]).toContain('/merge_requests/55/notes');
+    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+    expect(mockMarkPullRequestReady).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid metadata schema fields and PR numbers', () => {
+    const input = {
+      action: 'update_pull_request_metadata',
+      repositoryFullName: repository.fullName,
+      prNumber: 55,
+    };
+    expect(
+      sourceControlPullRequestWriteInputSchema.safeParse(input).success,
+    ).toBe(false);
+    expect(
+      sourceControlPullRequestWriteInputSchema.safeParse({ ...input, body: '' })
+        .success,
+    ).toBe(true);
+    expect(
+      sourceControlPullRequestWriteInputSchema.safeParse({
+        ...input,
+        state: 'merged',
+      }).success,
+    ).toBe(false);
+    expect(
+      sourceControlPullRequestWriteInputSchema.safeParse({
+        ...input,
+        title: ' ',
+      }).success,
+    ).toBe(false);
+    expect(
+      sourceControlPullRequestWriteInputSchema.safeParse({
+        ...input,
+        body: '',
+        prNumber: 0,
+      }).success,
+    ).toBe(false);
+  });
+
+  it('preserves GitHub provider errors for metadata updates', async () => {
+    const update = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Cannot reopen merged pull request'), {
+        status: 422,
+      }),
+    );
+    mockGetOctokit.mockReturnValue({ rest: { pulls: { update } } });
+    await expect(
+      writeSourceControlPullRequestForRepository({
+        repository,
+        input: {
+          action: 'update_pull_request_metadata',
+          repositoryFullName: repository.fullName,
+          prNumber: 55,
+          state: 'open',
+        },
+      }),
+    ).rejects.toMatchObject({
+      httpStatus: 422,
+      message: expect.stringContaining('Cannot reopen'),
+    });
+  });
+
+  it('propagates Bitbucket decline failures rather than claiming success', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(async () =>
+        jsonResponse({ error: 'Forbidden' }, 403),
+      );
+    await expect(
+      writeSourceControlPullRequestForRepository({
+        repository: { ...repository, sourceControlProvider: 'bitbucket' },
+        fetchImpl,
+        input: {
+          action: 'update_pull_request_metadata',
+          repositoryFullName: repository.fullName,
+          prNumber: 55,
+          state: 'closed',
+        },
+      }),
+    ).rejects.toThrow('403');
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each(['gitea', 'ado'] as const)(
+    'reports unsupported %s metadata honestly',
+    async (provider) => {
+      const fetchImpl = vi.fn();
+      const result = await writeSourceControlPullRequestForRepository({
+        repository: {
+          ...repository,
+          fullName:
+            provider === 'ado' ? 'acme/project/backend' : repository.fullName,
+          sourceControlProvider: provider,
+        },
+        fetchImpl,
+        input: {
+          action: 'update_pull_request_metadata',
+          repositoryFullName:
+            provider === 'ado' ? 'acme/project/backend' : repository.fullName,
+          prNumber: 55,
+          state: 'closed',
+        },
+      });
+      expect(result).toMatchObject({
+        applied: false,
+        warnings: [expect.stringContaining('metadata updates')],
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
 
   it('requests GitHub user and team reviewers with the installation token', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({

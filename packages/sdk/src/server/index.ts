@@ -389,6 +389,8 @@ export {
 } from './lib/pull-requests/source-control-pull-requests';
 export {
   getPayloadRecord,
+  resolveRepositoryRow,
+  type RepositoryRow,
   resolveSourceControlProviderForRepositoryFromPayload,
 } from './lib/pull-requests/source-control-pull-request-shared';
 export {
@@ -403,6 +405,7 @@ export {
 } from './lib/pull-requests/source-control-pull-request-reads';
 export {
   writeSourceControlPullRequestForTaskRun,
+  writeSourceControlPullRequestForRepository,
   sourceControlPullRequestWriteInputSchema,
   SourceControlWriteError,
   type SourceControlPullRequestWriteInput,

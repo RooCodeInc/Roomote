@@ -1,6 +1,6 @@
 import { createGitHubToken } from '@roomote/auth';
 import { getOctokit, Schemas as GitHubSchemas } from '@roomote/github';
-import { type TaskRun } from '@roomote/db/server';
+import { db, eq, githubInstallations, type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
   sourceControlProviderSchema,
@@ -59,73 +59,88 @@ const optionalTrimmedNonEmptyStringSchema = z.preprocess((value) => {
   return trimmed.length === 0 ? undefined : trimmed;
 }, z.string().min(1).optional());
 
-export const sourceControlPullRequestWriteInputSchema = z.object({
-  action: z.enum([
-    'reply_to_pull_request_comment',
-    'create_pull_request_comment',
-    'create_pull_request_review_comment',
-    'update_pull_request_comment',
-    'resolve_pull_request_thread',
-    'request_pull_request_reviewers',
-    'submit_pull_request_review',
-    'dismiss_pull_request_review',
-  ]),
-  repositoryFullName: z.string().trim().min(1),
-  prNumber: z.number().int().positive(),
-  /**
-   * Required for reply/resolve actions (validated in code, not in the
-   * schema). Thread ids match what the read surface returns per provider:
-   * GitHub review thread GraphQL node ids, GitLab discussion ids, ADO
-   * String(thread.id), Gitea String(review.id).
-   *
-   * For update_pull_request_comment on GitHub it is only a hint: top-level
-   * issue comments and review-thread comments live on different endpoints,
-   * and the writer tries the other endpoint when the hinted one does not
-   * know the comment id.
-   */
-  threadId: optionalTrimmedNonEmptyStringSchema,
-  /**
-   * Required for update_pull_request_comment: the comment id from
-   * list_pull_request_comments or a prior write result.
-   */
-  commentId: optionalTrimmedNonEmptyStringSchema,
-  /** Required for dismiss_pull_request_review. */
-  reviewId: optionalTrimmedNonEmptyStringSchema,
-  /** Required for reply, create_comment, and update_comment; optional for review. */
-  body: z.string().optional(),
-  /**
-   * Required for create_pull_request_review_comment: repository-relative
-   * POSIX path of the file the comment anchors to.
-   */
-  path: optionalTrimmedNonEmptyStringSchema,
-  /**
-   * Required for create_pull_request_review_comment: 1-based line number in
-   * the file version named by side.
-   */
-  line: z.number().int().positive().optional(),
-  /**
-   * Optional for create_pull_request_review_comment: RIGHT (default) anchors
-   * on the new/head version of the file, LEFT on the old/base version
-   * (deleted lines).
-   */
-  side: z.enum(['LEFT', 'RIGHT']).optional(),
-  /**
-   * Optional multi-line range start for create_pull_request_review_comment.
-   * GitHub and Azure DevOps honor the range; the other providers anchor to
-   * `line` and report a warning.
-   */
-  startLine: z.number().int().positive().optional(),
-  startSide: z.enum(['LEFT', 'RIGHT']).optional(),
-  /** Required for resolve_pull_request_thread: true resolves, false reopens. */
-  resolved: z.boolean().optional(),
-  /** Required for submit_pull_request_review. */
-  reviewEvent: z.enum(['approve', 'request_changes', 'comment']).optional(),
-  /** GitHub user logins for request_pull_request_reviewers. */
-  reviewers: z.array(z.string().trim().min(1)).optional(),
-  /** GitHub team slugs for request_pull_request_reviewers. */
-  teamReviewers: z.array(z.string().trim().min(1)).optional(),
-  sourceControlProvider: sourceControlProviderSchema.optional(),
-});
+export const sourceControlPullRequestWriteInputSchema = z
+  .object({
+    action: z.enum([
+      'reply_to_pull_request_comment',
+      'create_pull_request_comment',
+      'create_pull_request_review_comment',
+      'update_pull_request_comment',
+      'resolve_pull_request_thread',
+      'request_pull_request_reviewers',
+      'submit_pull_request_review',
+      'dismiss_pull_request_review',
+      'update_pull_request_metadata',
+    ]),
+    repositoryFullName: z.string().trim().min(1),
+    prNumber: z.number().int().positive(),
+    /**
+     * Required for reply/resolve actions (validated in code, not in the
+     * schema). Thread ids match what the read surface returns per provider:
+     * GitHub review thread GraphQL node ids, GitLab discussion ids, ADO
+     * String(thread.id), Gitea String(review.id).
+     *
+     * For update_pull_request_comment on GitHub it is only a hint: top-level
+     * issue comments and review-thread comments live on different endpoints,
+     * and the writer tries the other endpoint when the hinted one does not
+     * know the comment id.
+     */
+    threadId: optionalTrimmedNonEmptyStringSchema,
+    /**
+     * Required for update_pull_request_comment: the comment id from
+     * list_pull_request_comments or a prior write result.
+     */
+    commentId: optionalTrimmedNonEmptyStringSchema,
+    /** Required for dismiss_pull_request_review. */
+    reviewId: optionalTrimmedNonEmptyStringSchema,
+    /** Required for reply, create_comment, and update_comment; optional for review. */
+    body: z.string().optional(),
+    title: z.string().trim().min(1).optional(),
+    state: z.enum(['open', 'closed']).optional(),
+    /**
+     * Required for create_pull_request_review_comment: repository-relative
+     * POSIX path of the file the comment anchors to.
+     */
+    path: optionalTrimmedNonEmptyStringSchema,
+    /**
+     * Required for create_pull_request_review_comment: 1-based line number in
+     * the file version named by side.
+     */
+    line: z.number().int().positive().optional(),
+    /**
+     * Optional for create_pull_request_review_comment: RIGHT (default) anchors
+     * on the new/head version of the file, LEFT on the old/base version
+     * (deleted lines).
+     */
+    side: z.enum(['LEFT', 'RIGHT']).optional(),
+    /**
+     * Optional multi-line range start for create_pull_request_review_comment.
+     * GitHub and Azure DevOps honor the range; the other providers anchor to
+     * `line` and report a warning.
+     */
+    startLine: z.number().int().positive().optional(),
+    startSide: z.enum(['LEFT', 'RIGHT']).optional(),
+    /** Required for resolve_pull_request_thread: true resolves, false reopens. */
+    resolved: z.boolean().optional(),
+    /** Required for submit_pull_request_review. */
+    reviewEvent: z.enum(['approve', 'request_changes', 'comment']).optional(),
+    /** GitHub user logins for request_pull_request_reviewers. */
+    reviewers: z.array(z.string().trim().min(1)).optional(),
+    /** GitHub team slugs for request_pull_request_reviewers. */
+    teamReviewers: z.array(z.string().trim().min(1)).optional(),
+    sourceControlProvider: sourceControlProviderSchema.optional(),
+  })
+  .refine(
+    (input) =>
+      input.action !== 'update_pull_request_metadata' ||
+      input.title !== undefined ||
+      input.body !== undefined ||
+      input.state !== undefined,
+    {
+      message:
+        'At least one of title, body, or state is required for update_pull_request_metadata.',
+    },
+  );
 
 export type SourceControlPullRequestWriteInput = z.infer<
   typeof sourceControlPullRequestWriteInputSchema
@@ -323,6 +338,50 @@ export async function writeSourceControlPullRequestForTaskRun({
     host: payloadHost,
   });
 
+  const result = await writeSourceControlPullRequestForRepository({
+    repository,
+    input: { ...input, sourceControlProvider: provider },
+    fetchImpl,
+  });
+
+  await maybeMarkPullRequestReadyAfterReviewSummary({
+    taskRun,
+    input,
+    result,
+    provider,
+    host: payloadHost,
+    fetchImpl,
+  });
+  return result;
+}
+
+/** Provider writes only. Callers must authorize access to the resolved repository. */
+export async function writeSourceControlPullRequestForRepository({
+  repository,
+  input: rawInput,
+  fetchImpl = fetch,
+}: {
+  repository: RepositoryRow;
+  input: SourceControlPullRequestWriteInput;
+  fetchImpl?: FetchImpl;
+}): Promise<SourceControlPullRequestWriteResult> {
+  const parsed = sourceControlPullRequestWriteInputSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    throw new SourceControlWriteError(400, parsed.error.message);
+  }
+  const input = parsed.data;
+  assertWriteInputFields(input);
+  const provider = repository.sourceControlProvider;
+  if (
+    repository.fullName !== input.repositoryFullName ||
+    (input.sourceControlProvider !== undefined &&
+      input.sourceControlProvider !== provider)
+  ) {
+    throw new SourceControlWriteError(
+      400,
+      'Repository or source control provider mismatch.',
+    );
+  }
   let result: SourceControlPullRequestWriteResult;
   switch (provider) {
     case 'github':
@@ -366,14 +425,6 @@ export async function writeSourceControlPullRequestForTaskRun({
       break;
   }
 
-  await maybeMarkPullRequestReadyAfterReviewSummary({
-    taskRun,
-    input,
-    result,
-    provider,
-    host: payloadHost,
-    fetchImpl,
-  });
   return result;
 }
 
@@ -494,6 +545,29 @@ function assertWriteInputFields(
   input: SourceControlPullRequestWriteInput,
 ): void {
   switch (input.action) {
+    case 'update_pull_request_metadata':
+      if (
+        input.title === undefined &&
+        input.body === undefined &&
+        input.state === undefined
+      ) {
+        throw new SourceControlWriteError(
+          400,
+          'At least one of title, body, or state is required for update_pull_request_metadata.',
+        );
+      }
+      if (
+        (input.title !== undefined && !input.title.trim()) ||
+        (input.state !== undefined &&
+          input.state !== 'open' &&
+          input.state !== 'closed')
+      ) {
+        throw new SourceControlWriteError(
+          400,
+          'Invalid pull request title or state.',
+        );
+      }
+      break;
     case 'reply_to_pull_request_comment':
       requireThreadId(input);
       requireBody(input);
@@ -807,6 +881,22 @@ async function writeGitHubPullRequest({
   );
 
   switch (input.action) {
+    case 'update_pull_request_metadata': {
+      const { data } = await octokit.rest.pulls.update({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.body !== undefined ? { body: input.body } : {}),
+        ...(input.state !== undefined ? { state: input.state } : {}),
+      });
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        url: data.html_url ?? null,
+      });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const response = await octokit.graphql(
@@ -1038,6 +1128,16 @@ async function createGitHubWriteClient(
   }
 
   const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
+  const installation = await db.query.githubInstallations.findFirst({
+    where: eq(githubInstallations.id, repository.installationId),
+    columns: { suspendedAt: true },
+  });
+  if (!installation || installation.suspendedAt) {
+    throw new SourceControlWriteError(
+      403,
+      'GitHub installation is missing or suspended.',
+    );
+  }
   const token = await createGitHubToken({
     type: 'installationId',
     installationId: repository.installationId,
@@ -1069,6 +1169,28 @@ async function writeGitLabMergeRequest({
   const mergeRequestPath = `/projects/${encodeURIComponent(projectId)}/merge_requests/${input.prNumber}`;
 
   switch (input.action) {
+    case 'update_pull_request_metadata': {
+      const mergeRequest = await requestJson({
+        fetchImpl,
+        method: 'PUT',
+        url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
+        tokenHeader,
+        body: {
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.body !== undefined ? { description: input.body } : {}),
+          ...(input.state !== undefined
+            ? { state_event: input.state === 'closed' ? 'close' : 'reopen' }
+            : {}),
+        },
+        schema: z.object({ web_url: z.string().optional() }),
+      });
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        url: mergeRequest.web_url ?? null,
+      });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const note = await requestJson({
@@ -1527,6 +1649,16 @@ async function writeGiteaPullRequest({
   );
 
   switch (input.action) {
+    case 'update_pull_request_metadata':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'Gitea does not support metadata updates through this source-control interface.',
+        ],
+      });
     case 'reply_to_pull_request_comment': {
       // Gitea has no API for replying inside a review thread; fall back to an
       // issue comment that references the thread.
@@ -1733,6 +1865,52 @@ async function writeBitbucketPullRequest({
   );
 
   switch (input.action) {
+    case 'update_pull_request_metadata': {
+      // Bitbucket Cloud documents only open PR updates and a separate decline
+      // action, not reopening. Do not partially apply a request to reopen.
+      if (input.state === 'open') {
+        return buildWriteResult({
+          input,
+          provider,
+          repository,
+          applied: false,
+          warnings: [
+            'Bitbucket Cloud does not expose a supported pull request reopen operation; no metadata changes were applied.',
+          ],
+        });
+      }
+      const pullRequestUrl = buildApiUrl(
+        apiBaseUrl,
+        `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests/${input.prNumber}`,
+        {},
+      );
+      let url: string | null = null;
+      if (input.title !== undefined || input.body !== undefined) {
+        const updated = await requestJson({
+          fetchImpl,
+          method: 'PUT',
+          url: pullRequestUrl,
+          tokenHeader,
+          body: {
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(input.body !== undefined ? { description: input.body } : {}),
+          },
+          schema: bitbucketCreatedCommentSchema,
+        });
+        url = updated.links?.html?.href ?? null;
+      }
+      if (input.state === 'closed') {
+        const declined = await requestJson({
+          fetchImpl,
+          method: 'POST',
+          url: `${pullRequestUrl}/decline`,
+          tokenHeader,
+          schema: bitbucketCreatedCommentSchema,
+        });
+        url = declined.links?.html?.href ?? url;
+      }
+      return buildWriteResult({ input, provider, repository, url });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const comment = await requestJson({
@@ -2005,6 +2183,16 @@ async function writeAdoPullRequest({
   const threadsPath = `${repositoryPullRequestsPath}/${input.prNumber}/threads`;
 
   switch (input.action) {
+    case 'update_pull_request_metadata':
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        applied: false,
+        warnings: [
+          'Azure DevOps does not support metadata updates through this source-control interface.',
+        ],
+      });
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const comment = await requestJson({

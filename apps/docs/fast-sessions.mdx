@@ -23,19 +23,21 @@ When a task in a Session opens a pull request, that pull request belongs to the
 Session. A mention on it joins the Session instead of starting a new one, and
 Roomote answers on the pull request as well as in the Session's home surface.
 
-## GitHub actions without a workspace
+## Pull request actions without a workspace
 
 Ask a Session to update a pull request's title or description, close or reopen
-it, or add a comment to an issue or pull request. Fast can perform these bounded
-GitHub API actions directly, without starting a coding task. An explicit request
+it, or add, edit, or reply to a pull request comment. Fast can perform these bounded
+GitHub, GitLab, and Bitbucket actions directly, without starting a coding task. An explicit request
 to close or update an identified pull request authorizes that action; Roomote
-reports the result after GitHub confirms it.
+reports the provider result. Bitbucket reopening and thread replies are not
+supported; Roomote reports these capability gaps without claiming success.
 
-The repository must be active and connected through a non-suspended GitHub App
-installation. Your linked GitHub account must have write access to that
-repository, and the App must have permission for the requested action. Roomote
-checks access for each write and does not use a different user's access when a
-check fails. Reconnect your linked account if its GitHub username has changed.
+You must be an authenticated Roomote member. Specify the provider, active
+connected repository, and pull request number. Writes use the deployment's
+provider credential, which must have permission for the requested action.
+GitHub additionally requires a non-suspended App installation. A linked personal
+provider account and Roomote administrator access are not required. Fast records
+these tool calls in its audit trail.
 Existing repository, PR, issue, and Actions reads remain available as before.
 
 These direct tools do not merge pull requests, delete branches, push code,

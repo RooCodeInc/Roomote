@@ -188,6 +188,21 @@ If you add Organization projects permission to an existing app, an organization
 owner must approve the updated permission before Roomote can manage project
 items.
 
+## Direct pull request actions
+
+In Fast, ask Roomote to update a pull request's title or body, close or reopen
+it, or add, edit, or reply to a pull request comment without starting a coding
+task. Specify the repository and pull request number.
+
+You must be an authenticated Roomote member. The repository must be active and
+synced, with an active GitHub App installation. These actions use the
+deployment's installation credential; they do not require a linked personal
+GitHub account or Roomote administrator access. Fast records these tool calls
+in its audit trail and reports provider errors or unsupported capabilities.
+
+These tools do not merge pull requests, change branches, write code, or
+administer repositories. Existing coding-task permissions are unchanged.
+
 ## Daily GitHub management
 
 Roomote tasks can manage routine repository work through the GitHub App

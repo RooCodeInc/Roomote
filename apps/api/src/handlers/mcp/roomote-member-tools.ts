@@ -1,5 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import {
+  resolveRepositoryRow,
+  writeSourceControlPullRequestForRepository,
+} from '@roomote/sdk/server';
 
 import {
   ALL_REPOSITORIES,
@@ -48,10 +52,128 @@ const manageTasksInputSchema = {
   ...roomoteManagementFieldSchemas,
 } satisfies Record<string, z.ZodTypeAny>;
 
+const manageSourceControlInputSchema = z
+  .object({
+    action: z.enum([
+      'update_pull_request_metadata',
+      'create_pull_request_comment',
+      'update_pull_request_comment',
+      'reply_to_pull_request_comment',
+    ]),
+    sourceControlProvider: z.enum(['github', 'gitlab', 'bitbucket']),
+    repositoryFullName: z.string().trim().min(1),
+    prNumber: z.number().int().positive(),
+    title: z.string().trim().min(1).optional(),
+    body: z.string().optional(),
+    state: z.enum(['open', 'closed']).optional(),
+    commentId: z.string().trim().min(1).optional(),
+    threadId: z.string().trim().min(1).optional(),
+  })
+  .strict();
+
 export function registerRoomoteMemberTools(
   server: McpServer,
   auth: McpAuth,
 ): void {
+  server.registerTool(
+    'manage_source_control',
+    {
+      title: 'Manage Pull Request Metadata and Comments',
+      description:
+        'Update an existing PR/MR title, body, or open/closed state, or create, update, or reply to its discussion comments in an active connected repository. Requires a member user token, not a task run token. Metadata updates require at least one of title/body/state. Comment actions require body; updates require commentId and replies require threadId. Provider limitations are returned as applied:false with warnings. No merging, branch changes, code writes, reviews, or administration.',
+      inputSchema: manageSourceControlInputSchema,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async (params) => {
+      // Match the userOnly repository-write boundary; never synthesize a task actor.
+      if (
+        auth.authContext.tokenType !== 'auth' ||
+        !auth.userId ||
+        auth.userId !== auth.authContext.userId
+      ) {
+        return toolError({
+          error:
+            'Source control writes require an authenticated member user token.',
+        });
+      }
+      if (params.action === 'update_pull_request_metadata') {
+        if (
+          params.title === undefined &&
+          params.body === undefined &&
+          params.state === undefined
+        ) {
+          return toolError({
+            error:
+              'Metadata updates require at least one of title, body, or state.',
+          });
+        }
+        if (params.commentId !== undefined || params.threadId !== undefined) {
+          return toolError({
+            error: 'Comment identifiers are not accepted for metadata updates.',
+          });
+        }
+      } else {
+        if (
+          !params.body?.trim() ||
+          params.title !== undefined ||
+          params.state !== undefined
+        ) {
+          return toolError({
+            error:
+              'Comment actions require a non-empty body and do not accept title or state.',
+          });
+        }
+        if (
+          params.action === 'update_pull_request_comment' &&
+          !params.commentId
+        ) {
+          return toolError({
+            error: 'commentId is required for update_pull_request_comment.',
+          });
+        }
+        if (
+          params.action === 'reply_to_pull_request_comment' &&
+          (!params.threadId || params.commentId !== undefined)
+        ) {
+          return toolError({
+            error: 'Replies require threadId and do not accept commentId.',
+          });
+        }
+        if (
+          params.action === 'create_pull_request_comment' &&
+          (params.commentId !== undefined || params.threadId !== undefined)
+        ) {
+          return toolError({
+            error: 'Comment creation does not accept comment identifiers.',
+          });
+        }
+      }
+      try {
+        const repository = await resolveRepositoryRow({
+          provider: params.sourceControlProvider,
+          repositoryFullName: params.repositoryFullName,
+        });
+        return toMcpToolResult(
+          await writeSourceControlPullRequestForRepository({
+            repository,
+            input: params,
+          }),
+        );
+      } catch (error) {
+        return toolError({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Source control write failed.',
+        });
+      }
+    },
+  );
   server.registerTool(
     'manage_tasks',
     {

@@ -62,6 +62,25 @@ function createApp() {
 }
 
 describe('manageSourceControl', () => {
+  it('keeps member-only metadata writes unavailable to task tokens', async () => {
+    vi.clearAllMocks();
+    mockAssertTaskRunTokenTargetExists.mockResolvedValue(undefined);
+    const response = await createApp().request('/task-1/source_control', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_pull_request_metadata',
+        repositoryFullName: 'acme/frontend',
+        sourceControlProvider: 'github',
+        prNumber: 55,
+        state: 'closed',
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(mockFindTaskRunForSourceControlMutation).not.toHaveBeenCalled();
+    expect(mockWriteSourceControlPullRequestForTaskRun).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockAssertTaskRunTokenTargetExists.mockResolvedValue(undefined);

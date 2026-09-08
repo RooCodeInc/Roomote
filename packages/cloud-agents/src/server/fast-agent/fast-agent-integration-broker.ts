@@ -25,10 +25,6 @@ import {
 import { isRouterMcpServerEnabled } from '../mcp-policy';
 import { resolveApiBaseUrl } from '../shared-utils';
 import {
-  callFastGitHubWrite,
-  FAST_GITHUB_WRITE_TOOLS,
-} from './fast-agent-github-writes';
-import {
   getFastAgentConversationStorageWorkspaceId,
   type FastAgentMcpServerConfig,
   type FastAgentConversation,
@@ -40,7 +36,6 @@ export type FastAgentIntegration = {
   description: string;
   instructions?: string;
   tools: McpToolDefinition[];
-  githubApiWrites?: boolean;
   endpoint?: {
     url: string;
     headers: Record<string, string>;
@@ -331,9 +326,9 @@ async function resolveBrokerAuth(context: BrokerContext) {
 }
 
 /**
- * Actor-resolved remote MCP servers only. Local transports and filesystem
- * tools remain sandbox-only. Tools disabled by the deployment remain
- * unavailable, and calls to exposed tools are audited.
+ * Actor-resolved remote MCP servers, including the member Roomote tools.
+ * Local transports and filesystem tools remain sandbox-only. Tools disabled
+ * by the deployment remain unavailable, and calls to exposed tools are audited.
  */
 export async function listFastAgentIntegrations(
   context: BrokerContext,
@@ -382,8 +377,7 @@ export async function listFastAgentIntegrations(
     candidates.push({
       id: 'github',
       name: 'GitHub',
-      description:
-        "Read GitHub repositories and activity; update or close/reopen pull requests and add issue/PR comments with the requesting user's verified repository write access.",
+      description: 'Read GitHub repositories and activity.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
@@ -397,26 +391,16 @@ export async function listFastAgentIntegrations(
     return [];
   }
 
-  for (const candidate of candidates) {
-    candidate.githubApiWrites = Boolean(
-      githubInstallation &&
-      candidate.id === 'github' &&
-      candidate.endpoint?.deploymentProxy &&
-      candidate.endpoint.url === integrationProxyUrl(apiBaseUrl, 'github'),
-    );
-  }
-
   const results = await Promise.allSettled(
     candidates.map(async (integration) => ({
       ...integration,
-      tools: [
-        ...(await listCachedIntegrationTools({
+      tools: (
+        await listCachedIntegrationTools({
           cacheKey: `${context.userId}:${integration.endpoint!.url}`,
           url: integration.endpoint!.url,
           headers: integration.endpoint!.headers,
-        })),
-        ...(integration.githubApiWrites ? FAST_GITHUB_WRITE_TOOLS : []),
-      ]
+        })
+      )
         .filter((tool) => !integration.disabledTools.has(tool.name))
         .flatMap((tool) => {
           const shaped = shapeFastIntegrationTool(integration.id, tool);
@@ -449,7 +433,6 @@ export async function listFastAgentIntegrations(
             })
           : result.value.instructions,
         tools: result.value.tools,
-        githubApiWrites: result.value.githubApiWrites,
         endpoint: result.value.endpoint,
       },
     ];
@@ -531,27 +514,16 @@ export async function callFastAgentIntegration(
             headers: { Authorization: `Bearer ${authToken}` },
           };
     }
-    const localGithubWrite =
-      integration.id === 'github' &&
-      integration.githubApiWrites &&
-      FAST_GITHUB_WRITE_TOOLS.some((tool) => tool.name === request.toolName);
     const result = await withFastIntegrationTimeout(
       (signal) =>
-        localGithubWrite
-          ? callFastGitHubWrite({
-              userId: context.userId,
-              toolName: request.toolName,
-              args: request.args,
-              signal,
-            })
-          : callMcpTool({
-              url: endpoint.url,
-              headers: endpoint.headers,
-              toolName: request.toolName,
-              args: request.args,
-              toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
-              signal,
-            }),
+        callMcpTool({
+          url: endpoint.url,
+          headers: endpoint.headers,
+          toolName: request.toolName,
+          args: request.args,
+          toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
+          signal,
+        }),
       FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
       `Fast ${integration.id}/${request.toolName} integration call`,
     );

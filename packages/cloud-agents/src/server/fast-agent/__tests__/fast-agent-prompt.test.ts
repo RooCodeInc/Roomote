@@ -74,11 +74,17 @@ describe('buildFastAgentSystemPrompt', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
     expect(prompt).toContain('these API actions do not require a coding task');
     expect(prompt).toContain(
-      'An explicit request to close or update the identified PR is acceptance',
+      'An explicit request to close or update the identified PR/MR is acceptance',
     );
     expect(prompt).toContain(
       'report the permission blocker rather than delegating to bypass it',
     );
+    expect(prompt).toContain('Roomote member manage_source_control tool');
+    expect(prompt).toContain('update_pull_request_metadata');
+    expect(prompt).toContain(
+      'sourceControlProvider (github, gitlab, or bitbucket)',
+    );
+    expect(prompt).toContain('never claim success when applied is false');
   });
   it('bounds evidence-driven autonomy without weakening investigation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
@@ -425,7 +431,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
     expect(prompt).toContain('actor-resolved remote');
     expect(prompt).toContain(
-      'bounded GitHub API writes with per-request repository authorization',
+      'bounded member source-control writes through Roomote MCP',
     );
     expect(prompt).toContain('local stdio servers remain sandbox-only');
     expect(prompt).toContain(
