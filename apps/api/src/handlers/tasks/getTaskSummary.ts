@@ -8,11 +8,13 @@ import {
   eq,
   fastAgentParentEvents,
   sql,
+  taskMessages,
   tasks,
 } from '@roomote/db/server';
 import {
   getFastAgentParentFromPayload,
   getLinkedEnvironmentIdFromPayload,
+  getTerminalProviderErrorFromMessageData,
 } from '@roomote/types';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { Env } from '@roomote/env';
@@ -72,31 +74,61 @@ export async function getTaskSummary(
     const linkedEnvironmentId = getLinkedEnvironmentIdFromPayload(
       latestRun?.payload,
     );
-    const [linkedEnvironment, artifacts, latestReport] = await Promise.all([
-      linkedEnvironmentId
-        ? db.query.environments.findFirst({
-            where: eq(environments.id, linkedEnvironmentId),
-            columns: { id: true, name: true },
-          })
-        : null,
-      listArtifactsByTask({ taskId: task.id, auth: {} }),
-      parent
-        ? db.query.fastAgentParentEvents.findFirst({
-            where: and(
-              eq(fastAgentParentEvents.conversationId, parent.sessionId),
-              sql`${fastAgentParentEvents.event} ->> 'type' = 'child_message'`,
-              sql`${fastAgentParentEvents.event} ->> 'taskId' = ${task.id}`,
-            ),
-            orderBy: [
-              desc(fastAgentParentEvents.createdAt),
-              desc(fastAgentParentEvents.id),
-            ],
-            columns: { event: true },
-          })
-        : null,
-    ]);
+    const [linkedEnvironment, artifacts, latestReport, terminalMessage] =
+      await Promise.all([
+        linkedEnvironmentId
+          ? db.query.environments.findFirst({
+              where: eq(environments.id, linkedEnvironmentId),
+              columns: { id: true, name: true },
+            })
+          : null,
+        listArtifactsByTask({ taskId: task.id, auth: {} }),
+        parent
+          ? db.query.fastAgentParentEvents.findFirst({
+              where: and(
+                eq(fastAgentParentEvents.conversationId, parent.sessionId),
+                sql`${fastAgentParentEvents.event} ->> 'type' = 'child_message'`,
+                sql`${fastAgentParentEvents.event} ->> 'taskId' = ${task.id}`,
+              ),
+              orderBy: [
+                desc(fastAgentParentEvents.createdAt),
+                desc(fastAgentParentEvents.id),
+              ],
+              columns: { event: true, createdAt: true },
+            })
+          : null,
+        latestRun
+          ? db.query.taskMessages.findFirst({
+              where: and(
+                eq(taskMessages.taskId, task.id),
+                eq(taskMessages.runId, latestRun.id),
+                eq(taskMessages.eventType, 'roomote_runtime.assistant_message'),
+                sql`coalesce(${taskMessages.metadata} -> 'terminalProviderError' ->> 'errorSummary', ${taskMessages.payload} -> 'terminalProviderError' ->> 'errorSummary') is not null`,
+              ),
+              orderBy: [desc(taskMessages.ts), desc(taskMessages.createdAt)],
+              columns: { metadata: true, payload: true, createdAt: true },
+            })
+          : null,
+      ]);
+    const terminalError =
+      getTerminalProviderErrorFromMessageData(terminalMessage?.metadata) ??
+      getTerminalProviderErrorFromMessageData(terminalMessage?.payload);
+    // Terminal provider errors end a turn without making the session unresumable.
+    // Only a later closeout from this attempt can supersede that blocker. Compare
+    // database timestamps here, not the sandbox clock used by message.ts.
+    const unresolvedProviderError =
+      terminalError &&
+      !(
+        latestReport?.event.runId === latestRun?.id &&
+        latestReport?.event.purpose === 'closeout' &&
+        terminalMessage &&
+        latestReport.createdAt > terminalMessage.createdAt
+      )
+        ? terminalError.errorSummary
+        : null;
     // reportToParentSession durably stores the task's literal response here.
     const summary =
+      !unresolvedProviderError &&
       typeof latestReport?.event.message === 'string'
         ? latestReport.event.message
         : null;
@@ -131,7 +163,11 @@ export async function getTaskSummary(
       createdAt: task.timestamp,
       taskRunStatus: latestRun?.status ?? null,
       taskPhase: latestRun?.taskPhase ?? null,
-      taskRunError: latestRun?.error ?? null,
+      taskRunError:
+        latestRun?.error ??
+        (unresolvedProviderError
+          ? redactSecrets(unresolvedProviderError)
+          : null),
       environmentSetupState: latestRun?.environmentSetupState ?? null,
       linkedEnvironmentId: linkedEnvironmentId ?? null,
       linkedEnvironmentName: linkedEnvironment?.name ?? null,

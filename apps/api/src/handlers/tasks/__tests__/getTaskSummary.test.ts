@@ -10,6 +10,7 @@ const {
   eqMock,
   mockEnvironmentFindFirst,
   mockReportFindFirst,
+  mockMessageFindFirst,
   mockGetLatestTaskRunsByTaskIds,
   mockListArtifactsByTask,
   mockSelect,
@@ -22,6 +23,7 @@ const {
   eqMock: vi.fn((...args) => ({ type: 'eq', args })),
   mockEnvironmentFindFirst: vi.fn(),
   mockReportFindFirst: vi.fn(),
+  mockMessageFindFirst: vi.fn(),
   mockGetLatestTaskRunsByTaskIds: vi.fn(),
   mockListArtifactsByTask: vi.fn(),
   mockSelect: vi.fn(),
@@ -68,6 +70,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: mockEnvironmentFindFirst,
       },
       fastAgentParentEvents: { findFirst: mockReportFindFirst },
+      taskMessages: { findFirst: mockMessageFindFirst },
     },
   },
   environments: {
@@ -75,6 +78,15 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: eqMock,
   tasks: { id: 'tasks.id', orgId: 'tasks.orgId' },
+  taskMessages: {
+    taskId: 'taskMessages.taskId',
+    runId: 'taskMessages.runId',
+    eventType: 'taskMessages.eventType',
+    metadata: 'taskMessages.metadata',
+    payload: 'taskMessages.payload',
+    ts: 'taskMessages.ts',
+    createdAt: 'taskMessages.createdAt',
+  },
   fastAgentParentEvents: {
     conversationId: 'fastAgentParentEvents.conversationId',
     event: 'fastAgentParentEvents.event',
@@ -159,9 +171,17 @@ describe('getTaskSummary', () => {
     });
     mockListArtifactsByTask.mockResolvedValue([]);
     mockReportFindFirst.mockResolvedValue(undefined);
+    mockMessageFindFirst.mockResolvedValue(undefined);
   });
 
   it('returns the latest task run error in the summary payload', async () => {
+    mockMessageFindFirst.mockResolvedValue({
+      metadata: {
+        terminalProviderError: { errorSummary: 'Insufficient credits' },
+      },
+      payload: {},
+      createdAt: new Date('2026-01-01T00:00:03Z'),
+    });
     const response = await createApp(authContext).request(
       'http://localhost/tasks/task-1/summary',
     );
