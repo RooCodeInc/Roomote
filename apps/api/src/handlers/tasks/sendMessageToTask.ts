@@ -1338,6 +1338,17 @@ export async function steerMessageToTask({
         }
       }
 
+      if (!promptSubmitted) {
+        logHandlerError('steerMessageToTask', error);
+        return {
+          success: false,
+          error:
+            error instanceof Error ? error.message : 'Failed to send message',
+          status: 500,
+          delivery: 'not_accepted',
+        };
+      }
+
       if (error instanceof SandboxNotReadyError) {
         return {
           success: false,

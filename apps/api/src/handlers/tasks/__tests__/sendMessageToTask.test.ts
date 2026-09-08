@@ -347,6 +347,37 @@ describe('sendMessageToTask', () => {
     },
   );
 
+  it.each(['goal lookup', 'run token'])(
+    'allows a safe retry after active-run %s preparation fails',
+    async (stage) => {
+      mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+      const preparation =
+        stage === 'goal lookup' ? mockGetTaskGoalForRun : mockCreateRunToken;
+      preparation.mockRejectedValueOnce(new Error('preparation failed'));
+      const input = {
+        taskId: 'task-1',
+        userId: 'user-1',
+        message: 'Include the additional context.',
+        senderMode: 'fast_agent' as const,
+      };
+
+      expect(await steerMessageToTask(input)).toEqual({
+        success: false,
+        status: 500,
+        error: 'preparation failed',
+        delivery: 'not_accepted',
+      });
+      expect(mockSteerTaskMutate).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+
+      expect(await steerMessageToTask(input)).toEqual({
+        success: true,
+        result: { ok: true },
+      });
+      expect(mockSteerTaskMutate).toHaveBeenCalledOnce();
+    },
+  );
+
   it('marks Fast child messages for worker-owned pending-input dispatch', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({
