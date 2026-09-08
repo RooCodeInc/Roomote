@@ -278,9 +278,6 @@ export function createGithubMcp(options?: {
               typeof originalArgs.commentId === 'number'
                 ? originalArgs.commentId
                 : undefined,
-            fields: Object.keys(originalArgs).filter(
-              (field) => !['owner', 'repo'].includes(field),
-            ),
           }),
         );
         return {

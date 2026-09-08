@@ -1009,15 +1009,21 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.upstream).toHaveBeenCalledTimes(1);
   });
 
-  it('audits actor, repository, installation, operation and target without comment text', async () => {
+  it('audits trusted metadata without logging forwarded argument names or comment text', async () => {
     const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const arguments_ = {
+      owner,
+      repo: 'example',
+      issue_number: 42,
+      body: 'private-comment-text',
+      'sensitive-caller-controlled-key': 'private-value',
+    };
     try {
-      await call('add_issue_comment', {
-        owner,
-        repo: 'example',
-        issue_number: 42,
-        body: 'private-comment-text',
-      });
+      const response = await call('add_issue_comment', arguments_);
+      expect(response.status).toBe(200);
+      expect(
+        JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
+      ).toEqual(arguments_);
       expect(log).toHaveBeenCalledWith(
         expect.stringContaining('github_mcp_write_authorized'),
       );
@@ -1029,6 +1035,11 @@ describe('GitHub MCP bounded writes', () => {
         tool: 'add_issue_comment',
         targetNumber: 42,
       });
+      expect(audit).not.toHaveProperty('fields');
+      expect(JSON.stringify(log.mock.calls)).not.toContain(
+        'sensitive-caller-controlled-key',
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private-value');
       expect(JSON.stringify(log.mock.calls)).not.toContain(
         'private-comment-text',
       );
@@ -1065,7 +1076,7 @@ describe('GitHub MCP bounded writes', () => {
       const audit = JSON.parse(log.mock.calls[0]![0]);
       expect(audit).not.toHaveProperty('targetNumber');
       expect(audit).not.toHaveProperty('commentId');
-      expect(audit.fields).toEqual(['pullNumber', 'commentId', 'reaction']);
+      expect(audit).not.toHaveProperty('fields');
       expect(JSON.stringify(log.mock.calls)).not.toContain(
         'private-target-payload',
       );
