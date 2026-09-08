@@ -571,11 +571,18 @@ async function launchTaskSuggestionTaskFromReaction({
     announceChannelId = originThread?.channelId ?? channelId;
     if (isSuggestedTask) {
       announceMessageTs = messageTs;
-      await slack.addReaction?.({
+      const acknowledged = await slack.addReaction?.({
         channel: channelId,
         timestamp: messageTs,
         name: ackEmoji,
       });
+      if (acknowledged === false) {
+        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
+        apiLogger.warn(
+          `${logPrefix} failed to add the Slack launch acknowledgement`,
+        );
+        return false;
+      }
     } else {
       announceMessageTs = await slack.postMessage({
         channel: announceChannelId,
@@ -708,7 +715,7 @@ async function launchTaskSuggestionTaskFromReaction({
                 : {}),
               channelId: announceChannelId,
               threadTs: launchThreadTs,
-              messageId: launchThreadTs,
+              messageId: isSuggestedTask ? launchThreadTs : announceMessageTs,
               initiator,
               repoForPayload:
                 launchTarget.kind === 'all_repositories'

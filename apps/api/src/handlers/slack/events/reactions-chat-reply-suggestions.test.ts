@@ -985,6 +985,42 @@ describe('chat reply suggestion reactions', () => {
     );
   });
 
+  it('does not launch when the Slack acknowledgement fails', async () => {
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    const slack = {
+      postMessage: vi.fn(),
+      deleteMessage: vi.fn(),
+      addReaction: vi.fn(async () => false),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.releaseWorkItemClaim).toHaveBeenCalledWith(expect.anything(), {
+      id: 'work-item-1',
+      claimedAt,
+    });
+    expect(mocks.launchPinned).not.toHaveBeenCalled();
+    expect(mocks.startFastAgentResponse).not.toHaveBeenCalled();
+    expect(slack.postMessage).not.toHaveBeenCalled();
+  });
+
   it('releases the claim when Fast startup fails before acceptance', async () => {
     mocks.lookupSlackUserMapping.mockResolvedValue({
       hasInactiveMapping: false,
