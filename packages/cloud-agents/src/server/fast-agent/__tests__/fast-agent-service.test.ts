@@ -7383,70 +7383,79 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('lets the Fast parent manage custom automations through MCP tools', async () => {
-    const resolveMcpServerConfigs = vi.fn(async () => ({}));
-    mocks.listIntegrations.mockResolvedValue([
+  it.each([
+    ['manage_custom_automations', { action: 'list' }, { automations: [] }],
+    [
+      'create_custom_skill',
       {
-        id: 'roomote',
-        name: 'Roomote',
-        description: 'Manage Roomote',
-        tools: [{ name: 'manage_custom_automations' }],
+        name: 'example-checklist',
+        description: 'Review example changes',
+        content: 'Check tests and report risks.',
+        environmentIds: ['00000000-0000-4000-8000-000000000001'],
       },
-    ]);
-    mocks.callIntegration.mockResolvedValue({
-      automations: [],
-    });
-    const toolResults: unknown[] = [];
-    mocks.generateText.mockImplementationOnce(
-      async (_params, _session, options) => {
-        await options.onSessionReady('opencode-session-1');
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'ack',
-          message: 'On it.',
-        });
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          toolResults.push(
-            await invokeMcpTool('roomote', 'manage_custom_automations', {
-              action: 'list',
-            }),
-          );
-        }
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'The automation is disabled.',
-        });
-        return '';
-      },
-    );
+      { success: true, persisted: true, name: 'example-checklist' },
+    ],
+  ])(
+    'lets the Fast parent call %s through actor-authorized native MCP',
+    async (toolName, args, result) => {
+      const resolveMcpServerConfigs = vi.fn(async () => ({}));
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Manage Roomote',
+          tools: [{ name: toolName }],
+        },
+      ]);
+      mocks.callIntegration.mockResolvedValue(result);
+      const toolResults: unknown[] = [];
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'On it.',
+          });
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            toolResults.push(await invokeMcpTool('roomote', toolName, args));
+          }
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The requested operation succeeded.',
+          });
+          return '';
+        },
+      );
 
-    await answerFastAgentQuestion({
-      ...baseParams,
-      adapter: callbacks({ resolveMcpServerConfigs }),
-    });
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ resolveMcpServerConfigs }),
+      });
 
-    expect(toolResults[0]).toEqual({
-      success: true,
-      result: { automations: [] },
-    });
-    expect(toolResults[1]).toEqual({
-      success: false,
-      error: 'The same integration call already ran in this turn.',
-    });
-    expect(mocks.callIntegration).toHaveBeenCalledOnce();
-    expect(mocks.listIntegrations).toHaveBeenCalledWith(
-      { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
-      resolveMcpServerConfigs,
-    );
-    expect(mocks.callIntegration).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'user-1' }),
-      expect.arrayContaining([expect.objectContaining({ id: 'roomote' })]),
-      {
-        integrationId: 'roomote',
-        toolName: 'manage_custom_automations',
-        args: { action: 'list' },
-      },
-    );
-  });
+      expect(toolResults[0]).toEqual({
+        success: true,
+        result,
+      });
+      expect(toolResults[1]).toEqual({
+        success: false,
+        error: 'The same integration call already ran in this turn.',
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledOnce();
+      expect(mocks.listIntegrations).toHaveBeenCalledWith(
+        { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+        resolveMcpServerConfigs,
+      );
+      expect(mocks.callIntegration).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-1' }),
+        expect.arrayContaining([expect.objectContaining({ id: 'roomote' })]),
+        {
+          integrationId: 'roomote',
+          toolName,
+          args,
+        },
+      );
+    },
+  );
 
   it('upserts parent OpenCode task parts as one canonical subagent lifecycle', async () => {
     mocks.generateText.mockImplementation(

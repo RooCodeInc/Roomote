@@ -67,6 +67,33 @@ If the instruction is only one sentence, it probably belongs in
 [Agent Guidance](/agent-guidance),
 [environment guidance](/environments), or the task prompt instead.
 
+## Create a skill in conversation
+
+Admins can ask Roomote to save a custom skill directly in a Fast conversation,
+without starting a coding task or creating a repository file. Include a slug,
+a description of when to use the skill, the Markdown instructions, and the
+environments where it should be enabled. For example:
+
+```text
+Save a custom skill named release-checklist for the Web App environment.
+Description: Use when preparing a release for review.
+Instructions: Summarize the changes, check the release tests, and list any
+unresolved rollout risks. Do not publish the release without approval.
+```
+
+If the intended environments are unclear, Roomote asks before saving rather
+than enabling the skill everywhere. Saving requires admin access and at least
+one shared, non-evaluation environment. The skill appears in **Settings >
+Skills** with the same environment selections as a skill added in the settings
+page. Refresh an already-open settings page to see it.
+
+Roomote confirms the saved name and enabled environments after creation. Fast
+can discover and load it immediately, including in the same conversation.
+If a selected environment already has a custom skill with that slug, the
+entire creation is rejected and nothing is overwritten. Choose another slug
+or edit the existing skill in Settings. Built-in skills still take precedence;
+use a distinct name for your playbook.
+
 ## Write the description carefully
 
 The description helps Roomote decide when the skill is relevant. Make it
