@@ -454,7 +454,7 @@ branch (GitHub Actions workflow runs, GitLab Pipelines, Azure DevOps
 builds, Bitbucket Pipelines, and Gitea Actions). When a failure persists (it is not already fixed by a newer run and is
 not a one-off flake), Roomote starts a fix task that reproduces the failing
 job inside the repository's configured environment, finds the root cause, opens
-a PR with the fix, and posts one summary to the Manager Channel when it
+a PR with the fix, and posts one summary to the configured destination when it
 finishes. Only repositories that belong to a configured Roomote environment are
 triaged. For GitLab, ensure Pipeline Hooks are enabled on the webhook Roomote
 receives. For Azure DevOps, Roomote ensures the project-scoped
@@ -463,6 +463,20 @@ receives. For Azure DevOps, Roomote ensures the project-scoped
 For Gitea, repository webhook resync includes the `workflow_run` event so
 Actions completions reach Roomote; host matching uses the deployment
 `GITEA_BASE_URL`.
+
+In **Settings > Automations > CI Failure Triage**, choose **All repositories**
+to retain the shared destination, or **Selected repository groups** to limit
+triage to specific repositories. Add a group, select its repositories, and
+choose its own Slack, Discord, Teams, or Telegram destination. Each repository
+can belong to only one group. Provider and host labels distinguish repositories
+with the same name on different source-control instances.
+
+Selected groups apply to both webhook failures and **Run now**. Removing all
+groups selects no repositories; it does not restore **All repositories**.
+Repositories still need an active connection and a configured environment.
+**Run now** starts at most one eligible investigation per click, using that
+repository's group destination. CI Failure Triage is webhook-driven; scheduled
+checks do not scan repositories.
 
 Follow the [CI failure auto-fix recipe](/cookbook/ci-failure-auto-fix) for a
 copyable noise-control configuration.

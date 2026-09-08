@@ -2,6 +2,7 @@ import type {
   AnnouncerFrequency,
   BackgroundAutomationKey,
   ChannelAutoStartLaunchMode,
+  CiFailureTriageRepositoryRoute,
   CommunicationProvider,
   ConflictResolverMaxPrAgeDays,
   ConflictResolverFrequency,
@@ -19,6 +20,7 @@ import type {
 
 export type BackgroundAgentFieldErrorKey =
   | 'general'
+  | 'ciFailureTriageRepositoryRoutes'
   | 'reviewerEnvironmentIds'
   | 'reviewerCollaborators'
   | 'reviewerExcludedAuthors'
@@ -265,6 +267,8 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   callRoomoteViaEmojiName?: string | null;
   callRoomoteViaEmojiInstructions?: string | null;
   issueFixerInstructions?: string | null;
+  /** null restores legacy all repositories; omitted preserves persisted routes. */
+  ciFailureTriageRepositoryRoutes?: CiFailureTriageRepositoryRoute[] | null;
   channelAutoStartSlackChannels?: ChannelAutoStartInputRow[];
   /**
    * Optional with no default: older clients never send it, and their saves

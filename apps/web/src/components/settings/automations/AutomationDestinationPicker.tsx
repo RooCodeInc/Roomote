@@ -47,6 +47,8 @@ export function AutomationDestinationPicker({
   noneLabel = 'None',
   noneDescription = 'Results appear only in the task view.',
   disabled = false,
+  allowNone = true,
+  allowDirectMessage = true,
   onChange,
 }: {
   id: string;
@@ -60,6 +62,8 @@ export function AutomationDestinationPicker({
   noneLabel?: string;
   noneDescription?: string;
   disabled?: boolean;
+  allowNone?: boolean;
+  allowDirectMessage?: boolean;
   onChange: (value: AutomationDestinationValue) => void;
 }) {
   const visibleProviders = availableProviders.includes(
@@ -103,7 +107,9 @@ export function AutomationDestinationPicker({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">{noneLabel}</SelectItem>
+            {allowNone ? (
+              <SelectItem value="none">{noneLabel}</SelectItem>
+            ) : null}
             {visibleProviders.map((provider) => (
               <SelectItem key={provider} value={provider}>
                 {PROVIDER_LABELS[provider]}
@@ -138,7 +144,9 @@ export function AutomationDestinationPicker({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="channel">Channel</SelectItem>
-                <SelectItem value="direct_message">DM me</SelectItem>
+                {allowDirectMessage ? (
+                  <SelectItem value="direct_message">DM me</SelectItem>
+                ) : null}
               </SelectContent>
             </Select>
 

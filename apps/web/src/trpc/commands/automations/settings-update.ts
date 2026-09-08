@@ -14,6 +14,8 @@ import {
 } from '@roomote/types';
 import {
   db,
+  automations,
+  eq,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   deploymentSettings,
   getAutomationByKey,
@@ -36,6 +38,7 @@ import { captureActivationAutomationChanged } from '@roomote/telemetry/server';
 import type { ActivationAutomation } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
+import { resolveCiFailureTriageRepositoryRoutes } from './ci-failure-triage-routing';
 
 import {
   hasActiveGitHubInstallation,
@@ -337,6 +340,25 @@ export async function updateBackgroundAgentSettingsCommand(
       ? (input.platformIssueAlertsEnabled ??
         existingSettings.platformIssueAlertsEnabled)
       : existingSettings.platformIssueAlertsEnabled;
+  const savingCiRoutes =
+    input.savingAutomation === 'ciFailureTriage' &&
+    input.ciFailureTriageRepositoryRoutes !== undefined;
+  let ciRoutes = savingCiRoutes
+    ? (input.ciFailureTriageRepositoryRoutes ?? undefined)
+    : existingSettings.ciFailureTriageRepositoryRoutes;
+  if (savingCiRoutes && ciRoutes !== undefined) {
+    try {
+      ciRoutes = await resolveCiFailureTriageRepositoryRoutes(auth, ciRoutes);
+    } catch (error) {
+      return {
+        success: false,
+        fieldErrors: {
+          ciFailureTriageRepositoryRoutes:
+            error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
   const shouldUpdateCallRoomoteViaEmoji =
     input.savingAutomation === 'callRoomoteViaEmoji';
   const callRoomoteViaEmojiEnabled = shouldUpdateCallRoomoteViaEmoji
@@ -504,6 +526,10 @@ export async function updateBackgroundAgentSettingsCommand(
     destinationDescriptors.some(
       (descriptor) =>
         input.savingAutomation === descriptor.automationId &&
+        !(
+          descriptor.automationId === 'ciFailureTriage' &&
+          ciRoutes !== undefined
+        ) &&
         Boolean(submittedDestinations[descriptor.automationId].slackChannel),
     );
 
@@ -564,7 +590,12 @@ export async function updateBackgroundAgentSettingsCommand(
         })
       : keepPersistedDiscordChannel(existingSettings.managerDiscordChannelId),
     ...destinationDescriptors.map(async (descriptor) => {
-      const shouldUpdate = input.savingAutomation === descriptor.automationId;
+      const shouldUpdate =
+        input.savingAutomation === descriptor.automationId &&
+        !(
+          descriptor.automationId === 'ciFailureTriage' &&
+          ciRoutes !== undefined
+        );
       const submitted = submittedDestinations[descriptor.automationId];
       const [slack, discord] = await Promise.all([
         shouldUpdate
@@ -1095,7 +1126,8 @@ export async function updateBackgroundAgentSettingsCommand(
   for (const validation of managerChannelAutomationValidations) {
     if (
       input.savingAutomation !== validation.automationId ||
-      validation.frequency === 'off'
+      validation.frequency === 'off' ||
+      (validation.automationId === 'ciFailureTriage' && ciRoutes !== undefined)
     ) {
       continue;
     }
@@ -1473,8 +1505,22 @@ export async function updateBackgroundAgentSettingsCommand(
       updatedAt: now,
     });
 
+    const ciSettings = savingCiRoutes
+      ? {
+          ...(
+            await tx.query.automations.findFirst({
+              where: eq(automations.key, 'ci_failure_triage'),
+            })
+          )?.settings,
+        }
+      : undefined;
+    if (ciSettings) {
+      if (ciRoutes === undefined) delete ciSettings.repositoryRoutes;
+      else ciSettings.repositoryRoutes = ciRoutes;
+    }
     await upsertAutomation(tx, {
       key: 'ci_failure_triage',
+      ...(ciSettings ? { settings: ciSettings } : {}),
       enabled: ciFailureTriageFrequency !== 'off',
       schedule: { mode: ciFailureTriageFrequency },
       ...destinationUpsertFields('ciFailureTriage'),

@@ -9,6 +9,7 @@ import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   type BackgroundAutomationKey,
   type CommunicationProvider,
+  type CiFailureTriageRepositoryRoute,
   communicationProviders,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -68,6 +69,7 @@ import {
 } from './ScheduleOnlyAutomationContent';
 import { CustomAutomationsSection } from './CustomAutomationsSection';
 import { AutomationDestinationPicker } from './AutomationDestinationPicker';
+import { CiFailureTriageRepositoryRoutesEditor } from './CiFailureTriageRepositoryRoutesEditor';
 import {
   buildAutomationDiscordDestinationOptions,
   buildManagerSlackChannelOptions,
@@ -131,6 +133,7 @@ import {
 type FieldErrors = Partial<
   Record<
     | 'general'
+    | 'ciFailureTriageRepositoryRoutes'
     | 'reviewerEnvironmentIds'
     | 'reviewerCollaborators'
     | 'reviewerExcludedAuthors'
@@ -836,6 +839,7 @@ function mapSettingsToFormState(
     ciFailureTriageSlackChannelId: string | null;
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
+    ciFailureTriageRepositoryRoutes?: CiFailureTriageRepositoryRoute[];
     mergeAnnouncerTargetProvider: CommunicationProvider | null;
     mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
     mergeAnnouncerTargetChannelId: string | null;
@@ -976,6 +980,7 @@ function mapSettingsToFormState(
       '',
     ciFailureTriageDiscordChannel:
       settings.ciFailureTriageDiscordChannelId ?? '',
+    ciFailureTriageRepositoryRoutes: settings.ciFailureTriageRepositoryRoutes,
     mergeAnnouncerTargetProvider:
       settings.mergeAnnouncerTargetProvider ?? 'none',
     mergeAnnouncerTargetMode: settings.mergeAnnouncerTargetMode ?? 'channel',
@@ -2581,6 +2586,10 @@ export function AutomationsSettings() {
       null,
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
+  if (formState?.ciFailureTriageRepositoryRoutes?.length === 0) {
+    scheduleOnlyAutomationBlockedReasons.ciFailureTriage =
+      'Select at least one repository group first';
+  }
   return (
     <div className="space-y-6">
       {!settingsQuery.isPending &&
@@ -3389,44 +3398,41 @@ export function AutomationsSettings() {
                         }
                       />
                     ) : (
-                      renderSlackDestinationField({
-                        field:
-                          automation.id === 'securityAuditor'
-                            ? 'securityAuditorSlackChannel'
-                            : automation.id === 'codeQualityAuditor'
-                              ? 'codeQualityAuditorSlackChannel'
-                              : 'ciFailureTriageSlackChannel',
-                        inputId: `${automation.id}-slack-channel`,
-                        label: 'Post follow-up work to this Slack channel',
-                        helperText:
-                          automation.id === 'ciFailureTriage'
-                            ? 'Choose where Roomote should post CI failure triage work.'
-                            : 'Choose where Roomote should post actionable follow-up work.',
-                        savedChannelId:
-                          automation.id === 'securityAuditor'
-                            ? (settingsQuery.data?.settings
-                                .securityAuditorSlackChannelId ?? null)
-                            : automation.id === 'codeQualityAuditor'
-                              ? (settingsQuery.data?.settings
-                                  .codeQualityAuditorSlackChannelId ?? null)
-                              : (settingsQuery.data?.settings
-                                  .ciFailureTriageSlackChannelId ?? null),
-                        savedDiscordChannelId:
-                          automation.id === 'securityAuditor'
-                            ? (settingsQuery.data?.settings
-                                .securityAuditorDiscordChannelId ?? null)
-                            : automation.id === 'codeQualityAuditor'
-                              ? (settingsQuery.data?.settings
-                                  .codeQualityAuditorDiscordChannelId ?? null)
-                              : (settingsQuery.data?.settings
-                                  .ciFailureTriageDiscordChannelId ?? null),
-                        warningChannelId:
-                          automation.id === 'securityAuditor'
-                            ? slackChannelAccessWarnings.securityAuditorSlackChannel
-                            : automation.id === 'codeQualityAuditor'
-                              ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
-                              : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
-                      })
+                      <CiFailureTriageRepositoryRoutesEditor
+                        routes={formState.ciFailureTriageRepositoryRoutes}
+                        onChange={(routes) =>
+                          setFormState((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  ciFailureTriageRepositoryRoutes: routes,
+                                }
+                              : previous,
+                          )
+                        }
+                        availableProviders={communicationProviders.filter(
+                          (provider) =>
+                            capabilities?.[`${provider}Connected`] === true,
+                        )}
+                        slackOptions={buildSlackDestinationOptions(null)}
+                        discordOptions={channelAutoStartDiscordOptions}
+                        error={fieldErrors.ciFailureTriageRepositoryRoutes}
+                        globalDestination={renderSlackDestinationField({
+                          field: 'ciFailureTriageSlackChannel',
+                          inputId: 'ciFailureTriage-slack-channel',
+                          label: 'Post follow-up work to this Slack channel',
+                          helperText:
+                            'Choose where Roomote should post CI failure triage work.',
+                          savedChannelId:
+                            settingsQuery.data?.settings
+                              .ciFailureTriageSlackChannelId ?? null,
+                          savedDiscordChannelId:
+                            settingsQuery.data?.settings
+                              .ciFailureTriageDiscordChannelId ?? null,
+                          warningChannelId:
+                            slackChannelAccessWarnings.ciFailureTriageSlackChannel,
+                        })}
+                      />
                     )}
                   </ScheduleOnlyAutomationContent>
                 </AutomationCard>

@@ -28,6 +28,7 @@ import {
   DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
   DEFAULT_PR_REVIEW_SETTINGS,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getCiFailureTriageRepositoryRoutes,
   isChannelAutoStartLaunchMode,
   isConflictResolverMaxPrAgeDays,
   isInternalAutomationKey,
@@ -1112,6 +1113,9 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(['off', 'daily'] as const),
     ),
     ciFailureTriageLastRunAt: ciFailureTriage?.lastRunAt ?? null,
+    ciFailureTriageRepositoryRoutes: getCiFailureTriageRepositoryRoutes(
+      asObject(ciFailureTriage?.settings),
+    ),
     ciFailureTriageScanCursor: ciFailureTriage?.scanCursor ?? null,
 
     mergeAnnouncerFrequency: getAutomationFrequency(

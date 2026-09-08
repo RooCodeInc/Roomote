@@ -294,6 +294,129 @@ describe('launchCiFailureTriageForFailedRun', () => {
     );
   });
 
+  it.each(['github', 'gitlab', 'ado', 'gitea', 'bitbucket'] as const)(
+    'ignores unselected %s repositories before any side effects',
+    async (provider) => {
+      mockGetAutomationRuntime.mockResolvedValue({
+        enabled: true,
+        scheduleMode: 'daily',
+        settings: {
+          repositoryRoutes: [
+            {
+              repositoryIds: ['10000000-0000-4000-8000-000000000001'],
+              target: {
+                provider: 'slack',
+                targetKind: 'slack_channel',
+                externalRef: 'CROUTE',
+              },
+            },
+          ],
+        },
+      });
+      const result = await launchCiFailureTriageForFailedRun({
+        ...failedRun,
+        provider,
+      });
+      expect(result.message).toContain('outside');
+      expect(mockListConnectedCommunicationProviders).not.toHaveBeenCalled();
+      expect(mockFindEnvironmentIdForRepositoryId).not.toHaveBeenCalled();
+      expect(mockRedisSet).not.toHaveBeenCalled();
+      expect(mockTryClaimCiFailureTriageInvestigation).not.toHaveBeenCalled();
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['github', 'gitlab', 'ado', 'gitea', 'bitbucket'] as const)(
+    'routes selected %s webhook announcements and tasks to their group',
+    async (provider) => {
+      const repositoryId = '10000000-0000-4000-8000-000000000001';
+      mockGetAutomationRuntime.mockResolvedValue({
+        enabled: true,
+        scheduleMode: 'daily',
+        settings: {
+          repositoryRoutes: [
+            {
+              repositoryIds: [repositoryId],
+              target: {
+                provider: 'slack',
+                targetKind: 'slack_channel',
+                externalRef: 'CROUTE',
+              },
+            },
+          ],
+        },
+      });
+      mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-api');
+      mockResolveAutomationRuntimeDestination.mockImplementation(
+        async ({ runtime }) => runtime.destination,
+      );
+      const result = await launchCiFailureTriageForFailedRun({
+        ...failedRun,
+        provider,
+        repositoryId,
+      });
+      expect(result.taskId).toBe('task-scan-1');
+      expect(mockPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ channel: 'CROUTE' }),
+      );
+      expect(mockEnqueueTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          task: expect.objectContaining({
+            payload: expect.objectContaining({
+              channel: 'CROUTE',
+              slackChannel: 'CROUTE',
+            }),
+          }),
+        }),
+        expect.anything(),
+      );
+    },
+  );
+
+  it.each([
+    { repositoryRoutes: [] },
+    { repositoryRoutes: null },
+    { repositoryRoutes: [{ repositoryIds: ['invalid'], target: {} }] },
+  ])(
+    'does not fall back to all repositories for empty or malformed config',
+    async ({ repositoryRoutes }) => {
+      mockGetAutomationRuntime.mockResolvedValue({
+        enabled: true,
+        scheduleMode: 'daily',
+        settings: { repositoryRoutes },
+      });
+      await launchCiFailureTriageForFailedRun(failedRun);
+      expect(mockRedisSet).not.toHaveBeenCalled();
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not use another destination when the group provider is disconnected', async () => {
+    const repositoryId = '10000000-0000-4000-8000-000000000001';
+    mockGetAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      scheduleMode: 'daily',
+      settings: {
+        repositoryRoutes: [
+          {
+            repositoryIds: [repositoryId],
+            target: {
+              provider: 'discord',
+              targetKind: 'discord_channel',
+              externalRef: 'route',
+            },
+          },
+        ],
+      },
+    });
+    await launchCiFailureTriageForFailedRun({ ...failedRun, repositoryId });
+    expect(mockResolveAutomationRuntimeDestination).not.toHaveBeenCalled();
+    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('launches one environment-backed investigate-and-fix task', async () => {
     const result = await launchCiFailureTriageForFailedRun(failedRun);
 

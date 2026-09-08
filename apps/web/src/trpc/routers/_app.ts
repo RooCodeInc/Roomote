@@ -6,6 +6,7 @@ import {
 
 import {
   SLACK_RESOLVE_CHANNELS_MAX_IDS,
+  ciFailureTriageRepositoryRoutesSchema,
   SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
@@ -795,6 +796,9 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        ciFailureTriageRepositoryRoutes: ciFailureTriageRepositoryRoutesSchema
+          .nullable()
+          .optional(),
         ciFailureTriageDiscordChannel: z
           .string()
           .trim()

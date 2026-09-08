@@ -266,6 +266,83 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     );
   });
 
+  it.each([false, true])(
+    'limits manual runs by repository ID with destination override=%s',
+    async (override) => {
+      const repositoryId = '10000000-0000-4000-8000-000000000001';
+      const target = {
+        provider: 'teams',
+        targetKind: 'teams_channel',
+        externalRef: 'route-channel',
+      };
+      mockGetAutomationRuntime.mockResolvedValue({
+        enabled: true,
+        scheduleMode: 'daily',
+        settings: {
+          repositoryRoutes: [{ repositoryIds: [repositoryId], target }],
+        },
+      });
+      mockGetActiveRepositoriesForProviders.mockResolvedValue([
+        {
+          id: 'unselected',
+          fullName: 'acme/api',
+          sourceControlProvider: 'github',
+          host: 'other.example',
+          defaultBranch: 'main',
+        },
+        {
+          id: repositoryId,
+          fullName: 'acme/api',
+          sourceControlProvider: 'github',
+          host: 'github.com',
+          defaultBranch: 'main',
+        },
+      ]);
+      mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-selected');
+      mockResolveAutomationRuntimeDestination.mockImplementation(
+        async ({ runtime }) => runtime.destination,
+      );
+      const destination = {
+        provider: 'teams' as const,
+        channelId: 'override-channel',
+        source: 'automation_target' as const,
+      };
+      const result = await ciFailureTriageJob({
+        manualTrigger: true,
+        ...(override ? { destination } : {}),
+      });
+      expect(result.launchedTaskId).toBe('task-1');
+      expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledTimes(1);
+      expect(mockFindEnvironmentIdForRepositoryId).toHaveBeenCalledWith(
+        repositoryId,
+      );
+      expect(mockBuildCiFailureTriagePrompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelId: override ? 'override-channel' : 'route-channel',
+        }),
+      );
+    },
+  );
+
+  it('does not let a manual destination override bypass empty scope', async () => {
+    mockGetAutomationRuntime.mockResolvedValue({
+      enabled: true,
+      scheduleMode: 'daily',
+      settings: { repositoryRoutes: [] },
+    });
+    await ciFailureTriageJob({
+      manualTrigger: true,
+      destination: {
+        provider: 'slack',
+        channelId: 'C123',
+        source: 'automation_target',
+      },
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockTryClaimCiFailureTriageInvestigation).not.toHaveBeenCalled();
+    expect(mockFindEnvironmentIdForRepositoryId).not.toHaveBeenCalled();
+  });
+
   it('stamps GitLab provider on the payload for GitLab repos', async () => {
     mockGetActiveRepositoriesForProviders.mockResolvedValue([
       {

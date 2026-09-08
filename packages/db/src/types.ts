@@ -3,6 +3,7 @@ import type {
   AutomationScanCursor,
   ChannelAutoStartLaunchMode,
   CiFailureTriageFrequency,
+  CiFailureTriageRepositoryRoute,
   CodeQualityAuditorFrequency,
   ConflictResolverFrequency,
   ConflictResolverMaxPrAgeDays,
@@ -588,6 +589,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   ciFailureTriageFrequency: CiFailureTriageFrequency;
   ciFailureTriageSlackChannelId: string | null;
   ciFailureTriageDiscordChannelId: string | null;
+  ciFailureTriageRepositoryRoutes?: CiFailureTriageRepositoryRoute[];
   ciFailureTriageLastRunAt: Date | null;
   ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
   mergeAnnouncerFrequency: MergeAnnouncerFrequency;

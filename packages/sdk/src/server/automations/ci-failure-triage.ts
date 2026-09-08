@@ -44,6 +44,7 @@ import {
 } from '@roomote/gitlab';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getCiFailureTriageRepositoryRoutes,
   TaskPayloadKind,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -53,6 +54,7 @@ import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
 } from './destination';
+import { resolveCiFailureTriageRepositoryDestination } from './ci-failure-triage-routing';
 import {
   findEnvironmentIdForRepositoryId,
   getActiveRepositoriesForProviders,
@@ -91,14 +93,17 @@ export async function ciFailureTriageJob(
     }
 
     const connectedProviders = await listConnectedCommunicationProviders();
-    const destination =
-      opts.destination ??
-      (await resolveAutomationRuntimeDestination({
-        runtime,
-        slackConnected: connectedProviders.includes('slack'),
-      }));
+    const routes = getCiFailureTriageRepositoryRoutes(runtime.settings);
+    const legacyDestination =
+      routes === undefined
+        ? (opts.destination ??
+          (await resolveAutomationRuntimeDestination({
+            runtime,
+            slackConnected: connectedProviders.includes('slack'),
+          })))
+        : undefined;
 
-    if (!destination) {
+    if (routes === undefined && !legacyDestination) {
       result.skippedReason = 'Manager channel is not configured.';
       return result;
     }
@@ -109,8 +114,13 @@ export async function ciFailureTriageJob(
         'github',
       ]) as SourceControlProvider[];
 
-    const selectedRepositories =
-      await getActiveRepositoriesForProviders(supportedProviders);
+    const selectedRepositories = (
+      await getActiveRepositoriesForProviders(supportedProviders)
+    ).filter(
+      (repository) =>
+        routes === undefined ||
+        routes.some((route) => route.repositoryIds.includes(repository.id)),
+    );
 
     if (selectedRepositories.length === 0) {
       result.skippedReason =
@@ -118,7 +128,6 @@ export async function ciFailureTriageJob(
       return result;
     }
 
-    const channelId = destination.channelId;
     let launched = 0;
     let consideredWithEnvironment = 0;
     // Resolved once on first GitLab / Azure DevOps repository; each
@@ -132,6 +141,16 @@ export async function ciFailureTriageJob(
     // Walk every provider+host+fullName identity and resolve coverage through
     // the repository-id environment mapping (not fullName).
     for (const selectedRepository of selectedRepositories) {
+      const destination =
+        legacyDestination ??
+        (await resolveCiFailureTriageRepositoryDestination({
+          runtime,
+          repositoryId: selectedRepository.id,
+          connectedProviders,
+          destination: opts.destination,
+        }));
+      if (!destination) continue;
+      const channelId = destination.channelId;
       // Prefer the provider+host-scoped mapping row. Path-only fullName fallback
       // is GitHub-only so GitLab same-path hosts cannot mis-resolve workspaces.
       const mappedEnvironmentId = await findEnvironmentIdForRepositoryId(

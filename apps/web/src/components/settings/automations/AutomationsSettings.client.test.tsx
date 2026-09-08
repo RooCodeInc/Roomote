@@ -97,6 +97,21 @@ const baseFormState: FormState = {
 };
 
 describe('Automations selection helpers', () => {
+  it('saves and resets CI scope without conflating all repositories and none', () => {
+    const scoped = { ...baseFormState, ciFailureTriageRepositoryRoutes: [] };
+    expect(
+      buildAutomationSettingsSaveInput(scoped, baseFormState, 'ciFailureTriage')
+        .ciFailureTriageRepositoryRoutes,
+    ).toEqual([]);
+    expect(
+      buildAutomationSettingsSaveInput(baseFormState, scoped, 'ciFailureTriage')
+        .ciFailureTriageRepositoryRoutes,
+    ).toBeNull();
+    expect(
+      buildAutomationSettingsSaveInput(scoped, baseFormState, 'announcer')
+        .ciFailureTriageRepositoryRoutes,
+    ).toBeNull();
+  });
   it('saves Merge announcer through the standard provider/mode destination fields', () => {
     const input = buildAutomationSettingsSaveInput(
       {
