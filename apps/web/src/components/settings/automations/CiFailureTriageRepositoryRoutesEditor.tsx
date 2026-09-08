@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   type CiFailureTriageRepositoryRoute,
@@ -22,7 +22,10 @@ import {
 } from '@/components/system';
 
 import { EnvironmentRepositorySelector } from '../environments/EnvironmentRepositorySelector';
-import { AutomationDestinationPicker } from './AutomationDestinationPicker';
+import {
+  AutomationDestinationPicker,
+  PROVIDER_LABELS,
+} from './AutomationDestinationPicker';
 
 type Props = {
   routes: CiFailureTriageRepositoryRoute[] | undefined;
@@ -75,6 +78,13 @@ function SelectedRoutes({
   slackOptions,
   discordOptions,
 }: Props & { routes: CiFailureTriageRepositoryRoute[] }) {
+  const [editing, setEditing] = useState<number[]>(() =>
+    routes.flatMap((route, index) =>
+      route.repositoryIds.length === 0 || !route.target.externalRef.trim()
+        ? [index]
+        : [],
+    ),
+  );
   const repositories = useRepositories();
   const supported =
     getTriggerableBackgroundAutomationDescriptorByKey(
@@ -95,8 +105,8 @@ function SelectedRoutes({
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Only repositories in these groups are monitored. Each repository can
-        belong to one group, with its own report destination.
+        Only selected repositories are monitored. Each repository can have one
+        report destination.
       </p>
       {repositories.isPending ? <Skeleton className="h-20 w-full" /> : null}
       {repositories.isError ? (
@@ -127,6 +137,7 @@ function SelectedRoutes({
         }
         const destinationOptions =
           route.target.provider === 'discord' &&
+          route.target.externalRef &&
           !discordOptions.some(
             (option) => option.id === route.target.externalRef,
           )
@@ -139,66 +150,136 @@ function SelectedRoutes({
                 },
               ]
             : discordOptions;
+        const complete =
+          route.repositoryIds.length > 0 &&
+          Boolean(route.target.externalRef.trim());
+        const isEditing = editing.includes(index) || !complete;
+        const repositoryNames = route.repositoryIds
+          .map(
+            (id) =>
+              repositories.data?.find((repo) => repo.id === id)?.fullName ??
+              `Unavailable repository (${id})`,
+          )
+          .join(', ');
+        const destinationLabel = (
+          route.target.provider === 'slack'
+            ? slackOptions
+            : route.target.provider === 'discord'
+              ? discordOptions
+              : []
+        ).find((option) => option.id === route.target.externalRef)?.label;
         return (
           <fieldset
             key={index}
-            className="min-w-0 space-y-3 rounded-md border p-3"
+            aria-label={`Repository destination ${index + 1}`}
+            className={
+              isEditing
+                ? 'min-w-0 space-y-3'
+                : 'flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'
+            }
           >
-            <legend className="px-1 text-sm font-medium">
-              Group {index + 1}
-            </legend>
-            <EnvironmentRepositorySelector
-              repositories={routeOptions}
-              selectedRepositoryIds={route.repositoryIds}
-              inputPrefix={`ci-route-${index}`}
-              heightClassName="max-h-48"
-              onToggleRepository={(id) =>
-                updateRoute(index, {
-                  ...route,
-                  repositoryIds: route.repositoryIds.includes(id)
-                    ? route.repositoryIds.filter((existing) => existing !== id)
-                    : [...route.repositoryIds, id],
-                })
-              }
-            />
-            <AutomationDestinationPicker
-              id={`ci-route-${index}-destination`}
-              value={{
-                provider: route.target.provider,
-                mode: 'channel',
-                channelId: route.target.externalRef,
-              }}
-              availableProviders={availableProviders}
-              slackOptions={slackOptions}
-              discordOptions={destinationOptions}
-              allowNone={false}
-              allowDirectMessage={false}
-              onChange={(destination) => {
-                if (destination.provider === 'none') return;
-                updateRoute(index, {
-                  ...route,
-                  target: {
-                    provider: destination.provider,
-                    targetKind:
-                      destination.provider === 'telegram'
-                        ? 'telegram_chat'
-                        : `${destination.provider}_channel`,
-                    externalRef: destination.channelId,
-                  },
-                });
-              }}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                onChange(routes.filter((_, position) => position !== index))
-              }
-            >
-              <Trash2 />
-              Remove group {index + 1}
-            </Button>
+            {isEditing ? (
+              <>
+                <div
+                  role="group"
+                  aria-labelledby={`ci-route-${index}-repositories`}
+                  className="space-y-2"
+                >
+                  <Label id={`ci-route-${index}-repositories`}>
+                    Repositories
+                  </Label>
+                  <EnvironmentRepositorySelector
+                    repositories={routeOptions}
+                    selectedRepositoryIds={route.repositoryIds}
+                    inputPrefix={`ci-route-${index}`}
+                    heightClassName="max-h-48"
+                    onToggleRepository={(id) =>
+                      updateRoute(index, {
+                        ...route,
+                        repositoryIds: route.repositoryIds.includes(id)
+                          ? route.repositoryIds.filter(
+                              (existing) => existing !== id,
+                            )
+                          : [...route.repositoryIds, id],
+                      })
+                    }
+                  />
+                </div>
+                <AutomationDestinationPicker
+                  id={`ci-route-${index}-destination`}
+                  label="Send reports to"
+                  value={{
+                    provider: route.target.provider,
+                    mode: 'channel',
+                    channelId: route.target.externalRef,
+                  }}
+                  availableProviders={availableProviders}
+                  slackOptions={slackOptions}
+                  discordOptions={destinationOptions}
+                  allowNone={false}
+                  allowDirectMessage={false}
+                  onChange={(destination) => {
+                    if (destination.provider === 'none') return;
+                    updateRoute(index, {
+                      ...route,
+                      target: {
+                        provider: destination.provider,
+                        targetKind:
+                          destination.provider === 'telegram'
+                            ? 'telegram_chat'
+                            : `${destination.provider}_channel`,
+                        externalRef: destination.channelId,
+                      },
+                    });
+                  }}
+                />
+              </>
+            ) : (
+              <p className="min-w-0 break-words text-sm">
+                <span className="font-medium">{repositoryNames}</span>
+                {' → '}
+                <span className="text-muted-foreground">
+                  {destinationLabel ??
+                    `${PROVIDER_LABELS[route.target.provider]} · ${route.target.externalRef}`}
+                </span>
+              </p>
+            )}
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isEditing && !complete}
+                aria-expanded={isEditing}
+                onClick={() =>
+                  setEditing((current) =>
+                    isEditing
+                      ? current.filter((position) => position !== index)
+                      : [...current, index],
+                  )
+                }
+              >
+                {isEditing ? 'Done' : 'Edit'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setEditing((current) =>
+                    current
+                      .filter((position) => position !== index)
+                      .map((position) =>
+                        position > index ? position - 1 : position,
+                      ),
+                  );
+                  onChange(routes.filter((_, position) => position !== index));
+                }}
+              >
+                <Trash2 />
+                Remove
+              </Button>
+            </div>
           </fieldset>
         );
       })}
@@ -208,6 +289,7 @@ function SelectedRoutes({
         size="sm"
         onClick={() => {
           const provider = availableProviders[0] ?? 'slack';
+          setEditing((current) => [...current, routes.length]);
           onChange([
             ...routes,
             {
@@ -225,7 +307,7 @@ function SelectedRoutes({
         }}
       >
         <Plus />
-        Add repository group
+        Add repository destination
       </Button>
     </div>
   );
