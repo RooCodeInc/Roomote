@@ -149,6 +149,9 @@ function getLinearOauthSetupStatus(
   return status === 'partial' ? 'Configuration incomplete.' : null;
 }
 
+const SNOWFLAKE_PASSWORD_AUTH_NOTICE =
+  'This connection signs in to Snowflake with a password. Snowflake is retiring password-only sign-in for service users.';
+
 type AdminConfiguredIntegrationItemOptions = {
   integration: McpIntegrationDefinition;
   connection?: { authStatus?: string | null };
@@ -161,6 +164,8 @@ type AdminConfiguredIntegrationItemOptions = {
   connectionPending: boolean;
   canConfigure: boolean;
   canManageTools: boolean;
+  status?: ReactNode;
+  statusIcon?: ReactNode;
   openDialog: () => void;
   openToolDialog: () => void;
   disconnectIntegration: () => void;
@@ -499,6 +504,8 @@ function buildAdminConfiguredIntegrationItem({
   connectionPending,
   canConfigure,
   canManageTools,
+  status,
+  statusIcon,
   openDialog,
   openToolDialog,
   disconnectIntegration,
@@ -521,7 +528,8 @@ function buildAdminConfiguredIntegrationItem({
         : `Configure ${integration.name}`
       : undefined,
     isPending,
-    status: undefined,
+    status,
+    statusIcon,
     headerAction:
       canConfigure && connection != null
         ? {
@@ -691,12 +699,14 @@ function SnowflakeConnectionFields({
   fieldErrors,
   formError,
   allowBlankPrivateKey,
+  usesPasswordAuth,
   onFieldChange,
 }: {
   form: SnowflakeFormState;
   fieldErrors: Partial<Record<keyof SnowflakeFormState, string[]>>;
   formError: string | null;
   allowBlankPrivateKey: boolean;
+  usesPasswordAuth: boolean;
   onFieldChange: (field: keyof SnowflakeFormState, value: string) => void;
 }) {
   const fieldClassName =
@@ -704,6 +714,16 @@ function SnowflakeConnectionFields({
 
   return (
     <>
+      {usesPasswordAuth ? (
+        <Alert variant="notice">
+          <TriangleAlert className="size-4" />
+          <AlertDescription>
+            {SNOWFLAKE_PASSWORD_AUTH_NOTICE} Paste the private key below and
+            save to switch this connection to key-pair authentication. The
+            stored password is removed once a key is saved.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <div className="space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
@@ -1620,6 +1640,8 @@ export function Integrations() {
   );
   const allowsBlankSnowflakePrivateKey =
     snowflakeConnection.data?.authMethod === 'key_pair';
+  const snowflakeUsesPasswordAuth =
+    isSnowflakeConnected && snowflakeConnection.data?.authMethod === 'password';
 
   useEffect(() => {
     if (!isAsanaDialogOpen) {
@@ -2031,6 +2053,12 @@ export function Integrations() {
               connectionPending: snowflakeConnection.isPending,
               canConfigure: true,
               canManageTools: isAdmin,
+              status: snowflakeUsesPasswordAuth
+                ? `${SNOWFLAKE_PASSWORD_AUTH_NOTICE} Edit the connection to switch to a key pair.`
+                : undefined,
+              statusIcon: snowflakeUsesPasswordAuth ? (
+                <TriangleAlert className="size-4" />
+              ) : undefined,
               openDialog: () => setIsSnowflakeDialogOpen(true),
               openToolDialog: () => openMcpToolDialog(integration),
               disconnectIntegration: () =>
@@ -2271,6 +2299,7 @@ export function Integrations() {
     ripplingConnection.isPending,
     ripplingConnectionSummary,
     snowflakeConnection.isPending,
+    snowflakeUsesPasswordAuth,
     isSnowflakeDialogOpen,
     vercelConnection.isPending,
     isVercelDialogOpen,
@@ -3090,6 +3119,7 @@ export function Integrations() {
           fieldErrors={snowflakeFieldErrors}
           formError={snowflakeFormError}
           allowBlankPrivateKey={allowsBlankSnowflakePrivateKey}
+          usesPasswordAuth={snowflakeUsesPasswordAuth}
           onFieldChange={handleSnowflakeFieldChange}
         />
       </AdminConfiguredIntegrationDialog>

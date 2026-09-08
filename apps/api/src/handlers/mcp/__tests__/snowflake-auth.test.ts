@@ -96,6 +96,26 @@ const unencryptedPrivateKey = createPrivateKey({
   .export({ type: 'pkcs8', format: 'pem' })
   .toString();
 
+// Throwaway 1024-bit RSA key used only to prove that Roomote rejects keys
+// below Snowflake's 2048-bit minimum. It is a static fixture so the test does
+// not have to generate a weak key at runtime.
+const WEAK_RSA_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
+MIICdgIBADANBgkqhkiG9w0BAQEFAASCAmAwggJcAgEAAoGBAMpUctCsXrXT3N72
+xjom38dV1SjCSykBWPi0SZiCINbAe8HB9poI4OXxV7mgSD08zWL+oHy/+xOrk0Vn
+FpE8lUBuGs/OPmpiMAMpn8afkHui1wjUI4QDYViqnVQ3DZrFgQgmzryliujn5fgt
+FeW8U1oSMOVXxOitwmsz2L9PLPqXAgMBAAECgYBBGExcQKiz/Ta5cVGzUeB7RG0x
+ENmXlrxmP7LR40Pnc8QdQWcyhZq9wBkGOsAjG5XEvMErgaSo3nGiSZlkHsaxgi7Y
+g2FjOrz5dwANoxWfeXviQxeFhTcr9zZ7Kf4XLl67Julr0mrXCFwQjN0tSqKkJqa3
+T01RXZhPOOl2lZSX0QJBAPPzWLkLbfvABV6O8NmoLP6h/f8R+RWNJFfwT346JY7N
+klDVcq4r/PQdgOEF6PtSFoDRILCvWrSRn2S7y19zIs8CQQDUUtNXkJzMOlk3v6mZ
+6o8Gj03XMiWZxB1rc21yhkwuuah+amm3xDYb7usv36N+PZWtGCi4qEANJ6fqpC1Q
+2r25AkEArze6Ii7zcD8bnC9PDwacSshPh0WBgtk9oWwZrLBXCZrd3PFyzWcK6MvI
+Jdf434q2Xw/WSxGoNMnjkpbQHF62QQJANGFakjey9w9OA1rdVINxVYT1Bynv7Mdd
+Gq0XSzGmicBzuPw3qIZXcvy2ONFLXFGFI3baVPPtGVG3M0PdihzswQJAURom6e1h
+RHZARrKx3F4VZFnDiRRy7f+9DIwQt9KGyoyOLOSik/XFhWEE/NtYhC1adrMOaLD/
+4YBjSVQEeHBBgg==
+-----END PRIVATE KEY-----`;
+
 function createInitializeRequest(id: number) {
   return {
     jsonrpc: '2.0',
@@ -448,15 +468,10 @@ describe('snowflake MCP auth and tool handling', () => {
   });
 
   it('rejects RSA private keys smaller than 2048 bits', async () => {
-    const { privateKey: shortPrivateKey } = generateKeyPairSync('rsa', {
-      modulusLength: 1024,
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
     mockFindConnection.mockResolvedValue(
       mockConnectionRow({
         encryptedPassword: undefined,
-        encryptedPrivateKey: `enc:${shortPrivateKey}`,
+        encryptedPrivateKey: `enc:${WEAK_RSA_PRIVATE_KEY}`,
         encryptedPrivateKeyPassphrase: undefined,
       }),
     );

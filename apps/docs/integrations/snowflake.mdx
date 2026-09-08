@@ -31,6 +31,14 @@ run `umask 077`, then use `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bi
   warehouse context.
 </Warning>
 
+## Switch from password sign-in to a key pair
+
+Snowflake is retiring password-only sign-in for service users. Connections
+that still store a password show a warning in **Settings > Integrations**
+until an admin edits the connection and saves a private key. Saving a key
+removes the stored password, so Snowflake can drop the password from the
+user afterwards without affecting Roomote.
+
 ## Rotate from an existing credential
 
 1. Install the new public key in Snowflake's unused `RSA_PUBLIC_KEY_2` slot and verify its fingerprint before changing Roomote.
