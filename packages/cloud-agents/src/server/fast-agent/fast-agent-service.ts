@@ -119,6 +119,7 @@ import {
 } from './fast-agent-reply-stream';
 import { createFastAgentSurfaceReplyStreamer } from './fast-agent-surface-reply-stream';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
+import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
   findFastAgentUnresolvedRequest,
@@ -4559,6 +4560,7 @@ export async function answerFastAgentQuestion({
               (environment) => environment.id,
             ),
           }),
+          new RemoteFastAgentInstanceSkillSource(userId),
         );
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,

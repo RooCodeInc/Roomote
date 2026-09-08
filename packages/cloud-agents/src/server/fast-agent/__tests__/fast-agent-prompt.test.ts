@@ -70,6 +70,44 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('supports explicit instance invocation and member creation without environments', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      isCurrentUserAdmin: false,
+    });
+
+    expect(prompt).toContain(
+      'packaged > instance > legacy Settings > repository',
+    );
+    expect(prompt).toContain(
+      'load the instance match without asking for an environment',
+    );
+    expect(prompt).toContain('Instance skills have no `environmentIds`');
+    expect(prompt).toContain(
+      'select an environment only if its work requires a coding task',
+    );
+    expect(prompt).toContain('supplemental guidance, not packaged routers');
+    expect(prompt).toContain('cannot replace packaged first-hop routing');
+    const creationGuidance = prompt
+      .split('- Use `roomote_create_custom_skill`')[1]!
+      .split('\n')[0]!;
+    expect(creationGuidance).toContain('only when the user explicitly asks');
+    expect(creationGuidance).toContain('Any active deployment member');
+    expect(creationGuidance).toContain(
+      'do not supply environmentIds or ask for environment selection',
+    );
+    expect(creationGuidance).toContain(
+      'including when no environments are configured',
+    );
+    expect(creationGuidance).toContain('only after persistence succeeds');
+    expect(creationGuidance).toContain('exact returned `instance:<uuid>` ID');
+    expect(creationGuidance).toContain(
+      'Advisor and judge subagents cannot create skills',
+    );
+    expect(creationGuidance).not.toContain('admin-only');
+    expect(creationGuidance).not.toContain('enabled environments');
+  });
+
   it('bounds evidence-driven autonomy without weakening investigation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
     expect(prompt).toContain(
@@ -365,7 +403,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('settings-defined playbook');
     expect(prompt).toContain('repository-defined method');
     expect(prompt).toContain(
-      'without arguments for the complete packaged and Settings inventory',
+      'without arguments for the complete packaged, instance, and authorized legacy Settings inventory',
     );
     expect(prompt).toContain('this never inspects repositories');
     expect(prompt).toContain(
@@ -378,7 +416,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Dollar-prefixed prose without this marker is not an explicit skill invocation',
     );
     expect(prompt).toContain(
-      'An unscoped exact `name` lookup searches packaged and settings-defined skills',
+      'An unscoped exact `name` lookup searches packaged, instance, and authorized legacy Settings skills',
     );
     expect(prompt).toContain(
       'whenever a result includes `nextSourceOffset`, call `list_skills` again',
@@ -409,6 +447,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
     expect(prompt).toContain('manage_custom_automations');
+    expect(prompt).toContain('roomote_create_custom_skill');
+    expect(prompt).toContain('user explicitly asks to save');
+    expect(prompt).toContain(
+      'do not supply environmentIds or ask for environment selection',
+    );
+    expect(prompt).toContain('exact returned `instance:<uuid>` ID');
     expect(prompt).not.toContain('integration_call');
     expect(prompt).toContain('roomote_manage_tasks');
     expect(prompt).toContain("current user's deployment authorization");

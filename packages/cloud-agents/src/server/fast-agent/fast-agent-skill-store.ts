@@ -56,7 +56,7 @@ export type FastAgentSkillSummary = {
   name: string;
   repository?: string;
   settingsSource?: string;
-  source: 'packaged' | 'repository' | 'settings';
+  source: 'packaged' | 'instance' | 'repository' | 'settings';
 };
 
 export type FastAgentSkillDocument = FastAgentSkillSummary & {
@@ -74,6 +74,7 @@ export type FastAgentSkillListResult = {
 
 type FastAgentSkillCatalog = FastAgentSkillListResult & {
   counts: {
+    instance: number;
     packaged: number;
     repository: number;
     settings: number;
@@ -226,6 +227,7 @@ export class FastAgentSkillStore {
     rootDirectory?: string,
     private readonly repositorySkills?: FastAgentRepositorySkillSource,
     private readonly settingsSkills?: FastAgentSettingsSkillSource,
+    private readonly instanceSkills?: FastAgentSettingsSkillSource,
   ) {
     this.rootDirectory = rootDirectory
       ? Promise.resolve(resolve(rootDirectory))
@@ -253,12 +255,26 @@ export class FastAgentSkillStore {
     const packagedNames = new Set<string>(packaged.map((skill) => skill.name));
     const packagedMatchIsAuthoritative =
       !!query.name && packagedNames.has(query.name);
+    const instance = this.instanceSkills
+      ? await this.instanceSkills.list(query)
+      : { skills: [], warnings: [] };
+    const filteredInstance = instance.skills.filter(
+      (skill) =>
+        (!query.name || skill.name === query.name) &&
+        !packagedNames.has(skill.name),
+    );
+    const instanceNames = new Set(filteredInstance.map((skill) => skill.name));
+    const instanceMatchIsAuthoritative =
+      !!query.name && instanceNames.has(query.name);
     const settings =
-      !packagedMatchIsAuthoritative && this.settingsSkills
+      !packagedMatchIsAuthoritative &&
+      !instanceMatchIsAuthoritative &&
+      this.settingsSkills
         ? await this.settingsSkills.list(query)
         : { skills: [], warnings: [] };
     const repository =
       !packagedMatchIsAuthoritative &&
+      !instanceMatchIsAuthoritative &&
       (query.sourceOffset ?? 0) === 0 &&
       scope &&
       this.repositorySkills
@@ -270,7 +286,8 @@ export class FastAgentSkillStore {
     const filteredSettings = settings.skills.filter(
       (skill) =>
         (!query.name || skill.name === query.name) &&
-        !packagedNames.has(skill.name),
+        !packagedNames.has(skill.name) &&
+        !instanceNames.has(skill.name),
     );
     const settingsNames = new Set<string>(
       filteredSettings.map((skill) => skill.name),
@@ -279,20 +296,24 @@ export class FastAgentSkillStore {
       (skill) =>
         (!query.name || skill.name === query.name) &&
         !packagedNames.has(skill.name) &&
+        !instanceNames.has(skill.name) &&
         !settingsNames.has(skill.name),
     );
     return {
       counts: {
+        instance: filteredInstance.length,
         packaged: filteredPackaged.length,
         repository: filteredRepository.length,
         settings: filteredSettings.length,
         total:
           filteredPackaged.length +
+          filteredInstance.length +
           filteredSettings.length +
           filteredRepository.length,
       },
       skills: [
         ...filteredPackaged,
+        ...filteredInstance,
         ...filteredSettings,
         ...filteredRepository,
       ].sort((left, right) =>
@@ -303,7 +324,11 @@ export class FastAgentSkillStore {
       ...(settings.nextSourceOffset === undefined
         ? {}
         : { nextSourceOffset: settings.nextSourceOffset }),
-      warnings: [...settings.warnings, ...repository.warnings],
+      warnings: [
+        ...instance.warnings,
+        ...settings.warnings,
+        ...repository.warnings,
+      ],
     };
   }
 
@@ -318,6 +343,10 @@ export class FastAgentSkillStore {
       if (!this.settingsSkills) throw new Error('Unknown skill.');
       return this.settingsSkills.read(id, requestedResource);
     }
+    if (id.startsWith('instance:')) {
+      if (!this.instanceSkills) throw new Error('Unknown skill.');
+      return this.instanceSkills.read(id, requestedResource);
+    }
     if (!this.repositorySkills) throw new Error('Unknown skill.');
     return this.repositorySkills.read(id, requestedResource);
   }
@@ -326,6 +355,7 @@ export class FastAgentSkillStore {
     await Promise.all([
       this.repositorySkills?.dispose?.(),
       this.settingsSkills?.dispose?.(),
+      this.instanceSkills?.dispose?.(),
     ]);
   }
 
