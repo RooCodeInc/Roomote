@@ -1032,6 +1032,24 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('leaves PR feedback action questions to the conversation adapter', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventHandling: 'present_only',
+    });
+
+    expect(prompt).toContain(
+      'When a suggested action question and prompt are present, summarize the findings only; do not repeat or paraphrase the closing question or offer to act in your message.',
+    );
+    expect(prompt).toContain(
+      'The conversation adapter supplies that question and the pending user-approvable actions.',
+    );
+    expect(prompt).toContain(
+      'Do not launch a fix or call "send_task_message" until the user explicitly responds or clicks an action.',
+    );
+  });
+
   it('does not offer retry when the platform event is ineligible', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
