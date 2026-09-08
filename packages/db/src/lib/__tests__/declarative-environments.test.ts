@@ -557,5 +557,15 @@ describe('declarative environments', () => {
         (command) => command.name === 'Start Next.js web dev server',
       ),
     );
+    const docs = commands.at(-1);
+    expect(docs?.name).toBe('Start Mintlify docs preview');
+    expect(docs?.continue_on_error).toBe(true);
+    expect(docs?.detached).toBe(true);
+    expect(docs?.run).toBe(
+      'npm_config_prefer_offline=true pnpm --filter @roomote/docs dev --port 3333 --no-open',
+    );
+    expect(
+      commands.some((command) => command.run.includes('npm install -g mint')),
+    ).toBe(false);
   });
 });
