@@ -572,6 +572,20 @@ async function registerTelegramWebhookBestEffort(): Promise<TelegramWebhookRegis
 
 export async function repairTelegramWebhookCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
+  const credentials = await resolveTelegramRuntimeCredentials();
+  if (credentials.botToken && !credentials.webhookSecret) {
+    await db.transaction((tx) =>
+      upsertDeploymentEnvironmentVariables(tx, {
+        userId: auth.userId,
+        values: [
+          {
+            name: 'R_TELEGRAM_WEBHOOK_SECRET',
+            value: createTelegramWebhookSecret(),
+          },
+        ],
+      }),
+    );
+  }
   const result = await registerTelegramWebhookBestEffort();
   if (!result.registered) {
     throw new Error(result.error ?? 'Could not repair Telegram connection.');
