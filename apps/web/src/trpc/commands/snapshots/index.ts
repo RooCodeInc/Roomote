@@ -42,6 +42,7 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 import {
   type ClaimedOutOfBandContext,
@@ -417,6 +418,7 @@ export async function restoreTaskRunSnapshotCommand(
 
     // Conversation cargo (draft prompt, Slack/Linear channel bindings) lives
     // on the tasks row.
+    await requireTaskAccess(auth, sourceRun.taskId);
     const sourceTask = await db.query.tasks.findFirst({
       where: eq(tasks.id, sourceRun.taskId),
       columns: {

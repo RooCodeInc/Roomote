@@ -11,6 +11,7 @@ import {
 import type { PullRequestStatus, SourceControlProvider } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 type RecentPullRequest = {
   repo: string;
@@ -44,6 +45,7 @@ export async function getRecentPullRequestsCommand(
       and(
         eq(tasks.initiatorUserId, auth.userId),
         isNull(tasks.deletedAt),
+        customAutomationTaskAccess(auth),
         isNotNull(taskPullRequests.repository),
         isNotNull(taskPullRequests.prNumber),
       ),

@@ -181,6 +181,9 @@ describe('roomote MCP tool descriptions', () => {
     expect(automationsTool.config.description).toBe(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.description,
     );
+    expect(automationsTool.config.description).toContain(
+      'Members can create and manage their own custom automations',
+    );
     expect(automationsTool.config.title).toBe(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.title,
     );

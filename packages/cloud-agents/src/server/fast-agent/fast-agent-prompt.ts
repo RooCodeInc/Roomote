@@ -123,7 +123,6 @@ export function buildFastAgentSystemPrompt({
   automationReport = false,
   retryTaskStartAvailable = false,
   allowSilentAmbientReply = false,
-  isCurrentUserAdmin = false,
   implicitAutomationOffersEnabled = true,
   releaseVersion,
   commitSha,
@@ -148,7 +147,6 @@ export function buildFastAgentSystemPrompt({
   automationReport?: boolean;
   retryTaskStartAvailable?: boolean;
   allowSilentAmbientReply?: boolean;
-  isCurrentUserAdmin?: boolean;
   implicitAutomationOffersEnabled?: boolean;
   releaseVersion?: string;
   commitSha?: string;
@@ -213,13 +211,12 @@ export function buildFastAgentSystemPrompt({
     ? `${buildRoomoteReleaseIdentifier(releaseVersion, { commitSha, appEnv })}\n\n`
     : '';
   const recurringAutomationGuidance = `## Recurring Work and Automations
-- When an admin explicitly asks for recurring work, recognize a real cadence expression such as "every Monday", "daily", "weekly", "whenever X happens", "from now on", or "on a schedule". Do not treat preference words such as "always use tabs" as a cadence.
-- Reminders and recurring checks that belong to this conversation ("remind me in an hour", "check every 10 minutes until CI is green", "ping me here every weekday at 9") are wakeups, not automations: use "manage_wakeups", which needs no admin. Reach for a custom automation only for deployment-wide recurring work that should run outside this conversation or report to a channel.
+- When a user explicitly asks for recurring work, recognize a real cadence expression such as "every Monday", "daily", "weekly", "whenever X happens", "from now on", or "on a schedule". Do not treat preference words such as "always use tabs" as a cadence.
+- Reminders and recurring checks that belong to this conversation ("remind me in an hour", "check every 10 minutes until CI is green", "ping me here every weekday at 9") are wakeups, not automations: use "manage_wakeups". Reach for a custom automation for recurring work that should run outside this conversation or report to a channel or direct message.
 - Draft the automation conversationally with a proposed name, a prompt containing only the work (never the cadence), a validated human-readable schedule, a confirmed destination on the current chat surface, and the appropriate environment. Use \`resolve_schedule\` before creation; if it is ambiguous, ask the resolver's clarification question rather than guessing.
 - Before \`create\`, use \`list\` to check for an equivalent automation. Present the complete summary (name, prompt, schedule, destination, and environment or Fast mode) and ask one explicit confirmation question. Never create, update, enable, or delete silently. After creation, ask whether the user wants to \`run_now\` to test it.
-- If the user is not an admin, do not attempt creation. Explain that an administrator is required and provide a copy-pasteable draft name, prompt, and schedule instead.
 ${
-  isCurrentUserAdmin && implicitAutomationOffersEnabled && !platformEvent
+  implicitAutomationOffersEnabled && !platformEvent
     ? '- After a successful human turn, offer automation only when the completed work is clearly periodic-shaped (such as a report, digest, scan, sweep, monitor, triage, reminder, or status check), and the user signals repetition (such as "again", "like last time", or a repeated request) or the task is canonically periodic (such as a standup summary, PR review sweep, dependency check, or inbox/issue triage). Never offer for one-off fixes, edits, questions, or exploration; when in doubt, do not offer.\n- Append at most one short, unobtrusive sentence to the closeout: "By the way — if you want this weekly, I can save it as an automation. Just say the word." Do not interrupt the answer. Do not offer on failures, blockers, clarifications, automation-triggered turns, or after an offer was already made or declined in this conversation.\n'
     : '- Do not proactively offer to save work as an automation on this turn.\n'
 }`;
@@ -361,7 +358,7 @@ ${reactionGuidance}
 - Never send conversational acknowledgements to a task. "Okay", "cool", "thanks", status questions, and similar conversation are addressed to you. Use a user-visible chat tool.
 - Use "cancel_task" only when the user explicitly asks to stop an active task.
 - Call a deployment MCP tool when it can answer the request. Fast receives the same actor-authorized remote and deployment-proxied MCP tool catalog as delegated tasks; local stdio servers remain sandbox-only. Servers listed with a tool prefix expose each tool individually with its native JSON schema. On-demand servers are reached through \`find_integration_tools\` (fetch the schema by server id and tool name, or search by keywords) followed by \`call_integration_tool\`; the same acknowledgement, duplicate, and audit rules apply to both paths.
-- Use \`roomote_manage_custom_automations\` for custom automation lifecycle requests. It uses the current user's deployment authorization, is admin-only, and is unavailable to advisor and judge subagents. List before modifying an existing automation, use "list_models" before setting a model override, use update with "enabled" to enable or disable, and use "run_now" rather than "launch_task" to test an automation. Communicate first on a human-authored turn; platform events remain exempt. Delete only when the user explicitly requests it, and after creating an automation ask whether they want to run it now.
+- Use \`roomote_manage_custom_automations\` for custom automation lifecycle requests. It uses the current user's deployment authorization: members can create and manage their own custom automations, and admins can manage all custom automations, including those without a creator. The server enforces ownership; do not refuse a member's own-automation request merely because they are not an admin. Built-in automations and deployment settings remain admin-only. This tool is unavailable to advisor and judge subagents. List before modifying an existing automation, use "list_models" before setting a model override, use update with "enabled" to enable or disable, and use "run_now" rather than "launch_task" to test an automation. Communicate first on a human-authored turn; platform events remain exempt. Delete only when the user explicitly requests it, and after creating an automation ask whether they want to run it now.
 - Use "manage_wakeups" when the user wants a reminder, a delayed follow-up, or a recurring check that reports back into this conversation ("remind me in 20 minutes", "check every 10 minutes until CI is green", "every weekday at 9 ping me with open PRs"). The schedule is one short string: "in <positive integer>s|m|h|d" for a reminder, "every <positive integer>s|m|h|d" for a repeating check, "cron 0 9 * * 1-5" for a five-field calendar schedule. Prefer "in 30s", not fractional "in 0.5m". Recurring intervals under five minutes require an x<count> or until bound, such as "every 30s x3". Delivery is best effort; never promise an exact 30-second reply. Send only the fields the action needs. It is scoped to this conversation and available to every participant. Do not use \`roomote_manage_custom_automations\` for conversation-scoped reminders, and never sleep or poll inside a turn instead of scheduling a wakeup. After creating one, confirm the plan and the next run time in one sentence; when the user says stop or cancel, use action "cancel".
 
 ${recurringAutomationGuidance}

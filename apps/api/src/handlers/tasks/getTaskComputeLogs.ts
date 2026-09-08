@@ -19,6 +19,7 @@ import {
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
+import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 import { logHandlerError } from '../utils';
 import { visibleTaskHistoryCondition } from './helpers';
 
@@ -116,7 +117,13 @@ export async function getTaskComputeLogs(
     const [task] = await db
       .select({ id: tasks.id })
       .from(tasks)
-      .where(and(eq(tasks.id, taskId), visibleTaskHistoryCondition))
+      .where(
+        and(
+          eq(tasks.id, taskId),
+          visibleTaskHistoryCondition,
+          customAutomationHistoryAccess(c.get('mcpAuth'), 'task'),
+        ),
+      )
       .limit(1);
 
     if (!task) {

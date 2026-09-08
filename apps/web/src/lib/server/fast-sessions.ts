@@ -33,6 +33,7 @@ import type { UserAuthSuccess } from '@/types';
 import { getTaskMessageReference } from '@/lib/task-message-reference';
 import { currentEpochSeconds, signArtifactId } from './artifact-signature';
 import { COMPOSER_SUGGESTION_HISTORY_LIMIT } from './composer-suggestion-history';
+import { customAutomationFastSessionAccess } from './custom-automation-session-access';
 import {
   buildSessionTaskPreviews,
   getSessionPreviewProxyConfig,
@@ -331,10 +332,9 @@ const fastSessionSelection = {
   updatedAt: fastAgentConversations.updatedAt,
 };
 
-function fastSessionScope(_auth: FastSessionAuth) {
-  // Sessions follow the same visibility rules as tasks: every authenticated
-  // user of the deployment can read every conversation and its transcript.
-  return undefined;
+function fastSessionScope(auth: FastSessionAuth) {
+  // Ordinary conversations remain deployment-collaborative by ID.
+  return customAutomationFastSessionAccess(auth);
 }
 
 /** Light session lookup with the same visibility scope as the list/detail. */

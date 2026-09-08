@@ -18,6 +18,7 @@ import {
 } from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
+import { canAccessTask } from '@/lib/server/custom-automation-task-access';
 
 export const runtime = 'nodejs';
 
@@ -46,7 +47,7 @@ export async function GET(
     where: eq(taskRuns.id, runId),
   });
 
-  if (!taskRun) {
+  if (!taskRun || !(await canAccessTask(authResult, taskRun.taskId))) {
     return NextResponse.json({ error: 'Not Found' }, { status: 404 });
   }
 

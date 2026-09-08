@@ -3,6 +3,10 @@ import type { AuthTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
+
+vi.mock('../../custom-automation-history-access', () => ({
+  customAutomationHistoryAccess: vi.fn(() => undefined),
+}));
 import { getTaskSummary } from '../getTaskSummary';
 
 const {

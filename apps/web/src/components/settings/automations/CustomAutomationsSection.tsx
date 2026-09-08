@@ -49,6 +49,7 @@ import {
 import { ModelSelect } from '@/components/tasks/ModelSelect';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { useAuthorizedUser } from '@/hooks/useUser';
 
 import {
   AutomationDestinationPicker,
@@ -280,6 +281,7 @@ function scheduleSummaryLine(summary: string, timeZone: string): string {
 }
 
 export function CustomAutomationsSection() {
+  const { isAdmin } = useAuthorizedUser();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listQuery = useQuery(
@@ -287,13 +289,18 @@ export function CustomAutomationsSection() {
   );
   const environmentsQuery = useQuery(trpc.environments.list.queryOptions());
   const slackChannelsQuery = useQuery(
-    trpc.automations.listSlackChannels.queryOptions(),
+    trpc.automations.listSlackChannels.queryOptions(undefined, {
+      enabled: isAdmin,
+    }),
   );
   const discordChannelsQuery = useQuery(
-    trpc.automations.listDiscordChannels.queryOptions(),
+    trpc.automations.listDiscordChannels.queryOptions(undefined, {
+      enabled: isAdmin,
+    }),
   );
-  const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
-  const miscSettingsQuery = useQuery(trpc.miscSettings.get.queryOptions());
+  const optionsQuery = useQuery(
+    trpc.automations.getCustomAutomationOptions.queryOptions(),
+  );
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -304,12 +311,11 @@ export function CustomAutomationsSection() {
 
   // New destinations default to the shared manager channel, matching where
   // the other automations report by default.
-  const managerSlackChannelId =
-    settingsQuery.data?.settings.managerSlackChannelId ?? '';
+  const managerSlackChannelId = optionsQuery.data?.managerSlackChannelId ?? '';
   const managerDiscordChannelId =
-    settingsQuery.data?.settings.managerDiscordChannelId ?? '';
-  const capabilities = settingsQuery.data?.capabilities;
-  const capabilitiesLoaded = !settingsQuery.isPending && Boolean(capabilities);
+    optionsQuery.data?.managerDiscordChannelId ?? '';
+  const capabilities = optionsQuery.data?.capabilities;
+  const capabilitiesLoaded = !optionsQuery.isPending && Boolean(capabilities);
   const connectedDestinationOptions = useMemo(
     () =>
       capabilitiesLoaded
@@ -459,7 +465,7 @@ export function CustomAutomationsSection() {
 
   // Valid five-field cron is parsed and previewed entirely client-side; the
   // server round trip (and its LLM fallback) is only for natural language.
-  const schedulingTimeZone = miscSettingsQuery.data?.effectiveTimeZone;
+  const schedulingTimeZone = optionsQuery.data?.effectiveTimeZone;
   const clientParsedCron = useMemo(
     () =>
       schedulingTimeZone
@@ -815,6 +821,7 @@ export function CustomAutomationsSection() {
 
         <div className="space-y-2">
           <AutomationDestinationPicker
+            channelCatalogAvailable={isAdmin}
             id="custom-automation-destination"
             value={{
               provider: form.targetProvider,
@@ -894,11 +901,9 @@ export function CustomAutomationsSection() {
             disabled={busy || atCap || !capabilitiesLoaded}
             onClick={() => {
               const managerProvider =
-                managerSlackChannelId &&
-                settingsQuery.data?.capabilities.slackConnected
+                managerSlackChannelId && capabilities?.slackConnected
                   ? 'slack'
-                  : managerDiscordChannelId &&
-                      settingsQuery.data?.capabilities.discordConnected
+                  : managerDiscordChannelId && capabilities?.discordConnected
                     ? 'discord'
                     : null;
               const targetProvider =

@@ -141,10 +141,9 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('guides admins through explicit recurring work and offers automation only when enabled', () => {
+  it('guides every member through recurring work and offers automation when enabled', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
     });
 
     expect(prompt).toContain('## Recurring Work and Automations');
@@ -155,31 +154,28 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('ask one explicit confirmation question');
     expect(prompt).toContain('By the way — if you want this weekly');
     expect(prompt).toContain('when in doubt, do not offer');
+    expect(prompt).toContain('When a user explicitly asks for recurring work');
+    expect(prompt).not.toContain('do not attempt creation');
+    expect(prompt).not.toContain('provide a copy-pasteable draft');
   });
 
-  it('suppresses implicit offers for non-admins, automation events, and the deployment kill switch', () => {
-    const nonAdminPrompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-    });
+  it('suppresses implicit offers for automation events and the deployment kill switch', () => {
     const eventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
       turnSource: 'platform_event',
       platformEventKind: 'automation',
     });
     const disabledPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
       implicitAutomationOffersEnabled: false,
     });
 
-    for (const prompt of [nonAdminPrompt, eventPrompt, disabledPrompt]) {
+    for (const prompt of [eventPrompt, disabledPrompt]) {
       expect(prompt).not.toContain('By the way — if you want this weekly');
       expect(prompt).toContain(
         'Do not proactively offer to save work as an automation on this turn',
       );
     }
-    expect(nonAdminPrompt).toContain('provide a copy-pasteable draft');
   });
 
   it('tells human turns how to handle an unresolved earlier request', () => {
@@ -412,6 +408,21 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('integration_call');
     expect(prompt).toContain('roomote_manage_tasks');
     expect(prompt).toContain("current user's deployment authorization");
+    expect(prompt).toContain(
+      'members can create and manage their own custom automations',
+    );
+    expect(prompt).toContain(
+      'admins can manage all custom automations, including those without a creator',
+    );
+    expect(prompt).toContain(
+      "do not refuse a member's own-automation request merely because they are not an admin",
+    );
+    expect(prompt).toContain(
+      'Built-in automations and deployment settings remain admin-only',
+    );
+    expect(prompt).toContain(
+      'This tool is unavailable to advisor and judge subagents',
+    );
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');

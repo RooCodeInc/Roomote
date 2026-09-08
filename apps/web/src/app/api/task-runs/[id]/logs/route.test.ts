@@ -7,6 +7,11 @@ const createComputeProviderClientMock = vi.fn();
 const getComputeProviderCapabilitiesMock = vi.fn();
 const resolveComputeProviderEnvValuesMock = vi.fn();
 const streamCommandOutputMock = vi.fn();
+const canAccessTaskMock = vi.fn();
+
+vi.mock('@/lib/server/custom-automation-task-access', () => ({
+  canAccessTask: (...args: unknown[]) => canAccessTaskMock(...args),
+}));
 
 let lastSession:
   | {
@@ -53,6 +58,7 @@ describe('GET /api/task-runs/[id]/logs', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     lastSession = undefined;
+    canAccessTaskMock.mockResolvedValue(true);
 
     authorizeUserTokenMock.mockResolvedValue({
       success: true,

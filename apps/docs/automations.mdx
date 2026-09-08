@@ -40,6 +40,11 @@ informational rather than replyable task threads.
 
 ## Recommended automations
 
+Members can create and manage their own custom automations in **Settings >
+Automations** or through Roomote chat. Admins can manage all custom automations,
+including those created by other members and those without a creator. Built-in
+automations and deployment-wide settings remain admin-only.
+
 During setup, Roomote checks connected repositories for recurring work that an
 automation could handle. Admins can review the recommendations, turn individual
 automations on or off, and continue to apply the selected set. Skipping the
@@ -49,12 +54,12 @@ Recommendations are a starting point rather than a fixed policy. After applying
 them, use **Settings > Automations** to adjust schedules, destinations, workspace
 targets, prompts, or models, and to create other automations from scratch.
 
-Admins can also ask Fast to create recurring work during a conversation. Roomote
+Members and admins can also ask Fast to create recurring work during a conversation. Roomote
 confirms the schedule, checks for an existing matching automation, and asks for
 approval before it saves anything. After creation, Fast offers to run the
-automation immediately so you can verify the prompt and destination. When a
-non-admin asks, Fast prepares a copyable automation draft for an administrator
-instead of offering controls that person cannot use.
+automation immediately so you can verify the prompt and destination. Members
+manage the custom automations they create; managing someone else's automation
+requires an admin.
 
 ## Pull request automations
 
@@ -110,6 +115,11 @@ Other announcements link to the provider's compare view.
 
 ## Custom automations
 
+Members can list, inspect, edit, enable or disable, delete, and run their own
+custom automations. Admins can perform these actions on all custom automations,
+including those without a creator. These ownership rules apply in the dashboard
+and in Roomote chat.
+
 Create arbitrary scheduled agent runs with:
 
 - a clear **name**
@@ -151,7 +161,7 @@ originating Session, so earlier findings remain in context. In Slack, launches
 reuse that Session's report thread when it is available. Thread or topic
 placement on other providers depends on the provider and execution target.
 
-Admins can also choose **Custom schedule** and enter either a standard
+For a custom automation you manage, choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
 9am.” Roomote previews the interpreted schedule before saving and asks for
 clarification rather than guessing when the recurrence itself is ambiguous.
@@ -238,13 +248,16 @@ for three copyable custom automation prompts, or
 [draft a product-updates newsletter](/cookbook/product-updates-newsletter) with
 a custom MCP server and a natural-language schedule.
 
-The **Scheduling timezone** setting is available on both the Automations and
-Deployment settings pages. It applies to all scheduled automations and to
+The admin-only **Scheduling timezone** setting is available on both the Automations and
+Deployment settings pages. Members can choose schedules for their own custom
+automations but cannot change this shared timezone or other deployment settings.
+It applies to all scheduled automations and to
 natural-language schedule interpretation. Existing deployments continue using
 their Slack workspace timezone (or UTC when unavailable) until an admin pins
 an explicit IANA timezone.
 
-Admins can also manage custom automations conversationally through the
+Members can also manage their own custom automations conversationally, and
+admins can manage all custom automations, through the
 `manage_custom_automations` tool: list, inspect, resolve a schedule, create,
 update, delete, or run an enabled automation immediately. List results omit
 stored prompts to keep the conversation focused; after choosing an automation,

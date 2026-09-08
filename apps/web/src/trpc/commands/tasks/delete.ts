@@ -16,19 +16,20 @@ import {
 import { deleteArtifactsBatch } from '@/lib/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 export async function deleteTasksCommand(
   auth: UserAuthSuccess,
   input: { taskIds: string[] },
 ) {
-  // Any deployment member can delete tasks; deletion is a soft delete
+  // Ordinary tasks remain collaborative; deletion is a soft delete
   // (tasks.deletedAt) so satellites and artifact cleanup can still read the
   // rows.
-  void auth;
 
   const whereConditions = [
     inArray(tasks.id, input.taskIds),
     isNull(tasks.deletedAt),
+    customAutomationTaskAccess(auth),
   ];
 
   const result = await db.transaction(async (tx) => {

@@ -44,6 +44,7 @@ import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 
 import { getFastSessionById } from './fast-sessions';
+import { customAutomationSessionAccess } from './custom-automation-session-access';
 import {
   buildSessionTaskPreviews,
   getSessionPreviewProxyConfig,
@@ -73,39 +74,43 @@ const MIN_TRANSCRIPT_SEARCH_LENGTH = 3;
 const SEARCH_SNIPPET_CONTEXT_CHARS = 60;
 const SEARCH_SNIPPET_LENGTH = 180;
 
-function sessionScope(_auth: SessionAuth) {
-  // Sessions follow the same visibility rules as tasks: every authenticated
-  // user of the deployment can open and interact with any Session by id.
-  return undefined;
+function sessionScope(auth: SessionAuth) {
+  // Ordinary Sessions remain deployment-collaborative by ID.
+  return customAutomationSessionAccess(auth);
 }
 
 // The /sessions listing mirrors the /tasks listing instead: admins see every
 // Session, other users see the Sessions they own, participate in, or spoke in.
 function sessionListScope(auth: SessionAuth) {
   if (auth.isAdmin) return undefined;
-  return or(
-    eq(sessions.ownerUserId, auth.userId),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(sessionParticipants)
-        .where(
-          and(
-            eq(sessionParticipants.sessionId, sessions.id),
-            eq(sessionParticipants.userId, auth.userId),
+  return and(
+    sessionScope(auth),
+    or(
+      eq(sessions.ownerUserId, auth.userId),
+      // The access scope above resolves the human owner of custom runs.
+      eq(sessions.ownerAutomation, 'custom_automation'),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(sessionParticipants)
+          .where(
+            and(
+              eq(sessionParticipants.sessionId, sessions.id),
+              eq(sessionParticipants.userId, auth.userId),
+            ),
           ),
-        ),
-    ),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(fastAgentMessages)
-        .where(
-          and(
-            eq(fastAgentMessages.conversationId, sessions.fastConversationId),
-            sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
+      ),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(fastAgentMessages)
+          .where(
+            and(
+              eq(fastAgentMessages.conversationId, sessions.fastConversationId),
+              sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
+            ),
           ),
-        ),
+      ),
     ),
   );
 }

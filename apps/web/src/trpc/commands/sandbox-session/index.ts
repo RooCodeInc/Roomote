@@ -310,6 +310,12 @@ export async function saveDraftPromptCommand(
   });
 
   if (run) {
+    const access = await resolveTaskByIdAccessCommand(auth, {
+      taskId: run.taskId,
+    });
+    if (access.kind !== 'resolved') {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found' });
+    }
     await db
       .update(tasks)
       .set({ draftPrompt: input.draftPrompt || null })
