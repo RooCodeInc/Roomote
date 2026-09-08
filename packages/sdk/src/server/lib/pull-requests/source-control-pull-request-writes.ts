@@ -360,10 +360,13 @@ export async function writeSourceControlPullRequestForRepository({
   repository,
   input: rawInput,
   fetchImpl = fetch,
+  requirePullRequestScope = false,
 }: {
   repository: RepositoryRow;
   input: SourceControlPullRequestWriteInput;
   fetchImpl?: FetchImpl;
+  /** Enforce PR-only comment targets for member writes; task behavior is unchanged. */
+  requirePullRequestScope?: boolean;
 }): Promise<SourceControlPullRequestWriteResult> {
   const parsed = sourceControlPullRequestWriteInputSchema.safeParse(rawInput);
   if (!parsed.success) {
@@ -386,7 +389,12 @@ export async function writeSourceControlPullRequestForRepository({
   switch (provider) {
     case 'github':
       try {
-        result = await writeGitHubPullRequest({ input, repository, provider });
+        result = await writeGitHubPullRequest({
+          input,
+          repository,
+          provider,
+          requirePullRequestScope,
+        });
       } catch (error) {
         throw toGitHubWriteError(input, error);
       }
@@ -747,21 +755,31 @@ async function updateGitHubPullRequestComment({
   owner,
   repo,
   input,
+  pullRequest,
 }: {
   octokit: ReturnType<typeof getOctokit>;
   owner: string;
   repo: string;
   input: SourceControlPullRequestWriteInput;
+  pullRequest?: { url: string; issue_url: string };
 }): Promise<{ url: string | null; threadId: string | null }> {
   const commentId = requireCommentId(input);
   const body = requireBody(input);
   const request = { owner, repo, comment_id: Number(commentId), body };
   const asIssueComment = {
     threadId: null,
+    matchesPullRequest: async () => {
+      const { data } = await octokit.rest.issues.getComment(request);
+      return data.issue_url === pullRequest?.issue_url;
+    },
     run: () => octokit.rest.issues.updateComment(request),
   };
   const asReviewComment = {
     threadId: input.threadId ?? null,
+    matchesPullRequest: async () => {
+      const { data } = await octokit.rest.pulls.getReviewComment(request);
+      return data.pull_request_url === pullRequest?.url;
+    },
     run: () => octokit.rest.pulls.updateReviewComment(request),
   };
   const attempts = input.threadId
@@ -770,6 +788,12 @@ async function updateGitHubPullRequestComment({
 
   for (const attempt of attempts) {
     try {
+      if (pullRequest && !(await attempt.matchesPullRequest())) {
+        throw new SourceControlWriteError(
+          403,
+          `Comment ${commentId} does not belong to the requested pull request.`,
+        );
+      }
       const { data } = await attempt.run();
       return { url: data.html_url ?? null, threadId: attempt.threadId };
     } catch (error) {
@@ -870,15 +894,32 @@ async function writeGitHubPullRequest({
   input,
   repository,
   provider,
+  requirePullRequestScope,
 }: {
   input: SourceControlPullRequestWriteInput;
   repository: RepositoryRow;
   provider: 'github';
+  requirePullRequestScope: boolean;
 }): Promise<SourceControlPullRequestWriteResult> {
   const { octokit, owner, repo } = await createGitHubWriteClient(
     repository,
     provider,
   );
+
+  // GitHub's issue-comment and GraphQL thread writes are not scoped by PR number.
+  const pullRequest =
+    requirePullRequestScope &&
+    (input.action === 'create_pull_request_comment' ||
+      input.action === 'update_pull_request_comment' ||
+      input.action === 'reply_to_pull_request_comment')
+      ? (
+          await octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: input.prNumber,
+          })
+        ).data
+      : undefined;
 
   switch (input.action) {
     case 'update_pull_request_metadata': {
@@ -899,6 +940,30 @@ async function writeGitHubPullRequest({
     }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
+      if (pullRequest) {
+        const response = await octokit.graphql(
+          `query PullRequestReviewThreadScope($threadId: ID!) {
+            node(id: $threadId) {
+              ... on PullRequestReviewThread { pullRequest { id } }
+            }
+          }`,
+          { threadId },
+        );
+        const scope = z
+          .object({
+            node: z.object({ pullRequest: z.object({ id: z.string() }) }),
+          })
+          .safeParse(response);
+        if (
+          !scope.success ||
+          scope.data.node.pullRequest.id !== pullRequest.node_id
+        ) {
+          throw new SourceControlWriteError(
+            403,
+            'Review thread does not belong to the requested pull request.',
+          );
+        }
+      }
       const response = await octokit.graphql(
         `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
           addPullRequestReviewThreadReply(
@@ -997,6 +1062,7 @@ async function writeGitHubPullRequest({
         owner,
         repo,
         input,
+        pullRequest,
       });
 
       return buildWriteResult({

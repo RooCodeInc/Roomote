@@ -162,6 +162,7 @@ export function registerRoomoteMemberTools(
           await writeSourceControlPullRequestForRepository({
             repository,
             input: params,
+            requirePullRequestScope: true,
           }),
         );
       } catch (error) {

@@ -196,6 +196,235 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     host: null,
   };
 
+  describe('PR-only member comment scope', () => {
+    const pullRequest = {
+      url: 'https://api.github.com/repos/acme/backend/pulls/55',
+      issue_url: 'https://api.github.com/repos/acme/backend/issues/55',
+      node_id: 'PR_55',
+    };
+    const input = {
+      repositoryFullName: repository.fullName,
+      prNumber: 55,
+      body: 'Comment',
+    };
+
+    it.each([
+      'create_pull_request_comment',
+      'update_pull_request_comment',
+      'reply_to_pull_request_comment',
+    ] as const)('rejects issue numbers before %s', async (action) => {
+      const get = vi
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error('Not Found'), { status: 404 }),
+        );
+      const write = vi.fn();
+      mockGetOctokit.mockReturnValue({
+        rest: {
+          pulls: { get, updateReviewComment: write },
+          issues: { createComment: write, updateComment: write },
+        },
+        graphql: write,
+      });
+      await expect(
+        writeSourceControlPullRequestForRepository({
+          repository,
+          requirePullRequestScope: true,
+          input: { ...input, action, commentId: '12', threadId: 'thread' },
+        }),
+      ).rejects.toMatchObject({ httpStatus: 404 });
+      expect(get).toHaveBeenCalledWith({
+        owner: 'acme',
+        repo: 'backend',
+        pull_number: 55,
+      });
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it('creates comments after verifying the PR', async () => {
+      const get = vi.fn().mockResolvedValue({ data: pullRequest });
+      const createComment = vi.fn().mockResolvedValue({ data: { id: 12 } });
+      mockGetOctokit.mockReturnValue({
+        rest: { pulls: { get }, issues: { createComment } },
+      });
+      expect(
+        await writeSourceControlPullRequestForRepository({
+          repository,
+          requirePullRequestScope: true,
+          input: { ...input, action: 'create_pull_request_comment' },
+        }),
+      ).toMatchObject({ applied: true, commentId: '12' });
+      expect(createComment).toHaveBeenCalledWith({
+        owner: 'acme',
+        repo: 'backend',
+        issue_number: 55,
+        body: 'Comment',
+      });
+      expect(get.mock.invocationCallOrder[0]).toBeLessThan(
+        createComment.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it.each(['issue', 'review'] as const)(
+      'rejects unrelated %s comments without trying another mutation',
+      async (kind) => {
+        const read = vi.fn().mockResolvedValue({
+          data: {
+            issue_url: 'https://api.github.com/repos/acme/backend/issues/56',
+            pull_request_url:
+              'https://api.github.com/repos/other/repo/pulls/55',
+          },
+        });
+        const write = vi.fn();
+        mockGetOctokit.mockReturnValue({
+          rest: {
+            pulls: {
+              get: vi.fn().mockResolvedValue({ data: pullRequest }),
+              getReviewComment: read,
+              updateReviewComment: write,
+            },
+            issues: { getComment: read, updateComment: write },
+          },
+        });
+        await expect(
+          writeSourceControlPullRequestForRepository({
+            repository,
+            requirePullRequestScope: true,
+            input: {
+              ...input,
+              action: 'update_pull_request_comment',
+              commentId: '12',
+              ...(kind === 'review' ? { threadId: 'thread' } : {}),
+            },
+          }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+        expect(read).toHaveBeenCalledOnce();
+        expect(write).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['issue', 'review'] as const)(
+      'verifies matching %s comments after endpoint fallback',
+      async (kind) => {
+        const missing = vi
+          .fn()
+          .mockRejectedValue(
+            Object.assign(new Error('Not Found'), { status: 404 }),
+          );
+        const read = vi.fn().mockResolvedValue({
+          data: {
+            issue_url: pullRequest.issue_url,
+            pull_request_url: pullRequest.url,
+          },
+        });
+        const write = vi
+          .fn()
+          .mockResolvedValue({ data: { html_url: 'comment-url' } });
+        const otherWrite = vi.fn();
+        mockGetOctokit.mockReturnValue({
+          rest: {
+            pulls: {
+              get: vi.fn().mockResolvedValue({ data: pullRequest }),
+              getReviewComment: kind === 'review' ? read : missing,
+              updateReviewComment: kind === 'review' ? write : otherWrite,
+            },
+            issues: {
+              getComment: kind === 'issue' ? read : missing,
+              updateComment: kind === 'issue' ? write : otherWrite,
+            },
+          },
+        });
+        expect(
+          await writeSourceControlPullRequestForRepository({
+            repository,
+            requirePullRequestScope: true,
+            input: {
+              ...input,
+              action: 'update_pull_request_comment',
+              commentId: '12',
+              ...(kind === 'issue' ? { threadId: 'stale' } : {}),
+            },
+          }),
+        ).toMatchObject({ applied: true, url: 'comment-url' });
+        expect(missing).toHaveBeenCalledOnce();
+        expect(read).toHaveBeenCalledOnce();
+        expect(write).toHaveBeenCalledWith({
+          owner: 'acme',
+          repo: 'backend',
+          comment_id: 12,
+          body: 'Comment',
+        });
+        expect(otherWrite).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([null, {}, { pullRequest: { id: 'OTHER_PR' } }])(
+      'rejects missing or unrelated review threads: %j',
+      async (node) => {
+        const graphql = vi.fn().mockResolvedValue({ node });
+        mockGetOctokit.mockReturnValue({
+          rest: {
+            pulls: { get: vi.fn().mockResolvedValue({ data: pullRequest }) },
+          },
+          graphql,
+        });
+        await expect(
+          writeSourceControlPullRequestForRepository({
+            repository,
+            requirePullRequestScope: true,
+            input: {
+              ...input,
+              action: 'reply_to_pull_request_comment',
+              threadId: 'thread',
+            },
+          }),
+        ).rejects.toMatchObject({ httpStatus: 403 });
+        expect(graphql).toHaveBeenCalledOnce();
+        expect(graphql.mock.calls[0]?.[0]).toContain(
+          'query PullRequestReviewThreadScope',
+        );
+      },
+    );
+
+    it('replies only after matching the thread PR identity', async () => {
+      const graphql = vi
+        .fn()
+        .mockResolvedValueOnce({
+          node: { pullRequest: { id: pullRequest.node_id } },
+        })
+        .mockResolvedValueOnce({
+          addPullRequestReviewThreadReply: {
+            comment: { databaseId: 12, url: 'comment-url' },
+          },
+        });
+      mockGetOctokit.mockReturnValue({
+        rest: {
+          pulls: { get: vi.fn().mockResolvedValue({ data: pullRequest }) },
+        },
+        graphql,
+      });
+      expect(
+        await writeSourceControlPullRequestForRepository({
+          repository,
+          requirePullRequestScope: true,
+          input: {
+            ...input,
+            action: 'reply_to_pull_request_comment',
+            threadId: 'thread',
+          },
+        }),
+      ).toMatchObject({ applied: true, commentId: '12' });
+      expect(graphql).toHaveBeenCalledTimes(2);
+      expect(graphql.mock.calls[1]?.[0]).toContain(
+        'mutation AddPullRequestReviewThreadReply',
+      );
+      expect(graphql.mock.calls[1]?.[1]).toEqual({
+        threadId: 'thread',
+        body: 'Comment',
+      });
+    });
+  });
+
   it('updates GitHub metadata by number without task context or side effects', async () => {
     const update = vi.fn().mockResolvedValue({
       data: { html_url: 'https://github.com/acme/backend/pull/55' },

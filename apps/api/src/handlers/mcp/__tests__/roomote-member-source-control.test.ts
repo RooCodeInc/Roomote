@@ -77,6 +77,7 @@ describe('member source control adapter', () => {
       expect(mocks.write).toHaveBeenCalledWith({
         repository: await mocks.resolve.mock.results[0]!.value,
         input,
+        requirePullRequestScope: true,
       });
     },
   );
@@ -97,7 +98,11 @@ describe('member source control adapter', () => {
     };
     const result = await register().call(input);
     expect(result).not.toHaveProperty('isError', true);
-    expect(mocks.write).toHaveBeenCalledExactlyOnceWith({ repository, input });
+    expect(mocks.write).toHaveBeenCalledExactlyOnceWith({
+      repository,
+      input,
+      requirePullRequestScope: true,
+    });
     expect(JSON.stringify(result)).toContain('"applied":true');
   });
 
@@ -118,6 +123,23 @@ describe('member source control adapter', () => {
   ])('accepts bounded $action', async (fields) => {
     await register().call({ ...base, ...fields });
     expect(mocks.write).toHaveBeenCalledOnce();
+    expect(mocks.write).toHaveBeenCalledWith(
+      expect.objectContaining({ requirePullRequestScope: true }),
+    );
+  });
+
+  it('surfaces PR scope denials from the shared writer', async () => {
+    mocks.write.mockRejectedValueOnce(
+      new Error('Comment 12 does not belong to the requested pull request.'),
+    );
+    const result = await register().call({
+      ...base,
+      action: 'update_pull_request_comment',
+      commentId: '12',
+      body: 'Edited',
+    });
+    expect(result).toHaveProperty('isError', true);
+    expect(JSON.stringify(result)).toContain('does not belong');
   });
 
   it.each([
