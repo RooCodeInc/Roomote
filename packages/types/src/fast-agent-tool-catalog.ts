@@ -11,6 +11,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   findIntegrationTools: 'find_integration_tools',
   ignoreEvent: 'ignore_event',
   inspectImages: 'inspect_images',
+  inspectRepository: 'inspect_repository',
   launchTask: 'launch_task',
   manageWakeups: 'manage_wakeups',
   retryTaskStart: 'retry_task_start',
@@ -57,6 +58,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
     kind: ACP_TOOL_KINDS.read,
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.launchTask, kind: ACP_TOOL_KINDS.task },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository,
+    kind: ACP_TOOL_KINDS.read,
+  },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
     kind: ACP_TOOL_KINDS.task,

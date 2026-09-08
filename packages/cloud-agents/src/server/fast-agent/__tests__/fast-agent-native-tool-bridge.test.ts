@@ -43,6 +43,7 @@ import {
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 import { buildOpenCodeCliEnv } from '../../opencode-runtime';
 import { buildFastAgentToolFilter } from '../fast-agent-tool-policy';
+import { FastAgentRepositorySourceError } from '../fast-agent-repository-source';
 
 function stringWithSerializedByteLength(byteLength: number): string {
   return 'x'.repeat(byteLength - 2);
@@ -252,6 +253,7 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
@@ -282,6 +284,7 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
       FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
       FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+      FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository,
       FAST_AGENT_NATIVE_TOOL_NAMES.showWidget,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
@@ -398,6 +401,85 @@ describe('Fast native OpenCode tool bridge', () => {
       } else {
         process.env.ROOMOTE_TASK_ID = inheritedTaskId;
       }
+    }
+  });
+
+  it('binds source inspection only to its authorized parent and sanitizes failures', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('native-source', []);
+    const repositorySource = {
+      inspect: vi.fn().mockResolvedValue({
+        revision: 'a'.repeat(40),
+        tested: false,
+        content: '1: hello',
+      }),
+    };
+    const fallback = vi.fn();
+    const unbindParent = bindFastAgentNativeToolExecutor(
+      'source-parent',
+      'source-conversation',
+      fallback,
+      { allowSpillRecovery: true, repositorySource },
+    );
+    const unbindChild = bindFastAgentNativeToolExecutor(
+      'source-child',
+      'source-conversation',
+      fallback,
+      { allowSpillRecovery: false },
+    );
+    const invoke = (
+      sessionID: string,
+      token = runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
+    ) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionID,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository,
+          args: { action: 'read', repositoryId: 'repo-1', path: 'README.md' },
+        }),
+      });
+    try {
+      expect((await invoke('source-parent', 'invalid')).status).toBe(401);
+      const child = await (await invoke('source-child')).json();
+      expect(JSON.parse(child.output)).toMatchObject({ success: false });
+      expect(repositorySource.inspect).not.toHaveBeenCalled();
+      const parent = await (await invoke('source-parent')).json();
+      expect(JSON.parse(parent.output)).toMatchObject({
+        success: true,
+        result: { tested: false, revision: 'a'.repeat(40) },
+      });
+      expect(repositorySource.inspect).toHaveBeenCalledWith({
+        action: 'read',
+        repositoryId: 'repo-1',
+        path: 'README.md',
+      });
+      repositorySource.inspect.mockRejectedValueOnce(
+        new FastAgentRepositorySourceError('revision'),
+      );
+      const mismatch = await (await invoke('source-parent')).json();
+      expect(JSON.parse(mismatch.output)).toMatchObject({
+        success: false,
+        error: expect.stringContaining('pinned snapshot'),
+      });
+      repositorySource.inspect.mockRejectedValueOnce(
+        new Error('private-token-in-stderr'),
+      );
+      const failed = await (await invoke('source-parent')).json();
+      expect(JSON.parse(failed.output)).toEqual({
+        success: false,
+        error: 'Repository inspection is unavailable.',
+      });
+      expect(failed.output).not.toContain('private-token');
+      expect(fallback).not.toHaveBeenCalled();
+      unbindParent();
+      expect((await invoke('source-parent')).status).toBe(409);
+    } finally {
+      unbindParent();
+      unbindChild();
     }
   });
 

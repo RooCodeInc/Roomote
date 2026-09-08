@@ -176,6 +176,7 @@ import {
   type FastAgentPromptKind,
 } from './fast-agent-context-telemetry';
 import { RemoteFastAgentRepositorySkillSource } from './fast-agent-repository-skill-source';
+import { FastAgentRepositorySource } from './fast-agent-repository-source';
 import { FastAgentSkillStore } from './fast-agent-skill-store';
 import {
   FAST_AGENT_REACTION_INPUT_TYPE,
@@ -4566,6 +4567,11 @@ export async function answerFastAgentQuestion({
           { surface: conversation.surface },
         );
         const unbindExecutors = new Set<() => void>();
+        const repositorySource = new FastAgentRepositorySource({
+          allowedEnvironmentIds: availableEnvironments.map(
+            (environment) => environment.id,
+          ),
+        });
         const boundSubagentSessionIDs = new Set<string>();
         const unbindAllExecutors = () => {
           for (const unbind of unbindExecutors) unbind();
@@ -4821,6 +4827,7 @@ export async function answerFastAgentQuestion({
                             {
                               allowSkillAccess: true,
                               allowSpillRecovery: true,
+                              repositorySource,
                               skillStore,
                               spillBudget,
                             },
@@ -5020,7 +5027,11 @@ export async function answerFastAgentQuestion({
         } finally {
           unbindAllExecutors();
           unbindMcpExecutor();
-          await skillStore.dispose();
+          try {
+            await repositorySource.dispose();
+          } finally {
+            await skillStore.dispose();
+          }
         }
       },
     });

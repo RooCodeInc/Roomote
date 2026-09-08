@@ -87,6 +87,7 @@ const nativeToolNames = vi.hoisted(
       requestUserInput: 'request_user_input',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
+      inspectRepository: 'inspect_repository',
       showWidget: 'show_widget',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',
@@ -3968,12 +3969,23 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.bindExecutor.mock.calls.find(
         ([sessionID]) => sessionID === 'opencode-session-1',
       )?.[3],
-    ).toMatchObject({ allowSkillAccess: true, allowSpillRecovery: true });
+    ).toMatchObject({
+      allowSkillAccess: true,
+      allowSpillRecovery: true,
+      repositorySource: expect.objectContaining({
+        inspect: expect.any(Function),
+      }),
+    });
     expect(
       mocks.bindExecutor.mock.calls.find(
         ([sessionID]) => sessionID === 'opencode-subagent-1',
       )?.[3],
     ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
+    expect(
+      mocks.bindExecutor.mock.calls.find(
+        ([sessionID]) => sessionID === 'opencode-subagent-1',
+      )?.[3],
+    ).not.toHaveProperty('repositorySource');
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {

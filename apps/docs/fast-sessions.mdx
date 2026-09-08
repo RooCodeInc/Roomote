@@ -23,6 +23,31 @@ When a task in a Session opens a pull request, that pull request belongs to the
 Session. A mention on it joins the Session instead of starting a new one, and
 Roomote answers on the pull request as well as in the Session's home surface.
 
+## Inspect source without a sandbox
+
+Ask Fast a focused source question, such as "What does this function do in
+`src/auth.ts`?" It can list directories, read committed text files, and search
+literal text in repositories available through your configured environments
+without starting a repository sandbox. Name the repository and, when needed,
+the branch. Otherwise it uses the configured default branch.
+
+Source inspection keeps a pinned commit for related reads and reports that
+revision. It does not inspect a running task's uncommitted files or run tests.
+If the branch changes between turns, Roomote must reconcile the revision rather
+than silently combining different versions.
+
+Inspection is intentionally bounded: regular UTF-8 files up to 256 KiB, up to
+80 directory entries or read lines per response, and literal searches covering
+at most 16 files in a narrow scope. Results disclose truncation and skipped
+files; a partial search is not proof that something is absent. Larger or
+unsupported inspections can continue in a task.
+
+Tests, bug reproduction, dependency installation, project commands, and edits
+still require isolated task execution. Asking for a pull request review still
+uses the existing structured review task, including its findings and review
+posting. A source-only explanation is not a tested result or a completed PR
+review.
+
 ## Start a Session from the dashboard
 
 On the home page, leave the workspace selector on **Fast** to start a

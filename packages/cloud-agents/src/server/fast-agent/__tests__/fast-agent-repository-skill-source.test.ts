@@ -1,10 +1,23 @@
 import { access, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  db,
+  eq,
+  inArray,
+  environmentFactory,
+  environmentRepositoryMappings,
+  environments,
+  repositories,
+  repositoryFactory,
+  userFactory,
+  users,
+} from '@roomote/db/server';
 
 import {
   parseFastAgentRepositorySkillTree,
   RemoteFastAgentRepositorySkillSource,
+  resolveRepositorySkillRepositories,
   type RepositorySkillRepository,
   type RepositorySkillSnapshot,
 } from '../fast-agent-repository-skill-source';
@@ -58,6 +71,58 @@ async function snapshot(
 }
 
 describe('RemoteFastAgentRepositorySkillSource', () => {
+  it('resolves only active repositories mapped to allowed environments in the database', async () => {
+    const user = await userFactory.create();
+    const environmentIds: string[] = [];
+    const repositoryIds: string[] = [];
+    try {
+      const allowed = await environmentFactory.create({
+        createdByUserId: user.id,
+      });
+      environmentIds.push(allowed.id);
+      const other = await environmentFactory.create({
+        createdByUserId: user.id,
+      });
+      environmentIds.push(other.id);
+      for (const [environmentId, isActive] of [
+        [allowed.id, true],
+        [allowed.id, false],
+        [other.id, true],
+      ] as const) {
+        const repo = await repositoryFactory.create({
+          linkedByUserId: user.id,
+          isActive,
+          sourceControlProvider: 'gitlab',
+          installationId: null,
+          githubRepoId: null,
+        });
+        repositoryIds.push(repo.id);
+        await db
+          .insert(environmentRepositoryMappings)
+          .values({ environmentId, repositoryId: repo.id });
+      }
+      const visible = await resolveRepositorySkillRepositories([allowed.id]);
+      expect(visible.map((repo) => repo.id)).toEqual([repositoryIds[0]]);
+      expect(visible[0]?.environmentIds).toEqual([allowed.id]);
+      expect(await resolveRepositorySkillRepositories([])).toEqual([]);
+      await db
+        .delete(environmentRepositoryMappings)
+        .where(eq(environmentRepositoryMappings.environmentId, allowed.id));
+      expect(await resolveRepositorySkillRepositories([allowed.id])).toEqual(
+        [],
+      );
+    } finally {
+      if (environmentIds.length)
+        await db
+          .delete(environments)
+          .where(inArray(environments.id, environmentIds));
+      if (repositoryIds.length)
+        await db
+          .delete(repositories)
+          .where(inArray(repositories.id, repositoryIds));
+      await db.delete(users).where(eq(users.id, user.id));
+    }
+  });
   it('accepts only bounded regular Markdown blobs from repository trees', () => {
     const tree = [
       '100644 blob aaaaaa 120\t.agents/skills/release/SKILL.md',

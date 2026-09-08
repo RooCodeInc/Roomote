@@ -123,7 +123,7 @@ async function runGit(
   return result.stdout;
 }
 
-async function resolveRepositorySkillCredential(
+export async function resolveRepositorySkillCredential(
   repository: RepositorySkillRepository,
 ): Promise<RepositorySkillCredential> {
   switch (repository.sourceControlProvider) {
@@ -167,7 +167,7 @@ async function resolveRepositorySkillCredential(
   }
 }
 
-async function buildGitAuthenticationEnvironment(
+export async function buildGitAuthenticationEnvironment(
   directory: string,
   credential: RepositorySkillCredential,
 ): Promise<NodeJS.ProcessEnv> {
@@ -390,7 +390,7 @@ async function loadFastAgentRepositorySkillSnapshot(
   }
 }
 
-async function resolveRepositorySkillRepositories(
+export async function resolveRepositorySkillRepositories(
   allowedEnvironmentIds: string[],
   environmentId?: string,
 ): Promise<RepositorySkillRepository[]> {
