@@ -413,6 +413,7 @@ describe('fast-agent integration broker', () => {
     mocks.listMcpTools.mockResolvedValue([
       { name: 'manage_tasks', inputSchema: { type: 'object' } },
       { name: 'manage_custom_automations', inputSchema: { type: 'object' } },
+      { name: 'create_custom_skill', inputSchema: { type: 'object' } },
     ]);
 
     const integrations = await listFastAgentIntegrations({
@@ -422,6 +423,7 @@ describe('fast-agent integration broker', () => {
 
     expect(integrations[0]?.tools).toEqual([
       { name: 'manage_custom_automations', inputSchema: { type: 'object' } },
+      { name: 'create_custom_skill', inputSchema: { type: 'object' } },
     ]);
   });
 

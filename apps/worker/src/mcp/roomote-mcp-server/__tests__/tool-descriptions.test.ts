@@ -8,7 +8,10 @@ import {
   SHOW_WIDGET_HEIGHT_DESCRIPTION,
   SHOW_WIDGET_THEME_GUIDANCE,
 } from '@roomote/cloud-agents/show-widget';
-import { MANAGE_CUSTOM_AUTOMATIONS_TOOL } from '@roomote/types';
+import {
+  CREATE_CUSTOM_SKILL_TOOL,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+} from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
 const thisDirPath = path.dirname(thisFilePath);
@@ -202,6 +205,57 @@ describe('roomote MCP tool descriptions', () => {
         ].description,
       );
     }
+  });
+
+  it('registers the shared custom skill descriptor with its advertised fields', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(
+      registeredTools,
+      CREATE_CUSTOM_SKILL_TOOL.name,
+    );
+    expect(tool.config.title).toBe(CREATE_CUSTOM_SKILL_TOOL.title);
+    expect(tool.config.description).toBe(CREATE_CUSTOM_SKILL_TOOL.description);
+    expect(tool.config.annotations).toEqual(
+      CREATE_CUSTOM_SKILL_TOOL.annotations,
+    );
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual([
+      'name',
+      'description',
+      'content',
+    ]);
+    expect(
+      schema.safeParse({
+        name: 'review',
+        description: 'Review.',
+        content: 'Check.',
+        environmentIds: [],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires a token before creating a custom skill', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: '',
+    });
+    const tool = getRegisteredTool(
+      registeredTools,
+      CREATE_CUSTOM_SKILL_TOOL.name,
+    );
+    const result = await tool.handler?.({});
+    expect(result).toMatchObject({
+      content: [
+        {
+          text: expect.stringContaining(
+            'ROOMOTE_CLOUD_TOKEN environment variable not set',
+          ),
+        },
+      ],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('keeps cadence out of generated custom automation prompts', async () => {

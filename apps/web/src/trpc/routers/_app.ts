@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { instanceSkillsRouter } from './instance-skills';
 import {
   publicAuthTokenTimeoutMsSchema,
   runTokenTimeoutMsSchema,
@@ -3151,6 +3152,8 @@ export const appRouter = createRouter({
         setLicenseKeyCommand(auth, input),
       ),
   }),
+
+  instanceSkills: instanceSkillsRouter,
 
   customSkills: createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
