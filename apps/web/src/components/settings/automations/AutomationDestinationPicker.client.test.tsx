@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { AutomationDestinationPicker } from './AutomationDestinationPicker';
 
@@ -8,6 +8,35 @@ const discordOptions = [
 ];
 
 describe('AutomationDestinationPicker', () => {
+  it.each(['slack', 'discord'] as const)(
+    'preserves and edits known %s channel IDs without a catalog',
+    (provider) => {
+      const onChange = vi.fn();
+      render(
+        <AutomationDestinationPicker
+          id="destination"
+          value={{ provider, mode: 'channel', channelId: 'saved-channel' }}
+          availableProviders={[provider]}
+          slackOptions={slackOptions}
+          discordOptions={discordOptions}
+          channelCatalogAvailable={false}
+          onChange={onChange}
+        />,
+      );
+      const input = screen.getByRole('textbox', {
+        name: 'Destination channel',
+      });
+      expect(input).toHaveValue('saved-channel');
+      expect(screen.queryByText('#general')).not.toBeInTheDocument();
+      expect(screen.queryByText('#updates · Discord')).not.toBeInTheDocument();
+      fireEvent.change(input, { target: { value: 'known-channel' } });
+      expect(onChange).toHaveBeenCalledWith({
+        provider,
+        mode: 'channel',
+        channelId: 'known-channel',
+      });
+    },
+  );
   it('shows the standard provider and DM controls', () => {
     render(
       <AutomationDestinationPicker
@@ -16,6 +45,7 @@ describe('AutomationDestinationPicker', () => {
         availableProviders={['slack', 'discord', 'teams', 'telegram']}
         slackOptions={slackOptions}
         discordOptions={discordOptions}
+        channelCatalogAvailable={false}
         onChange={vi.fn()}
       />,
     );

@@ -386,6 +386,7 @@ import {
   getBackgroundAgentSettingsCommand,
   listAutomationDiscordChannelsCommand,
   listCustomAutomationsCommand,
+  getCustomAutomationOptionsCommand,
   resolveCustomAutomationScheduleCommand,
   listSlackChannelsCommand,
   triggerCustomAutomationCommand,
@@ -824,6 +825,10 @@ const automationsRouter = createRouter({
     listCustomAutomationsCommand(auth),
   ),
 
+  getCustomAutomationOptions: protectedProcedure.query(({ ctx: { auth } }) =>
+    getCustomAutomationOptionsCommand(auth),
+  ),
+
   createCustomAutomation: protectedProcedure
     .input(
       z.object({
@@ -994,11 +999,15 @@ export const appRouter = createRouter({
 
     messageEnvelopes: protectedProcedure
       .input(z.object({ taskId: z.string() }))
-      .query(({ input }) => getTaskMessageEnvelopesCommand(input)),
+      .query(({ ctx: { auth }, input }) =>
+        getTaskMessageEnvelopesCommand(auth, input),
+      ),
 
     runEvents: protectedProcedure
       .input(z.object({ taskId: z.string() }))
-      .query(({ input }) => getTaskRunEventsCommand(input)),
+      .query(({ ctx: { auth }, input }) =>
+        getTaskRunEventsCommand(auth, input),
+      ),
 
     generateSummary: protectedProcedure
       .input(z.object({ taskId: z.string() }))

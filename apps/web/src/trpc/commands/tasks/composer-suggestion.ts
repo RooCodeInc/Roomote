@@ -1,4 +1,5 @@
 import type { UserAuthSuccess } from '@/types';
+import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 import { getTaskSuggestableMessages } from '@/lib/server/task-messages';
 import {
@@ -16,6 +17,7 @@ export async function getComposerSuggestionCommand(
   input: { taskId: string },
 ): Promise<ComposerSuggestionResult> {
   try {
+    await requireTaskAccess(auth, input.taskId);
     const messages = await getTaskSuggestableMessages(input.taskId);
 
     return await suggestNextComposerMessage({

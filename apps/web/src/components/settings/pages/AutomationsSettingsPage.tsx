@@ -1,18 +1,13 @@
 'use client';
 
 import { AutomationsSettings } from '@/components/settings/automations';
+import { CustomAutomationsSection } from '@/components/settings/automations/CustomAutomationsSection';
 import { DeploymentTimeZoneSetting } from '@/components/settings/DeploymentTimeZoneSetting';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { DOCS_COOKBOOK_URL } from '@/lib/docs';
 import { PRODUCT_NAME } from '@roomote/types';
 
-import {
-  Alert,
-  AlertCircle,
-  AlertDescription,
-  BookOpenText,
-  HeaderCallout,
-} from '@/components/system';
+import { BookOpenText, HeaderCallout } from '@/components/system';
 
 export function AutomationsSettingsPage() {
   const { isAdmin } = useAuthorizedUser();
@@ -43,12 +38,7 @@ export function AutomationsSettingsPage() {
             <AutomationsSettings />
           </>
         ) : (
-          <Alert>
-            <AlertCircle className="size-4" />
-            <AlertDescription>
-              Only admins can access this page.
-            </AlertDescription>
-          </Alert>
+          <CustomAutomationsSection />
         )}
       </div>
     </div>

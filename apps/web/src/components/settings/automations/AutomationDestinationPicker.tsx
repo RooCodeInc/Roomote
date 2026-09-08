@@ -42,6 +42,7 @@ export function AutomationDestinationPicker({
   availableProviders,
   slackOptions,
   discordOptions,
+  channelCatalogAvailable = true,
   defaultSlackChannelId = '',
   defaultDiscordChannelId = '',
   noneLabel = 'None',
@@ -55,6 +56,7 @@ export function AutomationDestinationPicker({
   availableProviders: readonly CommunicationProvider[];
   slackOptions: DestinationOption[];
   discordOptions: DestinationOption[];
+  channelCatalogAvailable?: boolean;
   defaultSlackChannelId?: string;
   defaultDiscordChannelId?: string;
   noneLabel?: string;
@@ -147,7 +149,7 @@ export function AutomationDestinationPicker({
                 Results are sent privately to your linked {providerLabel}{' '}
                 account.
               </p>
-            ) : value.provider === 'slack' ? (
+            ) : value.provider === 'slack' && channelCatalogAvailable ? (
               <SlackChannelSelect
                 id={`${id}-channel`}
                 className="min-w-0 w-full"
@@ -158,7 +160,7 @@ export function AutomationDestinationPicker({
                   onChange({ ...value, channelId: channelId ?? '' })
                 }
               />
-            ) : value.provider === 'discord' ? (
+            ) : value.provider === 'discord' && channelCatalogAvailable ? (
               <Select
                 value={value.channelId || undefined}
                 disabled={disabled}
@@ -188,9 +190,13 @@ export function AutomationDestinationPicker({
                   onChange({ ...value, channelId: event.target.value })
                 }
                 placeholder={
-                  value.provider === 'teams'
-                    ? 'Teams conversation ID'
-                    : 'Telegram chat ID'
+                  value.provider === 'slack'
+                    ? 'Slack channel ID'
+                    : value.provider === 'discord'
+                      ? 'Discord channel ID'
+                      : value.provider === 'teams'
+                        ? 'Teams conversation ID'
+                        : 'Telegram chat ID'
                 }
               />
             )}

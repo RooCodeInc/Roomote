@@ -19,7 +19,7 @@ It's how we actually generate the ones we send every Friday.
 
 - **Trigger**: Schedule
 - **Setup time**: About 30 minutes
-- **Requires**: Admin access, custom Resend MCP server
+- **Requires**: Member access, an admin-configured custom Resend MCP server
 - **Serves**: PMs, Founders, Marketing
 - **Cooked By**: [Bruno Bergher](https://github.com/brunobergher) from [Roomote](https://roomote.dev)
 
@@ -30,9 +30,14 @@ It's how we actually generate the ones we send every Friday.
 - The Resend MCP server configured under **Settings > Integrations**, with a Resend API key
 - A report destination such as `#product-updates`, so the draft lands in a replyable thread
 
+Members can create and manage their own custom automations once the environment
+and integration are configured. Admins manage integration setup, deployment
+settings (including the shared scheduling timezone), and all custom automations,
+including those without a creator.
+
 ## Steps
 
-1. Add the Resend MCP server and confirm its tools are available in the environment.
+1. Confirm an admin has added the Resend MCP server and its tools are available in the environment.
 2. Create a custom automation named **Product Updates Newsletter**. Choose **Custom schedule**, enter `Mondays at 9am`, and select the environment.
 3. Paste the prompt below.
 4. Set the report destination to `#product-updates`.
