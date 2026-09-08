@@ -69,7 +69,7 @@ control credentials.
 ## Direct pull request actions
 
 In Fast, ask Roomote to update an identified pull request's title or
-description, add or edit a pull request discussion comment, or close it by **declining**
+description, add, edit, or reply to a pull request discussion comment, or close it by **declining**
 it. These actions do not require a coding task. Reopening a declined pull request
 is not supported by these tools; Roomote does not substitute an undocumented
 state change.
@@ -82,12 +82,13 @@ a linked personal Bitbucket account or Roomote administrator access.
 Writes use the deployment credential and appear under its identity, not your
 personal account. The credential must have the access Bitbucket requires for
 the requested action. Fast records these tool calls in its audit trail and
-reports provider errors or unsupported capabilities. Thread replies are not
-supported by these tools.
+reports provider errors or unsupported capabilities. To reply in an existing
+comment thread, identify its parent comment as well as the pull request.
 
 These tools do not merge pull requests, change destination branches, delete
 branches, write code, administer repositories, add issue comments, or manage
-inline review threads. Existing mention replies and coding tasks are unchanged.
+inline review anchors or resolve threads. Replies to existing threads are supported.
+Existing mention replies and coding tasks are unchanged.
 
 ## CI Failure Triage
 

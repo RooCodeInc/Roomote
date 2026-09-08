@@ -326,6 +326,44 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     expect(fetchImpl.mock.calls[1]?.[1].method).toBe('POST');
   });
 
+  it('reuses Bitbucket replies with the parent comment ID', async () => {
+    const url =
+      'https://bitbucket.org/acme/backend/pull-requests/55#comment-13';
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ id: 13, links: { html: { href: url } } }),
+      );
+    const result = await writeSourceControlPullRequestForRepository({
+      repository: { ...repository, sourceControlProvider: 'bitbucket' },
+      fetchImpl,
+      input: {
+        action: 'reply_to_pull_request_comment',
+        sourceControlProvider: 'bitbucket',
+        repositoryFullName: repository.fullName,
+        prNumber: 55,
+        threadId: '12',
+        body: 'Reply',
+      },
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(
+      'https://api.bitbucket.org/2.0/repositories/acme/backend/pullrequests/55/comments',
+    );
+    expect(fetchImpl.mock.calls[0]?.[1].method).toBe('POST');
+    expect(JSON.parse(fetchImpl.mock.calls[0]?.[1].body)).toEqual({
+      content: { raw: '> Re: review thread 12\n\nReply' },
+      parent: { id: '12' },
+    });
+    expect(result).toMatchObject({
+      applied: true,
+      threadId: '12',
+      commentId: '13',
+      url,
+      warnings: [],
+    });
+  });
+
   it('does not partially apply unsupported Bitbucket reopen requests', async () => {
     const fetchImpl = vi.fn();
     const result = await writeSourceControlPullRequestForRepository({

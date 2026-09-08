@@ -81,6 +81,26 @@ describe('member source control adapter', () => {
     },
   );
 
+  it('forwards Bitbucket thread replies to the existing shared writer', async () => {
+    const repository = {
+      id: 42,
+      sourceControlProvider: 'bitbucket',
+      fullName: 'owner/repo',
+    };
+    mocks.resolve.mockResolvedValueOnce(repository);
+    const input = {
+      ...base,
+      sourceControlProvider: 'bitbucket',
+      action: 'reply_to_pull_request_comment',
+      body: 'Reply',
+      threadId: '12',
+    };
+    const result = await register().call(input);
+    expect(result).not.toHaveProperty('isError', true);
+    expect(mocks.write).toHaveBeenCalledExactlyOnceWith({ repository, input });
+    expect(JSON.stringify(result)).toContain('"applied":true');
+  });
+
   it.each([
     { action: 'update_pull_request_metadata', state: 'open' },
     { action: 'create_pull_request_comment', body: 'Comment' },

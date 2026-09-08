@@ -29,8 +29,9 @@ Ask a Session to update a pull request's title or description, close or reopen
 it, or add, edit, or reply to a pull request comment. Fast can perform these bounded
 GitHub, GitLab, and Bitbucket actions directly, without starting a coding task. An explicit request
 to close or update an identified pull request authorizes that action; Roomote
-reports the provider result. Bitbucket reopening and thread replies are not
-supported; Roomote reports these capability gaps without claiming success.
+reports the provider result. Bitbucket supports replies to existing comment
+threads, but reopening a declined pull request is not supported by these tools;
+Roomote reports that capability gap without claiming success.
 
 You must be an authenticated Roomote member. Specify the provider, active
 connected repository, and pull request number. Writes use the deployment's
