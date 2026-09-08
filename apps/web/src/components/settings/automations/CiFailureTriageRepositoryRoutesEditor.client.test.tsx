@@ -77,7 +77,7 @@ describe('CI repository group editor', () => {
       }),
     ).toBeChecked();
     expect(
-      within(groups[0]!).queryByRole('checkbox', { name: /git.example.com/ }),
+      within(groups[0]!).queryByRole('checkbox', { name: /git\.example\.com/ }),
     ).not.toBeInTheDocument();
     expect(
       within(groups[1]!).getByRole('checkbox', {
