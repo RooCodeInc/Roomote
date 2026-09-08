@@ -1135,6 +1135,7 @@ describe('Integrations settings', () => {
     expect(state.customConnectionOptions).toEqual({
       isAdmin: true,
       connectionName: 'Acme Tools',
+      configureId: null,
     });
   });
 
@@ -1144,6 +1145,30 @@ describe('Integrations settings', () => {
     expect(state.customConnectionOptions).toEqual({
       isAdmin: true,
       connectionName: null,
+      configureId: null,
+    });
+  });
+
+  it('passes only the saved configure ID and suppresses creation parameters', () => {
+    const id = 'custom:4c72c9dd-3f5e-4d3e-9f7a-2c1b8a6e5d40';
+    state.searchParams = `configure=${encodeURIComponent(id)}&connect=custom&name=other&url=https://evil.example&token=secret&highlight=pylon&service=pylon`;
+    render(<Integrations />);
+    expect(state.customConnectionOptions).toEqual({
+      isAdmin: true,
+      connectionName: null,
+      configureId: id,
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('rejects ambiguous duplicate saved configure parameters', () => {
+    state.searchParams =
+      'configure=custom%3Aone&configure=custom%3Atwo&connect=custom&name=other';
+    render(<Integrations />);
+    expect(state.customConnectionOptions).toEqual({
+      isAdmin: true,
+      connectionName: null,
+      configureId: '',
     });
   });
 

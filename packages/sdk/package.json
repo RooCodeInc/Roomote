@@ -60,6 +60,10 @@
       "import": "./src/server/lib/safe-fetch.ts",
       "require": "./src/server/lib/safe-fetch.ts"
     },
+    "./server/custom-mcp-servers": {
+      "import": "./src/server/lib/custom-mcp-servers.ts",
+      "require": "./src/server/lib/custom-mcp-servers.ts"
+    },
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",
       "require": "./src/server/lib/notion-api.ts"

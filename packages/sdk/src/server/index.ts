@@ -1,4 +1,5 @@
 export { prepareIntegrationConnection } from './lib/prepare-integration-connection';
+export { manageIntegrationConnection } from './lib/manage-integration-connection';
 export {
   type AppRouter,
   type AppRouterInput,

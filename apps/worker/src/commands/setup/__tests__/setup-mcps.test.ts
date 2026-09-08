@@ -985,6 +985,9 @@ describe('resolveBuiltInMcpServers', () => {
 
   it('injects task env vars into the roomote MCP', () => {
     const taskEnv = {
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.test.com/api-prefix',
+      AUTH_TOKEN: 'untrusted-project-token',
+      TRPC_URL: 'https://project.test.com',
       ROOMOTE_CLOUD_TOKEN: 'test-cloud-token',
       R_APP_URL: 'https://api.test.com',
       ROOMOTE_WORKSPACE_PATH: '/workspace',
@@ -1010,6 +1013,8 @@ describe('resolveBuiltInMcpServers', () => {
       }
     ).env;
     expect(roomoteEnv.ROOMOTE_CLOUD_TOKEN).toBe('test-cloud-token');
+    expect(roomoteEnv.AUTH_TOKEN).toBe('test-cloud-token');
+    expect(roomoteEnv.TRPC_URL).toBe('https://platform.test.com/api-prefix');
     expect(roomoteEnv.R_APP_URL).toBe('https://api.test.com');
     expect(roomoteEnv.ROOMOTE_WORKSPACE_PATH).toBe('/workspace');
     expect(roomoteEnv.ROOMOTE_TASK_ID).toBe('task-123');

@@ -1,9 +1,11 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -27,6 +29,7 @@ type ListedServer = {
 const {
   state,
   createMock,
+  updateMock,
   deleteMock,
   setEnabledMock,
   connectMock,
@@ -35,6 +38,7 @@ const {
   state: {
     availability: { enabled: true },
     servers: [] as ListedServer[],
+    serversPromise: null as Promise<ListedServer[]> | null,
     toolsError: false,
     tools: [] as {
       name: string;
@@ -43,6 +47,7 @@ const {
     }[],
   },
   createMock: vi.fn(async () => ({ id: 'new-server' })),
+  updateMock: vi.fn(async () => ({ updated: true })),
   deleteMock: vi.fn(async () => ({ deleted: true })),
   setEnabledMock: vi.fn(async () => ({ enabled: false })),
   connectMock: vi.fn(async () => '/api/mcp-oauth/initiate/conn-1'),
@@ -63,7 +68,7 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['customMcpServers', 'list'],
         queryOptions: () => ({
           queryKey: ['customMcpServers', 'list'],
-          queryFn: async () => state.servers,
+          queryFn: async () => state.serversPromise ?? state.servers,
         }),
       },
       listTools: {
@@ -89,7 +94,7 @@ vi.mock('@/trpc/client', () => ({
       },
       update: {
         mutationOptions: (options = {}) => ({
-          mutationFn: vi.fn(),
+          mutationFn: updateMock,
           ...options,
         }),
       },
@@ -157,13 +162,16 @@ function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
 function Harness({
   isAdmin = true,
   connectionName = null,
+  configureId = null,
 }: {
   isAdmin?: boolean;
   connectionName?: string | null;
+  configureId?: string | null;
 }) {
   const { isEnabled, items, openAddDialog, dialogs } = useCustomMcpServers({
     isAdmin,
     connectionName,
+    configureId,
   });
 
   return (
@@ -198,17 +206,24 @@ function Harness({
 }
 
 function renderHarness(
-  props: { isAdmin?: boolean; connectionName?: string | null } = {},
+  props: {
+    isAdmin?: boolean;
+    connectionName?: string | null;
+    configureId?: string | null;
+  } = {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <Harness {...props} />
-    </QueryClientProvider>,
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <Harness {...props} />
+      </QueryClientProvider>,
+    ),
+    queryClient,
+  };
 }
 
 describe('useCustomMcpServers', () => {
@@ -221,9 +236,190 @@ describe('useCustomMcpServers', () => {
     vi.clearAllMocks();
     state.availability = { enabled: true };
     state.servers = [];
+    state.serversPromise = null;
     state.tools = [];
     state.toolsError = false;
+    window.history.replaceState(null, '', '/settings/integrations');
   });
+
+  it('opens the saved disabled row, focuses authentication and saves without activation', async () => {
+    const server = buildServer({ enabled: false });
+    state.servers = [server];
+    window.history.replaceState(
+      null,
+      '',
+      `/settings/integrations?configure=custom%3A${server.id}&url=https://evil.example&token=secret&name=other&authType=oauth`,
+    );
+    renderHarness({ configureId: `custom:${server.id}` });
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
+      'Authorize integration',
+    );
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toHaveValue(
+      server.name,
+    );
+    expect(
+      screen.getByPlaceholderText('https://mcp.example.com/mcp'),
+    ).toHaveValue(server.url);
+    expect(screen.getByPlaceholderText('e.g. x-api-key')).toHaveValue(
+      'x-api-key',
+    );
+    expect(
+      screen.getByPlaceholderText('Leave blank to keep the existing value'),
+    ).toHaveValue('');
+    expect(screen.getByRole('group', { name: 'Authentication' })).toHaveFocus();
+    expect(window.location.search).toBe('');
+    expect(document.body.textContent).not.toContain('secret');
+    expect(createMock).not.toHaveBeenCalled();
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(listToolsMock).not.toHaveBeenCalled();
+    fireEvent.change(
+      screen.getByPlaceholderText('Leave blank to keep the existing value'),
+      { target: { value: 'human-entered-key' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith(
+        {
+          id: server.id,
+          server: {
+            transport: 'remote',
+            name: server.name,
+            url: server.url,
+            authType: 'static_headers',
+            headers: { 'x-api-key': 'human-entered-key' },
+          },
+        },
+        expect.anything(),
+      ),
+    );
+    expect(setEnabledMock).not.toHaveBeenCalled();
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(screen.getByTestId('item-enabled')).toHaveTextContent('false');
+  });
+
+  it('clears link parameters before the saved list loads and then opens the matching row', async () => {
+    const server = buildServer({ enabled: false });
+    let resolveServers!: (servers: ListedServer[]) => void;
+    state.serversPromise = new Promise((resolve) => {
+      resolveServers = resolve;
+    });
+    window.history.replaceState(
+      null,
+      '',
+      `/settings/integrations?configure=custom%3A${server.id}&token=secret`,
+    );
+    renderHarness({ configureId: `custom:${server.id}` });
+    await waitFor(() => expect(window.location.search).toBe(''));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await act(async () => {
+      resolveServers([server]);
+    });
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
+      'Authorize integration',
+    );
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toHaveValue(
+      server.name,
+    );
+  });
+
+  it('allows secure header entry for a prepared row without existing headers', async () => {
+    const server = buildServer({ enabled: false, headerNames: [] });
+    state.servers = [server];
+    renderHarness({ configureId: `custom:${server.id}` });
+    await screen.findByRole('dialog');
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Add' }),
+    );
+    expect(screen.getByPlaceholderText('e.g. x-api-key')).toHaveValue('');
+    expect(
+      screen.getByPlaceholderText('Leave blank to keep the existing value'),
+    ).toHaveValue('');
+  });
+
+  it('does not authorize OAuth when opening or saving a saved OAuth row', async () => {
+    const server = buildServer({
+      enabled: false,
+      authType: 'oauth',
+      headerNames: [],
+      oauthResourceIndicatorDisabled: true,
+    });
+    state.servers = [server];
+    renderHarness({ configureId: `custom:${server.id}` });
+    await screen.findByRole('dialog');
+    expect(screen.getByRole('radio', { name: 'OAuth' })).toBeChecked();
+    expect(screen.getByRole('switch')).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(updateMock).toHaveBeenCalled());
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(setEnabledMock).not.toHaveBeenCalled();
+  });
+
+  it('consumes a saved-row link once and does not reopen after dismissal or refetch', async () => {
+    const server = buildServer();
+    state.servers = [server];
+    const { queryClient } = renderHarness({
+      configureId: `custom:${server.id}`,
+    });
+    await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    state.servers = [{ ...server }];
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['customMcpServers', 'list'],
+      });
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('open-add'));
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
+      'Add custom MCP server',
+    );
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toHaveValue('');
+  });
+
+  it.each([
+    { isAdmin: false, enabled: true, exists: true },
+    { isAdmin: true, enabled: false, exists: true },
+    { isAdmin: true, enabled: true, exists: false },
+  ])(
+    'does not open saved setup without access or a matching row: %j',
+    async ({ isAdmin, enabled, exists }) => {
+      const server = buildServer();
+      state.servers = exists ? [server] : [];
+      state.availability = { enabled };
+      window.history.replaceState(
+        null,
+        '',
+        `/settings/integrations?configure=custom%3A${server.id}&token=secret`,
+      );
+      renderHarness({ isAdmin, configureId: `custom:${server.id}` });
+      await waitFor(() => expect(window.location.search).toBe(''));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(createMock).not.toHaveBeenCalled();
+      expect(updateMock).not.toHaveBeenCalled();
+      expect(connectMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    '',
+    'custom:unknown',
+    'native:pylon',
+    'custom:4c72c9dd-3f5e-4d3e-9f7a-2c1b8a6e5d40?token=secret',
+    'https://user:secret@evil.example',
+  ])(
+    'ignores invalid configure ID %s without falling back to creation',
+    async (configureId) => {
+      state.servers = [buildServer()];
+      renderHarness({ configureId, connectionName: 'should-not-create' });
+      await screen.findByTestId('name');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(createMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('produces no items when there are no servers', async () => {
     renderHarness();

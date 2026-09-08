@@ -368,6 +368,14 @@ export function resolveBuiltInMcpServers(
     }
   }
 
+  // Bind the typed SDK worker client only inside Roomote's trusted MCP process.
+  if (roomoteEnv.ROOMOTE_CLOUD_TOKEN) {
+    roomoteEnv.AUTH_TOKEN = roomoteEnv.ROOMOTE_CLOUD_TOKEN;
+  }
+  if (roomoteEnv.ROOMOTE_PLATFORM_API_URL) {
+    roomoteEnv.TRPC_URL = roomoteEnv.ROOMOTE_PLATFORM_API_URL;
+  }
+
   const resolvedMcps: Record<string, McpServerConfig> = {};
 
   // The Brain is delivered only when the deployment has one, so its presence

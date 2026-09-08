@@ -410,7 +410,7 @@ function createRoomoteMcpServer(
     }
   }
   registerRoomoteCustomAutomationsTool(server, toolAuth);
-  registerRoomoteIntegrationConnectionTool(server);
+  registerRoomoteIntegrationConnectionTool(server, toolAuth);
 
   server.registerTool(
     'get_about_me',

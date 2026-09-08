@@ -1,6 +1,10 @@
 import { TRPCError } from '@trpc/server';
-import { prepareIntegrationConnectionInputSchema } from '@roomote/types';
+import {
+  prepareIntegrationConnectionInputSchema,
+  manageIntegrationConnectionInputSchema,
+} from '@roomote/types';
 import { prepareIntegrationConnection } from '../lib/prepare-integration-connection';
+import { manageIntegrationConnection } from '../lib/manage-integration-connection';
 import { z } from 'zod';
 import { ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
@@ -10,6 +14,8 @@ import {
 } from '@roomote/env';
 import {
   db,
+  users,
+  taskRuns,
   desc,
   mcpConnections,
   deploymentMcpEnablements,
@@ -161,6 +167,54 @@ export async function resolveUserMcpServerConfigs(options: {
 }
 
 export const mcpConnectionsRouter = router({
+  manageConnection: authenticatedProcedure
+    .input((input: unknown) => {
+      const parsed = manageIntegrationConnectionInputSchema.safeParse(input);
+      if (!parsed.success)
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Invalid integration connection input.',
+        });
+      return parsed.data;
+    })
+    .mutation(async ({ ctx, input }) => {
+      let userId = ctx.auth.userId;
+      if (isRunToken(ctx.auth)) {
+        if (ctx.auth.principal === 'deployment') {
+          throw new TRPCError({
+            code: 'FORBIDDEN',
+            message: 'Admin access required.',
+          });
+        }
+        const run = await db.query.taskRuns.findFirst({
+          where: eq(taskRuns.id, ctx.auth.runId),
+          columns: { actingUserId: true },
+        });
+        userId = run?.actingUserId ?? null;
+      }
+      if (!userId)
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Admin access required.',
+        });
+      const admin = await db.query.users.findFirst({
+        where: and(
+          eq(users.id, userId),
+          eq(users.role, 'admin'),
+          isNull(users.deletedAt),
+        ),
+        columns: { id: true },
+      });
+      if (!admin)
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Admin access required.',
+        });
+      return manageIntegrationConnection(
+        { userId: admin.id, isAdmin: true },
+        input,
+      );
+    }),
   prepareConnection: authenticatedProcedure
     .input(prepareIntegrationConnectionInputSchema)
     .query(({ input }) => prepareIntegrationConnection(input)),

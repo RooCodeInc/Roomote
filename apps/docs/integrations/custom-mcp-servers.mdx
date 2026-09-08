@@ -11,19 +11,60 @@ local stdio servers require a task sandbox.
 
 ## Start from a conversation
 
-Ask Roomote to **"Connect to [service name]"** for a secure Settings link.
-Roomote prefers a built-in integration; otherwise it opens custom setup with
-the service name. An authorized admin reviews the setup and enters an
-existing compatible remote MCP server URL and any credentials in Settings,
-not in chat. This flow does not create or host a server, build an API adapter,
-or turn an ordinary REST API URL into a compatible connection.
+Ask Roomote to **"Connect to [service name]"**. Roomote prefers a built-in
+integration and its existing human Settings setup. For custom remote servers,
+admins can ask Roomote to list or inspect saved connections, configure one,
+request authentication, test it, and apply an explicitly approved tool policy.
+This is more than a setup link, but authentication remains a secure human step.
 
-Saving is not verification. Complete any OAuth authorization, then ask Roomote
-to check which permitted tools it can access. Discovery cannot force-refresh
-a running task's attached catalog; start a new task if the server is missing.
-Fast can pick up changes on later turns, but cached tool lists may delay them.
-Neither a saved server nor an authorization still in progress means it is
-ready to use.
+1. Roomote checks for an existing connection before creating one. It uses a
+   verified compatible remote MCP endpoint from the provider's documentation or
+   asks you for the missing endpoint. Nonsecret HTTP(S) URLs without credentials,
+   query strings, or fragments can be supplied in the conversation. Never send
+   secret-bearing URLs, tokens, header values, or client secrets in chat.
+2. Roomote saves the remote configuration **disabled**, including updates. An
+   empty static-header configuration is waiting for secure credential entry; it
+   is not an anonymous or verified connection.
+3. Roomote requests authentication for the saved connection. For header auth,
+   the link opens that connection's secure Settings dialog. For OAuth, it starts
+   authorization for that connection. Enter secrets only in the secure human
+   flow, not in chat or tool arguments. You do not need to create the server
+   again. Credentials remain isolated server-side behind the Roomote proxy.
+4. Return to the Session after authentication and ask Roomote to test the
+   connection. The test probes the authenticated tool list; it does not activate
+   the server. No-auth servers also require testing and permission review.
+5. Review which tools to allow and explicitly approve activation. Roomote saves
+   the explicit blocked-tool list and activates only after a fresh successful
+   probe. An empty blocked-tool list means you explicitly allow all tools. A
+   failed activation probe leaves the server disabled; saving permissions
+   without requesting activation also leaves it disabled.
+
+A saved configuration, pending authentication, or successful test alone does
+not mean the integration is ready in your current task. After activation,
+Roomote checks the available, permitted tools. A Standard task requires a new
+task to attach a newly added server: discovery cannot refresh its attached
+catalog. Fast picks up new connections on the next turn, but cached tool lists
+can delay visibility. Discovery has no force-refresh control.
+
+These conversational management actions support remote MCP servers only.
+Native configuration, inspection, and authentication requests lead to existing
+human Settings setup; native connection tests and permission updates are not
+supported through this management flow. Local stdio setup remains separate and
+sandbox-only, unavailable in Fast.
+
+### Services without an MCP endpoint
+
+An ordinary REST API URL is not a compatible MCP connection, and Roomote will
+not invent an endpoint. You can authorize a bounded coding investigation of a
+custom adapter using Roomote's existing coding capabilities; Fast delegates
+that repository work to a coding task. The investigation must establish the
+supported API operations, a reachable hosted endpoint, server-side isolated
+credentials, an authorized deployment target, and validation. Implementation
+and deployment must stay within the scope you authorize. Roomote does not ship
+an arbitrary adapter-generation or hosting platform, and a sandbox-local
+prototype alone is not a usable remote connection.
+
+## Configure in Settings
 
 Most MCP servers publish a JSON snippet in their docs. The add dialog's
 **Import from JSON** button accepts a pasted `mcpServers` snippet (or a bare

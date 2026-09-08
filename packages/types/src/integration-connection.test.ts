@@ -55,8 +55,9 @@ describe('integration connection preparation', () => {
       integrationId: null,
       setupKind: 'custom',
     });
-    expect(result.guidance).toContain('API-only');
-    expect(result.guidance).toContain('Never invent an endpoint');
+    expect(result.guidance).toContain('manage_integration_connection');
+    expect(result.guidance).toContain('separately scoped coding investigation');
+    expect(result.guidance).toContain('never invent an endpoint');
     expect(result.guidance).toContain('find_integration_tools');
   });
 

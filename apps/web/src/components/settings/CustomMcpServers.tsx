@@ -250,15 +250,18 @@ function ServerFormDialog({
   editingServer,
   onSaved,
   connectionName = null,
+  focusAuthentication = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editingServer: ListedServer | null;
   onSaved: () => void;
   connectionName?: string | null;
+  focusAuthentication?: boolean;
 }) {
   const trpc = useTRPC();
   const isEdit = Boolean(editingServer);
+  const authenticationRef = useRef<HTMLDivElement>(null);
 
   const form = useForm<ServerFormValues>({ defaultValues: EMPTY_FORM });
   const { watch, setValue, register, reset } = form;
@@ -321,17 +324,29 @@ function ServerFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg">
+      <DialogContent
+        size="lg"
+        onOpenAutoFocus={(event) => {
+          if (focusAuthentication && authenticationRef.current) {
+            event.preventDefault();
+            authenticationRef.current.focus();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle>
-            {connectionName !== null
-              ? 'Connect integration'
-              : isEdit
-                ? 'Edit custom MCP server'
-                : 'Add custom MCP server'}
+            {focusAuthentication
+              ? 'Authorize integration'
+              : connectionName !== null
+                ? 'Connect integration'
+                : isEdit
+                  ? 'Edit custom MCP server'
+                  : 'Add custom MCP server'}
           </DialogTitle>
           <DialogDescription>
-            {connectionName !== null ? (
+            {focusAuthentication ? (
+              'Complete authentication for the saved integration. Credentials stay server-side. Saving does not enable access; return to the conversation to test tools and review permissions.'
+            ) : connectionName !== null ? (
               'Enter the remote integration URL from your provider. Credentials stay server-side. Saving does not authorize OAuth or verify tools; complete those steps separately.'
             ) : (
               <>
@@ -465,7 +480,13 @@ function ServerFormDialog({
                 />
               </div>
 
-              <div className="space-y-2">
+              <div
+                className="space-y-2"
+                ref={authenticationRef}
+                tabIndex={-1}
+                role="group"
+                aria-label="Authentication"
+              >
                 <Label>Authentication</Label>
                 <RadioGroup
                   value={authType}
@@ -487,6 +508,13 @@ function ServerFormDialog({
                     <Label htmlFor="auth-oauth">OAuth</Label>
                   </div>
                 </RadioGroup>
+                {focusAuthentication && (
+                  <p className="text-xs text-muted-foreground">
+                    Complete authentication here, then return to your Session to
+                    test the connection and review tool permissions. Saving does
+                    not enable this integration or authorize OAuth.
+                  </p>
+                )}
               </div>
 
               {authType === 'static_headers' && (
@@ -784,9 +812,11 @@ function CustomToolManagementDialog({
 export function useCustomMcpServers({
   isAdmin,
   connectionName = null,
+  configureId = null,
 }: {
   isAdmin: boolean;
   connectionName?: string | null;
+  configureId?: string | null;
 }): {
   isEnabled: boolean;
   items: IntegrationItem[];
@@ -814,10 +844,14 @@ export function useCustomMcpServers({
   const connect = useMutation(trpc.customMcpServers.connect.mutationOptions());
 
   const [formOpen, setFormOpen] = useState(false);
+  const [configureRequest] = useState(configureId);
+  const [focusAuthentication, setFocusAuthentication] = useState(false);
+  const consumedConfigure = useRef(false);
   const [prefilledName, setPrefilledName] = useState<string | null>(null);
   const consumedConnection = useRef(false);
   useEffect(() => {
     if (
+      configureRequest !== null ||
       connectionName === null ||
       consumedConnection.current ||
       !availability.isSuccess
@@ -834,9 +868,52 @@ export function useCustomMcpServers({
         : '',
     );
     setFormOpen(true);
-  }, [connectionName, isAdmin, availability.isSuccess, availability.data]);
+  }, [
+    configureRequest,
+    connectionName,
+    isAdmin,
+    availability.isSuccess,
+    availability.data,
+  ]);
   const [editingServer, setEditingServer] = useState<ListedServer | null>(null);
   const [toolsServer, setToolsServer] = useState<ListedServer | null>(null);
+
+  useEffect(() => {
+    if (configureRequest === null || consumedConfigure.current) return;
+    // Consume only an exact saved ID; never retain URL-supplied connection details.
+    window.history.replaceState(null, '', '/settings/integrations');
+    if (
+      !isAdmin ||
+      !/^custom:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        configureRequest,
+      )
+    ) {
+      consumedConfigure.current = true;
+      return;
+    }
+    if (availability.isPending) return;
+    if (availability.data?.enabled !== true) {
+      consumedConfigure.current = true;
+      return;
+    }
+    if (serversQuery.isPending) return;
+    consumedConfigure.current = true;
+    const server = serversQuery.data?.find(
+      (entry) =>
+        entry.id === configureRequest.slice(7) && entry.transport === 'remote',
+    );
+    if (!server) return;
+    setEditingServer(server);
+    setFocusAuthentication(true);
+    setFormOpen(true);
+  }, [
+    configureRequest,
+    isAdmin,
+    availability.isPending,
+    availability.data,
+    serversQuery.isPending,
+    serversQuery.data,
+  ]);
 
   const refresh = () =>
     queryClient.invalidateQueries({
@@ -928,6 +1005,7 @@ export function useCustomMcpServers({
               ariaLabel: `Edit ${server.name}`,
               onAction: () => {
                 setPrefilledName(null);
+                setFocusAuthentication(false);
                 setEditingServer(server);
                 setFormOpen(true);
               },
@@ -961,6 +1039,7 @@ export function useCustomMcpServers({
       <ServerFormDialog
         open={formOpen && isAdmin && isEnabled}
         connectionName={prefilledName}
+        focusAuthentication={focusAuthentication}
         onOpenChange={setFormOpen}
         editingServer={editingServer}
         onSaved={() => {
@@ -987,6 +1066,7 @@ export function useCustomMcpServers({
     openAddDialog: () => {
       if (!isAdmin || !isEnabled) return;
       setPrefilledName(null);
+      setFocusAuthentication(false);
       setEditingServer(null);
       setFormOpen(true);
     },

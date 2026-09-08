@@ -1,4 +1,17 @@
-import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
+import type {
+  AuthTokenContext,
+  RunTokenContext,
+  ManageIntegrationConnectionInput,
+} from '@roomote/types';
+import type { AppRouterInput } from '../../types';
+
+const { mockManageConnection, mockFindAdmin } = vi.hoisted(() => ({
+  mockManageConnection: vi.fn(),
+  mockFindAdmin: vi.fn(),
+}));
+vi.mock('../lib/manage-integration-connection', () => ({
+  manageIntegrationConnection: mockManageConnection,
+}));
 
 const mockEnv = vi.hoisted(() => ({
   R_PUBLIC_URL: 'https://roomote.example',
@@ -86,6 +99,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     select: mockSelect,
     query: {
+      users: { findFirst: mockFindAdmin },
       taskRuns: { findFirst: mockFindTaskRun },
       deploymentMcpEnablements: {
         findFirst: vi.fn(),
@@ -107,6 +121,7 @@ vi.mock('@roomote/db/server', () => ({
     enabled: 'customServer.enabled',
     stdio: 'customServer.stdio',
   },
+  users: { id: 'user.id', role: 'user.role', deletedAt: 'user.deletedAt' },
   mcpConnections: {
     id: 'connection.id',
     userId: 'connection.userId',
@@ -229,6 +244,99 @@ function buildEnabledOnlyRow(mcpId: string) {
     connection: null,
   };
 }
+
+describe('mcpConnectionsRouter.manageConnection', () => {
+  it('retains the strict typed client input contract', () => {
+    expectTypeOf<
+      AppRouterInput['mcpConnections']['manageConnection']
+    >().toEqualTypeOf<ManageIntegrationConnectionInput>();
+  });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFindAdmin.mockResolvedValue(undefined);
+    mockFindTaskRun.mockResolvedValue(undefined);
+    mockManageConnection.mockResolvedValue({ state: 'saved' });
+  });
+
+  it('authorizes an undeleted admin and calls the shared service', async () => {
+    mockFindAdmin.mockResolvedValue({ id: 'user-1' });
+    await expect(
+      createCaller().manageConnection({ action: 'list' }),
+    ).resolves.toEqual({ state: 'saved' });
+    expect(mockFindAdmin).toHaveBeenCalledWith({
+      columns: { id: true },
+      where: {
+        conditions: [
+          { column: 'user.id', value: 'user-1' },
+          { column: 'user.role', value: 'admin' },
+          { type: 'isNull', column: 'user.deletedAt' },
+        ],
+      },
+    });
+    expect(mockManageConnection).toHaveBeenCalledWith(
+      { userId: 'user-1', isAdmin: true },
+      { action: 'list' },
+    );
+  });
+
+  it('rejects a nonadmin or deleted user', async () => {
+    await expect(
+      createCaller().manageConnection({ action: 'list' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(mockManageConnection).not.toHaveBeenCalled();
+  });
+
+  it('uses the live run actor instead of the token owner', async () => {
+    mockFindTaskRun.mockResolvedValue({ actingUserId: 'live-admin' });
+    mockFindAdmin.mockResolvedValue({ id: 'live-admin' });
+    await createJobCaller().manageConnection({ action: 'list' });
+    expect(mockEq).toHaveBeenCalledWith('user.id', 'live-admin');
+    expect(mockManageConnection).toHaveBeenCalledWith(
+      { userId: 'live-admin', isAdmin: true },
+      { action: 'list' },
+    );
+  });
+
+  it('does not fall back to an admin token owner without a live run actor', async () => {
+    mockFindTaskRun.mockResolvedValue({ actingUserId: null });
+    mockFindAdmin.mockResolvedValue({ id: 'owner-user' });
+    await expect(
+      createJobCaller().manageConnection({ action: 'list' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(mockFindAdmin).not.toHaveBeenCalled();
+  });
+
+  it('rejects service principals even if the run has a human actor', async () => {
+    mockFindTaskRun.mockResolvedValue({ actingUserId: 'live-admin' });
+    const caller = mcpConnectionsRouter.createCaller({
+      auth: {
+        tokenType: 'run',
+        principal: 'deployment',
+        userId: null,
+        runId: 42,
+        version: 1,
+      },
+    });
+    await expect(
+      caller.manageConnection({ action: 'list' }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(mockFindAdmin).not.toHaveBeenCalled();
+    expect(mockManageConnection).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid credential-bearing input without echoing it', async () => {
+    await expect(
+      createCaller().manageConnection({
+        action: 'configure',
+        url: 'https://user:secret@example.com',
+      }),
+    ).rejects.toMatchObject({
+      code: 'BAD_REQUEST',
+      message: 'Invalid integration connection input.',
+    });
+    expect(mockManageConnection).not.toHaveBeenCalled();
+  });
+});
 
 describe('mcpConnectionsRouter.prepareConnection', () => {
   beforeEach(() => vi.clearAllMocks());

@@ -1383,11 +1383,13 @@ export function Integrations() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { isAdmin } = useAuthorizedUser();
-  const deepLinkedIntegrationId = (
-    searchParams.get('service') ??
-    searchParams.get('highlight') ??
-    ''
-  ).trim();
+  const deepLinkedIntegrationId = searchParams.has('configure')
+    ? ''
+    : (
+        searchParams.get('service') ??
+        searchParams.get('highlight') ??
+        ''
+      ).trim();
   const [dismissedDeepLinkIntegrationId, setDismissedDeepLinkIntegrationId] =
     useState<string | null>(null);
   const [clearedDeepLinkIntegrationId, setClearedDeepLinkIntegrationId] =
@@ -2287,8 +2289,13 @@ export function Integrations() {
     dialogs: customMcpDialogs,
   } = useCustomMcpServers({
     isAdmin,
+    configureId: searchParams.has('configure')
+      ? searchParams.getAll('configure').length === 1
+        ? searchParams.get('configure')
+        : ''
+      : null,
     connectionName:
-      searchParams.get('connect') === 'custom'
+      !searchParams.has('configure') && searchParams.get('connect') === 'custom'
         ? (searchParams.get('name') ?? '')
         : null,
   });

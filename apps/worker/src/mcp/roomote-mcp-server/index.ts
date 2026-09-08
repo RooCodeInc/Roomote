@@ -10,6 +10,7 @@ import {
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   PREPARE_INTEGRATION_CONNECTION_TOOL,
+  MANAGE_INTEGRATION_CONNECTION_TOOL,
   CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
@@ -93,6 +94,7 @@ import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
 import { handlePrepareIntegrationConnection } from './prepare-integration-connection.js';
+import { handleManageIntegrationConnection } from './manage-integration-connection.js';
 import {
   handleGetSessionMessages,
   handleGetSessionSummary,
@@ -113,6 +115,11 @@ export const roomoteMcpServer = new NullableOptionalsMcpServer({
 });
 
 let hasSubmittedAutomationSlackSummary = false;
+roomoteMcpServer.registerTool(
+  MANAGE_INTEGRATION_CONNECTION_TOOL.name,
+  MANAGE_INTEGRATION_CONNECTION_TOOL,
+  handleManageIntegrationConnection,
+);
 roomoteMcpServer.registerTool(
   PREPARE_INTEGRATION_CONNECTION_TOOL.name,
   PREPARE_INTEGRATION_CONNECTION_TOOL,
