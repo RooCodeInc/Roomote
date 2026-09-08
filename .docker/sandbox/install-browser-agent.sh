@@ -652,8 +652,6 @@ main() {
     printf '%s\n' "$AGENT_BROWSER_VERSION" > "$AGENT_BROWSER_INSTALL_MARKER"
   fi
 
-  real_cli_path="$(find_real_agent_browser_cli_path)"
-
   if [ -z "$real_cli_path" ]; then
     echo "agent-browser install: failed to resolve real CLI after install/repair" >&2
     exit 1
