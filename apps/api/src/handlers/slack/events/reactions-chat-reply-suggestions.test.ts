@@ -241,6 +241,7 @@ describe('chat reply suggestion reactions', () => {
     const slack = {
       postMessage: vi.fn(async () => 'seeded-thread-ts'),
       deleteMessage: vi.fn(async () => undefined),
+      addReaction: vi.fn(async () => true),
       getMessageMetadata: vi.fn(),
     };
 
@@ -290,10 +291,10 @@ describe('chat reply suggestion reactions', () => {
           conversation: {
             surface: 'slack',
             workspaceId: 'T1',
-            conversationId: expectedThread,
+            conversationId: bound ? expectedThread : 'forwarded-card-ts',
             replyTarget: {
               channelId: expectedChannel,
-              threadId: expectedThread,
+              threadId: bound ? expectedThread : 'forwarded-card-ts',
             },
           },
         });
@@ -319,6 +320,7 @@ describe('chat reply suggestion reactions', () => {
             'announce-ts',
         ),
         deleteMessage: vi.fn(),
+        addReaction: vi.fn(async () => true),
         getMessageMetadata: vi.fn(),
       };
       await handleReactionAddedEvent({
@@ -338,28 +340,21 @@ describe('chat reply suggestion reactions', () => {
       expect(
         mocks.trackedMessageFindFirst.mock.calls[1]![0].where,
       ).toContainEqual(['surface', 'slack']);
-      expect(slack.postMessage.mock.calls[0]![0]).toMatchObject({
-        channel: expectedChannel,
+      expect(slack.postMessage).not.toHaveBeenCalled();
+      expect(slack.addReaction).toHaveBeenCalledWith({
+        channel: 'C1',
+        timestamp: 'forwarded-card-ts',
+        name: 'eyes',
       });
-      if (bound) {
-        expect(slack.postMessage.mock.calls[0]![0]).toHaveProperty(
-          'thread_ts',
-          expectedThread,
-        );
-      } else {
-        expect(slack.postMessage.mock.calls[0]![0]).not.toHaveProperty(
-          'thread_ts',
-        );
-      }
       expect(mocks.launchPinned).toHaveBeenCalledWith(
         expect.objectContaining({
           conversation: {
             surface: 'slack',
             workspaceId: 'T1',
-            conversationId: expectedThread,
+            conversationId: bound ? expectedThread : 'forwarded-card-ts',
             replyTarget: {
               channelId: expectedChannel,
-              threadId: expectedThread,
+              threadId: bound ? expectedThread : 'forwarded-card-ts',
             },
           },
         }),
@@ -477,6 +472,7 @@ describe('chat reply suggestion reactions', () => {
       const slack = {
         postMessage: vi.fn(async () => 'seeded-thread-ts'),
         deleteMessage: vi.fn(async () => undefined),
+        addReaction: vi.fn(async () => true),
         getMessageMetadata: vi.fn(),
       };
 
@@ -495,12 +491,7 @@ describe('chat reply suggestion reactions', () => {
         },
       });
 
-      expect(slack.postMessage).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          channel: 'C1',
-          thread_ts: 'report-thread-ts',
-        }),
-      );
+      expect(slack.postMessage).not.toHaveBeenCalled();
       expect(mocks.conversationGetOrCreate).toHaveBeenCalledWith({
         userId: 'user-1',
         sessionId: 'session-origin',
@@ -567,6 +558,7 @@ describe('chat reply suggestion reactions', () => {
       const slack = {
         postMessage,
         deleteMessage: vi.fn(async () => undefined),
+        addReaction: vi.fn(async () => true),
         getMessageMetadata: vi.fn(),
       };
 
@@ -585,13 +577,12 @@ describe('chat reply suggestion reactions', () => {
         },
       });
 
-      // The announcement is a reply in the automation's report thread.
-      expect(postMessage).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          channel: 'C_REPORTS',
-          thread_ts: 'report-thread-ts',
-        }),
-      );
+      expect(postMessage).not.toHaveBeenCalled();
+      expect(slack.addReaction).toHaveBeenCalledWith({
+        channel: 'C1',
+        timestamp: 'card-ts',
+        name: 'eyes',
+      });
       expect(mocks.launchPinned).toHaveBeenCalledWith(
         expect.objectContaining({
           originSessionId: 'session-origin',
@@ -610,7 +601,7 @@ describe('chat reply suggestion reactions', () => {
         expect.objectContaining({
           channelId: 'C_REPORTS',
           threadTs: 'report-thread-ts',
-          messageId: 'announce-ts',
+          messageId: 'card-ts',
         }),
       );
     },
@@ -644,6 +635,7 @@ describe('chat reply suggestion reactions', () => {
     const slack = {
       postMessage: vi.fn(async () => 'seeded-thread-ts'),
       deleteMessage: vi.fn(async () => undefined),
+      addReaction: vi.fn(async () => true),
       getMessageMetadata: vi.fn(),
     };
 
@@ -663,9 +655,12 @@ describe('chat reply suggestion reactions', () => {
     });
 
     expect(mocks.resolveWorkspace).toHaveBeenCalled();
-    expect(slack.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: 'C1', thread_ts: 'report-thread-ts' }),
-    );
+    expect(slack.postMessage).not.toHaveBeenCalled();
+    expect(slack.addReaction).toHaveBeenCalledExactlyOnceWith({
+      channel: 'C1',
+      timestamp: 'card-ts',
+      name: 'eyes',
+    });
     expect(mocks.getSessionForTask).toHaveBeenCalledWith(
       expect.anything(),
       'scan-task-1',
@@ -986,7 +981,7 @@ describe('chat reply suggestion reactions', () => {
     expect(mocks.finalizeWorkItemLaunched).not.toHaveBeenCalled();
     expect(slack.deleteMessage).toHaveBeenCalledWith({
       channel: 'C1',
-      ts: 'seeded-thread-ts',
+      ts: 'card-ts',
     });
     expect(slack.postMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: expect.stringContaining('busy') }),

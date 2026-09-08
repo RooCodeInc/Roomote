@@ -536,10 +536,10 @@ async function launchTaskSuggestionTaskFromReaction({
     title: workItem.title,
     brief: suggestionBrief,
   });
-  const seededSuggestionSlackText = buildSeededSuggestionSlackText(
-    suggestionSlackText,
-    reactionEvent.user,
-  );
+  const isSuggestedTask = suggestionType === 'suggested_tasks';
+  const seededSuggestionSlackText = isSuggestedTask
+    ? null
+    : buildSeededSuggestionSlackText(suggestionSlackText, reactionEvent.user);
   const suggestionTaskPrompt = buildSuggestionTaskPromptText({
     title: workItem.title,
     brief: suggestionBrief,
@@ -569,24 +569,33 @@ async function launchTaskSuggestionTaskFromReaction({
       ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
       : null;
     announceChannelId = originThread?.channelId ?? channelId;
-    announceMessageTs = await slack.postMessage({
-      channel: announceChannelId,
-      ...(originThread ? { thread_ts: originThread.threadTs } : {}),
-      text: seededSuggestionSlackText,
-      blocks: [
-        {
-          type: 'markdown',
-          text: seededSuggestionSlackText,
-        },
-      ],
-    });
+    if (isSuggestedTask) {
+      announceMessageTs = messageTs;
+      await slack.addReaction?.({
+        channel: channelId,
+        timestamp: messageTs,
+        name: ackEmoji,
+      });
+    } else {
+      announceMessageTs = await slack.postMessage({
+        channel: announceChannelId,
+        ...(originThread ? { thread_ts: originThread.threadTs } : {}),
+        text: seededSuggestionSlackText!,
+        blocks: [
+          {
+            type: 'markdown',
+            text: seededSuggestionSlackText!,
+          },
+        ],
+      });
 
-    if (!announceMessageTs) {
-      await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
-      apiLogger.debug(
-        `${logPrefix} failed to post the Slack launch announcement; launch canceled`,
-      );
-      return false;
+      if (!announceMessageTs) {
+        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
+        apiLogger.debug(
+          `${logPrefix} failed to post the Slack launch announcement; launch canceled`,
+        );
+        return false;
+      }
     }
     const launchThreadTs = originThread?.threadTs ?? announceMessageTs;
 
