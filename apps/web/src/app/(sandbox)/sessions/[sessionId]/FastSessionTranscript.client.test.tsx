@@ -1886,7 +1886,9 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.getByText('New session')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'New session' }),
+    ).toHaveAttribute('title', 'New session');
 
     act(() => {
       FakeEventSource.instances[0]!.emit('session', {
@@ -1896,10 +1898,13 @@ describe('FastSessionTranscript', () => {
     });
 
     expect(
-      screen.getByText(
-        'Rotate the API keys across every production environment without downtime',
-      ),
-    ).toBeInTheDocument();
+      screen.getByRole('heading', {
+        name: 'Rotate the API keys across every production environment without downtime',
+      }),
+    ).toHaveAttribute(
+      'title',
+      'Rotate the API keys across every production environment without downtime',
+    );
     expect(document.title).toBe(
       'Rotate the API keys across every production environment with... | Roomote',
     );

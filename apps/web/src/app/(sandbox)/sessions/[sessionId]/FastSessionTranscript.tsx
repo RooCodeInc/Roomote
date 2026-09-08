@@ -59,10 +59,7 @@ import {
   SessionUserInputCard,
 } from './SessionUserInputCard';
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
-import {
-  SESSION_HEADER_CONTENT_CLASS_NAME,
-  SESSION_HEADER_TITLE_CLASS_NAME,
-} from './session-header-layout';
+import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
 
 import {
   AcpTranscriptBlockList,
@@ -745,7 +742,10 @@ export function FastSessionTranscript({
           actions={headerActions}
         >
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>
+            <h1
+              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+              title={title ?? fallbackTitle}
+            >
               {title ?? fallbackTitle}
             </h1>
             {(effectiveSessionModel || headerExtras) && (
