@@ -50,6 +50,7 @@ import { ModelSelect } from '@/components/tasks/ModelSelect';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { AutomationWebhookDialog } from './AutomationWebhookDialog';
 
 import {
   AutomationDestinationPicker,
@@ -304,6 +305,8 @@ export function CustomAutomationsSection() {
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [webhookAutomation, setWebhookAutomation] =
+    useState<CustomAutomationListItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
@@ -940,6 +943,16 @@ export function CustomAutomationsSection() {
       >
         {isCreating || editingId ? renderEditor() : null}
       </Dialog>
+      {webhookAutomation ? (
+        <AutomationWebhookDialog
+          automationId={webhookAutomation.id}
+          name={webhookAutomation.name}
+          open
+          onOpenChange={(open) => {
+            if (!open) setWebhookAutomation(null);
+          }}
+        />
+      ) : null}
 
       {listQuery.isPending ? (
         <Card variant="snug" data-testid="custom-automations-skeleton">
@@ -1081,6 +1094,16 @@ export function CustomAutomationsSection() {
                         automation={row}
                         disabled={busy}
                       />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        aria-label={`Granola trigger for ${row.name}`}
+                        onClick={() => setWebhookAutomation(row)}
+                      >
+                        Granola
+                      </Button>
                       <BasicTooltip content="Configure">
                         <Button
                           type="button"

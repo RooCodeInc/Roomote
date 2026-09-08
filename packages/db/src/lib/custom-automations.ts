@@ -1,4 +1,4 @@
-import { and, asc, count, eq, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, count, eq, isNull, lt, or, sql } from 'drizzle-orm';
 
 import {
   ALL_REPOSITORIES,
@@ -18,7 +18,13 @@ import {
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
-import { customAutomations, environments, tasks } from '../schema';
+import {
+  automationWebhookDeliveries,
+  automationWebhookTriggers,
+  customAutomations,
+  environments,
+  tasks,
+} from '../schema';
 import type { CustomAutomation } from '../types';
 import type { AutomationRunOutcomeStatus } from './automations';
 
@@ -312,7 +318,24 @@ export async function deleteCustomAutomation(
   id: string,
   client: DatabaseOrTransaction = db,
 ): Promise<void> {
-  await client.delete(customAutomations).where(eq(customAutomations.id, id));
+  await client.transaction(async (tx) => {
+    // Conflicts with trigger inserts' FK key-share lock until deletion commits.
+    await tx
+      .select({ id: customAutomations.id })
+      .from(customAutomations)
+      .where(eq(customAutomations.id, id))
+      .for('update');
+    const [trigger] = await tx
+      .select({ id: automationWebhookTriggers.id })
+      .from(automationWebhookTriggers)
+      .where(eq(automationWebhookTriggers.automationId, id))
+      .limit(1);
+    if (trigger)
+      throw new Error(
+        'Remove the automation webhook subscription before deleting this automation.',
+      );
+    await tx.delete(customAutomations).where(eq(customAutomations.id, id));
+  });
 }
 
 export async function recordCustomAutomationRunOutcome(
@@ -402,6 +425,13 @@ export async function tryClaimCustomAutomationLaunch(
     .where(
       and(
         eq(customAutomations.id, id),
+        sql`not exists (
+          select 1 from ${automationWebhookDeliveries} d
+          join ${automationWebhookTriggers} t on t.id = d.trigger_id
+          where t.automation_id = ${customAutomations.id}
+            and d.launch_claimed_at is not null
+            and d.status in ('pending', 'dispatching', 'running')
+        )`,
         or(
           isNull(customAutomations.launchClaimedAt),
           lt(customAutomations.launchClaimedAt, staleBefore),

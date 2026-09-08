@@ -4720,30 +4720,36 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       prompt: { ts: 1_000, turnSeq: 0 },
     };
 
-    it('settles a resumed turn whose earlier attempt already delivered its closeout without asking the model', async () => {
-      mocks.loadTurnAttempt.mockResolvedValueOnce({
-        ...attemptCounters,
-        events: [
-          { kind: 'reply', text: 'Looking into it.', purpose: 'ack' },
-          { kind: 'reply', text: 'All done.', purpose: 'closeout' },
-        ],
-      });
-      const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+    it.each(['human', 'platform_event'] as const)(
+      'settles a resumed %s turn whose earlier attempt already delivered its closeout without asking the model',
+      async (turnSource) => {
+        mocks.loadTurnAttempt.mockResolvedValueOnce({
+          ...attemptCounters,
+          events: [
+            { kind: 'reply', text: 'Looking into it.', purpose: 'ack' },
+            { kind: 'reply', text: 'All done.', purpose: 'closeout' },
+          ],
+        });
+        const postReply = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
 
-      const result = await answerFastAgentQuestion({
-        ...baseParams,
-        adapter: callbacks({ postReply }),
-        durableAdmission,
-        resumedAfterInterruption: true,
-      });
+        const result = await answerFastAgentQuestion({
+          ...baseParams,
+          turnSource,
+          adapter: callbacks({ postReply }),
+          durableAdmission,
+          resumedAfterInterruption: true,
+        });
 
-      // The answer already reached the surface; the resumed run only closes
-      // the books.
-      expect(result).toBe('All done.');
-      expect(mocks.generateText).not.toHaveBeenCalled();
-      expect(postReply).not.toHaveBeenCalled();
-      expect(mocks.markDurableDelivered).toHaveBeenCalledWith('durable-row-1');
-    });
+        // The answer already reached the surface; the resumed run only closes
+        // the books.
+        expect(result).toBe('All done.');
+        expect(mocks.generateText).not.toHaveBeenCalled();
+        expect(postReply).not.toHaveBeenCalled();
+        expect(mocks.markDurableDelivered).toHaveBeenCalledWith(
+          'durable-row-1',
+        );
+      },
+    );
 
     it('settles a resumed turn whose closeout replaced the retry notice, leaving the completed call as the last event', async () => {
       // The replaced notice keeps its earlier sequence, so the closeout's

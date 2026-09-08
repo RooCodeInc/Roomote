@@ -58,6 +58,8 @@ async function forwardWebhookRequest(
   const targetUrl = resolveApiUrl(env.TRPC_URL, `/api/webhooks/${path}`);
   targetUrl.search = request.nextUrl.search;
 
+  // Public provider callbacks authenticate at the API. Preserve signing headers
+  // (including Standard Webhooks webhook-id/timestamp/signature) and raw bytes.
   const headers = removeHopByHopHeaders(request.headers);
   const host = request.headers.get('host');
 

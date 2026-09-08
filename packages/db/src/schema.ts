@@ -1,6 +1,7 @@
 import {
   pgTable,
   text,
+  varchar,
   timestamp,
   integer,
   real,
@@ -4080,6 +4081,103 @@ export const customAutomations = pgTable(
     uniqueIndex('custom_automations_name_unique_idx').on(table.name),
     index('custom_automations_enabled_idx').on(table.enabled),
     index('custom_automations_environment_id_idx').on(table.environmentId),
+  ],
+);
+
+export const automationWebhookTriggers = pgTable(
+  'automation_webhook_triggers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    automationId: uuid('automation_id')
+      .notNull()
+      .references(() => customAutomations.id, { onDelete: 'cascade' }),
+    connectionId: uuid('connection_id')
+      .notNull()
+      .references(() => mcpConnections.id, { onDelete: 'restrict' }),
+    provider: varchar('provider', { length: 64 }).notNull().default('granola'),
+    enabled: boolean('enabled').notNull().default(false),
+    status: text('status')
+      .$type<'pending' | 'active' | 'error' | 'deleting'>()
+      .notNull()
+      .default('pending'),
+    providerEndpointId: text('provider_endpoint_id'),
+    encryptedSigningSecret: encryptedText('encrypted_signing_secret'),
+    events: jsonb('events')
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    folderIds: jsonb('folder_ids')
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    scopes: jsonb('scopes')
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    approvedByUserId: text('approved_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    maxRunsPerDay: integer('max_runs_per_day').notNull().default(20),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('automation_webhook_triggers_automation_idx').on(
+      table.automationId,
+    ),
+    index('automation_webhook_triggers_connection_idx').on(table.connectionId),
+  ],
+);
+
+// Independent of triggers so deleting/recreating subscriptions cannot reset spend.
+export const automationWebhookDailyBudgets = pgTable(
+  'automation_webhook_daily_budgets',
+  {
+    day: text('day').primaryKey(),
+    reservations: integer('reservations').notNull().default(0),
+  },
+);
+
+export const automationWebhookDeliveries = pgTable(
+  'automation_webhook_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    triggerId: uuid('trigger_id')
+      .notNull()
+      .references(() => automationWebhookTriggers.id, { onDelete: 'cascade' }),
+    eventId: text('event_id').notNull(),
+    eventType: text('event_type').notNull(),
+    noteId: text('note_id').notNull(),
+    occurredAt: timestamp('occurred_at').notNull(),
+    status: text('status')
+      .$type<'pending' | 'dispatching' | 'running' | 'succeeded' | 'failed'>()
+      .notNull()
+      .default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at').notNull().defaultNow(),
+    leaseUntil: timestamp('lease_until'),
+    leaseToken: uuid('lease_token'),
+    launchClaimedAt: timestamp('launch_claimed_at'),
+    firstDispatchedAt: timestamp('first_dispatched_at'),
+    sessionId: uuid('session_id'),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('automation_webhook_deliveries_event_idx').on(
+      table.triggerId,
+      table.eventId,
+    ),
+    index('automation_webhook_deliveries_due_idx').on(
+      table.status,
+      table.nextAttemptAt,
+    ),
+    index('automation_webhook_deliveries_daily_idx').on(
+      table.triggerId,
+      table.firstDispatchedAt,
+    ),
   ],
 );
 

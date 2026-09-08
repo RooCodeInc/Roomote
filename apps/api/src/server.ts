@@ -27,6 +27,7 @@ import { resolveApiCorsOrigin } from './cors';
 import { createSingleLineWarnLogger } from './logging';
 import { captureApiException, flushApiSentry } from './monitoring/sentry';
 import { installApiGracefulShutdown } from './graceful-shutdown';
+import { automationWebhooks } from './handlers/automation-webhooks';
 import {
   requestObservabilityMiddleware,
   routePolicyMiddleware,
@@ -207,6 +208,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/gitea', gitea);
   app.route('/api/webhooks/bitbucket', bitbucket);
   app.route('/api/webhooks/ado', ado);
+  app.route('/api/webhooks/automations', automationWebhooks);
   app.route('/api/webhooks/slack', slack);
   app.route('/api/webhooks/linear', linear);
   app.route('/api/webhooks/teams', teams);

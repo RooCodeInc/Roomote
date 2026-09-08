@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
+import { TRPCError } from '@trpc/server';
 
 import {
   and,
@@ -16,12 +17,17 @@ import {
   users,
 } from '@roomote/db/server';
 import {
+  configureAutomationWebhook,
+  getAutomationWebhook,
+  removeAutomationWebhook,
+  retryAutomationWebhookDelivery,
   listConnectedCommunicationProviders,
   resolveCustomAutomationSchedule,
   runCustomAutomationNow,
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  automationWebhookConfigSchema,
   FAST_EXECUTION,
   REASONING_EFFORT_VALUES,
   getCommunicationAutomationTargetKind,
@@ -173,7 +179,7 @@ const VALIDATION_ERROR_PATTERNS: RegExp[] = [
 ];
 
 /**
- * Translate an expected validation failure into a 400 response with the
+ * Translate an expected failure into a client error response with the
  * message, or return null when the error is not a known validation failure
  * (callers rethrow those so onError logs them as unexpected 500s).
  */
@@ -181,6 +187,19 @@ function knownErrorResponse(
   c: Pick<Context, 'json'>,
   error: unknown,
 ): Response | null {
+  if (error instanceof TRPCError) {
+    const statuses = {
+      UNAUTHORIZED: 401,
+      FORBIDDEN: 403,
+      CONFLICT: 409,
+      PRECONDITION_FAILED: 409,
+      BAD_REQUEST: 400,
+      NOT_FOUND: 404,
+    } as const;
+    const status = statuses[error.code as keyof typeof statuses];
+    return status ? c.json({ error: error.message }, status) : null;
+  }
+
   if (isDuplicateNameViolation(error)) {
     return c.json({ error: DUPLICATE_AUTOMATION_NAME_ERROR }, 400);
   }
@@ -273,6 +292,12 @@ export const customAutomationsRouter = new Hono<{
   Variables: CustomAutomationVariables;
 }>();
 
+customAutomationsRouter.onError((error, c) => {
+  const known = knownErrorResponse(c, error);
+  if (known) return known;
+  throw error;
+});
+
 customAutomationsRouter.use('*', async (c, next) => {
   const user = await resolveUser(c.get('mcpAuth'));
   if (!user) return c.json({ error: 'User access required' }, 403);
@@ -345,6 +370,59 @@ customAutomationsRouter.get('/', async (c) =>
 
 customAutomationsRouter.get('/models', async (c) =>
   c.json(await getDeploymentTaskModelOptions()),
+);
+
+customAutomationsRouter.get('/:id/webhook', async (c) =>
+  c.json(await getAutomationWebhook(actorId(c), c.req.param('id'))),
+);
+
+customAutomationsRouter.post('/:id/webhook', async (c) => {
+  const parsed = automationWebhookConfigSchema.safeParse(
+    await c.req.json().catch(() => null),
+  );
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  return c.json(
+    await configureAutomationWebhook(
+      actorId(c),
+      c.req.param('id'),
+      parsed.data,
+    ),
+  );
+});
+
+customAutomationsRouter.delete('/:id/webhook', async (c) => {
+  const text = await c.req.text();
+  let body: unknown = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+  }
+  const parsed = z
+    .object({ forceLocalRemoval: z.boolean().optional() })
+    .safeParse(body);
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  return c.json(
+    await removeAutomationWebhook(
+      actorId(c),
+      c.req.param('id'),
+      parsed.data.forceLocalRemoval,
+    ),
+  );
+});
+
+customAutomationsRouter.post(
+  '/:id/webhook/deliveries/:deliveryId/retry',
+  async (c) =>
+    c.json(
+      await retryAutomationWebhookDelivery(
+        actorId(c),
+        c.req.param('id'),
+        c.req.param('deliveryId'),
+      ),
+    ),
 );
 
 customAutomationsRouter.get('/:id', async (c) => {
@@ -551,7 +629,18 @@ customAutomationsRouter.delete('/:id', async (c) => {
   const existing = await getCustomAutomationById(c.req.param('id'));
   if (!existing || !canManage(c, existing))
     return c.json({ error: 'Custom automation was not found.' }, 404);
-  await deleteCustomAutomation(existing.id);
+  try {
+    await deleteCustomAutomation(existing.id);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message ===
+        'Remove the automation webhook subscription before deleting this automation.'
+    ) {
+      return c.json({ error: error.message }, 409);
+    }
+    throw error;
+  }
   void captureActivationCustomAutomationChanged(
     'deleted',
     toActivationAutomationDestinationProvider(existing.target.provider),

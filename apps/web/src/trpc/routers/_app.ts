@@ -9,6 +9,7 @@ import {
   SLACK_RESOLVE_CHANNELS_MAX_IDS,
   SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
+  automationWebhookConfigSchema,
   FAST_EXECUTION,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   computeProviders,
@@ -381,6 +382,10 @@ import {
 } from '../commands/task-suggestions';
 import {
   createCustomAutomationCommand,
+  configureAutomationWebhookCommand,
+  getAutomationWebhookCommand,
+  removeAutomationWebhookCommand,
+  retryAutomationWebhookDeliveryCommand,
   deleteCustomAutomationCommand,
   getAutomationOnboardingStatusCommand,
   getBackgroundAgentSettingsCommand,
@@ -824,6 +829,47 @@ const automationsRouter = createRouter({
   listCustomAutomations: protectedProcedure.query(({ ctx: { auth } }) =>
     listCustomAutomationsCommand(auth),
   ),
+
+  getAutomationWebhook: protectedProcedure
+    .input(z.object({ automationId: z.string().uuid() }))
+    .query(({ ctx: { auth }, input }) =>
+      getAutomationWebhookCommand(auth, input),
+    ),
+
+  configureAutomationWebhook: protectedProcedure
+    .input(
+      z.object({
+        automationId: z.string().uuid(),
+        config: automationWebhookConfigSchema,
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) => {
+      assertAdmin(auth);
+      return configureAutomationWebhookCommand(auth, input);
+    }),
+
+  removeAutomationWebhook: protectedProcedure
+    .input(
+      z.object({
+        automationId: z.string().uuid(),
+        forceLocalRemoval: z.boolean().optional(),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) => {
+      assertAdmin(auth);
+      return removeAutomationWebhookCommand(auth, input);
+    }),
+
+  retryAutomationWebhookDelivery: protectedProcedure
+    .input(
+      z.object({
+        automationId: z.string().uuid(),
+        deliveryId: z.string().uuid(),
+      }),
+    )
+    .mutation(({ ctx: { auth }, input }) =>
+      retryAutomationWebhookDeliveryCommand(auth, input),
+    ),
 
   getCustomAutomationOptions: protectedProcedure.query(({ ctx: { auth } }) =>
     getCustomAutomationOptionsCommand(auth),

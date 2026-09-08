@@ -4,6 +4,13 @@ export {
   runCustomAutomationNow,
 } from './custom-automations';
 export * from './custom-automation-schedule';
+export { processAutomationWebhookDeliveries } from './automation-webhook-dispatch';
+export {
+  getAutomationWebhook,
+  configureAutomationWebhook,
+  removeAutomationWebhook,
+  retryAutomationWebhookDelivery,
+} from './automation-webhooks';
 export { ciFailureTriageJob } from './ci-failure-triage';
 export {
   launchCiFailureTriageForFailedRun,

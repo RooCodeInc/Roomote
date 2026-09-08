@@ -41,6 +41,7 @@ vi.mock('@roomote/sdk/server', () => ({
   codeqlTriageJob: vi.fn(),
   conflictScanJob: vi.fn(),
   customAutomationsJob: vi.fn(),
+  processAutomationWebhookDeliveries: vi.fn(),
   dependabotTriageJob: vi.fn(),
   managerStatsJob: vi.fn(),
   providerUsageLimitJob: vi.fn(),
