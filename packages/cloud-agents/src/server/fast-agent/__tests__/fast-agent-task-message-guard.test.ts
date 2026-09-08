@@ -137,7 +137,7 @@ describe('FastAgentTaskMessageGuard', () => {
       [
         action({
           status: 'unknown',
-          arguments: { ...args, taskId: 'task-3' },
+          arguments: { ...args, taskId: ' task-3 ' },
           result: undefined,
         }),
         action({ status: 'unknown', result: undefined }),

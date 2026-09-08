@@ -44,10 +44,13 @@ export class FastAgentTaskMessageGuard {
         taskId?: unknown;
       };
       const taskId =
-        [result.taskId, args?.taskId].find(
-          (value): value is string =>
-            typeof value === 'string' && !!value.trim(),
-        ) ?? (currentTaskIds.length === 1 ? currentTaskIds[0] : undefined);
+        [result.taskId, args?.taskId]
+          .find(
+            (value): value is string =>
+              typeof value === 'string' && !!value.trim(),
+          )
+          ?.trim() ??
+        (currentTaskIds.length === 1 ? currentTaskIds[0] : undefined);
       if (!taskId) {
         for (const id of currentTaskIds) this.unresolved.add(id);
         continue;
