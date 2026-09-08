@@ -20,9 +20,10 @@ customSkillsRouter.post('/', async (c) => {
       ...('runId' in auth.authContext ? { runId: auth.authContext.runId } : {}),
     });
   } catch {
-    return c.json({ error: 'Admin access required' }, 403);
+    return c.json({ error: 'Active member access required' }, 403);
   }
-  if (!actorUserId) return c.json({ error: 'Admin access required' }, 403);
+  if (!actorUserId)
+    return c.json({ error: 'Active member access required' }, 403);
   const body = await c.req.json().catch(() => null);
   const parsed = createCustomSkillInputSchema.safeParse(body);
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
@@ -35,10 +36,7 @@ customSkillsRouter.post('/', async (c) => {
     if (error instanceof CreateCustomSkillError)
       return c.json({ error: error.message }, error.status);
     if (error instanceof ZodError)
-      return c.json(
-        { error: 'Invalid skill or selected environment configuration.' },
-        400,
-      );
+      return c.json({ error: 'Invalid skill.' }, 400);
     throw error;
   }
 });

@@ -1,10 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import {
   db,
-  environmentFactory,
-  environments,
   eq,
   inArray,
+  instanceSkills,
   taskFactory,
   taskRuns,
   tasks,
@@ -20,10 +20,9 @@ import type { Variables } from '../../../types';
 import { mcp } from '../index';
 
 const userIds: string[] = [];
-const environmentIds: string[] = [];
 const taskIds: string[] = [];
+const skillNames: string[] = [];
 const skill = {
-  name: 'worker-example-checklist',
   description: 'Use when reviewing examples.',
   content: 'Check examples.\n',
 };
@@ -39,13 +38,50 @@ function app(authContext?: AuthTokenContext | RunTokenContext) {
   return app;
 }
 
+function createSkill(
+  authContext: AuthTokenContext | RunTokenContext,
+  extra = {},
+) {
+  const name = `worker-checklist-${randomUUID()}`;
+  skillNames.push(name);
+  return {
+    name,
+    response: app(authContext).request('/api/mcp/custom-skills', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...skill, name, ...extra }),
+    }),
+  };
+}
+
+async function runContext(ownerId: string, actingUserId: string | null) {
+  const task = await taskFactory.create({ initiatorUserId: ownerId });
+  taskIds.push(task.id);
+  const [run] = await db
+    .insert(taskRuns)
+    .values({
+      taskId: task.id,
+      actingUserId,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: { repo: '', description: 'Create example skill' },
+    })
+    .returning({ id: taskRuns.id });
+  return {
+    runId: run!.id,
+    userId: ownerId,
+    principal: 'user',
+    tokenType: 'run',
+    version: 1,
+  } satisfies RunTokenContext;
+}
+
 afterEach(async () => {
+  if (skillNames.length)
+    await db
+      .delete(instanceSkills)
+      .where(inArray(instanceSkills.name, skillNames.splice(0)));
   if (taskIds.length)
     await db.delete(tasks).where(inArray(tasks.id, taskIds.splice(0)));
-  if (environmentIds.length)
-    await db
-      .delete(environments)
-      .where(inArray(environments.id, environmentIds.splice(0)));
   if (userIds.length)
     await db.delete(users).where(inArray(users.id, userIds.splice(0)));
 });
@@ -61,91 +97,105 @@ it.each(['/api/mcp/custom-skills', '/api/mcp/custom-skills/'])(
   },
 );
 
-it.each(['auth', 'run'] as const)(
-  'allows an admin %s context through the actual mount and persists the skill',
+it.each(['auth', 'run', 'deployment-run'] as const)(
+  'allows a member %s context and persists an instance skill under the live actor',
   async (tokenType) => {
-    const admin = await userFactory.create({ role: 'admin' });
-    userIds.push(admin.id);
-    const environment = await environmentFactory.create({
-      createdByUserId: admin.id,
-      config: {
-        name: 'Worker skill test',
-        repositories: [{ repository: 'example/repo' }],
-      },
-    });
-    environmentIds.push(environment.id);
-    let authContext: AuthTokenContext | RunTokenContext = {
-      userId: admin.id,
-      tokenType: 'auth',
-      version: 1,
-    };
-    let runId: number | undefined;
-    if (tokenType === 'run') {
-      const task = await taskFactory.create({ initiatorUserId: admin.id });
-      taskIds.push(task.id);
-      const [run] = await db
-        .insert(taskRuns)
-        .values({
-          taskId: task.id,
-          actingUserId: admin.id,
-          payloadKind: TaskPayloadKind.StandardTask,
-          payload: { repo: '', description: 'Create example skill' },
-        })
-        .returning({ id: taskRuns.id });
-      runId = run!.id;
-      authContext = {
-        runId,
-        userId: null,
-        principal: 'deployment',
-        tokenType: 'run',
-        version: 1,
-      };
+    const member = await userFactory.create({ role: 'member' });
+    const owner = await userFactory.create({ role: 'admin' });
+    userIds.push(member.id, owner.id);
+    const authContext: AuthTokenContext | RunTokenContext =
+      tokenType !== 'auth'
+        ? await runContext(owner.id, member.id)
+        : ({
+            userId: member.id,
+            tokenType: 'auth',
+            version: 1,
+          } satisfies AuthTokenContext);
+    if (tokenType === 'deployment-run' && authContext.tokenType === 'run') {
+      authContext.userId = null;
+      authContext.principal = 'deployment';
     }
-    const response = await app(authContext).request('/api/mcp/custom-skills', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...skill, environmentIds: [environment.id] }),
-    });
-    expect(response.status).toBe(201);
-    await expect(response.json()).resolves.toMatchObject({
+    const { name, response } = createSkill(authContext);
+    expect((await response).status).toBe(201);
+    await expect((await response).json()).resolves.toMatchObject({
       persisted: true,
-      environmentIds: [environment.id],
+      scope: 'instance',
+      name,
     });
     expect(
-      (
-        await db.query.environments.findFirst({
-          where: eq(environments.id, environment.id),
-        })
-      )?.config.manualSkills,
-    ).toEqual([skill]);
+      await db.query.instanceSkills.findFirst({
+        where: eq(instanceSkills.name, name),
+      }),
+    ).toMatchObject({ ...skill, name, createdByUserId: member.id });
 
-    // Granting route authentication must not grant mutation authority to a member or owner-only run.
-    if (runId !== undefined) {
+    // The same token must observe the current actor state, never its durable owner.
+    if (authContext.tokenType === 'run') {
       await db
         .update(taskRuns)
         .set({ actingUserId: null })
-        .where(eq(taskRuns.id, runId));
+        .where(eq(taskRuns.id, authContext.runId));
     } else {
       await db
         .update(users)
-        .set({ role: 'member' })
-        .where(eq(users.id, admin.id));
+        .set({ deletedAt: new Date() })
+        .where(eq(users.id, member.id));
     }
-    const denied = await app(authContext).request('/api/mcp/custom-skills', {
-      method: 'POST',
-      body: JSON.stringify({
-        ...skill,
-        name: 'should-not-save',
-        environmentIds: [environment.id],
-      }),
-    });
-    expect(denied.status).toBe(403);
+    const denied = createSkill(authContext);
+    expect((await denied.response).status).toBe(403);
     expect(
-      (
-        await db.query.environments.findFirst({
-          where: eq(environments.id, environment.id),
-        })
-      )?.config.manualSkills,
-    ).toEqual([skill]);
+      await db.query.instanceSkills.findFirst({
+        where: eq(instanceSkills.name, denied.name),
+      }),
+    ).toBeUndefined();
+  },
+);
+
+it.each(['missing', 'deleted', 'unknown-run', 'unknown-user'] as const)(
+  'denies a %s actor without creating an instance skill',
+  async (state) => {
+    const owner = await userFactory.create({ role: 'admin' });
+    const actor = await userFactory.create({
+      role: 'member',
+      deletedAt: new Date(),
+    });
+    userIds.push(owner.id, actor.id);
+    const context: AuthTokenContext | RunTokenContext =
+      state === 'unknown-user'
+        ? { userId: randomUUID(), tokenType: 'auth', version: 1 }
+        : await runContext(owner.id, state === 'deleted' ? actor.id : null);
+    if (state === 'unknown-run' && context.tokenType === 'run') {
+      await db.delete(taskRuns).where(eq(taskRuns.id, context.runId));
+    }
+    const { name, response } = createSkill(context);
+    expect((await response).status).toBe(403);
+    expect(
+      await db.query.instanceSkills.findFirst({
+        where: eq(instanceSkills.name, name),
+      }),
+    ).toBeUndefined();
+  },
+);
+
+it.each([
+  { environmentIds: [randomUUID()] },
+  { environmentId: randomUUID() },
+  { workspaceId: randomUUID() },
+  { createdByUserId: randomUUID() },
+  { actorUserId: randomUUID() },
+])(
+  'rejects caller-provided scope or identity %j at the mount',
+  async (extra) => {
+    const member = await userFactory.create({ role: 'member' });
+    userIds.push(member.id);
+    const { name, response } = createSkill(
+      { userId: member.id, tokenType: 'auth', version: 1 },
+      extra,
+    );
+    expect((await response).status).toBe(400);
+    expect(
+      await db.query.instanceSkills.findFirst({
+        where: eq(instanceSkills.name, name),
+      }),
+    ).toBeUndefined();
   },
 );

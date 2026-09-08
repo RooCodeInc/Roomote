@@ -151,7 +151,7 @@ roomoteMcpServer.registerTool(
   {
     title: CREATE_CUSTOM_SKILL_TOOL.title,
     description: CREATE_CUSTOM_SKILL_TOOL.description,
-    inputSchema: CREATE_CUSTOM_SKILL_TOOL.inputSchema,
+    inputSchema: z.object(CREATE_CUSTOM_SKILL_TOOL.inputSchema).strict(),
     annotations: CREATE_CUSTOM_SKILL_TOOL.annotations,
   },
   async (params): Promise<ToolResult> => {

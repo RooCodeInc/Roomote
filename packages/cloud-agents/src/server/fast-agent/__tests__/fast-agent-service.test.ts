@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   setOpenCodeSession: vi.fn(),
   upsertMessage: vi.fn(),
   getEnvironments: vi.fn(),
+  listCustomSkills: vi.fn(),
+  getCustomSkill: vi.fn(),
   getTaskModelOptions: vi.fn(),
   appendMemory: vi.fn(),
   isBrainEnabled: vi.fn(),
@@ -144,6 +146,8 @@ vi.mock('@roomote/db/server', () => ({
     id: 'id',
   },
   getDeploymentTaskModelOptions: mocks.getTaskModelOptions,
+  listCustomSkills: mocks.listCustomSkills,
+  getCustomSkill: mocks.getCustomSkill,
   appendFastAgentMemory: mocks.appendMemory,
   isBrainEnabled: mocks.isBrainEnabled,
   db: {
@@ -482,6 +486,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       prompt: null,
     });
     mocks.getActiveTasks.mockResolvedValue([]);
+    mocks.listCustomSkills.mockResolvedValue([]);
+    mocks.getCustomSkill.mockResolvedValue(null);
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -2809,6 +2815,142 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       userName: 'Matt',
       senderDisplayName: 'Matt',
     });
+  });
+
+  it('loads an explicitly invoked instance skill without environments using the current user', async () => {
+    const bridge = await vi.importActual<
+      typeof import('../fast-agent-native-tool-bridge')
+    >('../fast-agent-native-tool-bridge');
+    const runtime = await bridge.getFastAgentNativeToolRuntime(
+      'conversation-1',
+      [],
+    );
+    const adapter = callbacks();
+    const skill = {
+      id: '00000000-0000-4000-8000-000000000001',
+      name: 'daily-brief',
+      description: 'Prepare a daily brief.',
+      content: '# Daily Brief\nSummarize the current conversation.',
+    };
+    mocks.getEnvironments.mockResolvedValue([]);
+    mocks.getUserIdentity.mockResolvedValue({ isAdmin: false });
+    mocks.listCustomSkills.mockResolvedValue([skill]);
+    mocks.getCustomSkill.mockResolvedValue(skill);
+    mocks.getNativeRuntime.mockImplementationOnce(async () => {
+      mocks.mcpCapabilityAvailable = true;
+      return runtime;
+    });
+    mocks.bindExecutor.mockImplementationOnce(
+      bridge.bindFastAgentNativeToolExecutor,
+    );
+    const calledTools: string[] = [];
+    mocks.generateText.mockImplementationOnce(
+      async (params, _session, options) => {
+        expect(params.prompt).toContain(
+          '<explicit_skill_invocation name="daily-brief" />',
+        );
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        const callTool = async (
+          tool: string,
+          args: Record<string, unknown>,
+        ) => {
+          calledTools.push(tool);
+          const response = await fetch(
+            runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!,
+            {
+              method: 'POST',
+              headers: {
+                authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                sessionID: 'opencode-session-1',
+                tool,
+                args,
+              }),
+            },
+          );
+          expect(response.ok).toBe(true);
+          const payload = await response.json();
+          expect(payload.ok).toBe(true);
+          return JSON.parse(payload.output);
+        };
+        await callTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I will prepare the daily brief.',
+        });
+        const catalog = await callTool(nativeToolNames.listSkills, {
+          name: skill.name,
+        });
+        expect(catalog).toMatchObject({
+          success: true,
+          result: {
+            counts: { instance: 1, total: 1 },
+            skills: [
+              {
+                id: `instance:${skill.id}`,
+                name: skill.name,
+                invocation: skill.name,
+                source: 'instance',
+              },
+            ],
+          },
+        });
+        expect(catalog.result.skills[0]).not.toHaveProperty('environmentIds');
+        const loaded = await callTool(nativeToolNames.loadSkill, {
+          id: catalog.result.skills[0].id,
+        });
+        expect(loaded).toMatchObject({
+          success: true,
+          result: {
+            id: `instance:${skill.id}`,
+            source: 'instance',
+            resource: 'SKILL.md',
+            content:
+              '---\nname: daily-brief\ndescription: Prepare a daily brief.\n---\n\n# Daily Brief\nSummarize the current conversation.\n',
+          },
+        });
+        expect(loaded.result).not.toHaveProperty('environmentIds');
+        await callTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The daily brief is ready.',
+        });
+        return '';
+      },
+    );
+
+    try {
+      await answerFastAgentQuestion({
+        ...baseParams,
+        question: '$daily-brief summarize this conversation',
+        adapter,
+      });
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(mocks.listCustomSkills).toHaveBeenCalledExactlyOnceWith(
+        baseParams.userId,
+      );
+      expect(mocks.getCustomSkill).toHaveBeenCalledExactlyOnceWith(
+        baseParams.userId,
+        skill.id,
+      );
+      expect(baseParams.userId).not.toBe(baseParams.conversation.workspaceId);
+      expect(calledTools).toEqual([
+        nativeToolNames.sendChatReply,
+        nativeToolNames.listSkills,
+        nativeToolNames.loadSkill,
+        nativeToolNames.sendChatReply,
+      ]);
+      expect(adapter.launchTask).not.toHaveBeenCalled();
+      expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+      expect(mocks.launchPrReview).not.toHaveBeenCalled();
+      expect(mocks.bindExecutor).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledTimes(2);
+    } finally {
+      await bridge.revokeFastAgentMcpCapabilitiesForConversation(
+        'conversation-1',
+      );
+    }
   });
 
   it('marks a Slack mention skill invocation that appears later in a long message', async () => {
@@ -7391,9 +7533,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         name: 'example-checklist',
         description: 'Review example changes',
         content: 'Check tests and report risks.',
-        environmentIds: ['00000000-0000-4000-8000-000000000001'],
       },
-      { success: true, persisted: true, name: 'example-checklist' },
+      {
+        success: true,
+        persisted: true,
+        skillId: '00000000-0000-4000-8000-000000000001',
+        name: 'example-checklist',
+        scope: 'instance',
+      },
     ],
   ])(
     'lets the Fast parent call %s through actor-authorized native MCP',

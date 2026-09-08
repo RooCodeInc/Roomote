@@ -215,15 +215,13 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.annotations).toEqual(
       CREATE_CUSTOM_SKILL_TOOL.annotations,
     );
-    expect(Object.keys(tool.config.inputSchema)).toEqual([
+    const schema = tool.config
+      .inputSchema as unknown as z.ZodObject<z.ZodRawShape>;
+    expect(Object.keys(schema.shape)).toEqual([
       'name',
       'description',
       'content',
-      'environmentIds',
     ]);
-    const schema = z.object(
-      tool.config.inputSchema as unknown as z.ZodRawShape,
-    );
     expect(
       schema.safeParse({
         name: 'review',

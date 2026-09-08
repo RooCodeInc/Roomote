@@ -30,15 +30,15 @@ const input = {
   name: 'my-skill',
   description: 'Description',
   content: 'Instructions\n',
-  environmentIds: ['00000000-0000-4000-8000-000000000001'],
 };
 beforeEach(() => {
   vi.clearAllMocks();
-  resolve.mockResolvedValue('resolved-admin');
+  resolve.mockResolvedValue('resolved-member');
   create.mockResolvedValue({
     persisted: true,
     success: true,
     name: input.name,
+    scope: 'instance',
   });
 });
 function app() {
@@ -58,30 +58,40 @@ it('uses resolved acting identity and returns persisted result', async () => {
   expect(response.status).toBe(201);
   expect(create).toHaveBeenCalledWith({
     ...input,
-    actorUserId: 'resolved-admin',
+    actorUserId: 'resolved-member',
   });
-  expect(await response.json()).toMatchObject({ persisted: true });
+  expect(await response.json()).toMatchObject({
+    persisted: true,
+    scope: 'instance',
+  });
 });
 it('fails closed for missing or failed identity resolution', async () => {
   for (const failure of [false, true]) {
     if (failure) resolve.mockRejectedValueOnce(new Error('unavailable'));
     else resolve.mockResolvedValueOnce(null);
-    expect(
-      (
-        await app().request('/custom-skills', {
-          method: 'POST',
-          body: JSON.stringify(input),
-        })
-      ).status,
-    ).toBe(403);
+    const response = await app().request('/custom-skills', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Active member access required',
+    });
   }
   expect(create).not.toHaveBeenCalled();
 });
-it('rejects malformed bodies and absent or wildcard selection', async () => {
+it('rejects malformed bodies, missing fields, and caller-supplied scope or identity', async () => {
   for (const body of [
     '{',
-    JSON.stringify({ ...input, environmentIds: undefined }),
+    JSON.stringify({ ...input, name: undefined }),
+    JSON.stringify({ ...input, description: undefined }),
+    JSON.stringify({ ...input, content: undefined }),
     JSON.stringify({ ...input, environmentIds: ['__all_repositories__'] }),
+    JSON.stringify({ ...input, environmentId: 'environment' }),
+    JSON.stringify({ ...input, workspaceId: 'workspace' }),
+    JSON.stringify({ ...input, createdByUserId: 'creator' }),
+    JSON.stringify({ ...input, actorUserId: 'actor' }),
+    JSON.stringify({ ...input, scope: 'instance' }),
   ]) {
     expect(
       (await app().request('/custom-skills', { method: 'POST', body })).status,
@@ -99,14 +109,20 @@ it('registers the shared MCP contract and calls the same in-process route', asyn
     auth,
   );
   expect(registerTool.mock.calls[0]?.[0]).toBe(CREATE_CUSTOM_SKILL_TOOL.name);
-  expect(registerTool.mock.calls[0]?.[1].inputSchema).toBe(
+  expect(registerTool.mock.calls[0]?.[1].inputSchema.shape).toEqual(
     CREATE_CUSTOM_SKILL_TOOL.inputSchema,
   );
+  expect(
+    registerTool.mock.calls[0]?.[1].inputSchema.safeParse({
+      ...input,
+      environmentIds: [],
+    }).success,
+  ).toBe(false);
   expect(await handler(input)).toMatchObject({
     content: [expect.objectContaining({ type: 'text' })],
   });
   expect(create).toHaveBeenCalledWith({
     ...input,
-    actorUserId: 'resolved-admin',
+    actorUserId: 'resolved-member',
   });
 });

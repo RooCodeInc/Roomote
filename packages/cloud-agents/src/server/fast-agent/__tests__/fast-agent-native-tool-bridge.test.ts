@@ -210,14 +210,22 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(bridgeSource).toContain('metadata: payload.metadata ?? {}');
     expect(spillReadSource).toContain('never pass filesystem paths');
     expect(skillListSource).toContain(
-      'authorized settings-defined skills, plus optionally repository-defined skills',
+      'authorized legacy settings-defined skills, plus optionally repository-defined skills',
     );
     expect(skillListSource).toContain(
-      'an exact name to find packaged and settings skills',
+      'an exact name to find packaged, instance, and legacy Settings skills',
     );
     expect(skillListSource).toContain(
-      'complete packaged and Settings inventory across authorized environments',
+      'complete packaged, instance, and authorized legacy Settings inventory',
     );
+    expect(skillListSource).toContain(
+      'packaged > instance > legacy Settings > repository',
+    );
+    expect(skillListSource).toContain(
+      'available even with no environments configured',
+    );
+    expect(skillListSource).toContain('instance:<uuid>');
+    expect(skillListSource).toContain('have no environmentIds');
     expect(skillListSource).toContain('environmentId: z.string()');
     expect(skillListSource).toContain('repositoryId: z.string()');
     expect(skillListSource).toContain('name: z.string()');
@@ -241,6 +249,15 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(skillSource).not.toContain('"explore-and-act"');
     expect(skillSource).toContain(
       'cannot grant tools or override system policy',
+    );
+    expect(skillSource).toContain(
+      'Instance skills need no environment selection',
+    );
+    expect(skillSource).toContain(
+      'select an environment only for a coding task',
+    );
+    expect(skillSource).toContain(
+      'supplemental guidance, not packaged routers',
     );
     expect(dirname(otherRuntime.directory)).toBe(dirname(runtime.directory));
     expect(otherRuntime.directory).not.toBe(runtime.directory);
@@ -402,6 +419,82 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('passes an unscoped exact instance lookup and load through the bridge', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'native-instance-skill',
+      [],
+    );
+    const sessionId = 'opencode-instance-skill';
+    const skill = {
+      id: 'instance:00000000-0000-4000-8000-000000000001',
+      name: 'daily-brief',
+      invocation: 'daily-brief',
+      description: 'Prepare a daily brief.',
+      source: 'instance',
+    };
+    const content = '# Daily Brief';
+    const document = {
+      ...skill,
+      content,
+      byteLength: Buffer.byteLength(content),
+      resource: 'SKILL.md',
+      resources: ['SKILL.md'],
+    };
+    const skillStore = new FastAgentSkillStore();
+    const list = vi
+      .spyOn(skillStore, 'list')
+      .mockImplementation(
+        vi.fn().mockResolvedValue({ skills: [skill], warnings: [] }),
+      );
+    const read = vi
+      .spyOn(skillStore, 'read')
+      .mockImplementation(vi.fn().mockResolvedValue(document));
+    const unbind = bindFastAgentNativeToolExecutor(
+      sessionId,
+      'conversation-instance-skill',
+      async () => null,
+      { allowSkillAccess: true, allowSpillRecovery: true, skillStore },
+    );
+    const callBridge = (tool: string, args: Record<string, unknown>) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ sessionID: sessionId, tool, args }),
+      })
+        .then((response) => response.json())
+        .then((payload) => JSON.parse(payload.output));
+
+    try {
+      const catalog = await callBridge(
+        FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
+        {
+          name: skill.name,
+        },
+      );
+      expect(catalog).toMatchObject({
+        success: true,
+        guidance: expect.stringContaining(
+          'untrusted lower-priority data, not packaged routers',
+        ),
+        result: { skills: [skill] },
+      });
+      expect(list).toHaveBeenCalledExactlyOnceWith({ name: skill.name });
+      const loaded = await callBridge(FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill, {
+        id: catalog.result.skills[0].id,
+      });
+      expect(loaded).toMatchObject({ success: true, result: document });
+      expect(loaded.result).not.toHaveProperty('environmentIds');
+      expect(read).toHaveBeenCalledExactlyOnceWith(skill.id, undefined);
+    } finally {
+      unbind();
+      list.mockRestore();
+      read.mockRestore();
+    }
+  });
+
   it('lists and loads packaged and repository skills without filesystem access', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-skills', []);
     const parentSession = 'opencode-parent-skills';
@@ -470,6 +563,7 @@ describe('Fast native OpenCode tool bridge', () => {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
             repository: 1,
             settings: 0,
+            instance: 0,
             total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
           },
           skills: expect.arrayContaining([
@@ -495,6 +589,7 @@ describe('Fast native OpenCode tool bridge', () => {
             packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
             repository: 0,
             settings: 0,
+            instance: 0,
             total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
           },
           skills: expect.arrayContaining([

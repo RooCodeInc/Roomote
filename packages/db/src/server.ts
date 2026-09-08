@@ -108,6 +108,7 @@ export * from './lib/managed-access';
 
 export {
   users,
+  instanceSkills,
   userRelations,
   deploymentSettings,
   licenseUsageObservations,

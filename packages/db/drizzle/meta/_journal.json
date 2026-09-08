@@ -547,6 +547,13 @@
       "when": 1788560388583,
       "tag": "0077_normal_lionheart",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1788884814843,
+      "tag": "0078_hesitant_punisher",
+      "breakpoints": true
     }
   ]
 }

@@ -1,31 +1,18 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import {
-  db,
-  environmentFactory,
-  environments,
-  eq,
-  userFactory,
-  users,
-} from '@roomote/db/server';
+import { db, instanceSkills, eq, userFactory, users } from '@roomote/db/server';
 import { registerRoomoteCustomSkillsTool } from '../mcp/roomote-custom-skills-tool';
 
 it('advertises a usable MCP schema and persists through the real actor-authorized route', async () => {
-  const admin = await userFactory.create({ role: 'admin' });
-  const environment = await environmentFactory.create({
-    createdByUserId: admin.id,
-    config: {
-      name: 'MCP skill creation',
-      repositories: [{ repository: 'example/repo' }],
-    },
-  });
+  const member = await userFactory.create({ role: 'member' });
+  const name = `mcp-checklist-${member.id}`;
   const server = new McpServer({ name: 'custom-skill-test', version: '1' });
   const client = new Client({ name: 'custom-skill-test', version: '1' });
   try {
     registerRoomoteCustomSkillsTool(server, {
-      userId: admin.id,
-      authContext: { userId: admin.id, tokenType: 'auth', version: 1 },
+      userId: member.id,
+      authContext: { userId: member.id, tokenType: 'auth', version: 1 },
     });
     const [clientTransport, serverTransport] =
       InMemoryTransport.createLinkedPair();
@@ -37,23 +24,25 @@ it('advertises a usable MCP schema and persists through the real actor-authorize
         name: 'create_custom_skill',
         inputSchema: expect.objectContaining({
           type: 'object',
-          required: ['name', 'description', 'content', 'environmentIds'],
+          additionalProperties: false,
+          required: ['name', 'description', 'content'],
           properties: expect.objectContaining({
             name: expect.objectContaining({ type: 'string' }),
+            description: expect.objectContaining({ type: 'string' }),
             content: expect.objectContaining({ type: 'string' }),
-            environmentIds: expect.objectContaining({
-              type: 'array',
-              minItems: 1,
-            }),
           }),
         }),
       }),
     ]);
+    expect(Object.keys(tools[0]!.inputSchema.properties!)).toEqual([
+      'name',
+      'description',
+      'content',
+    ]);
     const args = {
-      name: 'mcp-example-checklist',
+      name,
       description: ' Review examples ',
       content: 'Check examples.\r\n',
-      environmentIds: [environment.id],
     };
     const created = await client.callTool({
       name: tools[0]!.name,
@@ -67,18 +56,15 @@ it('advertises a usable MCP schema and persists through the real actor-authorize
       }),
     ]);
     expect(
-      (
-        await db.query.environments.findFirst({
-          where: eq(environments.id, environment.id),
-        })
-      )?.config.manualSkills,
-    ).toEqual([
-      {
-        name: args.name,
-        description: 'Review examples',
-        content: 'Check examples.\n',
-      },
-    ]);
+      await db.query.instanceSkills.findFirst({
+        where: eq(instanceSkills.name, name),
+      }),
+    ).toMatchObject({
+      name: args.name,
+      description: 'Review examples',
+      content: 'Check examples.\n',
+      createdByUserId: member.id,
+    });
     const duplicate = await client.callTool({
       name: tools[0]!.name,
       arguments: args,
@@ -90,15 +76,29 @@ it('advertises a usable MCP schema and persists through the real actor-authorize
         text: expect.stringContaining('"status": 409'),
       }),
     ]);
-    const invalid = await client.callTool({
-      name: tools[0]!.name,
-      arguments: { ...args, environmentIds: [] },
-    });
-    expect(invalid.isError).toBe(true);
+    for (const extra of [
+      { environmentIds: [] },
+      { environmentId: 'environment' },
+      { workspaceId: 'workspace' },
+      { createdByUserId: member.id },
+    ]) {
+      const invalid = await client.callTool({
+        name: tools[0]!.name,
+        arguments: { ...args, name: `${name}-invalid`, ...extra },
+      });
+      expect(invalid.isError).toBe(true);
+    }
+    expect(
+      await db.query.instanceSkills.findFirst({
+        where: eq(instanceSkills.name, `${name}-invalid`),
+      }),
+    ).toBeUndefined();
   } finally {
     await client.close();
     await server.close();
-    await db.delete(environments).where(eq(environments.id, environment.id));
-    await db.delete(users).where(eq(users.id, admin.id));
+    await db
+      .delete(instanceSkills)
+      .where(eq(instanceSkills.createdByUserId, member.id));
+    await db.delete(users).where(eq(users.id, member.id));
   }
 });

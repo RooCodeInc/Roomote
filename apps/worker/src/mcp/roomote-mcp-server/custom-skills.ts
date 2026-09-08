@@ -35,13 +35,25 @@ export async function handleCreateCustomSkill(
     );
   }
 
-  const { success, persisted, skillId, name, environmentIds, scope } = payload;
+  const { success, persisted, skillId, name, scope } = payload;
+  if (
+    success !== true ||
+    persisted !== true ||
+    typeof skillId !== 'string' ||
+    typeof name !== 'string' ||
+    scope !== 'instance'
+  ) {
+    return {
+      ...errorResult('Custom skill persistence could not be confirmed.'),
+      isError: true,
+    };
+  }
   return {
     content: [
       {
         type: 'text',
         text: JSON.stringify(
-          { success, persisted, skillId, name, environmentIds, scope },
+          { success, persisted, skillId, name, scope },
           null,
           2,
         ),

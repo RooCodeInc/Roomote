@@ -2,4 +2,4 @@
 "@roomote/web": minor
 ---
 
-Admins can create custom Settings skills directly in conversation, choosing the environments where each playbook is enabled without starting a coding task. Creation validates environment access and rejects duplicate slugs without overwriting existing skills.
+Members can create instance-wide skills directly in Sessions or Settings without choosing an environment or starting a coding task. Creators and admins can manage them in Settings, Fast loads changes immediately, and coding runs refresh their skill catalog at startup. Existing environment skills remain available alongside the new first-class skill store.

@@ -11,15 +11,13 @@ const input: CreateCustomSkillInput = {
   name: 'review-checklist',
   description: 'Review a change.',
   content: 'Check the tests.',
-  environmentIds: ['11111111-1111-4111-8111-111111111111'],
 };
 const confirmation = {
   success: true,
   persisted: true,
   skillId: 'skill-1',
   name: input.name,
-  environmentIds: input.environmentIds,
-  scope: 'environments',
+  scope: 'instance',
 };
 
 describe('handleCreateCustomSkill', () => {
@@ -69,6 +67,7 @@ describe('handleCreateCustomSkill', () => {
           ...confirmation,
           content: input.content,
           token: 'private',
+          environmentIds: ['legacy-environment'],
         }),
       ),
     );
@@ -94,6 +93,26 @@ describe('handleCreateCustomSkill', () => {
     },
   );
 
+  it.each([
+    'private malformed JSON',
+    JSON.stringify(null),
+    JSON.stringify({}),
+    JSON.stringify({ ...confirmation, success: false }),
+    JSON.stringify({ ...confirmation, persisted: undefined }),
+    JSON.stringify({ ...confirmation, persisted: false }),
+    JSON.stringify({ ...confirmation, skillId: 123 }),
+    JSON.stringify({ ...confirmation, name: undefined }),
+    JSON.stringify({ ...confirmation, scope: 'environment' }),
+  ])('rejects unconfirmed 2xx responses safely (case %#)', async (body) => {
+    fetchMock.mockResolvedValueOnce(new Response(body));
+    const result = await handleCreateCustomSkill(input, config);
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      success: false,
+      error: 'Custom skill persistence could not be confirmed.',
+    });
+  });
+
   it('does not expose a non-JSON upstream error body', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response('private proxy diagnostics', { status: 502 }),
@@ -110,9 +129,6 @@ describe('handleCreateCustomSkill', () => {
     { name: '' },
     { description: '' },
     { content: '' },
-    { environmentIds: [] },
-    { environmentIds: ['*'] },
-    { environmentIds: undefined },
     { content: 'x'.repeat(8 * 1024 * 1024) },
   ])('rejects invalid input before fetching (case %#)', async (overrides) => {
     await expect(
