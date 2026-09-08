@@ -1032,6 +1032,24 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('summarizes PR feedback without a closing question or offer', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventHandling: 'present_only',
+    });
+
+    expect(prompt).toContain(
+      'Summarize the findings only in one closeout, then stop. Do not ask a closing question, repeat or paraphrase a supplied question, or offer to resolve the issues in your message.',
+    );
+    expect(prompt).toContain(
+      'The conversation adapter supplies any pending user-approvable actions.',
+    );
+    expect(prompt).toContain(
+      'Do not launch a fix or call "send_task_message" until the user explicitly responds or clicks an action.',
+    );
+  });
+
   it('does not offer retry when the platform event is ineligible', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

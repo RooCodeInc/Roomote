@@ -26,13 +26,12 @@ export function parseSlackPrReviewActionButtonValue(
 
 /**
  * Body blocks for a PR review-feedback notification that offers to act on the
- * feedback: the summary, the follow-up question, and Yes / auto-handle /
+ * feedback: the summary and Resolve / auto-handle /
  * Dismiss buttons. The caller appends the sticky thread footer.
  */
 export function buildSlackPrReviewActionBlocks(params: {
   /** Summary text in standard Markdown for Slack's modern markdown block. */
   text: string;
-  question: string;
   nonce: string;
 }): SlackBlock[] {
   const value = JSON.stringify({ nonce: params.nonce });
@@ -41,14 +40,6 @@ export function buildSlackPrReviewActionBlocks(params: {
     {
       type: 'markdown',
       text: params.text,
-    },
-    {
-      type: 'section',
-      block_id: 'pr_review_action_question',
-      text: {
-        type: 'mrkdwn',
-        text: params.question,
-      },
     },
     {
       type: 'actions',
@@ -94,13 +85,20 @@ const ACTIONS_BLOCK_ID = 'pr_review_action';
 
 /**
  * Rewrites a posted PR review offer once it is resolved or superseded: the
- * question and button blocks are replaced with a one-line resolution note
+ * legacy question and button blocks are removed, with an optional resolution note
  * while every other block (summary, relocated footers) is preserved as-is.
  */
 export function buildResolvedSlackPrReviewMessageBlocks(
   originalBlocks: unknown[] | undefined | null,
-  resolution: string,
+  resolution?: string,
 ): unknown[] {
+  const kept = (originalBlocks ?? []).filter((block) => {
+    const blockId = (block as { block_id?: unknown }).block_id;
+
+    return blockId !== QUESTION_BLOCK_ID && blockId !== ACTIONS_BLOCK_ID;
+  });
+  if (!resolution) return kept;
+
   const resolutionBlock = {
     type: 'context',
     elements: [{ type: 'mrkdwn', text: `_${resolution}_` }],
@@ -110,11 +108,6 @@ export function buildResolvedSlackPrReviewMessageBlocks(
     return [resolutionBlock];
   }
 
-  const kept = originalBlocks.filter((block) => {
-    const blockId = (block as { block_id?: unknown }).block_id;
-
-    return blockId !== QUESTION_BLOCK_ID && blockId !== ACTIONS_BLOCK_ID;
-  });
   const actionsIndex = originalBlocks.findIndex(
     (block) => (block as { block_id?: unknown }).block_id === ACTIONS_BLOCK_ID,
   );
