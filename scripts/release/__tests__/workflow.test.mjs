@@ -21,8 +21,10 @@ test('reconciliation is manual, serialized, and executes only trusted tooling', 
     'expected_main_sha',
     'resolution_sha',
   ]);
-  for (const input of Object.values(workflow.on.workflow_dispatch.inputs)) {
-    assert.equal(input.required, true);
+  for (const [name, input] of Object.entries(
+    workflow.on.workflow_dispatch.inputs,
+  )) {
+    assert.equal(input.required, name !== 'resolution_sha');
     assert.equal(input.type, 'string');
   }
   assert.deepEqual(workflow.concurrency, {
@@ -74,6 +76,9 @@ test('release procedure monitors promotion CI and reviews after every head chang
   assert.match(skill, /Do not wait\s+indefinitely for a human review/);
   assert.match(skill, /green status, or approval never\s+authorizes merging/);
   assert.match(skill, /Do not merge: CI applies this reviewed tree/);
+  assert.match(skill, /omit `resolution_sha`/);
+  assert.match(skill, /Tree equality alone is not proof/);
+  assert.match(skill, /Code\/docs conflicts still require explicit review/);
   assert.match(
     skill,
     /Ordinary\s+Release refresh deliberately refuses that state/,

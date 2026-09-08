@@ -16,8 +16,8 @@ on:
         required: true
         type: string
       resolution_sha:
-        description: Approved reconcile/vVERSION merge commit (full 40-character SHA)
-        required: true
+        description: Optional approved reconcile/vVERSION merge SHA; omit for verified file-identical reconciliation
+        required: false
         type: string
 
 concurrency:

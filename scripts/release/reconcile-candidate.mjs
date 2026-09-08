@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { extractChangelogSection } from './lib.mjs';
 
 const shaPattern = /^[a-f0-9]{40}$/;
@@ -11,7 +12,10 @@ export function reconciliationBody(
   { candidate, main, resolution, reviewUrl, head },
 ) {
   if (typeof body !== 'string') throw new Error('Missing Promote PR body');
-  const section = `${startMarker}\n### Candidate reconciliation\n\n- Frozen candidate: \`${candidate}\`\n- Pinned main: \`${main}\`\n- Reviewed resolution: \`${resolution}\` (${reviewUrl})\n- CI merge head: \`${head}\`\n\nThe candidate tree includes only the automatic merge and reviewed conflict resolutions.\n${endMarker}`;
+  const provenance = resolution
+    ? `- Reviewed resolution: \`${resolution}\` (${reviewUrl})\n\nThe candidate tree includes only the automatic merge and reviewed conflict resolutions.`
+    : '- Mode: verified file-identical reconciliation\n\nThe full candidate tree is unchanged; production preservation was verified conservatively.';
+  const section = `${startMarker}\n### Candidate reconciliation\n\n- Frozen candidate: \`${candidate}\`\n- Pinned main: \`${main}\`\n- CI merge head: \`${head}\`\n${provenance}\n\nPromotion still requires fresh CI, reviews, and approval at the new head.\n${endMarker}`;
   const start = body.indexOf(startMarker);
   const end = body.indexOf(endMarker);
   if (
@@ -34,7 +38,13 @@ export function reconciliationBody(
 // The injected runner is for deterministic tests; the CLI never accepts executable paths.
 export function reconcileCandidate(
   input,
-  { cwd = process.cwd(), env = process.env, run = spawnSync } = {},
+  {
+    cwd = process.cwd(),
+    env = process.env,
+    run = spawnSync,
+    delay = () =>
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000),
+  } = {},
 ) {
   const {
     version,
@@ -45,7 +55,13 @@ export function reconcileCandidate(
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version ?? '')) {
     throw new Error('version must be a stable version without v');
   }
-  for (const [name, sha] of Object.entries({ candidate, main, resolution })) {
+  const automatic = resolution === undefined || resolution === '';
+  const source = automatic ? candidate : resolution;
+  for (const [name, sha] of Object.entries({
+    candidate,
+    main,
+    ...(!automatic ? { resolution } : {}),
+  })) {
     if (!shaPattern.test(sha ?? ''))
       throw new Error(`${name} must be a full lowercase 40-character SHA`);
   }
@@ -104,14 +120,14 @@ export function reconcileCandidate(
       '--no-recurse-submodules',
       '--tags',
       'origin',
-      ...['main', releaseBranch, reviewBranch].map(
+      ...['main', releaseBranch, ...(!automatic ? [reviewBranch] : [])].map(
         (branch) => `+refs/heads/${branch}:refs/remotes/origin/${branch}`,
       ),
     );
     for (const [branch, sha] of [
       ['main', main],
       [releaseBranch, expectedHead],
-      [reviewBranch, resolution],
+      ...(!automatic ? [[reviewBranch, resolution]] : []),
     ]) {
       if (git('rev-parse', `refs/remotes/origin/${branch}`) !== sha)
         throw new Error(`Remote pin drift: ${branch}`);
@@ -130,7 +146,7 @@ export function reconcileCandidate(
     );
     if (ancestor.status === 0) throw new Error('Candidate already in main');
   }
-  function pullRequest(branch, base, headSha, baseSha, number) {
+  function pullRequest(branch, base, headSha, baseSha, number, lagHead) {
     if (number === undefined) {
       const matches = pages(
         `repos/${repository}/pulls?state=open&base=${encodeURIComponent(base)}&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`,
@@ -148,7 +164,7 @@ export function reconcileCandidate(
       pr.merged_at !== null ||
       pr.head?.ref !== branch ||
       pr.base?.ref !== base ||
-      pr.head?.sha !== headSha ||
+      (pr.head?.sha !== headSha && !(lagHead && pr.head?.sha === lagHead)) ||
       pr.base?.sha !== baseSha ||
       pr.head?.repo?.full_name !== repository ||
       pr.base?.repo?.full_name !== repository ||
@@ -236,15 +252,15 @@ export function reconcileCandidate(
 
   pins();
   const promote = pullRequest(releaseBranch, 'main', candidate, main);
-  const review = pullRequest(
-    reviewBranch,
-    releaseBranch,
-    resolution,
-    candidate,
-  );
-  reviewed(review);
+  const review = automatic
+    ? undefined
+    : pullRequest(reviewBranch, releaseBranch, resolution, candidate);
+  if (review) reviewed(review);
   // Exact parents exclude newer develop ancestry as well as ungrounded resolution diffs.
-  if (git('show', '-s', '--format=%P', resolution) !== `${candidate} ${main}`) {
+  if (
+    !automatic &&
+    git('show', '-s', '--format=%P', resolution) !== `${candidate} ${main}`
+  ) {
     throw new Error('Resolution parents must be exactly candidate then main');
   }
   const merge = command(
@@ -269,7 +285,7 @@ export function reconcileCandidate(
     throw new Error('Invalid merge-tree conflict report');
   }
   const conflicts = new Set(paths.filter(Boolean));
-  const resolvedTree = git('rev-parse', `${resolution}^{tree}`);
+  const resolvedTree = git('rev-parse', `${source}^{tree}`);
   const changed = git(
     'diff-tree',
     '--no-commit-id',
@@ -283,11 +299,60 @@ export function reconcileCandidate(
     .split('\0')
     .filter(Boolean);
   if (changed.some((path) => !conflicts.has(path)))
-    throw new Error('Resolution changes files outside conflicted paths');
+    throw new Error(
+      `${automatic ? 'Reviewed resolution required: ' : ''}Resolution changes files outside conflicted paths`,
+    );
   const read = (sha, path) => command('git', ['show', `${sha}:${path}`]).stdout;
+  if (automatic) {
+    const requireReview = (reason) => {
+      throw new Error(`Reviewed resolution required: ${reason}`);
+    };
+    const bases = git('merge-base', '--all', candidate, main).split('\n');
+    if (bases.length !== 1 || !shaPattern.test(bases[0]))
+      requireReview('automatic mode requires exactly one merge base');
+    if (
+      [...conflicts].some(
+        (path) => !['package.json', 'CHANGELOG.md'].includes(path),
+      )
+    )
+      requireReview(
+        'automatic mode supports only root package.json and CHANGELOG.md conflicts, not code/docs conflicts',
+      );
+    if (conflicts.has('package.json')) {
+      const mainPackage = JSON.parse(read(main, 'package.json'));
+      const basePackage = JSON.parse(read(bases[0], 'package.json'));
+      delete mainPackage.version;
+      delete basePackage.version;
+      if (!isDeepStrictEqual(mainPackage, basePackage))
+        requireReview('main root package changes extend beyond version');
+    }
+    if (conflicts.has('CHANGELOG.md')) {
+      const candidateChangelog = read(candidate, 'CHANGELOG.md');
+      const mainChangelog = read(main, 'CHANGELOG.md');
+      const sections = [...candidateChangelog.matchAll(/^##\s+[^\n]*$/gm)];
+      const mainStart = mainChangelog.search(/^##\s+/m);
+      const first = sections[0];
+      const second = sections[1];
+      if (
+        !first ||
+        !second ||
+        mainStart < 0 ||
+        first[0] !== `## ${version}` ||
+        candidateChangelog.slice(0, first.index) !==
+          mainChangelog.slice(0, mainStart) ||
+        candidateChangelog !==
+          mainChangelog.slice(0, mainStart) +
+            candidateChangelog.slice(first.index, second.index) +
+            mainChangelog.slice(mainStart)
+      )
+        requireReview(
+          'candidate changelog must be main header, candidate first section, then exact published main history',
+        );
+    }
+  }
   if (
     JSON.parse(read(candidate, 'package.json')).version !== version ||
-    JSON.parse(read(resolution, 'package.json')).version !== version
+    JSON.parse(read(source, 'package.json')).version !== version
   ) {
     throw new Error('Incorrect root version');
   }
@@ -295,7 +360,7 @@ export function reconcileCandidate(
     read(candidate, 'CHANGELOG.md'),
     version,
   );
-  const resolvedChangelog = read(resolution, 'CHANGELOG.md');
+  const resolvedChangelog = read(source, 'CHANGELOG.md');
   if (
     !candidateNotes ||
     extractChangelogSection(resolvedChangelog, version) !== candidateNotes
@@ -315,7 +380,7 @@ export function reconcileCandidate(
     '-r',
     '--name-only',
     '-z',
-    resolution,
+    source,
     '--',
     '.changeset',
   ).split('\0');
@@ -334,7 +399,7 @@ export function reconcileCandidate(
     'diff',
     '--check',
     main,
-    resolution,
+    source,
   );
   const head = git(
     'commit-tree',
@@ -344,27 +409,28 @@ export function reconcileCandidate(
     '-p',
     main,
     '-m',
-    `Reconcile v${version} with pinned main\n\nReviewed resolution: ${resolution}\nReview PR: ${review.html_url}`,
+    `Reconcile v${version} with pinned main\n\n${automatic ? 'Verified file-identical reconciliation: candidate tree unchanged' : `Reviewed resolution: ${resolution}\nReview PR: ${review.html_url}`}`,
   );
   const metadata = {
     candidate,
     main,
     resolution,
-    reviewUrl: review.html_url,
+    reviewUrl: review?.html_url,
     head,
   };
   reconciliationBody(promote.body, metadata);
 
   // Re-read review state and PR identities, then pins immediately before the ordinary FF push.
-  reviewed(
-    pullRequest(
-      reviewBranch,
-      releaseBranch,
-      resolution,
-      candidate,
-      review.number,
-    ),
-  );
+  if (review)
+    reviewed(
+      pullRequest(
+        reviewBranch,
+        releaseBranch,
+        resolution,
+        candidate,
+        review.number,
+      ),
+    );
   const currentPromote = pullRequest(
     releaseBranch,
     'main',
@@ -376,14 +442,24 @@ export function reconcileCandidate(
   pins();
   git('push', 'origin', `${head}:refs/heads/${releaseBranch}`);
   try {
-    pins(head);
-    const pushedPromote = pullRequest(
-      releaseBranch,
-      'main',
-      head,
-      main,
-      promote.number,
-    );
+    let pushedPromote;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      pins(head);
+      pushedPromote = pullRequest(
+        releaseBranch,
+        'main',
+        head,
+        main,
+        promote.number,
+        candidate,
+      );
+      if (pushedPromote.head.sha === head) break;
+      if (attempt === 4)
+        throw new Error(
+          'Promote PR head still lags at old candidate after 5 reads',
+        );
+      delay();
+    }
     // JSON travels over stdin, never through a shell or a candidate-owned file.
     command(
       'gh',
@@ -406,7 +482,12 @@ export function reconcileCandidate(
       `Candidate pushed successfully to ${head}, but Promote PR metadata update failed: ${error.message}`,
     );
   }
-  return { head, promoteUrl: promote.html_url, reviewUrl: review.html_url };
+  return {
+    head,
+    promoteUrl: promote.html_url,
+    reviewUrl: review?.html_url,
+    mode: automatic ? 'verified-file-identical' : 'reviewed-resolution',
+  };
 }
 
 if (

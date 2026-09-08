@@ -42,9 +42,13 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
    fast-forward-only and refuses shipped, closed, divergent, newer-version, or
    pending-changeset states.
    Production-base conflicts use the separately authorized **Reconcile Release
-   Candidate** workflow with pinned candidate/main commits and an independently
-   approved resolution on an ordinary branch. Never push a release branch
-   manually. See the [release skill](../.agents/skills/changeset-release-pr/SKILL.md#reconcile-a-frozen-candidate-with-production).
+   Candidate** workflow with pinned candidate/main commits. Omit `resolution_sha`
+   for CI-verified file-identical reconciliation with no extra approval-record PR.
+   CI must also prove production changes are retained; tree equality alone is
+   insufficient. Code/docs conflicts or content changes still require an
+   independently approved resolution on an ordinary branch. Never push a release
+   branch manually. Final promotion approval remains required. See the
+   [release skill](../.agents/skills/changeset-release-pr/SKILL.md#reconcile-a-frozen-candidate-with-production).
 4. Merge the Promote PR with a **merge commit** (not squash) into `main` to tag
    `vX.Y.Z`. GHCR builds the matching images, and the GitHub Release is created
    only after those images exist so `releases/latest` never points at a missing
