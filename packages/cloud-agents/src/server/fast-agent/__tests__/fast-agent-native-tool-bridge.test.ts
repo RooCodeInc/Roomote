@@ -8,7 +8,12 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  CREATE_SKILL_TOOL,
+  createSkillSchema,
+} from '@roomote/types';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
   SHOW_WIDGET_HEIGHT_DESCRIPTION,
@@ -260,6 +265,7 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': true,
       task: false,
       roomote_manage_custom_automations: false,
+      roomote_create_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: false,
     });
     for (const rawFilesystemTool of [
@@ -674,6 +680,17 @@ describe('Fast native OpenCode tool bridge', () => {
   });
 
   it('mounts actor-resolved MCP tools with their native JSON schemas', async () => {
+    const createSkillTool = {
+      name: CREATE_SKILL_TOOL.name,
+      description: CREATE_SKILL_TOOL.description,
+      inputSchema: zodToJsonSchema(createSkillSchema),
+    };
+    const createSkillArgs = {
+      name: 'notes',
+      description: 'Review notes',
+      content: 'Read notes',
+      environmentIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+    };
     const inputSchema = {
       type: 'object' as const,
       properties: {
@@ -695,6 +712,7 @@ describe('Fast native OpenCode tool bridge', () => {
         description: 'Repository access',
         tools: [
           { name: 'search_code', description: 'Search code', inputSchema },
+          createSkillTool,
         ],
       },
     ]);
@@ -728,6 +746,7 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': true,
       task: false,
       roomote_manage_custom_automations: false,
+      roomote_create_skill: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
     });
     const unbind = bindFastAgentMcpToolExecutor(
@@ -743,6 +762,7 @@ describe('Fast native OpenCode tool bridge', () => {
         }),
       ).resolves.toEqual([
         { name: 'search_code', description: 'Search code', inputSchema },
+        createSkillTool,
       ]);
       await expect(
         callMcpTool({
@@ -756,6 +776,17 @@ describe('Fast native OpenCode tool bridge', () => {
         integrationId: 'roomote',
         toolName: 'search_code',
         args: { query: 'Fast', filters: null },
+      });
+      await callMcpTool({
+        url: config.mcp.roomote!.url,
+        headers: config.mcp.roomote!.headers,
+        toolName: 'create_skill',
+        args: createSkillArgs,
+      });
+      expect(executor).toHaveBeenCalledWith({
+        integrationId: 'roomote',
+        toolName: 'create_skill',
+        args: createSkillArgs,
       });
     } finally {
       unbind();

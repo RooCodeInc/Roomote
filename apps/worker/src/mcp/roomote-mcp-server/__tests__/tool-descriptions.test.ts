@@ -8,7 +8,10 @@ import {
   SHOW_WIDGET_HEIGHT_DESCRIPTION,
   SHOW_WIDGET_THEME_GUIDANCE,
 } from '@roomote/cloud-agents/show-widget';
-import { MANAGE_CUSTOM_AUTOMATIONS_TOOL } from '@roomote/types';
+import {
+  CREATE_SKILL_TOOL,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+} from '@roomote/types';
 
 const thisFilePath = fileURLToPath(import.meta.url);
 const thisDirPath = path.dirname(thisFilePath);
@@ -138,6 +141,35 @@ function unwrapSchema(schema: z.ZodTypeAny): z.ZodTypeAny {
 }
 
 describe('roomote MCP tool descriptions', () => {
+  it('registers the shared create_skill descriptor with required environment selection', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, 'create_skill');
+    expect(tool.config).toMatchObject({
+      title: CREATE_SKILL_TOOL.title,
+      description: CREATE_SKILL_TOOL.description,
+      annotations: CREATE_SKILL_TOOL.annotations,
+    });
+    expect(Object.keys(tool.config.inputSchema)).toEqual([
+      'name',
+      'description',
+      'content',
+      'environmentIds',
+    ]);
+    const schema = z.object(tool.config.inputSchema as z.ZodRawShape);
+    expect(
+      schema.safeParse({
+        name: 'notes',
+        description: 'Notes',
+        content: 'Read notes',
+      }).success,
+    ).toBe(false);
+    delete process.env.ROOMOTE_CLOUD_TOKEN;
+    delete process.env.AUTH_TOKEN;
+    expect(await tool.handler?.({})).toMatchObject({
+      content: [{ text: expect.stringContaining('ROOMOTE_CLOUD_TOKEN') }],
+    });
+  });
+
   afterEach(() => {
     process.env = { ...originalEnv };
     vi.unstubAllGlobals();

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   and,
   asc,
+  createEnvironmentManualSkill,
   db,
   environments,
   eq,
@@ -669,6 +670,7 @@ export async function setCustomSkillAvailabilityCommand(
 
       await updateEnvironmentDefinition(tx, {
         environmentId: environment.id,
+        expectedConfig: environment.config,
         fields: {
           config: nextConfigParseResult.data,
         },
@@ -700,6 +702,10 @@ export async function saveManualSkillCommand(
   updatedEnvironmentIds: string[];
 }> {
   assertCustomSkillsAccess(auth);
+
+  if (!input.previousSkillId) {
+    return createEnvironmentManualSkill(input);
+  }
 
   const manualSkill = environmentManualSkillSchema.parse({
     name: input.name,
@@ -806,6 +812,7 @@ export async function saveManualSkillCommand(
         fields: {
           config: nextConfigParseResult.data,
         },
+        expectedConfig: environment.config,
         updatedAt: now,
       });
 
@@ -884,6 +891,7 @@ export async function removeCustomSkillCommand(
 
         await updateEnvironmentDefinition(tx, {
           environmentId: environment.id,
+          expectedConfig: environment.config,
           fields: {
             config: nextConfigParseResult.data,
           },
@@ -955,6 +963,7 @@ export async function removeCustomSkillCommand(
         fields: {
           config: nextConfigParseResult.data,
         },
+        expectedConfig: environment.config,
         updatedAt: now,
       });
 

@@ -13,6 +13,7 @@ import {
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  CREATE_SKILL_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
@@ -90,6 +91,7 @@ import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
+import { handleCreateSkill } from './create-skill.js';
 import { handleManageGoal } from './goal.js';
 import {
   handleGetSessionMessages,
@@ -126,6 +128,18 @@ const uuidStringSchema = z
   .refine((value) => z.string().uuid().safeParse(value).success, {
     message: 'Value must be a UUID.',
   });
+
+roomoteMcpServer.registerTool(
+  CREATE_SKILL_TOOL.name,
+  CREATE_SKILL_TOOL,
+  async (params): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+    return handleCreateSkill(params, config);
+  },
+);
 
 roomoteMcpServer.registerTool(
   MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,

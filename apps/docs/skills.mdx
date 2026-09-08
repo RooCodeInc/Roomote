@@ -43,6 +43,28 @@ You can add skills in two ways:
 The installed list shows which environments can use each skill. Edit a skill's
 availability when it should apply to more or fewer environments.
 
+## Create a skill in conversation
+
+Admins can ask Roomote to save a reusable workflow as a custom skill, in either
+a Fast conversation or a Standard task. Specify what the skill should do, when
+to use it, and which environments should have it. For example:
+
+```text
+Create a skill named release-checklist for the Web App environment.
+Use it when preparing a release. Check migrations, summarize user-facing
+changes, and identify any rollout risks before drafting the release notes.
+```
+
+Roomote saves the skill to the selected environments. It appears in
+**Settings > Skills**, where an admin can inspect or edit its content, change
+its availability, or remove it. Creation does not overwrite an existing custom
+skill with the same name in a selected environment.
+
+Use the returned `$skill-name` invocation, such as `$release-checklist`, in a
+new task using one of those environments. Already-running tasks do not reload
+their installed skills. Choose a distinct name: built-in Roomote skills take
+precedence over custom skills with the same name.
+
 ## When to use a custom skill
 
 Create a custom skill when the instruction is:

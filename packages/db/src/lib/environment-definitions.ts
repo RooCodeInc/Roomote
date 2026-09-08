@@ -18,6 +18,8 @@ type EnvironmentDefinitionFields = {
 
 type UpdateEnvironmentDefinitionInput = {
   environmentId: string;
+  /** Reject stale read-modify-write configs under the row lock. */
+  expectedConfig?: EnvironmentConfig;
   fields: EnvironmentDefinitionFields;
   updatedAt?: Date;
   repositoryIds?: string[];
@@ -124,6 +126,14 @@ export async function updateEnvironmentDefinition(
   );
 }
 
+export class EnvironmentDefinitionConflictError extends Error {
+  override name = 'EnvironmentDefinitionConflictError';
+
+  constructor() {
+    super('Environment configuration changed. Reload and try again.');
+  }
+}
+
 async function updateEnvironmentDefinitionLocked(
   dbOrTx: DatabaseOrTransaction,
   input: UpdateEnvironmentDefinitionInput,
@@ -146,6 +156,13 @@ async function updateEnvironmentDefinitionLocked(
       snapshotsInvalidated: false,
       verificationCleared: false,
     };
+  }
+
+  if (
+    input.expectedConfig !== undefined &&
+    !configsMatch(input.expectedConfig, currentEnvironment.config)
+  ) {
+    throw new EnvironmentDefinitionConflictError();
   }
 
   const changedFields: EnvironmentDefinitionFields = {};

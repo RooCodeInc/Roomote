@@ -53,6 +53,7 @@ import type { McpAuth } from './middleware';
 import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
+import { registerRoomoteCreateSkillTool } from './roomote-create-skill-tool';
 import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
 
 const ROOMOTE_MCP_SERVER_INFO = {
@@ -409,6 +410,7 @@ function createRoomoteMcpServer(
     }
   }
   registerRoomoteCustomAutomationsTool(server, toolAuth);
+  registerRoomoteCreateSkillTool(server, toolAuth);
 
   server.registerTool(
     'get_about_me',

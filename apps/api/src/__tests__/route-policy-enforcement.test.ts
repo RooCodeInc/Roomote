@@ -334,6 +334,9 @@ describe('route policy enforcement', () => {
       expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
       );
+      expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
+        'create_skill',
+      );
       const manageTasks = publicBody.result?.tools?.find(
         (tool) => tool.name === 'manage_tasks',
       );
@@ -488,6 +491,9 @@ describe('route policy enforcement', () => {
       expect(legacyBody.result?.tools?.map((tool) => tool.name)).toContain(
         'manage_custom_automations',
       );
+      expect(legacyBody.result?.tools?.map((tool) => tool.name)).toContain(
+        'create_skill',
+      );
 
       const runTokenResponse = await createApiApp().request(
         'http://localhost/mcp',
@@ -528,6 +534,9 @@ describe('route policy enforcement', () => {
       expect(
         legacyRunTokenBody.result?.tools?.map((tool) => tool.name),
       ).toContain('manage_custom_automations');
+      expect(
+        legacyRunTokenBody.result?.tools?.map((tool) => tool.name),
+      ).toContain('create_skill');
     });
 
     it('lets run-token requests through to handler-level run scoping', async () => {
