@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
     updateWhere: vi.fn(),
     findPending: vi.fn(),
     findRun: vi.fn(),
+    findWebhook: vi.fn(),
     selectRows: vi.fn(),
     acquireLock: vi.fn(),
     releaseLock: Object.assign(vi.fn(), {
@@ -33,6 +34,8 @@ const mocks = vi.hoisted(() => {
     deliver: vi.fn(),
     retryStartup: vi.fn(),
     recordAutomationOutcome: vi.fn(),
+    settleWebhook: vi.fn(),
+    markWebhookRunning: vi.fn(),
     recordWakeupOutcome: vi.fn(),
     DeliveryError,
   };
@@ -77,6 +80,7 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       fastAgentParentEvents: { findFirst: mocks.findPending },
       taskRuns: { findFirst: mocks.findRun },
+      automationWebhookDeliveries: { findFirst: mocks.findWebhook },
     },
   },
   and: vi.fn((...values: unknown[]) => values),
@@ -88,6 +92,8 @@ vi.mock('@roomote/db/server', () => ({
   lte: vi.fn((...values: unknown[]) => values),
   or: vi.fn((...values: unknown[]) => values),
   recordCustomAutomationRunOutcome: mocks.recordAutomationOutcome,
+  settleRunningAutomationWebhookDeliveryForSession: mocks.settleWebhook,
+  markAutomationWebhookDeliveryRunning: mocks.markWebhookRunning,
   recordSessionWakeupOutcome: mocks.recordWakeupOutcome,
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     strings: [...strings],
@@ -107,6 +113,7 @@ vi.mock('@roomote/db/server', () => ({
     discardedAt: 'discarded_at',
   },
   taskRuns: { id: 'task_runs.id', status: 'task_runs.status' },
+  automationWebhookDeliveries: { sessionId: 'webhook.session_id' },
 }));
 
 vi.mock('./fast-agent-parent-event', () => ({
@@ -189,6 +196,7 @@ describe('Fast parent event durable queue', () => {
     mocks.transaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
         callback({
+          update: vi.fn(() => ({ set: mocks.updateSet })),
           insert: vi.fn(() => ({ values: mocks.insertValues })),
           select: vi.fn(() => ({
             from: vi.fn(() => ({
@@ -206,6 +214,62 @@ describe('Fast parent event durable queue', () => {
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.deliver.mockResolvedValue('delivered');
+    mocks.settleWebhook.mockResolvedValue(false);
+    mocks.markWebhookRunning.mockResolvedValue(true);
+  });
+
+  it('marks a webhook running in the same transaction before inserting its event', async () => {
+    const webhookLease = { deliveryId: 'delivery-1', leaseToken: 'lease-1' };
+    await expect(
+      enqueueFastAgentParentEvent({ parent, event, webhookLease }),
+    ).resolves.toMatchObject({ queued: true });
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+    const tx = mocks.markWebhookRunning.mock.calls[0]![3];
+    expect(mocks.markWebhookRunning).toHaveBeenCalledWith(
+      'delivery-1',
+      'lease-1',
+      parent.sessionId,
+      tx,
+    );
+    expect(tx.insert).toHaveBeenCalledOnce();
+    expect(mocks.markWebhookRunning.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.insertValues.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.insertOnConflict.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.queueAdd.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('rejects the transaction without inserting or waking when the webhook lease is stale', async () => {
+    mocks.markWebhookRunning.mockResolvedValue(false);
+    await expect(
+      enqueueFastAgentParentEvent({
+        parent,
+        event,
+        webhookLease: { deliveryId: 'delivery-1', leaseToken: 'stale' },
+      }),
+    ).rejects.toThrow('Webhook dispatch lease is no longer current.');
+    await expect(mocks.transaction.mock.results[0]!.value).rejects.toThrow(
+      'Webhook dispatch lease is no longer current.',
+    );
+    expect(mocks.insertValues).not.toHaveBeenCalled();
+    expect(mocks.queueAdd).not.toHaveBeenCalled();
+  });
+
+  it('propagates insert failure through the webhook transaction without waking', async () => {
+    mocks.insertOnConflict.mockRejectedValueOnce(new Error('insert failed'));
+    await expect(
+      enqueueFastAgentParentEvent({
+        parent,
+        event,
+        webhookLease: { deliveryId: 'delivery-1', leaseToken: 'lease-1' },
+      }),
+    ).rejects.toThrow('insert failed');
+    await expect(mocks.transaction.mock.results[0]!.value).rejects.toThrow(
+      'insert failed',
+    );
+    expect(mocks.markWebhookRunning).toHaveBeenCalledOnce();
+    expect(mocks.queueAdd).not.toHaveBeenCalled();
   });
 
   it('persists before acknowledging and survives an immediate BullMQ failure', async () => {
@@ -348,6 +412,225 @@ describe('Fast parent event durable queue', () => {
       },
     );
   });
+
+  it.each(['succeeded', 'failed'] as const)(
+    'delegates webhook inbox completion to dependency-aware settlement: %s',
+    async (outcome) => {
+      const row = pendingRow('webhook-event', {
+        type: 'automation_triggered',
+        eventId: 'automation-1:2026-09-01T15:11:12.289Z',
+        automationId: 'automation-1',
+        automationName: 'Webhook scan',
+        prompt: 'Review incident.',
+        trigger: 'webhook',
+        webhookDeliveryId: 'delivery-1',
+        webhookTriggerId: 'trigger-1',
+      });
+      mocks.settleWebhook.mockResolvedValue(true);
+      mocks.findPending
+        .mockResolvedValueOnce(row)
+        .mockResolvedValueOnce(row)
+        .mockResolvedValueOnce(undefined);
+      if (outcome !== 'succeeded')
+        mocks.deliver.mockRejectedValueOnce(
+          new mocks.DeliveryError('delivery error', {
+            replyPosted: false,
+            permanent: outcome === 'failed',
+          }),
+        );
+      await drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: row.eventKey,
+      });
+      if (outcome === 'succeeded') {
+        expect(mocks.settleWebhook).toHaveBeenCalledWith(parent.sessionId);
+      } else
+        expect(mocks.settleWebhook).toHaveBeenCalledWith(parent.sessionId, {
+          id: row.id,
+          status: outcome === 'failed' ? 'discarded' : 'delivered',
+          ...(outcome === 'failed' ? { error: 'delivery error' } : {}),
+        });
+      expect(mocks.recordAutomationOutcome).not.toHaveBeenCalled();
+      expect(mocks.updateSet).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('leaves the inbox pending if webhook settlement fails', async () => {
+    const row = pendingRow('webhook-event', {
+      type: 'automation_triggered',
+      eventId: 'automation-1:2026-09-01T15:11:12.289Z',
+      automationId: 'automation-1',
+      automationName: 'Webhook scan',
+      prompt: 'Review incident.',
+      trigger: 'webhook',
+      webhookDeliveryId: 'delivery-1',
+    });
+    mocks.findPending
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce(row)
+      .mockResolvedValueOnce({ ...row, deliveredAt: new Date() });
+    mocks.settleWebhook.mockRejectedValue(
+      new Error('Webhook delivery settlement failed'),
+    );
+    await expect(
+      drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: row.eventKey,
+      }),
+    ).rejects.toThrow('Webhook delivery settlement');
+    expect(
+      mocks.updateSet.mock.calls.some(
+        ([value]) => value.deliveredAt || value.discardedAt,
+      ),
+    ).toBe(false);
+  });
+
+  it('promotes webhook followups before execution and resumes the same row after a crash', async () => {
+    const row = {
+      ...pendingRow('webhook-child'),
+      attempts: 0,
+      admission: null as string | null,
+      inferenceRetries: 0,
+    };
+    mocks.findWebhook.mockResolvedValue({ id: 'delivery-1' });
+    mocks.findPending.mockResolvedValue(row);
+    mocks.deliver.mockImplementationOnce(async (params, lock) => {
+      expect(mocks.updateSet).toHaveBeenCalledWith(
+        expect.objectContaining({ admission: 'inline' }),
+      );
+      expect(params.durableAdmission).toEqual({
+        eventId: row.id,
+        inferenceRetries: 0,
+      });
+      expect(params.resumedAfterInterruption).toBeUndefined();
+      expect(lock.durableRowId).toBe(row.id);
+      throw new Error('process disappeared');
+    });
+    const request = {
+      conversationId: parent.sessionId,
+      eventKey: row.eventKey,
+    };
+    await expect(drainFastAgentParentEvents(request)).rejects.toThrow(
+      'process disappeared',
+    );
+    row.admission = 'inline';
+    row.attempts = 1;
+    mocks.deliver.mockImplementationOnce(async (params) => {
+      expect(params.resumedAfterInterruption).toBe(true);
+      expect(params.durableAdmission.eventId).toBe(row.id);
+      expect(params.requestDurableResume).toBeTypeOf('function');
+      expect(params.requestDurableRetry).toBeTypeOf('function');
+      // Runtime owns journal reconstruction and settlement, not the queue.
+    });
+    await drainFastAgentParentEvents(request);
+    expect(mocks.settleWebhook).not.toHaveBeenCalled();
+    expect(mocks.deliver).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])(
+    'bounds webhook errors even when replyPosted=%s',
+    async (replyPosted) => {
+      const row = {
+        ...pendingRow('webhook-failing'),
+        admission: 'inline',
+        attempts: 0,
+        inferenceRetries: 2,
+      };
+      mocks.findWebhook.mockResolvedValue({ id: 'delivery-1' });
+      mocks.findPending.mockImplementation(async () =>
+        row.attempts < 5 ? row : undefined,
+      );
+      mocks.deliver.mockRejectedValue(
+        new mocks.DeliveryError('provider failed', { replyPosted }),
+      );
+      mocks.settleWebhook.mockImplementation(async () => {
+        row.attempts = 5;
+        return true;
+      });
+      const request = {
+        conversationId: parent.sessionId,
+        eventKey: row.eventKey,
+      };
+      // Two prior inference parks do not exhaust the queue failure budget.
+      for (row.attempts = 2; row.attempts < 4; row.attempts++) {
+        await expect(drainFastAgentParentEvents(request)).rejects.toThrow(
+          'provider failed',
+        );
+        expect(mocks.settleWebhook).not.toHaveBeenCalled();
+      }
+      await drainFastAgentParentEvents(request);
+      await drainFastAgentParentEvents(request);
+      expect(mocks.deliver).toHaveBeenCalledTimes(3);
+      expect(mocks.settleWebhook).toHaveBeenCalledWith(parent.sessionId, {
+        id: row.id,
+        status: 'discarded',
+        error: 'provider failed',
+      });
+    },
+  );
+
+  it('does not settle an interrupted webhook after a progress reply, even past the error cap', async () => {
+    const row = {
+      ...pendingRow('webhook-interrupted'),
+      admission: 'inline',
+      attempts: 10,
+    };
+    const controller = new AbortController();
+    const lock = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: controller.signal,
+    });
+    mocks.acquireLock.mockResolvedValue(lock);
+    mocks.findWebhook.mockResolvedValue({ id: 'delivery-1' });
+    mocks.findPending.mockResolvedValue(row);
+    mocks.deliver.mockImplementationOnce(async () => {
+      controller.abort(new Error('shutdown'));
+      throw new mocks.DeliveryError('shutdown', { replyPosted: true });
+    });
+    await expect(
+      drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: row.eventKey,
+      }),
+    ).rejects.toThrow('shutdown');
+    expect(mocks.settleWebhook).not.toHaveBeenCalled();
+    expect(
+      mocks.updateSet.mock.calls.some(
+        ([value]) => value.deliveredAt || value.discardedAt,
+      ),
+    ).toBe(false);
+  });
+
+  it.each(['delivered', 'discarded'] as const)(
+    'rechecks the session webhook after a child followup is %s',
+    async (status) => {
+      const row = pendingRow('child-followup');
+      mocks.findPending
+        .mockResolvedValueOnce(row)
+        .mockResolvedValueOnce(row)
+        .mockResolvedValueOnce(undefined);
+      mocks.settleWebhook.mockResolvedValue(true);
+      if (status === 'discarded')
+        mocks.deliver.mockRejectedValueOnce(
+          new mocks.DeliveryError('permanent followup failure', {
+            replyPosted: false,
+            permanent: true,
+          }),
+        );
+      await drainFastAgentParentEvents({
+        conversationId: parent.sessionId,
+        eventKey: row.eventKey,
+      });
+      expect(mocks.settleWebhook).toHaveBeenCalledWith(parent.sessionId, {
+        id: row.id,
+        status,
+        ...(status === 'discarded'
+          ? { error: 'permanent followup failure' }
+          : {}),
+      });
+      expect(mocks.recordAutomationOutcome).not.toHaveBeenCalled();
+      expect(mocks.updateSet).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('records the outcome of a scheduled wakeup turn once delivery settles', async () => {
     const wakeupEvent = {

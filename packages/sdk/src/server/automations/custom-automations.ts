@@ -1,6 +1,10 @@
 import { getOrCreateFastAgentSession } from '@roomote/cloud-agents/server';
 import {
   db,
+  automationWebhookDeliveries,
+  automationWebhookTriggers,
+  inArray,
+  reserveWebhookAutomationLaunch,
   and,
   customAutomations,
   discordInstallationChannels,
@@ -179,6 +183,7 @@ async function buildFastAutomationConversation(params: {
   eventId: string;
   destination: ResolvedAutomationDestination | null;
   target: AutomationTarget | null;
+  durableWebhook?: boolean;
 }): Promise<{
   conversation: FastAgentConversation;
   rootMessageId?: string;
@@ -221,6 +226,16 @@ async function buildFastAutomationConversation(params: {
       throw new Error('Discord is not connected.');
     }
     if (target?.targetKind === 'discord_user') {
+      if (params.durableWebhook) {
+        return {
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'dm',
+            conversationId: eventId,
+            replyTarget: { channelId: destination.channelId },
+          },
+        };
+      }
       const posted = await provider.postMessage({
         channelId: destination.channelId,
         text: `${automation.name} is running.`,
@@ -247,6 +262,16 @@ async function buildFastAutomationConversation(params: {
     });
     if (!channel?.installation.isActive) {
       throw new Error('Discord destination is no longer available.');
+    }
+    if (params.durableWebhook) {
+      return {
+        conversation: {
+          surface: 'discord',
+          workspaceId: channel.installation.guildId,
+          conversationId: eventId,
+          replyTarget: { channelId: destination.channelId },
+        },
+      };
     }
     const thread = await provider.createTaskThread({
       channelId: destination.channelId,
@@ -275,6 +300,19 @@ async function buildFastAutomationConversation(params: {
       await createTeamsCommunicationProviderFromRuntimeCredentials();
     if (!provider) {
       throw new Error('Teams is not connected.');
+    }
+    if (params.durableWebhook) {
+      return {
+        conversation: {
+          surface: 'teams',
+          workspaceId: destination.teamId,
+          conversationId: eventId,
+          replyTarget: {
+            channelId: destination.channelId,
+            serviceUrl: destination.serviceUrl,
+          },
+        },
+      };
     }
     const posted = await provider.postMessage({
       channelId: destination.channelId,
@@ -322,19 +360,23 @@ async function runFastCustomAutomation(params: {
   destination: ResolvedAutomationDestination | null;
   eventClaimedAt: Date;
   launchClaimedAt: Date;
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'webhook';
+  webhook?: AutomationRunOpts['webhook'];
   /** Environment the automation was configured for, offered to the turn as a hint. */
   preferredEnvironmentId: string | null;
 }): Promise<void> {
   if (!params.automation.createdByUserId) {
     throw new Error('Fast automation run-as user is not configured.');
   }
-  const eventId = `${params.automation.id}:${params.eventClaimedAt.toISOString()}`;
+  const eventId = params.webhook
+    ? `${params.automation.id}:webhook:${params.webhook.deliveryId}`
+    : `${params.automation.id}:${params.eventClaimedAt.toISOString()}`;
   const { conversation, rootMessageId } = await buildFastAutomationConversation(
     {
       automation: params.automation,
       eventId,
       destination: params.destination,
+      durableWebhook: Boolean(params.webhook),
       target: isConfiguredAutomationTarget(params.automation.target)
         ? params.automation.target
         : null,
@@ -362,6 +404,13 @@ async function runFastCustomAutomation(params: {
       launchClaimedAt: params.launchClaimedAt.toISOString(),
       prompt: params.automation.prompt,
       trigger: params.trigger,
+      ...(params.webhook
+        ? {
+            webhookDeliveryId: params.webhook.deliveryId,
+            webhookTriggerId: params.webhook.triggerId,
+            untrustedWebhookContext: params.webhook.untrustedNoteSummary,
+          }
+        : {}),
       ...(params.preferredEnvironmentId
         ? { preferredEnvironmentId: params.preferredEnvironmentId }
         : {}),
@@ -370,14 +419,23 @@ async function runFastCustomAutomation(params: {
     await enqueueFastAgentParentEvent({
       parent: { sessionId: session.id, conversation },
       event,
+      ...(params.webhook
+        ? {
+            webhookLease: {
+              deliveryId: params.webhook.deliveryId,
+              leaseToken: params.webhook.leaseToken,
+            },
+          }
+        : {}),
     });
   } catch (error) {
-    await reportFastAutomationStartupFailure({
-      automation: params.automation,
-      conversation,
-      rootMessageId,
-      error,
-    });
+    if (!params.webhook)
+      await reportFastAutomationStartupFailure({
+        automation: params.automation,
+        conversation,
+        rootMessageId,
+        error,
+      });
     throw error;
   }
 }
@@ -461,7 +519,7 @@ async function reportFastAutomationStartupFailure(params: {
   }
 }
 
-async function launchCustomAutomationRow(
+export async function launchCustomAutomationRow(
   automation: CustomAutomation,
   opts: AutomationRunOpts,
   scheduleContext?: ResolvedDeploymentTimeZone,
@@ -469,12 +527,15 @@ async function launchCustomAutomationRow(
   const result = emptyJobResult();
   const frequency = getCustomAutomationFrequency(automation);
 
-  if (automation.scheduleMode !== 'cron' && frequency === 'off') {
+  if (
+    !automation.enabled ||
+    (!opts.webhook && automation.scheduleMode !== 'cron' && frequency === 'off')
+  ) {
     result.skippedReason = 'Automation is disabled.';
     return result;
   }
 
-  if (!opts.manualTrigger) {
+  if (!opts.manualTrigger && !opts.webhook) {
     const timezone = scheduleContext ?? (await resolveDeploymentTimeZone());
     const now = new Date();
     const cronBaseline = new Date(
@@ -520,7 +581,35 @@ async function launchCustomAutomationRow(
     }
   }
 
+  const webhookOccurrence = automation.launchClaimedAt
+    ? await db
+        .select({ id: automationWebhookDeliveries.id })
+        .from(automationWebhookDeliveries)
+        .innerJoin(
+          automationWebhookTriggers,
+          eq(
+            automationWebhookTriggers.id,
+            automationWebhookDeliveries.triggerId,
+          ),
+        )
+        .where(
+          and(
+            eq(automationWebhookTriggers.automationId, automation.id),
+            inArray(automationWebhookDeliveries.status, [
+              'pending',
+              'dispatching',
+              'running',
+            ]),
+          ),
+        )
+        .limit(1)
+    : [];
+  if (!opts.webhook && webhookOccurrence.length) {
+    result.skippedReason = 'A webhook run is already in progress.';
+    return result;
+  }
   if (
+    !opts.webhook &&
     automation.launchClaimedAt &&
     Date.now() - automation.launchClaimedAt.getTime() >=
       CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS
@@ -602,10 +691,12 @@ async function launchCustomAutomationRow(
 
   // The short claim fence prevents concurrent launchers from double-launching
   // without blocking a due run behind a previous task that still appears active.
-  const launchClaimedAt = await tryClaimCustomAutomationLaunch(
-    automation.id,
-    automation.lastRunAt,
-  );
+  const launchClaimedAt = opts.webhook
+    ? await reserveWebhookAutomationLaunch(
+        opts.webhook.deliveryId,
+        opts.webhook.leaseToken,
+      )
+    : await tryClaimCustomAutomationLaunch(automation.id, automation.lastRunAt);
   if (!launchClaimedAt) {
     result.skippedReason = 'Another launch is already in progress.';
     return result;
@@ -631,13 +722,20 @@ async function launchCustomAutomationRow(
       destination,
       eventClaimedAt,
       launchClaimedAt,
-      trigger: opts.manualTrigger ? 'manual' : 'schedule',
+      trigger: opts.webhook
+        ? 'webhook'
+        : opts.manualTrigger
+          ? 'manual'
+          : 'schedule',
+      webhook: opts.webhook,
       preferredEnvironmentId,
     });
     result.queued = true;
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // An enqueue failure may follow durable persistence; retain the occurrence fence.
+    if (opts.webhook) throw error;
     try {
       const settled = await recordCustomAutomationRunOutcome(db, {
         id: automation.id,

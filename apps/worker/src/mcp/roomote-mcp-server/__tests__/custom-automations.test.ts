@@ -22,6 +22,74 @@ describe('handleManageCustomAutomations', () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  it.each([false, true])(
+    'forwards explicit removal opt-in %s in DELETE body',
+    async (forceLocalRemoval) => {
+      await handleManageCustomAutomations(
+        { action: 'webhook_remove', automationId: 'a', forceLocalRemoval },
+        config,
+      );
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(request.method).toBe('DELETE');
+      expect(JSON.parse(request.body as string)).toEqual({ forceLocalRemoval });
+    },
+  );
+
+  it.each([
+    ['webhook_inspect', 'GET', '/webhook'],
+    ['webhook_configure', 'POST', '/webhook'],
+    ['webhook_remove', 'DELETE', '/webhook'],
+    ['webhook_retry', 'POST', '/webhook/deliveries/d%2F1/retry'],
+  ] as const)(
+    'forwards %s with authenticated headers',
+    async (action, method, suffix) => {
+      const payload = {
+        subscription: { id: 's', status: 'active' },
+        deliveries: [],
+      };
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(payload)));
+      const result = await handleManageCustomAutomations(
+        {
+          action,
+          automationId: 'a/1',
+          deliveryId: 'd/1',
+        },
+        config,
+      );
+      const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(
+        `https://api.example.com/api/mcp/custom-automations/a%2F1${suffix}`,
+      );
+      expect(request.method).toBe(method);
+      expect(new Headers(request.headers).get('authorization')).toBe(
+        'Bearer test-token',
+      );
+      if (action === 'webhook_configure') {
+        expect(JSON.parse(request.body as string)).toEqual({
+          events: ['note.generated', 'note.access_granted'],
+          folderIds: [],
+          scopes: ['workspace'],
+          maxRunsPerDay: 20,
+          enabled: true,
+        });
+      } else expect(request.body).toBeUndefined();
+      expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual(payload);
+    },
+  );
+
+  it('does not send a webhook retry without a delivery ID', async () => {
+    const result = await handleManageCustomAutomations(
+      { action: 'webhook_retry', automationId: 'a' },
+      config,
+    );
+    expect(JSON.parse(result.content[0]?.text ?? '{}')).toEqual({
+      success: false,
+      error: 'deliveryId is required for webhook_retry',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('lists enabled automation model choices', async () => {
     await handleManageCustomAutomations({ action: 'list_models' }, config);
 

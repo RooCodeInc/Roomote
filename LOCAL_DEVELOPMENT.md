@@ -92,6 +92,114 @@ brew install ngrok
 ngrok config add-authtoken <your-ngrok-token>
 ```
 
+### Granola managed automation webhooks
+
+Create the custom automation before configuring its Granola binding. The public
+[Granola guide](https://docs.roomote.dev/integrations/granola#managed-automation-triggers)
+covers admin approval, shared-credential privacy, filters, and destination choice.
+The meeting-data integration remains read-only; managed subscriptions are a
+separate automation control surface.
+
+Public: notes visible to everyone in the Granola workspace. The `public` scope
+does not mean Internet-published notes and does not expand the shared key's access.
+
+Provider ingress is `POST /api/webhooks/automations/:id`, where `:id` is the
+trigger UUID, not the automation UUID; the route base is
+`/api/webhooks/automations`. The managed callback is derived from
+`R_PUBLIC_URL` (falling back to `R_APP_URL`) and requires public HTTPS. This
+public, signature-authenticated route is distinct from the management API below.
+It verifies Standard Webhooks HMAC-SHA256 over the raw request body with
+`webhook-id`, `webhook-timestamp`, and `webhook-signature`, enforces a five-minute
+timestamp tolerance and a 16 KiB body limit, and requires the envelope event ID
+to match the signed header. The ingress only records event identity metadata;
+it does not launch execution or persist raw payloads or meeting content.
+
+Management routes are mounted under `/api/mcp/custom-automations` and use MCP
+authentication plus acting-user authorization, not public webhook authentication:
+
+| Method and relative path | MCP action | Authorization |
+| --- | --- | --- |
+| `GET /:id/webhook` | `webhook_inspect` | Owner or admin |
+| `POST /:id/webhook` | `webhook_configure` | Admin |
+| `DELETE /:id/webhook` | `webhook_remove` | Admin |
+| `POST /:id/webhook/deliveries/:deliveryId/retry` | `webhook_retry` | Owner or admin |
+
+See `apps/api/src/handlers/custom-automations/index.ts` for route handlers and
+`packages/types/src/manage-custom-automations-tool.ts` for the shared MCP schema
+and request mapping. Configuration replaces filters and applies defaults for
+omitted fields; it is not a partial patch. Inspection must not expose signing
+secrets. `canRetry` from inspection is authoritative: only `failed` deliveries
+with no `sessionId` can be retried. Neither `running` deliveries nor previously
+executed failures can be replayed. A queued retry is not a successful completed
+run; unknown running outcomes require Session inspection, not replay.
+
+The SDK service and dispatch implementation are in
+`packages/sdk/src/server/automations/automation-webhooks.ts` and
+`packages/sdk/src/server/automations/automation-webhook-dispatch.ts`. The database
+admission and retention helpers are in
+`packages/db/src/lib/automation-webhooks.ts`. Check these contracts together:
+
+- Per-trigger daily invocation caps default to 20 and accept 1 through 100.
+  Global webhook limits are 5 active invocations and 200 new invocations per UTC
+  day. Daily accounting counts first launch reservations, not completions;
+  retries of the same reservation do not count as a new invocation.
+- Terminal deliveries (`succeeded` or `failed`) are eligible for cleanup after
+  seven days from settlement, in bounded batches. Live work is not expired.
+  Events older than seven days are rejected after deduplication metadata expires.
+  Delivery retention does not imply deletion of Session context.
+- Dispatch fetches a bounded note summary through the authenticated shared
+  Granola connection and passes it as untrusted evidence for the saved prompt.
+  It rechecks automation/owner availability, current admin approval, and the
+  shared connection. Signing secrets remain encrypted at rest and are never
+  returned by management inspection.
+- Management fails closed locally while updating the provider. Interrupted
+  `pending` or `deleting` operations can be reclaimed after two minutes. This
+  management lease is distinct from delivery dispatch leases and never permits
+  replaying work that already started.
+
+Webhook execution uses the core durable runtime in
+`packages/sdk/src/server/lib/fast-agent-parent-event-queue.ts`: the queued event
+is promoted from `queued` to `inline` admission and resumes the same recorded
+turn with its durable action journal after interruption or retry backoff.
+Ordinary setup/reply failures are bounded to three attempts; inference retry
+handoffs use the existing persisted runtime budget rather than consuming that
+ordinary-attempt allowance. This is separate from the delivery dispatch retry
+limit and is not an exactly-once guarantee for arbitrary external effects.
+Inspect uncertain effects rather than assuming that replay is safe.
+
+Ordinary removal cleans up the owned remote endpoint before deleting the local
+binding. The service also reconciles endpoints with this trigger's exact
+callback path (`/api/webhooks/automations/:id`) across host changes, not the full
+URL, when a create response was lost, because the one-time signing
+secret cannot be recovered. It removes that orphan before creating anew, not
+unrelated subscriptions. Deleting an automation with a binding requires remote
+cleanup first; provider failures leave the binding paused and recoverable.
+
+For revoked credentials, first restore access to the same shared connection and
+retry removal. If restoration is impossible, the admin-only `webhook_remove`
+action accepts optional `forceLocalRemoval: true` for explicit emergency orphan
+recovery. For an existing binding, the result is
+`{removed: true, remoteCleanupRequired: {providerEndpointId, callbackUrl}}`.
+Local removal skips provider calls, not the live-run guard: both ordinary and
+emergency removal reject `dispatching` or `running` deliveries. Pause and wait
+for settlement; inspect unknown outcomes rather than deleting or replaying them.
+Preserve the returned endpoint ID and exact callback URL for authorized manual
+cleanup in Granola, matching the exact trigger-specific path across host changes
+if the ID is unknown. Confirm the remote orphan
+is deleted before declaring cleanup complete or registering a replacement.
+Revoking credentials alone does not prove remote deletion, and force removal
+does not revoke the provider endpoint. The absent local binding prevents its
+subsequent deliveries from being accepted.
+
+Use mocked Granola responses and synthetic signed deliveries for local automated
+checks. Do not create live subscriptions as part of ordinary tests. Before
+claiming a deployment is ready, separately obtain authorization to verify the
+real subscription, public HTTPS callback, matching and nonmatching events,
+Session/report delivery, and remote update/removal. Mocked tests and docs checks
+do not establish that external verification happened; record it explicitly as
+not performed when no live checks were run. Never put API keys, signing secrets,
+or private meeting content into test fixtures, logs, or proof artifacts.
+
 ## Database Services
 
 Roomote uses local defaults for development services:

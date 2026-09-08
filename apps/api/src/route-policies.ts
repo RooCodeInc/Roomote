@@ -180,6 +180,12 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   // Signature-authenticated webhook entry points. Each handler verifies the
   // provider's signature/secret before processing the delivery.
   {
+    name: 'webhook-automations',
+    match: { type: 'prefix', path: '/api/webhooks/automations' },
+    policy: 'webhook',
+    rateLimits: WEBHOOK_RATE_LIMITS,
+  },
+  {
     name: 'webhook-github',
     match: { type: 'prefix', path: '/api/webhooks/github' },
     policy: 'webhook',

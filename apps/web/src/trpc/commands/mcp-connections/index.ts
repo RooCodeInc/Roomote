@@ -1,5 +1,6 @@
 import {
   db,
+  automationWebhookTriggers,
   mcpConnections,
   deploymentMcpEnablements,
   eq,
@@ -7,7 +8,9 @@ import {
   and,
   isNull,
   or,
+  type SQL,
 } from '@roomote/db/server';
+import { TRPCError } from '@trpc/server';
 import {
   filterMcpToolDefinitions,
   getDefaultMcpConnectionRole,
@@ -81,6 +84,26 @@ type GrafanaConnectionData = {
 function assertAdmin(auth: UserAuthSuccess) {
   if (!auth.isAdmin) {
     throw new Error('Unauthorized');
+  }
+}
+
+async function assertNoAutomationWebhookBindings(where: SQL | undefined) {
+  const [binding] = await db
+    .select({ id: automationWebhookTriggers.id })
+    .from(automationWebhookTriggers)
+    .innerJoin(
+      mcpConnections,
+      eq(automationWebhookTriggers.connectionId, mcpConnections.id),
+    )
+    .where(where)
+    .limit(1);
+
+  if (binding) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message:
+        'Remove automation webhook bindings before disconnecting Granola',
+    });
   }
 }
 
@@ -669,6 +692,11 @@ export async function setDeploymentMcpEnabledCommand(
   const defaultDisabledTools =
     getMcpIntegrationDefaultDisabledTools(integration);
 
+  const connectionFilter = eq(mcpConnections.mcpId, input.mcpId);
+  if (!input.enabled) {
+    await assertNoAutomationWebhookBindings(connectionFilter);
+  }
+
   const [result] = await db
     .insert(deploymentMcpEnablements)
     .values({
@@ -691,9 +719,7 @@ export async function setDeploymentMcpEnabledCommand(
 
   // When disabling, clean up all user connections for this MCP
   if (!input.enabled) {
-    await db
-      .delete(mcpConnections)
-      .where(eq(mcpConnections.mcpId, input.mcpId));
+    await db.delete(mcpConnections).where(connectionFilter);
   }
 
   captureIntegrationLifecycleEvent(
@@ -2094,17 +2120,18 @@ export async function disconnectMcpCommand(
     assertAdmin(auth);
   }
 
+  const connectionFilter = and(
+    eq(mcpConnections.mcpId, input.mcpId),
+    eq(mcpConnections.connectionRole, connectionRole),
+    connectionScope === 'deployment'
+      ? isNull(mcpConnections.userId)
+      : eq(mcpConnections.userId, auth.userId),
+  );
+  await assertNoAutomationWebhookBindings(connectionFilter);
+
   const [deleted] = await db
     .delete(mcpConnections)
-    .where(
-      and(
-        eq(mcpConnections.mcpId, input.mcpId),
-        eq(mcpConnections.connectionRole, connectionRole),
-        connectionScope === 'deployment'
-          ? isNull(mcpConnections.userId)
-          : eq(mcpConnections.userId, auth.userId),
-      ),
-    )
+    .where(connectionFilter)
     .returning();
 
   if (!deleted) {

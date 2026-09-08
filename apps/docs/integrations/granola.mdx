@@ -1,6 +1,6 @@
 ---
 title: Granola
-description: Give Roomote read-only access to shared Granola meeting context.
+description: Connect shared Granola meeting context and managed automation triggers.
 icon: '/logo/integrations/granola.svg'
 ---
 
@@ -12,6 +12,7 @@ your meeting notes and you want that context available in Roomote tasks.
 - Browse past meetings for relevant decisions and discussions
 - Read meeting notes and transcripts while planning or implementing work
 - Find action items, attendees, and related meeting folders during follow-up work
+- Start a custom automation when an approved Granola note event arrives
 
 ## How setup works
 
@@ -34,6 +35,189 @@ notes** unchecked.
 
 ## What to expect
 
-The built-in Granola connection is read-only. Roomote can list and read the
+The built-in Granola meeting tools are read-only. Roomote can list and read the
 notes, folders, meeting details, and transcripts allowed by the configured key,
-but it cannot modify Granola content or manage Granola webhooks.
+but cannot modify Granola content. Separately, an admin can manage a Granola
+webhook subscription bound to a Roomote custom automation.
+
+## Managed automation triggers
+
+Create the [custom automation](/automations#custom-automations) first, then add
+its Granola trigger. Connecting Granola alone does not subscribe an automation
+to events.
+
+Roomote owns the subscription it creates for each binding. Its provider ingress
+is `POST /api/webhooks/automations/:id`, where `:id` is the trigger ID, not the
+automation ID. The callback uses the deployment's public HTTPS URL
+(`R_PUBLIC_URL`, falling back to `R_APP_URL`). Do not register a second endpoint
+manually to work around an interrupted setup.
+
+1. Save an automation with a focused prompt, an execution target, and an
+   appropriate report destination. Use schedule `off` for event-only work;
+   keep the automation itself enabled.
+2. Have a deployment admin approve binding the automation to the shared Granola
+   connection. Admin access is required to configure, edit, or remove this
+   binding, even when the automation belongs to a member.
+3. Configure the events, scopes, optional folder IDs, and daily run cap through
+   Roomote chat using the automation's ID. The managed webhook actions are
+   listed below.
+4. Inspect the subscription state and delivery history. A saved configuration
+   is not proof that Granola can reach the deployment. Complete the remote
+   verification below before relying on the trigger.
+
+### Filters and spend safeguards
+
+| Setting | Default | Choices |
+| --- | --- | --- |
+| Events | `note.generated`, `note.access_granted` | Add `note.edited` only when edits should start work |
+| Scopes | `workspace` | Use `workspace` alone, or explicitly select `personal`, `public`, or both |
+| Folder IDs | No folder filter | Optionally restrict to selected Granola folder IDs |
+| Daily run cap | `20` | An integer from `1` through `100` |
+
+`workspace` cannot be combined with `personal` or `public`. Scope selection
+does not grant access beyond the connected key's permissions. Folder filtering
+is optional; an empty list does not restrict events to a particular folder.
+Folder IDs must use Granola's `fol_` format followed by 14 alphanumeric
+characters, with at most 100 IDs.
+
+Public: notes visible to everyone in the Granola workspace. This does not mean
+notes published on the Internet.
+
+The daily cap is a webhook invocation-count spend safeguard, not a dollar budget
+or a limit on the cost of any single run. It counts first launch reservations per
+trigger on a UTC day, not successful completions. Across all webhook triggers,
+the deployment also allows at most **5 active invocations** and **200 new
+invocations per UTC day**. Deliveries can remain pending until capacity is available. Start
+with the defaults and narrow the folders before opting into `note.edited`,
+which can produce more work as notes change. This cap does not replace controls
+on scheduled or manually started runs.
+
+### Shared data and destination privacy
+
+The Granola connection is deployment-shared, not the automation owner's personal
+Granola login. Admin approval binds the automation to that shared credential's
+data boundary. Choosing `personal` scope refers to what the connected key can
+access, not to a separate per-member private connection.
+
+Review the source scope and report destination together. A channel report can
+expose meeting content to people who could not read the original note in
+Granola. Prefer a restricted destination or a direct message to the automation
+owner when meeting context is sensitive. Direct-message delivery still requires
+the owner's linked communications account; it does not narrow the source key's
+access. Runs also retain their context in Roomote, so a private chat destination
+is not a replacement for reviewing Roomote access and the prompt's disclosure
+instructions.
+
+The public callback verifies the raw request signature with the subscription's
+signing secret and a five-minute timestamp tolerance; knowing the callback URL
+does not authorize a delivery. Signing secrets are encrypted at rest and are
+never returned by inspection. The delivery inbox stores event identity metadata,
+not raw webhook payloads or meeting content. Roomote fetches the note summary
+using the shared connection before dispatch and treats it as untrusted context,
+not instructions that override the saved automation prompt. Dispatch rechecks
+the enabled automation, active owner, current admin approval, and authenticated
+shared connection.
+
+### Inspect, edit, remove, and retry
+
+The `manage_custom_automations` tool supports these actions after creation:
+
+| Action | Required fields | Who can use it |
+| --- | --- | --- |
+| `webhook_inspect` | `automationId` | Automation owner or admin |
+| `webhook_configure` | `automationId`; optional `events`, `scopes`, `folderIds`, `maxRunsPerDay`, `enabled` | Admin |
+| `webhook_remove` | `automationId`; optional emergency `forceLocalRemoval` | Admin |
+| `webhook_retry` | `automationId`, `deliveryId` | Automation owner or admin |
+
+Configuration replaces the webhook filters rather than patching individual
+fields. Include the complete desired configuration when editing; omitted
+settings use the defaults above. Inspection returns safe subscription and
+delivery information, never the signing secret. Its `canRetry` field is
+authoritative: only a `failed` delivery with no Session (execution never started)
+can be retried. Running deliveries and previously executed failures cannot be
+replayed with this control, even when their outcome is unknown. A retry queues
+a delivery; it does not mean the automation completed. Inspect its later state
+and the run's Session before reporting success.
+
+Roomote deduplicates deliveries by event ID within a trigger and admits at most
+100 outstanding deliveries per trigger. Dispatch failures retry with backoff,
+up to five attempts before being marked failed; waiting for a busy automation
+does not consume that attempt allowance. These are Roomote dispatch limits,
+not a promise about Granola's own redelivery policy or automatic reruns of
+completed Sessions. Inspect failures before requesting a manual retry.
+
+Once execution starts, interruptions resume the same Session turn using its
+durable action journal, rather than launching a new run. Ordinary setup or reply
+failures have a three-attempt limit; inference retries use the runtime's existing
+retry budget separately. This recovery does not provide an exactly-once guarantee
+for arbitrary external effects. Inspect uncertain outcomes before repeating an
+action.
+
+Terminal delivery records (`succeeded` or `failed`) are eligible for cleanup
+after **7 days from terminal settlement**. Pending, dispatching, and running work
+is not expired by this retention policy. Events whose occurrence time is older
+than seven days cannot start new work after deduplication records expire. This
+is delivery-inbox retention, not a promise to erase Session transcripts or
+meeting context retained in runs.
+
+If subscription setup is pending or failed, do not treat the trigger as active.
+Likewise, a removal request is not evidence of remote deletion: inspect the
+result and resolve any reported cleanup failure before treating removal as
+complete.
+
+### Removal and orphan recovery
+
+Ordinary removal deletes the owned remote subscription and verifies cleanup
+before deleting the local binding. Deleting an automation with a binding also
+requires this admin-managed cleanup first. A cleanup failure leaves the local
+trigger paused and recoverable, rather than silently abandoning a remote
+subscription.
+
+If setup or removal was interrupted, wait **two minutes**, then retry the same
+management action. This recovers an expired management operation; it does not
+retry an automation execution. If a create response was lost, Roomote cannot
+recover Granola's one-time signing secret. It reconciles endpoints matching this
+trigger's exact callback path (`/api/webhooks/automations/:id`), even across host
+changes, removes that orphan, and creates a fresh
+subscription when configuration is retried. It does not adopt arbitrary existing
+subscriptions or remove unrelated endpoints.
+
+If credentials were revoked or provider access was lost:
+
+1. Keep the trigger paused and inspect its delivery history. Removal is blocked
+   while any delivery is `dispatching` or `running`; wait for active execution
+   to settle and inspect unknown outcomes rather than replaying them.
+2. Prefer restoring access to the same shared Granola connection and retrying
+   ordinary removal so Roomote can clean up the owned subscription remotely.
+3. If access cannot be restored, an admin can explicitly request
+   `webhook_remove` with `forceLocalRemoval: true`. This emergency option skips
+   provider cleanup but does not bypass the live-run guard. For an existing
+   binding, it returns
+   `{removed: true, remoteCleanupRequired: {providerEndpointId, callbackUrl}}`.
+4. Preserve those returned identifiers for an authorized Granola administrator
+   to locate and delete the remote endpoint. If the endpoint ID is unavailable,
+    use its exact trigger-specific callback path to identify the orphan, including
+    endpoints on a previous host. Verify remote deletion
+   before treating cleanup as complete or creating a replacement binding.
+
+Emergency removal deletes the local binding, not the provider subscription.
+Revoking the API key or receiving `removed: true` with `remoteCleanupRequired`
+does not prove the remote endpoint is gone. It may continue sending requests;
+without the local binding and signing secret, those deliveries cannot be
+accepted. Do not share credentials, signing secrets, or meeting content in an
+orphan-recovery report.
+
+### Verify remote setup
+
+Verification requires an approved real Granola connection and a public callback
+reachable by Granola. On the target deployment, confirm that the managed
+subscription is active, then generate an authorized matching note event and
+check the delivery history, resulting Session, and intended report destination.
+Check a nonmatching event as well when using filters. After editing or removing
+the binding, verify the corresponding remote subscription state rather than
+assuming a local save or removal request completed remote cleanup.
+
+Local tests with mocked Granola responses and documentation validation do not
+verify live subscription creation, signatures from real Granola deliveries,
+public callback reachability, or remote cleanup. Treat that external verification
+as a separate, explicitly authorized setup step.

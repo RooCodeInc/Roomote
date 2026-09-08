@@ -1,6 +1,12 @@
 import type { ResolvedAutomationDestination } from './destination';
 
 export type AutomationRunOpts = {
+  webhook?: {
+    deliveryId: string;
+    triggerId: string;
+    leaseToken: string;
+    untrustedNoteSummary: string;
+  };
   manualTrigger?: boolean;
   /** Destination selected by the caller for a one-off run. */
   destination?: ResolvedAutomationDestination;

@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { NextRequest } from 'next/server';
 
 import { POST } from '../route';
@@ -95,4 +96,70 @@ describe('POST /api/webhooks/[...path]', () => {
     expect(forwardedHeaders.get('x-roomote-webhook-secret')).toBe('secret');
     expect(response.status).toBe(200);
   });
+
+  it.each([200, 400, 401, 413, 429, 503])(
+    'forwards unsigned-by-Roomote Granola callbacks byte-for-byte and preserves status %s',
+    async (status) => {
+      mockBootstrapWebRuntimeEnv.mockResolvedValue({
+        TRPC_URL: 'http://api.test',
+      });
+      const triggerId = '4fc1c541-c79e-435b-b120-572532ff8157';
+      // Whitespace, CRLF and a multibyte metadata value must survive forwarding.
+      const body = Buffer.from(
+        '{\r\n  "event_id": "evt_123", "metadata": "caf\u00e9"\r\n}\n',
+      );
+      const id = 'evt_123';
+      const timestamp = '1788900000';
+      const key = Buffer.from('test-granola-key');
+      const signature = createHmac('sha256', key)
+        .update(`${id}.${timestamp}.`)
+        .update(body)
+        .digest('base64');
+      const signatures = `v1,${Buffer.alloc(32).toString('base64')} v1,${signature}`;
+      const fetchMock = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(new Response('{"status":"upstream"}', { status }));
+      const request = new NextRequest(
+        `https://public.roomote.test/api/webhooks/automations/${triggerId}`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(body.length),
+            'webhook-id': id,
+            'webhook-timestamp': timestamp,
+            'webhook-signature': signatures,
+          },
+          body,
+        },
+      );
+      const response = await POST(request, {
+        params: Promise.resolve({ path: ['automations', triggerId] }),
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      const [target, init] = fetchMock.mock.calls[0]!;
+      expect(String(target)).toBe(
+        `http://api.test/api/webhooks/automations/${triggerId}`,
+      );
+      const headers = init?.headers as Headers;
+      expect(headers.get('webhook-id')).toBe(id);
+      expect(headers.get('webhook-timestamp')).toBe(timestamp);
+      expect(headers.get('webhook-signature')).toBe(signatures);
+      expect(headers.has('authorization')).toBe(false);
+      expect(headers.has('cookie')).toBe(false);
+      expect(headers.has('content-length')).toBe(false);
+      const forwardedBody = Buffer.from(init?.body as ArrayBuffer);
+      expect(forwardedBody).toEqual(body);
+      expect(
+        createHmac('sha256', key)
+          .update(
+            `${headers.get('webhook-id')}.${headers.get('webhook-timestamp')}.`,
+          )
+          .update(forwardedBody)
+          .digest('base64'),
+      ).toBe(signature);
+      expect(response.status).toBe(status);
+      expect(await response.text()).toBe('{"status":"upstream"}');
+    },
+  );
 });

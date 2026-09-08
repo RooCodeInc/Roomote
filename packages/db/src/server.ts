@@ -60,6 +60,7 @@ export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
 export * from './lib/automations';
 export * from './lib/custom-automations';
+export * from './lib/automation-webhooks';
 export * from './lib/custom-automation-access';
 export * from './lib/custom-skills';
 export * from './lib/session-wakeups';
@@ -222,6 +223,9 @@ export {
   automations,
   automationsRelations,
   customAutomations,
+  automationWebhookTriggers,
+  automationWebhookDeliveries,
+  automationWebhookDailyBudgets,
   customAutomationsRelations,
   trackedMessages,
   trackedMessagesRelations,

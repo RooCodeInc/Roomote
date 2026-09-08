@@ -6,9 +6,162 @@ import {
   buildManageCustomAutomationsRequest,
   compactManageCustomAutomationsResult,
   manageCustomAutomationsInputSchema,
+  automationWebhookConfigSchema,
 } from './manage-custom-automations-tool';
 
 describe('manage custom automations tool contract', () => {
+  it.each([undefined, false, true])(
+    'preserves removal opt-in %s',
+    (forceLocalRemoval) => {
+      const input = manageCustomAutomationsInputSchema.parse({
+        action: 'webhook_remove',
+        automationId: 'a',
+        forceLocalRemoval,
+      });
+      expect(buildManageCustomAutomationsRequest(input)).toEqual({
+        ok: true,
+        request: {
+          path: '/a/webhook',
+          method: 'DELETE',
+          ...(forceLocalRemoval === undefined
+            ? {}
+            : { body: { forceLocalRemoval } }),
+        },
+      });
+    },
+  );
+
+  it.each(['true', 1, null])(
+    'rejects non-boolean removal opt-in %j',
+    (forceLocalRemoval) => {
+      expect(
+        manageCustomAutomationsInputSchema.safeParse({
+          action: 'webhook_remove',
+          forceLocalRemoval,
+        }).success,
+      ).toBe(false);
+    },
+  );
+
+  it('restricts emergency forget to webhook_remove and documents orphan cleanup', () => {
+    for (const action of MANAGE_CUSTOM_AUTOMATIONS_ACTIONS.filter(
+      (action) => action !== 'webhook_remove',
+    )) {
+      for (const forceLocalRemoval of [false, true]) {
+        expect(
+          manageCustomAutomationsInputSchema.safeParse({
+            action,
+            forceLocalRemoval,
+          }).success,
+        ).toBe(false);
+        expect(
+          buildManageCustomAutomationsRequest({ action, forceLocalRemoval }).ok,
+        ).toBe(false);
+      }
+    }
+    expect(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.forceLocalRemoval.description,
+    ).toContain('Admin-only emergency forget');
+    expect(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.forceLocalRemoval.description,
+    ).toContain('orphan requiring external cleanup');
+  });
+
+  it('defaults webhook configuration without subscribing to edits', () => {
+    expect(automationWebhookConfigSchema.parse({})).toEqual({
+      events: ['note.generated', 'note.access_granted'],
+      folderIds: [],
+      scopes: ['workspace'],
+      maxRunsPerDay: 20,
+      enabled: true,
+    });
+  });
+
+  it.each([
+    { events: [] },
+    { events: ['generated'] },
+    { scopes: [] },
+    { scopes: ['workspace', 'personal'] },
+    { scopes: ['unknown'] },
+    { folderIds: ['invalid'] },
+    { maxRunsPerDay: 0 },
+    { maxRunsPerDay: 101 },
+    { maxRunsPerDay: 1.5 },
+  ])('rejects invalid webhook configuration %j', (input) => {
+    expect(automationWebhookConfigSchema.safeParse(input).success).toBe(false);
+  });
+
+  it('builds webhook configuration from safe fields only', () => {
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'webhook_configure',
+        automationId: 'a/b',
+        prompt: 'not a filter',
+        enabled: false,
+        events: ['note.edited'],
+      }),
+    ).toEqual({
+      ok: true,
+      request: {
+        path: '/a%2Fb/webhook',
+        method: 'POST',
+        body: {
+          events: ['note.edited'],
+          folderIds: [],
+          scopes: ['workspace'],
+          maxRunsPerDay: 20,
+          enabled: false,
+        },
+      },
+    });
+  });
+
+  it.each([
+    ['webhook_inspect', 'GET', '/a%2Fb/webhook'],
+    ['webhook_remove', 'DELETE', '/a%2Fb/webhook'],
+    ['webhook_retry', 'POST', '/a%2Fb/webhook/deliveries/d%2Fe/retry'],
+  ] as const)(
+    'maps %s consistently for both MCP transports',
+    (action, method, path) => {
+      expect(
+        buildManageCustomAutomationsRequest({
+          action,
+          automationId: 'a/b',
+          deliveryId: 'd/e',
+        }),
+      ).toEqual({ ok: true, request: { method, path } });
+      expect(buildManageCustomAutomationsRequest({ action }).ok).toBe(false);
+    },
+  );
+
+  it('requires retry delivery IDs and validates configure inputs before transport', () => {
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'webhook_retry',
+        automationId: 'a',
+      }).ok,
+    ).toBe(false);
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'webhook_configure',
+        automationId: 'a',
+        maxRunsPerDay: -1,
+      }).ok,
+    ).toBe(false);
+    expect(
+      buildManageCustomAutomationsRequest({ action: 'webhook_configure' }).ok,
+    ).toBe(false);
+  });
+
+  it('preserves the service-safe subscription and delivery projection', () => {
+    const payload = {
+      subscription: { id: 's', status: 'active' },
+      deliveries: [{ id: 'd', status: 'failed' }],
+    };
+    expect(
+      compactManageCustomAutomationsResult('webhook_inspect', payload),
+    ).toEqual(payload);
+  });
   it('keeps every supported action in the shared Zod schema', () => {
     for (const action of MANAGE_CUSTOM_AUTOMATIONS_ACTIONS) {
       expect(manageCustomAutomationsInputSchema.parse({ action })).toEqual({

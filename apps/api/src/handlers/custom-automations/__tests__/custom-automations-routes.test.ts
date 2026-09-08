@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { TRPCError } from '@trpc/server';
 import type { Context } from 'hono';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type {
@@ -32,6 +33,10 @@ const {
   mockListConnectedCommunicationProviders,
   mockResolveCustomAutomationSchedule,
   mockRunCustomAutomationNow,
+  mockGetAutomationWebhook,
+  mockConfigureAutomationWebhook,
+  mockRemoveAutomationWebhook,
+  mockRetryAutomationWebhookDelivery,
   mockCaptureActivationCustomAutomationChanged,
 } = vi.hoisted(() => ({
   mockUsersFindFirst: vi.fn(),
@@ -45,6 +50,10 @@ const {
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveCustomAutomationSchedule: vi.fn(),
   mockRunCustomAutomationNow: vi.fn(),
+  mockGetAutomationWebhook: vi.fn(),
+  mockConfigureAutomationWebhook: vi.fn(),
+  mockRemoveAutomationWebhook: vi.fn(),
+  mockRetryAutomationWebhookDelivery: vi.fn(),
   mockCaptureActivationCustomAutomationChanged: vi.fn(),
 }));
 
@@ -63,6 +72,10 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  getAutomationWebhook: mockGetAutomationWebhook,
+  configureAutomationWebhook: mockConfigureAutomationWebhook,
+  removeAutomationWebhook: mockRemoveAutomationWebhook,
+  retryAutomationWebhookDelivery: mockRetryAutomationWebhookDelivery,
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
   resolveCustomAutomationSchedule: mockResolveCustomAutomationSchedule,
   runCustomAutomationNow: mockRunCustomAutomationNow,
@@ -180,6 +193,220 @@ describe('custom-automations MCP routes', () => {
   });
 
   describe('API-hosted Roomote MCP tool', () => {
+    describe.each([
+      ['GET', '/webhook', mockGetAutomationWebhook],
+      ['POST', '/webhook', mockConfigureAutomationWebhook],
+      ['DELETE', '/webhook', mockRemoveAutomationWebhook],
+      [
+        'POST',
+        '/webhook/deliveries/delivery-1/retry',
+        mockRetryAutomationWebhookDelivery,
+      ],
+    ] as const)('%s %s errors', (method, suffix, service) => {
+      it.each([
+        ['UNAUTHORIZED', 401],
+        ['FORBIDDEN', 403],
+        ['CONFLICT', 409],
+        ['PRECONDITION_FAILED', 409],
+        ['BAD_REQUEST', 400],
+        ['NOT_FOUND', 404],
+      ] as const)(
+        'maps %s to %s without exposing error details',
+        async (code, status) => {
+          service.mockRejectedValueOnce(
+            new TRPCError({
+              code,
+              message: 'Action cannot be completed.',
+              cause: new Error('private credential and upstream trace'),
+            }),
+          );
+          const { app, onError } = createApp();
+          const response = await app.request(`/custom-automations/a${suffix}`, {
+            method,
+            ...(method === 'POST'
+              ? {
+                  headers: { 'content-type': 'application/json' },
+                  body: '{}',
+                }
+              : {}),
+          });
+          expect(response.status).toBe(status);
+          expect(await response.json()).toEqual({
+            error: 'Action cannot be completed.',
+          });
+          expect(onError).not.toHaveBeenCalled();
+        },
+      );
+
+      it.each([
+        new Error('private database failure'),
+        Object.assign(new Error('not a trusted tRPC error'), {
+          code: 'FORBIDDEN',
+        }),
+        new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'private internal details',
+        }),
+        new TRPCError({
+          code: 'BAD_GATEWAY',
+          message: 'private upstream details',
+        }),
+      ])('keeps unexpected failures opaque', async (error) => {
+        service.mockRejectedValueOnce(error);
+        const { app, onError } = createApp();
+        const response = await app.request(`/custom-automations/a${suffix}`, {
+          method,
+          ...(method === 'POST'
+            ? {
+                headers: { 'content-type': 'application/json' },
+                body: '{}',
+              }
+            : {}),
+        });
+        expect(response.status).toBe(500);
+        expect(await response.json()).toEqual({
+          error: 'internal_server_error',
+        });
+        expect(onError).toHaveBeenCalledWith(error, expect.anything());
+      });
+    });
+
+    it.each([
+      ['webhook_inspect', mockGetAutomationWebhook],
+      ['webhook_configure', mockConfigureAutomationWebhook],
+      ['webhook_remove', mockRemoveAutomationWebhook],
+      ['webhook_retry', mockRetryAutomationWebhookDelivery],
+    ] as const)(
+      'forwards the resolved actor for %s',
+      async (action, service) => {
+        mockResolveActingUserIdOrNull.mockResolvedValue('actor-2');
+        mockUsersFindFirst.mockResolvedValue({ id: 'actor-2', role: 'member' });
+        service.mockResolvedValue({ outcome: 'queued' });
+        const { handler } = registerApiHostedTool({
+          userId: 'token-user',
+          authContext: {
+            tokenType: 'run',
+            runId: 42,
+            userId: 'token-user',
+            principal: 'user',
+            version: 1,
+          },
+        });
+        const result = await handler({
+          action,
+          automationId: 'automation-1',
+          deliveryId: 'delivery-1',
+        });
+        expect(service).toHaveBeenCalledWith(
+          'actor-2',
+          'automation-1',
+          ...(action === 'webhook_configure'
+            ? [
+                {
+                  events: ['note.generated', 'note.access_granted'],
+                  folderIds: [],
+                  scopes: ['workspace'],
+                  maxRunsPerDay: 20,
+                  enabled: true,
+                },
+              ]
+            : action === 'webhook_retry'
+              ? ['delivery-1']
+              : action === 'webhook_remove'
+                ? [undefined]
+                : []),
+        );
+        expect(JSON.stringify(result)).toContain('queued');
+      },
+    );
+
+    it('rejects invalid webhook configuration before calling the service', async () => {
+      const { app } = createApp();
+      const response = await app.request('/custom-automations/a/webhook', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ maxRunsPerDay: 0 }),
+      });
+      expect(response.status).toBe(400);
+      expect(mockConfigureAutomationWebhook).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, false, true])(
+      'forwards DELETE removal opt-in %s',
+      async (forceLocalRemoval) => {
+        mockRemoveAutomationWebhook.mockResolvedValue({ removed: true });
+        const { app } = createApp();
+        const response = await app.request('/custom-automations/a/webhook', {
+          method: 'DELETE',
+          ...(forceLocalRemoval === undefined
+            ? {}
+            : {
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ forceLocalRemoval }),
+              }),
+        });
+        expect(response.status).toBe(200);
+        expect(mockRemoveAutomationWebhook).toHaveBeenCalledExactlyOnceWith(
+          'admin-1',
+          'a',
+          forceLocalRemoval,
+        );
+      },
+    );
+
+    it.each([
+      '{"forceLocalRemoval":"true"}',
+      '{"forceLocalRemoval":null}',
+      '{"forceLocalRemoval":1}',
+      'null',
+      '[]',
+      '{',
+    ])('rejects invalid DELETE body %s', async (body) => {
+      const { app } = createApp();
+      const response = await app.request('/custom-automations/a/webhook', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      expect(response.status).toBe(400);
+      expect(mockRemoveAutomationWebhook).not.toHaveBeenCalled();
+    });
+
+    it.each([false, true])(
+      'forwards MCP removal opt-in %s',
+      async (forceLocalRemoval) => {
+        mockRemoveAutomationWebhook.mockResolvedValue({ removed: true });
+        const { handler } = registerApiHostedTool({
+          userId: 'admin-1',
+          authContext: {
+            tokenType: 'run',
+            runId: 42,
+            userId: 'admin-1',
+            principal: 'user',
+            version: 1,
+          },
+        });
+        await handler({
+          action: 'webhook_remove',
+          automationId: 'a',
+          forceLocalRemoval,
+        });
+        expect(mockRemoveAutomationWebhook).toHaveBeenCalledExactlyOnceWith(
+          'admin-1',
+          'a',
+          forceLocalRemoval,
+        );
+      },
+    );
+
+    it('rejects webhook requests without an authenticated actor', async () => {
+      mockResolveActingUserIdOrNull.mockResolvedValue(null);
+      const { app } = createApp();
+      expect((await app.request('/custom-automations/a/webhook')).status).toBe(
+        403,
+      );
+      expect(mockGetAutomationWebhook).not.toHaveBeenCalled();
+    });
     it('invokes the authoritative router with run-token acting-user authorization', async () => {
       const authContext: RunTokenContext = {
         tokenType: 'run',
@@ -925,6 +1152,38 @@ describe('custom-automations MCP routes', () => {
   });
 
   describe('DELETE /:id', () => {
+    it.each([
+      [
+        'Remove the automation webhook subscription before deleting this automation.',
+        409,
+      ],
+      [
+        'Remove the automation webhook subscription before deleting this automation. private details',
+        500,
+      ],
+      ['private database failure', 500],
+    ])('handles deletion failure with status %s', async (message, status) => {
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'automation-1',
+        target: {},
+      });
+      const error = new Error(message);
+      mockDeleteCustomAutomation.mockRejectedValueOnce(error);
+      const { app, onError } = createApp();
+      const response = await app.request('/custom-automations/automation-1', {
+        method: 'DELETE',
+      });
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({
+        error: status === 409 ? message : 'internal_server_error',
+      });
+      expect(
+        mockCaptureActivationCustomAutomationChanged,
+      ).not.toHaveBeenCalled();
+      if (status === 409) expect(onError).not.toHaveBeenCalled();
+      else expect(onError).toHaveBeenCalledWith(error, expect.anything());
+    });
+
     it('tracks deletion with only the persisted destination provider', async () => {
       const { app } = createApp();
       mockGetCustomAutomationById.mockResolvedValue({

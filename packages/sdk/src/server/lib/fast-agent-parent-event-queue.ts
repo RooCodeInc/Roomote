@@ -8,6 +8,7 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   and,
+  automationWebhookDeliveries,
   asc,
   db,
   eq,
@@ -19,8 +20,11 @@ import {
   or,
   recordCustomAutomationRunOutcome,
   recordSessionWakeupOutcome,
+  settleRunningAutomationWebhookDeliveryForSession,
+  markAutomationWebhookDeliveryRunning,
   sql,
   taskRuns,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -58,6 +62,7 @@ export class FastAgentParentBusyError extends Error {
 let fastAgentParentEventQueue: Queue<FastAgentParentEventQueueRequest> | null =
   null;
 const EXITED_RUN_STATUSES = new Set<RunStatus>(exitedRunStatuses);
+const MAX_DELIVERY_ATTEMPTS = 3;
 
 function getFastAgentParentEventQueue() {
   fastAgentParentEventQueue ??= new Queue<FastAgentParentEventQueueRequest>(
@@ -65,7 +70,7 @@ function getFastAgentParentEventQueue() {
     {
       connection: getRedis(),
       defaultJobOptions: {
-        attempts: 3,
+        attempts: MAX_DELIVERY_ATTEMPTS,
         backoff: { type: 'exponential', delay: 2_000 },
         removeOnComplete: true,
         // PostgreSQL remains the source of truth. A scheduled recovery sweep
@@ -143,18 +148,37 @@ export async function enqueueFastAgentParentEvent(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
   retryTaskStartRunId?: number;
+  webhookLease?: { deliveryId: string; leaseToken: string };
 }): Promise<{ eventKey: string; queued: true }> {
   const eventKey = buildFastAgentParentEventKey(params);
-  await db
-    .insert(fastAgentParentEvents)
-    .values({
-      conversationId: params.parent.sessionId,
-      eventKey,
-      parent: params.parent,
-      event: params.event,
-      retryTaskStartRunId: params.retryTaskStartRunId,
-    })
-    .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+  const persist = async (client: DatabaseOrTransaction) =>
+    client
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: params.parent.sessionId,
+        eventKey,
+        parent: params.parent,
+        event: params.event,
+        retryTaskStartRunId: params.retryTaskStartRunId,
+      })
+      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+
+  if (params.webhookLease) {
+    await db.transaction(async (tx) => {
+      if (
+        !(await markAutomationWebhookDeliveryRunning(
+          params.webhookLease!.deliveryId,
+          params.webhookLease!.leaseToken,
+          params.parent.sessionId,
+          tx,
+        ))
+      )
+        throw new Error('Webhook dispatch lease is no longer current.');
+      await persist(tx);
+    });
+  } else {
+    await persist(db);
+  }
 
   wakeFastAgentParentEvent({
     conversationId: params.parent.sessionId,
@@ -272,15 +296,22 @@ async function isStillPending(id: string): Promise<boolean> {
   return Boolean(row) && !row!.deliveredAt && !row!.discardedAt;
 }
 
-async function markDelivered(id: string) {
-  await db
+async function markDelivered(
+  id: string,
+  client: Pick<typeof db, 'update'> = db,
+) {
+  await client
     .update(fastAgentParentEvents)
     .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
     .where(eq(fastAgentParentEvents.id, id));
 }
 
-async function markDiscarded(id: string, error: unknown) {
-  await db
+async function markDiscarded(
+  id: string,
+  error: unknown,
+  client: Pick<typeof db, 'update'> = db,
+) {
+  await client
     .update(fastAgentParentEvents)
     .set({
       discardedAt: new Date(),
@@ -305,12 +336,42 @@ function getAutomationLaunchClaim(event: FastAgentParentEvent) {
 }
 
 async function finalizeAutomationLaunch(
+  sessionId: string,
   event: FastAgentParentEvent,
   status: 'succeeded' | 'failed',
   error?: unknown,
+  inboxId?: string,
 ) {
+  if (
+    await settleRunningAutomationWebhookDeliveryForSession(
+      sessionId,
+      inboxId
+        ? {
+            id: inboxId,
+            status: status === 'succeeded' ? 'delivered' : 'discarded',
+            ...(status === 'failed'
+              ? {
+                  error: error instanceof Error ? error.message : String(error),
+                }
+              : {}),
+          }
+        : undefined,
+    )
+  )
+    return true;
   const claim = getAutomationLaunchClaim(event);
-  if (!claim) return;
+  if (!claim) {
+    if (event.type === 'automation_triggered' && event.webhookDeliveryId) {
+      throw new Error('Webhook automation launch claim is missing or invalid.');
+    }
+    return false;
+  }
+
+  if (event.type === 'automation_triggered' && event.webhookDeliveryId) {
+    throw new Error(
+      'Webhook delivery settlement did not match a running delivery.',
+    );
+  }
 
   await recordCustomAutomationRunOutcome(db, {
     ...claim,
@@ -319,6 +380,7 @@ async function finalizeAutomationLaunch(
       ? { error: error instanceof Error ? error.message : String(error) }
       : {}),
   });
+  return false;
 }
 
 async function finalizeScheduledWakeup(
@@ -346,7 +408,17 @@ export async function drainFastAgentParentEvents(
 
   const parent = first.parent;
   if (parent.sessionId !== request.conversationId) {
-    await markDiscarded(first.id, 'Queued parent identity did not match.');
+    if (
+      !(await settleRunningAutomationWebhookDeliveryForSession(
+        request.conversationId,
+        {
+          id: first.id,
+          status: 'discarded',
+          error: 'Queued parent identity did not match.',
+        },
+      ))
+    )
+      await markDiscarded(first.id, 'Queued parent identity did not match.');
     return drainFastAgentParentEvents(request);
   }
 
@@ -362,6 +434,12 @@ export async function drainFastAgentParentEvents(
   }
 
   try {
+    // Followups carry no webhook id. The persisted Session association also
+    // covers child events and rows admitted before durable execution shipped.
+    const webhook = await db.query.automationWebhookDeliveries.findFirst({
+      where: eq(automationWebhookDeliveries.sessionId, request.conversationId),
+      columns: { id: true },
+    });
     for (;;) {
       const row = await getNextPendingEvent(request.conversationId);
       if (!row) return;
@@ -369,14 +447,31 @@ export async function drainFastAgentParentEvents(
         row.parent.sessionId !== request.conversationId ||
         !isFastAgentParentEvent(row.event)
       ) {
-        await markDiscarded(row.id, 'Queued Fast parent event was invalid.');
+        if (
+          !(await settleRunningAutomationWebhookDeliveryForSession(
+            request.conversationId,
+            {
+              id: row.id,
+              status: 'discarded',
+              error: 'Queued Fast parent event was invalid.',
+            },
+          ))
+        )
+          await markDiscarded(row.id, 'Queued Fast parent event was invalid.');
         continue;
       }
 
+      const webhookTurn =
+        Boolean(webhook) ||
+        (row.event.type === 'automation_triggered' &&
+          Boolean(row.event.webhookDeliveryId));
+      const durableTurn = row.admission === 'inline' || webhookTurn;
+      const resumedTurn = row.admission === 'inline' || (row.attempts ?? 0) > 0;
       await db
         .update(fastAgentParentEvents)
         .set({
           attempts: sql`${fastAgentParentEvents.attempts} + 1`,
+          ...(webhookTurn ? { admission: 'inline' as const } : {}),
           lastError: null,
           updatedAt: new Date(),
         })
@@ -391,7 +486,7 @@ export async function drainFastAgentParentEvents(
           conversationId: request.conversationId,
           eventKey: row.eventKey,
         };
-        if (row.admission === 'inline') {
+        if (durableTurn) {
           // Bind the row to the lock the way the inline surfaces do, so a
           // process shutdown that aborts this turn before it reaches its own
           // abort handling (still in setup, no inference yet) can release
@@ -401,19 +496,20 @@ export async function drainFastAgentParentEvents(
           turnLock.durableResume = () =>
             wakeFastAgentParentEventNow(wakeRequest);
         }
-        await deliverFastAgentParentEventWithLock(
+        const result = await deliverFastAgentParentEventWithLock(
           {
             parent: row.parent,
             event: row.event,
             ...(retryTaskStart ? { retryTaskStart } : {}),
-            // An inline-admitted row only reaches the queue after its owner
-            // was interrupted or parked it for a scheduled retry, so this
-            // delivery is a resumption of the same turn.
-            ...(row.admission === 'inline'
+            // Newly promoted webhook rows start fresh; existing inline rows
+            // resume the same recorded turn after interruption or backoff.
+            ...(durableTurn
               ? {
                   ...(row.retryAt
                     ? { resumedAfterInferenceRetry: true }
-                    : { resumedAfterInterruption: true }),
+                    : resumedTurn
+                      ? { resumedAfterInterruption: true }
+                      : {}),
                   // The resumed run owns the same row and is told what the
                   // earlier attempt already did, so it continues rather than
                   // repeating actions. The consumed retry count keeps the
@@ -433,7 +529,7 @@ export async function drainFastAgentParentEvents(
           },
           turnLock,
         );
-        if (row.admission === 'inline') {
+        if (durableTurn && result !== 'skipped') {
           // The resumed run settles its own row (delivered, or withdrawn
           // from replay before a terminal action), so nothing is written
           // here. If it is still pending, the run handed it back without
@@ -446,11 +542,20 @@ export async function drainFastAgentParentEvents(
             );
             return;
           }
+          await settleRunningAutomationWebhookDeliveryForSession(
+            request.conversationId,
+          );
           continue;
         }
-        await finalizeAutomationLaunch(row.event, 'succeeded');
+        const settled = await finalizeAutomationLaunch(
+          request.conversationId,
+          row.event,
+          'succeeded',
+          undefined,
+          row.id,
+        );
         await finalizeScheduledWakeup(row.event, 'succeeded');
-        await markDelivered(row.id);
+        if (!settled) await markDelivered(row.id);
       } catch (error) {
         if (findFastAgentDurableRetryScheduledError(error)) {
           // The resumed run parked itself for a scheduled retry: the row
@@ -463,16 +568,39 @@ export async function drainFastAgentParentEvents(
         }
         const deliveryError =
           error instanceof FastAgentParentEventDeliveryError ? error : null;
-        if (deliveryError?.replyPosted) {
-          await finalizeAutomationLaunch(row.event, 'succeeded');
+        // A shutdown after a progress reply is not a completed turn. Its
+        // durable row and tool journal must remain available to the successor.
+        if (durableTurn && turnLock.signal.aborted) throw error;
+        if (deliveryError?.replyPosted && !webhookTurn) {
+          const settled = await finalizeAutomationLaunch(
+            request.conversationId,
+            row.event,
+            'succeeded',
+            undefined,
+            row.id,
+          );
           await finalizeScheduledWakeup(row.event, 'succeeded');
-          await markDelivered(row.id);
+          if (!settled) await markDelivered(row.id);
           continue;
         }
-        if (deliveryError?.permanent) {
-          await finalizeAutomationLaunch(row.event, 'failed', deliveryError);
-          await finalizeScheduledWakeup(row.event, 'failed', deliveryError);
-          await markDiscarded(row.id, deliveryError);
+        // Inference parks have their own persisted runtime budget. Do not
+        // count those handoffs as queue failures; ordinary setup/reply errors
+        // must still terminate even when the recovery sweep recreates jobs.
+        if (
+          deliveryError?.permanent ||
+          (webhookTurn &&
+            (row.attempts ?? 0) + 1 - (row.inferenceRetries ?? 0) >=
+              MAX_DELIVERY_ATTEMPTS)
+        ) {
+          const settled = await finalizeAutomationLaunch(
+            request.conversationId,
+            row.event,
+            'failed',
+            error,
+            row.id,
+          );
+          await finalizeScheduledWakeup(row.event, 'failed', error);
+          if (!settled) await markDiscarded(row.id, error);
           continue;
         }
 

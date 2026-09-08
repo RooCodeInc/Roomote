@@ -6,6 +6,7 @@ import {
   codeqlTriageJob,
   conflictScanJob,
   customAutomationsJob,
+  processAutomationWebhookDeliveries,
   dependabotTriageJob,
   managerStatsJob,
   providerUsageLimitJob,
@@ -274,6 +275,7 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
     case ScheduledJobName.SessionsReconcile:
       return sessionsReconcileJob();
     case ScheduledJobName.CustomAutomations:
+      await processAutomationWebhookDeliveries();
       await customAutomationsJob();
       return;
     default:

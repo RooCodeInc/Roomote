@@ -14,6 +14,7 @@ const fastMocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
+  webhookOccurrences: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -57,6 +58,13 @@ vi.mock('../../lib/telegram-communication', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        innerJoin: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: fastMocks.webhookOccurrences })),
+        })),
+      })),
+    })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({ where: vi.fn() })),
     })),
@@ -68,6 +76,17 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   and: vi.fn((...args: unknown[]) => args),
+  inArray: vi.fn((...args: unknown[]) => args),
+  automationWebhookDeliveries: {
+    id: 'delivery.id',
+    triggerId: 'delivery.trigger_id',
+    status: 'delivery.status',
+  },
+  automationWebhookTriggers: {
+    id: 'trigger.id',
+    automationId: 'trigger.automation_id',
+  },
+  reserveWebhookAutomationLaunch: vi.fn(),
   customAutomations: {
     id: 'custom_automations.id',
     launchClaimedAt: 'custom_automations.launch_claimed_at',
@@ -117,12 +136,14 @@ import {
   listEnabledCustomAutomations,
   recordCustomAutomationRunOutcome,
   tryClaimCustomAutomationLaunch,
+  reserveWebhookAutomationLaunch,
 } from '@roomote/db/server';
 import { ALL_REPOSITORIES } from '@roomote/types';
 import { findUserDirectMessageDestination } from '../../lib/user-direct-message';
 
 import {
   customAutomationsJob,
+  launchCustomAutomationRow,
   runCustomAutomationNow,
 } from '../custom-automations';
 import {
@@ -159,6 +180,10 @@ const automation = {
 describe('customAutomationsJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fastMocks.webhookOccurrences.mockResolvedValue([]);
+    vi.mocked(reserveWebhookAutomationLaunch).mockResolvedValue(
+      new Date('2026-09-08T12:00:00Z'),
+    );
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       automation as never,
     ]);
@@ -233,6 +258,63 @@ describe('customAutomationsJob', () => {
     fastMocks.createTelegramProvider.mockResolvedValue({
       postMessage: fastMocks.telegramPostMessage,
     });
+  });
+
+  it('keeps webhook identity stable across leases without changing the saved prompt', async () => {
+    const row = { ...automation, environmentId: null, target: {} };
+    const webhook = {
+      deliveryId: 'delivery-1',
+      triggerId: 'trigger-1',
+      leaseToken: 'lease-1',
+      untrustedNoteSummary: 'Untrusted meeting text',
+    };
+    vi.mocked(reserveWebhookAutomationLaunch)
+      .mockResolvedValueOnce(new Date('2026-09-08T12:00:00Z'))
+      .mockResolvedValueOnce(new Date('2026-09-08T12:01:00Z'));
+    for (const leaseToken of ['lease-1', 'lease-2']) {
+      await expect(
+        launchCustomAutomationRow(row as never, {
+          webhook: { ...webhook, leaseToken },
+        }),
+      ).resolves.toMatchObject({ queued: true });
+    }
+    const eventId = `${automation.id}:webhook:delivery-1`;
+    for (const [index, leaseToken] of ['lease-1', 'lease-2'].entries()) {
+      expect(reserveWebhookAutomationLaunch).toHaveBeenNthCalledWith(
+        index + 1,
+        webhook.deliveryId,
+        leaseToken,
+      );
+      expect(fastMocks.enqueueParentEvent).toHaveBeenNthCalledWith(
+        index + 1,
+        expect.objectContaining({
+          parent: expect.objectContaining({
+            conversation: {
+              surface: 'automation',
+              workspaceId: automation.id,
+              conversationId: eventId,
+            },
+          }),
+          event: expect.objectContaining({
+            eventId,
+            prompt: automation.prompt,
+            trigger: 'webhook',
+            webhookDeliveryId: webhook.deliveryId,
+            webhookTriggerId: webhook.triggerId,
+            untrustedWebhookContext: webhook.untrustedNoteSummary,
+          }),
+          webhookLease: { deliveryId: webhook.deliveryId, leaseToken },
+        }),
+      );
+    }
+    expect(row.prompt).toBe(automation.prompt);
+    expect(tryClaimCustomAutomationLaunch).not.toHaveBeenCalled();
+    expect(recordCustomAutomationRunOutcome).not.toHaveBeenCalled();
+    for (const result of vi.mocked(db.update).mock.results) {
+      expect(result.value.set).toHaveBeenCalledWith({
+        lastLaunchedTaskId: null,
+      });
+    }
   });
 
   it('runs a channel-less Fast automation as a stored Session', async () => {

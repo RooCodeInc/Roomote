@@ -16,14 +16,66 @@ export const MANAGE_CUSTOM_AUTOMATIONS_ACTIONS = [
   'update',
   'delete',
   'run_now',
+  'webhook_inspect',
+  'webhook_configure',
+  'webhook_remove',
+  'webhook_retry',
 ] as const;
 
+export const automationWebhookConfigSchema = z.object({
+  events: z
+    .array(z.enum(['note.generated', 'note.access_granted', 'note.edited']))
+    .min(1)
+    .max(3)
+    .default(['note.generated', 'note.access_granted']),
+  folderIds: z
+    .array(z.string().regex(/^fol_[a-zA-Z0-9]{14}$/u))
+    .max(100)
+    .default([]),
+  scopes: z
+    .array(z.enum(['workspace', 'personal', 'public']))
+    .min(1)
+    .max(3)
+    .refine(
+      (scopes) => !scopes.includes('workspace') || scopes.length === 1,
+      'Workspace scope cannot be combined with other scopes.',
+    )
+    .default(['workspace']),
+  maxRunsPerDay: z.number().int().min(1).max(100).default(20),
+  enabled: z.boolean().default(true),
+});
+
 export const manageCustomAutomationsFieldSchemas = {
-  action: z.enum(MANAGE_CUSTOM_AUTOMATIONS_ACTIONS),
+  action: z
+    .enum(MANAGE_CUSTOM_AUTOMATIONS_ACTIONS)
+    .describe(
+      'Granola webhook_inspect and webhook_retry require owner/admin access. webhook_configure and webhook_remove require admin access. Inspect returns safe subscription and delivery history, never signing secrets. Configure replaces the webhook filters; retry queues a delivery, not a completed run.',
+    ),
   automationId: z
     .string()
     .optional()
-    .describe('Required for inspect, update, delete, and run_now.'),
+    .describe(
+      'Required for inspect, update, delete, run_now, and all webhook actions.',
+    ),
+  deliveryId: z.string().optional().describe('Required for webhook_retry.'),
+  forceLocalRemoval: z
+    .boolean()
+    .optional()
+    .describe(
+      'Only for webhook_remove. Admin-only emergency forget: true removes the local subscription without deleting the Granola webhook, leaving an orphan requiring external cleanup. Omit or use false for normal removal; never silently force removal.',
+    ),
+  events: automationWebhookConfigSchema.shape.events
+    .optional()
+    .describe(
+      'Granola webhook events. Defaults to note.generated and note.access_granted; note.edited is opt-in.',
+    ),
+  folderIds: automationWebhookConfigSchema.shape.folderIds.optional(),
+  scopes: automationWebhookConfigSchema.shape.scopes
+    .optional()
+    .describe('Granola webhook scopes. Defaults to workspace.'),
+  maxRunsPerDay: automationWebhookConfigSchema.shape.maxRunsPerDay
+    .optional()
+    .describe('Webhook daily run cap, 1-100; defaults to 20.'),
   name: z.string().optional(),
   prompt: z
     .string()
@@ -74,9 +126,17 @@ export const manageCustomAutomationsFieldSchemas = {
   targetChannelId: z.string().optional(),
 } satisfies z.ZodRawShape;
 
-export const manageCustomAutomationsInputSchema = z.object(
-  manageCustomAutomationsFieldSchemas,
-);
+export const manageCustomAutomationsInputSchema = z
+  .object(manageCustomAutomationsFieldSchemas)
+  .refine(
+    (input) =>
+      input.forceLocalRemoval === undefined ||
+      input.action === 'webhook_remove',
+    {
+      message: 'forceLocalRemoval is only supported for webhook_remove',
+      path: ['forceLocalRemoval'],
+    },
+  );
 
 export type ManageCustomAutomationsInput = z.infer<
   typeof manageCustomAutomationsInputSchema
@@ -246,6 +306,12 @@ export function compactManageCustomAutomationsResult(
     }
     case 'run_now':
       return pickDefined(result, ['outcome', 'taskId', 'reason', 'error']);
+    case 'webhook_inspect':
+    case 'webhook_configure':
+    case 'webhook_remove':
+    case 'webhook_retry':
+      // These operations return the SDK's safe subscription/delivery projection.
+      return result;
   }
 }
 
@@ -258,7 +324,61 @@ export function compactManageCustomAutomationsResult(
 export function buildManageCustomAutomationsRequest(
   params: ManageCustomAutomationsInput,
 ): ManageCustomAutomationsRequestResult {
+  if (
+    params.forceLocalRemoval !== undefined &&
+    params.action !== 'webhook_remove'
+  ) {
+    return {
+      ok: false,
+      error: 'forceLocalRemoval is only supported for webhook_remove',
+    };
+  }
   switch (params.action) {
+    case 'webhook_inspect':
+    case 'webhook_configure':
+    case 'webhook_remove':
+    case 'webhook_retry': {
+      if (!params.automationId) {
+        return {
+          ok: false,
+          error: `automationId is required for ${params.action}`,
+        };
+      }
+      const path = `/${encodeURIComponent(params.automationId)}/webhook`;
+      if (params.action === 'webhook_retry') {
+        if (!params.deliveryId)
+          return {
+            ok: false,
+            error: 'deliveryId is required for webhook_retry',
+          };
+        return {
+          ok: true,
+          request: {
+            path: `${path}/deliveries/${encodeURIComponent(params.deliveryId)}/retry`,
+            method: 'POST',
+          },
+        };
+      }
+      if (params.action === 'webhook_configure') {
+        const parsed = automationWebhookConfigSchema.safeParse(params);
+        if (!parsed.success) return { ok: false, error: parsed.error.message };
+        return {
+          ok: true,
+          request: { path, method: 'POST', body: parsed.data },
+        };
+      }
+      return {
+        ok: true,
+        request: {
+          path,
+          method: params.action === 'webhook_remove' ? 'DELETE' : 'GET',
+          ...(params.action === 'webhook_remove' &&
+          params.forceLocalRemoval !== undefined
+            ? { body: { forceLocalRemoval: params.forceLocalRemoval } }
+            : {}),
+        },
+      };
+    }
     case 'list':
       return { ok: true, request: { path: '', method: 'GET' } };
     case 'inspect':

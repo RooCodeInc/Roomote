@@ -227,6 +227,59 @@ not that a coding task launched or the work completed. A task ID is not promised
 at this point; follow the Session or configured report destination for the final
 result and any delegated tasks.
 
+### Granola webhook triggers
+
+After creating a custom automation, a deployment admin can bind it to the
+shared Granola connection. Admins approve, edit, and remove bindings; automation
+owners and admins can inspect subscription and delivery history and retry only
+eligible failed deliveries. Inspection's `canRetry` is authoritative: a delivery
+must be failed with no Session because execution never started. Running work and
+previously executed failures cannot be replayed. This is separate from permission
+to edit the automation itself.
+
+Use schedule `off` and leave the automation enabled for event-only work. The
+defaults are `note.generated` and `note.access_granted`, `workspace` scope, no
+folder filter, and a daily webhook run cap of 20. `note.edited` is opt-in.
+`workspace` cannot be mixed with `personal` or `public`; those alternative
+scopes still use the deployment's shared key, not a member's own Granola login.
+Public: notes visible to everyone in the Granola workspace, not the Internet.
+The cap accepts 1 through 100 and is a run-count spend safeguard, not a dollar
+budget. Across all webhook triggers, the deployment allows at most 5 active
+invocations and 200 new invocations per UTC day. Daily caps count first launch
+reservations, not successful completions; waiting deliveries can remain pending.
+These limits do not replace controls on scheduled or manual runs.
+
+The managed provider callback is `POST /api/webhooks/automations/:id` on the
+deployment's public HTTPS URL, using the trigger ID rather than the automation
+ID. Terminal delivery records are eligible for cleanup seven days after
+settlement; this does not expire live work or erase Session transcripts.
+
+Interrupted execution resumes the same Session turn with its durable action
+journal, not a new run. Ordinary setup or reply failures have a three-attempt
+limit; inference retries use the runtime's existing retry budget separately.
+This is not an exactly-once guarantee for arbitrary external effects. Inspect
+uncertain outcomes before repeating an action.
+
+Roomote owns the subscription it creates. Ordinary removal cleans up the remote
+subscription before deleting the local binding, and deletion is blocked while
+deliveries are dispatching or running. Interrupted management operations can be
+retried after two minutes; this is not permission to replay execution. Orphan
+reconciliation matches the exact trigger-specific callback path
+(`/api/webhooks/automations/:id`) across host changes, not the full URL. If
+credentials are revoked, restore provider access and retry cleanup. When that is
+impossible, the admin-only `webhook_remove` action accepts the explicit emergency
+option `forceLocalRemoval: true`, returning
+`{removed: true, remoteCleanupRequired: {providerEndpointId, callbackUrl}}` for an
+existing binding. This skips remote cleanup, not the live-run guard: preserve
+the identifiers and explicitly recover and delete the orphan in Granola.
+
+Review the report destination before enabling a trigger: meeting content read
+with the shared key may be more private than the channel receiving the report.
+Follow the [Granola setup and verification guide](/integrations/granola#managed-automation-triggers)
+for filters, management actions, privacy boundaries, orphan recovery, and remote
+verification. Signatures authenticate deliveries, not the instructions inside
+meeting content; fetched summaries remain untrusted context for the saved prompt.
+
 ### Upgrading to 1.4
 
 Existing custom automations now use this Session-first flow. Review prompts
@@ -511,7 +564,8 @@ manual work: transcript, logs, diffs, previews, artifacts, and final summary.
 ## Use Slack workflows for event-driven custom triggers
 
 For **scheduled** work with a fixed prompt, prefer **Custom automations**
-above. For **event-driven** team workflows, use Slack's own workflow builder
+above. For Granola note events, use the [managed trigger](/integrations/granola#managed-automation-triggers).
+For other **event-driven** team workflows, use Slack's own workflow builder
 and end the workflow with a Roomote mention.
 
 Good custom event triggers include:
