@@ -211,6 +211,9 @@ vi.mock('@/components/tasks', async () => {
           >
             Use GLM 5.2 model
           </button>
+          <button type="button" onClick={() => onModelChange('')}>
+            Use default model
+          </button>
           <button type="button" onClick={() => onReasoningEffortChange('high')}>
             Use high reasoning
           </button>
@@ -320,6 +323,25 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: 'openrouter/z-ai/glm-5.2',
+      });
+    });
+  });
+
+  it('starts a new Fast session on the default after resetting the model', async () => {
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Model for this session' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Use default model' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: 'Test prompt',
+        images: undefined,
+        attachmentTexts: undefined,
+        model: undefined,
       });
     });
   });

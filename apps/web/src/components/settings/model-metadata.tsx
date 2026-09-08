@@ -1,6 +1,7 @@
 import { FileText, Image, Type, Video, Volume2 } from '@/components/system';
 import type { LucideIcon } from '@/components/system';
 import type { TaskModelInputType, TaskModelMetadata } from '@roomote/types';
+import { formatCurrency } from '@/lib/formatters';
 
 const INPUT_TYPE_ICONS: Record<TaskModelInputType, LucideIcon> = {
   text: Type,
@@ -66,7 +67,7 @@ function formatSinglePrice(perToken: number | null | undefined): string {
     return `<$0.01`;
   }
   const rounded = Math.round(perMillion * 100) / 100;
-  return `$${rounded.toFixed(2)}`;
+  return formatCurrency(Number(rounded.toFixed(2)));
 }
 
 function getInputTypeIcons(

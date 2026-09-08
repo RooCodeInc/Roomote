@@ -72,6 +72,26 @@ During OAuth install, Roomote also records the installed bot display name when
 Slack exposes it, so setup and automation guidance can show the actual Slack
 app users should mention instead of assuming `@Roomote`.
 
+## Automatic manager channel
+
+After the app is installed, the first user who links their Slack account to
+Roomote triggers setup of a public `#roomote-managers` channel in that workspace.
+Installing the app alone does not trigger setup. Roomote creates the channel or
+reuses an existing public, unarchived, nonshared channel with that exact name,
+ensures the bot is a member, and sets it as the shared **Manager Channel** under
+**Settings > Automations > Automation output**.
+
+Existing Slack or Discord Manager Channel settings and explicit automation
+destinations are preserved. This setup does not create or enable automations.
+Private channels are not selected, converted, or read by automatic setup; they
+remain available for manual configuration with the appropriate bot access.
+
+Automatic setup requires the bot scopes `channels:manage` and `channels:join`.
+For an existing installation, use **Update app**, then **Reinstall in Slack** to
+approve these permissions. If workspace restrictions, unavailable permissions,
+or Slack errors prevent setup, account authentication still succeeds. Link your
+Slack account again to retry, or configure the Manager Channel manually.
+
 ## Redirect URLs
 
 Slack sign-in uses Slack OpenID Connect. Add the sign-in redirect URL:
@@ -105,8 +125,11 @@ app_mentions:read
 assistant:write
 channels:read
 channels:history
+channels:manage
+channels:join
 chat:write
 files:read
+files:write
 groups:read
 groups:history
 im:read
@@ -125,6 +148,31 @@ users:read
 After adding or changing scopes, reinstall the app from **OAuth & Permissions >
 Install to Workspace**. Slack does not apply new scopes to an existing
 installation until you reinstall.
+
+Native video replies require `files:write`. For an existing installation,
+reinstall the app and obtain workspace admin reapproval if required before
+expecting videos to appear as Slack files. Updating the manifest alone does not
+grant the installed bot this permission.
+
+## Video replies
+
+Roomote can share selected task recordings as native Slack video files in the
+conversation. Ask for the recording from a task associated with the current
+Session, including an earlier task in that Session, and Roomote can recover its
+uploaded artifact and share it without recording again. Native delivery is
+limited to uploaded recordings from that Session's task runs, not arbitrary
+recordings from other Sessions.
+Uploading a task artifact alone does not automatically post it to Slack.
+
+The recording must be no larger than 50 MiB. When conversion is needed, the
+converted file must also fit within 50 MiB. Larger recordings use an artifact
+viewer link instead of a native Slack attachment.
+
+For WebM recordings, delivery converts a copy to MP4 for Slack playback while
+preserving the original task artifact. If permissions, conversion, or upload
+prevent native delivery, Roomote shares only an artifact viewer link, without
+an error or unavailability explanation. Roomote only describes a video as
+attached when native delivery succeeds.
 
 ## Events and interactivity
 

@@ -53,6 +53,11 @@ export async function handleGetTaskSummary(
         (artifact) =>
           `Image Artifact: ${artifact.path} [id: ${artifact.id}] [view: ${artifact.viewUrl}]`,
       ),
+      ...(result.videoArtifacts ?? []).map(
+        (artifact) =>
+          `Video Artifact: ${artifact.path} [id: ${artifact.id}] [view: ${artifact.viewUrl}]`,
+      ),
+      result.summary ? `Summary: ${result.summary}` : null,
     ].filter(Boolean);
 
     return textResult(lines.join('\n'));

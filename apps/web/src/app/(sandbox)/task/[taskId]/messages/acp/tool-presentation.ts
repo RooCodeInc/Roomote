@@ -37,6 +37,7 @@ export type ToolIconKey =
   | 'roomote'
   | 'video'
   | 'target'
+  | 'list'
   | 'list-checks'
   | 'pull-request'
   | 'environment'
@@ -96,6 +97,8 @@ const TASK_TOOL_NAMES = new Set([
   'send_task_message',
 ]);
 const COMMUNICATION_TOOL_NAMES = new Set([
+  'report_to_parent_session',
+  'receive_task_report',
   'send_chat_reply',
   'send_chat_reaction',
   'send_chat_reaction_emoji',
@@ -104,8 +107,10 @@ const COMMUNICATION_TOOL_NAMES = new Set([
 ]);
 const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_custom_automations: 'task',
+  manage_wakeups: 'task',
   get_about_me: 'roomote',
   describe_video: 'video',
+  request_user_input: 'list',
   manage_goal: 'target',
   manage_tasks: 'list-checks',
   manage_source_control: 'pull-request',
@@ -151,6 +156,7 @@ export function resolveToolPresentation(
         : 'completed';
   const category = resolveToolCategory({
     kind,
+    isMcp: data.isMcp,
     toolName,
     serverName,
     isExecute: data.isExecute,
@@ -162,9 +168,7 @@ export function resolveToolPresentation(
     providerKind === 'mcp' && serverName
       ? getMcpIntegration(serverName)
       : undefined;
-  const displayName = toolName
-    ? formatToolIdentifier(toolName)
-    : sanitizeSandboxPathString(data.title ?? 'Tool');
+  const displayName = toolName ? formatToolIdentifier(toolName) : 'Tool';
   const providerLabel =
     serverName === 'roomote' || serverName === 'gbrain'
       ? undefined
@@ -176,9 +180,19 @@ export function resolveToolPresentation(
     readToolArguments(data),
     category,
     serverName,
+    providerKind === 'native'
+      ? (toolName ?? kind ?? (category === 'read' ? 'read' : null))
+      : null,
   );
-  const verb = receipt?.verb ?? (phase === 'running' ? 'Using' : 'Used');
-  const object = receipt?.object ?? displayName;
+  const verb =
+    receipt?.verb ??
+    (phase === 'running'
+      ? 'Running'
+      : phase === 'failed'
+        ? 'Failed'
+        : 'Completed');
+  const object =
+    receipt?.object ?? (toolName ? `${displayName} call` : 'tool call');
 
   return {
     identity: { providerKind, serverName, toolName },
@@ -202,6 +216,7 @@ export function resolveToolPresentation(
 
 function resolveToolCategory(input: {
   kind: string | null;
+  isMcp: boolean;
   toolName: string | null;
   serverName: string | null;
   isExecute: boolean;
@@ -238,7 +253,11 @@ function resolveToolCategory(input: {
     (input.toolName && LIST_TOOL_NAMES.has(input.toolName))
   )
     return 'list';
-  if (input.kind === 'edit') return 'edit';
+  if (
+    input.kind === 'edit' ||
+    (!input.isMcp && (input.toolName ?? input.kind) === 'apply_patch')
+  )
+    return 'edit';
   if (
     input.kind === 'task' ||
     (input.toolName && TASK_TOOL_NAMES.has(input.toolName))
@@ -294,6 +313,7 @@ function resolveReceiptLanguage(
   args: ToolArguments | null,
   category: ToolPresentationCategory,
   serverName: string | null,
+  nativeToolName: string | null,
 ): { verb: string; object: string } | null {
   const byPhase = (running: string, completed: string, failed: string) =>
     phase === 'running' ? running : phase === 'failed' ? failed : completed;
@@ -327,6 +347,21 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
       object: 'chat reply',
+    };
+  if (toolName === 'request_user_input')
+    return {
+      verb: byPhase('Asking for', 'Asked for', 'Failed to Ask for'),
+      object: 'human guidance',
+    };
+  if (toolName === 'report_to_parent_session')
+    return {
+      verb: byPhase('Sending', 'Sent', 'Failed to Send'),
+      object: 'report to Session',
+    };
+  if (toolName === 'receive_task_report')
+    return {
+      verb: byPhase('Receiving', 'Received', 'Failed to Receive'),
+      object: 'task report',
     };
   if (toolName === 'post_to_channel')
     return {
@@ -391,10 +426,64 @@ function resolveReceiptLanguage(
       verb: byPhase('Inspecting', 'Inspected', 'Failed to Inspect'),
       object: 'Images',
     };
+  if (nativeToolName === 'skill' || nativeToolName === 'load_skill') {
+    const name = stringArgument(args, 'name');
+    return {
+      verb: byPhase('Loading', 'Loaded', 'Failed to Load'),
+      object: name ? `skill ${name}` : 'skill',
+    };
+  }
+  if (nativeToolName === 'apply_patch' || nativeToolName === 'edit') {
+    const paths = new Set<string>();
+    if (
+      nativeToolName === 'apply_patch' &&
+      typeof args?.patchText === 'string'
+    ) {
+      // Only operation headers in the input identify files, never result prose
+      // or prefixed hunk contents. A move names the destination of one edit.
+      for (const match of args.patchText.matchAll(
+        /^\*\*\* (Add|Update|Delete) File: ([^\r\n]+)(?:\r?\n\*\*\* Move to: ([^\r\n]+))?/gm,
+      )) {
+        const path = (
+          match[1] === 'Update' ? (match[3] ?? match[2]!) : match[2]!
+        ).trim();
+        if (path) paths.add(path);
+      }
+    }
+    const path = paths.values().next().value;
+    return {
+      verb: byPhase('Editing', 'Edited', 'Failed to Edit'),
+      object:
+        paths.size > 1
+          ? `${paths.size} files`
+          : path
+            ? (stringArgument({ path }, 'path', true) ?? '')
+            : nativeToolName === 'edit'
+              ? (stringArgument(args, 'filePath', true) ??
+                stringArgument(args, 'file_path', true) ??
+                stringArgument(args, 'path', true) ??
+                '')
+              : '',
+    };
+  }
+  if (
+    nativeToolName === 'read' ||
+    nativeToolName === 'read_file' ||
+    nativeToolName === 'spill_read' ||
+    (toolName === null && nativeToolName !== null && category === 'read')
+  )
+    return {
+      verb: byPhase('Reading', 'Read', 'Failed to Read'),
+      object:
+        stringArgument(args, 'filePath', true) ??
+        stringArgument(args, 'file_path', true) ??
+        stringArgument(args, 'path', true) ??
+        'file',
+    };
   return null;
 }
 
-function readToolArguments(data: ToolData): ToolArguments | null {
+export function readToolArguments(data: ToolData): ToolArguments | null {
   const rawInput = (data as unknown as Record<string, unknown>).rawInput;
   if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
     return null;
@@ -410,11 +499,16 @@ function readToolArguments(data: ToolData): ToolArguments | null {
 function stringArgument(
   args: ToolArguments | null,
   key: string,
+  sanitizePath = false,
 ): string | null {
   const value = args?.[key];
   if (typeof value !== 'string') return null;
 
-  const normalizedValue = value.replace(/\s+/g, ' ').trim();
+  const normalizedValue = (
+    sanitizePath ? sanitizeSandboxPathString(value) : value
+  )
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!normalizedValue) return null;
   return normalizedValue.length > 80
     ? `${normalizedValue.slice(0, 77).trimEnd()}...`
@@ -451,8 +545,12 @@ function manageTasksReceipt(
       object: 'sessions',
     },
     get_summary: {
-      verb: byPhase('Getting', 'Received', 'Failed to Get'),
-      object: `summary from ${target}`,
+      verb: byPhase(
+        'Waiting to hear from',
+        'Heard back from',
+        'Failed to hear from',
+      ),
+      object: 'task',
     },
     get_messages: {
       verb: byPhase('Getting', 'Received', 'Failed to Get'),
@@ -523,7 +621,7 @@ export function summarizeToolGroup(
   if (category === 'edit')
     return {
       action: 'Edited',
-      objectSummary: `${count} ${count === 1 ? 'file' : 'files'}`,
+      objectSummary: `${count} ${count === 1 ? 'edit' : 'edits'}`,
     };
 
   const label = displayName.toLowerCase();

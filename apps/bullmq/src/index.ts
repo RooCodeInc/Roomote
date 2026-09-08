@@ -54,6 +54,7 @@ import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
 import { readBullMqQueueHealth } from './health';
+import { startSessionWakeupQueue } from './session-wakeup-queue';
 import { installBullMqGracefulShutdown } from './graceful-shutdown';
 
 // Deployments roll every service at once while migrations run only ahead
@@ -216,6 +217,11 @@ const {
   worker: fastAgentParentEventWorker,
   queueEvents: fastAgentParentEventQueueEvents,
 } = await startFastAgentParentEventQueue();
+const {
+  queue: sessionWakeupQueue,
+  worker: sessionWakeupWorker,
+  queueEvents: sessionWakeupQueueEvents,
+} = await startSessionWakeupQueue();
 
 const serverAdapter = new HonoAdapter(serveStatic);
 
@@ -256,6 +262,7 @@ createBullBoard({
       readOnlyMode: false,
     }),
     new BullMQAdapter(fastAgentParentEventQueue, { readOnlyMode: false }),
+    new BullMQAdapter(sessionWakeupQueue, { readOnlyMode: false }),
   ],
   serverAdapter,
 });
@@ -448,6 +455,9 @@ installBullMqGracefulShutdown({
     await pullRequestMergeabilityCheckQueue.close();
     await fastAgentParentEventQueueEvents.close();
     await fastAgentParentEventQueue.close();
+    await sessionWakeupWorker.close();
+    await sessionWakeupQueueEvents.close();
+    await sessionWakeupQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   },

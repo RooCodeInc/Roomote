@@ -61,6 +61,10 @@ import {
   updateSessionMetadata,
 } from '../commands/sessions';
 import {
+  cancelSessionWakeupCommand,
+  getSessionWakeupsCommand,
+} from '../commands/sessions/wakeups';
+import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
   analyticsExportInputSchema,
@@ -2961,6 +2965,16 @@ export const appRouter = createRouter({
   }),
 
   sessions: createRouter({
+    wakeups: protectedProcedure
+      .input(sessionIdInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getSessionWakeupsCommand(auth, input.sessionId),
+      ),
+    cancelWakeup: protectedProcedure
+      .input(sessionIdInputSchema.extend({ wakeupId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        cancelSessionWakeupCommand(auth, input),
+      ),
     list: protectedProcedure
       .input(sessionsListInputSchema)
       .query(({ ctx: { auth }, input }) => getSessions(auth, input)),

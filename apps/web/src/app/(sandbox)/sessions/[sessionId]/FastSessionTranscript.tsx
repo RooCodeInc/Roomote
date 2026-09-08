@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useReducedMotion } from 'motion/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -17,6 +16,7 @@ import {
   getTextFromContentBlocks,
   inferAcpMessageKind,
   parsePrReviewActionOffer,
+  getTaskModelDisplayName,
   type AcpMessage,
   type PrReviewActionChoice,
   type AcpEventType,
@@ -59,15 +59,13 @@ import {
   SessionUserInputCard,
 } from './SessionUserInputCard';
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
-import {
-  SESSION_HEADER_CONTENT_CLASS_NAME,
-  SESSION_HEADER_TITLE_CLASS_NAME,
-} from './session-header-layout';
+import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
 
 import {
   AcpTranscriptBlockList,
   useAcpTranscriptBlocks,
 } from '../../task/[taskId]/messages/acp';
+import { ModelBadge } from '@/components/sandbox';
 import {
   AcpProtocolService,
   toAcpUiMessage,
@@ -223,9 +221,7 @@ function ThinkingMessage() {
   return (
     <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
-        <Shimmer className="text-sm font-light" direction="rl" duration={1}>
-          Thinking
-        </Shimmer>
+        <Shimmer className="text-sm font-light">Thinking</Shimmer>
       </MessageContent>
     </Message>
   );
@@ -238,7 +234,6 @@ function RunningTasksMessage({
   count: number;
   onOpenTasks: () => void;
 }) {
-  const shouldReduceMotion = useReducedMotion();
   const label = `${count} ${count === 1 ? 'task' : 'tasks'} running`;
 
   return (
@@ -251,20 +246,9 @@ function RunningTasksMessage({
             aria-label={`${label}. Open ${count === 1 ? 'task' : 'tasks'}`}
             onClick={onOpenTasks}
           >
-            {shouldReduceMotion ? (
-              <span className="text-sm font-light text-muted-foreground">
-                {label}
-              </span>
-            ) : (
-              <Shimmer
-                as="span"
-                className="text-sm font-light"
-                duration={3}
-                spread={1}
-              >
-                {label}
-              </Shimmer>
-            )}
+            <Shimmer as="span" className="text-sm font-light" spread={1}>
+              {label}
+            </Shimmer>
           </button>
         </span>
       </MessageContent>
@@ -285,6 +269,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort = null,
   owner,
   headerExtras,
+  headerActions,
   timelineExtras,
 }: {
   sessionId: string;
@@ -299,6 +284,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort?: ReasoningEffort | null;
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
+  headerActions?: ReactNode;
   timelineExtras?: ReactNode;
 }) {
   const trpcClient = useTRPCClient();
@@ -308,6 +294,7 @@ export function FastSessionTranscript({
   const taskStateRevision = useSessionTaskStateRevision();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
+  const effectiveSessionModel = sessionModel ?? defaultModelId;
   const slackMentionScope = useMemo<SlackMentionScope>(
     () => ({ kind: 'session', sessionId }),
     [sessionId],
@@ -550,6 +537,11 @@ export function FastSessionTranscript({
       messages
         .filter(
           (message) =>
+            !(
+              message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+              (message.payload as { taskNavigation?: unknown } | null)
+                ?.taskNavigation === true
+            ) &&
             message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput &&
             message.eventType !==
               ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
@@ -745,13 +737,31 @@ export function FastSessionTranscript({
     >
       <SlackMentionProvider scope={slackMentionScope}>
         <WorkspaceHeader
-          className="py-4.25"
-          contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}
+          className="py-3.25"
+          contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
+          actions={headerActions}
         >
-          <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>
-            {title ?? fallbackTitle}
-          </h1>
-          {headerExtras}
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <h1
+              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+              title={title ?? fallbackTitle}
+            >
+              {title ?? fallbackTitle}
+            </h1>
+            {(effectiveSessionModel || headerExtras) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                {effectiveSessionModel ? (
+                  <ModelBadge
+                    model={effectiveSessionModel}
+                    displayName={getTaskModelDisplayName(effectiveSessionModel)}
+                    showIcon={false}
+                    iconClassName="text-muted-foreground"
+                  />
+                ) : null}
+                {headerExtras}
+              </div>
+            )}
+          </div>
         </WorkspaceHeader>
         <Conversation className="min-h-0 flex-1" initial="instant">
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">

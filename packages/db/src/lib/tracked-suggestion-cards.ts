@@ -14,6 +14,7 @@ type SuggestionCardRegistration = {
   suggestionType: string;
   suggestionKey: string;
   suggestionGroupKey?: string;
+  originSessionId?: string;
   launchRouting?: 'router';
   launchTarget?: string;
 };
@@ -39,6 +40,9 @@ export async function registerTrackedSuggestionCards(
         metadata: {
           suggestionType: registration.suggestionType,
           suggestionKey: registration.suggestionKey,
+          ...(registration.originSessionId
+            ? { originSessionId: registration.originSessionId }
+            : {}),
           ...(registration.suggestionGroupKey
             ? { suggestionGroupKey: registration.suggestionGroupKey }
             : {}),

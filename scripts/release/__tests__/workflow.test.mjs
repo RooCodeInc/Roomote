@@ -152,6 +152,50 @@ test('release workflow keeps promotion as the only automated PR gate', () => {
   assert.doesNotMatch(promoteScript, /--force(?:-with-lease)?/);
 });
 
+test('GHCR app and embedded worker use the checked-out build commit', () => {
+  const workflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/publish-ghcr.yml'), 'utf8'),
+  );
+  const steps = workflow.jobs.build.steps;
+  const checkoutIndex = steps.findIndex((step) =>
+    step.uses?.startsWith('actions/checkout@'),
+  );
+  const commitIndex = steps.findIndex((step) => step.id === 'commit');
+  const buildIndex = steps.findIndex((step) => step.id === 'build');
+  assert.ok(checkoutIndex >= 0 && checkoutIndex < commitIndex);
+  assert.ok(commitIndex < buildIndex);
+  assert.equal(
+    steps[commitIndex].run,
+    'sha="$(git rev-parse HEAD)"\necho "sha=$sha" >> "$GITHUB_OUTPUT"\n',
+  );
+  assert.match(
+    steps[buildIndex].with['build-args'],
+    /^GITHUB_SHA=\$\{\{ steps\.commit\.outputs\.sha \}\}$/m,
+  );
+
+  const dockerfile = readFileSync(
+    join(repoRoot, '.docker/app/Dockerfile'),
+    'utf8',
+  );
+  for (const name of ['base', 'runtime-base']) {
+    const stage = dockerfile.split(` AS ${name}\n`)[1].split(/^FROM /m)[0];
+    assert.match(stage, /^ARG GITHUB_SHA$/m);
+    assert.match(stage, /^ENV GITHUB_SHA=\$\{GITHUB_SHA\}$/m);
+  }
+  assert.match(
+    dockerfile,
+    /FROM base AS build-controller[\s\S]*?RUN \.\/scripts\/build-worker-release\.sh/,
+  );
+  const workerRelease = readFileSync(
+    join(repoRoot, 'scripts/build-worker-release.sh'),
+    'utf8',
+  );
+  assert.match(
+    workerRelease,
+    /^echo "\$\{GITHUB_SHA:-.*\}" > "\$TAG\/COMMIT"$/m,
+  );
+});
+
 test('GHCR release workflow announces only newly created releases in Discord', () => {
   const workflow = YAML.parse(
     readFileSync(join(repoRoot, '.github/workflows/publish-ghcr.yml'), 'utf8'),

@@ -151,6 +151,24 @@ describe('automation result blocks', () => {
     ).toBe('Weekly · GPT 5.6 Max · $0.00 · 1d 2h 3m 4s');
   });
 
+  it.each([
+    [999_990_000, '$999.99'],
+    [1_000_000_000, '$1,000.00'],
+    [1_234_560_000, '$1,234.56'],
+    [0, '$0.00'],
+    [1_000, '$0.00'],
+    [10_000, '$0.01'],
+  ])('formats %s micro-USD as %s in subtitles', (costMicroUsd, expected) => {
+    expect(
+      formatAutomationResultSubtitle({
+        trigger: 'Manual',
+        model: 'Kimi K3 Medium',
+        costMicroUsd,
+        durationMs: 37_900,
+      }),
+    ).toBe(`Manual · Kimi K3 Medium · ${expected} · 37s`);
+  });
+
   it('places additional actions before a custom Configure label', () => {
     const blocks = buildAutomationResultBlocks({
       title: 'Usage alert',

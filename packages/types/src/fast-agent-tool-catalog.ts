@@ -12,6 +12,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   ignoreEvent: 'ignore_event',
   inspectImages: 'inspect_images',
   launchTask: 'launch_task',
+  manageWakeups: 'manage_wakeups',
   retryTaskStart: 'retry_task_start',
   saveMemory: 'save_memory',
   sendChatReaction: 'send_chat_reaction',
@@ -56,6 +57,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
     kind: ACP_TOOL_KINDS.read,
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.launchTask, kind: ACP_TOOL_KINDS.task },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
+    kind: ACP_TOOL_KINDS.task,
+  },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart,
     kind: ACP_TOOL_KINDS.task,

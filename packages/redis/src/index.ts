@@ -5,6 +5,7 @@ export { getRedis } from './client';
 export {
   disconnectSessionPresence,
   isSessionUserPresent,
+  listSessionPresentUserIds,
   refreshSessionPresence,
   SESSION_PRESENCE_LEASE_MS,
 } from './session-presence';

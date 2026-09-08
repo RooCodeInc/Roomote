@@ -1226,7 +1226,9 @@ function unwrapOnDemandIntegrationCall(
   const candidates = [
     asStringOrNull(update.mcpToolName),
     asStringOrNull(update.toolName),
-    asStringOrNull(update.title),
+    update.isMcp === false && asStringOrNull(update.toolName)?.trim()
+      ? null
+      : asStringOrNull(update.title),
   ];
   const isWrapper = candidates.some(
     (name) =>
@@ -1265,6 +1267,15 @@ export function extractAcpMcpInvocation(
       mcpServerName: mcpServerName ?? null,
       mcpToolName: mcpToolName ?? null,
     };
+  }
+
+  // Native arguments and display titles are not MCP identity metadata.
+  if (
+    update.isMcp === false &&
+    asStringOrNull(update.toolName)?.trim() &&
+    !asStringOrNull(update.serverName)
+  ) {
+    return null;
   }
 
   const rawInput = asRecordOrNull(update.rawInput);

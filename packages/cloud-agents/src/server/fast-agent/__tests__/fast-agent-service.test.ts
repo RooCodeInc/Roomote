@@ -274,6 +274,7 @@ vi.mock('@roomote/redis', () => ({
 }));
 
 vi.mock('../fast-agent-turn-lock', () => ({
+  registerFastAgentTurnActivity: vi.fn(() => vi.fn()),
   FastAgentTurnLockLostError: class extends Error {
     constructor() {
       super('Fast conversation lock ownership was lost.');
@@ -313,6 +314,7 @@ import {
 import {
   FastAgentProcessShutdownError,
   FastAgentTurnLockLostError,
+  registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
 import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
 
@@ -775,6 +777,68 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('preserves explicit video selections in delivery, canonical persistence, and reply deduplication', async () => {
+    const imageArtifactIds = ['11111111-1111-4111-8111-111111111111'];
+    const videos = [
+      '22222222-2222-4222-8222-222222222222',
+      '33333333-3333-4333-8333-333333333333',
+    ];
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        for (const video of [videos[0], videos[0], videos[1]]) {
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'progress',
+            message: 'Here is the recording.',
+            videoArtifactIds: [video],
+          });
+        }
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Both recordings are ready.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultImageArtifactIds: imageArtifactIds,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledTimes(3);
+    for (const [index, video] of videos.entries()) {
+      expect(adapter.postReply).toHaveBeenNthCalledWith(index + 1, {
+        purpose: 'progress',
+        message: 'Here is the recording.',
+        imageArtifactIds,
+        videoArtifactIds: [video],
+      });
+    }
+    expect(adapter.postReply).toHaveBeenLastCalledWith({
+      purpose: 'closeout',
+      message: 'Both recordings are ready.',
+      imageArtifactIds,
+    });
+    const assistantMessages = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessages.map((message) => message.payload)).toEqual([
+      ...videos.map((video) => ({
+        purpose: 'progress',
+        imageArtifactIds,
+        videoArtifactIds: [video],
+      })),
+      { purpose: 'closeout', imageArtifactIds },
+    ]);
+  });
+
   it('persists child-selected image IDs when the parent omits the optional attachment argument', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
@@ -1050,6 +1114,58 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         }),
       }),
     );
+  });
+
+  it('leaves pending human rows for whole-turn delivery without a native-ready capability', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getPendingHumanFollowUp.mockResolvedValue([
+        {
+          id: '9ce14671-fd2e-41d3-a5dd-ab53766672cc',
+          createdAt: new Date('2026-08-31T12:00:00.000Z'),
+          parent: { sessionId: 'conversation-1' },
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.3',
+            currentMessageId: '100.3',
+            userId: 'user-1',
+            question: 'A question arriving during the answer.',
+          },
+        },
+      ]);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await vi.advanceTimersByTimeAsync(1_000);
+          await options.onAssistantMessageCompleted?.({
+            id: 'original-answer',
+            sessionId: 'opencode-session-1',
+            createdAtMs: 1,
+            completedAtMs: 2,
+          });
+          options.onNativeSteerClosed?.();
+          await vi.advanceTimersByTimeAsync(1_000);
+          return 'Original answer.';
+        },
+      );
+      const adapter = callbacks();
+      await expect(
+        answerFastAgentQuestion({ ...baseParams, adapter }),
+      ).resolves.toBe('Original answer.');
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          purpose: 'closeout',
+          message: 'Original answer.',
+        }),
+      );
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(mocks.nativeSteer).not.toHaveBeenCalled();
+      expect(mocks.getPendingHumanFollowUp).not.toHaveBeenCalled();
+      expect(mocks.updateParentEventWhere).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('injects durable human follow-ups with native steering between tool calls', async () => {
@@ -2519,6 +2635,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const activity = {
       start: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
     };
 
     await answerFastAgentQuestion({
@@ -2531,6 +2648,102 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(activity.start.mock.invocationCallOrder[0]).toBeLessThan(
       activity.settle.mock.invocationCallOrder[0]!,
     );
+    expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: false });
+  });
+
+  it.each(['cancel', 'shutdown', 'lost'] as const)(
+    'cleans up activity on %s before stuck inference finishes',
+    async (reason) => {
+      const controller = new AbortController();
+      const interruption =
+        reason === 'lost'
+          ? new FastAgentTurnLockLostError()
+          : reason === 'shutdown'
+            ? new FastAgentProcessShutdownError('SIGTERM')
+            : new Error('cancelled');
+      let finishInference!: () => void;
+      mocks.generateText.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => {
+          finishInference = resolve;
+        });
+        throw interruption;
+      });
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ activity }),
+        signal: controller.signal,
+      });
+      const rejected = expect(result).rejects.toBe(interruption);
+      await vi.waitFor(() => expect(finishInference).toBeTypeOf('function'));
+      controller.abort(interruption);
+      if (reason === 'lost') {
+        expect(activity.dispose).toHaveBeenCalled();
+        expect(activity.settle).not.toHaveBeenCalled();
+      } else {
+        await vi.waitFor(() =>
+          expect(activity.settle).toHaveBeenCalledWith({
+            keepProcessing: false,
+          }),
+        );
+      }
+      finishInference();
+      await rejected;
+    },
+  );
+
+  it('binds activity to the original lock when inference has a derived signal, then unregisters', async () => {
+    const lock = new AbortController();
+    const inference = new AbortController();
+    const unregister = vi.fn();
+    vi.mocked(registerFastAgentTurnActivity).mockReturnValueOnce(unregister);
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ activity }),
+      signal: inference.signal,
+      turnLockSignal: lock.signal,
+    });
+    expect(registerFastAgentTurnActivity).toHaveBeenCalledWith(
+      lock.signal,
+      expect.objectContaining({
+        settle: expect.any(Function),
+        dispose: expect.any(Function),
+      }),
+    );
+    expect(
+      vi.mocked(registerFastAgentTurnActivity).mock.invocationCallOrder.at(-1),
+    ).toBeLessThan(activity.start.mock.invocationCallOrder[0]!);
+    expect(unregister).toHaveBeenCalledOnce();
+  });
+
+  it('disposes instead of starting when setup enters an already-aborted turn', async () => {
+    const controller = new AbortController();
+    const lost = new FastAgentTurnLockLostError();
+    controller.abort(lost);
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ activity }),
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(lost);
+    expect(activity.start).not.toHaveBeenCalled();
+    expect(activity.dispose).toHaveBeenCalled();
+    expect(activity.settle).not.toHaveBeenCalled();
   });
 
   it('measures receipt to delivery and excludes assistant persistence', async () => {
@@ -3889,6 +4102,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('stops a lock-lost turn without posting a stale error closeout', async () => {
     const controller = new AbortController();
     const lockLost = new FastAgentTurnLockLostError();
+    const activity = {
+      start: vi.fn(),
+      settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
+    };
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
         expect(options.signal).toBeInstanceOf(AbortSignal);
@@ -3906,7 +4124,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         throw lockLost;
       },
     );
-    const adapter = callbacks();
+    const adapter = callbacks({ activity });
 
     await expect(
       answerFastAgentQuestion({
@@ -3922,6 +4140,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.reconcileRetryNotices).toHaveBeenCalledOnce();
     // No retry notice existed, so there is no orphan to attribute.
     expect(mocks.markRetryNoticeInterruption).not.toHaveBeenCalled();
+    expect(activity.dispose).toHaveBeenCalled();
+    expect(activity.settle).not.toHaveBeenCalled();
   });
 
   it('leaves a visible retry notice for the successor when lock loss cancels backoff', async () => {
@@ -5047,6 +5267,88 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }
     });
 
+    it.each([
+      [
+        { statusCode: '401', status: 429, code: 403, message: 'Rejected' },
+        'Rejected',
+      ],
+      [
+        { statusCode: null, status: 201, message: 'Rejected' },
+        'HTTP 201: Rejected',
+      ],
+      [{ statusCode: 400.5, message: 'Rejected' }, 'HTTP 400.5: Rejected'],
+      [
+        { statusCode: Infinity, message: 'Rejected' },
+        'HTTP Infinity: Rejected',
+      ],
+      [{ statusCode: 99, status: 401, message: 'Rejected' }, 'Rejected'],
+      [
+        {
+          message: 'Outer',
+          extra: { status: 401, data: { message: 'Hidden' } },
+        },
+        'Outer',
+      ],
+      [
+        {
+          message: 'Outer',
+          responseBody: '[{"status":401,"message":"Hidden"}]',
+        },
+        'Outer',
+      ],
+      [
+        { responseBody: ' {"status":400,"message":"Decoded"}' },
+        'HTTP 400: Decoded',
+      ],
+      [{ message: 'Outer', error: { message: 'Inner' } }, 'Outer'],
+      [
+        { data: { message: 'First' }, cause: { data: { message: 'Later' } } },
+        'Later',
+      ],
+      [
+        new Error('Root fallback', { cause: new Error('Nested ignored') }),
+        'Root fallback',
+      ],
+      [
+        { message: ' \n Rejected\t sk-testsecret1234  ' },
+        'Rejected [redacted]',
+      ],
+      [
+        { message: `${'word '.repeat(45)}end` },
+        `${'word '.repeat(45).slice(0, 199)}…`,
+      ],
+      [{ message: `${'word '.repeat(39)}12345` }, `${'word '.repeat(39)}12345`],
+      [{ message: `sk-${'x'.repeat(250)} Rejected` }, '[redacted] Rejected'],
+    ])(
+      'preserves provider detail display policy for %j',
+      async (rejection, detail) => {
+        vi.useFakeTimers();
+        try {
+          mocks.classifyInferenceError.mockReturnValue({
+            message: 'The inference provider rejected the request.',
+            reason: 'provider_error',
+            retryable: false,
+          });
+          mocks.generateText.mockRejectedValue(rejection);
+          const postReply = vi.fn().mockResolvedValue(undefined);
+          const result = answerFastAgentQuestion({
+            ...baseParams,
+            adapter: callbacks({ postReply }),
+          }).catch(() => undefined);
+          await vi.runAllTimersAsync();
+          await result;
+          expect(postReply).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              purpose: 'closeout',
+              message: `Could not complete the request because the inference provider returned an error. Please try again in a moment.\n\nProvider error: ${detail}`,
+            }),
+          );
+        } finally {
+          vi.useRealTimers();
+        }
+      },
+    );
+
     it('does not retry a rejection after tool use without a durable row', async () => {
       mocks.generateText.mockImplementationOnce(
         async (_params, _session, options) => {
@@ -5174,10 +5476,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         .mockRejectedValueOnce(new Error('TypeError: fetch failed'));
       const requestDurableRetry = vi.fn().mockResolvedValue(undefined);
       const postReply = vi.fn().mockResolvedValue(undefined);
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
 
       const result = answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply, requestDurableRetry }),
+        adapter: callbacks({ postReply, requestDurableRetry, activity }),
         durableAdmission,
       });
       result.catch(() => undefined);
@@ -5190,6 +5497,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // The first retry was a short in-process wait; the second left the
       // process as a park.
       expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(activity.settle).toHaveBeenCalledWith({ keepProcessing: true });
       expect(mocks.scheduleDurableRetry).toHaveBeenCalledOnce();
       const [rowId, schedule] = mocks.scheduleDurableRetry.mock.calls[0]!;
       expect(rowId).toBe('durable-row-1');
@@ -5212,10 +5520,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.markDurableDelivered).not.toHaveBeenCalled();
       expect(mocks.releaseDurableClaim).not.toHaveBeenCalled();
       expect(mocks.revokeDurableReplay).not.toHaveBeenCalled();
-      expect(mocks.reconcileRetryNotices).not.toHaveBeenCalledWith(
-        expect.anything(),
-        'turn_settled_reconcile',
-      );
+      expect(
+        mocks.reconcileRetryNotices.mock.calls.map((call) => call[1]),
+      ).not.toContain('turn_settled_reconcile');
       expect(
         mocks.touchSessionActivity.mock.calls.map((call) => call[3]),
       ).not.toContainEqual({ respondingUntil: null });
@@ -5627,10 +5934,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.any(String),
         '100.2',
       );
-      expect(mocks.reconcileRetryNotices).not.toHaveBeenCalledWith(
-        expect.anything(),
-        'next_turn_reconcile',
-      );
+      expect(
+        mocks.reconcileRetryNotices.mock.calls.map((call) => call[1]),
+      ).not.toContain('next_turn_reconcile');
       // The answer replaces the predecessor's visible notice in place and
       // retires the same canonical event instead of posting beside it.
       expect(replaceReply).toHaveBeenCalledWith(
@@ -5756,6 +6062,61 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     await expect(answer).rejects.toBe(shutdown);
   });
+
+  it.each([
+    { selection: {}, expectedModel: 'openai/gpt-5.6', expectedEffort: 'high' },
+    {
+      selection: {
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'low' as const,
+      },
+      expectedModel: 'anthropic/claude-sonnet-5',
+      expectedEffort: 'low',
+    },
+    {
+      selection: { model: null, reasoningEffort: null },
+      expectedModel: undefined,
+      expectedEffort: undefined,
+    },
+    {
+      selection: { model: null },
+      expectedModel: undefined,
+      expectedEffort: 'high',
+    },
+    {
+      selection: { reasoningEffort: null },
+      expectedModel: 'openai/gpt-5.6',
+      expectedEffort: undefined,
+    },
+  ])(
+    'applies persisted inference settings and explicit precedence on initial and resumed turns: $selection',
+    async ({ selection, expectedModel, expectedEffort }) => {
+      for (const resumed of [false, true]) {
+        mocks.getSession.mockResolvedValueOnce({
+          id: 'conversation-1',
+          compatibilityMessages: [],
+          openCodeSessionId: resumed ? 'opencode-session-1' : null,
+          model: 'openai/gpt-5.6',
+          reasoningEffort: 'high',
+          created: !resumed,
+        });
+        await answerFastAgentQuestion({
+          ...baseParams,
+          ...selection,
+          images: ['data:image/png;base64,aGVsbG8='],
+          resumedAfterInterruption: resumed,
+          adapter: callbacks(),
+        });
+        expect(mocks.generateText).toHaveBeenCalledTimes(resumed ? 2 : 1);
+        for (const mock of [mocks.generateText, mocks.resolveImageDelivery]) {
+          const options = mock.mock.lastCall?.[0];
+          expect(options).toBeDefined();
+          expect(options.model).toBe(expectedModel);
+          expect(options.reasoningEffort).toBe(expectedEffort);
+        }
+      }
+    },
+  );
 
   it('passes image data URLs to the Fast model as file input when it can view images', async () => {
     await answerFastAgentQuestion({
@@ -7232,7 +7593,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(adapter.postReply).toHaveBeenNthCalledWith(2, {
       purpose: 'progress',
-      message: '[Open in Roomote](https://roomote.example/task-1)',
+      message: '[Started coding task](https://roomote.example/task-1)',
+      taskNavigation: true,
     });
     expect(launchTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -7256,7 +7618,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const taskLinkIndex = canonicalWrites.findIndex(
       (message) =>
         message.eventType === 'roomote_runtime.assistant_message' &&
-        JSON.stringify(message.contentBlocks).includes('Open in Roomote'),
+        JSON.stringify(message.contentBlocks).includes('Started coding task'),
     );
     const toolResultIndex = canonicalWrites.findIndex(
       (message) =>
@@ -7265,6 +7627,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
     expect(toolCallIndex).toBeGreaterThanOrEqual(0);
     expect(taskLinkIndex).toBeGreaterThan(toolCallIndex);
+    expect(canonicalWrites[taskLinkIndex]?.payload).toMatchObject({
+      purpose: 'progress',
+      taskNavigation: true,
+    });
+    expect(canonicalWrites[taskLinkIndex]?.contentBlocks).toEqual([
+      {
+        type: 'text',
+        text: '[Started coding task](https://roomote.example/task-1)',
+      },
+    ]);
     expect(toolResultIndex).toBeGreaterThan(taskLinkIndex);
     expect(canonicalWrites[toolResultIndex]?.turnSeq).toBe(
       canonicalWrites[toolCallIndex]?.turnSeq,
@@ -7397,6 +7769,40 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('passes structured suggestions through an automation task-settled closeout', async () => {
+    const adapter = callbacks();
+    const suggestions = [
+      { title: 'Quarantine the flaky spec', brief: 'Skip it until fixed.' },
+    ];
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Two flaky specs found.',
+            suggestions,
+          }),
+        ).resolves.toMatchObject({ success: true, closed: true });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      automationReport: true,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Two flaky specs found.',
+      suggestions,
+    });
+  });
+
   it('rejects structured suggestions outside automation reports', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -7481,7 +7887,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             taskId: 'task-1',
             message: 'Include the regression test.',
           }),
-        ).resolves.toEqual({ success: true });
+        ).resolves.toEqual({ success: true, taskId: 'task-1' });
         await expect(
           invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
@@ -7591,10 +7997,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('reports a launch failure through the normal conversation closeout', async () => {
     const adapter = callbacks({
-      launchTask: vi.fn(async () => ({
-        success: false as const,
-        error: 'No task capacity is available.',
-      })),
+      launchTask: vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+        await postKickoff({
+          taskId: 'task-1',
+          taskUrl: 'https://roomote.example/task-1',
+        });
+        return {
+          success: false,
+          error: 'No task capacity is available.',
+        };
+      }),
     });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -7631,6 +8043,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       message:
         'I could not start the checkout work because no task capacity is available.',
     });
+    expect(adapter.postReply).toHaveBeenCalledTimes(2);
   });
 
   it('allows a corrected launch after rejecting an unavailable model', async () => {
@@ -7785,7 +8198,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'progress',
       message:
-        '[Open in Roomote](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
+        '[Started coding task](https://roomote.example/sessions/session-discord?utm_source=discord&utm_medium=link&utm_campaign=discord.thread_start&task=task-discord)',
+      taskNavigation: true,
     });
   });
 
@@ -7817,7 +8231,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(adapter.postReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        message: `[Open in Roomote](${taskUrl})`,
+        message: `[Started coding task](${taskUrl})`,
       }),
     );
   });
@@ -7904,9 +8318,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it.each(['running', 'completed'] as const)(
-    'forwards attachments to a %s task before posting a response',
-    async (status) => {
+  it.each([
+    { status: 'running', taskId: 'task-1' },
+    { status: 'completed', taskId: 'task-1' },
+    { status: 'running', taskId: undefined },
+    { status: 'completed', taskId: undefined },
+  ] as const)(
+    'forwards attachments to a $status task with target $taskId before posting a response',
+    async ({ status, taskId }) => {
       mocks.getActiveTasks.mockResolvedValue([
         { taskId: 'task-1', title: 'Checkout', status },
       ]);
@@ -7924,11 +8343,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           });
           await expect(
             invokeTool(nativeToolNames.sendTaskMessage, {
-              taskId: 'task-1',
+              ...(taskId ? { taskId } : {}),
               message: 'Include the failing test.',
               includeAttachments: true,
             }),
-          ).resolves.toEqual({ success: true });
+          ).resolves.toEqual({ success: true, taskId: 'task-1' });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
             message: 'The task was updated.',
@@ -7967,6 +8386,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       // The text acknowledgement opens the gate, then attachments are
       // forwarded before the response is posted.
       expect(order).toEqual(['reply', 'steer', 'reply']);
+      const toolResult = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .find(
+          (message) =>
+            message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult &&
+            message.payload.toolName === nativeToolNames.sendTaskMessage,
+        );
+      expect(toolResult).toBeDefined();
+      expect(JSON.parse(toolResult.payload.output)).toEqual({
+        success: true,
+        taskId: 'task-1',
+      });
     },
   );
 
@@ -9381,6 +9812,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     const activity = {
       start: vi.fn(),
       settle: vi.fn().mockResolvedValue(undefined),
+      dispose: vi.fn().mockResolvedValue(undefined),
     };
 
     await expect(
@@ -9609,6 +10041,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     it('streams a long reply into the surface and delivers through the stream', async () => {
       const streamCalls: string[] = [];
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
       const createReplyStream = vi.fn(() => ({
         append: vi.fn(async (text: string) => {
           streamCalls.push(`append:${text}`);
@@ -9643,16 +10080,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'closeout',
           });
+          expect(activity.settle).not.toHaveBeenCalled();
           return 'Looking at the deploy history.';
         },
       );
 
       await answerFastAgentQuestion({
         ...baseParams,
-        adapter: callbacks({ postReply, createReplyStream }),
+        adapter: callbacks({ postReply, createReplyStream, activity }),
       });
 
       expect(createReplyStream).toHaveBeenCalledTimes(1);
+      expect(activity.settle).toHaveBeenCalledOnce();
       expect(streamCalls).toEqual([
         'append:Looking at',
         'append: the deploy history.',
@@ -9663,6 +10102,214 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         platformMessageId: 'slack-ts-1',
       });
     });
+
+    it('keeps turn activity alive after a streamed ack while a dispatched integration tool is pending', async () => {
+      const activity = {
+        start: vi.fn(),
+        settle: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn().mockResolvedValue(undefined),
+      };
+      const createReplyStream = vi.fn(() => ({
+        append: vi.fn().mockResolvedValue(undefined),
+        finish: vi.fn(async () => ({
+          messageId: `slack-${createReplyStream.mock.calls.length}`,
+        })),
+        abort: vi.fn().mockResolvedValue(undefined),
+      }));
+      const postReply = vi.fn();
+      let releaseTool!: () => void;
+      const toolGate = new Promise<void>((resolve) => {
+        releaseTool = resolve;
+      });
+      let toolCompleted = false;
+      mocks.listIntegrations.mockResolvedValueOnce([
+        {
+          id: 'github',
+          name: 'GitHub',
+          tools: [{ name: 'search_code', inputSchema: { type: 'object' } }],
+        },
+      ]);
+      mocks.callIntegration.mockImplementationOnce(async () => {
+        await toolGate;
+        toolCompleted = true;
+        return { matches: ['fast-agent.ts'] };
+      });
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onAssistantTextUpdated?.({
+            messageId: 'ack-message',
+            partId: 'ack-text',
+            text: 'Searching the repository.',
+            completed: false,
+          });
+          await vi.waitFor(() =>
+            expect(
+              createReplyStream.mock.results[0]?.value.append,
+            ).toHaveBeenCalled(),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, { purpose: 'ack' });
+          expect(
+            await invokeTool(nativeToolNames.callIntegrationTool, {
+              integrationId: 'github',
+              toolName: 'search_code',
+              args: { query: 'fast agent' },
+            }),
+          ).toEqual({ success: true, result: { matches: ['fast-agent.ts'] } });
+          options.onAssistantTextUpdated?.({
+            messageId: 'closeout-message',
+            partId: 'closeout-text',
+            text: 'Found fast-agent.ts.',
+            completed: false,
+          });
+          await vi.waitFor(() =>
+            expect(
+              createReplyStream.mock.results[1]?.value.append,
+            ).toHaveBeenCalled(),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+          });
+          expect(activity.settle).not.toHaveBeenCalled();
+          return '';
+        },
+      );
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ activity, createReplyStream, postReply }),
+      });
+      try {
+        await vi.waitFor(() =>
+          expect(mocks.callIntegration).toHaveBeenCalledOnce(),
+        );
+        expect(mocks.callIntegration).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'conversation-1' }),
+          expect.any(Array),
+          {
+            integrationId: 'github',
+            toolName: 'search_code',
+            args: { query: 'fast agent' },
+          },
+        );
+        expect(
+          createReplyStream.mock.results[0]!.value.finish,
+        ).toHaveBeenCalledWith({
+          purpose: 'ack',
+          message: 'Searching the repository.',
+        });
+        // The gate is inside the dispatched tool, not an unrelated stand-in for work.
+        for (let i = 0; i < 3; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          expect(toolCompleted).toBe(false);
+          expect(activity.start).toHaveBeenCalledOnce();
+          expect(activity.settle).not.toHaveBeenCalled();
+          expect(activity.dispose).not.toHaveBeenCalled();
+          expect(createReplyStream).toHaveBeenCalledOnce();
+          expect(postReply).not.toHaveBeenCalled();
+        }
+      } finally {
+        releaseTool();
+        await result;
+      }
+      expect(toolCompleted).toBe(true);
+      expect(createReplyStream).toHaveBeenCalledTimes(2);
+      const closeout = createReplyStream.mock.results[1]!.value;
+      expect(closeout.finish).toHaveBeenCalledWith({
+        purpose: 'closeout',
+        message: 'Found fast-agent.ts.',
+      });
+      expect(activity.settle).toHaveBeenCalledExactlyOnceWith({
+        keepProcessing: false,
+      });
+      expect(closeout.finish.mock.invocationCallOrder[0]).toBeLessThan(
+        activity.settle.mock.invocationCallOrder[0]!,
+      );
+      expect(postReply).not.toHaveBeenCalled();
+    });
+
+    it.each(['cancel', 'shutdown', 'lost', 'dispose'] as const)(
+      'drains or fences a stream on %s before activity cleanup and late inference writes',
+      async (mode) => {
+        const controller = new AbortController();
+        const interruption =
+          mode === 'lost'
+            ? new FastAgentTurnLockLostError()
+            : mode === 'shutdown'
+              ? new FastAgentProcessShutdownError('SIGTERM')
+              : new Error('cancelled');
+        let releaseAppend!: () => void;
+        let releaseInference!: () => void;
+        const stream = {
+          append: vi.fn(
+            () =>
+              new Promise<void>((resolve) => {
+                releaseAppend = resolve;
+              }),
+          ),
+          finish: vi.fn(),
+          abort: vi.fn().mockResolvedValue(undefined),
+        };
+        const activity = {
+          start: vi.fn(),
+          settle: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn().mockResolvedValue(undefined),
+        };
+        mocks.generateText.mockImplementationOnce(
+          async (_params, _session, options) => {
+            options.onAssistantTextUpdated?.({
+              messageId: 'assistant-message-1',
+              partId: 'text-1',
+              text: 'Working',
+              completed: false,
+            });
+            await new Promise<void>((resolve) => {
+              releaseInference = resolve;
+            });
+            options.onAssistantTextUpdated?.({
+              messageId: 'assistant-message-1',
+              partId: 'text-1',
+              text: 'Working late',
+              completed: false,
+            });
+            throw interruption;
+          },
+        );
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          adapter: callbacks({ activity, createReplyStream: () => stream }),
+          signal: controller.signal,
+        });
+        const rejected = expect(result).rejects.toBe(interruption);
+        await vi.waitFor(() => expect(releaseAppend).toBeTypeOf('function'));
+        const cleanup = vi
+          .mocked(registerFastAgentTurnActivity)
+          .mock.calls.at(-1)![1];
+        controller.abort(interruption);
+        expect(activity.settle).not.toHaveBeenCalled();
+        if (mode === 'dispose') await cleanup.dispose();
+        releaseAppend();
+        await cleanup.settle();
+        if (mode === 'lost' || mode === 'dispose') {
+          expect(activity.dispose).toHaveBeenCalled();
+          expect(activity.settle).not.toHaveBeenCalled();
+        } else {
+          expect(activity.settle).toHaveBeenCalledOnce();
+          expect(stream.abort).toHaveBeenCalledOnce();
+          expect(stream.abort.mock.invocationCallOrder[0]).toBeLessThan(
+            activity.settle.mock.invocationCallOrder[0]!,
+          );
+        }
+        releaseInference();
+        await rejected;
+        expect(stream.abort).toHaveBeenCalledTimes(
+          mode === 'lost' || mode === 'dispose' ? 0 : 1,
+        );
+        expect(stream.append).toHaveBeenCalledOnce();
+        expect(activity.settle).toHaveBeenCalledTimes(
+          mode === 'lost' || mode === 'dispose' ? 0 : 1,
+        );
+      },
+    );
 
     it('posts a reply that finished writing before the stream opened', async () => {
       const createReplyStream = vi.fn();

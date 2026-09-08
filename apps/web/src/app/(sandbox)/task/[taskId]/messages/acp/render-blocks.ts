@@ -311,6 +311,14 @@ function extractObjectLabel(
     }
   }
 
+  if (
+    displayKind === 'generic' ||
+    (!msg.data.isMcp && (displayKind === 'read' || displayKind === 'edit'))
+  ) {
+    const presentation = resolveToolPresentation(msg.data, msg.partial);
+    return `${presentation.verb} ${presentation.object}`.trim();
+  }
+
   const title = msg.data.title?.trim();
   const dataKeys =
     displayKind === 'search' || displayKind === 'list' || displayKind === 'read'

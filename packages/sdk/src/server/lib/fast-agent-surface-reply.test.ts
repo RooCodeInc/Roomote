@@ -5,9 +5,15 @@ const mocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
+  telegramTyping: vi.fn(),
+  createDiscordProvider: vi.fn(),
+  discordTyping: vi.fn(),
+  discordPostMessage: vi.fn(),
+  discordEditMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
   createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   slackPostThreadMessage: vi.fn(),
+  deliverVideos: vi.fn(),
   slackUpdateMessage: vi.fn(),
   admitHumanFollowUp: vi.fn(),
   persistInline: vi.fn(),
@@ -23,6 +29,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./artifacts/create-session-artifact', () => ({
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
+}));
+vi.mock('./fast-agent-session-videos', () => ({
+  deliverFastAgentSessionVideos: mocks.deliverVideos,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -48,6 +57,11 @@ vi.mock('./teams-communication', () => ({
 vi.mock('./telegram-communication', () => ({
   createTelegramCommunicationProviderFromRuntimeCredentials:
     mocks.createTelegramProvider,
+}));
+
+vi.mock('./discord-communication', () => ({
+  createDiscordCommunicationProviderFromRuntimeCredentials:
+    mocks.createDiscordProvider,
 }));
 
 vi.mock('../automations/destination', () => ({
@@ -107,6 +121,7 @@ async function createConversation(input: {
     | 'slack'
     | 'teams'
     | 'telegram'
+    | 'discord'
     | 'linear'
     | 'github';
   title?: string;
@@ -149,6 +164,15 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     mocks.createTelegramProvider.mockResolvedValue({
       postMessage: mocks.telegramPostMessage,
       editMessageText: mocks.telegramEditMessage,
+      sendChatAction: mocks.telegramTyping,
+    });
+    mocks.createDiscordProvider.mockResolvedValue({
+      triggerTyping: mocks.discordTyping,
+      postMessage: mocks.discordPostMessage,
+      editMessage: mocks.discordEditMessage,
+    });
+    mocks.discordPostMessage.mockResolvedValue({
+      messageId: 'discord-message-1',
     });
     mocks.findTeamsConversationRoute.mockResolvedValue({
       serviceUrl: 'https://smba.example.com/amer/',
@@ -161,6 +185,107 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       abort: vi.fn(),
     });
   });
+
+  it.each(['discord', 'telegram'] as const)(
+    'wires %s typing to the reply target for only the active turn',
+    async (surface) => {
+      const user = await userFactory.create();
+      const replyTarget = { channelId: '123', threadId: '456' };
+      const conversation = await createConversation({
+        userId: user.id,
+        surface,
+        replyTarget,
+      });
+      const delivery = await buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: null,
+        question: 'Hi',
+      });
+      const typing =
+        surface === 'discord' ? mocks.discordTyping : mocks.telegramTyping;
+      expect(typing).not.toHaveBeenCalled();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        delivery!.adapter.activity!.start();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(typing).toHaveBeenCalledWith(replyTarget);
+        await vi.advanceTimersByTimeAsync(
+          surface === 'discord' ? 8_000 : 4_000,
+        );
+        expect(typing).toHaveBeenCalledTimes(2);
+        await delivery!.adapter.activity!.settle({ keepProcessing: true });
+        await vi.advanceTimersByTimeAsync(16_000);
+        expect(typing).toHaveBeenCalledTimes(2);
+      } finally {
+        await delivery!.adapter.activity!.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each(['discord', 'telegram'] as const)(
+    'reasserts %s after successful posts and replacements but not after a late post',
+    async (surface) => {
+      const typing =
+        surface === 'discord' ? mocks.discordTyping : mocks.telegramTyping;
+      const postMessage =
+        surface === 'discord'
+          ? mocks.discordPostMessage
+          : mocks.telegramPostMessage;
+      const editMessage =
+        surface === 'discord'
+          ? mocks.discordEditMessage
+          : mocks.telegramEditMessage;
+      const user = await userFactory.create();
+      const conversation = await createConversation({
+        userId: user.id,
+        surface,
+        replyTarget: { channelId: '123' },
+      });
+      const delivery = await buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: null,
+        question: 'Hi',
+      });
+      const adapter = delivery!.adapter;
+      const reply = { purpose: 'closeout' as const, message: 'Working' };
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      try {
+        adapter.activity!.start();
+        await vi.advanceTimersByTimeAsync(0);
+        await adapter.postReply(reply);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(typing).toHaveBeenCalledTimes(2);
+        await adapter.replaceReply!({ messageId: '123' }, reply);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(typing).toHaveBeenCalledTimes(3);
+        editMessage.mockRejectedValueOnce(new Error('edit failed'));
+        await expect(
+          adapter.replaceReply!({ messageId: '123' }, reply),
+        ).rejects.toThrow('edit failed');
+        expect(typing).toHaveBeenCalledTimes(3);
+        postMessage.mockRejectedValueOnce(new Error('post failed'));
+        await expect(adapter.postReply(reply)).rejects.toThrow('post failed');
+        expect(typing).toHaveBeenCalledTimes(3);
+        let resolveLate!: (value: { messageId: string }) => void;
+        const late = new Promise<{ messageId: string }>((resolve) => {
+          resolveLate = resolve;
+        });
+        postMessage.mockReturnValueOnce(late);
+        const posting = adapter.postReply(reply);
+        await adapter.activity!.dispose();
+        resolveLate({ messageId: '789' });
+        await posting;
+        await vi.advanceTimersByTimeAsync(8_000);
+        expect(typing).toHaveBeenCalledTimes(3);
+      } finally {
+        await adapter.activity!.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('serves web sessions with a transcript-only adapter', async () => {
     const user = await userFactory.create();
@@ -419,66 +544,87 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     ).resolves.toBeNull();
   });
 
-  it('binds Slack surface replies and replacements to the Fast session', async () => {
-    const user = await userFactory.create();
-    const conversation = await createConversation({
-      userId: user.id,
-      surface: 'slack',
-      title: 'Investigate Slack agent status',
-      replyTarget: { channelId: 'C456', threadId: '1700000000.000200' },
-    });
-    await db.insert(slackInstallations).values({
-      teamId: conversation.workspaceId,
-      teamName: 'Test workspace',
-      appId: 'A123',
-      botUserId: 'B123',
-      botAccessToken: 'xoxb-test',
-      scopes: { bot: ['chat:write'] },
-      installedByUserId: user.id,
-      isActive: true,
-    });
+  it.each(['', '[View video](https://roomote.example/video)'])(
+    'binds Slack surface replies and selected videos to the Fast session with fallback %j',
+    async (fallback) => {
+      mocks.deliverVideos.mockResolvedValueOnce(fallback);
+      const user = await userFactory.create();
+      const conversation = await createConversation({
+        userId: user.id,
+        surface: 'slack',
+        title: 'Investigate Slack agent status',
+        replyTarget: { channelId: 'C456', threadId: '1700000000.000200' },
+      });
+      await db.insert(slackInstallations).values({
+        teamId: conversation.workspaceId,
+        teamName: 'Test workspace',
+        appId: 'A123',
+        botUserId: 'B123',
+        botAccessToken: 'xoxb-test',
+        scopes: { bot: ['chat:write'] },
+        installedByUserId: user.id,
+        isActive: true,
+      });
 
-    const delivery = await buildFastAgentSurfaceReplyDelivery({
-      sessionId: conversation.id,
-      userId: user.id,
-      senderDisplayName: 'Matt',
-      question: 'Follow up',
-    });
-    const handle = await delivery!.adapter.postReply({
-      purpose: 'closeout',
-      message: 'First reply',
-    });
-    await delivery!.adapter.replaceReply!(handle!, {
-      purpose: 'closeout',
-      message: 'Updated reply',
-    });
+      const delivery = await buildFastAgentSurfaceReplyDelivery({
+        sessionId: conversation.id,
+        userId: user.id,
+        senderDisplayName: 'Matt',
+        question: 'Follow up',
+      });
+      const handle = await delivery!.adapter.postReply({
+        purpose: 'closeout',
+        message: 'First reply',
+        videoArtifactIds: ['video-1'],
+      });
+      expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
+        artifactIds: ['video-1'],
+        sessionId: conversation.id,
+        channelId: 'C456',
+        threadTs: '1700000000.000200',
+      });
+      expect(mocks.slackPostThreadMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bodyBlocks: expect.arrayContaining([
+            {
+              type: 'markdown',
+              text: ['First reply', fallback].filter(Boolean).join('\n\n'),
+            },
+          ]),
+        }),
+      );
+      await delivery!.adapter.replaceReply!(handle!, {
+        purpose: 'closeout',
+        message: 'Updated reply',
+      });
 
-    expect(mocks.createActivity).toHaveBeenCalledWith({
-      slack: expect.anything(),
-      workspaceId: conversation.workspaceId,
-      channel: 'C456',
-      threadTs: '1700000000.000200',
-      title: 'Investigate Slack agent status',
-      resolveTitle: expect.any(Function),
-    });
+      expect(mocks.createActivity).toHaveBeenCalledWith({
+        slack: expect.anything(),
+        workspaceId: conversation.workspaceId,
+        channel: 'C456',
+        threadTs: '1700000000.000200',
+        title: 'Investigate Slack agent status',
+        resolveTitle: expect.any(Function),
+      });
 
-    await expect(
-      db.query.fastAgentProviderMessages.findFirst({
-        where: and(
-          eq(fastAgentProviderMessages.provider, 'slack'),
-          eq(fastAgentProviderMessages.conversationId, conversation.id),
-          eq(fastAgentProviderMessages.messageId, 'slack-message-1'),
-        ),
-      }),
-    ).resolves.toMatchObject({
-      workspaceId: conversation.workspaceId,
-      channelId: 'C456',
-      threadId: '1700000000.000200',
-    });
-    expect(mocks.slackUpdateMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ ts: 'slack-message-1' }),
-    );
-  });
+      await expect(
+        db.query.fastAgentProviderMessages.findFirst({
+          where: and(
+            eq(fastAgentProviderMessages.provider, 'slack'),
+            eq(fastAgentProviderMessages.conversationId, conversation.id),
+            eq(fastAgentProviderMessages.messageId, 'slack-message-1'),
+          ),
+        }),
+      ).resolves.toMatchObject({
+        workspaceId: conversation.workspaceId,
+        channelId: 'C456',
+        threadId: '1700000000.000200',
+      });
+      expect(mocks.slackUpdateMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ ts: 'slack-message-1' }),
+      );
+    },
+  );
 
   it('returns null for an unknown session', async () => {
     const user = await userFactory.create();

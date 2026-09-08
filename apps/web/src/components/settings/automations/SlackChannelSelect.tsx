@@ -106,7 +106,9 @@ export function SlackChannelSelect({
                   <Check
                     className={cn(
                       'mr-2 size-4',
-                      option.id === value ? 'opacity-100' : 'opacity-0',
+                      option.id === selectedOption?.id
+                        ? 'opacity-100'
+                        : 'opacity-0',
                     )}
                   />
                   <span className="truncate">{option.label}</span>

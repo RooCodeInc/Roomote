@@ -18,6 +18,7 @@ import {
   workItems,
 } from '@roomote/db/server';
 import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+export { requireFastSuggestionOriginSessionId } from './fast-suggestion-origin';
 import {
   buildTaskSuggestionMessageMetadata,
   type SlackNotifier,
@@ -209,6 +210,7 @@ function formatSuggestion(
 }
 
 async function trackSuggestion(params: {
+  originSessionId: string;
   surface: 'slack' | 'discord' | 'teams' | 'telegram';
   channelId: string;
   messageId: string;
@@ -229,6 +231,7 @@ async function trackSuggestion(params: {
       suggestionType: 'suggested_tasks',
       suggestionKey: `${params.eventId}:${params.workItemId}`,
       suggestionGroupKey: params.eventId,
+      originSessionId: params.originSessionId,
       ...(params.launchTarget
         ? { launchTarget: params.launchTarget }
         : { launchRouting: 'router' as const }),
@@ -237,6 +240,7 @@ async function trackSuggestion(params: {
 }
 
 async function claimSuggestionSend(params: {
+  originSessionId: string;
   surface: 'teams' | 'telegram';
   channelId: string;
   threadId?: string;
@@ -259,6 +263,7 @@ async function claimSuggestionSend(params: {
         suggestionType: 'suggested_tasks',
         suggestionKey: `${params.eventId}:${params.workItemId}`,
         suggestionGroupKey: params.eventId,
+        originSessionId: params.originSessionId,
         ...(params.launchTarget
           ? { launchTarget: params.launchTarget }
           : { launchRouting: 'router' }),
@@ -290,6 +295,7 @@ async function finalizeSuggestionSend(params: {
 }
 
 export async function postFastAutomationSuggestionsToSlack(params: {
+  originSessionId: string;
   slack: Pick<SlackNotifier, 'postMessage'>;
   channelId: string;
   threadTs: string;
@@ -315,7 +321,7 @@ export async function postFastAutomationSuggestionsToSlack(params: {
       text,
       blocks: [{ type: 'markdown', text }],
       metadata: buildTaskSuggestionMessageMetadata({
-        sourceTaskId: params.eventId,
+        sourceTaskId: null,
         suggestionId: suggestion.id,
       }),
     });
@@ -324,6 +330,7 @@ export async function postFastAutomationSuggestionsToSlack(params: {
     }
     await trackSuggestion({
       surface: 'slack',
+      originSessionId: params.originSessionId,
       channelId: params.channelId,
       messageId,
       threadId: params.threadTs,
@@ -338,6 +345,7 @@ export async function postFastAutomationSuggestionsToSlack(params: {
 }
 
 export async function postFastAutomationSuggestionsToDiscord(params: {
+  originSessionId: string;
   provider: Pick<DiscordCommunicationProvider, 'postMessage'>;
   channelId: string;
   threadId?: string;
@@ -364,6 +372,7 @@ export async function postFastAutomationSuggestionsToDiscord(params: {
     }
     await trackSuggestion({
       surface: 'discord',
+      originSessionId: params.originSessionId,
       channelId: posted.threadId ?? posted.channelId,
       messageId: posted.messageId,
       ...(posted.threadId ? { threadId: posted.threadId } : {}),
@@ -378,6 +387,7 @@ export async function postFastAutomationSuggestionsToDiscord(params: {
 }
 
 export async function postFastAutomationSuggestionsToTeams(params: {
+  originSessionId: string;
   provider: Pick<TeamsCommunicationProvider, 'postMessage'>;
   channelId: string;
   serviceUrl: string;
@@ -396,6 +406,7 @@ export async function postFastAutomationSuggestionsToTeams(params: {
 
     const claimId = await claimSuggestionSend({
       surface: 'teams',
+      originSessionId: params.originSessionId,
       channelId: params.channelId,
       ...(params.threadId ? { threadId: params.threadId } : {}),
       workItemId: suggestion.id,
@@ -426,6 +437,7 @@ export async function postFastAutomationSuggestionsToTeams(params: {
 }
 
 export async function postFastAutomationSuggestionsToTelegram(params: {
+  originSessionId: string;
   provider: Pick<TelegramCommunicationProvider, 'postMessage'>;
   channelId: string;
   threadId?: string;
@@ -443,6 +455,7 @@ export async function postFastAutomationSuggestionsToTelegram(params: {
 
     const claimId = await claimSuggestionSend({
       surface: 'telegram',
+      originSessionId: params.originSessionId,
       channelId: params.channelId,
       ...(params.threadId ? { threadId: params.threadId } : {}),
       workItemId: suggestion.id,

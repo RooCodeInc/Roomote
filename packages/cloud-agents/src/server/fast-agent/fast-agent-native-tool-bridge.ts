@@ -27,6 +27,11 @@ import {
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
   REASONING_EFFORT_VALUES,
+  MANAGE_WAKEUPS_TOOL_DESCRIPTION,
+  SESSION_WAKEUP_NAME_MAX_LENGTH,
+  SESSION_WAKEUP_PROMPT_MAX_LENGTH,
+  SESSION_WAKEUP_SCHEDULE_GRAMMAR,
+  SESSION_WAKEUP_SCHEDULE_MAX_LENGTH,
   type FastAgentSurface,
   FAST_EXECUTION,
 } from '@roomote/types';
@@ -270,6 +275,7 @@ export default {
     message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
+    videoArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded videos explicitly selected for native Slack delivery. Recover IDs and viewer links with manage_tasks get_summary. Never claim a video is attached unless selected here and delivery succeeds; when native delivery fails or is unavailable, share only its viewer link without an error or unavailability explanation."),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
@@ -385,6 +391,24 @@ export default {
   description: "Cancel an active task delegated by this Fast conversation.",
   args: { taskId: z.string().nullable().optional() },
   execute: (args, context) => invoke("cancel_task", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: ${JSON.stringify(MANAGE_WAKEUPS_TOOL_DESCRIPTION)},
+  args: {
+    action: z.enum(["create", "list", "get", "cancel"]).describe("create schedules a wakeup; list shows active wakeups in this conversation; get shows one; cancel stops one. Cancel is the only stop action."),
+    wakeupId: z.string().optional().describe("Required for get and cancel. Omit otherwise."),
+    name: z.string().min(3).max(${SESSION_WAKEUP_NAME_MAX_LENGTH}).optional().describe("[create] Short label, e.g. 'Check PR #85 for merge'"),
+    prompt: z.string().min(10).max(${SESSION_WAKEUP_PROMPT_MAX_LENGTH}).optional().describe("[create] What to do when it fires. This conversation stays in context, so keep it short: what to check, what counts as done, what to tell the user."),
+    schedule: z.string().max(${SESSION_WAKEUP_SCHEDULE_MAX_LENGTH}).optional().describe(${JSON.stringify(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`)}),
+    reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for one-shots); 'only_when_notable' stays silent unless there is news (default for repeating schedules). Omit to use the default."),
+  },
+  execute: (args, context) => invoke("manage_wakeups", args, context),
 }
 `,
 

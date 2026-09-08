@@ -454,7 +454,6 @@ ${buildGitHubMessageInstructions()}`
   <task_context>
     <repository>${isAllRepositoriesSelection ? 'Repositories available in the workspace' : repo}</repository>
     <workspace_context>${usesSharedWorkspaceRoot ? getWorkspaceInstructions(repoFullNames, conflictResolverLabel) : 'Single repository workspace.'}</workspace_context>
-    <visual_proof_context>Screencast auto-classification is disabled for this task.</visual_proof_context>
   </task_context>
 
   ${taskSurfaceContext}
@@ -507,6 +506,7 @@ ${initialTodoSeed}
     <default_mode>${defaultMode}</default_mode>
     <autonomous_mode>
       <behavior>Autonomous mode carries the request through the selected skill's workflow without waiting for extra confirmations, and executes the default branch/push/PR path for repository-changing work.</behavior>
+      <scope>Autonomy applies to Roomote and authorized agents within the user request and permissions, not assuming authority over humans. Respect Human Ownership and Coordinate Agents Within Scope still apply; delegation does not expand authority.</scope>
       <proof_handoff_path>${autonomousProofInstruction}</proof_handoff_path>
       <branch_push_pr_path>${autonomousFinishInstruction}</branch_push_pr_path>
       <post_validation_delivery_rule>${postValidationDeliveryRule}</post_validation_delivery_rule>

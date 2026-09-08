@@ -20,6 +20,7 @@ import {
   buildInferenceProviderRecoveryPrompt,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
+  manageWakeupsInputSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
   truncateAcpOutputText,
@@ -57,6 +58,10 @@ import { z } from 'zod';
 import packageJson from '../../../../../package.json';
 
 import { appendAttachmentTextsToPromptText } from '../../file-attachments';
+import {
+  handleManageWakeupsToolCall,
+  normalizeManageWakeupsArgs,
+} from '../session-wakeups';
 import {
   buildSlackThreadPromptBlocks,
   wrapSlackMessage,
@@ -163,6 +168,7 @@ import {
   FastAgentTurnLockLostError,
   markFastAgentShutdownCloseoutPending,
   markFastAgentShutdownCloseoutSettled,
+  registerFastAgentTurnActivity,
 } from './fast-agent-turn-lock';
 import {
   captureFastAgentInferenceAttemptOutcome,
@@ -186,6 +192,7 @@ import {
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
 import { prepareShowWidget } from '../show-widget';
+import { decodeInferenceErrorEnvelope } from '../inference-error-envelope';
 import {
   formatFastAgentStorageFullMessage,
   inspectFastAgentStorageFullError,
@@ -230,6 +237,7 @@ const chatReplyArgsSchema = z.object({
   message: z.string().trim().min(1).optional(),
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
+  videoArtifactIds: z.array(z.string()).optional(),
   suggestions: z
     .array(
       z.object({
@@ -786,27 +794,8 @@ const FAST_AGENT_INFERENCE_DETAIL_MAX_CHARS = 200;
 function describeInferenceErrorForUser(error: unknown): string | undefined {
   let statusCode: number | undefined;
   let message: string | undefined;
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const seen = new Set<object>();
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || current.depth > 4) continue;
-    const { value, depth } = current;
-    if (typeof value === 'string') {
-      if (value.trim().startsWith('{')) {
-        try {
-          pending.push({ value: JSON.parse(value), depth: depth + 1 });
-        } catch {
-          // Plain text; nothing nested to read.
-        }
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object' || seen.has(value)) continue;
-    seen.add(value);
-    const record = value as Record<string, unknown>;
+  for (const record of decodeInferenceErrorEnvelope(error, 'display')) {
+    if (typeof record === 'string') continue;
     if (statusCode === undefined) {
       const candidate = record.statusCode ?? record.status;
       if (typeof candidate === 'number' && candidate >= 100) {
@@ -825,18 +814,9 @@ function describeInferenceErrorForUser(error: unknown): string | undefined {
       message === undefined &&
       typeof record.message === 'string' &&
       record.message.trim() &&
-      !(value instanceof Error)
+      !(record instanceof Error)
     ) {
       message = record.message;
-    }
-    for (const key of [
-      'providerError',
-      'cause',
-      'data',
-      'error',
-      'responseBody',
-    ]) {
-      if (key in record) pending.push({ value: record[key], depth: depth + 1 });
     }
   }
   if (message === undefined && error instanceof Error) {
@@ -1585,6 +1565,7 @@ export async function answerFastAgentQuestion({
   activeTasks = [],
   adapter,
   signal,
+  turnLockSignal = signal,
   model,
   reasoningEffort,
   turnSource = 'human',
@@ -1592,6 +1573,7 @@ export async function answerFastAgentQuestion({
   platformEventHandling = 'default',
   platformEventVisibility = 'optional',
   platformEventKind = 'delegated_task',
+  automationReport = false,
   defaultImageArtifactIds = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
@@ -1617,8 +1599,10 @@ export async function answerFastAgentQuestion({
   activeTasks?: FastAgentActiveTask[];
   adapter: FastAgentTurnAdapter;
   signal?: AbortSignal;
-  /** Explicit model override for this turn; defaults to the deployment's
-   * orchestration model. */
+  /** Original lock signal when inference uses a derived cancellation signal. */
+  turnLockSignal?: AbortSignal;
+  /** Explicit turn overrides; undefined uses stored session settings,
+   * while null uses deployment defaults. */
   model?: string | null;
   reasoningEffort?: ReasoningEffort | null;
   turnSource?: FastAgentTurnSource;
@@ -1626,6 +1610,9 @@ export async function answerFastAgentQuestion({
   platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
   platformEventKind?: FastAgentPlatformEventKind;
+  /** The settling delegated task ran for a custom automation; its closeout is
+   * the run's report and may carry launchable suggestions. */
+  automationReport?: boolean;
   /** Child-selected images to carry through when the parent model omits the
    * optional attachment argument while composing the child update. */
   defaultImageArtifactIds?: string[];
@@ -2498,7 +2485,11 @@ export async function answerFastAgentQuestion({
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
+          ...(reply.videoArtifactIds?.length
+            ? { videoArtifactIds: reply.videoArtifactIds }
+            : {}),
           ...(reply.kickoff ? { kickoff: true } : {}),
+          ...(reply.taskNavigation ? { taskNavigation: true } : {}),
         },
         source: conversation.surface,
         nativeSessionId: nativeMessage?.sessionId ?? activeOpenCodeSessionId,
@@ -2795,8 +2786,54 @@ export async function answerFastAgentQuestion({
     return true;
   };
 
+  let surfaceDisposed = false;
+  const disposeSurface = () => {
+    surfaceDisposed = true;
+    surfaceReplyStream.dispose();
+    return adapter.activity?.dispose() ?? Promise.resolve();
+  };
+  let surfaceSettlement: Promise<void> | undefined;
+  const finishSurface = () => {
+    const lost =
+      turnLockSignal?.reason instanceof FastAgentTurnLockLostError ||
+      signal?.reason instanceof FastAgentTurnLockLostError;
+    if (lost)
+      return disposeSurface().catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to dispose surface activity: ${formatErrorForLog(error)}`,
+        );
+      });
+    surfaceSettlement ??= (async () => {
+      await surfaceReplyStream.close();
+      if (!surfaceDisposed)
+        await adapter.activity?.settle({ keepProcessing: durableTurnDeferred });
+    })().catch((error) => {
+      console.warn(
+        `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
+      );
+    });
+    return surfaceSettlement;
+  };
+  const unregisterActivity =
+    turnLockSignal && (adapter.activity || adapter.createReplyStream)
+      ? registerFastAgentTurnActivity(turnLockSignal, {
+          settle: async () => {
+            await finishSurface();
+          },
+          dispose: disposeSurface,
+        })
+      : undefined;
+  const abortActivity = () => {
+    void finishSurface();
+  };
+  signal?.addEventListener('abort', abortActivity, { once: true });
   try {
-    adapter.activity?.start();
+    if (signal?.aborted || turnLockSignal?.aborted) {
+      // Setup can finish after an abort already released the lock.
+      await disposeSurface();
+    } else {
+      adapter.activity?.start();
+    }
   } catch (error) {
     console.warn(
       `[Fast Agent] Failed to start surface activity: ${formatErrorForLog(error)}`,
@@ -2856,6 +2893,9 @@ export async function answerFastAgentQuestion({
         return false;
       }),
     ]);
+    if (model === undefined) model = session.model;
+    if (reasoningEffort === undefined)
+      reasoningEffort = session.reasoningEffort;
     const availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -2919,6 +2959,7 @@ export async function answerFastAgentQuestion({
       await reconcileFastAgentInferenceRetryNotices(
         session.id,
         'next_turn_reconcile',
+        durableAdmission ? { excludeEventId: durableAdmission.eventId } : {},
       ).catch((error) => {
         console.warn(
           `[Fast Agent] Failed to reconcile interrupted inference retry notices: ${formatErrorForLog(error)}`,
@@ -3089,11 +3130,14 @@ export async function answerFastAgentQuestion({
       platformEventHandling,
       platformEventVisibility,
       platformEventKind,
+      automationReport,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       isCurrentUserAdmin: currentUser.isAdmin,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
+      commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
+      appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       therapistModeEnabled,
@@ -3386,6 +3430,10 @@ export async function answerFastAgentQuestion({
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      // Scheduling or cancelling a wakeup is instant and its own confirmation
+      // follows in the closeout; an acknowledgement first would only add a
+      // second message.
+      FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
       // A catalog lookup reads nothing external; the call it prepares for is
       // still gated on the acknowledgement.
       FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools,
@@ -3691,7 +3739,7 @@ export async function answerFastAgentQuestion({
               args.suggestions?.length &&
               (args.purpose !== 'closeout' ||
                 !platformEvent ||
-                platformEventKind !== 'automation' ||
+                (platformEventKind !== 'automation' && !automationReport) ||
                 !['slack', 'discord', 'teams', 'telegram'].includes(
                   conversation.surface,
                 ))
@@ -3747,6 +3795,7 @@ export async function answerFastAgentQuestion({
               };
             }
             const requestedImageArtifactIds = args.imageArtifactIds ?? [];
+            const requestedVideoArtifactIds = args.videoArtifactIds ?? [];
             const signatureImageArtifactIds =
               requestedImageArtifactIds.length > 0
                 ? requestedImageArtifactIds
@@ -3755,6 +3804,7 @@ export async function answerFastAgentQuestion({
               args.purpose,
               message,
               signatureImageArtifactIds,
+              requestedVideoArtifactIds,
               args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
@@ -3779,6 +3829,9 @@ export async function answerFastAgentQuestion({
                 message,
                 ...(requestedImageArtifactIds.length
                   ? { imageArtifactIds: requestedImageArtifactIds }
+                  : {}),
+                ...(requestedVideoArtifactIds.length
+                  ? { videoArtifactIds: requestedVideoArtifactIds }
                   : {}),
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
@@ -3973,7 +4026,8 @@ export async function answerFastAgentQuestion({
                 await postReply(
                   {
                     purpose: 'progress',
-                    message: `[Open in Roomote](${destinationUrl})`,
+                    message: `[Started coding task](${destinationUrl})`,
+                    taskNavigation: true,
                   },
                   true,
                 );
@@ -4155,7 +4209,7 @@ export async function answerFastAgentQuestion({
                   : {}),
               },
             );
-            return result;
+            return { ...result, taskId: target.taskId };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
@@ -4191,6 +4245,20 @@ export async function answerFastAgentQuestion({
               currentTasks.delete(target.taskId);
             }
             return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups: {
+            const args = manageWakeupsInputSchema.parse(
+              normalizeManageWakeupsArgs(call.args),
+            );
+
+            throwIfTurnCancelled();
+
+            return await handleManageWakeupsToolCall(
+              { conversationId: session.id, userId },
+
+              args,
+            );
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart: {
@@ -5249,6 +5317,7 @@ export async function answerFastAgentQuestion({
         await reconcileFastAgentInferenceRetryNotices(
           canonicalConversationId,
           'turn_settled_reconcile',
+          durableAdmission ? { excludeEventId: durableAdmission.eventId } : {},
         ).catch((error) => {
           console.warn(
             `[Fast Agent] Failed to reconcile settled inference retry notices: ${formatErrorForLog(error)}`,
@@ -5259,13 +5328,10 @@ export async function answerFastAgentQuestion({
     dropStreamedReply();
     // A stream no reply finished (a cancelled or parked turn) is closed so
     // Slack stops showing it as still writing; its text stays.
-    await surfaceReplyStream.abort();
+    await finishSurface();
     await replyStream.dispose();
-    await adapter.activity?.settle().catch((error) => {
-      console.warn(
-        `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
-      );
-    });
+    signal?.removeEventListener('abort', abortActivity);
+    unregisterActivity?.();
     diagnostics.finish();
   }
 }

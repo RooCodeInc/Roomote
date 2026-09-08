@@ -38,6 +38,9 @@ const CONSEQUENTIAL_RECEIPTS = new Set([
   'cancel_task',
   'retry_task_start',
   'send_task_message',
+  'report_to_parent_session',
+  'receive_task_report',
+  'inspect_images',
   'send_chat_reply',
   'post_to_channel',
   'send_chat_reaction_emoji',
@@ -97,7 +100,7 @@ export function resolveToolPresentationPolicy(
       : hasPreview
         ? 'preview'
         : isInternalDebugToolCallMessage(msg) ||
-            presentation.category === 'read' ||
+            (presentation.category === 'read' && !consequentialReceipt) ||
             (isSubagentToolMessage(msg) &&
               !options.showInternalMessages &&
               !hasSubagentSummary(msg))

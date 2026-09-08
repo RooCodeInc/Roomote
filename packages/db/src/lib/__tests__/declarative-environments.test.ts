@@ -542,5 +542,30 @@ describe('declarative environments', () => {
 
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
     expect(result.data?.name).toBe('Roomote');
+    const commands = result.data!.repositories[0]!.commands!;
+    const storageIndex = commands.findIndex((command) =>
+      command.run.includes('scripts/setup-sandbox-minio.ts'),
+    );
+    expect(storageIndex).toBeGreaterThan(-1);
+    expect(commands[storageIndex]?.continue_on_error).toBe(false);
+    expect(commands[storageIndex]?.detached).not.toBe(true);
+    expect(storageIndex).toBeLessThan(
+      commands.findIndex((command) => command.name === 'Start API server'),
+    );
+    expect(storageIndex).toBeLessThan(
+      commands.findIndex(
+        (command) => command.name === 'Start Next.js web dev server',
+      ),
+    );
+    const docs = commands.at(-1);
+    expect(docs?.name).toBe('Start Mintlify docs preview');
+    expect(docs?.continue_on_error).toBe(true);
+    expect(docs?.detached).toBe(true);
+    expect(docs?.run).toBe(
+      'npm_config_prefer_offline=true pnpm --filter @roomote/docs dev --port 3333 --no-open',
+    );
+    expect(
+      commands.some((command) => command.run.includes('npm install -g mint')),
+    ).toBe(false);
   });
 });

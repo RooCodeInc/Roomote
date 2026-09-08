@@ -4,11 +4,11 @@ description: Decide whether browser proof applies to a shipped change, capture s
 ---
 
 <role>
-You capture visual proof of a shipped change yourself. Decide whether browser proof applies, reach the product state, capture the smallest honest set of screenshots or screencasts with the `agent-browser` CLI, upload them with `manage_artifacts`, and return a concise proof result. The `judge` subagent later opens the captured images and checks them against the claim, so report exactly what was captured and how the state was produced.
+Capture the smallest honest proof with `agent-browser`, upload via `manage_artifacts`, and report how the state was produced. The `judge` later checks the images against the claim.
 </role>
 
 <handoff_context>
-<rule>When this skill is invoked by an active parent workflow such as `implement-changes` or `fix-pr`, its output is a proof result for that parent workflow, not the terminal completion of the user's repository-changing task. After returning the proof result, the parent workflow continues into its required judge pass and delivery state.</rule>
+<rule>When this skill is invoked by an active parent workflow such as `implement-changes` or `fix-pr`, its output is a proof result for that parent workflow, not the terminal completion of the user's repository-changing task. Finish the report (including no-op or blocked results) before the Task tool invokes `judge`: this ends the proof deadline, not uploads. Without a judge, load the next workflow skill before continuing. Reload `capture-visual-proof` after judge-driven source changes.</rule>
 <rule>Only treat this skill's proof report as the final task answer when the user explicitly invoked `capture-visual-proof` as a standalone proof task.</rule>
 </handoff_context>
 
@@ -34,10 +34,9 @@ You capture visual proof of a shipped change yourself. Decide whether browser pr
         <title>Define the proof scope and decide applicability</title>
         <actions>
           <action>State the shipped change and the claim to prove in one or two sentences.</action>
-          <action>Classify browser proof as `applicable` when the change alters rendered UI, layout, styling, or user-visible interaction that the environment's local browser surface can show. Classify it as `not applicable` when the claim is about provenance, generation, transport, parsing, lifecycle, permissions, configuration, tests, documentation, or another non-visual system behavior with no visible browser state as part of the claim. When in doubt, capture one screenshot.</action>
+          <action>Use your judgment to choose screenshots, video, both, or no visual proof according to what best demonstrates the work. Screenshots suit stable appearance; video is useful for motion and interactions and need not be explicitly requested. Skip visual proof when it would not add useful evidence.</action>
           <action>When browser proof is not applicable, skip capture and return the proof result immediately with one short `Other evidence note` naming the strongest non-visual evidence already in context.</action>
-          <action>Classify the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`. Only consider `screencast-only` or `both` when either the harness reports that screencast auto-classification is enabled for this task or the user's task request explicitly asks for a screencast, recording, or video. Otherwise restrict the choice to `screenshot-only` or `not applicable`. Use `screenshot-only` when one or more stable visible browser states are enough to prove the claim. Use `screencast-only` when the claim depends on interaction, timing, animation, navigation, redirect, persistence, revisit, resume, replay, or another temporal sequence.</action>
-          <action>Write a coverage checklist of the materially distinct visible treatments or states the claim spans (for example each affected placement, each theme, each empty or error state). Do not silently narrow a broad claim to the first easy visible example.</action>
+          <action>Report the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`. For capture, keep a short coverage checklist listing every materially distinct visible state or treatment the stated claim spans.</action>
         </actions>
       </step>
     </steps>
@@ -51,6 +50,8 @@ You capture visual proof of a shipped change yourself. Decide whether browser pr
           <action>If the target is unreachable or the app is not ready, inspect the port or current HTTP response once, then return blocked with blocker type `browser surface unavailable` and the observed port state, HTTP response, or visible browser error. Do not loop on retries or improvise a different surface.</action>
           <action>Reach each checklist state through genuine setup or disclosed simulation. Make at most two focused attempts per state; then record that item as unproved.</action>
           <action>Capture one artifact per checklist item, or one artifact that clearly shows several items together. For screencasts, start recording before the interaction that matters, stop as soon as the proof is visible, validate the clip with `ffprobe`, and extract 3 to 5 keyframes under `/tmp/capture-visual-proof/`.</action>
+          <action>For animation detail, read [Higher-FPS recording](resources/high-fps-recording.md): opt-in native `--fps 60`, MP4 delivery, and genuine cadence/pacing checks. Keep ordinary capture at its default.</action>
+          <action>For locally produced screencasts only, prefer a final MP4 with H.264, `yuv420p`, and `+faststart` for playback compatibility. Keep the native WebM source; use `ffmpeg` to convert a separate copy with `-c:v libx264 -pix_fmt yuv420p -preset veryfast -movflags +faststart` only when tools and time permit. Bound conversion to the remaining five-minute budget, reserving time for validation and upload; do not install tools or extend the deadline. If conversion is unavailable, fails, or would leave insufficient time, upload the native WebM instead and note the fallback. Preserve pacing, duration, and visible content: no retiming, cuts, overlays, or fabricated pixels. Validate the chosen final clip with `ffprobe` and extract keyframes from that clip. This is not a rule to convert arbitrary uploads or existing artifacts.</action>
           <action>Recapture an artifact once when the first honest capture is obviously blank, clipped, or misses the required visible state. That is the only retry this skill allows.</action>
           <action>If you capture only partial supporting evidence and the remaining checklist items cannot be shown honestly, return the result as blocked with the covered and missing items instead of reporting a narrowed success.</action>
         </actions>

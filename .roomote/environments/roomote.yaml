@@ -44,6 +44,12 @@ repositories:
         run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nR_APP_ENV=development\nWEB_DEV_LOGIN_ENABLED=true\n' > .env.local
         timeout: 600
         continue_on_error: false
+      - name: Provision and verify local artifact storage
+        # Serialized and PM2-supervised without requiring nested Docker. Loopback
+        # URLs support server calls and the sandbox-local browser, not remote browsers.
+        run: flock /tmp/roomote-sandbox-minio.lock pnpm exec dotenvx run --quiet -f .env.local -- pnpm --filter @roomote/api exec tsx scripts/setup-sandbox-minio.ts
+        timeout: 600
+        continue_on_error: false
       - name: Create development database
         run: psql -h localhost -U postgres -c "CREATE DATABASE roomote_development" || true
         timeout: 600
@@ -104,7 +110,9 @@ repositories:
         logfile: /tmp/roomote-controller.log
       - name: Start Mintlify docs preview
         # Mint is needed only for this optional final service.
-        run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint && cd apps/docs && mise exec node@22.20.0 -- mint dev --port 3333 --no-open
+        # Reuse cached CLI packages/metadata; fetch on a cold cache. The docs
+        # package owns the version pin, without adding Mint to every worker image.
+        run: npm_config_prefer_offline=true pnpm --filter @roomote/docs dev --port 3333 --no-open
         timeout: 600
         continue_on_error: true
         detached: true

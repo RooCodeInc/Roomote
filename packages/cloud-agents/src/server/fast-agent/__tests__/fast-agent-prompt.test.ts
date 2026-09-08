@@ -2,8 +2,108 @@ import { ALL_REPOSITORIES, RunStatus } from '@roomote/types';
 
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
+import { buildRoomoteSystemPrompt } from '../../../system-prompt';
+import { ROOMOTE_OWNERSHIP_GUIDANCE } from '../../../style-guidance';
+
+// Prompt assembly regressions, not model-response behavior evaluations.
+describe.each([
+  ['Fast', buildFastAgentSystemPrompt({ availableEnvironments: [] })],
+  ['direct-user coding', buildRoomoteSystemPrompt()],
+  [
+    'orchestrator-owned coding',
+    buildRoomoteSystemPrompt(undefined, { reportConsumer: 'orchestrator' }),
+  ],
+])('%s ownership guidance', (_mode, prompt) => {
+  it('includes the shared rules exactly once', () => {
+    expect(prompt.split(ROOMOTE_OWNERSHIP_GUIDANCE)).toHaveLength(2);
+  });
+
+  it.each([
+    ['human assignment', 'do not assign humans work'],
+    ['indirect human assignment', 'ask one human to direct another'],
+    ['unagreed team commitments', 'commit humans to plans'],
+    ['accepted commitments', 'Preserve accepted commitments'],
+    [
+      'explicit human coordination',
+      'When explicitly asked to coordinate people',
+    ],
+    [
+      'no invented acceptance',
+      'without presenting proposed assignments or deadlines as accepted',
+    ],
+    [
+      'authorized agent work',
+      'within the user request and permissions without repeated approval',
+    ],
+    [
+      'decisive coding execution',
+      'Continue ordinary authorized coding work decisively through implementation, validation, and delivery',
+    ],
+    [
+      'mixed recipients',
+      'In mixed human/agent threads, distinguish recipients',
+    ],
+    [
+      'agent authority',
+      'require an established coordination relationship or user authorization',
+    ],
+    [
+      'delegation boundary',
+      'Do not use an agent to indirectly direct humans or perform unauthorized actions',
+    ],
+    ['direct evidence', 'Be direct about evidence, not excessively hedged'],
+    [
+      'ambient rules',
+      'do not override existing ambient-message or directedness rules',
+    ],
+    [
+      'own-action example',
+      'Authorized own action: "I\'ll start a task to check which build contains the fix."',
+    ],
+    [
+      'polite overstepping example',
+      'Still overstepping: "Alex, could you ask Casey to complete the update?"',
+    ],
+  ])('retains the %s instruction', (_case, instruction) => {
+    expect(prompt).toContain(instruction);
+  });
+});
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('bounds evidence-driven autonomy without weakening investigation', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain(
+      'act autonomously when the next action is clear and reversible',
+    );
+    expect(prompt).toContain(
+      'Investigation does not authorize assigning colleagues or customers follow-up',
+    );
+    expect(prompt).toContain(
+      'Do not stop at acknowledgement, agreement, speculation, restatement, or a plan when meaningful investigation or execution is possible',
+    );
+  });
+  it.each(['production', 'preview', 'development', undefined])(
+    'shares build identity with normal prompts for %s',
+    (appEnv) => {
+      const metadata = {
+        commitSha: '0123456789abcdef0123456789abcdef01234567',
+        appEnv,
+      };
+      const fast = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        releaseVersion: '1.3.2',
+        ...metadata,
+      });
+      const normal = buildRoomoteSystemPrompt('1.3.2', metadata);
+      const identity = normal
+        .split('\n')
+        .find((line) => line.startsWith('Roomote release'));
+      expect(identity).toBeDefined();
+      expect(fast.split('\n')).toContain(identity);
+      expect(identity).toContain(metadata.commitSha);
+    },
+  );
+
   it('adds safe memory disclosure guidance only when therapist mode is enabled', () => {
     const enabledPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -113,6 +213,37 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).not.toContain('<resumed_turn>');
   });
 
+  it('tells automation turns to honor the preferred environment hint', () => {
+    const eventPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'automation',
+    });
+
+    expect(eventPrompt).toContain("as you would a teammate's request");
+    expect(eventPrompt).toContain('`preferredEnvironmentId`');
+    expect(eventPrompt).toContain('unless the prompt names a different one');
+  });
+
+  it('offers suggestions on an automation task-settled report only', () => {
+    const settlePrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+      automationReport: true,
+    });
+    const plainSettlePrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'delegated_task',
+    });
+
+    expect(settlePrompt).toContain("this closeout is that run's report");
+    expect(settlePrompt).toContain('`suggestions` array');
+    expect(settlePrompt).not.toContain('Execute the automation prompt now');
+    expect(plainSettlePrompt).not.toContain('`suggestions` array');
+  });
+
   it('omits the release identifier when no version is resolved', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
@@ -208,6 +339,16 @@ describe('buildFastAgentSystemPrompt', () => {
       'provide an accessible artifact viewer link when available and accurately say that the image could not be attached',
     );
     expect(prompt).toContain('send_chat_reaction');
+    expect(prompt).toContain(
+      'recover stable video artifact IDs and viewer links',
+    );
+    expect(prompt).toContain('"videoArtifactIds" for native Slack delivery');
+    expect(prompt).toContain(
+      'share only the artifact viewer link without an error or unavailability explanation',
+    );
+    expect(prompt).toContain(
+      'never claim a video is attached unless native delivery succeeds',
+    );
     expect(prompt).toContain(
       'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
     );
@@ -324,6 +465,68 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('no local filesystem, shell');
     expect(prompt).not.toContain(
       'current-channel chat context tools are the only direct external capabilities',
+    );
+  });
+
+  it('gates ongoing-process offers on an unresolved outcome and verification capability', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'ongoing process has a concrete unresolved outcome',
+    );
+    expect(prompt).toContain('Verify capability before offering');
+    expect(prompt).toContain(
+      'if unavailable or uncertain, do not promise monitoring',
+    );
+    expect(prompt).toContain('outcome, evidence source, timing and stop bound');
+    expect(prompt).toContain('with confirmed deployment and telemetry access');
+    expect(prompt).toContain(
+      'Never imply a release or process started or completed without evidence',
+    );
+  });
+
+  it('requires consent for offers but preserves direct explicit monitoring requests', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain('create no wakeup until the user accepts');
+    expect(prompt).toContain(
+      'Explicit user monitoring requests already authorize scheduling',
+    );
+    expect(prompt).toContain('do not require another opt-in');
+    expect(prompt).toContain('revalidate capability and list active wakeups');
+    expect(prompt).toContain('finite schedule and stop condition');
+    expect(prompt).toContain('without automatic renewal');
+    expect(prompt).toContain('Missing evidence is not success');
+    expect(prompt).toContain(
+      'Use "manage_wakeups" when the user wants a reminder',
+    );
+  });
+
+  it('keeps monitoring quiet, nonduplicative and subject to platform-event restrictions', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+    });
+
+    expect(prompt).toContain('"only_when_notable" for monitoring');
+    expect(prompt).toContain('stay quiet on unchanged results');
+    expect(prompt).toContain(
+      'duplicate existing task, PR lifecycle/review, or other notifications and monitors',
+    );
+    expect(prompt).toContain(
+      'Offer at most once for the same unresolved outcome',
+    );
+    expect(prompt).toContain('do not repeat an ignored or declined offer');
+    expect(prompt).toContain(
+      'Do not make proactive offers on automation or scheduled-wakeup turns',
+    );
+    expect(prompt).toContain(
+      'Presentation-only events remain presentation-only',
+    );
+    expect(prompt).toContain('do not inspect or schedule from them');
+    expect(prompt).toContain(
+      'not an offer to save work as a deployment automation',
     );
   });
 

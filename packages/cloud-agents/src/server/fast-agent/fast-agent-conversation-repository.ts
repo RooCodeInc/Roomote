@@ -18,6 +18,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  ne,
   or,
   sessions,
   sql,
@@ -28,6 +29,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   fastAgentConversationSchema,
   type FastAgentConversationOwner,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import { FAST_RESPONDING_LEASE_MS } from './fast-agent-constants';
@@ -41,6 +43,8 @@ export type FastAgentConversationRecord = {
   userId: string | null;
   owner: FastAgentConversationOwner;
   title: string | null;
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
   conversation: FastAgentConversation;
   /**
    * Durable visible history for cold starts and provider retries. OpenCode,
@@ -115,6 +119,7 @@ async function reconcileInferenceRetryNotices(
   conversationId: string,
   requireExpiredLease: boolean,
   reason: FastAgentInterruptionReason,
+  options: { excludeEventId?: string } = {},
 ): Promise<number> {
   await database.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`fast-agent-conversation:${conversationId}`}, 0))`,
@@ -128,6 +133,44 @@ async function reconcileInferenceRetryNotices(
     if (session?.respondingUntil && session.respondingUntil > new Date()) {
       return 0;
     }
+  }
+
+  // An active notice whose turn still has a pending durable row is not
+  // orphaned: that turn is parked for a retry, waiting for the queue, or
+  // running elsewhere, and its resumed run edits the notice into the answer.
+  // Stamping it as interrupted here would post a false interruption and
+  // leave the eventual answer beside it. The caller's own row (a new turn
+  // that has not superseded the older one, such as a reaction) is excluded.
+  //
+  // The expired-lease sweep is the backstop for a hand-off whose queue
+  // wakeup never runs, so there only a live claim or a scheduled retry
+  // counts as owned; a released or expired row must not block it forever.
+  const now = new Date();
+  const [pendingTurn] = await database
+    .select({ id: fastAgentParentEvents.id })
+    .from(fastAgentParentEvents)
+    .where(
+      and(
+        eq(fastAgentParentEvents.conversationId, conversationId),
+        eq(fastAgentParentEvents.admission, 'inline'),
+        isNull(fastAgentParentEvents.deliveredAt),
+        isNull(fastAgentParentEvents.discardedAt),
+        ...(options.excludeEventId
+          ? [ne(fastAgentParentEvents.id, options.excludeEventId)]
+          : []),
+        ...(requireExpiredLease
+          ? [
+              or(
+                gt(fastAgentParentEvents.claimedUntil, now),
+                gt(fastAgentParentEvents.retryAt, now),
+              ),
+            ]
+          : []),
+      ),
+    )
+    .limit(1);
+  if (pendingTurn) {
+    return 0;
   }
 
   // One set-based statement with no prior read: the terminal metadata is
@@ -175,9 +218,14 @@ export async function reconcileFastAgentInferenceRetryNotices(
     FastAgentInterruptionReason,
     'next_turn_reconcile' | 'turn_settled_reconcile'
   >,
+  options: {
+    /** The calling turn's own durable row, which must not count as a pending
+     * turn that owns the notices. */
+    excludeEventId?: string;
+  } = {},
 ): Promise<number> {
   return db.transaction((tx) =>
-    reconcileInferenceRetryNotices(tx, conversationId, false, reason),
+    reconcileInferenceRetryNotices(tx, conversationId, false, reason, options),
   );
 }
 
@@ -776,6 +824,8 @@ export interface FastAgentConversationRepository {
     sessionId?: string;
     /** Title to seed only when this call creates the conversation. */
     initialTitle?: string;
+    initialModel?: string;
+    initialReasoningEffort?: ReasoningEffort;
   }): Promise<FastAgentConversationGetOrCreateResult>;
   findById(input: {
     id: string;
@@ -916,6 +966,8 @@ async function loadConversationRecord(
     userId: record.userId,
     owner,
     title: record.title,
+    model: record.model,
+    reasoningEffort: record.reasoningEffort,
     conversation,
     compatibilityMessages: record.compatibilityMessages as ModelMessage[],
     openCodeSessionId: record.openCodeSessionId,
@@ -930,6 +982,8 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
       conversation,
       sessionId,
       initialTitle,
+      initialModel,
+      initialReasoningEffort,
     }) {
       const resolvedOwner =
         owner ?? (userId ? { kind: 'user' as const, userId } : null);
@@ -987,6 +1041,8 @@ export const fastAgentConversationRepository: FastAgentConversationRepository =
                   ? resolvedOwner.automationKey
                   : null,
               title: initialTitle?.trim() || null,
+              model: initialModel,
+              reasoningEffort: initialReasoningEffort,
               surface: conversation.surface,
               workspaceId: conversation.workspaceId,
               conversationId: conversation.conversationId,

@@ -48,7 +48,7 @@ describe('createFastAgentSlackSessionActivity', () => {
     };
   }
 
-  it('skips Slack activity when the turn settles before the delay', async () => {
+  it('initializes an idle Slack session when the turn settles before the delay', async () => {
     vi.useFakeTimers();
     const { activity, setAgentSessionStatus, syncTitle } = createActivity({});
 
@@ -56,7 +56,11 @@ describe('createFastAgentSlackSessionActivity', () => {
     await activity.settle();
     await vi.runAllTimersAsync();
 
-    expect(setAgentSessionStatus).not.toHaveBeenCalled();
+    expect(setAgentSessionStatus).toHaveBeenCalledExactlyOnceWith({
+      channel: 'C123',
+      threadTs: '100.001',
+      status: 'active',
+    });
     expect(syncTitle).not.toHaveBeenCalled();
   });
 
@@ -195,6 +199,39 @@ describe('createFastAgentSlackSessionActivity', () => {
     await expect(resolver?.()).resolves.toBe('Newer persisted title');
   });
 
+  it.each([undefined, 'Initial title'])(
+    'does not clear a newer turn status when a short turn receives a late title (%s)',
+    async (title) => {
+      vi.useFakeTimers();
+      const first = createActivity({ title });
+      first.activity.start();
+      await first.activity.settle();
+
+      const second = createActivity({
+        setAgentSessionStatus: first.setAgentSessionStatus,
+      });
+      second.activity.start();
+      await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+
+      first.activity.updateTitle?.('Late title');
+      await vi.runAllTimersAsync();
+
+      expect(
+        first.setAgentSessionStatus.mock.calls.map(([input]) => input.status),
+      ).toEqual(['active', 'processing']);
+      expect(first.syncTitle).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Late title' }),
+      );
+
+      await second.activity.settle();
+      expect(first.setAgentSessionStatus).toHaveBeenLastCalledWith({
+        channel: 'C123',
+        threadTs: '100.001',
+        status: 'active',
+      });
+    },
+  );
+
   it('waits for title synchronization before active cleanup', async () => {
     vi.useFakeTimers();
     let resolveSync!: () => void;
@@ -246,5 +283,122 @@ describe('createFastAgentSlackSessionActivity', () => {
       setAgentSessionStatus.mock.calls.map(([input]) => input.status),
     ).toEqual(['processing', 'active']);
     expect(syncTitle).not.toHaveBeenCalled();
+  });
+
+  it('disposes a delayed start without writing status or allowing a restart', async () => {
+    vi.useFakeTimers();
+    const { activity, setAgentSessionStatus } = createActivity({});
+    activity.start();
+    await activity.dispose();
+    activity.start();
+    await activity.settle();
+    await vi.runAllTimersAsync();
+    expect(setAgentSessionStatus).not.toHaveBeenCalled();
+  });
+
+  it('handles a rejected processing request before cleanup without an unhandled rejection', async () => {
+    vi.useFakeTimers();
+    const status = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('transport failed'))
+      .mockResolvedValue({ ok: true });
+    const { activity } = createActivity({ setAgentSessionStatus: status });
+    activity.start();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+    await activity.settle();
+    await activity.dispose();
+    expect(status.mock.calls.map(([input]) => input.status)).toEqual([
+      'processing',
+      'active',
+    ]);
+  });
+
+  it('fences active cleanup when ownership is lost during an in-flight processing write', async () => {
+    vi.useFakeTimers();
+    let resolveProcessing!: (value: { ok: boolean }) => void;
+    const processing = new Promise<{ ok: boolean }>((resolve) => {
+      resolveProcessing = resolve;
+    });
+    const status = vi
+      .fn()
+      .mockReturnValueOnce(processing)
+      .mockResolvedValue({ ok: true });
+    const { activity } = createActivity({ setAgentSessionStatus: status });
+    activity.start();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+    const settling = activity.settle();
+    expect(activity.settle()).toBe(settling);
+    const disposal = activity.dispose();
+    let drained = false;
+    void disposal.then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    resolveProcessing({ ok: true });
+    await Promise.all([settling, disposal]);
+    expect(status.mock.calls.map(([input]) => input.status)).toEqual([
+      'processing',
+    ]);
+  });
+
+  it.each([0, FAST_AGENT_SLACK_PROCESSING_DELAY_MS])(
+    'retains processing across a durable park after %sms',
+    async (elapsed) => {
+      vi.useFakeTimers();
+      const { activity, setAgentSessionStatus } = createActivity({});
+      activity.start();
+      await vi.advanceTimersByTimeAsync(elapsed);
+      await activity.settle({ keepProcessing: true });
+      await activity.dispose();
+      await vi.runAllTimersAsync();
+      expect(
+        setAgentSessionStatus.mock.calls.map(([input]) => input.status),
+      ).toEqual(['processing']);
+      const next = createActivity({ setAgentSessionStatus });
+      next.activity.start();
+      await next.activity.settle();
+      expect(
+        setAgentSessionStatus.mock.calls.map(([input]) => input.status),
+      ).toEqual(['processing', 'active']);
+    },
+  );
+
+  it('does not clear a successor after disposal during title synchronization', async () => {
+    vi.useFakeTimers();
+    let finishTitle!: () => void;
+    const syncTitle = vi
+      .fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finishTitle = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+    syncTitle.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishTitle = resolve;
+        }),
+    );
+    const first = createActivity({ title: 'Session title', syncTitle });
+    first.activity.start();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+    const settling = first.activity.settle();
+    const disposal = first.activity.dispose();
+    const next = createActivity({
+      setAgentSessionStatus: first.setAgentSessionStatus,
+    });
+    next.activity.start();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_SLACK_PROCESSING_DELAY_MS);
+    finishTitle();
+    await Promise.all([settling, disposal]);
+    expect(
+      first.setAgentSessionStatus.mock.calls.map(([input]) => input.status),
+    ).toEqual(['processing', 'processing']);
+    await next.activity.settle();
+    expect(
+      first.setAgentSessionStatus.mock.calls.map(([input]) => input.status),
+    ).toEqual(['processing', 'processing', 'active']);
   });
 });

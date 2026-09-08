@@ -1355,12 +1355,16 @@ export class SlackNotifier {
     channel: string;
     ts: string;
     markdownText?: string;
+    sessionStatus?: 'active' | 'processing' | 'suspended' | 'closed';
   }): Promise<boolean> {
     try {
       const response = await this.getClient().chat.stopStream({
         channel: params.channel,
         ts: params.ts,
         ...(params.markdownText ? { markdown_text: params.markdownText } : {}),
+        ...(params.sessionStatus
+          ? { session_status: params.sessionStatus }
+          : {}),
       });
       return response.ok === true;
     } catch (error) {

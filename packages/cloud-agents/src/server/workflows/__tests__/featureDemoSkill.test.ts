@@ -94,6 +94,21 @@ describe('feature-demo skill', () => {
     expect(narrationScript).not.toContain('xi-api-key');
   });
 
+  it('converts the native recording to playback-compatible MP4', () => {
+    const captureRunner = fs.readFileSync(
+      path.join(skillDirPath, 'capture/capture.mjs'),
+      'utf8',
+    );
+    expect(captureRunner).toMatch(/'-c:v',\s*'libx264'/);
+    expect(captureRunner).toMatch(/'-pix_fmt',\s*'yuv420p'/);
+    expect(captureRunner).toMatch(/'-movflags',\s*'\+faststart'/);
+    expect(skillContent).toContain('Keep the native `raw.webm` source');
+    expect(skillContent).toContain('-c copy -movflags +faststart');
+    expect(skillContent).toContain(
+      'do not retime or alter content for format conversion',
+    );
+  });
+
   it('never commits pipeline outputs into the repository', () => {
     expect(skillContent).toContain(
       'Never commit recordings, renders, node_modules, or props into the repository.',
@@ -163,14 +178,225 @@ describe('feature-demo skill', () => {
       'utf8',
     );
 
-    // Headless + frame ticker is the whole capture story. A headed path
+    // Native headless recording is the capture path. A headed path
     // existed for WebGL/3D surfaces but wedged the agent-browser daemon on
     // exactly the longer sessions a narrated demo produces, so those
     // surfaces are now reported as unrecordable by the honest-state gate.
     expect(captureRunner).not.toMatch(/--headed|script\.headed/);
     expect(skillContent).not.toMatch(/"headed":\s*true/);
-    expect(captureRunner).toContain("ab('eval', TICKER_JS)");
+    expect(captureRunner).not.toContain('TICKER_JS');
     expect(captureRunner).toContain('cannot be recorded here');
+  });
+
+  it.each([undefined, 1, 30, 60])(
+    'passes FPS %s to native capture and the render timeline',
+    (fps) => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-demo-'));
+      const scriptPath = path.join(tempDir, 'demo-script.json');
+      fs.writeFileSync(
+        scriptPath,
+        JSON.stringify({ url: 'https://example.com', fps, beats: [] }),
+      );
+      // Mock only subprocesses: execute the real runner and timeline writer,
+      // without launching a browser, sleeping, or encoding media.
+      const mock = `
+        import cp from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        cp.execFileSync = (command, args) => {
+          console.log(JSON.stringify([command, ...args]));
+          return command === 'ffprobe' ? '100' : args[0] === 'record' && args[1] === 'stop' ? JSON.stringify({ success: true, data: { fps: ${fps ?? 30}, capturedFrames: 10, frames: 10 } }) : '';
+        };
+        syncBuiltinESMExports();
+      `;
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [
+            '--import',
+            `data:text/javascript,${encodeURIComponent(mock)}`,
+            path.join(skillDirPath, 'capture/capture.mjs'),
+          ],
+          {
+            encoding: 'utf8',
+            env: {
+              ...process.env,
+              SCRIPT: scriptPath,
+              OUT_DIR: tempDir,
+              NARRATION: path.join(tempDir, 'absent.json'),
+              AGENT_BROWSER_BIN: 'mock-browser',
+            },
+          },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        const calls = result.stdout
+          .split('\n')
+          .filter((line) => line.startsWith('['))
+          .map((line) => JSON.parse(line));
+        expect(calls.slice(0, 4)).toEqual([
+          ['mock-browser', 'close'],
+          ['mock-browser', 'open', 'https://example.com'],
+          ['mock-browser', 'set', 'viewport', '1280', '800'],
+          [
+            'mock-browser',
+            'record',
+            'start',
+            `${tempDir}/raw.${(fps ?? 30) > 30 ? 'mp4' : 'webm'}`,
+            '--fps',
+            String(fps ?? 30),
+          ],
+        ]);
+        expect(calls.some((call) => call[1] === 'eval')).toBe(false);
+        const conversion = calls.find((call) => call[0] === 'ffmpeg');
+        expect(conversion).toContain((fps ?? 30) > 30 ? 'copy' : 'libx264');
+        expect(conversion).not.toContain('-r');
+        expect(
+          JSON.parse(
+            fs.readFileSync(path.join(tempDir, 'capture-stats.json'), 'utf8'),
+          ).data.capturedFrames,
+        ).toBe(10);
+        expect(
+          JSON.parse(
+            fs.readFileSync(path.join(tempDir, 'timeline.json'), 'utf8'),
+          ).fps,
+        ).toBe(fps ?? 30);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(['open', 'start', 'selector', 'stop', 'cleanup'])(
+    'closes the browser after a %s failure without replacing the capture error',
+    (failure) => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-demo-'));
+      const scriptPath = path.join(tempDir, 'demo-script.json');
+      fs.writeFileSync(
+        scriptPath,
+        JSON.stringify({
+          url: 'https://example.com',
+          beats: [{ a: 'click', sel: '#missing' }],
+        }),
+      );
+      const mock = `
+        import cp from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        const failure = ${JSON.stringify(failure)};
+        cp.execFileSync = (command, args) => {
+          console.log(JSON.stringify([command, ...args]));
+          if (args[0] === 'open' && failure === 'open') throw new Error('open failed');
+          if (args[0] === 'record' && args[1] === 'start' && failure === 'start') throw new Error('start failed');
+          if (args[0] === 'eval') return failure === 'stop' ? JSON.stringify({x:0,y:0,w:1,h:1}) : 'null';
+          if (args[0] === 'record' && args[1] === 'stop') throw new Error('stop failed');
+          if (args[0] === 'close' && failure === 'cleanup') throw new Error('cleanup failed');
+          return '';
+        };
+        syncBuiltinESMExports();
+      `;
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [
+            '--import',
+            `data:text/javascript,${encodeURIComponent(mock)}`,
+            path.join(skillDirPath, 'capture/capture.mjs'),
+          ],
+          {
+            encoding: 'utf8',
+            timeout: 10000,
+            env: {
+              ...process.env,
+              SCRIPT: scriptPath,
+              OUT_DIR: tempDir,
+              NARRATION: path.join(tempDir, 'absent.json'),
+              AGENT_BROWSER_BIN: 'mock-browser',
+            },
+          },
+        );
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          failure === 'selector' || failure === 'cleanup'
+            ? 'capture failed: element not found: #missing'
+            : `capture failed: ${failure} failed`,
+        );
+        const calls = result.stdout
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+        expect(calls.at(-1)).toEqual(['mock-browser', 'close']);
+        const stopCalls = calls.filter(
+          (call) => call[1] === 'record' && call[2] === 'stop',
+        );
+        expect(stopCalls).toHaveLength(
+          failure === 'open' || failure === 'start'
+            ? 0
+            : failure === 'stop'
+              ? 2
+              : 1,
+        );
+        expect(
+          calls.some((call) => call[0] === 'ffmpeg' || call[0] === 'ffprobe'),
+        ).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, 'timeline.json'))).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, 'capture-stats.json'))).toBe(
+          false,
+        );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([0, -1, 61, 29.97, '60', null, true])(
+    'rejects invalid FPS %s before capture',
+    (fps) => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-demo-'));
+      const scriptPath = path.join(tempDir, 'demo-script.json');
+      fs.writeFileSync(
+        scriptPath,
+        JSON.stringify({ url: 'https://example.com', fps, beats: [] }),
+      );
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [path.join(skillDirPath, 'capture/capture.mjs')],
+          {
+            encoding: 'utf8',
+            env: {
+              ...process.env,
+              SCRIPT: scriptPath,
+              AGENT_BROWSER_BIN: 'must-not-run-agent-browser',
+            },
+          },
+        );
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          'Demo script fps must be an integer from 1 to 60.',
+        );
+        expect(result.stderr).not.toContain('must-not-run-agent-browser');
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('uses timeline FPS throughout rendering and documents motion-heavy opt-in', () => {
+    const source = (file: string) =>
+      fs.readFileSync(path.join(skillDirPath, 'render/src', file), 'utf8');
+    expect(source('DemoStage.tsx')).toContain(
+      'export const FPS = timeline.fps;',
+    );
+    expect(source('DemoStage.tsx')).toContain('const t = frame / FPS;');
+    expect(source('FeatureDemo.tsx')).toContain(
+      'Math.round(TOTAL_SECONDS * FPS)',
+    );
+    expect(source('FeatureDemo.tsx')).toContain(
+      'Math.round(c.startSeconds * FPS)',
+    );
+    expect(source('Root.tsx')).toContain('fps={FPS}');
+    expect(skillContent).toContain(
+      'omit top-level `fps` for ordinary 30 FPS demos',
+    );
+    expect(skillContent).toContain('do not force it globally');
   });
 
   it('frames the render project as an adaptable reference template', () => {

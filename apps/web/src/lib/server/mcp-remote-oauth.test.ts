@@ -2,27 +2,43 @@ const redisState = vi.hoisted(() => new Map<string, string>());
 const redisSortedSets = vi.hoisted(
   () => new Map<string, Map<string, number>>(),
 );
+const redisExpirations = vi.hoisted(() => new Map<string, number>());
+const expireRedisKeys = vi.hoisted(() => () => {
+  for (const [key, expiresAt] of redisExpirations) {
+    if (expiresAt <= Date.now()) {
+      redisState.delete(key);
+      redisSortedSets.delete(key);
+      redisExpirations.delete(key);
+    }
+  }
+});
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
-    set: async (key: string, value: string) => {
+    set: async (key: string, value: string, _mode: string, ttl: number) => {
       redisState.set(key, value);
+      redisExpirations.set(key, Date.now() + ttl * 1000);
       return 'OK';
     },
-    get: async (key: string) => redisState.get(key) ?? null,
+    get: async (key: string) => {
+      expireRedisKeys();
+      return redisState.get(key) ?? null;
+    },
     eval: async (script: string, keyCount: number, ...args: string[]) => {
+      expireRedisKeys();
       const keys = args.slice(0, keyCount);
       const values = args.slice(keyCount);
       const key = keys[0]!;
       if (script.includes("redis.call('ZCARD', KEYS[2])")) {
         const indexKey = keys[1]!;
-        const [clientJson, , expiresAt, clientId, maxClients, now] = values;
+        const [clientJson, ttl, expiresAt, clientId, maxClients, now] = values;
         const clients = redisSortedSets.get(indexKey) ?? new Map();
         for (const [id, expiry] of clients) {
           if (expiry <= Number(now)) clients.delete(id);
         }
         if (clients.size >= Number(maxClients)) return 0;
         redisState.set(key, clientJson!);
+        redisExpirations.set(key, Date.now() + Number(ttl) * 1000);
         clients.set(clientId!, Number(expiresAt));
         redisSortedSets.set(indexKey, clients);
         return 1;
@@ -46,6 +62,12 @@ vi.mock('@roomote/redis', () => ({
         redisState.set(key, sessionJson!);
         redisState.set(keys[1]!, marker!);
         redisState.set(keys[2]!, sessionId!);
+        for (const sessionKey of keys) {
+          redisExpirations.set(
+            sessionKey,
+            Date.now() + Number(values[5]) * 1000,
+          );
+        }
         return 1;
       }
 
@@ -70,6 +92,12 @@ vi.mock('@roomote/redis', () => ({
         redisState.set(key, rotatedMarker!);
         redisState.set(keys[1]!, activeMarker!);
         redisState.set(keys[2]!, next!);
+        for (const rotatedKey of keys.slice(1)) {
+          redisExpirations.set(
+            rotatedKey,
+            Date.now() + Number(values[5]) * 1000,
+          );
+        }
         return ['ok'];
       }
 
@@ -107,6 +135,13 @@ vi.mock('@roomote/redis', () => ({
         }
         redisState.set(key, String(clientCount + 1));
         redisState.set(globalKey, String(globalCount + 1));
+        if (clientCount === 0)
+          redisExpirations.set(key, Date.now() + Number(values[0]) * 1000);
+        if (globalCount === 0)
+          redisExpirations.set(
+            globalKey,
+            Date.now() + Number(values[0]) * 1000,
+          );
         return 1;
       }
 
@@ -134,6 +169,11 @@ vi.mock('@roomote/redis', () => ({
           return 0;
         }
         if (!redisState.has(key)) return 0;
+        redisExpirations.set(key, Date.now() + Number(values[0]) * 1000);
+        redisExpirations.set(
+          userIndexKey,
+          Date.now() + Number(values[0]) * 1000,
+        );
         redisSortedSets.get(indexKey)?.delete(clientId);
         globalClients.set(clientId, expiresAt);
         redisSortedSets.set(globalIndexKey, globalClients);
@@ -176,6 +216,7 @@ import {
   createRemoteMcpConsentToken,
   createRemoteMcpRefreshSession,
   getRemoteMcpAuthorizationCode,
+  getRemoteMcpOAuthClient,
   getRemoteMcpRefreshSession,
   isAllowedOAuthRedirectUri,
   isRemoteMcpRegistrationAllowed,
@@ -191,7 +232,12 @@ describe('remote MCP OAuth state', () => {
   beforeEach(() => {
     redisState.clear();
     redisSortedSets.clear();
+    redisExpirations.clear();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it.each([
     ['Claude Code loopback', 'http://localhost:43110/callback'],
@@ -285,6 +331,204 @@ describe('remote MCP OAuth state', () => {
         key.includes('registered-clients'),
       )?.[1].size,
     ).toBe(0);
+  });
+
+  it('expires unapproved registrations after one hour without reads extending them', async () => {
+    const client = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+    });
+    vi.setSystemTime(Date.now() + 3_599_000);
+    await expect(getRemoteMcpOAuthClient(client.clientId)).resolves.toEqual(
+      client,
+    );
+    vi.setSystemTime(Date.now() + 1_000);
+    await expect(getRemoteMcpOAuthClient(client.clientId)).resolves.toBeNull();
+    await expect(
+      promoteRemoteMcpOAuthClient(client.clientId, 'user-1'),
+    ).resolves.toBe(false);
+  });
+
+  it('bounds pending registrations and reclaims expired capacity', async () => {
+    for (let index = 0; index < 250; index += 1) {
+      await registerRemoteMcpOAuthClient({
+        redirectUris: ['https://client.example/callback'],
+      });
+    }
+    await expect(
+      registerRemoteMcpOAuthClient({
+        redirectUris: ['https://client.example/callback'],
+      }),
+    ).rejects.toThrow('capacity');
+    vi.setSystemTime(Date.now() + 3_600_000);
+    await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+    });
+    expect(
+      redisSortedSets.get('mcp-remote-oauth:registered-clients')?.size,
+    ).toBe(1);
+    expect(redisState.size).toBe(1);
+  });
+
+  it('reuses an active client after its refresh session expires without extending tokens', async () => {
+    const client = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+    await promoteRemoteMcpOAuthClient(client.clientId, 'user-1');
+    const token = await createRemoteMcpRefreshSession({
+      userId: 'user-1',
+      clientId: client.clientId,
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    });
+    const session = await getRemoteMcpRefreshSession(token);
+    vi.setSystemTime(Date.now() + 29 * 86_400_000);
+    const rotation = await rotateRemoteMcpRefreshToken(token, session!);
+    if (rotation.status !== 'ok') throw new Error('expected rotation');
+    await promoteRemoteMcpOAuthClient(client.clientId, 'user-1');
+    expect(
+      (await getRemoteMcpRefreshSession(rotation.refreshToken))?.expiresAt,
+    ).toBe(session!.expiresAt);
+
+    vi.setSystemTime(Date.now() + 86_400_000);
+    await expect(
+      getRemoteMcpRefreshSession(rotation.refreshToken),
+    ).resolves.toBeNull();
+    await expect(
+      rotateRemoteMcpRefreshToken(rotation.refreshToken, session!),
+    ).resolves.toEqual({ status: 'invalid' });
+    await expect(getRemoteMcpOAuthClient(client.clientId)).resolves.toEqual(
+      client,
+    );
+    await expect(
+      promoteRemoteMcpOAuthClient(client.clientId, 'user-1'),
+    ).resolves.toBe(true);
+  });
+
+  it('keeps a reused registration beyond its original inactivity deadline', async () => {
+    const client = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+    });
+    await promoteRemoteMcpOAuthClient(client.clientId, 'user-1');
+    for (let index = 0; index < 4; index += 1) {
+      vi.setSystemTime(Date.now() + 60 * 86_400_000);
+      await expect(getRemoteMcpOAuthClient(client.clientId)).resolves.toEqual(
+        client,
+      );
+      await expect(
+        promoteRemoteMcpOAuthClient(client.clientId, 'user-1'),
+      ).resolves.toBe(true);
+    }
+    const expiresAt = Date.now() / 1000 + 90 * 86_400;
+    for (const [key, members] of redisSortedSets) {
+      if (key.includes('active-clients'))
+        expect(members.get(client.clientId)).toBe(expiresAt);
+    }
+  });
+
+  it('upgrades a still-valid legacy 30-day registration on authenticated activity', async () => {
+    const client = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+    });
+    await promoteRemoteMcpOAuthClient(client.clientId, 'user-1');
+    const legacyExpiry = Date.now() + 30 * 86_400_000;
+    redisExpirations.set(
+      `mcp-remote-oauth:client:${client.clientId}`,
+      legacyExpiry,
+    );
+    for (const [key, members] of redisSortedSets) {
+      if (key.includes('active-clients')) {
+        members.set(client.clientId, legacyExpiry / 1000);
+        if (key.includes(':user:')) redisExpirations.set(key, legacyExpiry);
+      }
+    }
+    vi.setSystemTime(legacyExpiry - 86_400_000);
+    await expect(
+      promoteRemoteMcpOAuthClient(client.clientId, 'user-1'),
+    ).resolves.toBe(true);
+    vi.setSystemTime(legacyExpiry + 86_400_000);
+    await expect(getRemoteMcpOAuthClient(client.clientId)).resolves.toEqual(
+      client,
+    );
+  });
+
+  it('reclaims inactive client capacity without expiring recently used clients', async () => {
+    for (let index = 0; index < 50; index += 1) {
+      const client = await registerRemoteMcpOAuthClient({
+        redirectUris: ['https://client.example/callback'],
+      });
+      await promoteRemoteMcpOAuthClient(client.clientId, 'user-1');
+    }
+    const activeIds = [
+      ...redisSortedSets.get('mcp-remote-oauth:active-clients')!.keys(),
+    ];
+    const retainedId = activeIds[0]!;
+    vi.setSystemTime(Date.now() + 60 * 86_400_000);
+    await expect(
+      promoteRemoteMcpOAuthClient(retainedId, 'user-1'),
+    ).resolves.toBe(true);
+    // Anonymous lookups must not keep an otherwise idle registration alive.
+    await getRemoteMcpOAuthClient(activeIds[1]!);
+    vi.setSystemTime(Date.now() + 30 * 86_400_000);
+    await expect(getRemoteMcpOAuthClient(activeIds[1]!)).resolves.toBeNull();
+    const replacement = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+    });
+    await expect(
+      promoteRemoteMcpOAuthClient(replacement.clientId, 'user-1'),
+    ).resolves.toBe(true);
+    for (const [key, members] of redisSortedSets) {
+      if (key.includes('active-clients'))
+        expect([...members.keys()]).toEqual([retainedId, replacement.clientId]);
+    }
+    await expect(getRemoteMcpOAuthClient(retainedId)).resolves.not.toBeNull();
+  });
+
+  it('preserves global capacity limits when renewing existing clients', async () => {
+    const client = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+    });
+    await promoteRemoteMcpOAuthClient(client.clientId, 'user-1');
+    const members = redisSortedSets.get('mcp-remote-oauth:active-clients')!;
+    for (let index = 1; index < 10_000; index += 1)
+      members.set(`other-${index}`, Date.now() / 1000 + 90 * 86_400);
+    await expect(
+      promoteRemoteMcpOAuthClient(client.clientId, 'user-1'),
+    ).resolves.toBe(true);
+    const overflow = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+    });
+    await expect(
+      promoteRemoteMcpOAuthClient(overflow.clientId, 'user-2'),
+    ).resolves.toBe(false);
+  });
+
+  it('revokes tokens without deleting the reusable registration or restoring the revoked grant', async () => {
+    const client = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://client.example/callback'],
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+    await promoteRemoteMcpOAuthClient(client.clientId, 'user-1');
+    const binding = {
+      userId: 'user-1',
+      clientId: client.clientId,
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    };
+    const token = await createRemoteMcpRefreshSession(binding);
+    await revokeRemoteMcpRefreshSession(token, 'other-client');
+    await expect(getRemoteMcpRefreshSession(token)).resolves.not.toBeNull();
+    await revokeRemoteMcpRefreshSession(token, client.clientId);
+    await expect(getRemoteMcpRefreshSession(token)).resolves.toBeNull();
+    await expect(getRemoteMcpOAuthClient(client.clientId)).resolves.toEqual(
+      client,
+    );
+    await promoteRemoteMcpOAuthClient(client.clientId, 'user-1');
+    const replacement = await createRemoteMcpRefreshSession(binding);
+    await expect(
+      getRemoteMcpRefreshSession(replacement),
+    ).resolves.not.toBeNull();
+    await expect(getRemoteMcpRefreshSession(token)).resolves.toBeNull();
   });
 
   it('consumes authorization codes once', async () => {

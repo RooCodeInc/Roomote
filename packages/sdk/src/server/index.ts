@@ -209,6 +209,7 @@ export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
+export { requireFastSuggestionOriginSessionId } from './lib/fast-automation-suggestions';
 
 export {
   buildFastAgentParentEventKey,
@@ -222,6 +223,15 @@ export {
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {
+  SESSION_WAKEUP_FIRE_JOB_NAME,
+  SESSION_WAKEUP_QUEUE_NAME,
+  SESSION_WAKEUP_RECOVERY_LOOKAHEAD_MS,
+  fireSessionWakeup,
+  recoverPendingSessionWakeups,
+  type FireSessionWakeupResult,
+  type SessionWakeupFireJob,
+} from './lib/session-wakeups';
+export {
   admitFastAgentHumanFollowUp,
   persistFastAgentInlineHumanTurn,
   type FastAgentDurableTurn,
@@ -231,6 +241,7 @@ export {
   resolveFastAgentSessionImages,
   type FastAgentReplyImage,
 } from './lib/fast-agent-session-images';
+export { deliverFastAgentSessionVideos } from './lib/fast-agent-session-videos';
 
 export {
   getCommunicationProviderAdapter,

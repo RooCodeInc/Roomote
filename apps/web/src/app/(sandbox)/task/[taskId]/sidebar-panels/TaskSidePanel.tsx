@@ -22,15 +22,17 @@ interface DiffPanelProps {
 }
 
 interface TaskSidePanelDesktopProps {
+  activeView: ReturnType<typeof useTaskSidePanel>['activeView'];
   session: TaskSession;
   diffPanel?: DiffPanelProps;
 }
 
 export function TaskSidePanelDesktop({
+  activeView,
   session,
   diffPanel,
 }: TaskSidePanelDesktopProps) {
-  const { activeView, closeSidePanel } = useTaskSidePanel();
+  const { closeSidePanel } = useTaskSidePanel();
 
   return (
     <FramedSurface

@@ -8,7 +8,10 @@ import {
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
+  buildSlackThreadReplyFooterBlock,
+  getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
+  withSlackThreadReplyFooterLock,
   type SlackNotifier,
 } from '@roomote/slack';
 
@@ -28,6 +31,7 @@ export async function postSlackThreadMarkdownMessage({
   conversationLog,
   fastSessionFooter,
   images = [],
+  deliverVideos,
 }: {
   slack: SlackNotifier;
   channel: string;
@@ -42,6 +46,8 @@ export async function postSlackThreadMarkdownMessage({
   /** Attach the sticky Fast session reply footer to this message. */
   fastSessionFooter?: { sessionId: string } & FastSessionReplyFooterContext;
   images?: Array<{ url: string; altText: string }>;
+  /** Upload only after the source guard permits a successful text post. */
+  deliverVideos?: () => Promise<string>;
 }): Promise<SlackThreadMarkdownPostResult> {
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
@@ -98,6 +104,49 @@ export async function postSlackThreadMarkdownMessage({
 
   if (!messageTs) {
     return 'failed';
+  }
+
+  const videoFallback = await deliverVideos?.();
+  if (videoFallback) {
+    text = [text, videoFallback].filter(Boolean).join('\n\n');
+    const updated = await withSlackThreadReplyFooterLock({
+      channel,
+      threadTs,
+      fn: async () => {
+        const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
+          channel,
+          threadTs,
+        );
+        return slack.updateMessage({
+          channel,
+          ts: messageTs,
+          message: {
+            text,
+            blocks: [
+              { type: 'markdown', text },
+              ...images.map((image) => ({
+                type: 'image' as const,
+                image_url: image.url,
+                alt_text: image.altText,
+              })),
+              ...(fastSessionFooter && footerMessageTs === messageTs
+                ? [
+                    buildSlackThreadReplyFooterBlock({
+                      footerText: buildFastSessionReplyFooterText({
+                        provider: 'slack',
+                        ...fastSessionFooter,
+                      }),
+                    }),
+                  ]
+                : []),
+            ],
+          },
+        });
+      },
+    });
+    if (!updated) {
+      throw new Error('Slack did not update the Fast video fallback reply.');
+    }
   }
 
   if (conversationLog) {

@@ -47,7 +47,12 @@ export function formatAutomationResultSubtitle(params: {
   ]
     .filter((part): part is string => part !== null)
     .join(' ');
-  const price = `$${(Math.max(0, params.costMicroUsd) / 1_000_000).toFixed(2)}`;
+  const price = `$${Number(
+    (Math.max(0, params.costMicroUsd) / 1_000_000).toFixed(2),
+  ).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
   return `${params.trigger} · ${params.model} · ${price} · ${duration}`;
 }

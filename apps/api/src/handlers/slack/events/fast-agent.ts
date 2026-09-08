@@ -32,6 +32,7 @@ import {
   createSlackFastReplyStream,
   recordFastAgentConversationMessageBestEffort,
   resolveFastAgentSessionImages,
+  deliverFastAgentSessionVideos,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
 
@@ -372,7 +373,12 @@ export async function processFastAgentMessage(params: {
                 ),
             }
           : {}),
-        postReply: async ({ message, kickoff, imageArtifactIds = [] }) => {
+        postReply: async ({
+          message,
+          kickoff,
+          imageArtifactIds = [],
+          videoArtifactIds = [],
+        }) => {
           const replyImages = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,
@@ -383,6 +389,15 @@ export async function processFastAgentMessage(params: {
             threadTs: threadId,
             text: message,
             sourceMessageTs: event.ts,
+            deliverVideos: videoArtifactIds.length
+              ? () =>
+                  deliverFastAgentSessionVideos({
+                    artifactIds: videoArtifactIds,
+                    sessionId: session.id,
+                    channelId: event.channel,
+                    threadTs: threadId,
+                  })
+              : undefined,
             conversationLog: {
               userId,
               slackTeamId: teamId,

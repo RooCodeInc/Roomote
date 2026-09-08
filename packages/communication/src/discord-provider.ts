@@ -576,7 +576,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         ...(index === batchCount - 1 && input.buttons
           ? { components: buildDiscordComponents(input.buttons) }
           : {}),
-        ...(index === 0 && input.replyToMessageId
+        ...(index === 0 && !input.threadId && input.replyToMessageId
           ? {
               message_reference: {
                 message_id: input.replyToMessageId,

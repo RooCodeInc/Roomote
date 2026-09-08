@@ -1,5 +1,5 @@
 // Capture runner: drives agent-browser through a demo script, records a
-// cursorless WebM, and emits the timeline the Remotion renderer consumes.
+// cursorless video, and emits the timeline the Remotion renderer consumes.
 // Runs inside the worker sandbox (agent-browser + ffmpeg present).
 //
 // Two ideas make the output polished:
@@ -55,6 +55,14 @@ if (unsupportedBeat) {
 }
 
 const VIEWPORT = script.viewport || { w: 1280, h: 800 };
+const FPS = script.fps === undefined ? 30 : script.fps;
+// VP8 can backpressure high-rate capture; native H.264 keeps the pipe moving.
+const RAW_PATH = `${OUT_DIR}/raw.${FPS > 30 ? 'mp4' : 'webm'}`;
+
+if (!Number.isInteger(FPS) || FPS < 1 || FPS > 60) {
+  console.error('Demo script fps must be an integer from 1 to 60.');
+  process.exit(1);
+}
 
 // Narration manifest (pre-capture synthesis). Optional: without it the demo
 // is captions-only and lines are paced by estimated speaking time.
@@ -120,7 +128,7 @@ const centerNorm = (r) => ({
 
 const timeline = {
   video: { path: 'recording.mp4', width: VIEWPORT.w, height: VIEWPORT.h },
-  fps: 30,
+  fps: FPS,
   durationSeconds: 0,
   cursorKeys: [{ t: 0, v: { x: 0.5, y: 1.1 } }],
   clicks: [],
@@ -145,18 +153,6 @@ const pushCursorMove = (startT, endT, target) => {
   curCursor = target;
 };
 
-// Headless capture emits frames only on visual damage and stamps them
-// without wall-clock gaps, so a static surface collapses into a sub-second
-// video; an imperceptible 2px dot re-painting every animation frame keeps
-// frames flowing at wall-clock rate.
-const TICKER_JS =
-  '(function(){var d=document.createElement("div");' +
-  'd.style.cssText="position:fixed;left:0;bottom:0;width:2px;height:2px;' +
-  'z-index:2147483647;pointer-events:none;background:#000;opacity:0.01";' +
-  'document.body.appendChild(d);var f=0;' +
-  '(function t(){d.style.opacity=(f++%2)?"0.02":"0.01";' +
-  'requestAnimationFrame(t)})()})()';
-
 async function run() {
   mkdirSync(OUT_DIR, { recursive: true });
   // Fully stop any existing agent-browser daemon before recording. `close`
@@ -168,104 +164,129 @@ async function run() {
   } catch {
     // no active daemon is fine
   }
-  ab('set', 'viewport', String(VIEWPORT.w), String(VIEWPORT.h));
-  ab('record', 'start', `${OUT_DIR}/raw.webm`, script.url);
-
-  t0 = Date.now();
-  ab('eval', TICKER_JS);
-  sleep(300); // let the first frames settle
-
-  for (const beat of script.beats) {
-    if (beat.a === 'hold' || beat.a === 'wait') {
-      sleep(beat.ms);
-      continue;
-    }
-
-    if (beat.a === 'scrollTo') {
-      ab('scrollintoview', beat.sel);
-      sleep(beat.ms ?? 650); // let the scroll settle (shows in the recording)
-      continue;
-    }
-
-    if (beat.a === 'show') {
-      // The default narrated move: scroll the subject into view and speak
-      // over it with the camera wide. No cursor glide is needed for a
-      // non-interactive beat.
-      ab('scrollintoview', beat.sel);
-      sleep(beat.settleMs ?? 600); // scroll settles on screen
-      const settled = now();
-
-      if (beat.caption) {
-        const lineSeconds = narration
-          ? narration.clips[lineIndex].durationSeconds
-          : estimateSpokenSeconds(beat.caption);
-        const lineStart =
-          Math.round(Math.max(0.1, prevLineEnd + 0.1, settled - 0.15) * 1000) /
-          1000;
-        const lineEnd = lineStart + lineSeconds;
-        prevLineEnd = lineEnd;
-
-        timeline.captions.push({
-          start: lineStart,
-          end: Math.round((lineEnd + 0.25) * 1000) / 1000,
-          text: beat.caption,
-        });
-        if (narration) {
-          narration.clips[lineIndex].startSeconds = lineStart;
-        }
-        lineIndex += 1;
-
-        const holdSeconds = Math.max(0.5, lineEnd + LINE_GAP - now());
-        sleep(holdSeconds * 1000);
-      } else {
-        sleep(beat.holdMs ?? 900);
-      }
-      continue;
-    }
-
-    if (beat.a === 'click') {
-      const c = centerNorm(rect(beat.sel));
-      const t = now();
-      timeline.clicks.push({ t, at: c });
-      // Give the pointer a short bracketed hop when it is not already on the
-      // target while preserving the interaction cue.
-      if (curCursor.x !== c.x || curCursor.y !== c.y) {
-        pushCursorMove(Math.max(0, t - 0.25), t, c);
-      }
-      ab('click', beat.sel);
-      sleep(beat.holdMs ?? 300);
-      continue;
-    }
-
-    if (beat.a === 'type') {
-      const c = centerNorm(rect(beat.sel));
-      const moveStart = now();
-      ab(
-        'mouse',
-        'move',
-        String((c.x * VIEWPORT.w) | 0),
-        String((c.y * VIEWPORT.h) | 0),
-      );
-      sleep(beat.moveMs ?? 450);
-      const moveEnd = now();
-      pushCursorMove(moveStart, moveEnd, c);
-      ab('type', beat.sel, beat.text);
-      continue;
-    }
-
-    throw new Error(`unknown beat action: ${beat.a}`);
-  }
-
-  timeline.durationSeconds = now();
-  ab('record', 'stop');
+  // Native recording attaches to the active page and preserves wall-clock
+  // holds without injecting animation into the product.
+  let recording = false;
   try {
-    ab('close', '--all');
-  } catch {
-    // best-effort; the recording is already on disk
+    ab('open', script.url);
+    ab('set', 'viewport', String(VIEWPORT.w), String(VIEWPORT.h));
+    ab('record', 'start', RAW_PATH, '--fps', String(FPS));
+    recording = true;
+
+    t0 = Date.now();
+    sleep(300); // let the first frames settle
+
+    for (const beat of script.beats) {
+      if (beat.a === 'hold' || beat.a === 'wait') {
+        sleep(beat.ms);
+        continue;
+      }
+
+      if (beat.a === 'scrollTo') {
+        ab('scrollintoview', beat.sel);
+        sleep(beat.ms ?? 650); // let the scroll settle (shows in the recording)
+        continue;
+      }
+
+      if (beat.a === 'show') {
+        // The default narrated move: scroll the subject into view and speak
+        // over it with the camera wide. No cursor glide is needed for a
+        // non-interactive beat.
+        ab('scrollintoview', beat.sel);
+        sleep(beat.settleMs ?? 600); // scroll settles on screen
+        const settled = now();
+
+        if (beat.caption) {
+          const lineSeconds = narration
+            ? narration.clips[lineIndex].durationSeconds
+            : estimateSpokenSeconds(beat.caption);
+          const lineStart =
+            Math.round(
+              Math.max(0.1, prevLineEnd + 0.1, settled - 0.15) * 1000,
+            ) / 1000;
+          const lineEnd = lineStart + lineSeconds;
+          prevLineEnd = lineEnd;
+
+          timeline.captions.push({
+            start: lineStart,
+            end: Math.round((lineEnd + 0.25) * 1000) / 1000,
+            text: beat.caption,
+          });
+          if (narration) {
+            narration.clips[lineIndex].startSeconds = lineStart;
+          }
+          lineIndex += 1;
+
+          const holdSeconds = Math.max(0.5, lineEnd + LINE_GAP - now());
+          sleep(holdSeconds * 1000);
+        } else {
+          sleep(beat.holdMs ?? 900);
+        }
+        continue;
+      }
+
+      if (beat.a === 'click') {
+        const c = centerNorm(rect(beat.sel));
+        const t = now();
+        timeline.clicks.push({ t, at: c });
+        // Give the pointer a short bracketed hop when it is not already on the
+        // target while preserving the interaction cue.
+        if (curCursor.x !== c.x || curCursor.y !== c.y) {
+          pushCursorMove(Math.max(0, t - 0.25), t, c);
+        }
+        ab('click', beat.sel);
+        sleep(beat.holdMs ?? 300);
+        continue;
+      }
+
+      if (beat.a === 'type') {
+        const c = centerNorm(rect(beat.sel));
+        const moveStart = now();
+        ab(
+          'mouse',
+          'move',
+          String((c.x * VIEWPORT.w) | 0),
+          String((c.y * VIEWPORT.h) | 0),
+        );
+        sleep(beat.moveMs ?? 450);
+        const moveEnd = now();
+        pushCursorMove(moveStart, moveEnd, c);
+        ab('type', beat.sel, beat.text);
+        continue;
+      }
+
+      throw new Error(`unknown beat action: ${beat.a}`);
+    }
+
+    timeline.durationSeconds = now();
+    const captureOutput = ab('record', 'stop', '--json');
+    recording = false;
+    const captureResult = JSON.parse(captureOutput);
+    writeFileSync(
+      `${OUT_DIR}/capture-stats.json`,
+      JSON.stringify(
+        { ...captureResult, wallSeconds: timeline.durationSeconds },
+        null,
+        2,
+      ),
+    );
+  } finally {
+    if (recording) {
+      try {
+        ab('record', 'stop');
+      } catch {
+        // Preserve the capture error; still attempt to close the browser.
+      }
+    }
+    try {
+      ab('close');
+    } catch {
+      // Preserve the capture error if browser cleanup also fails.
+    }
   }
 
   // Honest-state gate: a recording much shorter than the interaction means
-  // the screencast stalled (or frames stayed sparse despite the ticker) and
+  // the screencast stalled and
   // the demo would be garbage. Fail loudly instead of shipping it.
   const recordedSeconds = parseFloat(
     execFileSync('ffprobe', [
@@ -275,7 +296,7 @@ async function run() {
       'format=duration',
       '-of',
       'default=nw=1:nk=1',
-      `${OUT_DIR}/raw.webm`,
+      RAW_PATH,
     ])
       .toString()
       .trim(),
@@ -297,19 +318,18 @@ async function run() {
     );
   }
 
-  // WebM (VP8/VP9) -> H.264 mp4 for the renderer.
+  // Convert ordinary WebM; remux native high-FPS H.264 without resampling.
   execFileSync(
     'ffmpeg',
     [
       '-y',
       '-i',
-      `${OUT_DIR}/raw.webm`,
-      '-c:v',
-      'libx264',
-      '-pix_fmt',
-      'yuv420p',
-      '-preset',
-      'veryfast',
+      RAW_PATH,
+      ...(FPS > 30
+        ? ['-c', 'copy']
+        : ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast']),
+      '-movflags',
+      '+faststart',
       `${OUT_DIR}/recording.mp4`,
     ],
     { stdio: ['ignore', 'ignore', 'pipe'] },

@@ -1,5 +1,18 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
+import * as suggestionStart from '../suggestion-start.js';
+import type { FastAgentConversation } from '@roomote/types';
+
+vi.mock('../../tasks/suggestion-launch.js', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../../tasks/suggestion-launch.js')
+  >()),
+  resolveSuggestionFastConversation: vi.fn(
+    async ({ conversation }: { conversation: FastAgentConversation }) =>
+      conversation,
+  ),
+}));
 
 const {
   authAccountsFindFirstMock,
@@ -48,6 +61,8 @@ const {
   findTeamsConversationRouteMock,
   getFastSessionMock,
   isFastProviderMessageMock,
+  finalizeWorkItemMock,
+  releaseWorkItemMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
@@ -115,6 +130,8 @@ const {
   findTeamsConversationRouteMock: vi.fn(),
   getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
+  finalizeWorkItemMock: vi.fn(),
+  releaseWorkItemMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -142,6 +159,8 @@ vi.mock('../suggestion-start.js', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  finalizeWorkItemLaunched: finalizeWorkItemMock,
+  releaseWorkItemClaim: releaseWorkItemMock,
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
   setTrustedRunActingUser: setTrustedRunActingUserMock,
   getSessionForTask: getSessionForTaskMock,
@@ -599,6 +618,9 @@ describe('Teams webhook handler', () => {
   });
 
   it('launches a pinned suggestion through the owning Fast Session without a model turn', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
     trackedSuggestionMessageFindFirstMock.mockResolvedValue({
       workItemId: 'suggestion-1',
     });
@@ -615,6 +637,7 @@ describe('Teams webhook handler', () => {
         targetRepositoryFullName: 'acme/app',
         targetEnvironmentId: null,
         sourceTaskId: 'scan-task-1',
+        originSessionId: 'session-card',
         launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
       },
     });
@@ -713,6 +736,7 @@ describe('Teams webhook handler', () => {
         kickoffMessage: 'Started a task in acme/app.',
       }),
     );
+    expect(resolveOrigin).toHaveBeenCalledWith('scan-task-1', 'session-card');
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         initiator: { kind: 'user', userId: 'mapped-user-1' },
@@ -828,6 +852,134 @@ describe('Teams webhook handler', () => {
       }),
     );
   });
+
+  it.each(['reaction', 'numbered text'] as const)(
+    'dispatches a taskless router suggestion from %s in its canonical Fast conversation',
+    async (path) => {
+      const resolveOrigin = vi
+        .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+        .mockResolvedValueOnce('session-origin');
+      const canonicalConversation = {
+        surface: 'teams' as const,
+        workspaceId: 'tenant-1',
+        conversationId: 'original-report:user:report-owner',
+        replyTarget: {
+          channelId: '19:original-channel@thread.v2',
+          threadId: 'original-report',
+        },
+      };
+      const resolveConversation = vi
+        .spyOn(suggestionLaunch, 'resolveSuggestionFastConversation')
+        .mockResolvedValueOnce(canonicalConversation);
+      const suggestion = {
+        id: 'suggestion-router',
+        title: 'Investigate the report',
+        brief: 'Follow up on the findings.',
+        investigationContext: null,
+        targetRepositoryFullName: null,
+        targetEnvironmentId: null,
+        usesRouterLaunch: true,
+        sourceTaskId: null,
+        originSessionId: 'session-card',
+        launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
+      };
+      teamsUserMappingFindFirstMock.mockResolvedValue({
+        userId: 'mapped-user-1',
+      });
+      findFirstMock.mockResolvedValue(null);
+      if (path === 'reaction') {
+        trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+          workItemId: suggestion.id,
+        });
+        resolveAndClaimTeamsSuggestionReactionMock.mockResolvedValue({
+          outcome: 'claimed',
+          suggestion,
+        });
+      } else {
+        vi.mocked(
+          suggestionStart.parseTeamsSuggestionStartText,
+        ).mockReturnValueOnce(1);
+        vi.mocked(
+          suggestionStart.resolveAndClaimTeamsSuggestionStart,
+        ).mockResolvedValueOnce({ outcome: 'claimed', suggestion });
+      }
+      const actual = await vi.importActual<
+        typeof import('../suggestion-start.js')
+      >('../suggestion-start.js');
+      launchClaimedTeamsSuggestionMock.mockImplementationOnce(
+        actual.launchClaimedTeamsSuggestion,
+      );
+      finalizeWorkItemMock.mockResolvedValueOnce(true);
+      const abort = vi.fn();
+      getFastSessionMock.mockImplementationOnce(async ({ conversation }) => {
+        expect(conversation).toEqual(canonicalConversation);
+        return { id: 'fast-original', conversation: canonicalConversation };
+      });
+      continueFastReplyMock.mockImplementationOnce(async ({ onAccepted }) => {
+        onAccepted(abort);
+        return true;
+      });
+      const response = await createApp().request('/teams', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer valid-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(
+          createTeamsActivity({
+            id: 'new-interaction',
+            replyToId: 'clicked-card',
+            ...(path === 'reaction'
+              ? {
+                  type: 'messageReaction',
+                  text: undefined,
+                  entities: undefined,
+                  reactionsAdded: [{ type: 'like' }],
+                }
+              : { text: '<at>Roomote</at> start idea 1' }),
+          }),
+        ),
+      });
+      await expect(response.json()).resolves.toEqual({
+        ok: true,
+        started: true,
+        runId: null,
+      });
+      expect(resolveOrigin).toHaveBeenCalledWith(null, 'session-card');
+      expect(resolveConversation).toHaveBeenCalledWith({
+        userId: 'mapped-user-1',
+        originSessionId: 'session-origin',
+        conversation: expect.objectContaining({
+          conversationId: 'clicked-card:user:mapped-user-1',
+          replyTarget: {
+            channelId: '19:conversation@thread.v2',
+            threadId: 'clicked-card',
+          },
+        }),
+      });
+      expect(getFastSessionMock).toHaveBeenCalledWith({
+        userId: 'mapped-user-1',
+        conversation: canonicalConversation,
+      });
+      expect(continueFastReplyMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'fast-original',
+          userId: 'mapped-user-1',
+          currentMessageId: 'new-interaction',
+          question: expect.stringContaining('Investigate the report'),
+        }),
+      );
+      expect(finalizeWorkItemMock).toHaveBeenCalledWith(expect.anything(), {
+        id: suggestion.id,
+        taskId: null,
+        claimedAt: suggestion.launchClaimedAt,
+      });
+      expect(releaseWorkItemMock).not.toHaveBeenCalled();
+      expect(abort).not.toHaveBeenCalled();
+      expect(launchPinnedMock).not.toHaveBeenCalled();
+      expect(enqueueTaskMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('queues a native reaction on the owner’s bound Fast message', async () => {
     teamsUserMappingFindFirstMock.mockResolvedValue({

@@ -81,6 +81,7 @@ export type ClaimedTeamsSuggestion = {
   launchTarget?: string;
   /** The scan or onboarding task that produced the suggestion. */
   sourceTaskId?: string | null;
+  originSessionId?: unknown;
   launchClaimedAt: Date;
 };
 
@@ -122,6 +123,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       messageTs: trackedMessages.messageTs,
       threadTs: trackedMessages.threadTs,
       createdAt: trackedMessages.createdAt,
+      metadata: trackedMessages.metadata,
     })
     .from(trackedMessages)
     .where(
@@ -148,7 +150,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
   // Group cards by their intro message and keep the newest group: the list the
   // user is replying to. message_ts is '<introMessageId>:<workItemId>'; strip
   // the known workItemId suffix (intro ids may themselves contain ':').
-  const groups = new Map<string, { createdAt: Date; workItemIds: string[] }>();
+  const groups = new Map<string, { createdAt: Date; cards: typeof cards }>();
 
   for (const card of scopedCards) {
     if (!card.workItemId || !card.messageTs) {
@@ -162,7 +164,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
     const group = groups.get(groupKey);
 
     if (group) {
-      group.workItemIds.push(card.workItemId);
+      group.cards.push(card);
 
       if (card.createdAt > group.createdAt) {
         group.createdAt = card.createdAt;
@@ -170,7 +172,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
     } else {
       groups.set(groupKey, {
         createdAt: card.createdAt,
-        workItemIds: [card.workItemId],
+        cards: [card],
       });
     }
   }
@@ -184,7 +186,12 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
   const items = await db
     .select({ id: workItems.id, title: workItems.title })
     .from(workItems)
-    .where(inArray(workItems.id, latestGroup.workItemIds))
+    .where(
+      inArray(
+        workItems.id,
+        latestGroup.cards.map((card) => card.workItemId!),
+      ),
+    )
     .orderBy(asc(workItems.sortOrder), asc(workItems.createdAt));
 
   const target = items[input.ideaNumber - 1];
@@ -209,6 +216,9 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       targetRepositoryFullName: claimed.targetRepositoryFullName,
       targetEnvironmentId: claimed.targetEnvironmentId,
       sourceTaskId: claimed.sourceTaskId,
+      originSessionId: latestGroup.cards.find(
+        (card) => card.workItemId === target.id,
+      )?.metadata?.originSessionId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };

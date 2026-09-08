@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import { cn } from '@/lib/utils';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   type BackgroundAutomationKey,
@@ -40,7 +41,7 @@ export function TaskAutomationIcon({
       width={96}
       height={96}
       alt=""
-      className={className}
+      className={cn('dark:invert dark:mix-blend-screen', className)}
     />
   );
 }

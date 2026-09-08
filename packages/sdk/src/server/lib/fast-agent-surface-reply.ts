@@ -33,6 +33,7 @@ import {
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
 import { resolveFastAgentSessionImages } from './fast-agent-session-images';
+import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
 import { findSlackConversationSubjectByUserId } from './slack-conversation-log';
 import {
   createFastAgentCommunicationTaskLauncher,
@@ -68,6 +69,7 @@ import {
   buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
+import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -225,7 +227,6 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         createArtifact,
         launchTask: createFastAgentWebTaskLauncher({
           userId: params.userId,
-          conversation,
         }),
         postReply: async () => {},
       },
@@ -314,13 +315,26 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           channelId: conversation.replyTarget.channelId,
           threadTs: threadId,
         }),
-        postReply: async ({ message, imageArtifactIds = [] }) => {
+        postReply: async ({
+          message,
+          imageArtifactIds = [],
+          videoArtifactIds = [],
+        }) => {
           const quote = pendingQuote;
           pendingQuote = null;
           const images = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
             sessionId: session.id,
           });
+          const videoFallback = videoArtifactIds.length
+            ? await deliverFastAgentSessionVideos({
+                artifactIds: videoArtifactIds,
+                sessionId: session.id,
+                channelId: conversation.replyTarget.channelId,
+                threadTs: threadId,
+              })
+            : '';
+          message = [message, videoFallback].filter(Boolean).join('\n\n');
           const messageTs = await postSlackThreadMessageWithFooterText({
             slack,
             channel: conversation.replyTarget.channelId,
@@ -385,7 +399,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           text: params.question,
         });
 
+    const activity = createFastAgentTypingActivity({
+      sendTyping: () => provider.triggerTyping(conversation.replyTarget),
+      intervalMs: 8_000,
+    });
     const adapter: FastAgentTurnAdapter = {
+      activity,
       createArtifact,
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
@@ -421,6 +440,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
               text: textWithFooter,
               textFormat: 'markdown',
             });
+            activity.reassert();
             return {
               messageId: result.lastTextMessageId ?? result.messageId,
               textWithoutFooter: getDiscordFooterlessFinalChunk({
@@ -445,7 +465,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         return { messageId: posted.messageId };
       },
     };
-    adapter.replaceReply = createDiscordFastReplyReplacer({
+    const replaceReply = createDiscordFastReplyReplacer({
       provider,
       conversation,
       channelId: conversation.replyTarget.channelId,
@@ -455,6 +475,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       postReplacement: (text) =>
         adapter.postReply({ purpose: 'closeout', message: text }),
     });
+    adapter.replaceReply = async (handle, reply) => {
+      const result = await replaceReply(handle, reply);
+      activity.reassert();
+      return result;
+    };
     return { conversation, adapter };
   }
 
@@ -570,9 +595,21 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const replyToMessageId = params.replyToMessageId ?? params.currentMessageId;
+    const activity = createFastAgentTypingActivity({
+      sendTyping: () => provider.sendChatAction(conversation.replyTarget),
+      intervalMs: 4_000,
+    });
+    const replaceReply = createTelegramFastReplyReplacer({
+      provider,
+      conversation,
+      channelId: conversation.replyTarget.channelId,
+      sessionId: session.id,
+      footerContext,
+    });
     return {
       conversation,
       adapter: {
+        activity,
         createArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
@@ -588,6 +625,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
             textFormat: 'markdown',
           });
+          activity.reassert();
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
             conversation,
@@ -595,13 +633,11 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: createTelegramFastReplyReplacer({
-          provider,
-          conversation,
-          channelId: conversation.replyTarget.channelId,
-          sessionId: session.id,
-          footerContext,
-        }),
+        replaceReply: async (handle, reply) => {
+          const result = await replaceReply(handle, reply);
+          activity.reassert();
+          return result;
+        },
       },
     };
   }

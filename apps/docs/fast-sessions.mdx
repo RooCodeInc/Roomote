@@ -45,6 +45,9 @@ conversation to execution to review without changing identity.
 
 ## The session view
 
+A Session header shows the other people currently viewing that Session. Your
+own avatar is omitted from the viewer list.
+
 A Session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest
 error, and cost. Select a card to open its details panel. For a live nested
@@ -96,6 +99,13 @@ generated title that updates as the Session evolves. Replies appear as the
 model writes them, then settle into the saved message once the reply is
 delivered.
 
+Expand a tool receipt to inspect the request and result, including messages sent
+to delegated tasks, reports received from them, and image-inspection questions
+and answers. Task-message receipts link to the source or destination task by
+title, with its ID as a fallback. Details are sanitized for display; internal
+event metadata is not exposed. A running receipt may show its input before a
+result arrives.
+
 Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
 sandboxed in the web view. Chat surfaces receive a concise text preview and a
@@ -144,6 +154,64 @@ requested.
 In shared Slack and Discord conversations, Fast can stay silent when linked
 participants are talking to each other. A direct reply to Roomote, a mention,
 or a direct message still requires a response.
+
+## Reminders and monitors
+
+A Session can schedule a message to itself. Ask Fast to "remind me in twenty
+minutes", "check every ten minutes whether CI is green, up to six times", or
+"every weekday at nine, summarize the open pull requests", and it creates a
+wakeup for that Session. When the wakeup fires, Fast picks the conversation back
+up with its full history in context, does what was asked, and replies on the same surface
+the Session lives on: the transcript in the dashboard, or the originating Slack,
+Discord, Teams, or Telegram thread.
+
+Reporting policy is separate from the schedule. One-shot wakeups default to
+replying every run; recurring wakeups default to replying only when there is
+something notable, such as a change, a result, a blocker, or a decision you need
+to make. Ongoing-process checks can be one-shot or recurring and stay quiet
+without news. Ask for a reply on every run when you want a recurring reminder
+or report instead. When a monitored condition resolves, Fast tells you and
+cancels any remaining checks. You can also ask Fast to list or cancel wakeups
+at any time; archiving a Session cancels all of its wakeups.
+
+In the dashboard, active scheduled wakeups appear above the Session composer,
+ordered by their next run. Each row shows the wakeup's name and a countdown.
+**Due soon** means the scheduled time has arrived, not that the check has run
+or completed. The Session owner or an admin can use the row's **Cancel wakeup**
+control to stop it; other viewers can see the schedule but cannot cancel it
+from this list.
+
+Fast can proactively offer a follow-up when an ongoing process has a concrete
+unresolved outcome worth checking and it has verified that available tools can
+check it. The offer names the outcome, evidence source, timing, and stop bound.
+Fast waits for your acceptance before scheduling; an explicit request to monitor
+already gives that permission. Before scheduling, it rechecks access and reuses
+an equivalent active check rather than duplicating monitoring or notifications.
+
+For ongoing-process monitoring, Fast uses a one-shot check or sets a finite run
+count or end time on a recurring schedule at any cadence, without automatic
+renewal. It stops earlier if the outcome resolves, the check becomes irrelevant,
+or it loses the capability to verify the outcome. Missing evidence or reaching
+the bound without evidence of resolution is not success. This is how Fast is
+instructed to manage monitors, not a scheduler restriction on every recurring
+wakeup: explicitly requested recurring reminders or reports can remain unbounded
+where the scheduling limits below allow it.
+
+Wakeups belong to the conversation and do not require an administrator. A
+Session may hold up to ten active wakeups, intervals range from one second to
+seven days, and recurring wakeups can be bounded by a run count or an end time.
+Intervals under five minutes must carry one of those bounds. A recurring wakeup
+whose turns fail five times in a row is retired. Deployment-wide recurring work
+that should run outside a conversation or report to a channel is an
+[automation](/automations) instead.
+
+Relative and interval schedules use `in <positive integer>s|m|h|d` and
+`every <positive integer>s|m|h|d`: seconds, minutes, hours, or days. Use `in 30s`,
+not fractional `in 0.5m`. For a short recurring check, use `every 30s x3` or an
+`until` end time; recurring intervals under five minutes still require a bound.
+Cron schedules remain five-field expressions, such as `cron 0 9 * * 1-5`.
+Delivery is best effort: `in 30s` does not guarantee a reply exactly 30 seconds
+later.
 
 ## Session and execution access
 

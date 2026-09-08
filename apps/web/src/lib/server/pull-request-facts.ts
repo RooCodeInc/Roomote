@@ -10,20 +10,7 @@ import {
 } from '@roomote/db/server';
 
 import type { TimePeriodFilter } from '@/types';
-
-function getTimeCutoff(
-  timePeriod: TimePeriodFilter | undefined,
-  now: Date,
-): Date | null {
-  if (!timePeriod || timePeriod === 'all') {
-    return null;
-  }
-
-  const cutoff = new Date(now);
-  cutoff.setUTCHours(0, 0, 0, 0);
-  cutoff.setUTCDate(cutoff.getUTCDate() - (timePeriod - 1));
-  return cutoff;
-}
+import { getTimeCutoff } from './analytics/time-buckets';
 
 export async function getStoredPullRequestsForAnalytics(params: {
   repositoryIds: string[];

@@ -10,6 +10,7 @@ const {
   getMcpIntegrationAuthorizationParametersMock,
   getMcpIntegrationMock,
   getMcpIntegrationOauthEndpointsMock,
+  getMcpIntegrationOauthResourceMock,
   getMcpIntegrationOauthScopeModeMock,
   getMcpIntegrationOauthScopeSeparatorMock,
   getMcpIntegrationOauthScopesMock,
@@ -33,6 +34,7 @@ const {
   getMcpIntegrationAuthorizationParametersMock: vi.fn(),
   getMcpIntegrationMock: vi.fn(),
   getMcpIntegrationOauthEndpointsMock: vi.fn(),
+  getMcpIntegrationOauthResourceMock: vi.fn(),
   getMcpIntegrationOauthScopeModeMock: vi.fn(),
   getMcpIntegrationOauthScopeSeparatorMock: vi.fn(),
   getMcpIntegrationOauthScopesMock: vi.fn(),
@@ -91,6 +93,7 @@ vi.mock('@roomote/types', () => ({
   getMcpIntegrationAuthorizationParameters:
     getMcpIntegrationAuthorizationParametersMock,
   getMcpIntegrationOauthEndpoints: getMcpIntegrationOauthEndpointsMock,
+  getMcpIntegrationOauthResource: getMcpIntegrationOauthResourceMock,
   getMcpIntegrationOauthScopeMode: getMcpIntegrationOauthScopeModeMock,
   getMcpIntegrationOauthScopeSeparator:
     getMcpIntegrationOauthScopeSeparatorMock,
@@ -151,6 +154,7 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     getMcpIntegrationOauthScopesMock.mockReturnValue(undefined);
     getMcpIntegrationOauthScopeModeMock.mockReturnValue(undefined);
     getMcpIntegrationOauthEndpointsMock.mockReturnValue(undefined);
+    getMcpIntegrationOauthResourceMock.mockReturnValue(undefined);
     getMcpIntegrationOauthScopeSeparatorMock.mockReturnValue(' ');
     getMcpIntegrationAuthorizationParametersMock.mockReturnValue([]);
     generateCodeVerifierMock.mockReturnValue('verifier-value');
@@ -266,6 +270,9 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       'boards:read',
       'updates:read',
     ]);
+    getMcpIntegrationOauthResourceMock.mockReturnValue(
+      'https://mcp.monday.com/mcp',
+    );
 
     const response = await GET(buildRequest(), {
       params: Promise.resolve({ connectionId: CONNECTION_ID }),
@@ -276,6 +283,9 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
       expect.objectContaining({ scope: 'boards:read updates:read' }),
     );
     const authUrl = new URL(response.headers.get('location')!);
+    expect(authUrl.searchParams.get('resource')).toBe(
+      'https://mcp.monday.com/mcp',
+    );
     expect(authUrl.searchParams.get('scope')).toBe('boards:read updates:read');
     expect(authUrl.searchParams.get('scope')).not.toContain('boards:write');
   });

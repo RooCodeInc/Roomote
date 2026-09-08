@@ -179,6 +179,15 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
+      "Autonomous mode carries the request through the selected skill's workflow without waiting for extra confirmations",
+    );
+    expect(harnessInstructions).toContain(
+      'Autonomy applies to Roomote and authorized agents within the user request and permissions, not assuming authority over humans',
+    );
+    expect(harnessInstructions).toContain(
+      'Respect Human Ownership and Coordinate Agents Within Scope still apply; delegation does not expand authority',
+    );
+    expect(harnessInstructions).toContain(
       'the active `implement-changes` workflow stays responsible for the run until the required delivery result is known and must finish through the delegated `create-draft-pr` skill',
     );
     expect(harnessInstructions).toContain(

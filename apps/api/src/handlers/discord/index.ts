@@ -632,14 +632,17 @@ async function processDiscordGatewayEvent(
   ) {
     return { ok: true, ignored: 'discord_fast_session_user_mismatch' };
   }
+  // Message-backed Discord threads share the immutable report root's ID;
+  // a reply reference inside the thread may point to any later message.
+  const automationReportRootMessageId = message
+    ? (metadata.communicationThreadId ?? message.message_reference?.message_id)
+    : undefined;
   const repliedToAutomationReport =
-    !forceNewTask &&
-    !repliedFastSession &&
-    message?.message_reference?.message_id
+    !forceNewTask && !repliedFastSession && automationReportRootMessageId
       ? await findTaskBackedAutomationReportRun({
           provider: 'discord',
           channelId: metadata.communicationChannelId,
-          messageId: message.message_reference.message_id,
+          messageId: automationReportRootMessageId,
         })
       : null;
   const activeRun =

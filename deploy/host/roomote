@@ -825,12 +825,17 @@ cmd_backup() {
     # never rebuilds. Dump it on the same consistency point (gbrain is
     # already stopped above). The database name is validated by the
     # entrypoint to [A-Za-z0-9_], which is what makes the URL surgery safe.
-    if postgres_command '' 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; psql "$DATABASE_URL" -Atqc "SELECT 1 FROM pg_database WHERE datname = '\''$GB'\''" | grep -q 1'; then
+    if ! brain_database_probe="$(postgres_command '' 'GB="${GBRAIN_DATABASE_NAME:-gbrain}"; psql "$DATABASE_URL" -Atqc "SELECT 1 FROM pg_database WHERE datname = '\''$GB'\''"')"; then
+      die "could not determine whether the Brain index database exists"
+    fi
+    if [ "$brain_database_probe" = '1' ]; then
       log "Dumping the Brain index database"
       postgres_command '' "$gbrain_url_snippet"'; pg_dump --clean --if-exists --no-owner --no-privileges "$GBRAIN_URL"' >"$staging_dir/gbrain.sql"
       brain_database_included='true'
-    else
+    elif [ -z "$brain_database_probe" ]; then
       log "The Brain index database does not exist yet; bundling the volume only"
+    else
+      die "unexpected response while probing the Brain index database"
     fi
   fi
 

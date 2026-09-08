@@ -117,6 +117,18 @@ describe('Header', () => {
             enabled: options?.enabled,
           }),
         },
+        byId: {
+          queryOptions: (
+            _input: { sessionId: string },
+            options?: { enabled?: boolean },
+          ) => ({
+            queryKey: ['sessions.byId'],
+            queryFn: async () => ({
+              tasks: [{ taskId: 'task-123' }, { taskId: 'task-456' }],
+            }),
+            enabled: options?.enabled,
+          }),
+        },
       },
       tasks: {
         updateTitle: {
@@ -138,6 +150,9 @@ describe('Header', () => {
     renderHeader();
 
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
   });
 
   it('keeps the header clean when the task uses OpenCode', () => {

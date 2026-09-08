@@ -1,4 +1,5 @@
 import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
 
 const mocks = vi.hoisted(() => ({
   findRun: vi.fn(),
@@ -269,7 +270,70 @@ describe('Discord component callbacks', () => {
     });
   });
 
+  it('preserves a taskless router card origin through the Fast callback and claim settlement', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
+    const claimedAt = new Date('2026-08-28T00:00:00.000Z');
+    mocks.claimSuggestion.mockResolvedValue({
+      id: 'suggestion-1',
+      title: 'Investigate errors',
+      brief: null,
+      sourceTaskId: null,
+      originSessionId: 'session-origin',
+      usesRouterLaunch: true,
+      launchClaimedAt: claimedAt,
+    });
+    mocks.resolveChannel.mockResolvedValue({ channelId: 'channel-1' });
+    mocks.finalizeWorkItem.mockResolvedValue({ id: 'suggestion-1' });
+
+    await handleDiscordComponentInteraction({
+      provider: { postMessage: vi.fn() } as never,
+      applicationId: 'app-1',
+      interactionDeferred: true,
+      interaction: {
+        id: 'new-interaction',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token',
+        channel_id: 'card-thread',
+        user: { id: 'clicker', username: 'matt' },
+        data: { custom_id: 'idea:suggestion-1', component_type: 2 },
+      },
+      channel: {
+        channelId: 'card-thread',
+        parentChannelId: 'channel-1',
+        channelName: 'Suggestions',
+        channelType: 11,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+    });
+
+    expect(resolveOrigin).toHaveBeenCalledWith(null, 'session-origin');
+    expect(mocks.processFastAgentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        originSessionId: 'session-origin',
+        eventId: 'new-interaction',
+        conversationId: 'card-thread',
+        senderUserId: 'user-1',
+        sender: { id: 'clicker', username: 'matt' },
+      }),
+    );
+    expect(mocks.finalizeWorkItem).toHaveBeenCalledWith(expect.anything(), {
+      id: 'suggestion-1',
+      taskId: null,
+      claimedAt,
+    });
+    expect(mocks.releaseWorkItem).not.toHaveBeenCalled();
+    expect(mocks.launchPinned).not.toHaveBeenCalled();
+  });
+
   it('starts a coding task for a pinned suggestion', async () => {
+    const resolveOrigin = vi
+      .spyOn(suggestionLaunch, 'resolveSuggestionOriginSessionId')
+      .mockResolvedValueOnce('session-origin');
     const claimedAt = new Date('2026-08-28T00:00:00.000Z');
     mocks.getSessionForTask.mockResolvedValue({ id: 'session-origin' });
     mocks.claimSuggestionByMessage.mockResolvedValue({
@@ -283,6 +347,7 @@ describe('Discord component callbacks', () => {
         targetEnvironmentId: null,
         usesRouterLaunch: false,
         sourceTaskId: 'scan-task-1',
+        originSessionId: 'session-card',
         launchClaimedAt: claimedAt,
       },
     });
@@ -321,10 +386,7 @@ describe('Discord component callbacks', () => {
     });
 
     expect(mocks.startNewTask).toHaveBeenCalled();
-    expect(mocks.getSessionForTask).toHaveBeenCalledWith(
-      expect.anything(),
-      'scan-task-1',
-    );
+    expect(resolveOrigin).toHaveBeenCalledWith('scan-task-1', 'session-card');
     expect(mocks.launchPinned).toHaveBeenCalledWith(
       expect.objectContaining({ originSessionId: 'session-origin' }),
     );

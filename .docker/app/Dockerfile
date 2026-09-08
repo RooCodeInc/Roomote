@@ -93,9 +93,11 @@ COPY apps/docs ./apps/docs/
 ARG R_APP_ENV
 ARG RELEASE_VERSION
 ARG RELEASE_PRODUCT_VERSION
+ARG GITHUB_SHA
 ENV R_APP_ENV=${R_APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
 ENV RELEASE_PRODUCT_VERSION=${RELEASE_PRODUCT_VERSION}
+ENV GITHUB_SHA=${GITHUB_SHA}
 
 # ---------------------------------------------------------------------------
 # web: Next.js standalone build. The placeholder env values only satisfy
@@ -297,9 +299,11 @@ RUN chmod +x /roomote/.docker/app/entrypoint.sh
 ARG R_APP_ENV
 ARG RELEASE_VERSION
 ARG RELEASE_PRODUCT_VERSION
+ARG GITHUB_SHA
 ENV R_APP_ENV=${R_APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
 ENV RELEASE_PRODUCT_VERSION=${RELEASE_PRODUCT_VERSION}
+ENV GITHUB_SHA=${GITHUB_SHA}
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOME=/tmp
@@ -314,8 +318,9 @@ ARG OPENCODE_CLI_VERSION=1.18.10
 
 # Fast mode uses bounded, temporary partial Git fetches to discover
 # repository-defined skills without exposing a checkout to the model.
+# Native Slack video delivery converts WebM copies to H.264/AAC MP4.
 RUN apt -qq update && \
-  apt -qq install -y git && \
+  apt -qq install -y git ffmpeg util-linux && \
   rm -rf /var/lib/apt/lists/*
 
 # The install and version check run as root; with the image's HOME=/tmp they

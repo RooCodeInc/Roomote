@@ -188,6 +188,17 @@ function normalizeAcpMcpToolFields(payload: Record<string, unknown>): {
     flattenedServerNames: collectAcpFlattenedServerNames(payload),
   });
 
+  const nativeToolName = asString(payload.toolName);
+  if (!mcpInvocation && payload.isMcp === false && nativeToolName) {
+    return {
+      isMcp: false,
+      toolName: nativeToolName,
+      serverName: null,
+      mcpServerName: null,
+      mcpToolName: null,
+    };
+  }
+
   const resolvedServer =
     mcpInvocation?.mcpServerName ??
     asString(payload.mcpServerName) ??
@@ -646,20 +657,18 @@ function getToolCallUpdateLifecycleState(update: Record<string, unknown>): {
 function mergeToolResultPayload(
   existing: AcpToolCallUiMessage | AcpToolResultUiMessage,
   incoming: AcpToolResultUiMessage,
+  incomingPayload: Record<string, unknown>,
 ): AcpToolResultPayload {
   const existingData = existing.data;
   const existingRawInput = asRecord(
     (existingData as unknown as Record<string, unknown>).rawInput,
   );
   const mergedPayload: AcpToolResultPayload = {
+    ...(existingRawInput ? { rawInput: existingRawInput } : {}),
     ...incoming.data,
     kind: incoming.data.kind ?? existingData.kind,
     title: incoming.data.title ?? existingData.title,
     command: incoming.data.command ?? existingData.command,
-    mcpServerName: incoming.data.mcpServerName ?? existingData.mcpServerName,
-    mcpToolName: incoming.data.mcpToolName ?? existingData.mcpToolName,
-    serverName: incoming.data.serverName ?? existingData.serverName,
-    toolName: incoming.data.toolName ?? existingData.toolName,
     isSubagentSpawn:
       incoming.data.isSubagentSpawn ?? existingData.isSubagentSpawn,
     senderThreadId: incoming.data.senderThreadId ?? existingData.senderThreadId,
@@ -680,7 +689,8 @@ function mergeToolResultPayload(
 
   return {
     ...mergedPayload,
-    ...normalizeAcpMcpToolFields({ ...mergedPayload }),
+    // Normalize with the known identity before a sparse title can imply MCP.
+    ...normalizeAcpMcpToolFields({ ...existingData, ...incomingPayload }),
   };
 }
 
@@ -989,6 +999,7 @@ export class AcpProtocolService {
   private applyToolResultMessageToList(
     messages: AcpUiMessage[],
     toolResultMessage: Extract<AcpUiMessage, { kind: 'tool_result' }>,
+    incomingPayload: Record<string, unknown>,
   ): AcpUiMessage[] {
     const toolCallId = toolResultMessage.toolCallId;
 
@@ -1034,7 +1045,11 @@ export class AcpProtocolService {
     next[existingIndex] = {
       ...toolResultMessage,
       text: incomingText || existing.text,
-      data: mergeToolResultPayload(existing, toolResultMessage),
+      data: mergeToolResultPayload(
+        existing,
+        toolResultMessage,
+        incomingPayload,
+      ),
       previousTs: existing.previousTs,
       partial: false,
       isTurnCompletion:
@@ -1651,6 +1666,7 @@ export class AcpProtocolService {
         acpMessages: this.applyToolResultMessageToList(
           nextMessages,
           candidate as AcpToolResultUiMessage,
+          event.payload,
         ),
       };
     }
@@ -1774,6 +1790,7 @@ export class AcpProtocolService {
         acpMessages = this.applyToolResultMessageToList(
           acpMessages,
           toolResultMessage,
+          envelope.payload ?? {},
         );
 
         if (toolResultMessage.toolCallId) {
