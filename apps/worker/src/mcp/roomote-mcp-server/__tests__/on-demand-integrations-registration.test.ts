@@ -43,7 +43,7 @@ describe('roomote MCP on-demand integration tool registration', () => {
     expect(tools.call_integration_tool).toBeDefined();
   });
 
-  it('exposes integration call args as an object with arbitrary JSON values', async () => {
+  it('exposes integration call args as a required, ref-free object', async () => {
     process.env.ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH = '/tmp/catalog.json';
     const { roomoteMcpServer } = await import('../index.js');
     const [clientTransport, serverTransport] =
@@ -59,17 +59,21 @@ describe('roomote MCP on-demand integration tool registration', () => {
       );
       const argsSchema = callTool?.inputSchema.properties?.args as
         | {
-            anyOf?: Array<{
-              type?: string;
-              additionalProperties?: { anyOf?: Array<{ type?: string }> };
-            }>;
+            type?: string;
+            anyOf?: unknown[];
+            additionalProperties?: { anyOf?: Array<{ type?: string }> };
           }
         | undefined;
-      const objectSchema = argsSchema?.anyOf?.find(
-        (schema) => schema.type === 'object',
-      );
 
-      expect(objectSchema?.additionalProperties?.anyOf).toEqual(
+      // The member server makes optional fields nullable, which would turn
+      // `args` into `anyOf [object, null]`; gpt-5.x models then send null on
+      // every call. A recursive value schema would serialize to `$ref`s that
+      // downstream schema rewrites leave dangling. Neither may come back.
+      expect(callTool?.inputSchema.required).toContain('args');
+      expect(argsSchema?.type).toBe('object');
+      expect(argsSchema?.anyOf).toBeUndefined();
+      expect(JSON.stringify(callTool?.inputSchema)).not.toContain('$ref');
+      expect(argsSchema?.additionalProperties?.anyOf).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ type: 'string' }),
           expect.objectContaining({ type: 'object' }),
