@@ -238,7 +238,10 @@ export async function postToBrain(
  * One word for what became of a task's pull requests, for the page
  * frontmatter. Merged wins because shipped work is what later recall should
  * weight; a task whose every PR closed unmerged is the failure worth
- * remembering; anything still open is not an outcome yet.
+ * remembering; anything still open is not an outcome yet. A status that was
+ * never observed (the details fetch failed and the row kept its null) is not
+ * "open": the page says nothing about the outcome until one is known, so a PR
+ * that was already terminal when it went unfetched is never recorded as open.
  */
 type TaskPullRequestOutcome = 'merged' | 'closed' | 'open';
 
@@ -251,6 +254,10 @@ export function summarizePullRequestOutcome(
 
   if (pullRequests.some((pr) => pr.status === 'merged')) {
     return 'merged';
+  }
+
+  if (pullRequests.some((pr) => pr.status == null)) {
+    return null;
   }
 
   if (pullRequests.every((pr) => pr.status === 'closed')) {
@@ -278,10 +285,10 @@ function describePullRequestStatus(
 }
 
 function describePullRequestOutcome(
-  outcome: TaskPullRequestOutcome | null,
+  outcome: TaskPullRequestOutcome,
   count: number,
 ): string {
-  const noun = count === 1 ? 'The pull request' : 'The pull requests';
+  const noun = count === 1 ? 'the pull request' : 'the pull requests';
 
   switch (outcome) {
     case 'merged':
@@ -289,9 +296,9 @@ function describePullRequestOutcome(
         ? 'Outcome: the pull request was merged, so this work shipped.'
         : 'Outcome: at least one pull request was merged, so this work shipped.';
     case 'closed':
-      return `Outcome: ${noun.toLowerCase()} closed without merging, so this work did not ship as written. Treat the approach with that in mind.`;
-    default:
-      return `Outcome: ${noun.toLowerCase()} ${count === 1 ? 'was' : 'were'} still open when this memory was last refreshed.`;
+      return `Outcome: ${noun} closed without merging, so this work did not ship as written. Treat the approach with that in mind.`;
+    case 'open':
+      return `Outcome: ${noun} ${count === 1 ? 'was' : 'were'} still open when this memory was last refreshed.`;
   }
 }
 
@@ -371,8 +378,12 @@ export function buildMemoryPage(input: {
           '',
           ...prLines,
           '',
-          describePullRequestOutcome(outcome, input.pullRequests.length),
-          '',
+          ...(outcome
+            ? [
+                describePullRequestOutcome(outcome, input.pullRequests.length),
+                '',
+              ]
+            : []),
         ]
       : []),
   ].join('\n');

@@ -536,10 +536,35 @@ describe('task memory pull request outcomes', () => {
     ).toBe('merged');
   });
 
-  it('does not claim an outcome for open, draft, or unknown status', () => {
+  it('reports open and draft PRs as not yet an outcome', () => {
     expect(summarizePullRequestOutcome([{ status: 'open' }])).toBe('open');
     expect(summarizePullRequestOutcome([{ status: 'draft' }])).toBe('open');
-    expect(summarizePullRequestOutcome([{ status: null }])).toBe('open');
+    expect(
+      summarizePullRequestOutcome([{ status: 'closed' }, { status: 'open' }]),
+    ).toBe('open');
+
+    const page = buildMemoryPage({
+      ...base,
+      pullRequests: [{ ...pr, status: 'open' }],
+    });
+
+    expect(page.content).toContain('\npr_outcome: open\n');
+    expect(page.content).toContain(
+      'Outcome: the pull request was still open when this memory was last refreshed.',
+    );
+  });
+
+  it('keeps a never-observed status unknown instead of calling it open', () => {
+    // A failed details fetch leaves the association's status null. That PR
+    // may already be merged or closed, so the page must not claim otherwise.
+    expect(summarizePullRequestOutcome([{ status: null }])).toBeNull();
+    expect(summarizePullRequestOutcome([{}])).toBeNull();
+    expect(
+      summarizePullRequestOutcome([{ status: 'closed' }, { status: null }]),
+    ).toBeNull();
+    expect(
+      summarizePullRequestOutcome([{ status: null }, { status: 'merged' }]),
+    ).toBe('merged');
     expect(summarizePullRequestOutcome([])).toBeNull();
 
     const page = buildMemoryPage({
@@ -547,11 +572,10 @@ describe('task memory pull request outcomes', () => {
       pullRequests: [{ ...pr, status: null }],
     });
 
-    expect(page.content).toContain('\npr_outcome: open\n');
+    expect(page.content).not.toContain('pr_outcome');
     expect(page.content).toContain(': status unknown');
-    expect(page.content).toContain(
-      'Outcome: the pull request was still open when this memory was last refreshed.',
-    );
+    expect(page.content).not.toContain('Outcome:');
+    expect(page.content).toContain('## Pull requests');
   });
 
   it('omits the outcome field entirely when the task opened no PR', () => {
