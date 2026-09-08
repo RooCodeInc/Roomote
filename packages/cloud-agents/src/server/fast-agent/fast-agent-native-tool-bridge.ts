@@ -463,7 +463,9 @@ export default {
     toolName: z.string().min(1).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName)}),
     // OpenCode renames $defs without rewriting refs. Keep JSON value types
     // concrete but non-recursive; nested values are validated server-side.
-    args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())])).optional().describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
+    // Required (not optional) so no provider ever sees a null alternative
+    // that gpt-5.x models prefer over filling in an object.
+    args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())])).describe(${JSON.stringify(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args)}),
   },
   execute: (args, context) => invoke(${JSON.stringify(CALL_INTEGRATION_TOOL_TOOL.name)}, args, context),
 }
