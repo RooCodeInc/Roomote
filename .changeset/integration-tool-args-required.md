@@ -1,5 +1,5 @@
 ---
-'roomote': patch
+'@roomote/web': patch
 ---
 
-Fix on-demand integration calls from sandbox tasks: `call_integration_tool` now declares `args` as a required, non-recursive object on both the member MCP server and Fast, so gpt-5.x models stop sending `args: null` and Sentry, Linear, and Notion lookups run again.
+On-demand integration lookups work again with GPT-5.x models in sandbox tasks and Fast, fixing failed requests to services such as Sentry, Linear, and Notion without changing their connection settings.
