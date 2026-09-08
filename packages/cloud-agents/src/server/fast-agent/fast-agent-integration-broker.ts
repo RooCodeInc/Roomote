@@ -255,7 +255,7 @@ function describeMcpServer(
     return {
       name: 'Roomote',
       description:
-        'Manage this Roomote deployment, including custom automations and other deployment capabilities.',
+        'Manage this Roomote deployment, including custom skills, custom automations, and other deployment capabilities.',
     };
   }
   if (isMemoryMcpServer(id)) {

@@ -1076,6 +1076,24 @@ describe('WorkspaceManager tool versions', () => {
   });
 
   describe('installManualEnvironmentSkills', () => {
+    it.each([
+      '.',
+      '..',
+      '../outside',
+      'nested/skill',
+      'nested\\skill',
+      '/absolute',
+    ])(
+      'skips unsafe persisted name %s before creating a package',
+      async (name) => {
+        await manager.installManualEnvironmentSkills([
+          { name, description: 'Legacy', content: 'Instructions' },
+        ]);
+        expect(mkdtemp).not.toHaveBeenCalled();
+        expect(mockExecute).not.toHaveBeenCalled();
+      },
+    );
+
     it('should write each manual skill into a temporary package and install it via the skills CLI', async () => {
       await manager.installManualEnvironmentSkills([
         {
