@@ -154,7 +154,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'skills',
     label: 'Skills',
     title: 'Skills',
-    description: 'Manage reusable skills for Sessions and coding tasks.',
+    description: 'Shared instructions for all Sessions and coding tasks.',
     href: SETTINGS_PATHS.skills,
     icon: GraduationCap,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.skills),

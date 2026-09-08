@@ -69,8 +69,17 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
 }));
 vi.mock('@/components/settings/SettingsShell', () => ({
-  SettingsShell: ({ children }: { children: React.ReactNode }) => (
-    <>{children}</>
+  SettingsShell: ({
+    children,
+    headerAction,
+  }: {
+    children: React.ReactNode;
+    headerAction?: React.ReactNode;
+  }) => (
+    <>
+      <header>{headerAction}</header>
+      {children}
+    </>
   ),
 }));
 vi.mock('@/components/settings/CustomSkills', () => ({
@@ -111,6 +120,12 @@ it('makes Skills navigation and creation available to members without environmen
   expect(
     screen.queryByText('Legacy environment management'),
   ).not.toBeInTheDocument();
+  expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(1);
+  expect(
+    within(screen.getByRole('banner')).getByRole('button', {
+      name: 'Add Skill',
+    }),
+  ).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Add Skill' }));
   const dialog = screen.getByRole('dialog');
   expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
@@ -143,25 +158,45 @@ it('lets members view every body but only manage skills authorized by the server
   renderSkills();
   await screen.findByText('my-skill');
   expect(
-    screen.getByRole('button', { name: 'Edit my-skill' }),
+    within(screen.getByRole('list', { name: 'Shared skills' })).getAllByRole(
+      'button',
+    ),
+  ).toHaveLength(2);
+  expect(
+    screen.queryByRole('button', { name: /^Edit |^Delete / }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText('my-skill'));
+  const ownedDialog = screen.getByRole('dialog');
+  expect(within(ownedDialog).getByText('# My skill body')).toBeInTheDocument();
+  expect(
+    within(ownedDialog).getByRole('button', { name: 'Edit my-skill' }),
   ).toBeInTheDocument();
   expect(
-    screen.getByRole('button', { name: 'Delete my-skill' }),
+    within(ownedDialog).getByRole('button', { name: 'Delete my-skill' }),
   ).toBeInTheDocument();
+  fireEvent.click(
+    within(ownedDialog).getAllByRole('button', { name: 'Close' })[0]!,
+  );
+  fireEvent.click(screen.getByText('shared-skill'));
   expect(
     screen.queryByRole('button', { name: 'Edit shared-skill' }),
   ).not.toBeInTheDocument();
   expect(
     screen.queryByRole('button', { name: 'Delete shared-skill' }),
   ).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'View shared-skill' }));
   expect(
     within(screen.getByRole('dialog')).getByText('# Shared skill body'),
   ).toBeInTheDocument();
+  expect(
+    within(screen.getByRole('dialog')).queryByRole('button', {
+      name: /^Edit|^Delete/,
+    }),
+  ).not.toBeInTheDocument();
 });
 
 it('shows document-size validation instead of silently refusing to save', async () => {
   renderSkills();
+  fireEvent.click(await screen.findByRole('button', { name: 'View my-skill' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Edit my-skill' }));
   const dialog = screen.getByRole('dialog');
   fireEvent.change(within(dialog).getByLabelText('Content'), {
@@ -177,6 +212,7 @@ it('shows document-size validation instead of silently refusing to save', async 
 
 it('updates a creator skill and invalidates the catalog', async () => {
   const { invalidate } = renderSkills();
+  fireEvent.click(await screen.findByRole('button', { name: 'View my-skill' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Edit my-skill' }));
   const dialog = screen.getByRole('dialog');
   expect(within(dialog).getByLabelText('Content')).toHaveValue(
@@ -198,6 +234,7 @@ it('updates a creator skill and invalidates the catalog', async () => {
 
 it('requires confirmation before deleting and refreshes the catalog', async () => {
   const { invalidate } = renderSkills();
+  fireEvent.click(await screen.findByRole('button', { name: 'View my-skill' }));
   fireEvent.click(
     await screen.findByRole('button', { name: 'Delete my-skill' }),
   );
@@ -206,6 +243,7 @@ it('requires confirmation before deleting and refreshes the catalog', async () =
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }),
   );
   expect(deleteMock).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'View my-skill' }));
   fireEvent.click(screen.getByRole('button', { name: 'Delete my-skill' }));
   fireEvent.click(
     within(screen.getByRole('dialog')).getByRole('button', {
@@ -221,12 +259,15 @@ it('requires confirmation before deleting and refreshes the catalog', async () =
   );
 });
 
-it('retains clearly labeled environment management for admins', async () => {
+it('retains environment management for admins with one shared add action in the header', async () => {
   state.isAdmin = true;
   renderSkills();
   await screen.findByText('my-skill');
+  expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(1);
   expect(
-    screen.getByRole('heading', { name: 'Environment skills' }),
-  ).toBeInTheDocument();
+    within(screen.getByRole('banner')).getByRole('button', {
+      name: 'Add Skill',
+    }),
+  ).toBeVisible();
   expect(screen.getByText('Legacy environment management')).toBeInTheDocument();
 });
