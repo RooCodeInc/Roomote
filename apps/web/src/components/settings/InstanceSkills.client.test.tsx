@@ -82,9 +82,6 @@ vi.mock('@/components/settings/SettingsShell', () => ({
     </>
   ),
 }));
-vi.mock('@/components/settings/CustomSkills', () => ({
-  CustomSkills: () => <div>Legacy environment management</div>,
-}));
 
 import { SkillsSettingsPage } from './pages/SkillsSettingsPage';
 import { getAccessibleSettingsNavigation } from './settings-navigation';
@@ -118,7 +115,7 @@ it('makes Skills navigation and creation available to members without environmen
   const { invalidate } = renderSkills();
   await screen.findByText('my-skill');
   expect(
-    screen.queryByText('Legacy environment management'),
+    screen.queryByText(/marketplace|environment/i),
   ).not.toBeInTheDocument();
   expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(1);
   expect(
@@ -259,7 +256,7 @@ it('requires confirmation before deleting and refreshes the catalog', async () =
   );
 });
 
-it('retains environment management for admins with one shared add action in the header', async () => {
+it('shows only shared skills for admins with one add action in the header', async () => {
   state.isAdmin = true;
   renderSkills();
   await screen.findByText('my-skill');
@@ -269,5 +266,8 @@ it('retains environment management for admins with one shared add action in the 
       name: 'Add Skill',
     }),
   ).toBeVisible();
-  expect(screen.getByText('Legacy environment management')).toBeInTheDocument();
+  expect(
+    screen.queryByText(/marketplace|environment/i),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole('list', { name: 'Shared skills' })).toBeVisible();
 });

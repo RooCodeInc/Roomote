@@ -38,19 +38,22 @@ Instance skills are stored once for the Roomote instance, independently of
 environments. Any member can create or read them. Only the creator or an admin
 can edit or delete them; these permissions also apply to conversational creation.
 
-Admins can expand **Marketplace & environment skills** below the list when
-environments or existing installations are present. Marketplace search and
-environment-only creation and management remain there. These skills stay attached to selected environments. They are
-not automatically migrated, copied, or removed when an instance skill is created.
+Environment skills and marketplace installation controls are not shown in
+**Settings > Skills**. Existing environment skills remain stored and available
+to Roomote within their authorized environment scope. Admins manage them in
+the environment editor's **YAML** view: use `manualSkills` for inline custom
+instructions and `skills` for published skills. See the
+[environment definition reference](/environments/definition#skills) for examples.
+They are not automatically migrated, copied, or removed.
 
 | Skill type        | How it is added                                      | Availability                                                           |
 | ----------------- | ---------------------------------------------------- | ---------------------------------------------------------------------- |
 | Instance skill    | Ask in conversation or use Add Skill in Settings      | All Sessions and coding tasks on this instance                          |
-| Environment skill | Admins manage custom or marketplace skills in Settings | Selected environments only                                             |
+| Environment skill | Admins edit `manualSkills` or `skills` in environment YAML | Selected environments only                                             |
 | Repository skill  | Maintain a skill in the repository                    | The authorized repository or environment scope                          |
 
-Instance skills do not have an environment selection. Environment skills keep
-their existing availability controls.
+Instance skills do not have an environment selection. Environment skills apply
+to the environments whose YAML includes them.
 
 ## When to use a custom skill
 
