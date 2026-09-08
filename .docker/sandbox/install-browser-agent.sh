@@ -427,6 +427,19 @@ should_seed_preview_cookies() {
   return 1
 }
 
+is_informational_invocation() {
+  local arg
+  for arg in "${AGENT_BROWSER_EXEC_ARGS[@]}"; do
+    case "$arg" in
+      --help|-h|--version|-V)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
 should_clear_seed_cache() {
   case "$AGENT_BROWSER_COMMAND" in
     close|quit|exit)
@@ -547,7 +560,7 @@ collect_cli_browser_args "$@"
 parse_cli_context "${AGENT_BROWSER_EXEC_ARGS[@]}"
 configure_local_preview_host_resolution
 
-if should_seed_preview_cookies; then
+if ! is_informational_invocation && should_seed_preview_cookies; then
   seed_preview_cookies
 fi
 
