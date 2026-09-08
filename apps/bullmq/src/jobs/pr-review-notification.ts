@@ -631,11 +631,6 @@ export const prReviewNotificationJob = async (
             prompt: delivery.followUpPrompt,
           }
         : null;
-    // Surfaces without buttons (and the task-history record) carry the offer
-    // as a trailing question, preserving the pre-elicitation message shape.
-    const textWithQuestion = followUp
-      ? `${delivery.text}\n${followUp.question}`
-      : delivery.text;
     const roomoteReviewIdentity = events.find(
       (event) => event.reviewTaskId && event.reviewHeadSha,
     );
@@ -945,7 +940,7 @@ ${delivery.text}`;
             runId: latestJob.id,
             taskId: data.taskId,
             route: null,
-            text: textWithQuestion,
+            text: delivery.text,
           });
           return;
         }
@@ -957,7 +952,7 @@ ${delivery.text}`;
         runId: latestJob.id,
         taskId: data.taskId,
         route: null,
-        text: autoHandledText ?? textWithQuestion,
+        text: autoHandledText ?? delivery.text,
       });
       if (!webReviewActionDeliveryId) {
         await finalizePrReviewNotificationRequest(data);
@@ -1009,7 +1004,7 @@ ${delivery.text}`;
       messageTs = await postPrReviewNotification({
         taskId: data.taskId,
         route: delivery.route,
-        text: textWithQuestion,
+        text: delivery.text,
         ...(followUp && isButtonRouteProvider(delivery.route.provider)
           ? {
               action: {
@@ -1067,7 +1062,7 @@ ${delivery.text}`;
       runId: latestJob.id,
       taskId: data.taskId,
       route: delivery.route,
-      text: textWithQuestion,
+      text: delivery.text,
       ...(messageTs ? { messageTs } : {}),
       ...(taskReviewActionDeliveryId && followUp
         ? {

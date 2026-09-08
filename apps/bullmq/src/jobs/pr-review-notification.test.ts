@@ -552,7 +552,7 @@ describe('prReviewNotificationJob', () => {
       runId: 1,
       taskId: 'task-1',
       route: null,
-      text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
+      text: 'Alice requested changes on owner/repo#42.',
     });
   });
 
@@ -702,7 +702,7 @@ describe('prReviewNotificationJob', () => {
       runId: 1,
       taskId: 'task-1',
       route: null,
-      text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
+      text: 'Alice requested changes on owner/repo#42.',
     });
     expect(mockFinalize).toHaveBeenCalled();
   });
@@ -817,10 +817,10 @@ describe('prReviewNotificationJob', () => {
     );
     expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith([superseded]);
 
-    // The task-history record carries the question as trailing text.
+    // Newly recorded history contains only the summary, not the action question.
     expect(mockRecordDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
       }),
     );
   });
@@ -970,7 +970,7 @@ describe('prReviewNotificationJob', () => {
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
     expect(mockTelegramPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
         buttons: [
           [
             expect.objectContaining({
@@ -1014,6 +1014,24 @@ describe('prReviewNotificationJob', () => {
     await prReviewNotificationJob(makeJob() as never);
 
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'formatted-message',
+        buttons: [
+          [
+            {
+              text: 'Resolve these issues',
+              callbackData: `prr:y:${storedNonce}`,
+            },
+            {
+              text: 'Auto-resolve on this PR',
+              callbackData: `prr:a:${storedNonce}`,
+            },
+            { text: 'Dismiss', callbackData: `prr:d:${storedNonce}` },
+          ],
+        ],
+      }),
+    );
     expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
       storedNonce,
       'message-with-actions',
@@ -1023,7 +1041,7 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('keeps Teams routes on the plain trailing-question text', async () => {
+  it('posts only the summary for Teams routes without adding controls', async () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: {
@@ -1042,7 +1060,7 @@ describe('prReviewNotificationJob', () => {
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     expect(mockTeamsPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
       }),
     );
     expect(mockTeamsPostMessage.mock.calls[0]?.[0]?.buttons).toBeUndefined();
@@ -1736,6 +1754,7 @@ describe('prReviewNotificationJob', () => {
           deliveryId,
           question: 'Would you like me to resolve these issues?',
         },
+        text: 'Review feedback remains.',
       }),
     );
     expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(

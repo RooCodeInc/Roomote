@@ -1350,7 +1350,6 @@ async function createDiscordFastAgentParentTurn(
           ? {
               nonce: buildPrReviewActionNonce(params.event),
               taskId: params.event.taskId,
-              question: params.event.suggestedActionQuestion,
               followUpPrompt: params.event.suggestedActionPrompt,
               repository: params.event.pullRequest.repository,
               prNumber: params.event.pullRequest.number,
@@ -1444,10 +1443,7 @@ async function createDiscordFastAgentParentTurn(
             suggestions.length > 0,
           )
         : message;
-      const bodyText = action
-        ? `${reportMessage}\n${action.question}`
-        : reportMessage;
-      const textWithFooter = `${bodyText}\n\n${footerText}`;
+      const textWithFooter = `${reportMessage}\n\n${footerText}`;
       const posted = await postDiscordFastParentMessageWithFooter({
         provider,
         conversation,
