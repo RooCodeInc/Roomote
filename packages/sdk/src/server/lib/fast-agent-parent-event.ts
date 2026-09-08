@@ -2453,9 +2453,6 @@ export async function deliverFastAgentParentEventWithLock(
         (humanFollowUp ? 'human' : 'platform_event'),
       ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
       ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
-      ...(humanFollowUp
-        ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
-        : {}),
       ...(params.resumedAfterInterruption
         ? { resumedAfterInterruption: true }
         : {}),
