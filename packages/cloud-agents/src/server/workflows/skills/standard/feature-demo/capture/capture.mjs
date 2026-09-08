@@ -1,5 +1,5 @@
 // Capture runner: drives agent-browser through a demo script, records a
-// cursorless WebM, and emits the timeline the Remotion renderer consumes.
+// cursorless video, and emits the timeline the Remotion renderer consumes.
 // Runs inside the worker sandbox (agent-browser + ffmpeg present).
 //
 // Two ideas make the output polished:
@@ -55,6 +55,14 @@ if (unsupportedBeat) {
 }
 
 const VIEWPORT = script.viewport || { w: 1280, h: 800 };
+const FPS = script.fps === undefined ? 30 : script.fps;
+// VP8 can backpressure high-rate capture; native H.264 keeps the pipe moving.
+const RAW_PATH = `${OUT_DIR}/raw.${FPS > 30 ? 'mp4' : 'webm'}`;
+
+if (!Number.isInteger(FPS) || FPS < 1 || FPS > 60) {
+  console.error('Demo script fps must be an integer from 1 to 60.');
+  process.exit(1);
+}
 
 // Narration manifest (pre-capture synthesis). Optional: without it the demo
 // is captions-only and lines are paced by estimated speaking time.
@@ -120,7 +128,7 @@ const centerNorm = (r) => ({
 
 const timeline = {
   video: { path: 'recording.mp4', width: VIEWPORT.w, height: VIEWPORT.h },
-  fps: 30,
+  fps: FPS,
   durationSeconds: 0,
   cursorKeys: [{ t: 0, v: { x: 0.5, y: 1.1 } }],
   clicks: [],
@@ -145,18 +153,6 @@ const pushCursorMove = (startT, endT, target) => {
   curCursor = target;
 };
 
-// Headless capture emits frames only on visual damage and stamps them
-// without wall-clock gaps, so a static surface collapses into a sub-second
-// video; an imperceptible 2px dot re-painting every animation frame keeps
-// frames flowing at wall-clock rate.
-const TICKER_JS =
-  '(function(){var d=document.createElement("div");' +
-  'd.style.cssText="position:fixed;left:0;bottom:0;width:2px;height:2px;' +
-  'z-index:2147483647;pointer-events:none;background:#000;opacity:0.01";' +
-  'document.body.appendChild(d);var f=0;' +
-  '(function t(){d.style.opacity=(f++%2)?"0.02":"0.01";' +
-  'requestAnimationFrame(t)})()})()';
-
 async function run() {
   mkdirSync(OUT_DIR, { recursive: true });
   // Fully stop any existing agent-browser daemon before recording. `close`
@@ -168,11 +164,13 @@ async function run() {
   } catch {
     // no active daemon is fine
   }
+  // Native recording attaches to the active page and preserves wall-clock
+  // holds without injecting animation into the product.
+  ab('open', script.url);
   ab('set', 'viewport', String(VIEWPORT.w), String(VIEWPORT.h));
-  ab('record', 'start', `${OUT_DIR}/raw.webm`, script.url);
+  ab('record', 'start', RAW_PATH, '--fps', String(FPS));
 
   t0 = Date.now();
-  ab('eval', TICKER_JS);
   sleep(300); // let the first frames settle
 
   for (const beat of script.beats) {
@@ -257,7 +255,11 @@ async function run() {
   }
 
   timeline.durationSeconds = now();
-  ab('record', 'stop');
+  const captureResult = JSON.parse(ab('record', 'stop', '--json'));
+  writeFileSync(
+    `${OUT_DIR}/capture-stats.json`,
+    JSON.stringify({ ...captureResult, wallSeconds: timeline.durationSeconds }, null, 2),
+  );
   try {
     ab('close', '--all');
   } catch {
@@ -265,7 +267,7 @@ async function run() {
   }
 
   // Honest-state gate: a recording much shorter than the interaction means
-  // the screencast stalled (or frames stayed sparse despite the ticker) and
+  // the screencast stalled and
   // the demo would be garbage. Fail loudly instead of shipping it.
   const recordedSeconds = parseFloat(
     execFileSync('ffprobe', [
@@ -275,7 +277,7 @@ async function run() {
       'format=duration',
       '-of',
       'default=nw=1:nk=1',
-      `${OUT_DIR}/raw.webm`,
+      RAW_PATH,
     ])
       .toString()
       .trim(),
@@ -297,19 +299,16 @@ async function run() {
     );
   }
 
-  // WebM (VP8/VP9) -> H.264 mp4 for the renderer.
+  // Convert ordinary WebM; remux native high-FPS H.264 without resampling.
   execFileSync(
     'ffmpeg',
     [
       '-y',
       '-i',
-      `${OUT_DIR}/raw.webm`,
-      '-c:v',
-      'libx264',
-      '-pix_fmt',
-      'yuv420p',
-      '-preset',
-      'veryfast',
+      RAW_PATH,
+      ...(FPS > 30
+        ? ['-c', 'copy']
+        : ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'veryfast']),
       '-movflags',
       '+faststart',
       `${OUT_DIR}/recording.mp4`,
