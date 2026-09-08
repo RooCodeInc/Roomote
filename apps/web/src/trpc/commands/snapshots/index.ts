@@ -316,7 +316,7 @@ export async function clearEnvironmentSnapshotCommand(
 }
 
 export async function requestTaskRunSleepCommand(
-  _auth: UserAuthSuccess,
+  auth: UserAuthSuccess,
   input: { runId: number },
 ): Promise<SimpleResult> {
   try {
@@ -327,6 +327,8 @@ export async function requestTaskRunSleepCommand(
     if (!taskRun) {
       return { success: false, error: 'Task run not found' };
     }
+
+    await requireTaskAccess(auth, taskRun.taskId);
 
     if (!taskRun.machineId) {
       return { success: false, error: 'No machine associated with this job' };

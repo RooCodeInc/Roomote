@@ -1,4 +1,5 @@
 import { Env } from '@/lib/server';
+import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
 import type { UserAuthSuccess } from '@/types';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
@@ -543,6 +544,8 @@ export async function getTaskPreviewStatusCommand(
   auth: UserAuthSuccess,
   input: { taskId: string },
 ): Promise<TaskPreviewStatus> {
+  await requireTaskAccess(auth, input.taskId);
+
   const [taskRun, runtimeReady] = await Promise.all([
     resolveLatestTaskRunForTask(input.taskId),
     isPreviewRuntimeReady(),

@@ -2,19 +2,24 @@ import {
   automations,
   customAutomations,
   db,
+  environmentFactory,
   eq,
   runFactory,
   taskArtifacts,
   taskFactory,
   taskMessages,
   taskRunEvents,
+  taskRuns,
   tasks,
   userFactory,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  RunStatus,
+  TaskPayloadKind,
 } from '@roomote/types';
+import { enqueueTaskSleep } from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 import { getTasksCommand } from '@/trpc/commands/tasks/list';
 import { getTaskByIdCommand } from '@/trpc/commands/tasks/by-id';
@@ -29,6 +34,8 @@ import { getComposerSuggestionCommand } from '@/trpc/commands/tasks/composer-sug
 import { cancelTaskRunCommand } from '@/trpc/commands/task-runs';
 import { retryFailedTaskStartCommand } from '@/trpc/commands/task-runs/retry-failed-start';
 import { saveDraftPromptCommand } from '@/trpc/commands/sandbox-session';
+import { requestTaskRunSleepCommand } from '@/trpc/commands/snapshots';
+import { getTaskPreviewStatusCommand } from '@/trpc/commands/preview-settings';
 import {
   getArtifactById,
   getArtifactByPath,
@@ -40,6 +47,7 @@ import { canAccessTask } from './custom-automation-task-access';
 vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   syncTaskCommunicationThreadTitleBestEffort: vi.fn(),
+  enqueueTaskSleep: vi.fn(),
 }));
 
 describe('custom automation task history access', () => {
@@ -65,7 +73,27 @@ describe('custom automation task history access', () => {
       workflow: 'standard',
       visibility: 'visible',
     });
-    const run = await runFactory.create({ taskId: task.id });
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+      config: {
+        name: 'Private preview',
+        repositories: [{ repository: 'test/repo' }],
+        ports: [{ name: 'WEB', port: 3000, primary: true }],
+      },
+    });
+    const run = await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Running,
+      vendor: 'modal',
+      machineId: 'private-machine',
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'test/repo',
+        environmentId: environment.id,
+        description: 'Private task',
+      },
+      machineDomains: { WEB: 'private.preview.example.com' },
+    });
     await db.insert(taskMessages).values({
       runId: run.id,
       payload: {},
@@ -102,6 +130,7 @@ describe('custom automation task history access', () => {
     return {
       task,
       run,
+      environment,
       automation: automation!,
       artifact: artifact!,
       ownerAuth,
@@ -109,6 +138,130 @@ describe('custom automation task history access', () => {
       adminAuth: { ...otherAuth, isAdmin: true },
     };
   }
+
+  describe('sleep and preview authorization', () => {
+    beforeEach(() => {
+      vi.mocked(enqueueTaskSleep).mockClear();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('allows the automation owner and admin to sleep and read previews', async () => {
+      const { task, run, environment, ownerAuth, adminAuth } = await fixture();
+      for (const auth of [ownerAuth, adminAuth]) {
+        await expect(
+          requestTaskRunSleepCommand(auth, { runId: run.id }),
+        ).resolves.toEqual({ success: true });
+        await expect(
+          getTaskPreviewStatusCommand(auth, { taskId: task.id }),
+        ).resolves.toMatchObject({
+          environment: { id: environment.id, portNames: ['WEB'] },
+          runHasPreviewDomains: true,
+        });
+      }
+      expect(enqueueTaskSleep).toHaveBeenCalledTimes(2);
+      expect(enqueueTaskSleep).toHaveBeenCalledWith({ runId: run.id });
+    });
+
+    it('denies unrelated members without enqueueing sleep', async () => {
+      const { run, otherAuth } = await fixture();
+      const result = await requestTaskRunSleepCommand(otherAuth, {
+        runId: run.id,
+      });
+      expect(enqueueTaskSleep).not.toHaveBeenCalled();
+      expect(result).toEqual({ success: false, error: 'Task not found' });
+    });
+
+    it('denies unrelated members without disclosing preview information', async () => {
+      const { task, otherAuth } = await fixture();
+      await expect(
+        getTaskPreviewStatusCommand(otherAuth, { taskId: task.id }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND', message: 'Task not found' });
+    });
+
+    it('checks access before disclosing machine state', async () => {
+      const { run, otherAuth } = await fixture();
+      await db
+        .update(taskRuns)
+        .set({ machineId: null })
+        .where(eq(taskRuns.id, run.id));
+      await expect(
+        requestTaskRunSleepCommand(otherAuth, { runId: run.id }),
+      ).resolves.toEqual({ success: false, error: 'Task not found' });
+      expect(enqueueTaskSleep).not.toHaveBeenCalled();
+    });
+
+    it.each(['deleted', 'creatorless', 'absent', 'malformed'] as const)(
+      'fails closed for %s automation provenance while preserving admin access',
+      async (provenance) => {
+        const { task, run, automation, ownerAuth, adminAuth } = await fixture();
+        if (provenance === 'deleted') {
+          await db
+            .delete(customAutomations)
+            .where(eq(customAutomations.id, automation.id));
+        } else if (provenance === 'creatorless') {
+          await db
+            .update(customAutomations)
+            .set({ createdByUserId: null })
+            .where(eq(customAutomations.id, automation.id));
+        } else {
+          await db
+            .update(tasks)
+            .set({
+              actorExternalId: provenance === 'absent' ? null : 'not-a-uuid',
+            })
+            .where(eq(tasks.id, task.id));
+        }
+        await expect(
+          requestTaskRunSleepCommand(ownerAuth, { runId: run.id }),
+        ).resolves.toEqual({ success: false, error: 'Task not found' });
+        expect(enqueueTaskSleep).not.toHaveBeenCalled();
+        await expect(
+          getTaskPreviewStatusCommand(ownerAuth, { taskId: task.id }),
+        ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        await expect(
+          requestTaskRunSleepCommand(adminAuth, { runId: run.id }),
+        ).resolves.toEqual({ success: true });
+        await expect(
+          getTaskPreviewStatusCommand(adminAuth, { taskId: task.id }),
+        ).resolves.toMatchObject({ runHasPreviewDomains: true });
+      },
+    );
+
+    it('preserves ordinary task collaboration', async () => {
+      const { task, run, ownerAuth, otherAuth } = await fixture();
+      await db
+        .update(tasks)
+        .set({
+          initiatorKind: 'user',
+          initiatorUserId: ownerAuth.userId,
+          initiatorAutomation: null,
+          actorExternalId: null,
+        })
+        .where(eq(tasks.id, task.id));
+      await expect(
+        requestTaskRunSleepCommand(otherAuth, { runId: run.id }),
+      ).resolves.toEqual({ success: true });
+      expect(enqueueTaskSleep).toHaveBeenCalledWith({ runId: run.id });
+      await expect(
+        getTaskPreviewStatusCommand(otherAuth, { taskId: task.id }),
+      ).resolves.toMatchObject({ runHasPreviewDomains: true });
+    });
+
+    it('rejects missing tasks and runs without enqueueing sleep', async () => {
+      const { ownerAuth } = await fixture();
+      await expect(
+        requestTaskRunSleepCommand(ownerAuth, { runId: -1 }),
+      ).resolves.toEqual({ success: false, error: 'Task run not found' });
+      expect(enqueueTaskSleep).not.toHaveBeenCalled();
+      await expect(
+        getTaskPreviewStatusCommand(ownerAuth, { taskId: 'missing-task' }),
+      ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    });
+  });
 
   it('applies live ownership independently of all/category/guessed creator filters', async () => {
     const { task, automation, ownerAuth, otherAuth, adminAuth } =
