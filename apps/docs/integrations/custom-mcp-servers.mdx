@@ -16,6 +16,9 @@ integration and its existing human Settings setup. For custom remote servers,
 admins can ask Roomote to list or inspect saved connections, configure one,
 request authentication, test it, and apply an explicitly approved tool policy.
 This is more than a setup link, but authentication remains a secure human step.
+Provider names must produce a valid custom-server name containing an ASCII
+letter or number. Names that cannot do so are rejected rather than replaced
+with an invented name.
 
 1. Roomote checks for an existing connection before creating one. It uses a
    verified compatible remote MCP endpoint from the provider's documentation or
@@ -38,6 +41,7 @@ This is more than a setup link, but authentication remains a secure human step.
    probe. An empty blocked-tool list means you explicitly allow all tools. A
    failed activation probe leaves the server disabled; saving permissions
    without requesting activation also leaves it disabled.
+   Conversational configuration updates require another permission review.
 
 A saved configuration, pending authentication, or successful test alone does
 not mean the integration is ready in your current task. After activation,
@@ -72,6 +76,12 @@ server config) and prefills the form from it, for both remote and local
 servers. Snippets that launch `mcp-remote` are converted to remote servers on
 the upstream URL, which keeps credentials behind the Roomote proxy and
 enables per-tool management.
+
+Enabling a saved remote server in Settings requires a saved tool policy and a
+fresh authenticated connection check. If no policy has been saved, use
+**Manage tools** to review and save it first, even when allowing every tool.
+This also applies when re-enabling an older remote server. Existing enabled
+servers remain enabled; local stdio servers do not require this remote probe.
 
 Three kinds of servers are supported:
 

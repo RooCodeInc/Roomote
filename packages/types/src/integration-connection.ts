@@ -7,12 +7,13 @@ import {
 } from './custom-mcp-servers';
 
 export function sanitizeCustomMcpServerName(raw: string): string | null {
-  const sanitized = raw
+  const normalized = raw
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^[^a-z0-9]+/, '')
-    .replace(/-+$/, '')
-    .slice(0, 64);
+    .replace(/^[^a-z0-9]+/, '');
+  let end = normalized.length;
+  while (end > 0 && normalized[end - 1] === '-') end--;
+  const sanitized = normalized.slice(0, Math.min(end, 64));
 
   return CUSTOM_MCP_SERVER_NAME_PATTERN.test(sanitized) ? sanitized : null;
 }
@@ -115,6 +116,10 @@ export const prepareIntegrationConnectionInputSchema = z
       .regex(
         /^[\p{L}\p{N}][\p{L}\p{N} .&'()+-]*$/u,
         'Enter only a provider name, not a URL or credentials.',
+      )
+      .refine(
+        (provider) => sanitizeCustomMcpServerName(provider) !== null,
+        'Enter a provider name containing an ASCII letter or number.',
       )
       .describe(
         'Nonsecret provider name only. Never supply credentials, tokens, headers, or a remote URL.',

@@ -15,6 +15,7 @@ import {
   connectCustomMcpServerCommand,
   createCustomMcpServerCommand,
   listCustomMcpServerToolsCommand,
+  setCustomMcpServerPermissionsCommand,
   updateCustomMcpServerCommand,
 } from './custom-mcp-servers';
 
@@ -260,56 +261,15 @@ export async function manageIntegrationConnection(
           message:
             'permissions requires an explicit disabledTools list, including [] to allow all tools.',
         };
-      // Disable first and obtain a fresh version. A failed probe must never leave an active connection.
-      const [disabled] = await db
-        .update(customMcpServers)
-        .set({
-          enabled: false,
-          updatedAt: new Date(
-            Math.max(Date.now(), server.updatedAt.getTime() + 1),
-          ),
-        })
-        .where(
-          and(
-            eq(customMcpServers.id, server.id),
-            sql`${customMcpServers.updatedAt} = ${server.version}::timestamp`,
-          ),
-        )
-        .returning();
-      if (!disabled)
-        return {
-          state: 'failed' as const,
-          message: 'Configuration changed; inspect and retry.',
-        };
-      if (input.enabled === true) {
-        await validateTarget(disabled.url!);
-        await listCustomMcpServerToolsCommand(
-          auth,
-          { id: disabled.id },
-          disabled,
-        );
-      }
-      const [updated] = await db
-        .update(customMcpServers)
-        .set({
+      const updated = await setCustomMcpServerPermissionsCommand(
+        auth,
+        {
+          id: server.id,
           disabledTools: input.disabledTools,
           enabled: input.enabled === true,
-          updatedAt: new Date(
-            Math.max(Date.now(), disabled.updatedAt.getTime() + 1),
-          ),
-        })
-        .where(
-          and(
-            eq(customMcpServers.id, disabled.id),
-            eq(customMcpServers.updatedAt, disabled.updatedAt),
-          ),
-        )
-        .returning();
-      if (!updated)
-        return {
-          state: 'failed' as const,
-          message: 'Configuration changed; inspect and retry.',
-        };
+        },
+        server.version,
+      );
       return {
         state:
           input.enabled === true ? ('verified' as const) : ('saved' as const),

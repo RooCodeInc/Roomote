@@ -321,7 +321,7 @@ export async function updateCustomMcpServerCommand(
       .update(customMcpServers)
       .set({
         ...columns,
-        ...(options.prepareOnly ? { enabled: false } : {}),
+        ...(options.prepareOnly ? { enabled: false, disabledTools: null } : {}),
         ...(credentialTargetChanged
           ? {
               oauthServerMetadata: null,
@@ -776,6 +776,59 @@ export async function disconnectCustomMcpServerCommand(
   return { disconnected: true };
 }
 
+/** Shared remote activation gate for Sessions and Settings. */
+export async function setCustomMcpServerPermissionsCommand(
+  auth: UserAuthSuccess,
+  input: { id: string; disabledTools: string[]; enabled: boolean },
+  expectedUpdatedAt: string,
+) {
+  assertAdmin(auth);
+  assertCustomMcpEnabled();
+
+  const [disabled] = await db
+    .update(customMcpServers)
+    .set({
+      enabled: false,
+      updatedAt: sql`greatest(now(), ${customMcpServers.updatedAt} + interval '1 millisecond')`,
+    })
+    .where(
+      and(
+        eq(customMcpServers.id, input.id),
+        sql`${customMcpServers.updatedAt} = ${expectedUpdatedAt}::timestamp`,
+      ),
+    )
+    .returning({
+      server: customMcpServers,
+      version: sql<string>`${customMcpServers.updatedAt}::text`,
+    });
+  if (!disabled) throw new Error('Configuration changed; inspect and retry.');
+
+  // A failed probe leaves the server disabled. Credentials and egress checks
+  // use the same version that must still exist when activation is persisted.
+  if (input.enabled) {
+    await listCustomMcpServerToolsCommand(auth, input, {
+      ...disabled.server,
+      version: disabled.version,
+    });
+  }
+  const [updated] = await db
+    .update(customMcpServers)
+    .set({
+      disabledTools: input.disabledTools,
+      enabled: input.enabled,
+      updatedAt: sql`greatest(now(), ${customMcpServers.updatedAt} + interval '1 millisecond')`,
+    })
+    .where(
+      and(
+        eq(customMcpServers.id, input.id),
+        sql`${customMcpServers.updatedAt} = ${disabled.version}::timestamp`,
+      ),
+    )
+    .returning();
+  if (!updated) throw new Error('Configuration changed; inspect and retry.');
+  return updated;
+}
+
 export async function setCustomMcpServerEnabledCommand(
   auth: UserAuthSuccess,
   input: { id: string; enabled: boolean },
@@ -783,14 +836,41 @@ export async function setCustomMcpServerEnabledCommand(
   assertAdmin(auth);
   assertCustomMcpEnabled();
 
-  const [updated] = await db
-    .update(customMcpServers)
-    .set({ enabled: input.enabled, updatedAt: new Date() })
-    .where(eq(customMcpServers.id, input.id))
-    .returning({ id: customMcpServers.id });
+  const server = await db.query.customMcpServers.findFirst({
+    where: eq(customMcpServers.id, input.id),
+    extras: {
+      version: sql<string>`${customMcpServers.updatedAt}::text`.as('version'),
+    },
+  });
+  if (!server) throw new Error('Custom MCP server not found.');
 
-  if (!updated) {
-    throw new Error('Custom MCP server not found.');
+  if (input.enabled && !server.stdio) {
+    if (server.disabledTools === null) {
+      throw new Error(
+        'Review and save permissions in Manage tools before enabling this server.',
+      );
+    }
+    await setCustomMcpServerPermissionsCommand(
+      auth,
+      { ...input, disabledTools: server.disabledTools },
+      server.version,
+    );
+  } else {
+    const [updated] = await db
+      .update(customMcpServers)
+      .set({
+        enabled: input.enabled,
+        updatedAt: sql`greatest(now(), ${customMcpServers.updatedAt} + interval '1 millisecond')`,
+      })
+      .where(
+        and(
+          eq(customMcpServers.id, input.id),
+          sql`${customMcpServers.updatedAt} = ${server.version}::timestamp`,
+        ),
+      )
+      .returning({ id: customMcpServers.id });
+
+    if (!updated) throw new Error('Configuration changed; inspect and retry.');
   }
 
   captureIntegrationLifecycleEvent(

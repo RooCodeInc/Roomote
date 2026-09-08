@@ -22,7 +22,11 @@ vi.mock('./mcp/data', () => ({ getValidAccessToken: tokenMock }));
 vi.mock('@roomote/telemetry/server', () => ({ captureEvent: vi.fn() }));
 
 import { manageIntegrationConnection } from './manage-integration-connection';
-import { createCustomMcpServerCommand } from './custom-mcp-servers';
+import {
+  createCustomMcpServerCommand,
+  setCustomMcpServerEnabledCommand,
+  setCustomMcpServerDisabledToolsCommand,
+} from './custom-mcp-servers';
 
 const auth = { userId: 'integration-manager-test', isAdmin: true };
 let sequence = 0;
@@ -173,7 +177,7 @@ it('preserves explicit custom IDs and compares normalized names without allowing
   ).toMatchObject({ state: 'failed' });
 });
 
-it.each(['***', 'Roomote!'])(
+it.each(['***', 'Roomote!', '\u5de5\u5177'])(
   'rejects unusable or reserved normalized name %s',
   async (name) => {
     expect(
@@ -284,6 +288,199 @@ it('does not activate a target changed during the authenticated probe', async ()
       })
     )?.enabled,
   ).toBe(false);
+});
+
+it('Settings cannot enable a Session connection before explicit permissions are saved', async () => {
+  const server = await create();
+  await expect(
+    setCustomMcpServerEnabledCommand(auth, { id: server.id, enabled: true }),
+  ).rejects.toThrow('Review and save permissions');
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(
+    await db.query.customMcpServers.findFirst({
+      where: eq(customMcpServers.id, server.id),
+    }),
+  ).toMatchObject({ enabled: false, disabledTools: null });
+});
+
+it.each(['static_headers', 'oauth'] as const)(
+  'Settings cannot enable %s before authentication even with saved permissions',
+  async (authType) => {
+    const server = await create(authType);
+    await setCustomMcpServerDisabledToolsCommand(auth, {
+      id: server.id,
+      disabledTools: [],
+    });
+    await expect(
+      setCustomMcpServerEnabledCommand(auth, { id: server.id, enabled: true }),
+    ).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      await db.query.customMcpServers.findFirst({
+        where: eq(customMcpServers.id, server.id),
+      }),
+    ).toMatchObject({ enabled: false });
+  },
+);
+
+it('Settings performs a fresh authenticated probe with saved permissions on every enable', async () => {
+  const server = await create('static_headers');
+  await db
+    .update(customMcpServers)
+    .set({ headers: { authorization: encrypt('Bearer static-secret') } })
+    .where(eq(customMcpServers.id, server.id));
+  await setCustomMcpServerDisabledToolsCommand(auth, {
+    id: server.id,
+    disabledTools: ['delete_items'],
+  });
+  await setCustomMcpServerEnabledCommand(auth, {
+    id: server.id,
+    enabled: true,
+  });
+  expect(fetchMock).toHaveBeenCalledWith(
+    server.url,
+    expect.objectContaining({
+      headers: expect.objectContaining({
+        authorization: 'Bearer static-secret',
+      }),
+    }),
+  );
+  expect(
+    await db.query.customMcpServers.findFirst({
+      where: eq(customMcpServers.id, server.id),
+    }),
+  ).toMatchObject({ enabled: true, disabledTools: ['delete_items'] });
+  await setCustomMcpServerEnabledCommand(auth, {
+    id: server.id,
+    enabled: false,
+  });
+  fetchMock.mockRejectedValue(new Error('Probe failed'));
+  await expect(
+    setCustomMcpServerEnabledCommand(auth, { id: server.id, enabled: true }),
+  ).rejects.toThrow('Probe failed');
+  expect(
+    await db.query.customMcpServers.findFirst({
+      where: eq(customMcpServers.id, server.id),
+    }),
+  ).toMatchObject({ enabled: false });
+});
+
+it.each([false, true])(
+  'Settings checks OAuth credentials against the current target (retarget during refresh: %s)',
+  async (retarget) => {
+    const server = await create('oauth');
+    await setCustomMcpServerDisabledToolsCommand(auth, {
+      id: server.id,
+      disabledTools: [],
+    });
+    await db.insert(mcpConnections).values({
+      mcpId: `custom:${server.id}`,
+      userId: null,
+      authConfig: {},
+      enabled: true,
+      authStatus: 'authenticated',
+    });
+    tokenMock.mockImplementationOnce(async () => {
+      if (retarget) {
+        await db
+          .update(customMcpServers)
+          .set({
+            url: 'https://changed.example.com/mcp',
+            updatedAt: new Date(Date.now() + 1000),
+          })
+          .where(eq(customMcpServers.id, server.id));
+      }
+      return 'oauth-secret';
+    });
+    const activation = setCustomMcpServerEnabledCommand(auth, {
+      id: server.id,
+      enabled: true,
+    });
+    if (retarget) {
+      await expect(activation).rejects.toThrow('Configuration changed');
+      expect(fetchMock).not.toHaveBeenCalled();
+    } else {
+      await expect(activation).resolves.toEqual({ enabled: true });
+      expect(fetchMock).toHaveBeenCalledWith(
+        server.url,
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            authorization: 'Bearer oauth-secret',
+          }),
+        }),
+      );
+    }
+    expect(
+      await db.query.customMcpServers.findFirst({
+        where: eq(customMcpServers.id, server.id),
+      }),
+    ).toMatchObject({ enabled: !retarget });
+  },
+);
+
+it.each(['target', 'permissions'] as const)(
+  'Settings cannot activate after concurrent %s changes during its probe',
+  async (change) => {
+    const server = await create();
+    await setCustomMcpServerDisabledToolsCommand(auth, {
+      id: server.id,
+      disabledTools: [],
+    });
+    fetchMock.mockImplementationOnce(async () => {
+      await db
+        .update(customMcpServers)
+        .set({
+          ...(change === 'target'
+            ? { url: 'https://changed.example.com/mcp' }
+            : { disabledTools: ['delete_items'] }),
+          updatedAt: new Date(Date.now() + 1000),
+        })
+        .where(eq(customMcpServers.id, server.id));
+      return toolsResponse();
+    });
+    await expect(
+      setCustomMcpServerEnabledCommand(auth, { id: server.id, enabled: true }),
+    ).rejects.toThrow('Configuration changed');
+    expect(
+      await db.query.customMcpServers.findFirst({
+        where: eq(customMcpServers.id, server.id),
+      }),
+    ).toMatchObject({ enabled: false });
+  },
+);
+
+it('Session reconfiguration invalidates saved permissions before Settings can reactivate', async () => {
+  const server = await create();
+  await setCustomMcpServerDisabledToolsCommand(auth, {
+    id: server.id,
+    disabledTools: [],
+  });
+  expect(
+    await manageIntegrationConnection(auth, {
+      action: 'configure',
+      integrationId: `custom:${server.id}`,
+    }),
+  ).toMatchObject({ state: 'saved' });
+  await expect(
+    setCustomMcpServerEnabledCommand(auth, { id: server.id, enabled: true }),
+  ).rejects.toThrow('Review and save permissions');
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it('preserves stdio enable and disable without a control-plane probe', async () => {
+  const { id } = await createCustomMcpServerCommand(auth, {
+    transport: 'stdio',
+    name: `manager-${++sequence}`,
+    stdio: { command: 'example-mcp' },
+  });
+  ids.push(id);
+  await expect(
+    setCustomMcpServerEnabledCommand(auth, { id, enabled: false }),
+  ).resolves.toEqual({ enabled: false });
+  await expect(
+    setCustomMcpServerEnabledCommand(auth, { id, enabled: true }),
+  ).resolves.toEqual({ enabled: true });
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it('keeps activation disabled on a failed probe and redacts upstream errors', async () => {

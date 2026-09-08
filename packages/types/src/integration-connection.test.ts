@@ -28,11 +28,37 @@ describe('integration connection preparation', () => {
     ['Example & Co', 'example-co'],
     ['Caf\u00e9 Tools', 'caf-tools'],
     ['***', null],
+    ['\u5de5\u5177', null],
     ['a'.repeat(80), 'a'.repeat(64)],
   ] as const)(
     'sanitizes %j consistently for custom server names',
     (raw, expected) => {
       expect(sanitizeCustomMcpServerName(raw)).toBe(expected);
+    },
+  );
+
+  it('trims long hyphen suffixes in linear time without changing slug semantics', () => {
+    const suffix = '-'.repeat(100_000);
+    expect(sanitizeCustomMcpServerName(`Example${suffix}`)).toBe('example');
+    expect(sanitizeCustomMcpServerName(`Example${suffix}Z`)).toBe(
+      `example${'-'.repeat(57)}`,
+    );
+    expect(sanitizeCustomMcpServerName(suffix)).toBeNull();
+    expect(sanitizeCustomMcpServerName('Example_---')).toBe('example_');
+  });
+
+  it.each(['\u5de5\u5177', '\u00e9', '\u0661\u0662'])(
+    'rejects unmappable provider %s before creating a setup link',
+    (provider) => {
+      expect(
+        prepareIntegrationConnectionInputSchema.safeParse({ provider }).success,
+      ).toBe(false);
+      expect(() =>
+        buildIntegrationConnectionPreparation(
+          { provider },
+          'https://roomote.example',
+        ),
+      ).toThrow('ASCII letter or number');
     },
   );
 
