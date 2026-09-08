@@ -11,6 +11,7 @@ import {
   tasks,
   taskRuns,
   getBackgroundAgentSettings,
+  findActiveSlackInstallationForChannel,
   upsertBackgroundAutomationSlackThread,
   slackInstallations,
   users,
@@ -299,17 +300,7 @@ async function maybeNotifyPlatformIssue(params: {
     return;
   }
 
-  const [settings, slackInstallation] = await Promise.all([
-    getBackgroundAgentSettings(),
-    db.query.slackInstallations.findFirst({
-      where: and(eq(slackInstallations.isActive, true)),
-      columns: {
-        botAccessToken: true,
-        isActive: true,
-        teamId: true,
-      },
-    }),
-  ]);
+  const settings = await getBackgroundAgentSettings();
 
   if (!settings.platformIssueAlertsEnabled) {
     return;
@@ -372,9 +363,11 @@ async function maybeNotifyPlatformIssue(params: {
     return;
   }
 
-  if (!slackInstallation?.botAccessToken || !slackInstallation.isActive) {
+  const slackInstallation =
+    await findActiveSlackInstallationForChannel(channelId);
+  if (!slackInstallation?.botAccessToken) {
     console.warn(
-      `[recordTaskMessageEnvelope] No active Slack installation, skipping platform issue Slack alert for task ${params.taskId}`,
+      `[recordTaskMessageEnvelope] No unambiguous active Slack installation for channel ${channelId}, skipping platform issue Slack alert for task ${params.taskId}`,
     );
     return;
   }
