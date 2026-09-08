@@ -252,6 +252,7 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.listSkills]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.showWidget]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.spillRead]: true,
@@ -282,6 +283,7 @@ describe('Fast native OpenCode tool bridge', () => {
       FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage,
       FAST_AGENT_NATIVE_TOOL_NAMES.listSkills,
       FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+      FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository,
       FAST_AGENT_NATIVE_TOOL_NAMES.showWidget,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep,
       FAST_AGENT_NATIVE_TOOL_NAMES.spillRead,
@@ -398,6 +400,72 @@ describe('Fast native OpenCode tool bridge', () => {
       } else {
         process.env.ROOMOTE_TASK_ID = inheritedTaskId;
       }
+    }
+  });
+
+  it('routes source inspection through the bound native executor', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('native-source', []);
+    const parentExecutor = vi.fn().mockResolvedValue({
+      success: true,
+      result: {
+        revision: 'a'.repeat(40),
+        tested: false,
+        content: '1: hello',
+      },
+    });
+    const childExecutor = vi.fn().mockResolvedValue({
+      success: false,
+      error: 'That tool is reserved for the Fast parent agent.',
+    });
+    const unbindParent = bindFastAgentNativeToolExecutor(
+      'source-parent',
+      'source-conversation',
+      parentExecutor,
+      { allowSpillRecovery: true },
+    );
+    const unbindChild = bindFastAgentNativeToolExecutor(
+      'source-child',
+      'source-conversation',
+      childExecutor,
+      { allowSpillRecovery: false },
+    );
+    const invoke = (
+      sessionID: string,
+      token = runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN,
+    ) =>
+      fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionID,
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository,
+          args: { action: 'read', repositoryId: 'repo-1', path: 'README.md' },
+        }),
+      });
+    try {
+      expect((await invoke('source-parent', 'invalid')).status).toBe(401);
+      const child = await (await invoke('source-child')).json();
+      expect(JSON.parse(child.output)).toMatchObject({ success: false });
+      expect(parentExecutor).not.toHaveBeenCalled();
+      expect(childExecutor).toHaveBeenCalledOnce();
+      const parent = await (await invoke('source-parent')).json();
+      expect(JSON.parse(parent.output)).toMatchObject({
+        success: true,
+        result: { tested: false, revision: 'a'.repeat(40) },
+      });
+      expect(parentExecutor).toHaveBeenCalledWith({
+        sessionId: 'source-parent',
+        name: FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository,
+        args: { action: 'read', repositoryId: 'repo-1', path: 'README.md' },
+      });
+      unbindParent();
+      expect((await invoke('source-parent')).status).toBe(409);
+    } finally {
+      unbindParent();
+      unbindChild();
     }
   });
 

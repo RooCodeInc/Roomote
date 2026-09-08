@@ -87,6 +87,7 @@ const nativeToolNames = vi.hoisted(
       requestUserInput: 'request_user_input',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
+      inspectRepository: 'inspect_repository',
       showWidget: 'show_widget',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',
@@ -317,6 +318,10 @@ import {
   registerFastAgentTurnActivity,
 } from '../fast-agent-turn-lock';
 import { FAST_RESPONDING_LEASE_RENEW_MS } from '../fast-agent-constants';
+import {
+  FastAgentRepositorySource,
+  FastAgentRepositorySourceError,
+} from '../fast-agent-repository-source';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -3892,6 +3897,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         // tools that the subagent tool filter denies.
         await expect(
           subagentExecutor({
+            agent: 'advisor',
+            name: nativeToolNames.inspectRepository,
+            args: { action: 'list', repositoryId: 'repo-1' },
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'That tool is reserved for the Fast parent agent.',
+        });
+        await expect(
+          subagentExecutor({
             agent: 'judge',
             name: nativeToolNames.callIntegrationTool,
             args: {
@@ -3968,12 +3983,20 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       mocks.bindExecutor.mock.calls.find(
         ([sessionID]) => sessionID === 'opencode-session-1',
       )?.[3],
-    ).toMatchObject({ allowSkillAccess: true, allowSpillRecovery: true });
+    ).toMatchObject({
+      allowSkillAccess: true,
+      allowSpillRecovery: true,
+    });
     expect(
       mocks.bindExecutor.mock.calls.find(
         ([sessionID]) => sessionID === 'opencode-subagent-1',
       )?.[3],
     ).toMatchObject({ allowSkillAccess: false, allowSpillRecovery: false });
+    expect(
+      mocks.bindExecutor.mock.calls.find(
+        ([sessionID]) => sessionID === 'opencode-subagent-1',
+      )?.[3],
+    ).not.toHaveProperty('repositorySource');
   });
 
   it('rebuilds an invalidated OpenCode session from canonical compatibility history', async () => {
@@ -6568,6 +6591,178 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   );
 
   describe('turn start acknowledgement', () => {
+    it('gates and records repository inspection through the native execution lifecycle', async () => {
+      const args = {
+        action: 'read',
+        repositoryId: 'repo-1',
+        path: 'README.md',
+      };
+      const sourceResult = {
+        revision: 'a'.repeat(40),
+        tested: false,
+        content: '1: source',
+      };
+      const inspect = vi
+        .spyOn(FastAgentRepositorySource.prototype, 'inspect')
+        .mockImplementation(async () => {
+          const calls = mocks.upsertMessage.mock.calls.map(
+            ([input]) => input.message,
+          );
+          expect(calls.at(-1)).toMatchObject({
+            eventType: 'roomote_runtime.tool_call',
+            payload: {
+              toolName: nativeToolNames.inspectRepository,
+              rawInput: { arguments: args },
+            },
+          });
+          return sourceResult;
+        });
+      const results: unknown[] = [];
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          results.push(
+            await invokeTool(nativeToolNames.inspectRepository, args),
+          );
+          expect(inspect).not.toHaveBeenCalled();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Inspecting the committed source.',
+          });
+          results.push(
+            await invokeTool(nativeToolNames.inspectRepository, args),
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Source inspected, not tested.',
+          });
+          results.push(
+            await invokeTool(nativeToolNames.inspectRepository, args),
+          );
+          return '';
+        },
+      );
+      try {
+        await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+        expect(results).toEqual([
+          {
+            success: false,
+            error:
+              'Post an acknowledgement with send_chat_reply before this action.',
+          },
+          { success: true, guidance: expect.any(String), result: sourceResult },
+          { success: false, error: 'This Fast turn is closed.' },
+        ]);
+        expect(inspect).toHaveBeenCalledOnce();
+        const events = mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter(
+            (message) =>
+              message.payload?.toolName === nativeToolNames.inspectRepository,
+          );
+        expect(events.map((event) => event.eventType)).toEqual([
+          'roomote_runtime.tool_call',
+          'roomote_runtime.tool_result',
+          'roomote_runtime.tool_call',
+          'roomote_runtime.tool_result',
+          'roomote_runtime.tool_call',
+          'roomote_runtime.tool_result',
+        ]);
+        expect(events[3].eventId).toBe(events[2].eventId);
+        expect(JSON.parse(events[3].payload.output)).toMatchObject({
+          success: true,
+          result: sourceResult,
+        });
+      } finally {
+        inspect.mockRestore();
+      }
+    });
+
+    it('refuses repository inspection when turn lock ownership is lost', async () => {
+      const controller = new AbortController();
+      const lost = new FastAgentTurnLockLostError();
+      const inspect = vi.spyOn(FastAgentRepositorySource.prototype, 'inspect');
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Inspecting source.',
+          });
+          controller.abort(lost);
+          await expect(
+            invokeTool(nativeToolNames.inspectRepository, {
+              action: 'list',
+              repositoryId: 'repo-1',
+            }),
+          ).resolves.toMatchObject({ success: false });
+          throw lost;
+        },
+      );
+      try {
+        await expect(
+          answerFastAgentQuestion({
+            ...baseParams,
+            adapter: callbacks(),
+            signal: controller.signal,
+          }),
+        ).rejects.toBe(lost);
+        expect(inspect).not.toHaveBeenCalled();
+      } finally {
+        inspect.mockRestore();
+      }
+    });
+
+    it.each([
+      new Error('private-token-in-stderr'),
+      new FastAgentRepositorySourceError('revision'),
+    ])('records safe repository inspection failures (%s)', async (failure) => {
+      const inspect = vi
+        .spyOn(FastAgentRepositorySource.prototype, 'inspect')
+        .mockRejectedValue(failure);
+      let result: unknown;
+      mocks.generateText.mockImplementationOnce(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Inspecting source.',
+          });
+          result = await invokeTool(nativeToolNames.inspectRepository, {
+            action: 'list',
+            repositoryId: 'repo-1',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Inspection unavailable.',
+          });
+          return '';
+        },
+      );
+      try {
+        await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+        expect(result).toEqual({
+          success: false,
+          error:
+            failure instanceof FastAgentRepositorySourceError
+              ? failure.message
+              : 'Repository inspection is unavailable.',
+        });
+        const event = mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .find(
+            (message) =>
+              message.payload?.toolName === nativeToolNames.inspectRepository &&
+              message.eventType === 'roomote_runtime.tool_result',
+          );
+        expect(event.payload.status).toBe('failed');
+        expect(event.payload.output).not.toContain('private-token');
+        expect(inspect).toHaveBeenCalledOnce();
+      } finally {
+        inspect.mockRestore();
+      }
+    });
+
     const acknowledgementRequired = {
       success: false,
       error: 'Post an acknowledgement with send_chat_reply before this action.',
@@ -8569,6 +8764,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.inspectRepository, {
+            action: 'list',
+            repositoryId: 'repo-1',
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error:
+            'This platform event may only be presented to the user with a closeout.',
+        });
         expect(
           await invokeTool(nativeToolNames.sendTaskMessage, {
             taskId: 'task-1',
