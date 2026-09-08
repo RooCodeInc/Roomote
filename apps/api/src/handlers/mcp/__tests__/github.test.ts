@@ -223,53 +223,60 @@ describe('GitHub MCP bounded writes', () => {
     ).toEqual(arguments_);
   });
 
-  it.each([
-    'base',
-    'draft',
-    'maintainer_can_modify',
-    'reviewers',
-    'head',
-    'merge',
-    '_ui_submitted',
-    'unknown',
-  ])('rejects update field %s before minting or forwarding', async (field) => {
+  it('forwards all native update fields without local field caps', async () => {
+    const arguments_ = {
+      ...args,
+      base: 'release',
+      draft: true,
+      maintainer_can_modify: false,
+      reviewers: ['reviewer'],
+      title: 't'.repeat(257),
+      body: 'b'.repeat(65537),
+    };
+    expect((await call('update_pull_request', arguments_)).status).toBe(200);
     expect(
-      (await call('update_pull_request', { ...args, [field]: true })).status,
-    ).toBe(400);
-    expect(mocks.mint).not.toHaveBeenCalled();
-    expect(mocks.upstream).not.toHaveBeenCalled();
+      JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
+    ).toEqual(arguments_);
   });
 
   it.each([
-    { ...args, state: 'merged' },
-    { ...args, pullNumber: 0 },
-    { ...args, pullNumber: 1.5 },
     { ...args, owner: '../outside' },
     { ...args, repo: '..' },
     { ...args, repo: 'example/other' },
-    { owner, repo: 'example', pullNumber: 42 },
-    { ...args, title: null },
-  ])('rejects malformed or empty updates: %j', async (arguments_) => {
+    { repo: 'example' },
+    { owner },
+    { ...args, owner: 42 },
+  ])('rejects malformed repository targets: %j', async (arguments_) => {
     expect((await call('update_pull_request', arguments_)).status).toBe(400);
     expect(mocks.mint).not.toHaveBeenCalled();
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it.each(['reaction', 'comment_id'])(
-    'rejects non-comment action field %s',
-    async (field) => {
+  it.each([
+    ['add_issue_comment', { issue_number: 42, reaction: 'eyes' }],
+    ['add_issue_comment', { issue_number: 42, comment_id: 12, reaction: '+1' }],
+    ['add_reply_to_pull_request_comment', { commentId: 12, reaction: 'eyes' }],
+    ['add_issue_comment', { issue_number: 42, body: 'b'.repeat(65537) }],
+    [
+      'add_reply_to_pull_request_comment',
+      { pullNumber: 42, commentId: 12, body: 'b'.repeat(65537) },
+    ],
+    ['update_pull_request', { pullNumber: 42 }],
+    ['update_pull_request', {}],
+    ['update_pull_request', { pullNumber: 'invalid', state: 'merged' }],
+    ['update_pull_request', { pullNumber: 0, title: null }],
+    ['add_issue_comment', { issue_number: { payload: 'private-id' } }],
+    ['add_issue_comment', {}],
+    ['add_reply_to_pull_request_comment', { commentId: 'invalid' }],
+    ['add_reply_to_pull_request_comment', {}],
+  ])(
+    'leaves native argument validation to upstream for %s',
+    async (name, fields) => {
+      const arguments_ = { owner, repo: 'example', ...fields };
+      expect((await call(name as string, arguments_)).status).toBe(200);
       expect(
-        (
-          await call('add_issue_comment', {
-            owner,
-            repo: 'example',
-            issue_number: 42,
-            body: 'Comment',
-            [field]: 'eyes',
-          })
-        ).status,
-      ).toBe(400);
-      expect(mocks.upstream).not.toHaveBeenCalled();
+        JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
+      ).toEqual(arguments_);
     },
   );
 
@@ -301,36 +308,87 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it('filters discovery and removes all unsupported write arguments for JSON and SSE', async () => {
+  it('filters discovery while preserving full native schemas and descriptions for JSON and SSE', async () => {
     const tools = [
       { name: 'get_file_contents', inputSchema: { type: 'object' } },
-      ...[
-        'update_pull_request',
-        'add_issue_comment',
-        'add_reply_to_pull_request_comment',
-      ].map((name) => ({
-        name,
+      {
+        name: 'update_pull_request',
+        description: 'Update an existing pull request in a GitHub repository.',
         inputSchema: {
           type: 'object',
-          properties: Object.fromEntries(
-            [
-              'owner',
-              'repo',
-              'pullNumber',
-              'title',
-              'body',
-              'state',
-              'issue_number',
-              'commentId',
-              'reaction',
-              'draft',
-              'base',
-              'reviewers',
-              'maintainer_can_modify',
-            ].map((field) => [field, { type: 'string' }]),
-          ),
+          required: ['owner', 'repo', 'pullNumber'],
+          properties: {
+            owner: { type: 'string' },
+            repo: { type: 'string' },
+            pullNumber: { type: 'number' },
+            title: { type: 'string' },
+            body: { type: 'string' },
+            state: { type: 'string', enum: ['open', 'closed'] },
+            draft: { type: 'boolean' },
+            base: { type: 'string', description: 'New base branch name' },
+            maintainer_can_modify: { type: 'boolean' },
+            reviewers: { type: 'array', items: { type: 'string' } },
+          },
         },
-      })),
+      },
+      {
+        name: 'add_issue_comment',
+        description:
+          'Add a comment and/or reaction to a specific issue or issue comment in a GitHub repository. Use this tool with pull requests as well (in this case pass pull request number as issue_number), but only if user is not asking specifically to add or react to review comments. At least one of body or reaction is required.',
+        inputSchema: {
+          type: 'object',
+          required: ['owner', 'repo', 'issue_number'],
+          properties: {
+            owner: { type: 'string' },
+            repo: { type: 'string' },
+            issue_number: { type: 'number' },
+            comment_id: { type: 'integer', minimum: 1 },
+            body: { type: 'string', minLength: 1 },
+            reaction: {
+              type: 'string',
+              enum: [
+                '+1',
+                '-1',
+                'laugh',
+                'confused',
+                'heart',
+                'hooray',
+                'rocket',
+                'eyes',
+              ],
+            },
+          },
+        },
+      },
+      {
+        name: 'add_reply_to_pull_request_comment',
+        description:
+          'Add a reply and/or reaction to an existing pull request comment. This can create a new comment linked as a reply to the specified comment, add an emoji reaction to the specified comment, or do both. At least one of body or reaction is required.',
+        inputSchema: {
+          type: 'object',
+          required: ['owner', 'repo', 'commentId'],
+          properties: {
+            owner: { type: 'string' },
+            repo: { type: 'string' },
+            pullNumber: { type: 'number' },
+            commentId: { type: 'number', minimum: 1 },
+            body: { type: 'string' },
+            reaction: {
+              type: 'string',
+              enum: [
+                '+1',
+                '-1',
+                'laugh',
+                'confused',
+                'heart',
+                'hooray',
+                'rocket',
+                'eyes',
+              ],
+            },
+          },
+        },
+      },
       { name: 'merge_pull_request' },
       { name: 'actions_run_trigger' },
       { name: 'issue_write' },
@@ -353,34 +411,7 @@ describe('GitHub MCP bounded writes', () => {
       expect(visible.map((tool: { name: string }) => tool.name)).toEqual(
         tools.slice(0, 4).map((tool) => tool.name),
       );
-      expect(Object.keys(visible[1].inputSchema.properties)).toEqual([
-        'owner',
-        'repo',
-        'pullNumber',
-        'title',
-        'body',
-        'state',
-      ]);
-      expect(Object.keys(visible[2].inputSchema.properties)).toEqual([
-        'owner',
-        'repo',
-        'issue_number',
-        'body',
-      ]);
-      expect(Object.keys(visible[3].inputSchema.properties)).toEqual([
-        'owner',
-        'repo',
-        'pullNumber',
-        'commentId',
-        'body',
-      ]);
-      expect(visible[1].inputSchema.additionalProperties).toBe(false);
-      expect(visible[2].inputSchema.required).toEqual([
-        'owner',
-        'repo',
-        'issue_number',
-        'body',
-      ]);
+      expect(visible).toEqual(tools.slice(0, 4));
     }
     expect(
       new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
@@ -390,11 +421,15 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.mint).toHaveBeenCalledWith({ type: 'activeInstallation' });
   });
 
-  it('fails closed on an unparseable discovery response', async () => {
+  it('preserves an unparseable upstream discovery response', async () => {
     mocks.upstream.mockResolvedValueOnce(new Response('not JSON'));
-    expect(
-      (await post({ jsonrpc: '2.0', id: 7, method: 'tools/list' })).status,
-    ).toBe(502);
+    const response = await post({
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'tools/list',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('not JSON');
   });
 
   it('keeps ordinary reads upstream-readonly', async () => {
@@ -609,6 +644,45 @@ describe('GitHub MCP bounded writes', () => {
         'private-comment-text',
       );
       expect(JSON.stringify(log.mock.calls)).not.toContain('scoped-test-token');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('omits nonnumeric audit IDs without rejecting or logging their payloads', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const arguments_ = {
+      owner,
+      repo: 'example',
+      pullNumber: { private: 'private-target-payload' },
+      commentId: 'private-comment-id',
+      reaction: 'eyes',
+    };
+    try {
+      const error = {
+        jsonrpc: '2.0',
+        id: 7,
+        error: { code: -32602, message: 'Invalid commentId' },
+      };
+      mocks.upstream.mockResolvedValueOnce(Response.json(error));
+      const response = await call(
+        'add_reply_to_pull_request_comment',
+        arguments_,
+      );
+      expect(await response.json()).toEqual(error);
+      expect(
+        JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
+      ).toEqual(arguments_);
+      const audit = JSON.parse(log.mock.calls[0]![0]);
+      expect(audit).not.toHaveProperty('targetNumber');
+      expect(audit).not.toHaveProperty('commentId');
+      expect(audit.fields).toEqual(['pullNumber', 'commentId', 'reaction']);
+      expect(JSON.stringify(log.mock.calls)).not.toContain(
+        'private-target-payload',
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toContain(
+        'private-comment-id',
+      );
     } finally {
       log.mockRestore();
     }

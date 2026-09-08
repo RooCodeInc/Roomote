@@ -54,14 +54,24 @@ same as running tests: local checkout, code edits, command execution, and testin
 are delegated to a task, as are investigations that need a workspace.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
-also supports requested changes to an existing pull request's title or body,
-close/reopen, top-level issue or PR comments, and replies to existing PR review
-comments directly in Fast. Writes require an active Roomote member, an active
+also supports native GitHub updates directly in Fast: changes to existing pull
+requests, issue or PR comments, review-comment replies, and comment reactions.
+For example, ask "Mark PR #42 in example/repo ready for review", "Request a review
+from octocat on that PR", or "Add a thumbs-up reaction to this existing comment"
+with its GitHub URL. The discovered native tool descriptions and schemas determine
+the supported arguments, rather than a separate restricted field list.
+
+Writes require an active Roomote member, an active
 connected repository, and the GitHub App installation's applicable permission;
-no personal GitHub OAuth connection is required. This bounded path does not
-merge or create PRs, change files or branches, manage reviewers or draft status,
+no personal GitHub OAuth connection is required. Authorization is scoped to the
+repository, not only to pull requests. Retargeting a PR to an existing base branch
+is supported when exposed by the tool; it does not write branches or files.
+This bounded path does not merge, create or delete PRs, write files or branches,
 edit or delete comments, or administer repositories. A permission denial is not
 bypassed by switching to another route.
+
+An update that combines several actions is not guaranteed to be atomic. If it
+returns an error, Roomote checks what changed before retrying.
 
 ### GitLab and Bitbucket MCP evaluation
 

@@ -369,9 +369,6 @@ interface McpProxyConfig {
     routeParams: Record<string, string>,
     request: unknown,
   ) => Promise<ResolvedCredentials>;
-  transformToolDefinition?: (
-    tool: { name: string } & Record<string, unknown>,
-  ) => Record<string, unknown>;
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
   allowedToolNames?: readonly string[];
@@ -536,7 +533,6 @@ function filterToolsListPayload(
   },
   options?: {
     stripToolSchemaPatterns?: boolean;
-    transformToolDefinition?: McpProxyConfig['transformToolDefinition'];
   },
 ): unknown {
   if (!payload || typeof payload !== 'object') {
@@ -566,16 +562,15 @@ function filterToolsListPayload(
       ),
   );
 
-  const filteredTools = filterMcpToolDefinitions(namedTools, toolPolicy)
-    .map((tool) =>
+  const filteredTools = filterMcpToolDefinitions(namedTools, toolPolicy).map(
+    (tool) =>
       'inputSchema' in tool
         ? {
             ...tool,
             inputSchema: normalizeNullableArraySchema(tool.inputSchema),
           }
         : tool,
-    )
-    .map((tool) => options?.transformToolDefinition?.(tool) ?? tool);
+  );
 
   return {
     ...payload,
@@ -1138,7 +1133,6 @@ export function createMcpProxy(config: McpProxyConfig) {
             },
             {
               stripToolSchemaPatterns: shouldStripToolSchemaPatterns,
-              transformToolDefinition: config.transformToolDefinition,
             },
           );
           const headers = buildProxyResponseHeaders(upstreamResponse.headers);
@@ -1151,14 +1145,6 @@ export function createMcpProxy(config: McpProxyConfig) {
             headers,
           });
         } catch {
-          if (config.transformToolDefinition) {
-            return jsonRpcErrorResponse(
-              502,
-              -32603,
-              `Unable to filter ${name} tools/list response`,
-              getJsonRpcRequestId(parsedBody),
-            );
-          }
           // Fall through to the raw upstream response if the body is not JSON.
         }
       }

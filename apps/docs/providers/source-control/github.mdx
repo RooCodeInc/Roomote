@@ -190,18 +190,34 @@ items.
 
 ## Daily GitHub management
 
-Fast can update an existing pull request's title or description, close or reopen
-it, add a top-level issue or pull request comment, and reply to an existing PR
-review comment without starting a coding task. These actions use the deployment
+Fast can use the native `update_pull_request`, `add_issue_comment`, and
+`add_reply_to_pull_request_comment` tools without starting a coding task.
+Their discovered descriptions and schemas define the supported arguments,
+including reviewer requests, draft status, base retargeting, maintainer edit
+permission, comments, replies, and reactions. These actions use the deployment
 GitHub App, require an active Roomote member and an active connected repository,
 and remain subject to the installation's issue or pull request write permission.
 No personal GitHub OAuth connection is required. Ask for the specific change and
-identify the repository and issue or pull request.
+identify the repository and target issue, pull request, or comment. Authorization
+is repository-scoped, not restricted to pull requests. A reaction-only call on an
+existing review comment can use `commentId` without `pullNumber` when allowed by
+the discovered native schema.
 
-Merging or creating pull requests, changing branches or files, managing reviewers
-or draft status, editing or deleting comments, and repository administration are
+For example, ask Roomote to:
+
+- mark PR #42 in `example/repo` ready for review
+- request a review from `octocat` on that PR
+- add a thumbs-up reaction to an existing comment, providing its GitHub URL
+
+Retargeting a pull request's base to an existing branch does not write a branch
+or change files. Merging, creating or deleting pull requests, writing branches
+or files, editing or deleting comments, and repository administration are
 not available through this bounded Fast path; those requests still require a
 coding task. Other source-control providers are unchanged.
+
+Native updates that combine several actions are not guaranteed to be atomic.
+After an error, Roomote inspects the resulting state before retrying so an action
+that already succeeded is not blindly repeated.
 
 Roomote tasks can manage routine repository work through the GitHub App
 installation. Requests default to the repository mapped to the task:
