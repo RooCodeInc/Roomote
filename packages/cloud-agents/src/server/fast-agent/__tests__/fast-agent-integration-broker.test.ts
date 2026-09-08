@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/auth', () => ({
   createAuthToken: mocks.createAuthToken,
+  createGitHubToken: vi.fn(),
   ROOMOTE_MCP_PATH: '/mcp',
 }));
 
