@@ -70,6 +70,27 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('keeps scoped GitHub inspection and narrow PR actions out of task startup', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain('read_repository');
+    expect(prompt).toContain(
+      'checks, discussion comments, review comments, reviews',
+    );
+    expect(prompt).toContain('repository-scoped code or PR search');
+    expect(prompt).toContain(
+      'Search accepts plain searchTerms, not GitHub query syntax',
+    );
+    expect(prompt).toContain('not the legacy installation-wide GitHub proxy');
+    expect(prompt).toContain('do not require a clone or task startup');
+    expect(prompt).toContain('rename_pull_request');
+    expect(prompt).toContain('close_pull_request');
+    expect(prompt).toContain('recording the actual request in userIntent');
+    expect(prompt).toContain('never bypass a denial');
+    expect(prompt).toContain('available API tools do not suffice');
+    expect(prompt).not.toContain(
+      'when external inspection, editing, execution, or validation is required',
+    );
+  });
   it('bounds evidence-driven autonomy without weakening investigation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
     expect(prompt).toContain(
@@ -604,7 +625,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'In closeouts, lead with the answer, not a preamble or a recap of the question',
     );
     expect(prompt).toContain(
-      'Use deployment MCP servers as relevant sources of truth',
+      'Use deployment MCP servers for API-backed repository inspection',
     );
     expect(prompt).toContain(
       'Ask for clarification only when ambiguity blocks meaningful investigation',
@@ -613,7 +634,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'regardless of whether the message is phrased as a question, request, or declarative feedback',
     );
     expect(prompt).toContain(
-      'A message that requires repository or workspace inspection, execution, change, or validation should be delegated',
+      'Use direct API tools when sufficient; delegate work that requires a local workspace, execution, code changes, or validation',
     );
     expect(prompt).not.toContain(
       'A question that requires repository or workspace inspection',
@@ -737,7 +758,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not launch a task or call an integration merely to re-check user-supplied facts unless the user asks for verification',
     );
     expect(prompt).toContain(
-      'If the message actually requires repository or workspace inspection, execution, change, or validation, delegate it',
+      'Use the direct API path below when it suffices; otherwise delegate workspace work',
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),

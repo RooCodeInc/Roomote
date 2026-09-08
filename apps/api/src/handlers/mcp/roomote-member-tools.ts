@@ -23,6 +23,7 @@ import {
 } from './in-process-api';
 import type { McpAuth } from './middleware';
 import { toMcpToolResult } from './proxy-utils';
+import { registerRoomoteRepositoryTools } from './roomote-repository-tools';
 
 function invokeMemberApi(
   auth: McpAuth,
@@ -52,6 +53,7 @@ export function registerRoomoteMemberTools(
   server: McpServer,
   auth: McpAuth,
 ): void {
+  registerRoomoteRepositoryTools(server, auth);
   server.registerTool(
     'manage_tasks',
     {

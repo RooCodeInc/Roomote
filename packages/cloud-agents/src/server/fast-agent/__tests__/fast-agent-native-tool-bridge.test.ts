@@ -260,6 +260,8 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': true,
       task: false,
       roomote_manage_custom_automations: false,
+      roomote_rename_pull_request: false,
+      roomote_close_pull_request: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.createArtifact]: false,
     });
     for (const rawFilesystemTool of [
@@ -728,6 +730,8 @@ describe('Fast native OpenCode tool bridge', () => {
       '*': true,
       task: false,
       roomote_manage_custom_automations: false,
+      roomote_rename_pull_request: false,
+      roomote_close_pull_request: false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: false,
     });
     const unbind = bindFastAgentMcpToolExecutor(

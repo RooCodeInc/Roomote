@@ -25,6 +25,38 @@ Roomote answers on the pull request as well as in the Session's home surface.
 
 ## Start a Session from the dashboard
 
+### Inspect GitHub without a workspace
+
+Ask a Session to inspect a connected GitHub repository's files, branches,
+commits, pull requests, changed files, diffs, checks, discussion comments,
+review comments, or reviews. You can also search code and pull requests within
+one connected repository. Roomote can read these through
+the API without cloning the repository or starting a coding task. Local tests,
+code changes, and work that needs a checkout still use a task.
+
+Search accepts plain words or identifiers rather than arbitrary GitHub query
+syntax. Pull request searches can include open, closed, or all states. Results
+are paginated; GitHub search exposes at most the first 1,000 matches, and code
+search follows GitHub's default-branch indexing limits.
+
+You can also explicitly ask Roomote to rename a pull request's title or close
+it. Name the repository and pull request, and supply the new title for a rename.
+Closing does not merge the pull request or delete its branch. These direct
+actions do not support description edits, reopening, merging, or other updates.
+
+These operations require an active connected GitHub repository, a linked GitHub
+account, and live repository access for that account. Renaming and closing
+require write access, and the GitHub App must also permit the operation. When
+an environment is specified, the repository must belong to it. Permission
+failures are reported rather than retried with broader access. The request and
+outcome are recorded in Session tool activity and server audit logs.
+
+The existing read-only GitHub integration is unchanged. These direct Session
+operations use the member-authorized repository tools described here instead
+of relying on that integration's installation-wide access.
+
+### Choose where work runs
+
 On the home page, leave the workspace selector on **Fast** to start a
 conversation. Roomote answers directly when it can and delegates execution
 when the request needs a repository workspace. Selecting an environment or
