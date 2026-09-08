@@ -43,7 +43,6 @@ import {
 import { callMcpTool, listMcpTools } from '../../mcp-tool-client';
 import { buildOpenCodeCliEnv } from '../../opencode-runtime';
 import { buildFastAgentToolFilter } from '../fast-agent-tool-policy';
-import { FastAgentRepositorySourceError } from '../fast-agent-repository-source';
 
 function stringWithSerializedByteLength(byteLength: number): string {
   return 'x'.repeat(byteLength - 2);
@@ -404,26 +403,30 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('binds source inspection only to its authorized parent and sanitizes failures', async () => {
+  it('routes source inspection through the bound native executor', async () => {
     const runtime = await getFastAgentNativeToolRuntime('native-source', []);
-    const repositorySource = {
-      inspect: vi.fn().mockResolvedValue({
+    const parentExecutor = vi.fn().mockResolvedValue({
+      success: true,
+      result: {
         revision: 'a'.repeat(40),
         tested: false,
         content: '1: hello',
-      }),
-    };
-    const fallback = vi.fn();
+      },
+    });
+    const childExecutor = vi.fn().mockResolvedValue({
+      success: false,
+      error: 'That tool is reserved for the Fast parent agent.',
+    });
     const unbindParent = bindFastAgentNativeToolExecutor(
       'source-parent',
       'source-conversation',
-      fallback,
-      { allowSpillRecovery: true, repositorySource },
+      parentExecutor,
+      { allowSpillRecovery: true },
     );
     const unbindChild = bindFastAgentNativeToolExecutor(
       'source-child',
       'source-conversation',
-      fallback,
+      childExecutor,
       { allowSpillRecovery: false },
     );
     const invoke = (
@@ -446,35 +449,18 @@ describe('Fast native OpenCode tool bridge', () => {
       expect((await invoke('source-parent', 'invalid')).status).toBe(401);
       const child = await (await invoke('source-child')).json();
       expect(JSON.parse(child.output)).toMatchObject({ success: false });
-      expect(repositorySource.inspect).not.toHaveBeenCalled();
+      expect(parentExecutor).not.toHaveBeenCalled();
+      expect(childExecutor).toHaveBeenCalledOnce();
       const parent = await (await invoke('source-parent')).json();
       expect(JSON.parse(parent.output)).toMatchObject({
         success: true,
         result: { tested: false, revision: 'a'.repeat(40) },
       });
-      expect(repositorySource.inspect).toHaveBeenCalledWith({
-        action: 'read',
-        repositoryId: 'repo-1',
-        path: 'README.md',
+      expect(parentExecutor).toHaveBeenCalledWith({
+        sessionId: 'source-parent',
+        name: FAST_AGENT_NATIVE_TOOL_NAMES.inspectRepository,
+        args: { action: 'read', repositoryId: 'repo-1', path: 'README.md' },
       });
-      repositorySource.inspect.mockRejectedValueOnce(
-        new FastAgentRepositorySourceError('revision'),
-      );
-      const mismatch = await (await invoke('source-parent')).json();
-      expect(JSON.parse(mismatch.output)).toMatchObject({
-        success: false,
-        error: expect.stringContaining('pinned snapshot'),
-      });
-      repositorySource.inspect.mockRejectedValueOnce(
-        new Error('private-token-in-stderr'),
-      );
-      const failed = await (await invoke('source-parent')).json();
-      expect(JSON.parse(failed.output)).toEqual({
-        success: false,
-        error: 'Repository inspection is unavailable.',
-      });
-      expect(failed.output).not.toContain('private-token');
-      expect(fallback).not.toHaveBeenCalled();
       unbindParent();
       expect((await invoke('source-parent')).status).toBe(409);
     } finally {
