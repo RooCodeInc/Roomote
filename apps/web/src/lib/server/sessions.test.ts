@@ -7,10 +7,13 @@ import {
   ensureSessionForTask,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
+  inArray,
   llmUsageEvents,
   runFactory,
   sessionFactory,
   sessionParticipants,
+  sessions,
   sessionTasks,
   taskArtifacts,
   taskFactory,
@@ -18,6 +21,7 @@ import {
   taskPullRequests,
   tasks,
   userFactory,
+  users,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -45,6 +49,130 @@ import {
 } from './sessions';
 
 describe('unified Session queries', () => {
+  it.each(['task', 'fast'] as const)(
+    'requires ownership of every %s provenance row, including missing IDs',
+    async (provenance) => {
+      const owner = await userFactory.create();
+      const other = await userFactory.create();
+      await db
+        .insert(automations)
+        .values({ key: 'custom_automation' })
+        .onConflictDoNothing();
+      const [owned, unowned] = await db
+        .insert(customAutomations)
+        .values(
+          [owner, other].map((user) => ({
+            name: `Mixed provenance ${user.id}`,
+            prompt: 'Private report',
+            createdByUserId: user.id,
+          })),
+        )
+        .returning();
+      const [conversation] = await db
+        .insert(fastAgentConversations)
+        .values({
+          userId: other.id,
+          surface: 'web',
+          workspaceId: other.id,
+          conversationId: crypto.randomUUID(),
+        })
+        .returning();
+      const session = await sessionFactory.create({
+        ownerKind: 'automation',
+        ownerAutomation: 'custom_automation',
+        fastConversationId: provenance === 'fast' ? conversation!.id : null,
+      });
+      const ownerAuth = { userId: owner.id, isAdmin: false };
+      const adminAuth = { userId: other.id, isAdmin: true };
+      const taskIds: string[] = [];
+
+      try {
+        // One valid row must not mask another owner's or an invalid row.
+        for (const automationId of [
+          owned!.id,
+          unowned!.id,
+          null,
+          'not-a-uuid',
+          crypto.randomUUID(),
+        ]) {
+          if (provenance === 'task') {
+            for (const actorExternalId of [owned!.id, automationId]) {
+              const task = await taskFactory.create({
+                initiatorKind: 'automation',
+                initiatorAutomation: 'custom_automation',
+                actorExternalId,
+              });
+              taskIds.push(task.id);
+              if (actorExternalId === null) {
+                // The factory supplies a default for null actorExternalId.
+                await db
+                  .update(tasks)
+                  .set({ actorExternalId: null })
+                  .where(eq(tasks.id, task.id));
+              }
+              await db.insert(sessionTasks).values({
+                sessionId: session.id,
+                taskId: task.id,
+                origin: 'direct_launch',
+              });
+            }
+          } else {
+            await db.insert(fastAgentParentEvents).values(
+              [owned!.id, automationId].map((id) => ({
+                conversationId: conversation!.id,
+                eventKey: crypto.randomUUID(),
+                parent: {
+                  sessionId: conversation!.id,
+                  conversation: {
+                    surface: 'web' as const,
+                    workspaceId: other.id,
+                    conversationId: conversation!.conversationId,
+                  },
+                },
+                event: { type: 'automation_triggered', automationId: id },
+              })),
+            );
+          }
+          expect(await findAccessibleSession(ownerAuth, session.id)).toEqual(
+            automationId === owned!.id
+              ? expect.objectContaining({ id: session.id })
+              : null,
+          );
+          await expect(
+            findAccessibleSession(
+              { userId: other.id, isAdmin: false },
+              session.id,
+            ),
+          ).resolves.toBeNull();
+          await expect(
+            findAccessibleSession(adminAuth, session.id),
+          ).resolves.toMatchObject({ id: session.id });
+          if (provenance === 'task') {
+            await db
+              .delete(sessionTasks)
+              .where(eq(sessionTasks.sessionId, session.id));
+          } else {
+            await db
+              .delete(fastAgentParentEvents)
+              .where(
+                eq(fastAgentParentEvents.conversationId, conversation!.id),
+              );
+          }
+        }
+      } finally {
+        await db.delete(sessions).where(eq(sessions.id, session.id));
+        await db.delete(tasks).where(inArray(tasks.id, taskIds));
+        await db
+          .delete(fastAgentConversations)
+          .where(eq(fastAgentConversations.id, conversation!.id));
+        await db
+          .delete(customAutomations)
+          .where(inArray(customAutomations.id, [owned!.id, unowned!.id]));
+        await db.delete(users).where(inArray(users.id, [owner.id, other.id]));
+      }
+    },
+  );
+
   it('lists a task-only automation Session for its owner without requiring participation', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
