@@ -351,13 +351,8 @@ describe('deliverFastAgentParentEvent', () => {
     });
     mocks.retirePrReviewActionMessagesBestEffort.mockResolvedValue(undefined);
     mocks.buildSlackPrReviewActionBlocks.mockImplementation(
-      ({ text, question, nonce }) => [
+      ({ text, nonce }) => [
         { type: 'section', text: { type: 'mrkdwn', text } },
-        {
-          type: 'section',
-          block_id: 'pr_review_action_question',
-          text: { type: 'mrkdwn', text: question },
-        },
         { type: 'actions', nonce },
       ],
     );
@@ -2844,13 +2839,16 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         client_msg_id: expect.any(String),
-        text: 'There is new PR feedback.\nWant me to resolve these issues?',
+        text: 'There is new PR feedback.',
         blocks: expect.arrayContaining([
-          expect.objectContaining({ block_id: 'pr_review_action_question' }),
           expect.objectContaining({ type: 'actions' }),
         ]),
       }),
     );
+    expect(mocks.buildSlackPrReviewActionBlocks).toHaveBeenCalledWith({
+      text: 'There is new PR feedback.',
+      nonce: expect.any(String),
+    });
     expect(mocks.setPendingPrReviewAction).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'slack',

@@ -833,7 +833,6 @@ async function createSlackFastAgentParentTurn(
             ? {
                 nonce: buildPrReviewActionNonce(params.event),
                 taskId: params.event.taskId,
-                question: params.event.suggestedActionQuestion,
                 followUpPrompt: params.event.suggestedActionPrompt,
                 repository: params.event.pullRequest.repository,
                 prNumber: params.event.pullRequest.number,
@@ -1048,11 +1047,10 @@ async function createSlackFastAgentParentTurn(
           slack,
           channel: conversation.replyTarget.channelId,
           threadTs: threadId!,
-          text: action ? `${message}\n${action.question}` : message,
+          text: message,
           bodyBlocks: action
             ? buildSlackPrReviewActionBlocks({
                 text: message,
-                question: action.question,
                 nonce: action.nonce,
               })
             : [

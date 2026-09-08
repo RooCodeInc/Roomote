@@ -134,7 +134,6 @@ function logPrReviewNotificationTriage(input: {
 type PrReviewNotificationAction = {
   /** Summary text in the route provider's link syntax, without the question. */
   summaryText: string;
-  question: string;
   followUpPrompt: string;
   repository: string;
   prNumber: number;
@@ -309,12 +308,11 @@ async function postPrReviewNotification({
       channel: route.channelId,
       threadTs: route.threadId,
       taskId,
-      text,
+      text: action ? action.summaryText : text,
       ...(action && nonce
         ? {
             blocks: buildSlackPrReviewActionBlocks({
               text: action.summaryText,
-              question: action.question,
               nonce,
             }),
           }
@@ -334,10 +332,9 @@ async function postPrReviewNotification({
         );
       if (canonicalDeliveryId && !attached) {
         if (pendingAction) {
-          await retirePrReviewActionMessagesBestEffort(
-            [{ ...pendingAction, messageId: messageTs }],
-            'Superseded by newer PR activity.',
-          );
+          await retirePrReviewActionMessagesBestEffort([
+            { ...pendingAction, messageId: messageTs },
+          ]);
         }
         throw new Error('Canonical PR review prompt lost its posting fence');
       }
@@ -393,15 +390,12 @@ async function postPrReviewNotification({
       );
     if (canonicalDeliveryId && !attached) {
       if (pendingAction) {
-        await retirePrReviewActionMessagesBestEffort(
-          [
-            {
-              ...pendingAction,
-              messageId: posted.lastTextMessageId ?? posted.messageId,
-            },
-          ],
-          'Superseded by newer PR activity.',
-        );
+        await retirePrReviewActionMessagesBestEffort([
+          {
+            ...pendingAction,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
+          },
+        ]);
       }
       throw new Error('Canonical PR review prompt lost its posting fence');
     }
@@ -1020,7 +1014,6 @@ ${delivery.text}`;
           ? {
               action: {
                 summaryText: delivery.text,
-                question: followUp.question,
                 followUpPrompt: followUp.prompt,
                 repository: data.repository,
                 prNumber: data.prNumber,

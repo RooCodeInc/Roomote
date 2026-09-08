@@ -375,7 +375,6 @@ export type RetirablePrReviewActionMessage = Pick<
 /** Removes controls from superseded review offers without failing delivery. */
 export async function retirePrReviewActionMessagesBestEffort(
   pendingActions: RetirablePrReviewActionMessage[],
-  resolution = 'Superseded by newer review feedback.',
 ): Promise<void> {
   for (const pending of pendingActions) {
     if (!pending.messageId) continue;
@@ -404,7 +403,7 @@ export async function retirePrReviewActionMessagesBestEffort(
           channel: pending.channelId,
           ts: pending.messageId,
           message: {
-            blocks: buildResolvedSlackPrReviewMessageBlocks(blocks, resolution),
+            blocks: buildResolvedSlackPrReviewMessageBlocks(blocks),
           },
         });
         continue;
@@ -474,10 +473,7 @@ export async function retirePendingPrReviewActionsForPullRequest(input: {
       : [],
   );
 
-  await retirePrReviewActionMessagesBestEffort(
-    pending,
-    'Superseded by a new commit.',
-  );
+  await retirePrReviewActionMessagesBestEffort(pending);
 }
 
 export async function claimPendingPrReviewAction(

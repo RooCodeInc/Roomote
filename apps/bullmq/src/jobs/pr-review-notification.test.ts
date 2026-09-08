@@ -783,7 +783,7 @@ describe('prReviewNotificationJob', () => {
     );
 
     const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
-    expect(postedCall.text).toBe('formatted-message\nWant me to take a look?');
+    expect(postedCall.text).toBe('formatted-message');
     const blocks = postedCall.blocks as Array<Record<string, unknown>>;
     expect(blocks).toEqual([
       expect.objectContaining({
@@ -791,17 +791,13 @@ describe('prReviewNotificationJob', () => {
         text: 'formatted-message',
       }),
       expect.objectContaining({
-        block_id: 'pr_review_action_question',
-        text: expect.objectContaining({ text: 'Want me to take a look?' }),
-      }),
-      expect.objectContaining({
         type: 'actions',
         block_id: 'pr_review_action',
       }),
     ]);
-    // Both buttons carry the stored nonce so the click handler can claim it.
+    // All buttons carry the stored nonce so the click handler can claim it.
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
-    const actionsBlock = blocks[2] as {
+    const actionsBlock = blocks[1] as {
       elements: Array<{ action_id: string; value: string }>;
     };
     expect(actionsBlock.elements.map((element) => element.action_id)).toEqual([
@@ -942,10 +938,9 @@ describe('prReviewNotificationJob', () => {
         }) as never,
       ),
     ).rejects.toThrow('Canonical PR review prompt lost its posting fence');
-    expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith(
-      [expect.objectContaining({ nonce: deliveryId, messageId: '999.888' })],
-      'Superseded by newer PR activity.',
-    );
+    expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ nonce: deliveryId, messageId: '999.888' }),
+    ]);
   });
 
   it('posts callback buttons and stores the pending offer for Telegram routes', async () => {
