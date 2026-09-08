@@ -178,6 +178,18 @@ and connected-service access checks still apply to every request.
 You can revoke the connection from your MCP client. If a saved session expires
 or is revoked, Roomote asks you to approve access again in the browser.
 
+Access tokens last one hour. Clients that request refresh tokens can refresh
+access within a 30-day session; rotating a refresh token does not extend that
+session. The client registration is separate: each successful authorization
+code exchange or token refresh keeps the same client ID available for another
+90 days. Token expiration or revocation does not itself delete that registration
+or let a revoked token regain access.
+
+To limit unused registrations, initial registration must be followed by a
+successful authorization code exchange within one hour. After 90 days without
+a successful exchange or refresh, an activated registration expires. If that
+happens, remove and re-add Roomote in your MCP client to register again.
+
 ## Troubleshooting
 
 If your client does not open a browser or complete sign-in, make sure it

@@ -1,7 +1,20 @@
 import type { Context } from 'hono';
 
-import { and, db, environments, eq, tasks } from '@roomote/db/server';
-import { getLinkedEnvironmentIdFromPayload } from '@roomote/types';
+import {
+  and,
+  db,
+  desc,
+  environments,
+  eq,
+  fastAgentParentEvents,
+  sql,
+  tasks,
+} from '@roomote/db/server';
+import {
+  getFastAgentParentFromPayload,
+  getLinkedEnvironmentIdFromPayload,
+} from '@roomote/types';
+import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { Env } from '@roomote/env';
 
 import type { Variables } from '../../types';
@@ -55,10 +68,11 @@ export async function getTaskSummary(
 
     const latestRuns = await getLatestTaskRunsByTaskIds([task.id]);
     const latestRun = latestRuns[task.id] ?? null;
+    const parent = getFastAgentParentFromPayload(latestRun?.payload);
     const linkedEnvironmentId = getLinkedEnvironmentIdFromPayload(
       latestRun?.payload,
     );
-    const [linkedEnvironment, artifacts] = await Promise.all([
+    const [linkedEnvironment, artifacts, latestReport] = await Promise.all([
       linkedEnvironmentId
         ? db.query.environments.findFirst({
             where: eq(environments.id, linkedEnvironmentId),
@@ -66,9 +80,32 @@ export async function getTaskSummary(
           })
         : null,
       listArtifactsByTask({ taskId: task.id, auth: {} }),
+      parent
+        ? db.query.fastAgentParentEvents.findFirst({
+            where: and(
+              eq(fastAgentParentEvents.conversationId, parent.sessionId),
+              sql`${fastAgentParentEvents.event} ->> 'type' = 'child_message'`,
+              sql`${fastAgentParentEvents.event} ->> 'taskId' = ${task.id}`,
+            ),
+            orderBy: [
+              desc(fastAgentParentEvents.createdAt),
+              desc(fastAgentParentEvents.id),
+            ],
+            columns: { event: true },
+          })
+        : null,
     ]);
-    const imageArtifacts = artifacts
-      .filter((artifact) => artifact.contentType.startsWith('image/'))
+    // reportToParentSession durably stores the task's literal response here.
+    const summary =
+      typeof latestReport?.event.message === 'string'
+        ? latestReport.event.message
+        : null;
+    const mediaArtifacts = artifacts
+      .filter(
+        (artifact) =>
+          artifact.contentType.startsWith('image/') ||
+          artifact.contentType.startsWith('video/'),
+      )
       .map((artifact) => ({
         id: artifact.id,
         path: artifact.path,
@@ -85,6 +122,7 @@ export async function getTaskSummary(
     return c.json({
       id: task.id,
       title: task.title,
+      summary: summary?.trim() ? redactSecrets(summary) : null,
       mode: task.mode,
       completed: task.state === 'completed',
       state: task.state,
@@ -97,7 +135,12 @@ export async function getTaskSummary(
       environmentSetupState: latestRun?.environmentSetupState ?? null,
       linkedEnvironmentId: linkedEnvironmentId ?? null,
       linkedEnvironmentName: linkedEnvironment?.name ?? null,
-      imageArtifacts,
+      imageArtifacts: mediaArtifacts.filter((artifact) =>
+        artifact.contentType.startsWith('image/'),
+      ),
+      videoArtifacts: mediaArtifacts.filter((artifact) =>
+        artifact.contentType.startsWith('video/'),
+      ),
     });
   } catch (error) {
     logHandlerError('getTaskSummary', error);

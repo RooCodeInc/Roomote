@@ -112,7 +112,7 @@
       "read-yaml-file@1>js-yaml": "3.15.1",
       "nise>path-to-regexp": "8.4.0",
       "protobufjs": "7.6.5",
-      "qs": "6.15.2",
+      "qs": "6.16.0",
       "router>path-to-regexp": "8.4.0",
       "socket.io>socket.io-adapter": "2.5.8",
       "socket.io-adapter>ws": "8.21.0",

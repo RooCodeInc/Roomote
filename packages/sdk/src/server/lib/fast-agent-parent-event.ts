@@ -88,6 +88,7 @@ import {
   postFastAutomationSuggestionsToTeams,
   postFastAutomationSuggestionsToTelegram,
 } from './fast-automation-suggestions';
+import { requireFastSuggestionOriginSessionId } from './fast-suggestion-origin';
 
 import {
   buildSignedArtifactRawUrl,
@@ -97,10 +98,12 @@ import {
   resolveFastAgentSessionImages,
   type FastAgentReplyImage,
 } from './fast-agent-session-images';
+import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
+import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
 import {
@@ -811,6 +814,7 @@ async function createSlackFastAgentParentTurn(
       postReply: async ({
         message,
         imageArtifactIds = [],
+        videoArtifactIds = [],
         suggestions = [],
         kickoff,
         purpose,
@@ -837,6 +841,16 @@ async function createSlackFastAgentParentTurn(
               }
             : null;
 
+        const videoFallback =
+          threadId && videoArtifactIds.length
+            ? await deliverFastAgentSessionVideos({
+                artifactIds: videoArtifactIds,
+                sessionId: session.id,
+                channelId: conversation.replyTarget.channelId,
+                threadTs: threadId,
+              })
+            : '';
+        message = [message, videoFallback].filter(Boolean).join('\n\n');
         const reportMessage =
           isFastAutomationReportEvent(params.event) && !kickoff
             ? appendFastAutomationSuggestionInstruction(
@@ -889,7 +903,9 @@ async function createSlackFastAgentParentTurn(
                 'Slack did not create the Fast automation result.',
               );
             }
-            params.onReplyPosted();
+            // Text-only roots are already delivered; selected videos still need a retry on failure.
+            if (!videoArtifactIds.length) params.onReplyPosted();
+            // Video delivery authorizes against the persisted Session destination.
             await fastAgentConversationRepository.getOrCreate({
               userId: actorUserId,
               conversation: {
@@ -900,6 +916,36 @@ async function createSlackFastAgentParentTurn(
                 },
               },
             });
+            if (videoArtifactIds.length) {
+              const fallback = await deliverFastAgentSessionVideos({
+                artifactIds: videoArtifactIds,
+                sessionId: session.id,
+                channelId: conversation.replyTarget.channelId,
+                threadTs: messageTs,
+              });
+              if (fallback) {
+                const updated = await slack.updateMessage({
+                  channel: conversation.replyTarget.channelId,
+                  ts: messageTs,
+                  message: buildCustomAutomationSlackMessage({
+                    automationId: customAutomationId,
+                    automationName,
+                    text: `${reportMessage}\n\n${fallback}`,
+                    contentBlocks: [
+                      ...contentBlocks,
+                      { type: 'markdown' as const, text: fallback },
+                    ],
+                    sessionId: params.parent.sessionId,
+                    ...(params.event.type === 'task_settled'
+                      ? { taskUrl: params.event.taskUrl }
+                      : {}),
+                  }),
+                });
+                if (!updated)
+                  throw new Error('Slack did not accept the video fallback.');
+              }
+            }
+            if (videoArtifactIds.length) params.onReplyPosted();
             await recordFastAgentConversationMessageBestEffort({
               sessionId: session.id,
               conversation: {
@@ -919,6 +965,9 @@ async function createSlackFastAgentParentTurn(
             suggestions.length > 0
           ) {
             await postFastAutomationSuggestionsToSlack({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: messageTs,
@@ -961,6 +1010,9 @@ async function createSlackFastAgentParentTurn(
             suggestions.length > 0
           ) {
             await postFastAutomationSuggestionsToSlack({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
               slack,
               channelId: conversation.replyTarget.channelId,
               threadTs: rootMessageId,
@@ -1268,7 +1320,12 @@ async function createDiscordFastAgentParentTurn(
     event: params.event,
     conversation,
   });
+  const activity = createFastAgentTypingActivity({
+    sendTyping: () => provider.triggerTyping(conversation.replyTarget),
+    intervalMs: 8_000,
+  });
   const adapter: FastAgentTurnAdapter = {
+    activity,
     launchTask: createFastAgentDiscordTaskLauncher({
       provider,
       userId: actorUserId,
@@ -1333,6 +1390,7 @@ async function createDiscordFastAgentParentTurn(
             'Discord did not return a Fast automation report message id.',
           );
         }
+        activity.reassert();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -1340,6 +1398,9 @@ async function createDiscordFastAgentParentTurn(
         });
         if (suggestions.length > 0) {
           await postFastAutomationSuggestionsToDiscord({
+            originSessionId: await requireFastSuggestionOriginSessionId(
+              session.id,
+            ),
             provider,
             channelId: conversation.replyTarget.channelId,
             ...(conversation.replyTarget.threadId
@@ -1349,6 +1410,7 @@ async function createDiscordFastAgentParentTurn(
             createdByUserId: actorUserId,
             suggestions,
           });
+          activity.reassert();
         }
         params.onReplyPosted();
         return;
@@ -1432,6 +1494,7 @@ async function createDiscordFastAgentParentTurn(
               : {}),
           }),
       });
+      activity.reassert();
       await recordFastAgentConversationMessageBestEffort({
         sessionId: session.id,
         conversation,
@@ -1439,6 +1502,9 @@ async function createDiscordFastAgentParentTurn(
       });
       if (settleReport && suggestions.length > 0) {
         await postFastAutomationSuggestionsToDiscord({
+          originSessionId: await requireFastSuggestionOriginSessionId(
+            session.id,
+          ),
           provider,
           channelId: conversation.replyTarget.channelId,
           ...(conversation.replyTarget.threadId
@@ -1448,6 +1514,7 @@ async function createDiscordFastAgentParentTurn(
           createdByUserId: actorUserId,
           suggestions,
         });
+        activity.reassert();
       }
       if (action) {
         const { superseded } =
@@ -1467,7 +1534,7 @@ async function createDiscordFastAgentParentTurn(
   };
   // A resumed turn edits the retry notice its predecessor posted; an
   // oversized replacement falls back to a fresh reply through this adapter.
-  adapter.replaceReply = createDiscordFastReplyReplacer({
+  const replaceReply = createDiscordFastReplyReplacer({
     provider,
     conversation,
     channelId: conversation.replyTarget.channelId,
@@ -1477,6 +1544,11 @@ async function createDiscordFastAgentParentTurn(
     postReplacement: (text) =>
       adapter.postReply({ purpose: 'closeout', message: text }),
   });
+  adapter.replaceReply = async (handle, reply) => {
+    const result = await replaceReply(handle, reply);
+    activity.reassert();
+    return result;
+  };
   return { userId: actorUserId, conversation, adapter };
 }
 
@@ -1577,6 +1649,9 @@ async function createTeamsFastAgentParentTurn(
           });
           if (suggestions.length > 0) {
             await postFastAutomationSuggestionsToTeams({
+              originSessionId: await requireFastSuggestionOriginSessionId(
+                session.id,
+              ),
               provider,
               channelId: conversation.replyTarget.channelId,
               serviceUrl,
@@ -1610,6 +1685,9 @@ async function createTeamsFastAgentParentTurn(
           suggestions.length > 0
         ) {
           await postFastAutomationSuggestionsToTeams({
+            originSessionId: await requireFastSuggestionOriginSessionId(
+              session.id,
+            ),
             provider,
             channelId: conversation.replyTarget.channelId,
             serviceUrl,
@@ -1655,10 +1733,22 @@ async function createTelegramFastAgentParentTurn(
   }
   const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
+  const activity = createFastAgentTypingActivity({
+    sendTyping: () => provider.sendChatAction(conversation.replyTarget),
+    intervalMs: 4_000,
+  });
+  const replaceReply = createTelegramFastReplyReplacer({
+    provider,
+    conversation,
+    channelId: conversation.replyTarget.channelId,
+    sessionId: session.id,
+    footerContext: params.footerContext,
+  });
   return {
     userId: actorUserId,
     conversation,
     adapter: {
+      activity,
       launchTask: createFastAgentCommunicationTaskLauncher({
         userId: actorUserId,
         conversation,
@@ -1667,13 +1757,11 @@ async function createTelegramFastAgentParentTurn(
           conversation,
         }),
       }),
-      replaceReply: createTelegramFastReplyReplacer({
-        provider,
-        conversation,
-        channelId: conversation.replyTarget.channelId,
-        sessionId: session.id,
-        footerContext: params.footerContext,
-      }),
+      replaceReply: async (handle, reply) => {
+        const result = await replaceReply(handle, reply);
+        activity.reassert();
+        return result;
+      },
       postReply: async ({
         message,
         imageArtifactIds = [],
@@ -1702,6 +1790,7 @@ async function createTelegramFastAgentParentTurn(
           textFormat: 'markdown',
           images,
         });
+        activity.reassert();
         await recordFastAgentConversationMessageBestEffort({
           sessionId: session.id,
           conversation,
@@ -1713,6 +1802,9 @@ async function createTelegramFastAgentParentTurn(
           suggestions.length > 0
         ) {
           await postFastAutomationSuggestionsToTelegram({
+            originSessionId: await requireFastSuggestionOriginSessionId(
+              session.id,
+            ),
             provider,
             channelId: conversation.replyTarget.channelId,
             ...(conversation.replyTarget.threadId
@@ -1722,6 +1814,7 @@ async function createTelegramFastAgentParentTurn(
             createdByUserId: actorUserId,
             suggestions,
           });
+          activity.reassert();
         }
         params.onReplyPosted();
         return { messageId: posted.messageId };

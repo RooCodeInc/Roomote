@@ -512,10 +512,7 @@ export async function qualifyProviderModel(
           model: modelId.replace(`${input.provider}/`, ''),
           messages: [{ role: 'user', content: 'Reply with pong.' }],
           stream: true,
-          tool_choice: {
-            type: 'function',
-            function: { name: 'ping' },
-          },
+          tool_choice: 'required',
           tools: [
             {
               type: 'function',

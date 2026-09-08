@@ -86,9 +86,7 @@ function NarrationWorkingReasoningMessage() {
       <MessageContent>
         <div className="flex items-center gap-2 text-sm font-light text-muted-foreground">
           <Lightbulb className="size-4" />
-          <Shimmer direction="rl" duration={1}>
-            Thinking...
-          </Shimmer>
+          <Shimmer>Thinking...</Shimmer>
         </div>
       </MessageContent>
     </Message>

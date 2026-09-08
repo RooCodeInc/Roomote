@@ -45,6 +45,9 @@ conversation to execution to review without changing identity.
 
 ## The session view
 
+A Session header shows the other people currently viewing that Session. Your
+own avatar is omitted from the viewer list.
+
 A Session timeline shows prompts, replies, and delegated execution activity.
 Execution cards show their status, workspace, pull requests, artifacts, latest
 error, and cost. Select a card to open its details panel. For a live nested
@@ -155,19 +158,28 @@ or a direct message still requires a response.
 ## Reminders and monitors
 
 A Session can schedule a message to itself. Ask Fast to "remind me in twenty
-minutes", "check every ten minutes whether CI is green", or "every weekday at
-nine, summarize the open pull requests", and it creates a wakeup for that
-Session. When the wakeup fires, Fast picks the conversation back up with its
-full history in context, does what was asked, and replies on the same surface
+minutes", "check every ten minutes whether CI is green, up to six times", or
+"every weekday at nine, summarize the open pull requests", and it creates a
+wakeup for that Session. When the wakeup fires, Fast picks the conversation back
+up with its full history in context, does what was asked, and replies on the same surface
 the Session lives on: the transcript in the dashboard, or the originating Slack,
 Discord, Teams, or Telegram thread.
 
-A one-shot wakeup is a reminder and always replies. A recurring wakeup is a
-monitor and stays quiet unless it has something to report, such as a change, a
-result, a blocker, or a decision you need to make. When the monitored condition
-resolves, Fast tells you and cancels the wakeup itself. You can also ask Fast to
-list or cancel wakeups at any time; archiving a Session cancels all of its
-wakeups.
+Reporting policy is separate from the schedule. One-shot wakeups default to
+replying every run; recurring wakeups default to replying only when there is
+something notable, such as a change, a result, a blocker, or a decision you need
+to make. Ongoing-process checks can be one-shot or recurring and stay quiet
+without news. Ask for a reply on every run when you want a recurring reminder
+or report instead. When a monitored condition resolves, Fast tells you and
+cancels any remaining checks. You can also ask Fast to list or cancel wakeups
+at any time; archiving a Session cancels all of its wakeups.
+
+In the dashboard, active scheduled wakeups appear above the Session composer,
+ordered by their next run. Each row shows the wakeup's name and a countdown.
+**Due soon** means the scheduled time has arrived, not that the check has run
+or completed. The Session owner or an admin can use the row's **Cancel wakeup**
+control to stop it; other viewers can see the schedule but cannot cancel it
+from this list.
 
 Fast can proactively offer a follow-up when an ongoing process has a concrete
 unresolved outcome worth checking and it has verified that available tools can

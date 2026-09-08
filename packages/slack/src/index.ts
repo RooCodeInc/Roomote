@@ -2,6 +2,7 @@ export * from './account-link';
 export * from './communication-provider';
 export * from './drain-slack-messages';
 export * from './emoji-preferences';
+export * from './ensure-slack-manager-channel';
 export * from './fast-agent-live-task-launcher';
 export * from './fast-agent-root-binding-lock';
 export * from './fast-agent-session-activity';

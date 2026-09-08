@@ -47,7 +47,6 @@ import {
   registerTrackedSuggestionCards,
   repositories,
   resolveRepositorySelectionByIds,
-  slackInstallationChannels,
   slackInstallations,
   slackUserMappings,
   sql,
@@ -69,6 +68,7 @@ import {
   usesSharedScheduledSuggestionSlackModel,
 } from '../slack/helpers/suggestion-workspace';
 import { resolveScheduledSuggestionSlackConfig } from './background-automation-slack';
+import { resolveAutomationSlackTargetData } from './automation-slack-target';
 import { buildScheduledSuggestionRootMessage } from './scheduled-suggestion-root-summary';
 import {
   scheduleSuggestedTasksFollowupBestEffort,
@@ -980,7 +980,7 @@ async function postSetupTaskSuggestionsToSlack(params: {
  * on delivery, not on mere Slack-installation existence, so a Slack-installed
  * deployment that cannot resolve a channel still falls through to another provider.
  */
-async function postSuggestedTasksSummaryToSlack(params: {
+export async function postSuggestedTasksSummaryToSlack(params: {
   sourceTaskId: string;
   createdByUserId: string | null;
   suggestionSource?: TaskSuggestionSource;
@@ -996,49 +996,23 @@ async function postSuggestedTasksSummaryToSlack(params: {
   // suppress the summary post; user-attribution decoration is skipped instead.
   const createdByUserId = params.createdByUserId;
 
-  const [slackInstallation] = await db
-    .select({
-      id: slackInstallations.id,
-      teamId: slackInstallations.teamId,
-      botAccessToken: slackInstallations.botAccessToken,
-    })
-    .from(slackInstallations)
-    .where(eq(slackInstallations.isActive, true))
-    .limit(1);
-
-  if (!slackInstallation) {
-    return false;
-  }
-
   const slackConfig = resolveScheduledSuggestionSlackConfig(
     params.suggestionSource,
   );
+  const target = await resolveAutomationSlackTargetData(
+    slackConfig.automationKey,
+  );
+
+  if (!target) {
+    return false;
+  }
+  const { slackInstallation } = target;
+
   const automationLabel =
     getScheduledSuggestionBackgroundAutomationDescriptor(
       params.suggestionSource,
     )?.label ?? null;
   const shouldTrackAutomationThread = Boolean(params.suggestionSource);
-
-  // Two-level fallback: the automation's own slack_channel target, then the
-  // shared manager channel (getAutomationRuntime resolves both levels).
-  const automationRuntime = await getAutomationRuntime(
-    slackConfig.automationKey,
-  );
-  const configuredChannelId = automationRuntime.slackChannelId;
-
-  const [channel] = configuredChannelId
-    ? [{ channelId: configuredChannelId }]
-    : await db
-        .select({ channelId: slackInstallationChannels.channelId })
-        .from(slackInstallationChannels)
-        .where(
-          eq(
-            slackInstallationChannels.slackInstallationId,
-            slackInstallation.id,
-          ),
-        )
-        .orderBy(asc(slackInstallationChannels.createdAt))
-        .limit(1);
 
   const publication = await db.transaction(async (tx) => {
     await tx.execute(
@@ -1070,7 +1044,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
         ),
       )
       .limit(1);
-    const channelId = receipt?.channelId ?? channel?.channelId;
+    const channelId = receipt?.channelId ?? target.channelId;
 
     const existingSuggestionCards = await tx
       .select({ workItemId: trackedMessages.workItemId })

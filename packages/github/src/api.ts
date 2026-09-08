@@ -24,6 +24,7 @@ import {
   githubPendingInstallations,
   githubInstallations,
   environments,
+  environmentRepositoryMappings,
   repositories,
   and,
   eq,
@@ -45,29 +46,39 @@ async function resolveTokenOptionsForRepositoryNames({
   repositoryNames,
   missingMessagePrefix,
   spanningMessagePrefix,
+  repositoryRows,
 }: {
   taskRun: TaskRun;
   repositoryNames: string[];
   missingMessagePrefix: string;
   spanningMessagePrefix: string;
-}): Promise<CreateGitHubTokenOptions> {
+  repositoryRows?: Repository[];
+}): Promise<
+  Extract<CreateGitHubTokenOptions, { type: 'installationId' }> & {
+    installationId: string;
+  }
+> {
   const uniqueRepositoryNames = [
     ...new Set(
-      filterRepositoryNamesForSourceControlProvider(
-        taskRun.payload,
-        repositoryNames.filter(Boolean),
-        DEFAULT_SOURCE_CONTROL_PROVIDER,
-      ),
+      repositoryRows
+        ? repositoryNames
+        : filterRepositoryNamesForSourceControlProvider(
+            taskRun.payload,
+            repositoryNames.filter(Boolean),
+            DEFAULT_SOURCE_CONTROL_PROVIDER,
+          ),
     ),
   ];
 
-  const selectedRepoRows = await db.query.repositories.findMany({
-    where: and(
-      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
-      eq(repositories.isActive, true),
-      inArray(repositories.fullName, uniqueRepositoryNames),
-    ),
-  });
+  const selectedRepoRows =
+    repositoryRows ??
+    (await db.query.repositories.findMany({
+      where: and(
+        eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+        eq(repositories.isActive, true),
+        inArray(repositories.fullName, uniqueRepositoryNames),
+      ),
+    }));
 
   const foundRepositories = new Set(
     selectedRepoRows.map((repository) => repository.fullName),
@@ -185,32 +196,61 @@ type Checks = RestEndpointMethodTypes['checks'];
  * Authentication
  */
 
+export async function resolveTaskRunEnvironmentGitHubRepositories(
+  taskRun: TaskRun,
+): Promise<Repository[] | null> {
+  if (!taskRun.payload.environmentId) return null;
+  const environment = await db.query.environments.findFirst({
+    where: eq(environments.id, taskRun.payload.environmentId),
+  });
+  if (!environment) {
+    throw new Error(
+      `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
+    );
+  }
+  if (environment.config.repositories.length === 0) return null;
+
+  // Repository mappings retain provider identity even when providers share a name.
+  const mappings = await db.query.environmentRepositoryMappings.findMany({
+    where: eq(environmentRepositoryMappings.environmentId, environment.id),
+    with: { repository: true },
+  });
+  const repositoryRows = mappings
+    .map(({ repository }) => repository)
+    .filter(
+      (repository) =>
+        repository.isActive &&
+        repository.sourceControlProvider === DEFAULT_SOURCE_CONTROL_PROVIDER,
+    );
+  const options = await resolveTokenOptionsForRepositoryNames({
+    taskRun,
+    repositoryNames: repositoryRows.map((row) => row.fullName),
+    repositoryRows,
+    missingMessagePrefix: 'Environment repositories not found',
+    spanningMessagePrefix: 'Environment repositories',
+  });
+  return db.query.repositories.findMany({
+    where: and(
+      eq(repositories.sourceControlProvider, DEFAULT_SOURCE_CONTROL_PROVIDER),
+      eq(repositories.isActive, true),
+      eq(repositories.installationId, options.installationId),
+    ),
+  });
+}
+
 async function resolveTaskRunGitHubTokenOptions(
   taskRun: TaskRun,
 ): Promise<CreateGitHubTokenOptions> {
-  if (taskRun.payload.environmentId) {
-    const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, taskRun.payload.environmentId),
+  const repositoryRows =
+    await resolveTaskRunEnvironmentGitHubRepositories(taskRun);
+  if (repositoryRows !== null) {
+    return resolveTokenOptionsForRepositoryNames({
+      taskRun,
+      repositoryNames: repositoryRows.map((row) => row.fullName),
+      repositoryRows,
+      missingMessagePrefix: 'Environment repositories not found',
+      spanningMessagePrefix: 'Environment repositories',
     });
-
-    if (!environment) {
-      throw new Error(
-        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
-      );
-    }
-
-    const environmentRepositories = environment.config.repositories.map(
-      (repository) => repository.repository,
-    );
-
-    if (environmentRepositories.length > 0) {
-      return resolveTokenOptionsForRepositoryNames({
-        taskRun,
-        repositoryNames: environmentRepositories,
-        missingMessagePrefix: 'Environment repositories not found',
-        spanningMessagePrefix: 'Environment repositories',
-      });
-    }
   }
 
   const selectedRepositories = Array.isArray(

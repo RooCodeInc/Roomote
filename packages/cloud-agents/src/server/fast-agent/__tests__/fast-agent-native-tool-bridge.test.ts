@@ -146,6 +146,12 @@ describe('Fast native OpenCode tool bridge', () => {
       'Never claim an image or screenshot is attached, shown, or included unless this list is non-empty',
     );
     expect(replySource).toContain('accessible artifact viewer link');
+    expect(replySource).toContain(
+      'videoArtifactIds: z.array(z.string()).optional()',
+    );
+    expect(replySource).toContain(
+      'explicitly selected for native Slack delivery',
+    );
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(createArtifactSource).toContain('invoke("create_artifact"');
     expect(createArtifactSource).toContain('maximum 128 KiB');

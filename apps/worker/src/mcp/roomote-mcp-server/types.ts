@@ -57,6 +57,7 @@ export interface TaskSearchResponse {
 export interface TaskSummaryResponse {
   id: string;
   title: string | null;
+  summary?: string | null;
   mode: string | null;
   completed: boolean;
   repositoryName: string | null;
@@ -76,6 +77,7 @@ export interface TaskSummaryResponse {
     contentType: string;
     viewUrl: string;
   }>;
+  videoArtifacts?: TaskSummaryResponse['imageArtifacts'];
 }
 
 export interface TaskComputeLog {

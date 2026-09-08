@@ -81,6 +81,12 @@ vi.mock('./Header', () => ({
   Header: () => <div>Header</div>,
 }));
 
+vi.mock('./TaskRobotIconScope', () => ({
+  TaskRobotIconScope: ({ children }: { children: ReactNode }) => (
+    <>{children}</>
+  ),
+}));
+
 vi.mock('./Messages', () => ({
   Messages: ({ footer }: { footer?: ReactNode }) => (
     <div>

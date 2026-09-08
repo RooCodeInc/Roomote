@@ -82,6 +82,12 @@ vi.mock('@tanstack/react-query', async (importOriginal) => ({
   useQuery: () => ({ data: composerSuggestionState.data }),
 }));
 
+// Wakeup polling has dedicated provider-backed tests. Keep this suite's query
+// mocks scoped to composer suggestions rather than mounting the live poller.
+vi.mock('./SessionWakeups', () => ({
+  SessionWakeups: () => null,
+}));
+
 vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
@@ -1899,28 +1905,32 @@ describe('FastSessionTranscript', () => {
     );
   });
 
-  it('uses content-driven wrapping for header extras', () => {
+  it('renders header extras and actions while preserving the Fast stream ID', () => {
     render(
       <FastSessionTranscript
-        sessionId="session-1"
+        sessionId="fast-conversation-1"
         initialMessages={[]}
         initialTitle="Short session title"
         headerExtras={
           <a href="https://github.com/acme/widgets/pull/42">widgets#42</a>
         }
+        headerActions={<button type="button">Session viewers</button>}
       />,
     );
 
     const heading = screen.getByRole('heading', {
       name: 'Short session title',
     });
-    expect(heading).toHaveClass('max-w-full', 'flex-[0_1_auto]');
-    expect(heading.parentElement).toHaveClass(
-      'flex-row',
-      'flex-wrap',
-      'items-center',
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('link', { name: 'widgets#42' }),
     );
-    expect(heading.parentElement?.className).not.toContain('@[480px]');
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('button', { name: 'Session viewers' }),
+    );
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toBe(
+      '/api/sessions/fast-conversation-1/stream',
+    );
   });
 
   it('hides the reply composer for non-web sessions', () => {

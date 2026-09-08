@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import {
+  and,
   db,
   desc,
   eq,
@@ -58,7 +59,7 @@ type UsageLimitCommunicationAdapter = Awaited<
 
 type ProviderUsageLimitDependencies = {
   getRuntime: typeof getAutomationRuntime;
-  getSlackBotToken: () => Promise<string | null>;
+  getSlackBotToken: (teamId?: string) => Promise<string | null>;
   getSnapshots: () => Promise<ProviderUsageLimitSnapshot[]>;
   getRedisClient: () => UsageLimitRedis;
   createNotifier: (token: string) => UsageLimitNotifier;
@@ -81,9 +82,12 @@ const defaultDependencies: ProviderUsageLimitDependencies = {
   now: () => new Date(),
 };
 
-async function getActiveSlackBotToken(): Promise<string | null> {
+async function getActiveSlackBotToken(teamId?: string): Promise<string | null> {
   const installation = await db.query.slackInstallations.findFirst({
-    where: eq(slackInstallations.isActive, true),
+    where: and(
+      eq(slackInstallations.isActive, true),
+      ...(teamId ? [eq(slackInstallations.teamId, teamId)] : []),
+    ),
     orderBy: [desc(slackInstallations.updatedAt)],
     columns: { botAccessToken: true },
   });
@@ -327,7 +331,7 @@ export async function providerUsageLimitJob(
   }
 
   const now = dependencies.now();
-  const slackBotToken = await dependencies.getSlackBotToken();
+  let slackBotToken = await dependencies.getSlackBotToken();
   const destination =
     opts.destination ??
     (await dependencies.resolveDestination({
@@ -338,6 +342,10 @@ export async function providerUsageLimitJob(
     result.skippedReason =
       'Provider usage limit alert channel is not configured.';
     return result;
+  }
+
+  if (destination.provider === 'slack' && destination.teamId) {
+    slackBotToken = await dependencies.getSlackBotToken(destination.teamId);
   }
 
   if (destination.provider === 'slack' && !slackBotToken) {

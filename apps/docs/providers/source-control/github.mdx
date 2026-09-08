@@ -198,6 +198,14 @@ installation. Requests default to the repository mapped to the task:
 - list accessible GitHub Projects V2, inspect an issue or pull request's Status,
   and update an existing project item's single-select Status field
 
+An environment-backed task can also push branches and create or update pull
+requests in another active GitHub repository connected to the same GitHub App
+installation, even when that repository is not part of the environment
+workspace. This write access does not automatically add the repository to the
+prepared workspace. Roomote rejects inactive repositories, repositories
+connected through another provider, and repositories that belong to a different
+GitHub App installation.
+
 Read-only requests, creations, and additive label actions run directly. Before
 editing, replacing, assigning, clearing, moving, or deleting an item, Roomote
 shows the proposed change and asks for confirmation. Deletions name the resource

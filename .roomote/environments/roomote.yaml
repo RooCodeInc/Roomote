@@ -110,7 +110,9 @@ repositories:
         logfile: /tmp/roomote-controller.log
       - name: Start Mintlify docs preview
         # Mint is needed only for this optional final service.
-        run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint && cd apps/docs && mise exec node@22.20.0 -- mint dev --port 3333 --no-open
+        # Reuse cached CLI packages/metadata; fetch on a cold cache. The docs
+        # package owns the version pin, without adding Mint to every worker image.
+        run: npm_config_prefer_offline=true pnpm --filter @roomote/docs dev --port 3333 --no-open
         timeout: 600
         continue_on_error: true
         detached: true

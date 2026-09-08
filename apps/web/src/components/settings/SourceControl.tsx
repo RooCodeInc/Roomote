@@ -563,7 +563,10 @@ function PrActionSetting({
         }}
         disabled={prActionQuery.isLoading || setPrAction.isPending}
       >
-        <SelectTrigger className="w-full max-w-sm">
+        <SelectTrigger
+          aria-label="Pull request delivery"
+          className="w-full max-w-sm"
+        >
           <SelectValue placeholder="Select a delivery mode" />
         </SelectTrigger>
         <SelectContent>

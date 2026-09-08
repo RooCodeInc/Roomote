@@ -43,8 +43,11 @@ describe('DelegatedTaskCard', () => {
     );
 
     expect(screen.getByText('Fix checkout')).toBeInTheDocument();
-    expect(screen.getByText('Started coding task')).toBeInTheDocument();
+    expect(screen.getByText('Coding agent')).toBeInTheDocument();
     expect(screen.getByText('Working')).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'View coding task: Fix checkout' }),
     );

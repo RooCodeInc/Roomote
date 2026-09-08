@@ -50,16 +50,15 @@ describe('Standard Task visual-proof step', () => {
     expect(harnessInstructions).not.toContain('delegated proof');
   });
 
-  it('keeps screencast auto-classification disabled', () => {
+  it('leaves proof format selection to the capture skill', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
     });
 
-    expect(harnessInstructions).toContain(
-      'Screencast auto-classification is disabled for this task.',
-    );
+    expect(harnessInstructions).not.toContain('screencast auto-classification');
+    expect(harnessInstructions).not.toContain('<visual_proof_context>');
     expect(harnessInstructions).not.toContain('background: true');
     expect(harnessInstructions).not.toContain('completion notification');
   });

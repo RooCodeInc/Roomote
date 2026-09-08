@@ -72,6 +72,41 @@ describe('AcpToolDetails', () => {
     toolInputSpy.mockClear();
   });
 
+  it('shows the actual returned task summary in YAML, not a later notification', () => {
+    const msg = buildMessage({
+      kind: 'tool',
+      toolName: 'manage_tasks',
+      serverName: 'roomote',
+      title: 'manage_tasks',
+      rawInput: { action: 'get_summary', taskId: 'task-1' },
+      output: JSON.stringify({
+        success: true,
+        result: {
+          id: 'task-1',
+          summary:
+            'Implemented the fix.\nValidation: focused regression passed.',
+        },
+      }),
+    } as Partial<AcpToolResultUiMessage['data']>);
+    render(
+      <AcpToolMessage
+        msg={{ ...msg, text: 'A newer PR notification or kickoff.' }}
+      />,
+    );
+    expect(codeBlockSpy).not.toHaveBeenCalled();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Heard back from task Completed' }),
+    );
+    expect(codeBlockSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        language: 'yaml',
+        code: 'success: true\nresult:\n  id: task-1\n  summary: |-\n    Implemented the fix.\n    Validation: focused regression passed.',
+      }),
+    );
+    expect(screen.queryByText(/newer PR notification/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Current task summary')).not.toBeInTheDocument();
+  });
+
   it.each([
     ['inspect_images', 'question', 'Inspected Images'],
     ['report_to_parent_session', 'message', 'Sent report to Session'],

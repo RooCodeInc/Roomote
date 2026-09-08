@@ -60,6 +60,17 @@ Operators can also configure an email allowlist for a self-hosted deployment.
 When that allowlist is active, a user still needs to pass the normal sign-in
 rules and have an allowed email address.
 
+## Staying signed in
+
+Web sign-in sessions last 30 days from sign-in or the last renewal. While you
+use the web app, eligible browser requests renew both the session and its
+cookie, at most once every 24 hours. Simply leaving a sleeping or closed browser
+open does not renew a session. After the session expires, sign in again.
+
+Signing out, removal by an admin, and password resets still revoke sessions.
+Clearing browser cookies or rotating the deployment's session-signing secret
+also requires signing in again. Sign out when using a shared device.
+
 ## License and seats
 
 A Roomote deployment is free for up to 10 users. Every registered user

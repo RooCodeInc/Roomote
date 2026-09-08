@@ -147,7 +147,9 @@ the automation only needs a specific repository set.
 
 Suggestions can accompany the Session's report after a delegated task finishes,
 not just its initial response. Accepting one keeps the follow-up in the
-originating Session and report thread, so earlier findings remain in context.
+originating Session, so earlier findings remain in context. In Slack, launches
+reuse that Session's report thread when it is available. Thread or topic
+placement on other providers depends on the provider and execution target.
 
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
@@ -184,9 +186,10 @@ When a report destination is set, Roomote uses that conversation for actionable
 or important findings, meaningful completed results, blockers, and questions
 that need input. Routine success, healthy status, and no-change results stay
 silent unless the automation prompt explicitly asks for a report in those
-cases. The first message starts a thread, later updates continue that same
-thread, and you can reply there to continue the Session. There is no progress
-chatter in between. Without a destination, the run happens silently and its
+cases. In Slack, the first report starts a thread and later updates continue
+that thread. On other providers, updates use the run's conversation or topic.
+Reply to the report to continue the Session. There is no progress chatter in
+between. Without a destination, the run happens silently and its
 results remain in its stored web Session, including any delegated task cards.
 
 Unless the prompt asks for a different presentation, custom automation reports
@@ -355,6 +358,12 @@ manager-facing updates and suggestions.
 Set **Automation output** first. This is the shared Slack or Discord Manager
 Channel for manager-facing posts, suggestions, summaries, and setup alerts.
 Make sure the Roomote app can access the channel before you save it.
+
+For Slack, the first account connection after app installation automatically
+sets up public `#roomote-managers` if no Slack or Discord Manager Channel is
+configured. Existing automation destinations are unchanged, and no automations
+are enabled by channel setup. See [Slack setup](/providers/communications/slack#automatic-manager-channel)
+for required permissions and retry instructions.
 
 **Inference Provider Usage Alerts** is enabled at an hourly cadence with an 85% threshold
 when it first appears, preserving the provider warning behavior from earlier

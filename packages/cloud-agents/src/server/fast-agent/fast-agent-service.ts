@@ -237,6 +237,7 @@ const chatReplyArgsSchema = z.object({
   message: z.string().trim().min(1).optional(),
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
+  videoArtifactIds: z.array(z.string()).optional(),
   suggestions: z
     .array(
       z.object({
@@ -2484,6 +2485,9 @@ export async function answerFastAgentQuestion({
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
+          ...(reply.videoArtifactIds?.length
+            ? { videoArtifactIds: reply.videoArtifactIds }
+            : {}),
           ...(reply.kickoff ? { kickoff: true } : {}),
           ...(reply.taskNavigation ? { taskNavigation: true } : {}),
         },
@@ -2782,37 +2786,51 @@ export async function answerFastAgentQuestion({
     return true;
   };
 
-  const finishActivity = () => {
+  let surfaceDisposed = false;
+  const disposeSurface = () => {
+    surfaceDisposed = true;
+    surfaceReplyStream.dispose();
+    return adapter.activity?.dispose() ?? Promise.resolve();
+  };
+  let surfaceSettlement: Promise<void> | undefined;
+  const finishSurface = () => {
     const lost =
       turnLockSignal?.reason instanceof FastAgentTurnLockLostError ||
       signal?.reason instanceof FastAgentTurnLockLostError;
-    return (
-      lost
-        ? adapter.activity?.dispose()
-        : adapter.activity?.settle({ keepProcessing: durableTurnDeferred })
-    )?.catch((error) => {
+    if (lost)
+      return disposeSurface().catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to dispose surface activity: ${formatErrorForLog(error)}`,
+        );
+      });
+    surfaceSettlement ??= (async () => {
+      await surfaceReplyStream.close();
+      if (!surfaceDisposed)
+        await adapter.activity?.settle({ keepProcessing: durableTurnDeferred });
+    })().catch((error) => {
       console.warn(
         `[Fast Agent] Failed to settle surface activity: ${formatErrorForLog(error)}`,
       );
     });
+    return surfaceSettlement;
   };
   const unregisterActivity =
-    turnLockSignal && adapter.activity
+    turnLockSignal && (adapter.activity || adapter.createReplyStream)
       ? registerFastAgentTurnActivity(turnLockSignal, {
           settle: async () => {
-            await finishActivity();
+            await finishSurface();
           },
-          dispose: () => adapter.activity!.dispose(),
+          dispose: disposeSurface,
         })
       : undefined;
   const abortActivity = () => {
-    void finishActivity();
+    void finishSurface();
   };
   signal?.addEventListener('abort', abortActivity, { once: true });
   try {
     if (signal?.aborted || turnLockSignal?.aborted) {
       // Setup can finish after an abort already released the lock.
-      await adapter.activity?.dispose();
+      await disposeSurface();
     } else {
       adapter.activity?.start();
     }
@@ -3118,6 +3136,8 @@ export async function answerFastAgentQuestion({
       isCurrentUserAdmin: currentUser.isAdmin,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
+      commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
+      appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       therapistModeEnabled,
@@ -3775,6 +3795,7 @@ export async function answerFastAgentQuestion({
               };
             }
             const requestedImageArtifactIds = args.imageArtifactIds ?? [];
+            const requestedVideoArtifactIds = args.videoArtifactIds ?? [];
             const signatureImageArtifactIds =
               requestedImageArtifactIds.length > 0
                 ? requestedImageArtifactIds
@@ -3783,6 +3804,7 @@ export async function answerFastAgentQuestion({
               args.purpose,
               message,
               signatureImageArtifactIds,
+              requestedVideoArtifactIds,
               args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
@@ -3807,6 +3829,9 @@ export async function answerFastAgentQuestion({
                 message,
                 ...(requestedImageArtifactIds.length
                   ? { imageArtifactIds: requestedImageArtifactIds }
+                  : {}),
+                ...(requestedVideoArtifactIds.length
+                  ? { videoArtifactIds: requestedVideoArtifactIds }
                   : {}),
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
@@ -5303,9 +5328,8 @@ export async function answerFastAgentQuestion({
     dropStreamedReply();
     // A stream no reply finished (a cancelled or parked turn) is closed so
     // Slack stops showing it as still writing; its text stays.
-    await surfaceReplyStream.abort();
+    await finishSurface();
     await replyStream.dispose();
-    await finishActivity();
     signal?.removeEventListener('abort', abortActivity);
     unregisterActivity?.();
     diagnostics.finish();
