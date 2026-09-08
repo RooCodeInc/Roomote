@@ -162,10 +162,7 @@ describe('createSlackFastReplyStream', () => {
     );
   });
 
-  it.each([
-    '',
-    'Native upload failed. [View video](https://roomote.example/video)',
-  ])(
+  it.each(['', '[View video](https://roomote.example/video)'])(
     'delivers only selected videos and appends the transport fallback %j',
     async (fallback) => {
       mocks.deliverVideos.mockResolvedValue(fallback);
@@ -279,7 +276,7 @@ describe('createSlackFastReplyStream', () => {
         );
       else mocks.updateWithFooter.mockResolvedValueOnce(false);
       mocks.deliverVideos.mockResolvedValue(
-        'Upload failed. [View video](https://roomote.example/video)',
+        '[View video](https://roomote.example/video)',
       );
       const { stream, onDelivered, getPendingQuote } = build(
         slack,
@@ -299,7 +296,7 @@ describe('createSlackFastReplyStream', () => {
       expect(slack.deleteMessage).not.toHaveBeenCalled();
       expect(mocks.updateWithFooter).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          text: '> Matt: hi\nResult.\n\nUpload failed. [View video](https://roomote.example/video)',
+          text: '> Matt: hi\nResult.\n\n[View video](https://roomote.example/video)',
           bodyBlocks: [
             {
               type: 'section',
@@ -308,7 +305,7 @@ describe('createSlackFastReplyStream', () => {
             },
             {
               type: 'markdown',
-              text: 'Result.\n\nUpload failed. [View video](https://roomote.example/video)',
+              text: 'Result.\n\n[View video](https://roomote.example/video)',
             },
             {
               type: 'image',

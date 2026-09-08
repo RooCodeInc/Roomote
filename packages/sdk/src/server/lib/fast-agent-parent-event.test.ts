@@ -476,7 +476,7 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
-  it.each(['', 'Upload failed. [View video](https://roomote.example/video)'])(
+  it.each(['', '[View video](https://roomote.example/video)'])(
     'delivers selected videos from queued follow-ups with fallback %j',
     async (fallback) => {
       mocks.deliverVideos.mockResolvedValueOnce(fallback);
@@ -1402,7 +1402,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
   });
 
-  it.each(['', 'Upload failed. [View video](https://roomote.example/video)'])(
+  it.each(['', '[View video](https://roomote.example/video)'])(
     'delivers videos beneath a newly created automation root with fallback %j',
     async (fallback) => {
       let persistedThread: string | undefined;
@@ -1512,7 +1512,7 @@ describe('deliverFastAgentParentEvent', () => {
         );
       if (failure === 'fallback update') {
         mocks.deliverVideos.mockResolvedValueOnce(
-          'Upload failed. [View video](https://roomote.example/video)',
+          '[View video](https://roomote.example/video)',
         );
         mocks.updateMessage.mockResolvedValueOnce(false);
       }

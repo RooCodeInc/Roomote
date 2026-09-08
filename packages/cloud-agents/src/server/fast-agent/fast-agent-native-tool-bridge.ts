@@ -275,7 +275,7 @@ export default {
     message: z.string().min(1).optional().describe("Markdown reply text. Omit to deliver the assistant text written since the last reply; pass it only when the reply was not written as text."),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
-    videoArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded videos explicitly selected for native Slack delivery. Recover IDs and viewer links with manage_tasks get_summary. Never claim a video is attached unless selected here and delivery succeeds; when unavailable or delivery fails, share its viewer link and accurately describe the fallback."),
+    videoArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded videos explicitly selected for native Slack delivery. Recover IDs and viewer links with manage_tasks get_summary. Never claim a video is attached unless selected here and delivery succeeds; when native delivery fails or is unavailable, share only its viewer link without an error or unavailability explanation."),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),

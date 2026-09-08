@@ -47,6 +47,7 @@ import {
   taskFactory,
   userFactory,
 } from '@roomote/db/server';
+import { Env } from '@roomote/env';
 import {
   deliverFastAgentSessionVideos,
   resolveFastAgentSessionVideos,
@@ -57,6 +58,12 @@ const aliasId = randomUUID();
 const params = { sessionId, channelId: 'CVIDEO', threadTs: '123.456' };
 const original = Buffer.from('original video');
 let teamId: string;
+const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+function viewerLink(video: typeof taskArtifacts.$inferSelect) {
+  const baseUrl = (Env.R_PUBLIC_URL ?? Env.R_APP_URL).replace(/\/+$/, '');
+  return `[View video](${baseUrl}/task/${video.taskId}/artifacts/${video.path}?v=${video.version})`;
+}
 
 function storageObject(
   chunks: Uint8Array[] = [original],
@@ -259,6 +266,7 @@ it('retrieves owned bytes and uses the documented Slack external upload sequence
     thread_ts: '123.456',
   });
   expect(mocks.convert).not.toHaveBeenCalled();
+  expect(warn).not.toHaveBeenCalled();
   expect(mocks.ticket.mock.invocationCallOrder[0]).toBeLessThan(
     mocks.fetch.mock.invocationCallOrder[0]!,
   );
@@ -295,10 +303,11 @@ it.each([
   'size-limit',
   'storage',
   'ticket',
+  'missing-scope',
   'upload',
   'completion',
 ])(
-  'returns an honest authorized viewer fallback on %s failure',
+  'returns only an authorized viewer link and logs sanitized context on %s failure',
   async (stage) => {
     const video = await artifact({
       path: 'proof/demo.webm',
@@ -315,6 +324,15 @@ it.each([
     if (stage === 'storage')
       mocks.send.mockRejectedValueOnce(new Error('S3 unavailable'));
     if (stage === 'ticket') mocks.ticket.mockResolvedValueOnce({ ok: false });
+    if (stage === 'missing-scope')
+      mocks.ticket.mockRejectedValueOnce(
+        Object.assign(
+          new Error('missing_scope xoxb-secret https://secret/upload'),
+          {
+            data: { error: 'missing_scope', needed: 'files:write' },
+          },
+        ),
+      );
     if (stage === 'upload')
       mocks.fetch.mockResolvedValueOnce(
         new Response('failed', { status: 500 }),
@@ -325,13 +343,21 @@ it.each([
       ...params,
       artifactIds: [video.id],
     });
-    expect(text).toContain(
-      'Native Slack video delivery could not be confirmed. [View video](',
+    expect(text).toBe(viewerLink(video));
+    expect(warn).toHaveBeenCalledExactlyOnceWith(
+      '[Fast Agent] Native Slack video delivery failed.',
+      {
+        sessionId,
+        artifactId: video.id,
+        stage:
+          stage === 'size-limit'
+            ? 'conversion'
+            : stage === 'ticket' || stage === 'missing-scope'
+              ? 'upload-ticket'
+              : stage,
+        completing: stage === 'completion',
+      },
     );
-    expect(text).toContain(
-      `/task/${video.taskId}/artifacts/proof/demo.webm?v=1`,
-    );
-    expect(text).not.toContain('files.slack.com');
     if (stage !== 'completion') expect(mocks.complete).not.toHaveBeenCalled();
   },
 );
@@ -359,11 +385,12 @@ it('retains ambiguous completion claims, never repeating the upload on retry', a
   mocks.complete.mockRejectedValueOnce(
     new Error('response lost after Slack accepted'),
   );
-  expect(await deliverFastAgentSessionVideos(input)).toContain('[View video]');
-  expect(await deliverFastAgentSessionVideos(input)).toContain('[View video]');
+  expect(await deliverFastAgentSessionVideos(input)).toBe(viewerLink(video));
+  expect(await deliverFastAgentSessionVideos(input)).toBe(viewerLink(video));
   expect(mocks.ticket).toHaveBeenCalledTimes(1);
   expect(mocks.complete).toHaveBeenCalledTimes(1);
   expect(mocks.del).not.toHaveBeenCalled();
+  expect(warn).toHaveBeenCalledTimes(1);
 });
 
 it('retries a definite pre-completion failure', async () => {
@@ -421,9 +448,13 @@ it('returns a viewer fallback when Slack credentials are unavailable', async () 
     .where(eq(slackInstallations.teamId, teamId));
   expect(
     await deliverFastAgentSessionVideos({ ...params, artifactIds: [video.id] }),
-  ).toContain('[View video]');
+  ).toBe(viewerLink(video));
   expect(mocks.set).not.toHaveBeenCalled();
   expect(mocks.send).not.toHaveBeenCalled();
+  expect(warn).toHaveBeenCalledExactlyOnceWith(
+    '[Fast Agent] Native Slack video delivery unavailable.',
+    { sessionId, stage: 'credentials' },
+  );
 });
 
 it.each(['metadata', 'content-length', 'stream', 'empty'])(
@@ -483,10 +514,23 @@ it('keeps per-artifact retry state after partial delivery', async () => {
     .mockRejectedValueOnce(new Error('timeout'));
   const input = { ...params, artifactIds: [first.id, second.id] };
   const fallback = await deliverFastAgentSessionVideos(input);
-  expect(fallback).not.toContain(`/task/${first.taskId}/`);
-  expect(fallback).toContain(`/task/${second.taskId}/`);
+  expect(fallback).toBe(viewerLink(second));
   expect(await deliverFastAgentSessionVideos(input)).toBe(fallback);
   expect(mocks.ticket).toHaveBeenCalledTimes(2);
+});
+
+it('returns only viewer links for multiple failed uploads in selection order', async () => {
+  const first = await artifact();
+  const second = await artifact();
+  mocks.ticket.mockRejectedValue(new Error('missing_scope'));
+  expect(
+    await deliverFastAgentSessionVideos({
+      ...params,
+      artifactIds: [first.id, second.id],
+    }),
+  ).toBe(`${viewerLink(first)}\n\n${viewerLink(second)}`);
+  expect(warn).toHaveBeenCalledTimes(2);
+  expect(mocks.complete).not.toHaveBeenCalled();
 });
 
 it('scopes dedup to channel and thread', async () => {

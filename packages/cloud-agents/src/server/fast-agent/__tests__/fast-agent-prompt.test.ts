@@ -344,7 +344,10 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('"videoArtifactIds" for native Slack delivery');
     expect(prompt).toContain(
-      'never describe a link-only fallback as an attached video',
+      'share only the artifact viewer link without an error or unavailability explanation',
+    );
+    expect(prompt).toContain(
+      'never claim a video is attached unless native delivery succeeds',
     );
     expect(prompt).toContain(
       'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',

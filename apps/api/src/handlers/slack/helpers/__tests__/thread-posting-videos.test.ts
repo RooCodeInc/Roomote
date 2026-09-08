@@ -56,7 +56,7 @@ describe('Slack reply video delivery', () => {
     },
     deliverVideos,
   };
-  const fallback = 'Upload failed. [View video](https://example.com/video)';
+  const fallback = '[View video](https://example.com/video)';
 
   beforeEach(() => {
     vi.resetAllMocks();

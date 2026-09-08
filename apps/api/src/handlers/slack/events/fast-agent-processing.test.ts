@@ -240,7 +240,7 @@ describe('processFastAgentMessage', () => {
 
   it.each([
     ['', true],
-    ['Upload failed. [View video](https://roomote.example/video)', true],
+    ['[View video](https://roomote.example/video)', true],
     ['', false],
   ] as const)(
     'attaches selected images and videos on a later human follow-up with fallback %j (source present=%s)',

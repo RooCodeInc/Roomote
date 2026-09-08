@@ -163,9 +163,9 @@ Uploading a task artifact alone does not automatically post it to Slack.
 
 For WebM recordings, delivery converts a copy to MP4 for Slack playback while
 preserving the original task artifact. If permissions, conversion, or upload
-prevent native delivery, Roomote shares an artifact viewer link instead and
-reports that the video could not be attached. A viewer link is not a native
-Slack attachment.
+prevent native delivery, Roomote shares only an artifact viewer link, without
+an error or unavailability explanation. Roomote only describes a video as
+attached when native delivery succeeds.
 
 ## Events and interactivity
 

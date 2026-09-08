@@ -127,7 +127,7 @@ export async function deliverFastAgentSessionVideos(params: {
   const videos = await resolveFastAgentSessionVideos(params);
   if (videos.length === 0) return '';
   const fallback = (video: (typeof videos)[number]) =>
-    `Native Slack video delivery could not be confirmed. [View video](${video.viewUrl})`;
+    `[View video](${video.viewUrl})`;
   const session = await fastAgentConversationRepository.findById({
     id: params.sessionId,
   });
@@ -147,7 +147,13 @@ export async function deliverFastAgentSessionVideos(params: {
     ),
     columns: { botAccessToken: true },
   });
-  if (!installation?.botAccessToken) return videos.map(fallback).join('\n\n');
+  if (!installation?.botAccessToken) {
+    console.warn('[Fast Agent] Native Slack video delivery unavailable.', {
+      sessionId: session.id,
+      stage: 'credentials',
+    });
+    return videos.map(fallback).join('\n\n');
+  }
   const client = createSlackWebClient(installation.botAccessToken, {
     timeout: IO_TIMEOUT_MS,
     retryConfig: { retries: 0 },
@@ -159,6 +165,7 @@ export async function deliverFastAgentSessionVideos(params: {
     const key = `fast-slack-video:${JSON.stringify([session.id, params.channelId, params.threadTs, video.id])}`;
     let claimed = false;
     let completing = false;
+    let stage = 'claim';
     try {
       const redis = getRedis();
       claimed =
@@ -169,8 +176,10 @@ export async function deliverFastAgentSessionVideos(params: {
           failures.push(fallback(video));
         continue;
       }
+      stage = 'size';
       if (video.size <= 0 || video.size > MAX_FAST_VIDEO_BYTES)
         throw new Error('Video size limit exceeded.');
+      stage = 'storage';
       const signal = AbortSignal.timeout(IO_TIMEOUT_MS);
       const object = await getOwnedArtifactObject(
         { taskId: video.taskId },
@@ -210,10 +219,14 @@ export async function deliverFastAgentSessionVideos(params: {
       const webm =
         video.contentType.split(';')[0]?.trim().toLowerCase() ===
           'video/webm' || /\.webm$/i.test(video.filename);
-      if (webm) bytes = await convertFastAgentWebmToMp4(bytes);
+      if (webm) {
+        stage = 'conversion';
+        bytes = await convertFastAgentWebmToMp4(bytes);
+      }
       const filename = webm
         ? `${video.filename.replace(/\.[^.]+$/, '')}.mp4`
         : video.filename;
+      stage = 'upload-ticket';
       const ticket = await client.files.getUploadURLExternal({
         filename,
         length: bytes.length,
@@ -221,6 +234,7 @@ export async function deliverFastAgentSessionVideos(params: {
       if (!ticket.ok || !ticket.file_id || !ticket.upload_url)
         throw new Error('Slack upload ticket unavailable.');
       // Only Slack's authenticated ticket supplies the upload URL; never fetch artifact URLs.
+      stage = 'upload';
       const uploaded = await fetch(ticket.upload_url, {
         method: 'POST',
         body: new Uint8Array(bytes),
@@ -233,14 +247,23 @@ export async function deliverFastAgentSessionVideos(params: {
       // Keep the pending claim on any ambiguous completion (including a process crash).
       // Retrying completeUploadExternal is unsafe: Slack only permits it once.
       completing = true;
+      stage = 'completion';
       const completed = await client.files.completeUploadExternal({
         files: [{ id: ticket.file_id, title: filename }],
         channel_id: params.channelId,
         thread_ts: params.threadTs,
       });
       if (!completed.ok) throw new Error('Slack upload completion failed.');
+      stage = 'delivery-marker';
       await redis.set(key, 'delivered', 'EX', DELIVERY_TTL_SECONDS);
     } catch {
+      // Raw provider errors may contain tokens, signed URLs or conversion output.
+      console.warn('[Fast Agent] Native Slack video delivery failed.', {
+        sessionId: session.id,
+        artifactId: video.id,
+        stage,
+        completing,
+      });
       if (claimed && !completing)
         await getRedis()
           .del(key)

@@ -250,7 +250,7 @@ describe('Fast Slack reaction input', () => {
 
   it.each([
     ['', true],
-    ['Upload failed. [View video](https://roomote.example/video)', true],
+    ['[View video](https://roomote.example/video)', true],
     ['', false],
   ] as const)(
     'attaches selected images and videos in a reaction reply with fallback %j (source present=%s)',

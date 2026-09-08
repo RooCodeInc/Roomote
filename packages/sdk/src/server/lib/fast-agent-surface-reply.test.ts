@@ -544,7 +544,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     ).resolves.toBeNull();
   });
 
-  it.each(['', 'Upload failed. [View video](https://roomote.example/video)'])(
+  it.each(['', '[View video](https://roomote.example/video)'])(
     'binds Slack surface replies and selected videos to the Fast session with fallback %j',
     async (fallback) => {
       mocks.deliverVideos.mockResolvedValueOnce(fallback);
