@@ -265,6 +265,87 @@ describe('feature-demo skill', () => {
     },
   );
 
+  it.each(['open', 'start', 'selector', 'stop', 'cleanup'])(
+    'closes the browser after a %s failure without replacing the capture error',
+    (failure) => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-demo-'));
+      const scriptPath = path.join(tempDir, 'demo-script.json');
+      fs.writeFileSync(
+        scriptPath,
+        JSON.stringify({
+          url: 'https://example.com',
+          beats: [{ a: 'click', sel: '#missing' }],
+        }),
+      );
+      const mock = `
+        import cp from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        const failure = ${JSON.stringify(failure)};
+        cp.execFileSync = (command, args) => {
+          console.log(JSON.stringify([command, ...args]));
+          if (args[0] === 'open' && failure === 'open') throw new Error('open failed');
+          if (args[0] === 'record' && args[1] === 'start' && failure === 'start') throw new Error('start failed');
+          if (args[0] === 'eval') return failure === 'stop' ? JSON.stringify({x:0,y:0,w:1,h:1}) : 'null';
+          if (args[0] === 'record' && args[1] === 'stop') throw new Error('stop failed');
+          if (args[0] === 'close' && failure === 'cleanup') throw new Error('cleanup failed');
+          return '';
+        };
+        syncBuiltinESMExports();
+      `;
+      try {
+        const result = spawnSync(
+          process.execPath,
+          [
+            '--import',
+            `data:text/javascript,${encodeURIComponent(mock)}`,
+            path.join(skillDirPath, 'capture/capture.mjs'),
+          ],
+          {
+            encoding: 'utf8',
+            timeout: 10000,
+            env: {
+              ...process.env,
+              SCRIPT: scriptPath,
+              OUT_DIR: tempDir,
+              NARRATION: path.join(tempDir, 'absent.json'),
+              AGENT_BROWSER_BIN: 'mock-browser',
+            },
+          },
+        );
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(
+          failure === 'selector' || failure === 'cleanup'
+            ? 'capture failed: element not found: #missing'
+            : `capture failed: ${failure} failed`,
+        );
+        const calls = result.stdout
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line));
+        expect(calls.at(-1)).toEqual(['mock-browser', 'close']);
+        const stopCalls = calls.filter(
+          (call) => call[1] === 'record' && call[2] === 'stop',
+        );
+        expect(stopCalls).toHaveLength(
+          failure === 'open' || failure === 'start'
+            ? 0
+            : failure === 'stop'
+              ? 2
+              : 1,
+        );
+        expect(
+          calls.some((call) => call[0] === 'ffmpeg' || call[0] === 'ffprobe'),
+        ).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, 'timeline.json'))).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, 'capture-stats.json'))).toBe(
+          false,
+        );
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.each([0, -1, 61, 29.97, '60', null, true])(
     'rejects invalid FPS %s before capture',
     (fps) => {
