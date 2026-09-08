@@ -173,6 +173,8 @@ jobs:
             echo
             echo "- Merge this PR with a **merge commit** (do not squash or rebase)."
             echo "- If multiple promote PRs are open, merge them in version order (oldest first)."
+            echo "- Monitor CI and reviews on this PR's current head, not only the release-preparation PR. Unresolved findings and missing required approvals remain blockers even with green CI."
+            echo "- After a refresh or CI reconciliation, re-check the new head; monitoring never authorizes merging or publication."
             echo "- Merging publishes a GitHub Release for \`${tag}\` and triggers the existing GHCR \`v*\` image publish (\`latest\` channel)."
             echo "- The \`${release_branch}\` branch can be deleted after this PR merges."
             echo

@@ -73,6 +73,20 @@ To replace an unshipped candidate rather than refresh it, run
 last published tag. This carries the unshipped notes into the replacement
 version; close the older Promote PR before promoting the replacement.
 
+Before promotion, monitor both CI and reviews on the **current Promote PR head**.
+Passing release-preparation checks does not validate the candidate; unresolved
+review findings and missing required approvals remain blockers even with green
+CI. Repeat validation after any candidate refresh or reconciliation.
+
+When production hotfix history conflicts with a frozen candidate, use the
+explicitly authorized **Reconcile Release Candidate** workflow, not a manual
+release-branch push. It applies an independently reviewed merge tree with exact
+candidate/main pins and no newer develop content. The ordinary resolution PR is
+review-only and must not be merged. See the
+[release skill's reconciliation procedure](.agents/skills/changeset-release-pr/SKILL.md#reconcile-a-frozen-candidate-with-production)
+for preparation, approval, dispatch, and post-push monitoring. This procedure
+does not merge the Promote PR, tag, publish, or deploy a release.
+
 ## Contributor License Agreement
 
 All contributors are required to sign the Roomote
