@@ -6,6 +6,7 @@ import { and, db, eq, isNull, repositories, users } from '@roomote/db/server';
 import {
   createBitbucketRepositoryClient,
   getBitbucketOAuthConnection,
+  resolveBitbucketInstanceHost,
   resolveBitbucketOAuthAccessToken,
   stripUuidBraces,
   type BitbucketRepositoryClient,
@@ -39,10 +40,14 @@ async function authorize(auth: Variables['authContext'], fullName?: string) {
   if (!user || !['admin', 'member'].includes(user.role)) {
     throw new McpProxyError(403, 'Current deployment membership required');
   }
+  const host = await resolveBitbucketInstanceHost();
+  if (host !== 'bitbucket.org' && host !== 'www.bitbucket.org') {
+    throw new McpProxyError(403, 'Bitbucket Cloud host required');
+  }
   const connected = await db.query.repositories.findFirst({
     where: and(
       eq(repositories.sourceControlProvider, 'bitbucket'),
-      eq(repositories.host, 'bitbucket.org'),
+      eq(repositories.host, host),
       eq(repositories.isActive, true),
       fullName === undefined ? undefined : eq(repositories.fullName, fullName),
     ),

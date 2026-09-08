@@ -11,30 +11,33 @@ import {
 } from '@roomote/db/server';
 import type { Variables } from '../../../types';
 
-const { connection, resolveToken, createClient, client } = vi.hoisted(() => ({
-  connection: vi.fn(),
-  resolveToken: vi.fn(),
-  createClient: vi.fn(),
-  client: {
-    getRepository: vi.fn(),
-    getFile: vi.fn(),
-    listDirectory: vi.fn(),
-    searchCode: vi.fn(),
-    listCommits: vi.fn(),
-    getCommit: vi.fn(),
-    getPullRequest: vi.fn(),
-    getPullRequestDiff: vi.fn(),
-    listPullRequestComments: vi.fn(),
-    updatePullRequest: vi.fn(),
-    declinePullRequest: vi.fn(),
-    getPullRequestComment: vi.fn(),
-    createPullRequestComment: vi.fn(),
-  },
-}));
+const { connection, resolveHost, resolveToken, createClient, client } =
+  vi.hoisted(() => ({
+    connection: vi.fn(),
+    resolveHost: vi.fn(),
+    resolveToken: vi.fn(),
+    createClient: vi.fn(),
+    client: {
+      getRepository: vi.fn(),
+      getFile: vi.fn(),
+      listDirectory: vi.fn(),
+      searchCode: vi.fn(),
+      listCommits: vi.fn(),
+      getCommit: vi.fn(),
+      getPullRequest: vi.fn(),
+      getPullRequestDiff: vi.fn(),
+      listPullRequestComments: vi.fn(),
+      updatePullRequest: vi.fn(),
+      declinePullRequest: vi.fn(),
+      getPullRequestComment: vi.fn(),
+      createPullRequestComment: vi.fn(),
+    },
+  }));
 
 vi.mock('@roomote/bitbucket', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/bitbucket')>()),
   getBitbucketOAuthConnection: connection,
+  resolveBitbucketInstanceHost: resolveHost,
   resolveBitbucketOAuthAccessToken: resolveToken,
   createBitbucketRepositoryClient: createClient,
 }));
@@ -132,6 +135,7 @@ beforeEach(async () => {
   repoIds.push(repoId);
   auth = { tokenType: 'auth', version: 1, userId };
   connection.mockResolvedValue({ status: 'active' });
+  resolveHost.mockResolvedValue('bitbucket.org');
   resolveToken.mockResolvedValue('fresh-token');
   createClient.mockReturnValue(client);
   client.getRepository.mockResolvedValue(identity);
@@ -149,6 +153,47 @@ afterEach(async () => {
 });
 
 describe('Bitbucket MCP discovery authorization', () => {
+  it('discovers and calls tools for the configured www Cloud host', async () => {
+    resolveHost.mockResolvedValue('www.bitbucket.org');
+    await db
+      .update(repositories)
+      .set({ host: 'www.bitbucket.org' })
+      .where(eq(repositories.id, repoId));
+    expect((await request()).status).toBe(200);
+    expect(resolveToken).not.toHaveBeenCalled();
+    client.getFile.mockResolvedValue('contents');
+    const { status, body } = await request('get_file', {
+      ref: 'main',
+      path: 'README.md',
+    });
+    expect(status).toBe(200);
+    expect(body.result.structuredContent).toEqual({ result: 'contents' });
+    expect(resolveToken).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    'www.bitbucket.org',
+    'bitbucket.example.com',
+    'bitbucket.org.evil.test',
+  ])(
+    'rejects discovery and calls for a mismatched or non-Cloud configured host %s',
+    async (host) => {
+      resolveHost.mockResolvedValue(host);
+      if (host !== 'www.bitbucket.org') {
+        await db
+          .update(repositories)
+          .set({ host })
+          .where(eq(repositories.id, repoId));
+      }
+      expect((await request()).status).toBe(403);
+      expect(
+        (await request('get_file', { ref: 'main', path: 'README.md' })).status,
+      ).toBe(403);
+      expect(resolveToken).not.toHaveBeenCalled();
+      expect(createClient).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['member', 'admin'] as const)(
     'offers exactly the bounded tools to a live %s without resolving credentials',
     async (role) => {

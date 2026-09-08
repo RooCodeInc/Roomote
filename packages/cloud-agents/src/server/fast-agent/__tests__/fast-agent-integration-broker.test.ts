@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => ({
   completeIntegrationCall: vi.fn(),
   findGithubInstallation: vi.fn(),
   getBitbucketOAuthConnection: vi.fn(),
+  resolveBitbucketInstanceHost: vi.fn(),
   findMember: vi.fn(),
   findRepository: vi.fn(),
 }));
 
 vi.mock('@roomote/bitbucket', () => ({
   getBitbucketOAuthConnection: mocks.getBitbucketOAuthConnection,
+  resolveBitbucketInstanceHost: mocks.resolveBitbucketInstanceHost,
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -96,6 +98,7 @@ describe('fast-agent integration broker', () => {
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
     mocks.getBitbucketOAuthConnection.mockResolvedValue(null);
+    mocks.resolveBitbucketInstanceHost.mockResolvedValue('bitbucket.org');
     mocks.findMember.mockResolvedValue({ role: 'member' });
     mocks.findRepository.mockResolvedValue({ externalRepoId: 'repo-uuid' });
     mocks.beginIntegrationCall.mockResolvedValue({
@@ -234,6 +237,58 @@ describe('fast-agent integration broker', () => {
         ],
         columns: { externalRepoId: true },
       });
+    },
+  );
+
+  it('discovers and calls Bitbucket tools using the configured www Cloud host', async () => {
+    mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
+    mocks.resolveBitbucketInstanceHost.mockResolvedValue('www.bitbucket.org');
+    const available = await listFastAgentIntegrations(auditContext);
+    expect(available.map((integration) => integration.id)).toEqual([
+      'bitbucket',
+    ]);
+    expect(mocks.findRepository).toHaveBeenCalledWith({
+      where: [
+        ['provider', 'bitbucket'],
+        ['host', 'www.bitbucket.org'],
+        ['active', true],
+      ],
+      columns: { externalRepoId: true },
+    });
+    mocks.callMcpTool.mockResolvedValue({ result: 'contents' });
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'bitbucket',
+        toolName: 'search',
+        args: {},
+      }),
+    ).resolves.toEqual({ result: 'contents' });
+  });
+
+  it('omits Bitbucket when no repository matches the configured www host', async () => {
+    mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
+    mocks.resolveBitbucketInstanceHost.mockResolvedValue('www.bitbucket.org');
+    mocks.findRepository.mockResolvedValue(undefined);
+    expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+    expect(mocks.findRepository).toHaveBeenCalledWith({
+      where: [
+        ['provider', 'bitbucket'],
+        ['host', 'www.bitbucket.org'],
+        ['active', true],
+      ],
+      columns: { externalRepoId: true },
+    });
+    expect(mocks.listMcpTools).not.toHaveBeenCalled();
+  });
+
+  it.each(['bitbucket.example.com', 'bitbucket.org.evil.test'])(
+    'omits Bitbucket for non-Cloud configured host %s before repository lookup',
+    async (host) => {
+      mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
+      mocks.resolveBitbucketInstanceHost.mockResolvedValue(host);
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+      expect(mocks.findRepository).not.toHaveBeenCalled();
+      expect(mocks.listMcpTools).not.toHaveBeenCalled();
     },
   );
 

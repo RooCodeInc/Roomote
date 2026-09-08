@@ -1,5 +1,8 @@
 import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
-import { getBitbucketOAuthConnection } from '@roomote/bitbucket';
+import {
+  getBitbucketOAuthConnection,
+  resolveBitbucketInstanceHost,
+} from '@roomote/bitbucket';
 import {
   and,
   beginSlackFastIntegrationCall,
@@ -333,6 +336,8 @@ async function resolveBrokerAuth(context: BrokerContext) {
 async function isBitbucketAvailable(userId: string): Promise<boolean> {
   const connection = await getBitbucketOAuthConnection();
   if (connection?.status !== 'active') return false;
+  const host = await resolveBitbucketInstanceHost();
+  if (host !== 'bitbucket.org' && host !== 'www.bitbucket.org') return false;
 
   const [member, repository] = await Promise.all([
     db.query.users.findFirst({
@@ -342,7 +347,7 @@ async function isBitbucketAvailable(userId: string): Promise<boolean> {
     db.query.repositories.findFirst({
       where: and(
         eq(repositories.sourceControlProvider, 'bitbucket'),
-        eq(repositories.host, 'bitbucket.org'),
+        eq(repositories.host, host),
         eq(repositories.isActive, true),
       ),
       columns: { externalRepoId: true },
