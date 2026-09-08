@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -60,6 +62,80 @@ describe('isAgentBrowserVersionOlder', () => {
 });
 
 describe('install-browser-agent.sh', () => {
+  it('replaces a stale saved CLI path after upgrading the npm package', () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'agent-browser-upgrade-'),
+    );
+    const homeDir = path.join(tempDir, 'home');
+    const installRoot = path.join(tempDir, 'install');
+    const npmPrefix = path.join(tempDir, 'npm');
+    const fakeBinDir = path.join(tempDir, 'bin');
+    const oldCliPath = path.join(tempDir, 'old-agent-browser');
+    const newCliPath = path.join(npmPrefix, 'bin', 'agent-browser');
+    const chromePath = path.join(
+      homeDir,
+      '.agent-browser/browsers/chrome-test/chrome',
+    );
+    const savedCliPath = path.join(installRoot, '.cli-path');
+
+    fs.mkdirSync(path.dirname(newCliPath), { recursive: true });
+    fs.mkdirSync(fakeBinDir, { recursive: true });
+    fs.mkdirSync(installRoot, { recursive: true });
+    fs.writeFileSync(
+      oldCliPath,
+      '#!/bin/sh\nprintf "agent-browser 0.33.2\\n"\n',
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      newCliPath,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then\n  printf "agent-browser 0.37.0\\n"\nelif [ "$1" = "install" ]; then\n  mkdir -p "${path.dirname(chromePath)}"\n  : > "${chromePath}"\n  chmod +x "${chromePath}"\nfi\n`,
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(
+      path.join(fakeBinDir, 'npm'),
+      `#!/bin/sh\nif [ "$1 $2" = "prefix -g" ]; then\n  printf "${npmPrefix}\\n"\nelif [ "$1 $2" = "install -g" ]; then\n  exit 0\nelse\n  exit 1\nfi\n`,
+      { mode: 0o755 },
+    );
+    fs.writeFileSync(savedCliPath, `${oldCliPath}\n`);
+
+    try {
+      execFileSync(
+        'bash',
+        [
+          fileURLToPath(
+            new URL(
+              '../../../../../../.docker/sandbox/install-browser-agent.sh',
+              import.meta.url,
+            ),
+          ),
+        ],
+        {
+          env: {
+            ...process.env,
+            HOME: homeDir,
+            PATH: `${fakeBinDir}:${process.env.PATH}`,
+            AGENT_BROWSER_INSTALL_ROOT: installRoot,
+            AGENT_BROWSER_EXECUTABLE_PATH: path.join(installRoot, 'chrome'),
+            AGENT_BROWSER_SAVED_CLI_PATH: savedCliPath,
+            AGENT_BROWSER_INSTALL_MARKER: path.join(installRoot, '.installed'),
+            AGENT_BROWSER_SYSTEM_WRAPPER_PATH: path.join(
+              tempDir,
+              'system-agent-browser',
+            ),
+            AGENT_BROWSER_USER_WRAPPER_PATH: path.join(
+              tempDir,
+              'user-agent-browser',
+            ),
+          },
+        },
+      );
+
+      expect(fs.readFileSync(savedCliPath, 'utf8').trim()).toBe(newCliPath);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps native FPS support available across image and runtime install pins', () => {
     const installer = fs.readFileSync(
       new URL(
