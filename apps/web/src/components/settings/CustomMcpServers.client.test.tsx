@@ -638,9 +638,26 @@ describe('useCustomMcpServers', () => {
   });
 
   it.each([
+    ['Example & Co', 'example-co'],
+    ["Acme's Tools (EU)+", 'acme-s-tools-eu'],
+    ['Caf\u00e9 Tools', 'caf-tools'],
+  ])(
+    'prefills valid preparation provider %s',
+    async (connectionName, expected) => {
+      renderHarness({ connectionName });
+      await screen.findByRole('dialog');
+      expect(screen.getByPlaceholderText('e.g. internal-tools')).toHaveValue(
+        expected,
+      );
+      expect(createMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
     'https://user:secret@evil.example',
     '<script>alert(1)</script>',
     'a'.repeat(101),
+    'a'.repeat(81),
     'api_key=secret',
     'Acme\nTools',
   ])('does not prefill unsafe name %s', async (connectionName) => {

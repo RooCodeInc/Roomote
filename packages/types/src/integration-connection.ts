@@ -1,6 +1,21 @@
 import { z } from 'zod';
 
 import { MCP_INTEGRATIONS } from './mcp-oauth';
+import {
+  CUSTOM_MCP_SERVER_NAME_PATTERN,
+  RESERVED_CUSTOM_MCP_SERVER_NAMES,
+} from './custom-mcp-servers';
+
+export function sanitizeCustomMcpServerName(raw: string): string | null {
+  const sanitized = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .replace(/-+$/, '')
+    .slice(0, 64);
+
+  return CUSTOM_MCP_SERVER_NAME_PATTERN.test(sanitized) ? sanitized : null;
+}
 
 export const manageIntegrationConnectionInputSchema = z
   .object({
@@ -141,6 +156,23 @@ export function buildIntegrationConnectionPreparation(
       ? MCP_INTEGRATIONS.find((entry) => entry.id === 'x')
       : undefined);
   const url = new URL('/settings/integrations', appUrl);
+  const customName = sanitizeCustomMcpServerName(provider);
+  if (
+    !integration &&
+    customName !== null &&
+    RESERVED_CUSTOM_MCP_SERVER_NAMES.has(customName)
+  ) {
+    return {
+      status: 'unsupported' as const,
+      validated: false as const,
+      provider,
+      integrationId: null,
+      setupKind: 'unsupported' as const,
+      setupUrl: url.toString(),
+      guidance:
+        'This name is reserved for a built-in service and cannot be configured as a custom MCP server. Use the service-specific setup flow instead. No connection has been checked or changed.',
+    };
+  }
   if (integration) {
     url.searchParams.set('highlight', integration.id);
   } else {

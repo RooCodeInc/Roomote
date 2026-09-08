@@ -4,6 +4,10 @@ import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
+import {
+  prepareIntegrationConnectionInputSchema,
+  sanitizeCustomMcpServerName,
+} from '@roomote/types';
 
 import {
   Badge,
@@ -30,7 +34,6 @@ import {
 import { Loading } from '@/components/layout';
 import {
   parseCustomMcpServerJson,
-  sanitizeCustomMcpServerName,
   type CustomMcpJsonImport,
 } from '@/lib/custom-mcp-json-import';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
@@ -861,10 +864,12 @@ export function useCustomMcpServers({
     // Only the display name is accepted from conversational links, never connection details.
     window.history.replaceState(null, '', '/settings/integrations');
     if (!isAdmin || availability.data.enabled !== true) return;
-    const name = connectionName.trim();
+    const preparation = prepareIntegrationConnectionInputSchema.safeParse({
+      provider: connectionName,
+    });
     setPrefilledName(
-      /^[a-zA-Z0-9 _-]{1,100}$/.test(name)
-        ? (sanitizeCustomMcpServerName(name) ?? '')
+      preparation.success
+        ? (sanitizeCustomMcpServerName(preparation.data.provider) ?? '')
         : '',
     );
     setFormOpen(true);

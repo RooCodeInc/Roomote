@@ -115,6 +115,78 @@ it('creates static-header configurations disabled and pending human credentials'
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
+it('normalizes a conversational name before creation and reuses it on configure and inspect', async () => {
+  const result = await manageIntegrationConnection(auth, {
+    action: 'configure',
+    name: 'Acme Tools',
+    url: 'https://mcp.example.com/mcp',
+  });
+  const server = await db.query.customMcpServers.findFirst({
+    where: eq(customMcpServers.name, 'acme-tools'),
+  });
+  if (server) ids.push(server.id);
+  expect(result.state).toBe('saved');
+  expect(server).toMatchObject({ name: 'acme-tools', enabled: false });
+
+  for (const action of ['configure', 'inspect'] as const) {
+    expect(
+      await manageIntegrationConnection(auth, { action, name: 'Acme Tools' }),
+    ).toMatchObject({
+      state: 'saved',
+      integrationId: `custom:${server!.id}`,
+      enabled: false,
+    });
+  }
+  expect(
+    await db.query.customMcpServers.findMany({
+      where: eq(customMcpServers.name, 'acme-tools'),
+    }),
+  ).toHaveLength(1);
+});
+
+it('preserves explicit custom IDs and compares normalized names without allowing renames', async () => {
+  const server = await create();
+  const integrationId = `custom:${server.id}`;
+  expect(
+    await manageIntegrationConnection(auth, {
+      action: 'configure',
+      integrationId,
+      name: server.name.toUpperCase().replace('-', ' '),
+    }),
+  ).toMatchObject({ state: 'saved', integrationId });
+  expect(
+    await manageIntegrationConnection(auth, {
+      action: 'configure',
+      integrationId,
+      name: 'Different Name',
+    }),
+  ).toMatchObject({
+    state: 'failed',
+    message: 'Custom integration names cannot be changed.',
+  });
+  expect(
+    await manageIntegrationConnection(auth, {
+      action: 'inspect',
+      integrationId: 'custom:missing-server',
+      name: server.name,
+    }),
+  ).toMatchObject({ state: 'failed' });
+});
+
+it.each(['***', 'Roomote!'])(
+  'rejects unusable or reserved normalized name %s',
+  async (name) => {
+    expect(
+      await manageIntegrationConnection(auth, {
+        action: 'configure',
+        name,
+        url: 'https://mcp.example.com/mcp',
+      }),
+    ).toMatchObject({ state: 'failed' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
 it.each([
   'http://127.0.0.1/mcp',
   'https://u:password@example.com/mcp',

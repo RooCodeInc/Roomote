@@ -2,9 +2,40 @@ import { MCP_INTEGRATIONS } from './mcp-oauth';
 import {
   buildIntegrationConnectionPreparation,
   prepareIntegrationConnectionInputSchema,
+  sanitizeCustomMcpServerName,
 } from './integration-connection';
 
 describe('integration connection preparation', () => {
+  it.each(['GitHub', ' SLACK ', 'GitHub.', 'Slack (+)', 'Roomote', 'gbrain'])(
+    'does not send reserved fallback %j to custom setup',
+    (provider) => {
+      const result = buildIntegrationConnectionPreparation(
+        { provider },
+        'https://roomote.example',
+      );
+      expect(result).toMatchObject({
+        status: 'unsupported',
+        validated: false,
+        setupKind: 'unsupported',
+        setupUrl: 'https://roomote.example/settings/integrations',
+      });
+      expect(result.guidance).toContain('service-specific setup');
+    },
+  );
+
+  it.each([
+    ['Example_Server v2', 'example_server-v2'],
+    ['Example & Co', 'example-co'],
+    ['Caf\u00e9 Tools', 'caf-tools'],
+    ['***', null],
+    ['a'.repeat(80), 'a'.repeat(64)],
+  ] as const)(
+    'sanitizes %j consistently for custom server names',
+    (raw, expected) => {
+      expect(sanitizeCustomMcpServerName(raw)).toBe(expected);
+    },
+  );
+
   it.each(MCP_INTEGRATIONS)(
     'prefers catalog id and name for $id',
     (integration) => {

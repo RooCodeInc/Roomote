@@ -5,6 +5,7 @@ import {
   MCP_INTEGRATIONS,
   customMcpConnectionId,
   customMcpRemoteServerInputSchema,
+  sanitizeCustomMcpServerName,
   type ManageIntegrationConnectionInput,
 } from '@roomote/types';
 import { prepareIntegrationConnection } from './prepare-integration-connection';
@@ -117,10 +118,15 @@ export async function manageIntegrationConnection(
     }
 
     assertCustomMcpEnabled();
+    const name = input.name
+      ? sanitizeCustomMcpServerName(input.name)
+      : undefined;
+    if (name === null) throw new Error('Invalid custom integration name.');
+    const customIdentifier = input.integrationId ?? name ?? identifier;
     const server = await db.query.customMcpServers.findFirst({
-      where: identifier.startsWith('custom:')
-        ? eq(customMcpServers.id, identifier.slice(7))
-        : eq(customMcpServers.name, identifier),
+      where: customIdentifier.startsWith('custom:')
+        ? eq(customMcpServers.id, customIdentifier.slice(7))
+        : eq(customMcpServers.name, customIdentifier),
       // PostgreSQL defaults carry microseconds; Date would truncate the CAS version.
       extras: {
         version: sql<string>`${customMcpServers.updatedAt}::text`.as('version'),
@@ -139,7 +145,7 @@ export async function manageIntegrationConnection(
           state: 'failed' as const,
           message: 'Only remote MCP connections are supported.',
         };
-      if (server && input.name && input.name !== server.name)
+      if (server && name && name !== server.name)
         return {
           state: 'failed' as const,
           message: 'Custom integration names cannot be changed.',
@@ -152,7 +158,7 @@ export async function manageIntegrationConnection(
       const url = await validateTarget(input.url ?? server?.url ?? '');
       const configuration = customMcpRemoteServerInputSchema.parse({
         transport: 'remote',
-        name: server?.name ?? input.name ?? identifier,
+        name: server?.name ?? name ?? identifier,
         url,
         authType: input.authType ?? server?.authType ?? 'none',
         ...(server?.authType === 'static_headers' &&

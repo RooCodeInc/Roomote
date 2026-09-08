@@ -1,4 +1,6 @@
-import { CUSTOM_MCP_SERVER_NAME_PATTERN } from '@roomote/types';
+import { sanitizeCustomMcpServerName } from '@roomote/types';
+
+export { sanitizeCustomMcpServerName } from '@roomote/types';
 
 /**
  * Parser for the "paste JSON" import in the custom MCP server dialog.
@@ -41,22 +43,6 @@ function looksLikeServerConfig(record: Record<string, unknown>): boolean {
     typeof record.url === 'string' ||
     typeof record.serverUrl === 'string'
   );
-}
-
-/**
- * Best-effort conversion of a snippet's server key into a valid server name.
- * Returns null when nothing usable remains; the form then keeps whatever the
- * user already typed.
- */
-export function sanitizeCustomMcpServerName(raw: string): string | null {
-  const sanitized = raw
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^[^a-z0-9]+/, '')
-    .replace(/-+$/, '')
-    .slice(0, 64);
-
-  return CUSTOM_MCP_SERVER_NAME_PATTERN.test(sanitized) ? sanitized : null;
 }
 
 function toStringRecord(value: unknown): Record<string, string> | undefined {
