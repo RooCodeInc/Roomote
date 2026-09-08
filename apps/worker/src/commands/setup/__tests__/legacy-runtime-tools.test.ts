@@ -60,6 +60,33 @@ describe('isAgentBrowserVersionOlder', () => {
 });
 
 describe('install-browser-agent.sh', () => {
+  it('keeps native FPS support available across image and runtime install pins', () => {
+    const installer = fs.readFileSync(
+      new URL(
+        '../../../../../../.docker/sandbox/install-browser-agent.sh',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    const dockerfile = fs.readFileSync(
+      new URL('../../../../Dockerfile', import.meta.url),
+      'utf8',
+    );
+    const runtime = fs.readFileSync(
+      new URL('../legacy-runtime-tools.ts', import.meta.url),
+      'utf8',
+    );
+    const version = dockerfile.match(/^ARG AGENT_BROWSER_VERSION=(.+)$/m)?.[1];
+    expect(version).toBeDefined();
+    expect(
+      compareNumericDotVersions(version!, '0.37.0'),
+    ).toBeGreaterThanOrEqual(0);
+    expect(installer).toContain(
+      `AGENT_BROWSER_VERSION="\${AGENT_BROWSER_VERSION:-${version}}"`,
+    );
+    expect(runtime).toContain(`const AGENT_BROWSER_VERSION = '${version}';`);
+  });
+
   it('resolves the shared installer relative to the module instead of process.cwd()', () => {
     const productionModuleUrl = new URL(
       '../legacy-runtime-tools.ts',

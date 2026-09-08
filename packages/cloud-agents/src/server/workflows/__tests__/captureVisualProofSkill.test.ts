@@ -160,6 +160,31 @@ describe('Capture visual proof skill', () => {
     );
   });
 
+  it('offers native high-FPS motion capture without claiming encoded rate proves capture rate', () => {
+    expect(skillContent).toContain('resources/high-fps-recording.md');
+    const recordingGuide = read(
+      '../skills/standard/capture-visual-proof/resources/high-fps-recording.md',
+    ).replace(/\s+/g, ' ');
+    expect(recordingGuide).toContain(
+      'Keep ordinary screencasts at the native default',
+    );
+    expect(recordingGuide).toContain('motion.mp4 --fps 60');
+    expect(recordingGuide).toContain(
+      'VP8 WebM encoding can throttle incoming frames',
+    );
+    expect(recordingGuide).toContain(
+      '-c copy -movflags +faststart motion-faststart.mp4',
+    );
+    expect(recordingGuide).toContain('requires agent-browser 0.37.0 or newer');
+    expect(recordingGuide).toContain('agent-browser record --help');
+    expect(recordingGuide).toContain('capturedFrames');
+    expect(recordingGuide).toContain('elapsed wall-clock time');
+    expect(recordingGuide).toContain('Encoded FPS alone is not evidence');
+    expect(recordingGuide).toContain(
+      'must never be presented as higher capture FPS',
+    );
+  });
+
   it('prefers compatible MP4 for local screencasts with a bounded native fallback', () => {
     expect(skillContent).toContain('For locally produced screencasts only');
     expect(skillContent).toContain(
