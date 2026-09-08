@@ -157,9 +157,16 @@ grant the installed bot this permission.
 ## Video replies
 
 Roomote can share selected task recordings as native Slack video files in the
-conversation. Ask for the recording from a task, including an earlier task, and
-Roomote can recover its uploaded artifact and share it without recording again.
+conversation. Ask for the recording from a task associated with the current
+Session, including an earlier task in that Session, and Roomote can recover its
+uploaded artifact and share it without recording again. Native delivery is
+limited to uploaded recordings from that Session's task runs, not arbitrary
+recordings from other Sessions.
 Uploading a task artifact alone does not automatically post it to Slack.
+
+The recording must be no larger than 50 MiB. When conversion is needed, the
+converted file must also fit within 50 MiB. Larger recordings use an artifact
+viewer link instead of a native Slack attachment.
 
 For WebM recordings, delivery converts a copy to MP4 for Slack playback while
 preserving the original task artifact. If permissions, conversion, or upload

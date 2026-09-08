@@ -23,6 +23,28 @@ Sentry gives Roomote incident and performance context during a task. It can also
 support scheduled read-only Sentry triage. The final decision, code change, and
 review still happen in the normal task and repository flow.
 
+## Scope a triage request
+
+Name the Sentry organization, projects or workloads, time window, and relevant
+environments. For example: "Triage checkout errors in the storefront project
+in our Sentry organization over the last 24 hours, production only."
+Roomote discovers accessible scope and asks for clarification when the target
+or window is missing or ambiguous instead of assuming project names or scanning
+other organizations. Include multiple organizations only when you want them
+scanned, and preserve any region-specific Sentry URL in your request.
+
+Triage scans stay read-only. Ask explicitly for follow-up work and identify the
+eligible repository or environment if you want findings turned into execution;
+otherwise recommendations stay in the report. Specify a report destination and
+whether clean scans should stay quiet. Access or scope blockers are reported
+rather than treated as a clean result.
+
+The built-in **Triage Sentry Issues** [automation](/automations) supplies its own
+schedule-derived scan window and configured project scope. Leaving its project
+slugs blank selects all projects available to the configured connection; it
+does not restore an implicit project list for ad hoc or custom triage requests.
+Roomote still asks which organization to use if that selection is ambiguous.
+
 ## Recipes using this
 
 - [Triage customer issues](/cookbook/support-channel)
