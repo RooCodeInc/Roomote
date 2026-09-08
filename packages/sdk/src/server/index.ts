@@ -233,6 +233,7 @@ export {
 } from './lib/session-wakeups';
 export {
   admitFastAgentHumanFollowUp,
+  handOffFastAgentInterruptedTurn,
   persistFastAgentInlineHumanTurn,
   type FastAgentDurableTurn,
   type FastAgentHumanFollowUpAdmission,

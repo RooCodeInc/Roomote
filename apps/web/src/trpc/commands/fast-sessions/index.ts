@@ -19,6 +19,7 @@ import {
   buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
+  handOffFastAgentInterruptedTurn,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
@@ -138,8 +139,10 @@ type WebFastAgentTurnInput = {
   /** Deterministic turn ID override. Canonical event IDs derive from it, so a
    * fixed value lets a turn be claimed idempotently across retries. */
   currentMessageId?: string;
-  /** Fast conversation id for durable admission of a human turn. Platform
-   * turns (kickoffs, artifact builds) omit it and stay non-replayable. */
+  /** Fast conversation id for durable admission. Every turn passes it;
+   * only setup-session turns (adapter extensions, setup snapshot) are still
+   * process-bound, and their scheduler re-runs them when they never
+   * completed. */
   durableSessionId?: string;
   /** Skip the turn if this exact canonical event row already exists when the
    * turn acquires its lock. This is the atomic claim for the setup kickoff:
@@ -258,9 +261,11 @@ async function runWebFastAgentTurn({
     // events ride the same row with their framing recorded; the ones that
     // need adapter extensions or a setup snapshot cannot be rebuilt by the
     // queue and stay process-bound.
-    const durableTurn =
+    const durableAdmissionRequest:
+      | Parameters<typeof persistFastAgentInlineHumanTurn>[0]
+      | null =
       durableSessionId && !adapterExtensions && !setupSnapshot
-        ? await persistFastAgentInlineHumanTurn({
+        ? {
             parent: { sessionId: durableSessionId, conversation },
             event: {
               type: 'human_follow_up',
@@ -281,13 +286,18 @@ async function runWebFastAgentTurn({
                 : {}),
               ...(setupSession ? { setupSession: true } : {}),
             },
-          }).catch((error) => {
+          }
+        : null;
+    const durableTurn = durableAdmissionRequest
+      ? await persistFastAgentInlineHumanTurn(durableAdmissionRequest).catch(
+          (error) => {
             console.error(
               `[Fast Web] Failed to persist turn admission: ${formatErrorForLog(error)}`,
             );
             return null;
-          })
-        : null;
+          },
+        )
+      : null;
     if (durableTurn && durableSessionId) {
       release.durableRowId = durableTurn.id;
       release.durableResume = () =>
@@ -345,7 +355,12 @@ async function runWebFastAgentTurn({
                   retryAt,
                 ),
             }
-          : {}),
+          : durableAdmissionRequest
+            ? {
+                requestLateDurableAdmission: () =>
+                  handOffFastAgentInterruptedTurn(durableAdmissionRequest),
+              }
+            : {}),
         ...delivery.adapter,
         ...adapterExtensions,
       },
