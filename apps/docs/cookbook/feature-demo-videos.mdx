@@ -36,6 +36,13 @@ narration configured, the demo gets a voice-over that leads each visual beat.
 3. The finished video is uploaded as a task artifact and linked in the reply
    (and embedded under `## Screencasts` when the task opens a PR).
 
+In Slack, ask Roomote to share the finished recording as a native video file.
+The Slack app needs `files:write`, including reinstall or admin reapproval for
+an existing installation. WebM delivery converts a copy to MP4 and keeps the
+original artifact. If native delivery fails or is unavailable, Roomote shares
+only a viewer link, without an error or unavailability explanation, and does
+not claim the video is attached. See [Slack video replies](/providers/communications/slack#video-replies).
+
 ## Narration
 
 Captioned demos work out of the box. For a voice-over in your own (cloned)

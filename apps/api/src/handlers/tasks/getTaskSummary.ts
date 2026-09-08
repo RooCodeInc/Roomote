@@ -100,8 +100,12 @@ export async function getTaskSummary(
       typeof latestReport?.event.message === 'string'
         ? latestReport.event.message
         : null;
-    const imageArtifacts = artifacts
-      .filter((artifact) => artifact.contentType.startsWith('image/'))
+    const mediaArtifacts = artifacts
+      .filter(
+        (artifact) =>
+          artifact.contentType.startsWith('image/') ||
+          artifact.contentType.startsWith('video/'),
+      )
       .map((artifact) => ({
         id: artifact.id,
         path: artifact.path,
@@ -131,7 +135,12 @@ export async function getTaskSummary(
       environmentSetupState: latestRun?.environmentSetupState ?? null,
       linkedEnvironmentId: linkedEnvironmentId ?? null,
       linkedEnvironmentName: linkedEnvironment?.name ?? null,
-      imageArtifacts,
+      imageArtifacts: mediaArtifacts.filter((artifact) =>
+        artifact.contentType.startsWith('image/'),
+      ),
+      videoArtifacts: mediaArtifacts.filter((artifact) =>
+        artifact.contentType.startsWith('video/'),
+      ),
     });
   } catch (error) {
     logHandlerError('getTaskSummary', error);

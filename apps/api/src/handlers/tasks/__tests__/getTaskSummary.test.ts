@@ -173,6 +173,7 @@ describe('getTaskSummary', () => {
       taskRunError: 'Sandbox startup timed out',
       environmentSetupState: 'failed',
       summary: null,
+      videoArtifacts: [],
     });
   });
 
@@ -211,7 +212,7 @@ describe('getTaskSummary', () => {
     expect(andMock.mock.calls[0]).toContain(visibleTaskHistoryCondition);
   });
 
-  it('returns stable IDs and viewer links for uploaded task images', async () => {
+  it('returns separate stable IDs and viewer links for uploaded task images and videos', async () => {
     mockListArtifactsByTask.mockResolvedValueOnce([
       {
         id: '11111111-1111-4111-8111-111111111111',
@@ -237,6 +238,18 @@ describe('getTaskSummary', () => {
         uploaded: true,
         createdAt: new Date('2026-04-21T12:00:01Z'),
       },
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        taskId: 'task-1',
+        runId: 101,
+        path: 'proof/final recording.webm',
+        version: 3,
+        artifactType: 'visual-proof',
+        contentType: 'video/webm',
+        size: 456,
+        uploaded: true,
+        createdAt: new Date('2026-04-21T12:00:02Z'),
+      },
     ]);
 
     const response = await createApp(authContext).request(
@@ -254,6 +267,17 @@ describe('getTaskSummary', () => {
           contentType: 'image/png',
           viewUrl:
             'https://roomote.example/task/task-1/artifacts/proof/final%20image.png?v=2',
+        },
+      ],
+      videoArtifacts: [
+        {
+          id: '33333333-3333-4333-8333-333333333333',
+          path: 'proof/final recording.webm',
+          version: 3,
+          artifactType: 'visual-proof',
+          contentType: 'video/webm',
+          viewUrl:
+            'https://roomote.example/task/task-1/artifacts/proof/final%20recording.webm?v=3',
         },
       ],
     });

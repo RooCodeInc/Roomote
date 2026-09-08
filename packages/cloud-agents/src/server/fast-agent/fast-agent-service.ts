@@ -237,6 +237,7 @@ const chatReplyArgsSchema = z.object({
   message: z.string().trim().min(1).optional(),
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
+  videoArtifactIds: z.array(z.string()).optional(),
   suggestions: z
     .array(
       z.object({
@@ -2484,6 +2485,9 @@ export async function answerFastAgentQuestion({
           ...(reply.imageArtifactIds?.length
             ? { imageArtifactIds: reply.imageArtifactIds }
             : {}),
+          ...(reply.videoArtifactIds?.length
+            ? { videoArtifactIds: reply.videoArtifactIds }
+            : {}),
           ...(reply.kickoff ? { kickoff: true } : {}),
           ...(reply.taskNavigation ? { taskNavigation: true } : {}),
         },
@@ -3791,6 +3795,7 @@ export async function answerFastAgentQuestion({
               };
             }
             const requestedImageArtifactIds = args.imageArtifactIds ?? [];
+            const requestedVideoArtifactIds = args.videoArtifactIds ?? [];
             const signatureImageArtifactIds =
               requestedImageArtifactIds.length > 0
                 ? requestedImageArtifactIds
@@ -3799,6 +3804,7 @@ export async function answerFastAgentQuestion({
               args.purpose,
               message,
               signatureImageArtifactIds,
+              requestedVideoArtifactIds,
               args.suggestions ?? [],
             ]);
             if (completedChatReplySignatures.has(signature)) {
@@ -3823,6 +3829,9 @@ export async function answerFastAgentQuestion({
                 message,
                 ...(requestedImageArtifactIds.length
                   ? { imageArtifactIds: requestedImageArtifactIds }
+                  : {}),
+                ...(requestedVideoArtifactIds.length
+                  ? { videoArtifactIds: requestedVideoArtifactIds }
                   : {}),
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }

@@ -13,6 +13,7 @@ import {
 } from '@roomote/slack';
 
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
 
 /**
  * Streams a Fast reply into a Slack thread with Slack's message streaming
@@ -89,49 +90,76 @@ export function createSlackFastReplyStream(params: {
       const images = reply.imageArtifactIds?.length
         ? ((await params.resolveImages?.(reply.imageArtifactIds)) ?? [])
         : [];
-      let updated = false;
-      try {
-        updated = await updateSlackThreadMessageWithFooterText({
-          slack: params.slack,
-          channel: params.channelId,
-          threadTs: params.threadTs,
-          messageTs: ts,
-          text: quote ? `${quote}\n${reply.message}` : reply.message,
-          bodyBlocks: [
-            ...(quote
-              ? [
-                  {
-                    type: 'section' as const,
-                    block_id: ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
-                    text: { type: 'mrkdwn' as const, text: quote },
-                  },
-                ]
-              : []),
-            { type: 'markdown' as const, text: reply.message },
-            ...images.map((image) => ({
-              type: 'image' as const,
-              image_url: image.url,
-              alt_text: image.altText,
-            })),
-          ],
-          footerText: buildFastSessionReplyFooterText({
-            provider: 'slack',
-            sessionId: params.sessionId,
-            ...params.footerContext,
-          }),
-        });
-      } catch (error) {
-        console.warn(
-          `[Fast Agent] Failed to apply the final body to streamed Slack reply ${ts}: ${error instanceof Error ? error.message : String(error)}`,
+      const updateBody = async (message: string) => {
+        try {
+          return await updateSlackThreadMessageWithFooterText({
+            slack: params.slack,
+            channel: params.channelId,
+            threadTs: params.threadTs,
+            messageTs: ts,
+            text: quote ? `${quote}\n${message}` : message,
+            bodyBlocks: [
+              ...(quote
+                ? [
+                    {
+                      type: 'section' as const,
+                      block_id: ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
+                      text: { type: 'mrkdwn' as const, text: quote },
+                    },
+                  ]
+                : []),
+              { type: 'markdown' as const, text: message },
+              ...images.map((image) => ({
+                type: 'image' as const,
+                image_url: image.url,
+                alt_text: image.altText,
+              })),
+            ],
+            footerText: buildFastSessionReplyFooterText({
+              provider: 'slack',
+              sessionId: params.sessionId,
+              ...params.footerContext,
+            }),
+          });
+        } catch (error) {
+          console.warn(
+            `[Fast Agent] Failed to apply the final body to streamed Slack reply ${ts}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return false;
+        }
+      };
+      let updated = await updateBody(reply.message);
+      // Upload only after Slack accepts the visible reply. The transport deduplicates
+      // uploads if a failed fallback rewrite leaves delivery to postReply.
+      const videoFallback =
+        updated && reply.videoArtifactIds?.length
+          ? await deliverFastAgentSessionVideos({
+              artifactIds: reply.videoArtifactIds,
+              sessionId: params.sessionId,
+              channelId: params.channelId,
+              threadTs: params.threadTs,
+            })
+          : '';
+      if (videoFallback) {
+        updated = await updateBody(
+          [reply.message, videoFallback].filter(Boolean).join('\n\n'),
         );
       }
       if (!updated) {
+        if (videoFallback) {
+          // Keep the accepted text beside any successfully uploaded videos.
+          // The normal post path still needs to deliver the missing fallback.
+          console.warn(
+            `[Fast Agent] Slack did not accept the video fallback for streamed reply ${ts}; keeping the text reply while fallback delivery retries normally.`,
+          );
+          return undefined;
+        }
         const deleted = await params.slack
           .deleteMessage({ channel: params.channelId, ts })
           .catch(() => false);
-        if (deleted) {
+        if (deleted || reply.videoArtifactIds?.length) {
           console.warn(
-            `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}; removed the partial stream so the reply can post normally.`,
+            `[Fast Agent] Slack did not accept the final body for streamed reply ${ts}; ${deleted ? 'removed the partial stream' : 'video delivery is still pending'} so the reply can post normally.`,
           );
           return undefined;
         }

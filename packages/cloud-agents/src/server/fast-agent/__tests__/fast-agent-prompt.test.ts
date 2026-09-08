@@ -340,6 +340,16 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain(
+      'recover stable video artifact IDs and viewer links',
+    );
+    expect(prompt).toContain('"videoArtifactIds" for native Slack delivery');
+    expect(prompt).toContain(
+      'share only the artifact viewer link without an error or unavailability explanation',
+    );
+    expect(prompt).toContain(
+      'never claim a video is attached unless native delivery succeeds',
+    );
+    expect(prompt).toContain(
       'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
     );
     expect(prompt).toContain(

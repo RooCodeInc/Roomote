@@ -310,6 +310,8 @@ async function run() {
       'yuv420p',
       '-preset',
       'veryfast',
+      '-movflags',
+      '+faststart',
       `${OUT_DIR}/recording.mp4`,
     ],
     { stdio: ['ignore', 'ignore', 'pipe'] },

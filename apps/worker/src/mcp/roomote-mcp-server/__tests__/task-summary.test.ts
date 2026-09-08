@@ -76,7 +76,7 @@ describe('handleGetTaskSummary', () => {
     expect(result.content[0]?.text).not.toContain('Summary:');
   });
 
-  it('surfaces stable image artifact IDs and viewer links', async () => {
+  it('surfaces stable image and video artifact IDs and viewer links', async () => {
     vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
       id: 'task-proof',
       title: 'Capture proof',
@@ -102,12 +102,26 @@ describe('handleGetTaskSummary', () => {
             'https://roomote.example/task/task-proof/artifacts/proof/final.png?v=1',
         },
       ],
+      videoArtifacts: [
+        {
+          id: '22222222-2222-4222-8222-222222222222',
+          path: 'proof/demo.webm',
+          version: 2,
+          artifactType: 'visual-proof',
+          contentType: 'video/webm',
+          viewUrl:
+            'https://roomote.example/task/task-proof/artifacts/proof/demo.webm?v=2',
+        },
+      ],
     });
 
     const result = await handleGetTaskSummary({ taskId: 'task-proof' }, config);
 
     expect(result.content[0]?.text).toContain(
       'Image Artifact: proof/final.png [id: 11111111-1111-4111-8111-111111111111] [view: https://roomote.example/task/task-proof/artifacts/proof/final.png?v=1]',
+    );
+    expect(result.content[0]?.text).toContain(
+      'Video Artifact: proof/demo.webm [id: 22222222-2222-4222-8222-222222222222] [view: https://roomote.example/task/task-proof/artifacts/proof/demo.webm?v=2]',
     );
   });
 

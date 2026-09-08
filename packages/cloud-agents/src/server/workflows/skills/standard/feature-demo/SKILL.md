@@ -131,6 +131,7 @@ Run this with a GENEROUS command timeout (10 minutes) on the first attempt: a na
 <step number="8">
 <name>Deliver</name>
 <actions>
+<action>Prefer final MP4 with H.264, `yuv420p`, and `+faststart` for playback compatibility. Keep the native `raw.webm` source. If the rendered MP4 lacks faststart, remux a separate copy with `ffmpeg -i out/demo-wide.mp4 -c copy -movflags +faststart out/demo-wide-faststart.mp4` and verify it before upload; do not retime or alter content for format conversion.</action>
 <action>Upload the mp4 via `manage_artifacts` (`action: upload`, `type: general`) plus one representative keyframe PNG. Treat only the returned `artifactId`/`viewUrl`/`rawUrl` values as canonical — never invent URLs.</action>
 <action>In a PR body, embed under `## Screencasts` using the existing convention: the keyframe image (its signed `rawUrl`) hyperlinked to the video's `viewUrl`, with a one-line caption. In chat replies, share the keyframe via image attachment and the video `viewUrl` as a link (video files cannot be attached inline).</action>
 <action>End with a sharing note: what the demo shows, which presets were rendered, and whether it is narrated or captions-only.</action>

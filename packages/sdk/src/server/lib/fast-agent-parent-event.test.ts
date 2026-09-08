@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   getConversationLookupIds: vi.fn(),
   findTaskPullRequests: vi.fn(),
   postMessage: vi.fn(),
+  deliverVideos: vi.fn(),
   updateMessage: vi.fn(),
   addReaction: vi.fn(),
   resolveSlackReactionNames: vi.fn(),
@@ -57,6 +58,10 @@ const mocks = vi.hoisted(() => ({
   updateSourceControlComment: vi.fn(),
   linearEmitResponse: vi.fn(),
   createConversationArtifact: vi.fn(),
+}));
+
+vi.mock('./fast-agent-session-videos', () => ({
+  deliverFastAgentSessionVideos: mocks.deliverVideos,
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -470,6 +475,44 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({ userId: 'user-2' }),
     );
   });
+
+  it.each(['', '[View video](https://roomote.example/video)'])(
+    'delivers selected videos from queued follow-ups with fallback %j',
+    async (fallback) => {
+      mocks.deliverVideos.mockResolvedValueOnce(fallback);
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Result.',
+          videoArtifactIds: ['video-1'],
+        }),
+      );
+      await deliverFastAgentParentEventWithLock(
+        {
+          parent,
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.003',
+            currentMessageId: '100.003',
+            userId: 'user-2',
+            question: 'Send that video.',
+          },
+        },
+        mocks.releaseTurnLock,
+      );
+      expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
+        artifactIds: ['video-1'],
+        sessionId: parent.sessionId,
+        channelId: parent.conversation.replyTarget.channelId,
+        threadTs: parent.conversation.replyTarget.threadId,
+      });
+      expect(mocks.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: ['Result.', fallback].filter(Boolean).join('\n\n'),
+        }),
+      );
+    },
+  );
 
   it('posts a recovered child image on a later Slack human turn', async () => {
     await deliverFastAgentParentEvent({
@@ -1357,6 +1400,220 @@ describe('deliverFastAgentParentEvent', () => {
     );
     expect(mocks.appendSuggestionInstruction).not.toHaveBeenCalled();
     expect(mocks.postSlackSuggestions).not.toHaveBeenCalled();
+  });
+
+  it.each(['', '[View video](https://roomote.example/video)'])(
+    'delivers videos beneath a newly created automation root with fallback %j',
+    async (fallback) => {
+      let persistedThread: string | undefined;
+      mocks.bindConversation.mockImplementationOnce(
+        async ({ conversation }) => {
+          await Promise.resolve();
+          persistedThread = conversation.replyTarget.threadId;
+          return { id: parent.sessionId, conversation };
+        },
+      );
+      mocks.deliverVideos.mockImplementationOnce(async ({ threadTs }) => {
+        expect(persistedThread).toBe(threadTs);
+        return fallback;
+      });
+      mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Result.',
+          videoArtifactIds: ['video-1'],
+        }),
+      );
+      await deliverFastAgentParentEvent({
+        parent: {
+          ...parent,
+          conversation: {
+            ...parent.conversation,
+            replyTarget: { channelId: 'C123' },
+          },
+        },
+        event: {
+          type: 'task_settled',
+          taskId: 'child-task-1',
+          runId: 42,
+          customAutomationId: 'automation-1',
+          status: 'completed',
+          taskUrl: 'https://roomote.example/task/child-task-1',
+          pullRequests: [],
+        },
+      });
+      expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
+        artifactIds: ['video-1'],
+        sessionId: parent.sessionId,
+        channelId: 'C123',
+        threadTs: '101.001',
+      });
+      expect(mocks.postMessage.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.bindConversation.mock.invocationCallOrder[0]!,
+      );
+      expect(mocks.bindConversation.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.deliverVideos.mock.invocationCallOrder[0]!,
+      );
+      if (fallback) {
+        expect(mocks.updateMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ts: '101.001',
+            message: expect.objectContaining({
+              text: `Result.\n\n${fallback}`,
+              blocks: expect.arrayContaining([
+                { type: 'markdown', text: fallback },
+              ]),
+            }),
+          }),
+        );
+      } else expect(mocks.updateMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['binding', 'transport', 'fallback update'] as const)(
+    'retries an automation video after a %s failure without losing its persisted root',
+    async (failure) => {
+      const pendingParent = {
+        ...parent,
+        conversation: {
+          ...parent.conversation,
+          replyTarget: { channelId: 'C123' },
+        },
+      };
+      let storedConversation = pendingParent.conversation;
+      mocks.findSession.mockImplementation(async () => ({
+        id: parent.sessionId,
+        userId: 'u1',
+        conversation: storedConversation,
+        messages: [],
+      }));
+      mocks.bindConversation.mockImplementation(async ({ conversation }) => {
+        await Promise.resolve();
+        storedConversation = conversation;
+        return { id: parent.sessionId, conversation };
+      });
+      mocks.deliverVideos.mockReset();
+      mocks.deliverVideos.mockImplementation(
+        async ({ channelId, threadTs }) => {
+          expect(storedConversation.replyTarget).toEqual({
+            channelId,
+            threadId: threadTs,
+          });
+          return '';
+        },
+      );
+      if (failure === 'binding')
+        mocks.bindConversation.mockRejectedValueOnce(
+          new Error('binding failed'),
+        );
+      if (failure === 'transport')
+        mocks.deliverVideos.mockRejectedValueOnce(
+          new Error('transport failed'),
+        );
+      if (failure === 'fallback update') {
+        mocks.deliverVideos.mockResolvedValueOnce(
+          '[View video](https://roomote.example/video)',
+        );
+        mocks.updateMessage.mockResolvedValueOnce(false);
+      }
+      mocks.answerQuestion.mockImplementation(async ({ adapter }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'Result.',
+          videoArtifactIds: ['video-1'],
+        }),
+      );
+      const event = {
+        type: 'task_settled' as const,
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed' as const,
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      };
+      await expect(
+        deliverFastAgentParentEvent({ parent: pendingParent, event }),
+      ).rejects.toMatchObject({ replyPosted: false });
+      expect(mocks.releaseRootBindingLock).toHaveBeenCalledOnce();
+      if (failure === 'binding')
+        expect(mocks.deliverVideos).not.toHaveBeenCalled();
+      else
+        expect(storedConversation.replyTarget).toEqual({
+          channelId: 'C123',
+          threadId: '101.001',
+        });
+
+      await expect(
+        deliverFastAgentParentEvent({ parent: pendingParent, event }),
+      ).resolves.toBe('delivered');
+      expect(mocks.deliverVideos).toHaveBeenLastCalledWith({
+        artifactIds: ['video-1'],
+        sessionId: parent.sessionId,
+        channelId: 'C123',
+        threadTs: '101.001',
+      });
+      // Once binding succeeded, retry resolves the saved root and updates it instead of posting another.
+      expect(mocks.postMessage).toHaveBeenCalledTimes(
+        failure === 'binding' ? 2 : 1,
+      );
+      if (failure === 'binding') {
+        expect(mocks.postMessage.mock.calls[0]![0].client_msg_id).toBe(
+          mocks.postMessage.mock.calls[1]![0].client_msg_id,
+        );
+      } else expect(mocks.bindConversation).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('uses the stored destination rather than stale queued reply coordinates for videos', async () => {
+    const conversation = {
+      ...parent.conversation,
+      replyTarget: { channelId: 'C-MOVED', threadId: '200.001' },
+    };
+    mocks.findSession.mockResolvedValue({
+      id: parent.sessionId,
+      userId: 'u1',
+      conversation,
+      messages: [],
+    });
+    mocks.deliverVideos.mockImplementationOnce(
+      async ({ channelId, threadTs }) => {
+        expect({ channelId, threadId: threadTs }).toEqual(
+          conversation.replyTarget,
+        );
+        return '';
+      },
+    );
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'Result.',
+        videoArtifactIds: ['video-1'],
+      }),
+    );
+    await deliverFastAgentParentEventWithLock(
+      {
+        parent,
+        event: {
+          type: 'human_follow_up',
+          eventId: '100.003',
+          currentMessageId: '100.003',
+          userId: 'user-2',
+          question: 'Send that video.',
+        },
+      },
+      mocks.releaseTurnLock,
+    );
+    expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
+      artifactIds: ['video-1'],
+      sessionId: parent.sessionId,
+      channelId: 'C-MOVED',
+      threadTs: '200.001',
+    });
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C-MOVED', thread_ts: '200.001' }),
+    );
+    expect(mocks.bindConversation).not.toHaveBeenCalled();
   });
 
   it('creates the first Slack message when a pending Fast automation settles', async () => {

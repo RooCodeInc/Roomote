@@ -160,6 +160,28 @@ describe('Capture visual proof skill', () => {
     );
   });
 
+  it('prefers compatible MP4 for local screencasts with a bounded native fallback', () => {
+    expect(skillContent).toContain('For locally produced screencasts only');
+    expect(skillContent).toContain(
+      '-c:v libx264 -pix_fmt yuv420p -preset veryfast -movflags +faststart',
+    );
+    expect(skillContent).toContain('Keep the native WebM source');
+    expect(skillContent).toContain('remaining five-minute budget');
+    expect(skillContent).toContain(
+      'do not install tools or extend the deadline',
+    );
+    expect(skillContent).toContain(
+      'If conversion is unavailable, fails, or would leave insufficient time, upload the native WebM instead',
+    );
+    expect(skillContent).toContain(
+      'no retiming, cuts, overlays, or fabricated pixels',
+    );
+    expect(skillContent).toContain('extract keyframes from that clip');
+    expect(skillContent).toContain(
+      'not a rule to convert arbitrary uploads or existing artifacts',
+    );
+  });
+
   it('treats manage_artifacts upload results as the only canonical proof links', () => {
     expect(skillContent).toContain(
       'Treat the `artifactId`, `viewUrl`, and `rawUrl` values returned by each upload tool result as the only canonical artifact references. Never invent, guess, or reconstruct artifact IDs or URLs.',
