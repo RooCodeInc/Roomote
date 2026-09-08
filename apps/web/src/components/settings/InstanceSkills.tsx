@@ -8,7 +8,6 @@ import { createCustomSkillInputSchema } from '@roomote/types';
 import type { z } from 'zod';
 import { toast } from 'sonner';
 import { useTRPC } from '@/trpc/client';
-import { Section } from '@/components/settings/Section';
 import {
   Button,
   Dialog,
@@ -25,10 +24,8 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-  GraduationCap,
   Input,
   Pencil,
-  Plus,
   Skeleton,
   Textarea,
   Trash2,
@@ -190,7 +187,13 @@ function SkillEditor({
   );
 }
 
-export function InstanceSkills() {
+export function InstanceSkills({
+  isCreating,
+  onCloseCreate,
+}: {
+  isCreating: boolean;
+  onCloseCreate: () => void;
+}) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const list = useQuery(trpc.instanceSkills.list.queryOptions());
@@ -211,21 +214,7 @@ export function InstanceSkills() {
   );
 
   return (
-    <Section
-      icon={GraduationCap}
-      title="Instance skills"
-      action={
-        <Button onClick={() => setEditor({ skill: null })}>
-          <Plus />
-          Add Skill
-        </Button>
-      }
-    >
-      <p className="text-sm text-muted-foreground">
-        Available to all Sessions and coding tasks. Changes do not reload skills
-        in currently running tasks. Any member can add a skill; only its creator
-        or an admin can edit or delete it.
-      </p>
+    <>
       {list.isPending ? (
         <div className="space-y-2">
           <Skeleton className="h-16 w-full" />
@@ -233,59 +222,31 @@ export function InstanceSkills() {
         </div>
       ) : list.isError ? (
         <ErrorState
-          title="Failed to load instance skills"
+          title="Failed to load skills"
           description={list.error.message}
         />
       ) : list.data.length === 0 ? (
         <EmptyState
-          title="No instance skills yet"
-          description="Add a reusable skill for everyone on this instance."
+          title="No shared skills yet"
+          description="Add a skill to share reusable instructions with your team."
         />
       ) : (
-        <ul className="divide-y">
+        <ul className="divide-y" aria-label="Shared skills">
           {list.data.map((skill) => (
-            <li
-              key={skill.id}
-              className="flex flex-wrap items-center justify-between gap-3 py-3"
-            >
-              <div className="min-w-0 flex-1">
-                <p className="break-words font-medium">{skill.name}</p>
-                <p className="break-words text-sm text-muted-foreground">
+            <li key={skill.id} className="py-3">
+              <button
+                type="button"
+                className="block w-full min-w-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setViewing(skill)}
+                aria-label={`View ${skill.name}`}
+              >
+                <span className="block break-words font-medium hover:underline">
+                  {skill.name}
+                </span>
+                <span className="line-clamp-2 break-words text-sm text-muted-foreground">
                   {skill.description}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setViewing(skill)}
-                  aria-label={`View ${skill.name}`}
-                >
-                  View
-                </Button>
-                {skill.canManage ? (
-                  <>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setEditor({ skill })}
-                      aria-label={`Edit ${skill.name}`}
-                    >
-                      <Pencil />
-                      Edit
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setDeleting(skill)}
-                      aria-label={`Delete ${skill.name}`}
-                    >
-                      <Trash2 />
-                      Delete
-                    </Button>
-                  </>
-                ) : null}
-              </div>
+                </span>
+              </button>
             </li>
           ))}
         </ul>
@@ -293,6 +254,7 @@ export function InstanceSkills() {
       {editor ? (
         <SkillEditor skill={editor.skill} onClose={() => setEditor(null)} />
       ) : null}
+      {isCreating ? <SkillEditor skill={null} onClose={onCloseCreate} /> : null}
       <Dialog
         open={viewing !== null}
         onOpenChange={(open) => {
@@ -308,6 +270,29 @@ export function InstanceSkills() {
             {viewing?.content}
           </pre>
           <DialogFooter>
+            {viewing?.canManage ? (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDeleting(viewing);
+                    setViewing(null);
+                  }}
+                  aria-label={`Delete ${viewing.name}`}
+                >
+                  <Trash2 /> Delete
+                </Button>
+                <Button
+                  onClick={() => {
+                    setEditor({ skill: viewing });
+                    setViewing(null);
+                  }}
+                  aria-label={`Edit ${viewing.name}`}
+                >
+                  <Pencil /> Edit
+                </Button>
+              </>
+            ) : null}
             <Button variant="outline" onClick={() => setViewing(null)}>
               Close
             </Button>
@@ -348,6 +333,6 @@ export function InstanceSkills() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Section>
+    </>
   );
 }

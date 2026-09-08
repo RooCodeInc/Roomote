@@ -665,6 +665,14 @@ export function CustomSkills() {
     });
   };
 
+  if (
+    listQuery.isSuccess &&
+    environments.length === 0 &&
+    installedSkills.length === 0
+  ) {
+    return null;
+  }
+
   if (listQuery.isPending) {
     return (
       <div className="space-y-8">
@@ -689,549 +697,555 @@ export function CustomSkills() {
   }
 
   return (
-    <div className="space-y-8">
-      <Dialog
-        open={editorState !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setEditorState(null);
-          }
-        }}
-      >
-        <DialogContent size="sm">
-          {editorState && (
-            <>
-              <DialogHeader>
-                <DialogTitle>
-                  {installedSkillIdSet.has(editorState.skillId)
-                    ? 'Manage Skill'
-                    : 'Install Skill'}
-                </DialogTitle>
-                <DialogDescription>
-                  Select the environments where{' '}
-                  <span className="font-medium text-foreground">
-                    {editorState.isAllSelection
-                      ? `${editorState.source} (all skills)`
-                      : `${editorState.source}@${editorState.name}`}
-                  </span>{' '}
-                  should be available.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-2">
-                {environments.map((environment) => {
-                  const isImmutable =
-                    editorState.immutableEnvironmentIds.includes(
-                      environment.id,
-                    );
-
-                  return (
-                    <label
-                      key={environment.id}
-                      htmlFor={`custom-skill-env-${environment.id}`}
-                      className={`flex items-center gap-2 text-sm ${
-                        isImmutable
-                          ? 'cursor-default opacity-70'
-                          : 'cursor-pointer'
-                      }`}
-                    >
-                      <Checkbox
-                        id={`custom-skill-env-${environment.id}`}
-                        checked={editorState.selectedEnvironmentIds.includes(
-                          environment.id,
-                        )}
-                        disabled={isImmutable}
-                        onCheckedChange={() =>
-                          toggleEnvironmentSelection(environment.id)
-                        }
-                      />
-                      <VectorSquare className="size-4" />
-                      <span>{environment.name}</span>
-                    </label>
-                  );
-                })}
-              </div>
-
-              {!editorState.isAllSelection &&
-              editorState.immutableEnvironmentIds.length > 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Environments already managed by{' '}
-                  <span className="font-medium text-foreground">
-                    {editorState.source} (all skills)
-                  </span>{' '}
-                  are read-only here.
-                </p>
-              ) : null}
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setEditorState(null)}
-                  disabled={isSavingAvailability}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => void saveAvailability()}
-                  disabled={
-                    isSavingAvailability ||
-                    editorState.selectedEnvironmentIds.filter(
-                      (environmentId) =>
-                        !editorState.immutableEnvironmentIds.includes(
-                          environmentId,
-                        ),
-                    ).length === 0
-                  }
-                >
-                  {isSavingAvailability
-                    ? 'Saving…'
-                    : installedSkillIdSet.has(editorState.skillId)
-                      ? 'Update'
-                      : 'Install'}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={manualEditorState !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            closeManualEditor();
-          }
-        }}
-      >
-        <DialogContent size="2xl">
-          {manualEditorState && (
-            <>
-              <DialogHeader>
-                <DialogTitle>
-                  {manualEditorState.previousSkillId
-                    ? 'Edit Skill'
-                    : 'Add Skill'}
-                </DialogTitle>
-                <DialogDescription></DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="manual-skill-name">Slug</Label>
-                  <Input
-                    id="manual-skill-name"
-                    aria-label="Manual skill slug"
-                    value={manualEditorState.name}
-                    onChange={(event) => {
-                      const nextName = normalizeManualSkillNameInput(
-                        event.currentTarget.value,
-                      );
-
-                      setManualEditorState((current) =>
-                        current
-                          ? {
-                              ...current,
-                              name: nextName,
-                            }
-                          : current,
-                      );
-                    }}
-                    placeholder="my-manual-skill"
-                    pattern="[^/\\s]+"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="manual-skill-description">Description</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Important for the agent know when to use this skill.
-                  </p>
-                  <Textarea
-                    id="manual-skill-description"
-                    aria-label="Manual skill description"
-                    value={manualEditorState.description}
-                    onChange={(event) => {
-                      const nextDescription = event.currentTarget.value;
-
-                      setManualEditorState((current) =>
-                        current
-                          ? {
-                              ...current,
-                              description: nextDescription,
-                            }
-                          : current,
-                      );
-                    }}
-                    rows={2}
-                    placeholder="Adds custom Roomote behavior."
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="manual-skill-content">Content</Label>
-                  <Textarea
-                    id="manual-skill-content"
-                    aria-label="Manual skill content"
-                    value={manualEditorState.content}
-                    onChange={(event) => {
-                      const nextContent = event.currentTarget.value;
-
-                      setManualEditorState((current) =>
-                        current
-                          ? {
-                              ...current,
-                              content: nextContent,
-                            }
-                          : current,
-                      );
-                    }}
-                    rows={22}
-                    spellCheck={false}
-                    className="font-mono text-xs"
-                  />
-                </div>
-
-                <div className="space-y-2  text-sm">
-                  <p>Enable in</p>
-                  {environments.map((environment) => (
-                    <label
-                      key={environment.id}
-                      htmlFor={`manual-skill-env-${environment.id}`}
-                      className="flex cursor-pointer items-center gap-2"
-                    >
-                      <Checkbox
-                        id={`manual-skill-env-${environment.id}`}
-                        checked={manualEditorState.selectedEnvironmentIds.includes(
-                          environment.id,
-                        )}
-                        onCheckedChange={() =>
-                          toggleManualEnvironmentSelection(environment.id)
-                        }
-                      />
-                      <VectorSquare className="size-4" />
-                      <span>{environment.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={closeManualEditor}
-                  disabled={isSavingManualSkill}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => void saveManualSkill()}
-                  disabled={
-                    isSavingManualSkill ||
-                    manualEditorState.name.trim().length === 0 ||
-                    manualEditorState.description.trim().length === 0 ||
-                    manualEditorState.content.trim().length === 0 ||
-                    manualEditorState.selectedEnvironmentIds.length === 0
-                  }
-                >
-                  {isSavingManualSkill ? <Spinner /> : <Check />}
-                  {isSavingManualSkill ? 'Saving…' : 'Save Skill'}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={removeConfirmSkillId !== null}
-        onOpenChange={(open) => {
-          if (!open && !removeMutation.isPending) {
-            setRemoveConfirmSkillId(null);
-          }
-        }}
-      >
-        <DialogContent size="sm">
-          {removeConfirmSkill && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Uninstall Skill</DialogTitle>
-                <DialogDescription>
-                  This will remove{' '}
-                  <span className="font-medium text-foreground">
-                    {formatSkillReference(removeConfirmSkill)}
-                  </span>{' '}
-                  {removeConfirmSkill.kind === 'manual'
-                    ? 'from the environments currently using this manual skill variant.'
-                    : 'from all environments.'}{' '}
-                  This action cannot be undone.
-                </DialogDescription>
-              </DialogHeader>
-
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setRemoveConfirmSkillId(null)}
-                  disabled={removeMutation.isPending}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() =>
-                    removeMutation.mutate({
-                      skillId: removeConfirmSkill.skillId,
-                    })
-                  }
-                  disabled={removeMutation.isPending}
-                >
-                  {removeMutation.isPending ? (
-                    <>
-                      <Spinner className="size-4" />
-                      Removing…
-                    </>
-                  ) : (
-                    'Uninstall'
-                  )}
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <section aria-labelledby="installed-skills" className="space-y-3">
-        <h2
-          id="installed-skills"
-          className="text-sm font-semibold text-foreground"
+    <details className="group border-t pt-4">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <ChevronDown className="size-4 -rotate-90 group-open:rotate-0" />
+        Marketplace &amp; environment skills
+      </summary>
+      <div className="space-y-6 pt-4">
+        <p className="text-sm text-muted-foreground">
+          These skills are available only in their selected environments.
+        </p>
+        <Dialog
+          open={editorState !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditorState(null);
+            }
+          }}
         >
-          Installed
-        </h2>
+          <DialogContent size="sm">
+            {editorState && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>
+                    {installedSkillIdSet.has(editorState.skillId)
+                      ? 'Manage Skill'
+                      : 'Install Skill'}
+                  </DialogTitle>
+                  <DialogDescription>
+                    Select the environments where{' '}
+                    <span className="font-medium text-foreground">
+                      {editorState.isAllSelection
+                        ? `${editorState.source} (all skills)`
+                        : `${editorState.source}@${editorState.name}`}
+                    </span>{' '}
+                    should be available.
+                  </DialogDescription>
+                </DialogHeader>
 
-        {installedSkills.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No custom skills installed yet. Roomote itself has mad skills
-            though.
-          </p>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {installedSkills.map((skill) => (
-              <SkillCard
-                key={skill.skillId}
-                title={formatSkillTitle(skill)}
-                byline={formatSkillByline({
-                  kind: skill.kind,
-                  source: skill.source,
-                  deploymentName,
-                })}
-                description={skill.description}
-                environments={skill.environments}
-                actions={
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`Edit ${formatSkillReference(skill)}`}
-                      onClick={() =>
-                        skill.kind === 'manual'
-                          ? openManualEditor(skill)
-                          : openAvailabilityEditor({
-                              skillId: skill.skillId,
-                              source: skill.source,
-                              name: skill.parsed.fullName,
-                              isAllSelection: skill.isAllSelection,
-                              selectedEnvironmentIds: skill.environments.map(
-                                (environment) => environment.id,
-                              ),
-                              immutableEnvironmentIds: skill.isAllSelection
-                                ? []
-                                : (allSelectionEnvironmentIdsBySource.get(
-                                    skill.source,
-                                  ) ?? []),
-                            })
-                      }
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`Remove ${formatSkillReference(skill)}`}
-                      onClick={() => setRemoveConfirmSkillId(skill.skillId)}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </div>
-                }
-              />
-            ))}
-          </div>
-        )}
-      </section>
+                <div className="space-y-2">
+                  {environments.map((environment) => {
+                    const isImmutable =
+                      editorState.immutableEnvironmentIds.includes(
+                        environment.id,
+                      );
 
-      <section aria-labelledby="add-skills" className="space-y-3">
-        <h2 id="add-skills" className="text-sm font-semibold text-foreground">
-          Add from the{' '}
-          <Link
-            href="https://skills.sh"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary hover:underline"
-          >
-            Vercel Marketplace
-            <SquareArrowOutUpRight className="ml-1 inline size-3" />
-          </Link>
-        </h2>
+                    return (
+                      <label
+                        key={environment.id}
+                        htmlFor={`custom-skill-env-${environment.id}`}
+                        className={`flex items-center gap-2 text-sm ${
+                          isImmutable
+                            ? 'cursor-default opacity-70'
+                            : 'cursor-pointer'
+                        }`}
+                      >
+                        <Checkbox
+                          id={`custom-skill-env-${environment.id}`}
+                          checked={editorState.selectedEnvironmentIds.includes(
+                            environment.id,
+                          )}
+                          disabled={isImmutable}
+                          onCheckedChange={() =>
+                            toggleEnvironmentSelection(environment.id)
+                          }
+                        />
+                        <VectorSquare className="size-4" />
+                        <span>{environment.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
 
-        <div className="flex w-full items-center gap-2">
-          <div className="relative w-full md:max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              id="custom-skills-search"
-              value={searchQuery}
-              onChange={(event) => {
-                setHasInteractedWithSearch(true);
-                setSearchQuery(event.currentTarget.value);
-              }}
-              placeholder="Search by skill name or source"
-              className="pl-9"
-            />
-            {searchResultsQuery.isFetching && canRunSearchQuery ? (
-              <Spinner className="absolute right-3 top-1/2 -translate-y-1/2" />
-            ) : (
-              searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setDebouncedSearchQuery('');
-                    queryClient.removeQueries({
-                      queryKey: trpc.customSkills.search.queryKey(),
-                    });
-                  }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
-                  aria-label="Clear search"
-                >
-                  <X className="size-4" />
-                </button>
-              )
+                {!editorState.isAllSelection &&
+                editorState.immutableEnvironmentIds.length > 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Environments already managed by{' '}
+                    <span className="font-medium text-foreground">
+                      {editorState.source} (all skills)
+                    </span>{' '}
+                    are read-only here.
+                  </p>
+                ) : null}
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setEditorState(null)}
+                    disabled={isSavingAvailability}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void saveAvailability()}
+                    disabled={
+                      isSavingAvailability ||
+                      editorState.selectedEnvironmentIds.filter(
+                        (environmentId) =>
+                          !editorState.immutableEnvironmentIds.includes(
+                            environmentId,
+                          ),
+                      ).length === 0
+                    }
+                  >
+                    {isSavingAvailability
+                      ? 'Saving…'
+                      : installedSkillIdSet.has(editorState.skillId)
+                        ? 'Update'
+                        : 'Install'}
+                  </Button>
+                </DialogFooter>
+              </>
             )}
-          </div>
-        </div>
+          </DialogContent>
+        </Dialog>
 
-        {canRunSearchQuery && searchResultsQuery.isError ? (
-          <p className="text-sm text-destructive">
-            {searchResultsQuery.error.message}
-          </p>
-        ) : null}
+        <Dialog
+          open={manualEditorState !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeManualEditor();
+            }
+          }}
+        >
+          <DialogContent size="2xl">
+            {manualEditorState && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>
+                    {manualEditorState.previousSkillId
+                      ? 'Edit Skill'
+                      : 'Add Skill'}
+                  </DialogTitle>
+                  <DialogDescription></DialogDescription>
+                </DialogHeader>
 
-        {canRunSearchQuery && searchResultsQuery.data ? (
-          searchResults.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No skills found for this search.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {searchResults.map((result) => {
-                const installedSkill = installedSkillById.get(result.skillId);
-                const sourceAllEnvironmentIds =
-                  allSelectionEnvironmentIdsBySource.get(result.source) ?? [];
-                const explicitEnvironmentIds =
-                  installedSkill?.environments.map(
-                    (environment) => environment.id,
-                  ) ?? [];
-                const editableEnvironmentIds = environments
-                  .map((environment) => environment.id)
-                  .filter(
-                    (environmentId) =>
-                      !sourceAllEnvironmentIds.includes(environmentId),
-                  );
-                const isCoveredByAllSelection =
-                  sourceAllEnvironmentIds.length > 0 &&
-                  editableEnvironmentIds.length === 0;
-                const isInstalled =
-                  installedSkillIdSet.has(result.skillId) ||
-                  isCoveredByAllSelection;
-                const canInstall =
-                  !isInstalled && editableEnvironmentIds.length > 0;
-                const selectedEnvironmentIds = installedSkill
-                  ? Array.from(
-                      new Set([
-                        ...explicitEnvironmentIds,
-                        ...sourceAllEnvironmentIds,
-                      ]),
-                    )
-                  : sourceAllEnvironmentIds;
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="manual-skill-name">Slug</Label>
+                    <Input
+                      id="manual-skill-name"
+                      aria-label="Manual skill slug"
+                      value={manualEditorState.name}
+                      onChange={(event) => {
+                        const nextName = normalizeManualSkillNameInput(
+                          event.currentTarget.value,
+                        );
 
-                return (
-                  <SkillCard
-                    key={result.skillId}
-                    title={formatSkillTitle(result)}
-                    byline={formatSkillByline({
-                      kind: result.kind,
-                      source: result.source,
-                      deploymentName,
-                    })}
-                    description={result.description}
-                    installLabel={result.installsLabel}
-                    url={result.url}
-                    actions={
+                        setManualEditorState((current) =>
+                          current
+                            ? {
+                                ...current,
+                                name: nextName,
+                              }
+                            : current,
+                        );
+                      }}
+                      placeholder="my-manual-skill"
+                      pattern="[^/\\s]+"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="manual-skill-description">
+                      Description
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Important for the agent know when to use this skill.
+                    </p>
+                    <Textarea
+                      id="manual-skill-description"
+                      aria-label="Manual skill description"
+                      value={manualEditorState.description}
+                      onChange={(event) => {
+                        const nextDescription = event.currentTarget.value;
+
+                        setManualEditorState((current) =>
+                          current
+                            ? {
+                                ...current,
+                                description: nextDescription,
+                              }
+                            : current,
+                        );
+                      }}
+                      rows={2}
+                      placeholder="Adds custom Roomote behavior."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="manual-skill-content">Content</Label>
+                    <Textarea
+                      id="manual-skill-content"
+                      aria-label="Manual skill content"
+                      value={manualEditorState.content}
+                      onChange={(event) => {
+                        const nextContent = event.currentTarget.value;
+
+                        setManualEditorState((current) =>
+                          current
+                            ? {
+                                ...current,
+                                content: nextContent,
+                              }
+                            : current,
+                        );
+                      }}
+                      rows={22}
+                      spellCheck={false}
+                      className="font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="space-y-2  text-sm">
+                    <p>Enable in</p>
+                    {environments.map((environment) => (
+                      <label
+                        key={environment.id}
+                        htmlFor={`manual-skill-env-${environment.id}`}
+                        className="flex cursor-pointer items-center gap-2"
+                      >
+                        <Checkbox
+                          id={`manual-skill-env-${environment.id}`}
+                          checked={manualEditorState.selectedEnvironmentIds.includes(
+                            environment.id,
+                          )}
+                          onCheckedChange={() =>
+                            toggleManualEnvironmentSelection(environment.id)
+                          }
+                        />
+                        <VectorSquare className="size-4" />
+                        <span>{environment.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={closeManualEditor}
+                    disabled={isSavingManualSkill}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void saveManualSkill()}
+                    disabled={
+                      isSavingManualSkill ||
+                      manualEditorState.name.trim().length === 0 ||
+                      manualEditorState.description.trim().length === 0 ||
+                      manualEditorState.content.trim().length === 0 ||
+                      manualEditorState.selectedEnvironmentIds.length === 0
+                    }
+                  >
+                    {isSavingManualSkill ? <Spinner /> : <Check />}
+                    {isSavingManualSkill ? 'Saving…' : 'Save Skill'}
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog
+          open={removeConfirmSkillId !== null}
+          onOpenChange={(open) => {
+            if (!open && !removeMutation.isPending) {
+              setRemoveConfirmSkillId(null);
+            }
+          }}
+        >
+          <DialogContent size="sm">
+            {removeConfirmSkill && (
+              <>
+                <DialogHeader>
+                  <DialogTitle>Uninstall Skill</DialogTitle>
+                  <DialogDescription>
+                    This will remove{' '}
+                    <span className="font-medium text-foreground">
+                      {formatSkillReference(removeConfirmSkill)}
+                    </span>{' '}
+                    {removeConfirmSkill.kind === 'manual'
+                      ? 'from the environments currently using this manual skill variant.'
+                      : 'from all environments.'}{' '}
+                    This action cannot be undone.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setRemoveConfirmSkillId(null)}
+                    disabled={removeMutation.isPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() =>
+                      removeMutation.mutate({
+                        skillId: removeConfirmSkill.skillId,
+                      })
+                    }
+                    disabled={removeMutation.isPending}
+                  >
+                    {removeMutation.isPending ? (
+                      <>
+                        <Spinner className="size-4" />
+                        Removing…
+                      </>
+                    ) : (
+                      'Uninstall'
+                    )}
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        {installedSkills.length > 0 ? (
+          <section aria-labelledby="installed-skills" className="space-y-3">
+            <h2
+              id="installed-skills"
+              className="text-sm font-semibold text-foreground"
+            >
+              Installed
+            </h2>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {installedSkills.map((skill) => (
+                <SkillCard
+                  key={skill.skillId}
+                  title={formatSkillTitle(skill)}
+                  byline={formatSkillByline({
+                    kind: skill.kind,
+                    source: skill.source,
+                    deploymentName,
+                  })}
+                  description={skill.description}
+                  environments={skill.environments}
+                  actions={
+                    <div className="flex items-center gap-1">
                       <Button
                         type="button"
-                        size="sm"
-                        disabled={!canInstall}
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Edit ${formatSkillReference(skill)}`}
                         onClick={() =>
-                          openAvailabilityEditor({
-                            skillId: result.skillId,
-                            source: result.source,
-                            name: result.parsed.fullName,
-                            isAllSelection: result.isAllSelection,
-                            selectedEnvironmentIds,
-                            immutableEnvironmentIds: sourceAllEnvironmentIds,
-                          })
+                          skill.kind === 'manual'
+                            ? openManualEditor(skill)
+                            : openAvailabilityEditor({
+                                skillId: skill.skillId,
+                                source: skill.source,
+                                name: skill.parsed.fullName,
+                                isAllSelection: skill.isAllSelection,
+                                selectedEnvironmentIds: skill.environments.map(
+                                  (environment) => environment.id,
+                                ),
+                                immutableEnvironmentIds: skill.isAllSelection
+                                  ? []
+                                  : (allSelectionEnvironmentIdsBySource.get(
+                                      skill.source,
+                                    ) ?? []),
+                              })
                         }
                       >
-                        {isInstalled || !canInstall ? (
-                          <Check />
-                        ) : (
-                          <ArrowUpFromLine />
-                        )}
-                        {isInstalled
-                          ? 'Installed'
-                          : canInstall
-                            ? 'Install'
-                            : 'Available'}
+                        <Pencil />
                       </Button>
-                    }
-                  />
-                );
-              })}
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        aria-label={`Remove ${formatSkillReference(skill)}`}
+                        onClick={() => setRemoveConfirmSkillId(skill.skillId)}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  }
+                />
+              ))}
             </div>
-          )
+          </section>
         ) : null}
-      </section>
 
-      <section aria-labelledby="manual-skills" className="-mt-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => openManualEditor()}
-        >
-          <PencilRuler />
-          Add a custom skill
-        </Button>
-      </section>
-    </div>
+        <section aria-labelledby="add-skills" className="space-y-3">
+          <h2 id="add-skills" className="text-sm font-semibold text-foreground">
+            Add from the{' '}
+            <Link
+              href="https://skills.sh"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              Vercel Marketplace
+              <SquareArrowOutUpRight className="ml-1 inline size-3" />
+            </Link>
+          </h2>
+
+          <div className="flex w-full items-center gap-2">
+            <div className="relative w-full md:max-w-md">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="custom-skills-search"
+                value={searchQuery}
+                onChange={(event) => {
+                  setHasInteractedWithSearch(true);
+                  setSearchQuery(event.currentTarget.value);
+                }}
+                placeholder="Search by skill name or source"
+                className="pl-9"
+              />
+              {searchResultsQuery.isFetching && canRunSearchQuery ? (
+                <Spinner className="absolute right-3 top-1/2 -translate-y-1/2" />
+              ) : (
+                searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setDebouncedSearchQuery('');
+                      queryClient.removeQueries({
+                        queryKey: trpc.customSkills.search.queryKey(),
+                      });
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
+                    aria-label="Clear search"
+                  >
+                    <X className="size-4" />
+                  </button>
+                )
+              )}
+            </div>
+          </div>
+
+          {canRunSearchQuery && searchResultsQuery.isError ? (
+            <p className="text-sm text-destructive">
+              {searchResultsQuery.error.message}
+            </p>
+          ) : null}
+
+          {canRunSearchQuery && searchResultsQuery.data ? (
+            searchResults.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No skills found for this search.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {searchResults.map((result) => {
+                  const installedSkill = installedSkillById.get(result.skillId);
+                  const sourceAllEnvironmentIds =
+                    allSelectionEnvironmentIdsBySource.get(result.source) ?? [];
+                  const explicitEnvironmentIds =
+                    installedSkill?.environments.map(
+                      (environment) => environment.id,
+                    ) ?? [];
+                  const editableEnvironmentIds = environments
+                    .map((environment) => environment.id)
+                    .filter(
+                      (environmentId) =>
+                        !sourceAllEnvironmentIds.includes(environmentId),
+                    );
+                  const isCoveredByAllSelection =
+                    sourceAllEnvironmentIds.length > 0 &&
+                    editableEnvironmentIds.length === 0;
+                  const isInstalled =
+                    installedSkillIdSet.has(result.skillId) ||
+                    isCoveredByAllSelection;
+                  const canInstall =
+                    !isInstalled && editableEnvironmentIds.length > 0;
+                  const selectedEnvironmentIds = installedSkill
+                    ? Array.from(
+                        new Set([
+                          ...explicitEnvironmentIds,
+                          ...sourceAllEnvironmentIds,
+                        ]),
+                      )
+                    : sourceAllEnvironmentIds;
+
+                  return (
+                    <SkillCard
+                      key={result.skillId}
+                      title={formatSkillTitle(result)}
+                      byline={formatSkillByline({
+                        kind: result.kind,
+                        source: result.source,
+                        deploymentName,
+                      })}
+                      description={result.description}
+                      installLabel={result.installsLabel}
+                      url={result.url}
+                      actions={
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={!canInstall}
+                          onClick={() =>
+                            openAvailabilityEditor({
+                              skillId: result.skillId,
+                              source: result.source,
+                              name: result.parsed.fullName,
+                              isAllSelection: result.isAllSelection,
+                              selectedEnvironmentIds,
+                              immutableEnvironmentIds: sourceAllEnvironmentIds,
+                            })
+                          }
+                        >
+                          {isInstalled || !canInstall ? (
+                            <Check />
+                          ) : (
+                            <ArrowUpFromLine />
+                          )}
+                          {isInstalled
+                            ? 'Installed'
+                            : canInstall
+                              ? 'Install'
+                              : 'Available'}
+                        </Button>
+                      }
+                    />
+                  );
+                })}
+              </div>
+            )
+          ) : null}
+        </section>
+
+        <section aria-labelledby="manual-skills" className="-mt-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => openManualEditor()}
+          >
+            <PencilRuler />
+            Add an environment-only skill
+          </Button>
+        </section>
+      </div>
+    </details>
   );
 }
