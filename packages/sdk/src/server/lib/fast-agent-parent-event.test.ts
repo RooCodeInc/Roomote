@@ -454,7 +454,6 @@ describe('deliverFastAgentParentEvent', () => {
         images: ['data:image/png;base64,aGVsbG8='],
         userId: 'user-2',
         currentMessageId: '100.003',
-        currentDurableHumanFollowUpEventId: '100.003',
         senderDisplayName: 'Matt',
         senderExternalId: 'U123',
         turnSource: 'human',
