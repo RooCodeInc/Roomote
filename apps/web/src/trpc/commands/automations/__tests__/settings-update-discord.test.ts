@@ -6,11 +6,15 @@ import {
   discordInstallations,
   eq,
   getBackgroundAgentSettingsForDeployment,
+  inArray,
   slackInstallations,
   upsertAutomation,
   users,
 } from '@roomote/db/server';
-import type { BackgroundAutomationKey } from '@roomote/types';
+import {
+  USER_FACING_AUTOMATION_KEYS,
+  type BackgroundAutomationKey,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -205,7 +209,10 @@ async function getAutomationTargets(key: BackgroundAutomationKey) {
 describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   beforeEach(async () => {
     mockCaptureActivationAutomationChanged.mockClear();
-    await db.delete(automations);
+    // Internal automation rows are referenced by other suites' task fixtures.
+    await db
+      .delete(automations)
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
@@ -1213,7 +1220,10 @@ async function getAutomationTargetsWithMetadata(key: BackgroundAutomationKey) {
 
 describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () => {
   beforeEach(async () => {
-    await db.delete(automations);
+    // Internal automation rows are referenced by other suites' task fixtures.
+    await db
+      .delete(automations)
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);

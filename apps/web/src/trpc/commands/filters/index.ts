@@ -31,14 +31,19 @@ import {
 import { formatRepositoryName } from '@/lib';
 import { getTaskSurfaceLabel } from '@/lib/task-surface-label';
 import { getCreatorFilterCondition } from '@/lib/server/tasks';
+import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 type FilterOption = { value: string; label: string; subLabel?: string };
 
 const getTimePeriodCutoff = (timePeriod: number): number =>
   Math.floor(Date.now() / 1000) - timePeriod * 24 * 60 * 60;
 
-function getVisibleTaskHistoryConditions() {
-  return [eq(tasks.visibility, 'visible'), isNull(tasks.deletedAt)];
+function getVisibleTaskHistoryConditions(auth: UserAuthSuccess) {
+  return [
+    eq(tasks.visibility, 'visible'),
+    isNull(tasks.deletedAt),
+    customAutomationTaskAccess(auth),
+  ];
 }
 
 function getSurfaceSubLabel(surface: TaskSurface | null): string | undefined {
@@ -60,7 +65,7 @@ export async function getUsersOnlyForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const whereConditions = [...getVisibleTaskHistoryConditions()];
+  const whereConditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.repositoryName) {
     whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
@@ -157,7 +162,7 @@ export async function getRepositoriesForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const conditions = [...getVisibleTaskHistoryConditions()];
+  const conditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.userId) {
     conditions.push(getCreatorFilterCondition(input.userId));
@@ -212,7 +217,7 @@ export async function getPullRequestsForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const whereConditions = [...getVisibleTaskHistoryConditions()];
+  const whereConditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.repositoryName) {
     whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
@@ -289,7 +294,7 @@ export async function getModelsForFilterCommand(
   },
 ): Promise<FilterOption[]> {
   void auth;
-  const conditions = [...getVisibleTaskHistoryConditions()];
+  const conditions = [...getVisibleTaskHistoryConditions(auth)];
 
   if (input.repositoryName) {
     if (input.repositoryName.startsWith('env:')) {

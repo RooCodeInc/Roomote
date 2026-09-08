@@ -14,7 +14,6 @@ export {
   ArrowRight,
   ArrowRightIcon,
   ArrowRightToLine,
-  ArrowUpFromLine,
   ArrowUpRightIcon,
   AtSignIcon,
   BookOpenText,

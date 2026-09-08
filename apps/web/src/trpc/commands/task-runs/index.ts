@@ -18,6 +18,7 @@ import {
 import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
+import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
 import { sendSandboxPromptCommand } from '../sandbox-session';
 import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
 
@@ -93,6 +94,7 @@ export async function cancelTaskRunCommand(
   input: { taskId: string; runId?: number },
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
+    await requireTaskAccess(auth, input.taskId);
     const taskFilter = eq(taskRuns.taskId, input.taskId);
 
     const job =

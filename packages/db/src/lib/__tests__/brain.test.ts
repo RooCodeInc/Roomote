@@ -26,6 +26,7 @@ import {
   settleBrainMemoryEvent,
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
+  requeueBrainMemoryEventsForTasks,
   resetBrainIngestionState,
   canonicalizeBrainCollectorItemSlugs,
   deleteBrainCollectorItems,
@@ -601,6 +602,87 @@ describe('saveBrainAgentSummary', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]?.agentSummary).toBe('written before finish');
+  });
+});
+
+describe('requeueBrainMemoryEventsForTasks', () => {
+  it('hands settled memories back with a fresh budget and a bumped revision', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
+    await settleBrainMemoryEvent(db, claimed!.id, claimed!.revision, 'done');
+
+    const touched = await requeueBrainMemoryEventsForTasks(db, [run.taskId]);
+
+    const [event] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, run.id));
+
+    expect(touched).toBe(1);
+    expect(event?.status).toBe('pending');
+    expect(event?.attempts).toBe(0);
+    expect(event?.revision).toBe(claimed!.revision + 1);
+  });
+
+  it('creates the row for a completed run that never had one', async () => {
+    const run = await makeCompletedRun();
+
+    const touched = await requeueBrainMemoryEventsForTasks(db, [run.taskId]);
+
+    const events = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, run.id));
+
+    expect(touched).toBe(1);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.status).toBe('pending');
+  });
+
+  it('leaves a claimed row with its single writer and fences its completion', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    const claimed = (await claimPendingBrainMemoryEvents(db, 10)).find(
+      (candidate) => candidate.runId === run.id,
+    );
+
+    await requeueBrainMemoryEventsForTasks(db, [run.taskId]);
+
+    const [held] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.id, claimed!.id));
+    expect(held!.status).toBe('processing');
+    expect(held!.revision).toBe(claimed!.revision + 1);
+
+    const result = await settleBrainMemoryEvent(
+      db,
+      claimed!.id,
+      claimed!.revision,
+      'done',
+    );
+    expect(result).toBe('superseded');
+  });
+
+  it('ignores runs that did not complete and unknown tasks', async () => {
+    const task = await taskFactory.create({ state: 'active' });
+    createdTaskIds.push(task.id);
+    await db.insert(taskRuns).values({
+      taskId: task.id,
+      kind: 'fresh',
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'test/repo',
+        description: 'running fixture',
+      } as CreateTaskRun['payload'],
+      status: RunStatus.Running,
+    });
+
+    expect(
+      await requeueBrainMemoryEventsForTasks(db, [task.id, 'no-such-task']),
+    ).toBe(0);
+    expect(await requeueBrainMemoryEventsForTasks(db, [])).toBe(0);
   });
 });
 

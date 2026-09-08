@@ -22,7 +22,6 @@ export function PrReviewActionOffer({
   offer,
   onAction,
   className,
-  showQuestion = false,
   testId = 'pr-review-action-offer',
 }: {
   offer: PrReviewActionOfferData;
@@ -30,7 +29,6 @@ export function PrReviewActionOffer({
     choice: PrReviewActionChoice,
   ) => Promise<PrReviewActionOfferStatus>;
   className?: string;
-  showQuestion?: boolean;
   testId?: string;
 }) {
   const [status, setStatus] = useState(offer.status);
@@ -52,9 +50,8 @@ export function PrReviewActionOffer({
 
   return (
     <div className={cn(className)} data-testid={testId}>
-      {showQuestion ? <p className="mb-2 text-sm">{offer.question}</p> : null}
       {status === 'pending' ? (
-        <div className="flex flex-wrap gap-2" aria-label={offer.question}>
+        <div className="flex flex-wrap gap-2" aria-label="PR review actions">
           <Button
             size="sm"
             disabled={isSubmitting}

@@ -236,8 +236,11 @@ Fast can read a bounded history from the current Slack channel, discover other
 channels in the same workspace, and post standalone updates to channels where
 the Roomote app is authorized. Reactions remain scoped to the current inbound
 message. Fast can also use MCP servers and user-scoped integrations that you are
-allowed to access and delegate repository work to Roomote tasks. Deployment
-admins can manage custom automations through Fast. Fast does not read other
+allowed to access and delegate repository work to Roomote tasks. Members can
+create and manage their own [custom automations](/automations#custom-automations)
+through Fast; deployment admins can manage all custom automations, including
+those without a creator. Built-in automations and deployment settings remain
+admin-only. Fast does not read other
 channels implicitly or inspect repository contents without delegating the work
 to a task. When the request spans every repository, Fast can delegate it to the
 deployment's all-repositories environment.

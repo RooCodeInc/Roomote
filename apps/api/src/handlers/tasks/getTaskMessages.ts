@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { z } from 'zod';
 
 import {
   db,
@@ -8,6 +9,7 @@ import {
   and,
   asc,
   desc,
+  fastAgentConversations,
 } from '@roomote/db/server';
 import {
   getTextFromContentBlocks,
@@ -19,6 +21,7 @@ import {
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
+import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 import { visibleTaskHistoryCondition } from './helpers';
 import { getFastSessionMessagesForUser } from './fastSessionCommunication';
 import { logHandlerError } from '../utils';
@@ -71,12 +74,29 @@ export async function getTaskMessages(
     const [task] = await db
       .select({ id: tasks.id })
       .from(tasks)
-      .where(and(eq(tasks.id, taskId), visibleTaskHistoryCondition))
+      .where(
+        and(
+          eq(tasks.id, taskId),
+          visibleTaskHistoryCondition,
+          customAutomationHistoryAccess(c.get('mcpAuth'), 'task'),
+        ),
+      )
       .limit(1);
 
     if (!task) {
       const userId = c.get('mcpAuth').userId;
-      if (userId) {
+      if (userId && z.string().uuid().safeParse(taskId).success) {
+        const [conversation] = await db
+          .select({ id: fastAgentConversations.id })
+          .from(fastAgentConversations)
+          .where(
+            and(
+              eq(fastAgentConversations.id, taskId),
+              customAutomationHistoryAccess(c.get('mcpAuth'), 'fast'),
+            ),
+          )
+          .limit(1);
+        if (!conversation) return c.json({ error: 'Task not found' }, 404);
         const messages = await getFastSessionMessagesForUser({
           sessionId: taskId,
           userId,

@@ -119,6 +119,7 @@ import {
 } from './fast-agent-reply-stream';
 import { createFastAgentSurfaceReplyStreamer } from './fast-agent-surface-reply-stream';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
+import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
   findFastAgentUnresolvedRequest,
@@ -3133,7 +3134,6 @@ export async function answerFastAgentQuestion({
       automationReport,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
-      isCurrentUserAdmin: currentUser.isAdmin,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
@@ -4559,6 +4559,7 @@ export async function answerFastAgentQuestion({
               (environment) => environment.id,
             ),
           }),
+          new RemoteFastAgentInstanceSkillSource(userId),
         );
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,

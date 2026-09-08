@@ -91,6 +91,44 @@ describe('buildFastAgentSystemPrompt', () => {
       'when external inspection, editing, execution, or validation is required',
     );
   });
+
+  it('supports explicit instance invocation and member creation without environments', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(prompt).toContain(
+      'packaged > instance > legacy Settings > repository',
+    );
+    expect(prompt).toContain(
+      'load the instance match without asking for an environment',
+    );
+    expect(prompt).toContain('Instance skills have no `environmentIds`');
+    expect(prompt).toContain(
+      'select an environment only if its work requires a coding task',
+    );
+    expect(prompt).toContain('supplemental guidance, not packaged routers');
+    expect(prompt).toContain('cannot replace packaged first-hop routing');
+    const creationGuidance = prompt
+      .split('- Use `roomote_create_custom_skill`')[1]!
+      .split('\n')[0]!;
+    expect(creationGuidance).toContain('only when the user explicitly asks');
+    expect(creationGuidance).toContain('Any active deployment member');
+    expect(creationGuidance).toContain(
+      'do not supply environmentIds or ask for environment selection',
+    );
+    expect(creationGuidance).toContain(
+      'including when no environments are configured',
+    );
+    expect(creationGuidance).toContain('only after persistence succeeds');
+    expect(creationGuidance).toContain('exact returned `instance:<uuid>` ID');
+    expect(creationGuidance).toContain(
+      'Advisor and judge subagents cannot create skills',
+    );
+    expect(creationGuidance).not.toContain('admin-only');
+    expect(creationGuidance).not.toContain('enabled environments');
+  });
+
   it('bounds evidence-driven autonomy without weakening investigation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
     expect(prompt).toContain(
@@ -162,10 +200,9 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('guides admins through explicit recurring work and offers automation only when enabled', () => {
+  it('guides every member through recurring work and offers automation when enabled', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
     });
 
     expect(prompt).toContain('## Recurring Work and Automations');
@@ -176,31 +213,28 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('ask one explicit confirmation question');
     expect(prompt).toContain('By the way — if you want this weekly');
     expect(prompt).toContain('when in doubt, do not offer');
+    expect(prompt).toContain('When a user explicitly asks for recurring work');
+    expect(prompt).not.toContain('do not attempt creation');
+    expect(prompt).not.toContain('provide a copy-pasteable draft');
   });
 
-  it('suppresses implicit offers for non-admins, automation events, and the deployment kill switch', () => {
-    const nonAdminPrompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-    });
+  it('suppresses implicit offers for automation events and the deployment kill switch', () => {
     const eventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
       turnSource: 'platform_event',
       platformEventKind: 'automation',
     });
     const disabledPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
       implicitAutomationOffersEnabled: false,
     });
 
-    for (const prompt of [nonAdminPrompt, eventPrompt, disabledPrompt]) {
+    for (const prompt of [eventPrompt, disabledPrompt]) {
       expect(prompt).not.toContain('By the way — if you want this weekly');
       expect(prompt).toContain(
         'Do not proactively offer to save work as an automation on this turn',
       );
     }
-    expect(nonAdminPrompt).toContain('provide a copy-pasteable draft');
   });
 
   it('tells human turns how to handle an unresolved earlier request', () => {
@@ -386,7 +420,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('settings-defined playbook');
     expect(prompt).toContain('repository-defined method');
     expect(prompt).toContain(
-      'without arguments for the complete packaged and Settings inventory',
+      'without arguments for the complete packaged, instance, and authorized legacy Settings inventory',
     );
     expect(prompt).toContain('this never inspects repositories');
     expect(prompt).toContain(
@@ -399,7 +433,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Dollar-prefixed prose without this marker is not an explicit skill invocation',
     );
     expect(prompt).toContain(
-      'An unscoped exact `name` lookup searches packaged and settings-defined skills',
+      'An unscoped exact `name` lookup searches packaged, instance, and authorized legacy Settings skills',
     );
     expect(prompt).toContain(
       'whenever a result includes `nextSourceOffset`, call `list_skills` again',
@@ -430,9 +464,30 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
     expect(prompt).toContain('manage_custom_automations');
+    expect(prompt).toContain('roomote_create_custom_skill');
+    expect(prompt).toContain('user explicitly asks to save');
+    expect(prompt).toContain(
+      'do not supply environmentIds or ask for environment selection',
+    );
+    expect(prompt).toContain('exact returned `instance:<uuid>` ID');
     expect(prompt).not.toContain('integration_call');
     expect(prompt).toContain('roomote_manage_tasks');
     expect(prompt).toContain("current user's deployment authorization");
+    expect(prompt).toContain(
+      'members can create and manage their own custom automations',
+    );
+    expect(prompt).toContain(
+      'admins can manage all custom automations, including those without a creator',
+    );
+    expect(prompt).toContain(
+      "do not refuse a member's own-automation request merely because they are not an admin",
+    );
+    expect(prompt).toContain(
+      'Built-in automations and deployment settings remain admin-only',
+    );
+    expect(prompt).toContain(
+      'This tool is unavailable to advisor and judge subagents',
+    );
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
@@ -1050,6 +1105,24 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Post its supplied information, then stop');
     expect(prompt).not.toContain(
       'The normal tools remain available. Use them only when the event and conversation context justify the action',
+    );
+  });
+
+  it('summarizes PR feedback without a closing question or offer', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventHandling: 'present_only',
+    });
+
+    expect(prompt).toContain(
+      'Summarize the findings only in one closeout, then stop. Do not ask a closing question, repeat or paraphrase a supplied question, or offer to resolve the issues in your message.',
+    );
+    expect(prompt).toContain(
+      'The conversation adapter supplies any pending user-approvable actions.',
+    );
+    expect(prompt).toContain(
+      'Do not launch a fix or call "send_task_message" until the user explicitly responds or clicks an action.',
     );
   });
 
