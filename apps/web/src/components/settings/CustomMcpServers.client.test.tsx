@@ -24,10 +24,18 @@ type ListedServer = {
   enabled: boolean;
 };
 
-const { state, createMock, deleteMock, setEnabledMock } = vi.hoisted(() => ({
+const {
+  state,
+  createMock,
+  deleteMock,
+  setEnabledMock,
+  connectMock,
+  listToolsMock,
+} = vi.hoisted(() => ({
   state: {
     availability: { enabled: true },
     servers: [] as ListedServer[],
+    toolsError: false,
     tools: [] as {
       name: string;
       description: string | null;
@@ -37,6 +45,8 @@ const { state, createMock, deleteMock, setEnabledMock } = vi.hoisted(() => ({
   createMock: vi.fn(async () => ({ id: 'new-server' })),
   deleteMock: vi.fn(async () => ({ deleted: true })),
   setEnabledMock: vi.fn(async () => ({ enabled: false })),
+  connectMock: vi.fn(async () => '/api/mcp-oauth/initiate/conn-1'),
+  listToolsMock: vi.fn(),
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -63,7 +73,11 @@ vi.mock('@/trpc/client', () => ({
           options: Record<string, unknown> = {},
         ) => ({
           queryKey: ['customMcpServers', 'listTools', input.id],
-          queryFn: async () => ({ tools: state.tools }),
+          queryFn: async () => {
+            listToolsMock();
+            if (state.toolsError) throw new Error('Could not list tools');
+            return { tools: state.tools };
+          },
           ...options,
         }),
       },
@@ -99,7 +113,7 @@ vi.mock('@/trpc/client', () => ({
       },
       connect: {
         mutationOptions: (options = {}) => ({
-          mutationFn: vi.fn(async () => '/api/mcp-oauth/initiate/conn-1'),
+          mutationFn: connectMock,
           ...options,
         }),
       },
@@ -140,8 +154,17 @@ function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
  * Renders what the hook produces: custom servers become plain integration
  * items, so the assertions below mirror what the Integrations grids show.
  */
-function Harness() {
-  const { isEnabled, items, openAddDialog, dialogs } = useCustomMcpServers();
+function Harness({
+  isAdmin = true,
+  connectionName = null,
+}: {
+  isAdmin?: boolean;
+  connectionName?: string | null;
+}) {
+  const { isEnabled, items, openAddDialog, dialogs } = useCustomMcpServers({
+    isAdmin,
+    connectionName,
+  });
 
   return (
     <div>
@@ -161,6 +184,11 @@ function Harness() {
             <span data-testid="configured">{String(item.configured)}</span>
             <span data-testid="item-enabled">{String(item.enabled)}</span>
             <span data-testid="item-connected">{String(item.connected)}</span>
+            {item.utilityAction && (
+              <button onClick={item.utilityAction.onAction}>
+                Manage tools
+              </button>
+            )}
           </li>
         ))}
       </ul>
@@ -169,14 +197,16 @@ function Harness() {
   );
 }
 
-function renderHarness() {
+function renderHarness(
+  props: { isAdmin?: boolean; connectionName?: string | null } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <Harness />
+      <Harness {...props} />
     </QueryClientProvider>,
   );
 }
@@ -191,6 +221,8 @@ describe('useCustomMcpServers', () => {
     vi.clearAllMocks();
     state.availability = { enabled: true };
     state.servers = [];
+    state.tools = [];
+    state.toolsError = false;
   });
 
   it('produces no items when there are no servers', async () => {
@@ -244,7 +276,9 @@ describe('useCustomMcpServers', () => {
     renderHarness();
 
     expect(await screen.findByTestId('secondary')).toHaveTextContent('Connect');
-    expect(screen.getByTestId('status')).toHaveTextContent('Not connected yet');
+    expect(screen.getByTestId('status')).toHaveTextContent(
+      'Saved. Authorization pending.',
+    );
     expect(screen.getByTestId('item-connected')).toHaveTextContent('false');
   });
 
@@ -371,5 +405,143 @@ describe('useCustomMcpServers', () => {
     expect(
       screen.getByText('The pasted text is not valid JSON.'),
     ).toBeInTheDocument();
+  });
+
+  it('opens a remote-only connection form once with a sanitized name and no automatic mutation', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/settings/integrations?connect=custom&name=Acme%20Tools&url=https://evil.example&token=secret&transport=stdio',
+    );
+    renderHarness({ connectionName: 'Acme Tools' });
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
+      'Connect integration',
+    );
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toHaveValue(
+      'acme-tools',
+    );
+    expect(
+      screen.getByPlaceholderText('https://mcp.example.com/mcp'),
+    ).toHaveValue('');
+    expect(screen.queryByText('Import from JSON')).not.toBeInTheDocument();
+    expect(screen.queryByText('Local (stdio)')).not.toBeInTheDocument();
+    expect(window.location.search).toBe('');
+    expect(createMock).not.toHaveBeenCalled();
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(listToolsMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByTestId('open-add'));
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
+      'Add custom MCP server',
+    );
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toHaveValue('');
+    expect(screen.getByText('Import from JSON')).toBeInTheDocument();
+  });
+
+  it.each([
+    'https://user:secret@evil.example',
+    '<script>alert(1)</script>',
+    'a'.repeat(101),
+    'api_key=secret',
+    'Acme\nTools',
+  ])('does not prefill unsafe name %s', async (connectionName) => {
+    renderHarness({ connectionName });
+    await screen.findByRole('dialog');
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toHaveValue('');
+    expect(
+      screen.getByPlaceholderText('https://mcp.example.com/mcp'),
+    ).toHaveValue('');
+  });
+
+  it.each([
+    { isAdmin: false, enabled: true },
+    { isAdmin: true, enabled: false },
+  ])(
+    'does not open for unauthorized or disabled entry: %j',
+    async ({ isAdmin, enabled }) => {
+      state.availability = { enabled };
+      renderHarness({ isAdmin, connectionName: 'acme' });
+      await waitFor(() =>
+        expect(screen.getByTestId('enabled')).toHaveTextContent(
+          String(enabled),
+        ),
+      );
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(createMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('requires the human URL and saves through the existing remote mutation', async () => {
+    renderHarness({ connectionName: 'Acme' });
+    await screen.findByRole('dialog');
+    fireEvent.change(
+      screen.getByPlaceholderText('https://mcp.example.com/mcp'),
+      { target: { value: 'https://acme.example/mcp' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save integration' }));
+    await waitFor(() =>
+      expect(createMock).toHaveBeenCalledWith(
+        {
+          name: 'acme',
+          transport: 'remote',
+          url: 'https://acme.example/mcp',
+          authType: 'none',
+        },
+        expect.anything(),
+      ),
+    );
+  });
+
+  it('does not label a saved remote integration connected or verified', async () => {
+    state.servers = [buildServer()];
+    renderHarness();
+    expect(await screen.findByTestId('item-connected')).toHaveTextContent(
+      'false',
+    );
+    expect(screen.getByTestId('status')).toHaveTextContent(
+      'Saved. Use Manage tools to verify',
+    );
+  });
+
+  it('only verifies tools after an explicit successful tool-list check', async () => {
+    state.servers = [buildServer()];
+    state.tools = [{ name: 'search', description: null, enabled: true }];
+    renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage tools' }),
+    );
+    expect(
+      await screen.findByText(
+        'Tools verified: the integration returned its tool list.',
+      ),
+    ).toBeInTheDocument();
+    expect(listToolsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not claim verification for an empty list', async () => {
+    state.servers = [buildServer()];
+    renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage tools' }),
+    );
+    expect(
+      await screen.findByText('The integration returned no tools.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Tools verified:/)).not.toBeInTheDocument();
+  });
+
+  it('disables tool-policy saving after a failed check', async () => {
+    state.servers = [buildServer()];
+    state.toolsError = true;
+    renderHarness();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Manage tools' }),
+    );
+    expect(await screen.findByText('Could not list tools')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.queryByText(/Tools verified:/)).not.toBeInTheDocument();
   });
 });

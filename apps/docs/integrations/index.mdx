@@ -21,6 +21,34 @@ connections remain stored but inactive, so unsetting the value restores
 them. This policy does not affect the separate provider categories above or
 MCP servers defined on an environment.
 
+## Ask Roomote to connect
+
+Say **"Connect to X"** (or name another service) in a Fast Session or task.
+You do not need to know MCP terminology. Roomote prepares a secure Settings
+link, preferring a built-in integration when one is available. Preparing the
+link does not save, authorize, or verify a connection.
+
+Open the link to review and consent to setup. Existing admin permissions and
+personal account-linking requirements still apply. Enter credentials only in
+Settings, never in chat. Roomote does not collect credentials through tool
+arguments or bypass deployment restrictions.
+
+For a service outside the built-in catalog, the link opens
+[custom setup](/integrations/custom-mcp-servers). An admin needs an existing
+compatible remote MCP service URL from the provider, entered in secure
+Settings. An ordinary API URL is not enough: this flow does not invent
+endpoints, build API adapters, or host a server for you.
+
+After completing setup, tell Roomote to check the integration's available
+tools. A saved configuration or pending authorization is not a verified
+connection. Roomote checks permitted tools and, when needed, a safe read
+operation before reporting what it can access. Running tasks may need a new
+task to pick up a newly added integration. Fast reloads its catalog on later
+turns, but cached results can delay visibility; a later turn or new Session
+may be needed, and neither guarantees an immediate refresh. Missing tools
+can also mean authentication, permissions, or deployment policy still needs
+attention.
+
 ## Connection patterns
 
 You will usually see one of these setup models:

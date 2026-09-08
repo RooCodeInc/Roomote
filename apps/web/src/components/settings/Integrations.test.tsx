@@ -12,6 +12,10 @@ import { toast } from 'sonner';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 
 const state = vi.hoisted(() => ({
+  customConnectionOptions: null as {
+    isAdmin: boolean;
+    connectionName: string | null;
+  } | null,
   integrationsEnabled: true,
   deploymentEnablements: [] as Array<{ mcpId: string; enabled: boolean }>,
   oauthReadiness: [{ mcpId: 'linear', status: 'ready' as const }] as Array<{
@@ -336,12 +340,18 @@ vi.mock('@/trpc/client', () => ({
 // Custom MCP servers are covered by their own suite; this one exercises the
 // catalog cards, so stub the hook that feeds custom cards into the grids.
 vi.mock('./CustomMcpServers', () => ({
-  useCustomMcpServers: () => ({
-    isEnabled: true,
-    items: [],
-    openAddDialog: vi.fn(),
-    dialogs: null,
-  }),
+  useCustomMcpServers: (options: {
+    isAdmin: boolean;
+    connectionName: string | null;
+  }) => {
+    state.customConnectionOptions = options;
+    return {
+      isEnabled: true,
+      items: [],
+      openAddDialog: vi.fn(),
+      dialogs: null,
+    };
+  },
 }));
 
 vi.mock('@/components/system', () => ({
@@ -1116,6 +1126,25 @@ describe('Integrations settings', () => {
         .getByRole('heading', { name: 'Sentry' })
         .closest('[data-highlighted="true"]'),
     ).not.toBeNull();
+  });
+
+  it('passes only the custom name and admin permission to the existing form', () => {
+    state.searchParams =
+      'connect=custom&name=Acme+Tools&url=https://evil.example&token=secret&transport=stdio&authType=oauth';
+    render(<Integrations />);
+    expect(state.customConnectionOptions).toEqual({
+      isAdmin: true,
+      connectionName: 'Acme Tools',
+    });
+  });
+
+  it('does not open custom setup for a native highlight or a name alone', () => {
+    state.searchParams = 'highlight=pylon&name=Acme';
+    render(<Integrations />);
+    expect(state.customConnectionOptions).toEqual({
+      isAdmin: true,
+      connectionName: null,
+    });
   });
 
   it('shows the confirmation dialog when a highlighted integration is not enabled', () => {

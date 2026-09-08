@@ -21,6 +21,7 @@ import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
 import { buildTherapistModeInstructions } from '../therapist-mode';
+import { INTEGRATION_CONNECTION_GUIDANCE } from '../integration-connection-guidance';
 
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
@@ -349,6 +350,7 @@ ${reactionGuidance}
 - An offer is not authorization: create no wakeup until the user accepts. Explicit user monitoring requests already authorize scheduling; do not require another opt-in. Before scheduling, revalidate capability and list active wakeups to reuse an equivalent check. Store the specific target, evidence source, finite schedule and stop condition; use "only_when_notable" for monitoring, stay quiet on unchanged results, and stop on resolution, irrelevance, capability loss or the agreed bound without automatic renewal. Missing evidence is not success.
 - Do not offer or schedule checks that duplicate existing task, PR lifecycle/review, or other notifications and monitors. Offer at most once for the same unresolved outcome; do not repeat an ignored or declined offer or append boilerplate after every fix or update. Do not make proactive offers on automation or scheduled-wakeup turns. Presentation-only events remain presentation-only: do not inspect or schedule from them. This is conversation-scoped follow-up, not an offer to save work as a deployment automation.
 
+${INTEGRATION_CONNECTION_GUIDANCE}
 ## Orchestration Policy
 - User-supplied corrections, status updates, acknowledgements, and opinions are conversation state, not requests for external verification. Do not launch a task or call an integration merely to re-check user-supplied facts unless the user asks for verification. If the message actually requires repository or workspace inspection, execution, change, or validation, delegate it under the rules below.
 - Use "launch_task" for new independent repository or workspace work when external inspection, editing, execution, or validation is required, regardless of whether the message is phrased as a question, request, or declarative feedback. Existing active tasks do not block a new independent task.

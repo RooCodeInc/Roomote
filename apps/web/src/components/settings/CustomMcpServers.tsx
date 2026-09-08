@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 
@@ -30,6 +30,7 @@ import {
 import { Loading } from '@/components/layout';
 import {
   parseCustomMcpServerJson,
+  sanitizeCustomMcpServerName,
   type CustomMcpJsonImport,
 } from '@/lib/custom-mcp-json-import';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
@@ -248,11 +249,13 @@ function ServerFormDialog({
   onOpenChange,
   editingServer,
   onSaved,
+  connectionName = null,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   editingServer: ListedServer | null;
   onSaved: () => void;
+  connectionName?: string | null;
 }) {
   const trpc = useTRPC();
   const isEdit = Boolean(editingServer);
@@ -262,14 +265,18 @@ function ServerFormDialog({
 
   useEffect(() => {
     if (open) {
-      reset(editingServer ? serverToFormValues(editingServer) : EMPTY_FORM);
+      reset(
+        editingServer
+          ? serverToFormValues(editingServer)
+          : { ...EMPTY_FORM, name: connectionName ?? '' },
+      );
       setError(null);
       setJsonImportOpen(false);
       setJsonText('');
       setImportError(null);
       setImportNotes([]);
     }
-  }, [open, editingServer, reset]);
+  }, [open, editingServer, reset, connectionName]);
 
   const [error, setError] = useState<string | null>(null);
   const [jsonImportOpen, setJsonImportOpen] = useState(false);
@@ -317,18 +324,28 @@ function ServerFormDialog({
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>
-            {isEdit ? 'Edit custom MCP server' : 'Add custom MCP server'}
+            {connectionName !== null
+              ? 'Connect integration'
+              : isEdit
+                ? 'Edit custom MCP server'
+                : 'Add custom MCP server'}
           </DialogTitle>
           <DialogDescription>
-            Custom servers are available to agents in every task. Remote servers
-            are reached through an authenticated Roomote proxy, so credentials
-            stay server-side. Local servers run inside the task sandbox with the
-            same privileges as the agent.
+            {connectionName !== null ? (
+              'Enter the remote integration URL from your provider. Credentials stay server-side. Saving does not authorize OAuth or verify tools; complete those steps separately.'
+            ) : (
+              <>
+                Custom servers are available to agents in every task. Remote
+                servers are reached through an authenticated Roomote proxy, so
+                credentials stay server-side. Local servers run inside the task
+                sandbox with the same privileges as the agent.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="space-y-4">
-          {!isEdit && (
+          {!isEdit && connectionName === null && (
             <div className="space-y-2">
               {jsonImportOpen ? (
                 <>
@@ -411,11 +428,11 @@ function ServerFormDialog({
             />
             <p className="text-xs text-muted-foreground">
               Lowercase letters, digits, dashes, and underscores. Shown to
-              agents as the MCP server name.
+              agents as the integration name.
             </p>
           </div>
 
-          {!isEdit && (
+          {!isEdit && connectionName === null && (
             <div className="space-y-2">
               <Label>Type</Label>
               <RadioGroup
@@ -587,7 +604,15 @@ function ServerFormDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={isSaving}>
-              {isSaving ? <Loading /> : isEdit ? 'Save' : 'Add server'}
+              {isSaving ? (
+                <Loading />
+              ) : connectionName !== null ? (
+                'Save integration'
+              ) : isEdit ? (
+                'Save'
+              ) : (
+                'Add server'
+              )}
             </Button>
           </div>
         </form>
@@ -681,40 +706,47 @@ function CustomToolManagementDialog({
               : 'Failed to load tools.'}
           </p>
         ) : (
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {toolsQuery.data?.tools.map((tool) => (
-              <label
-                key={tool.name}
-                className="flex items-start gap-3 text-sm cursor-pointer"
-              >
-                <Checkbox
-                  checked={!disabledNames.has(tool.name)}
-                  onCheckedChange={(checked) => {
-                    setDisabledNames((current) => {
-                      const next = new Set(current);
+          <>
+            <p className="text-sm text-muted-foreground">
+              {toolsQuery.data?.tools.length
+                ? 'Tools verified: the integration returned its tool list.'
+                : 'The integration returned no tools.'}
+            </p>
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {toolsQuery.data?.tools.map((tool) => (
+                <label
+                  key={tool.name}
+                  className="flex items-start gap-3 text-sm cursor-pointer"
+                >
+                  <Checkbox
+                    checked={!disabledNames.has(tool.name)}
+                    onCheckedChange={(checked) => {
+                      setDisabledNames((current) => {
+                        const next = new Set(current);
 
-                      if (checked === true) {
-                        next.delete(tool.name);
-                      } else {
-                        next.add(tool.name);
-                      }
+                        if (checked === true) {
+                          next.delete(tool.name);
+                        } else {
+                          next.add(tool.name);
+                        }
 
-                      return next;
-                    });
-                  }}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-mono">{tool.name}</span>
-                  {tool.description && (
-                    <span className="block text-xs text-muted-foreground">
-                      {tool.description}
-                    </span>
-                  )}
-                </span>
-              </label>
-            ))}
-          </div>
+                        return next;
+                      });
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-mono">{tool.name}</span>
+                    {tool.description && (
+                      <span className="block text-xs text-muted-foreground">
+                        {tool.description}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </>
         )}
 
         <div className="flex justify-end gap-2">
@@ -728,7 +760,11 @@ function CustomToolManagementDialog({
           <Button
             type="button"
             onClick={save}
-            disabled={setDisabledTools.isPending || toolsQuery.isPending}
+            disabled={
+              setDisabledTools.isPending ||
+              toolsQuery.isPending ||
+              toolsQuery.isError
+            }
           >
             {setDisabledTools.isPending ? <Loading /> : 'Save'}
           </Button>
@@ -745,7 +781,13 @@ function CustomToolManagementDialog({
  * (a "Custom" badge is the only visual difference), so this exposes items
  * plus the dialogs they drive rather than owning a section of its own.
  */
-export function useCustomMcpServers(): {
+export function useCustomMcpServers({
+  isAdmin,
+  connectionName = null,
+}: {
+  isAdmin: boolean;
+  connectionName?: string | null;
+}): {
   isEnabled: boolean;
   items: IntegrationItem[];
   openAddDialog: () => void;
@@ -772,6 +814,27 @@ export function useCustomMcpServers(): {
   const connect = useMutation(trpc.customMcpServers.connect.mutationOptions());
 
   const [formOpen, setFormOpen] = useState(false);
+  const [prefilledName, setPrefilledName] = useState<string | null>(null);
+  const consumedConnection = useRef(false);
+  useEffect(() => {
+    if (
+      connectionName === null ||
+      consumedConnection.current ||
+      !availability.isSuccess
+    )
+      return;
+    consumedConnection.current = true;
+    // Only the display name is accepted from conversational links, never connection details.
+    window.history.replaceState(null, '', '/settings/integrations');
+    if (!isAdmin || availability.data.enabled !== true) return;
+    const name = connectionName.trim();
+    setPrefilledName(
+      /^[a-zA-Z0-9 _-]{1,100}$/.test(name)
+        ? (sanitizeCustomMcpServerName(name) ?? '')
+        : '',
+    );
+    setFormOpen(true);
+  }, [connectionName, isAdmin, availability.isSuccess, availability.data]);
   const [editingServer, setEditingServer] = useState<ListedServer | null>(null);
   const [toolsServer, setToolsServer] = useState<ListedServer | null>(null);
 
@@ -812,7 +875,7 @@ export function useCustomMcpServers(): {
           </Badge>
         ),
         enabled: server.enabled,
-        connected: server.enabled && !needsConnection,
+        connected: server.transport === 'stdio' && server.enabled,
         // Custom servers are always deployment-defined, so a disabled one
         // belongs with "Configured" rather than the catalog's "Available".
         configured: true,
@@ -832,8 +895,10 @@ export function useCustomMcpServers(): {
         status: needsConnection
           ? server.authStatus === 'error'
             ? 'This server needs to be reconnected before agents can use it.'
-            : 'Not connected yet.'
-          : undefined,
+            : 'Saved. Authorization pending.'
+          : server.transport === 'remote'
+            ? 'Saved. Use Manage tools to verify available tools.'
+            : undefined,
         ...(server.transport === 'remote'
           ? {
               utilityAction: {
@@ -862,6 +927,7 @@ export function useCustomMcpServers(): {
               label: 'Edit',
               ariaLabel: `Edit ${server.name}`,
               onAction: () => {
+                setPrefilledName(null);
                 setEditingServer(server);
                 setFormOpen(true);
               },
@@ -893,7 +959,8 @@ export function useCustomMcpServers(): {
   const dialogs = (
     <>
       <ServerFormDialog
-        open={formOpen}
+        open={formOpen && isAdmin && isEnabled}
+        connectionName={prefilledName}
         onOpenChange={setFormOpen}
         editingServer={editingServer}
         onSaved={() => {
@@ -918,6 +985,8 @@ export function useCustomMcpServers(): {
     isEnabled,
     items,
     openAddDialog: () => {
+      if (!isAdmin || !isEnabled) return;
+      setPrefilledName(null);
       setEditingServer(null);
       setFormOpen(true);
     },

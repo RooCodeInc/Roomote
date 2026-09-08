@@ -6,7 +6,24 @@ description: 'Connect MCP servers that are not in the built-in catalog'
 Custom MCP servers let agents use services that Roomote does not ship a
 built-in integration for. Deployment admins configure them under
 **Settings → Integrations → Custom MCP Servers**, and they become available to
-agents in every task.
+agents in newly started tasks. Remote servers are also available in Fast;
+local stdio servers require a task sandbox.
+
+## Start from a conversation
+
+Ask Roomote to **"Connect to [service name]"** for a secure Settings link.
+Roomote prefers a built-in integration; otherwise it opens custom setup with
+the service name. An authorized admin reviews the setup and enters an
+existing compatible remote MCP server URL and any credentials in Settings,
+not in chat. This flow does not create or host a server, build an API adapter,
+or turn an ordinary REST API URL into a compatible connection.
+
+Saving is not verification. Complete any OAuth authorization, then ask Roomote
+to check which permitted tools it can access. Discovery cannot force-refresh
+a running task's attached catalog; start a new task if the server is missing.
+Fast can pick up changes on later turns, but cached tool lists may delay them.
+Neither a saved server nor an authorization still in progress means it is
+ready to use.
 
 Most MCP servers publish a JSON snippet in their docs. The add dialog's
 **Import from JSON** button accepts a pasted `mcpServers` snippet (or a bare

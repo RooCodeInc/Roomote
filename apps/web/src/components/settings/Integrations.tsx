@@ -562,11 +562,11 @@ function AddCustomMcpServerBar({ onAdd }: { onAdd: () => void }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border/70 px-4 py-3">
       <p className="text-sm text-muted-foreground">
-        Not in the catalog? Connect your own MCP server, remote or local.
+        Not in the catalog? Add a custom integration in advanced settings.
       </p>
       <Button type="button" variant="secondary" size="sm" onClick={onAdd}>
         <Plus />
-        Add custom server
+        Connect integration
       </Button>
     </div>
   );
@@ -2285,7 +2285,13 @@ export function Integrations() {
     items: customMcpItems,
     openAddDialog: openCustomMcpDialog,
     dialogs: customMcpDialogs,
-  } = useCustomMcpServers();
+  } = useCustomMcpServers({
+    isAdmin,
+    connectionName:
+      searchParams.get('connect') === 'custom'
+        ? (searchParams.get('name') ?? '')
+        : null,
+  });
 
   const { installed, configured, available } = splitIntegrationItems([
     ...items,
@@ -2913,17 +2919,17 @@ export function Integrations() {
             instance.
           </AlertDescription>
         </Alert>
-        {customMcpEnabled ? (
+        {customMcpEnabled && isAdmin ? (
           <>
             {customMcpDialogs}
             <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
             <IntegrationSection
               id="custom-mcp-servers"
-              title="Custom MCP servers"
+              title="Custom integrations"
               items={customMcpItems}
               emptyState={
                 <p className="text-sm text-muted-foreground">
-                  No custom MCP servers configured yet.
+                  No custom integrations configured yet.
                 </p>
               }
             />
@@ -3178,7 +3184,7 @@ export function Integrations() {
         }}
       />
       {customMcpDialogs}
-      {customMcpEnabled ? (
+      {customMcpEnabled && isAdmin ? (
         <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
       ) : null}
       <IntegrationSection

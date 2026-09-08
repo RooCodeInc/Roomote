@@ -29,6 +29,10 @@ describe('roomote MCP on-demand integration tool registration', () => {
   it('registers the lookup and call tools only when a catalog is attached', async () => {
     const { roomoteMcpServer: withoutCatalog } = await import('../index.js');
     expect(
+      registeredTools(withoutCatalog).prepare_integration_connection
+        ?.annotations?.readOnlyHint,
+    ).toBe(true);
+    expect(
       registeredTools(withoutCatalog).find_integration_tools,
     ).toBeUndefined();
     expect(

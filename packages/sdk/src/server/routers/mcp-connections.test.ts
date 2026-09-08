@@ -1,6 +1,8 @@
 import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const mockEnv = vi.hoisted(() => ({
+  R_PUBLIC_URL: 'https://roomote.example',
+  R_APP_URL: 'http://localhost:3000',
   R_CURATED_INTEGRATIONS_DISABLED: false,
   R_CUSTOM_MCP_DISABLED: false,
   R_GBRAIN_URL: undefined as string | undefined,
@@ -227,6 +229,39 @@ function buildEnabledOnlyRow(mcpId: string) {
     connection: null,
   };
 }
+
+describe('mcpConnectionsRouter.prepareConnection', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns setup links for user and worker callers without looking up credentials', async () => {
+    for (const caller of [createCaller(), createJobCaller()]) {
+      expect(
+        await caller.prepareConnection({ provider: 'Twitter' }),
+      ).toMatchObject({
+        setupUrl: 'https://roomote.example/settings/integrations?highlight=x',
+        status: 'setup_required',
+        validated: false,
+      });
+    }
+    expect(mockSelect).not.toHaveBeenCalled();
+    expect(mockFindConnections).not.toHaveBeenCalled();
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects unauthenticated callers and credential fields', async () => {
+    await expect(
+      mcpConnectionsRouter
+        .createCaller({ auth: null })
+        .prepareConnection({ provider: 'Example' }),
+    ).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(
+      createCaller().prepareConnection({
+        provider: 'Example',
+        token: 'secret',
+      } as never),
+    ).rejects.toMatchObject({ code: 'BAD_REQUEST' });
+  });
+});
 
 describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   beforeEach(() => {

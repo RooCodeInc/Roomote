@@ -23,6 +23,7 @@ import { isRecognizedInitialSkillInvocation } from './skillInvocationRouting';
 import { renderLinkedWorkItemsSection } from './pr-linked-work-items';
 import { buildGitHubMessageInstructions } from '../github-message-instructions';
 import { buildTherapistModeInstructions } from '../therapist-mode';
+import { INTEGRATION_CONNECTION_GUIDANCE } from '../integration-connection-guidance';
 
 const DEFAULT_ATTRIBUTION: ResolvedTaskCommitAuthor = {
   kind: 'roomote',
@@ -462,6 +463,7 @@ ${buildGitHubMessageInstructions()}`
   ${codeReviewSelfReviewCloseoutContext}
   ${reportingContext}
   ${therapistModeInstructions}
+  ${INTEGRATION_CONNECTION_GUIDANCE}
 
   <todo_policy>
     <purpose>The shared todo discipline lives in the global system prompt. This workflow-owned policy adds the seeding, routing, delegation, and delivery-specific todo semantics that the generic prompt cannot infer on its own.</purpose>

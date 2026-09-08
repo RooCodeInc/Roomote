@@ -1,3 +1,4 @@
+export { prepareIntegrationConnection } from './lib/prepare-integration-connection';
 export {
   type AppRouter,
   type AppRouterInput,

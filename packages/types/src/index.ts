@@ -16,6 +16,7 @@ export * from './session-wakeups';
 export * from './fast-agent';
 export * from './fast-agent-tool-catalog';
 export * from './integration-tool-lookup';
+export * from './integration-connection';
 export * from './chatgpt-subscription';
 export * from './github-copilot-subscription';
 export * from './xai-subscription';

@@ -1,4 +1,6 @@
 import { TRPCError } from '@trpc/server';
+import { prepareIntegrationConnectionInputSchema } from '@roomote/types';
+import { prepareIntegrationConnection } from '../lib/prepare-integration-connection';
 import { z } from 'zod';
 import { ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
@@ -159,6 +161,9 @@ export async function resolveUserMcpServerConfigs(options: {
 }
 
 export const mcpConnectionsRouter = router({
+  prepareConnection: authenticatedProcedure
+    .input(prepareIntegrationConnectionInputSchema)
+    .query(({ input }) => prepareIntegrationConnection(input)),
   isOrgEnabled: authenticatedProcedure
     .input(
       z.object({

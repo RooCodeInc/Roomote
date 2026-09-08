@@ -52,6 +52,7 @@ import { requireCommunicationLookupTaskRun } from './communication-lookup-run-co
 import type { McpAuth } from './middleware';
 import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
+import { registerRoomoteIntegrationConnectionTool } from './roomote-integration-connection-tool';
 import { registerRoomoteCustomAutomationsTool } from './roomote-custom-automations-tool';
 import { registerRoomoteCommunicationTools } from './roomote-communication-tools';
 
@@ -409,6 +410,7 @@ function createRoomoteMcpServer(
     }
   }
   registerRoomoteCustomAutomationsTool(server, toolAuth);
+  registerRoomoteIntegrationConnectionTool(server);
 
   server.registerTool(
     'get_about_me',

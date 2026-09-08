@@ -9,6 +9,7 @@ import {
   ALL_REPOSITORIES,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
+  PREPARE_INTEGRATION_CONNECTION_TOOL,
   CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
@@ -91,6 +92,7 @@ import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
+import { handlePrepareIntegrationConnection } from './prepare-integration-connection.js';
 import {
   handleGetSessionMessages,
   handleGetSessionSummary,
@@ -111,6 +113,16 @@ export const roomoteMcpServer = new NullableOptionalsMcpServer({
 });
 
 let hasSubmittedAutomationSlackSummary = false;
+roomoteMcpServer.registerTool(
+  PREPARE_INTEGRATION_CONNECTION_TOOL.name,
+  PREPARE_INTEGRATION_CONNECTION_TOOL,
+  async (input): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config)
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    return handlePrepareIntegrationConnection(input, config);
+  },
+);
 const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);
 const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
   message: 'Value must be non-empty.',
