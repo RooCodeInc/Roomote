@@ -111,6 +111,8 @@ mcp.use('/environments/*', mcpAuthMiddleware);
 mcp.use('/environments', mcpAuthMiddleware);
 mcp.use('/custom-automations/*', mcpAuthMiddleware);
 mcp.use('/custom-automations', mcpAuthMiddleware);
+mcp.use('/custom-skills/*', mcpAuthMiddleware);
+mcp.use('/custom-skills', mcpAuthMiddleware);
 
 mcp.route('/slack', slackMcp);
 mcp.route('/communication', communicationMcp);
