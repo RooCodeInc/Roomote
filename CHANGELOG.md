@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.4.1 (2026-09-08)
+
+Roomote 1.4.1 restores integration lookups that failed with GPT-5.x models.
+
+### Highlights
+
+- Use connected services such as Sentry, Linear, and Notion again without changing their connection settings.
+
+### Patch changes
+
+- On-demand integration lookups work again with GPT-5.x models in sandbox tasks and Fast, fixing failed requests to services such as Sentry, Linear, and Notion without changing their connection settings.
+
 ## 1.4.0 (2026-09-08)
 
 Roomote 1.4 brings reminders, clearer shared Sessions, and richer video evidence together with easier automation setup and more reliable everyday work.
