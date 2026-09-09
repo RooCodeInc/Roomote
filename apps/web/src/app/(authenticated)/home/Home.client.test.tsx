@@ -8,6 +8,10 @@ import {
 
 import { ALL_REPOSITORIES } from '@roomote/types';
 import type { PromptInputMessage } from '@/components/ai-elements';
+import {
+  clearPendingFastSessionLaunch,
+  getPendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
 
 let currentSearchParams = '';
 let currentIsAdmin = true;
@@ -242,9 +246,11 @@ describe('Home', () => {
       ({ text }: { text: string }) => Promise.resolve({ text }),
     );
     mockStartFastSession.mockResolvedValue({
-      sessionId: 'fast-session-1',
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      fastConversationId: '22222222-2222-4222-8222-222222222222',
       taskId: 'task-4',
     });
+    clearPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111');
     mockUseLaunchTaskModels.mockReturnValue({
       data: {
         defaultModelId: 'openrouter/openai/gpt-5.4',
@@ -302,11 +308,22 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: undefined,
+        conversationId: expect.any(String),
       });
     });
 
     expect(mockStartFastSession).toHaveBeenCalledTimes(1);
-    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/11111111-1111-4111-8111-111111111111',
+    );
+    expect(
+      getPendingFastSessionLaunch('11111111-1111-4111-8111-111111111111'),
+    ).toEqual(
+      expect.objectContaining({
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+        text: 'Test prompt',
+      }),
+    );
   });
 
   it('starts a new Fast session with the selected non-default model', async () => {
@@ -323,6 +340,7 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: 'openrouter/z-ai/glm-5.2',
+        conversationId: expect.any(String),
       });
     });
   });
@@ -342,6 +360,7 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: undefined,
+        conversationId: expect.any(String),
       });
     });
   });
@@ -389,9 +408,12 @@ describe('Home', () => {
         images: ['data:image/png;base64,image-1'],
         attachmentTexts: undefined,
         model: undefined,
+        conversationId: expect.any(String),
       });
     });
-    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+    expect(mockPush).toHaveBeenCalledWith(
+      '/sessions/11111111-1111-4111-8111-111111111111',
+    );
   });
 
   it('renders the feedback prompt below the input and opens its dialog', async () => {
@@ -530,9 +552,29 @@ describe('Home', () => {
         images: undefined,
         attachmentTexts: undefined,
         model: undefined,
+        conversationId: expect.any(String),
       });
     });
     expect(mockStartFastSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses the client conversation identity after an ambiguous start failure', async () => {
+    mockStartFastSession
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+      });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));
+
+    expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).toBe(
+      mockStartFastSession.mock.calls[1]?.[0].conversationId,
+    );
   });
 
   it('renders onboarding guidance on Home', () => {

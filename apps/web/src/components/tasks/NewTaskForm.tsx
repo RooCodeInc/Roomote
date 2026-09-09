@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, type Ref } from 'react';
+import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -13,6 +13,7 @@ import {
 
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
+import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
@@ -67,6 +68,7 @@ export function NewTaskForm({
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   const startFastSessionMutation = useStartFastSession();
+  const fastConversationIdRef = useRef<string | null>(null);
 
   const startFastSession = useCallback(
     async (payload: {
@@ -81,9 +83,21 @@ export function NewTaskForm({
       if (startFastSessionMutation.isPending) {
         return;
       }
+      const conversationId =
+        fastConversationIdRef.current ?? crypto.randomUUID();
+      fastConversationIdRef.current = conversationId;
       try {
-        const { sessionId } =
-          await startFastSessionMutation.mutateAsync(payload);
+        const { sessionId, fastConversationId } =
+          await startFastSessionMutation.mutateAsync({
+            ...payload,
+            conversationId,
+          });
+        stagePendingFastSessionLaunch(sessionId, {
+          fastConversationId: fastConversationId ?? conversationId,
+          text: payload.text,
+          images: payload.images,
+        });
+        fastConversationIdRef.current = null;
         onTaskStarted?.();
         router.push(`/sessions/${sessionId}`);
       } catch (error) {

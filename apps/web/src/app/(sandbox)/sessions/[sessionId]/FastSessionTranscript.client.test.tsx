@@ -15,6 +15,10 @@ import {
   pendingResponseReducer,
 } from './FastSessionTranscript';
 import { SessionRunningTaskCountContext } from './session-task-panel-context';
+import {
+  clearPendingFastSessionLaunch,
+  stagePendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -209,6 +213,7 @@ beforeEach(() => {
   composerSuggestionState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
+  clearPendingFastSessionLaunch('session-1');
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -804,6 +809,67 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.getByText('Thinking')).toBeInTheDocument();
+  });
+
+  it('shows a staged initial prompt immediately and reconciles its canonical event', () => {
+    stagePendingFastSessionLaunch('session-1', {
+      fastConversationId: 'fast-session-1',
+      text: 'Initial question',
+      images: ['data:image/png;base64,aGVsbG8='],
+    });
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.getByText('Initial question')).toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'canonical-user',
+              role: 'user',
+              text: 'Initial question',
+              ts: Date.now(),
+            }),
+            eventId: 'web-kickoff:fast-session-1:user',
+            contentBlocks: [
+              { type: 'text', text: 'Initial question' },
+              { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' },
+            ],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getAllByText('Initial question')).toHaveLength(1);
+  });
+
+  it('does not duplicate a staged prompt already present in initial messages', () => {
+    stagePendingFastSessionLaunch('session-1', {
+      fastConversationId: 'fast-session-1',
+      text: 'Already persisted',
+    });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'canonical-user',
+              role: 'user',
+              text: 'Already persisted',
+              ts: Date.now(),
+            }),
+            eventId: 'web-kickoff:fast-session-1:user',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByText('Already persisted')).toHaveLength(1);
   });
 
   it('waits for the first visible assistant message before showing timeline extras', () => {
