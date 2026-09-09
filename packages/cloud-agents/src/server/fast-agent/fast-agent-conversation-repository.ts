@@ -268,6 +268,9 @@ export type FastAgentTurnAttemptAction = {
   /** 'unknown' when the call was recorded but the process died before its result. */
   status: 'completed' | 'failed' | 'unknown';
   result?: string;
+  /** Server-authored task-message intent; absent on legacy rows. */
+  continuation?: 'instruction' | 'recovery';
+  instructionId?: string;
 };
 
 export type FastAgentTurnAttemptReplyPurpose =
@@ -320,6 +323,86 @@ export type FastAgentTurnAttemptSummary = {
 
 const TURN_ATTEMPT_RESULT_MAX_CHARS = 1_200;
 
+function turnAttemptText(blocks: unknown): string {
+  return Array.isArray(blocks)
+    ? blocks
+        .flatMap((block) =>
+          block &&
+          typeof block === 'object' &&
+          (block as { type?: unknown }).type === 'text'
+            ? [String((block as { text?: unknown }).text ?? '')]
+            : [],
+        )
+        .join('')
+    : '';
+}
+
+function turnAttemptAction(row: {
+  eventType: string;
+  payload: unknown;
+  metadata: unknown;
+  contentBlocks: unknown;
+}): FastAgentTurnAttemptAction {
+  const payload = (row.payload ?? {}) as Record<string, unknown>;
+  const metadata = (row.metadata ?? {}) as Record<string, unknown>;
+  // Native/MCP input wraps arguments; subagent input is persisted directly.
+  const rawInput = payload.rawInput as Record<string, unknown> | undefined;
+  const continuation = metadata.taskMessageContinuation;
+  const instructionId = metadata.taskMessageInstructionId;
+  const action: FastAgentTurnAttemptAction = {
+    kind: 'action',
+    tool: String(payload.toolName ?? payload.title ?? 'tool'),
+    arguments:
+      rawInput && typeof rawInput === 'object'
+        ? 'arguments' in rawInput
+          ? rawInput.arguments
+          : rawInput
+        : null,
+    status:
+      row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall
+        ? 'unknown'
+        : payload.status === 'failed'
+          ? 'failed'
+          : 'completed',
+    ...(continuation === 'instruction' || continuation === 'recovery'
+      ? { continuation }
+      : {}),
+    ...(typeof instructionId === 'string' ? { instructionId } : {}),
+  };
+  if (action.status !== 'unknown') {
+    const output = turnAttemptText(row.contentBlocks);
+    if (output) action.result = output;
+  }
+  return action;
+}
+
+/** Canonical task-message receipts across all turns, including hidden/current work. */
+export async function loadFastAgentTaskMessageHistory(
+  conversationId: string,
+): Promise<FastAgentTurnAttemptEvent[]> {
+  const rows = await db
+    .select({
+      eventType: fastAgentMessages.eventType,
+      payload: fastAgentMessages.payload,
+      metadata: fastAgentMessages.metadata,
+      contentBlocks: fastAgentMessages.contentBlocks,
+    })
+    .from(fastAgentMessages)
+    .where(
+      and(
+        eq(fastAgentMessages.conversationId, conversationId),
+        or(
+          eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolCall),
+          eq(fastAgentMessages.eventType, ACP_ENVELOPE_EVENT_TYPES.ToolResult),
+        ),
+        sql`${fastAgentMessages.payload}->>'toolName' = 'send_task_message'`,
+      ),
+    )
+    // Result upserts preserve createdAt, so late results cannot reorder receipts.
+    .orderBy(fastAgentMessages.createdAt, fastAgentMessages.turnSeq);
+  return rows.map(turnAttemptAction);
+}
+
 /**
  * What an earlier attempt at this turn already did, for the run that resumes
  * it. Every tool call is recorded before it executes and its result after,
@@ -350,19 +433,6 @@ export async function loadFastAgentTurnAttemptSummary(
       ),
     )
     .orderBy(fastAgentMessages.turnSeq, fastAgentMessages.ts);
-
-  const text = (blocks: unknown) =>
-    Array.isArray(blocks)
-      ? blocks
-          .flatMap((block) =>
-            block &&
-            typeof block === 'object' &&
-            (block as { type?: unknown }).type === 'text'
-              ? [String((block as { text?: unknown }).text ?? '')]
-              : [],
-          )
-          .join('')
-      : '';
 
   const events: FastAgentTurnAttemptEvent[] = [];
   // A call and its result share one canonical event, so normally only one row
@@ -411,36 +481,12 @@ export async function loadFastAgentTurnAttemptSummary(
       // process died between starting the call and recording its outcome.
       const toolCallId = String(payload.toolCallId ?? '');
       if (!toolCallId) continue;
-      // Native and MCP calls wrap their input as `rawInput.arguments`;
-      // subagent task calls persist the input object directly.
-      const rawInput = payload.rawInput as
-        | { arguments?: unknown }
-        | Record<string, unknown>
-        | undefined;
-      const action: FastAgentTurnAttemptAction = {
-        kind: 'action',
-        tool: String(payload.toolName ?? payload.title ?? 'tool'),
-        arguments:
-          rawInput && typeof rawInput === 'object'
-            ? 'arguments' in rawInput
-              ? rawInput.arguments
-              : rawInput
-            : null,
-        status:
-          row.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall
-            ? 'unknown'
-            : payload.status === 'failed'
-              ? 'failed'
-              : 'completed',
-      };
-      if (action.status !== 'unknown') {
-        const output = text(row.contentBlocks);
-        if (output) {
-          action.result =
-            output.length > TURN_ATTEMPT_RESULT_MAX_CHARS
-              ? `${output.slice(0, TURN_ATTEMPT_RESULT_MAX_CHARS)}…`
-              : output;
-        }
+      const action = turnAttemptAction(row);
+      if (
+        action.result &&
+        action.result.length > TURN_ATTEMPT_RESULT_MAX_CHARS
+      ) {
+        action.result = `${action.result.slice(0, TURN_ATTEMPT_RESULT_MAX_CHARS)}…`;
       }
       const index = actionIndexByCallId.get(toolCallId);
       if (index === undefined) {
@@ -455,7 +501,7 @@ export async function loadFastAgentTurnAttemptSummary(
       metadata.visibleInTranscript !== false &&
       metadata.interruptionReason === undefined
     ) {
-      const reply = text(row.contentBlocks).trim();
+      const reply = turnAttemptText(row.contentBlocks).trim();
       if (!reply) continue;
       const purpose = payload.purpose ?? metadata.purpose;
       events.push({

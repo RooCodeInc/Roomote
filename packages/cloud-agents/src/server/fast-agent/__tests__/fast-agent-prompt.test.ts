@@ -1295,6 +1295,16 @@ describe('buildFastAgentSystemPrompt', () => {
         'Do not launch a replacement task or schedule a retry loop',
       );
       expect(prompt).toContain('Outside presentation-only events');
+      expect(prompt).toContain('defaults to continuation="recovery"');
+      expect(prompt).toContain(
+        'never for a check-in, status question, or task event',
+      );
+      expect(prompt).toContain(
+        'only an accepted new human instruction resets that task',
+      );
+      expect(prompt).toContain(
+        'Do not change continuation mode or reword the message to bypass the refusal',
+      );
       expect(prompt).toContain(
         'Say work is continuing only when current execution or an accepted continuation supports it',
       );

@@ -16,6 +16,7 @@ import {
   findFastAgentActiveInferenceRetryNotice,
   findFastAgentUnresolvedRequest,
   loadFastAgentTurnAttemptSummary,
+  loadFastAgentTaskMessageHistory,
   INTERRUPTED_INFERENCE_RETRY_MESSAGE,
   scheduleFastAgentDurableTurnRetry,
   markFastAgentDurableTurnDelivered,
@@ -1593,6 +1594,215 @@ describe('Fast conversation repository', () => {
       },
       prompt: null,
     });
+  });
+
+  it('loads durable task-message receipts across turns in original call order, including silent pending work', async () => {
+    const user = await createUser();
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: slackConversation,
+    });
+    const other = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation: {
+        ...slackConversation,
+        conversationId: 'other-history',
+        replyTarget: {
+          ...slackConversation.replyTarget,
+          threadId: 'other-history',
+        },
+      },
+    });
+    const write = async (
+      turnId: string,
+      turnSeq: number,
+      metadata: Record<string, unknown>,
+      options: {
+        result?: string;
+        failed?: boolean;
+        conversationId?: string;
+        toolName?: string;
+        eventType?: 'roomote_runtime.assistant_message';
+      } = {},
+    ) => {
+      await fastAgentConversationRepository.upsertMessage({
+        conversationId: options.conversationId ?? session.id,
+        message: {
+          eventId: `${turnId}:tool:${turnSeq}`,
+          turnId,
+          turnSeq,
+          ts: options.result ? 99_000 : 1_000 - turnSeq,
+          eventType:
+            options.eventType ??
+            (options.result
+              ? 'roomote_runtime.tool_result'
+              : 'roomote_runtime.tool_call'),
+          role: 'tool',
+          contentBlocks: options.result
+            ? [{ type: 'text', text: options.result }]
+            : [],
+          metadata: { visibleInTranscript: false, ...metadata },
+          payload: {
+            toolCallId: `${turnId}:tool:${turnSeq}`,
+            toolName: options.toolName ?? 'send_task_message',
+            status: options.failed ? 'failed' : 'completed',
+            // Model input must never supply the trusted continuation stamp.
+            taskMessageContinuation: 'recovery',
+            rawInput: {
+              arguments: {
+                taskId: 'task-history',
+                message: turnId,
+                metadata: { taskMessageContinuation: 'recovery' },
+              },
+            },
+          },
+          source: 'slack',
+        },
+      });
+    };
+    const recovery = { taskMessageContinuation: 'recovery' };
+    const instruction = {
+      taskMessageContinuation: 'instruction',
+      taskMessageInstructionId: 'human-request-2',
+    };
+    await write('recovery-turn', 8, recovery);
+    const original = await db.query.fastAgentMessages.findFirst({
+      where: and(
+        eq(fastAgentMessages.conversationId, session.id),
+        eq(fastAgentMessages.eventId, 'recovery-turn:tool:8'),
+      ),
+    });
+    await write('instruction-turn', 1, instruction);
+    await write('current-event-turn', 2, recovery);
+    // A late result replaces the earlier call without moving it after the instruction.
+    const result = JSON.stringify({ success: true, detail: 'x'.repeat(1_300) });
+    await write('recovery-turn', 8, recovery, { result });
+    await write('instruction-turn', 1, instruction, {
+      result: '{"success":true}',
+    });
+    await write('legacy-turn', 3, {}, { result: '{"success":true}' });
+    await write(
+      'invalid-stamp',
+      4,
+      {
+        taskMessageContinuation: 'automatic',
+        taskMessageInstructionId: 123,
+      },
+      { result: '{"success":false}', failed: true },
+    );
+    await write('unrelated-tool', 5, {}, { toolName: 'launch_task' });
+    await write(
+      'unrelated-event',
+      6,
+      {},
+      {
+        eventType: 'roomote_runtime.assistant_message',
+      },
+    );
+    await write('other-conversation', 7, recovery, {
+      conversationId: other.id,
+    });
+
+    const updated = await db.query.fastAgentMessages.findFirst({
+      where: eq(fastAgentMessages.id, original!.id),
+    });
+    expect(updated!.createdAt).toEqual(original!.createdAt);
+    // Deterministic timestamps also exercise turnSeq as the equal-time tie breaker.
+    for (const [turnId, createdAt] of [
+      ['recovery-turn', '2026-01-01T00:00:00Z'],
+      ['instruction-turn', '2026-01-02T00:00:00Z'],
+      ['current-event-turn', '2026-01-02T00:00:00Z'],
+      ['legacy-turn', '2026-01-03T00:00:00Z'],
+      ['invalid-stamp', '2026-01-04T00:00:00Z'],
+    ] as const) {
+      await db
+        .update(fastAgentMessages)
+        .set({ createdAt: new Date(createdAt) })
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.turnId, turnId),
+          ),
+        );
+    }
+    const history = await loadFastAgentTaskMessageHistory(session.id);
+    expect(history).toEqual([
+      {
+        kind: 'action',
+        tool: 'send_task_message',
+        arguments: {
+          taskId: 'task-history',
+          message: 'recovery-turn',
+          metadata: { taskMessageContinuation: 'recovery' },
+        },
+        status: 'completed',
+        continuation: 'recovery',
+        result,
+      },
+      {
+        kind: 'action',
+        tool: 'send_task_message',
+        arguments: {
+          taskId: 'task-history',
+          message: 'instruction-turn',
+          metadata: { taskMessageContinuation: 'recovery' },
+        },
+        status: 'completed',
+        continuation: 'instruction',
+        instructionId: 'human-request-2',
+        result: '{"success":true}',
+      },
+      {
+        kind: 'action',
+        tool: 'send_task_message',
+        arguments: {
+          taskId: 'task-history',
+          message: 'current-event-turn',
+          metadata: { taskMessageContinuation: 'recovery' },
+        },
+        status: 'unknown',
+        continuation: 'recovery',
+      },
+      {
+        kind: 'action',
+        tool: 'send_task_message',
+        arguments: {
+          taskId: 'task-history',
+          message: 'legacy-turn',
+          metadata: { taskMessageContinuation: 'recovery' },
+        },
+        status: 'completed',
+        result: '{"success":true}',
+      },
+      {
+        kind: 'action',
+        tool: 'send_task_message',
+        arguments: {
+          taskId: 'task-history',
+          message: 'invalid-stamp',
+          metadata: { taskMessageContinuation: 'recovery' },
+        },
+        status: 'failed',
+        result: '{"success":false}',
+      },
+    ]);
+    for (const [index, turnId] of [
+      'recovery-turn',
+      'instruction-turn',
+      'current-event-turn',
+      'legacy-turn',
+      'invalid-stamp',
+    ].entries()) {
+      const summary = await loadFastAgentTurnAttemptSummary(session.id, turnId);
+      expect(summary.events).toEqual([
+        index === 0
+          ? { ...history[0], result: `${result.slice(0, 1_200)}…` }
+          : history[index],
+      ]);
+    }
+    await expect(
+      loadFastAgentTaskMessageHistory(crypto.randomUUID()),
+    ).resolves.toEqual([]);
   });
 
   it('walks a durable turn row through claim, release, revoke, and delivery', async () => {

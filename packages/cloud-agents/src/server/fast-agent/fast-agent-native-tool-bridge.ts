@@ -358,6 +358,7 @@ export default {
   args: {
     taskId: z.string().nullable().optional(),
     message: z.string().min(1),
+    continuation: z.enum(["instruction", "recovery"]).optional().describe("Defaults to recovery, with a durable one-attempt budget per task and outstanding request. Use instruction only to forward a new explicit directive from the current human message, never for a status check or platform event."),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
   },
   execute: (args, context) => invoke("send_task_message", args, context),
