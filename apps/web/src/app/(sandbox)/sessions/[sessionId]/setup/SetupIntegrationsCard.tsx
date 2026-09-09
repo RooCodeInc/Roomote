@@ -8,7 +8,6 @@ import { toast } from 'sonner';
 import {
   MCP_INTEGRATIONS,
   SETUP_INTEGRATIONS,
-  SETUP_INTEGRATION_CATEGORIES,
   SETUP_INTEGRATIONS_CONTINUE_OPTION,
   SETUP_INTEGRATIONS_QUESTION_ID,
   isDeploymentScopedMcpIntegration,
@@ -16,7 +15,7 @@ import {
 } from '@roomote/types';
 
 import {
-  Badge,
+  ArrowRight,
   Button,
   Dialog,
   DialogContent,
@@ -25,7 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
   Plug,
-  RefreshCw,
   Skeleton,
 } from '@/components/system';
 import { McpIcon } from '@/components/settings/McpIcon';
@@ -66,22 +64,28 @@ export function SetupIntegrationsCard({
   const connections = useUserMcpConnections();
   const availability = useCuratedIntegrationsAvailability();
   const connectMcp = useConnectMcp();
-  const [showAll, setShowAll] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [continued, setContinued] = useState(false);
   const shownRequest = useRef<string | null>(null);
+  const skippedRequest = useRef<string | null>(null);
 
   const matchedIds = new Set(
     request.questions
       .find((question) => question.id === SETUP_INTEGRATIONS_QUESTION_ID)
       ?.options?.map((option) => option.id) ?? [],
   );
-  const matchedCount = SETUP_INTEGRATIONS.filter((integration) =>
+  const visibleIntegrations = SETUP_INTEGRATIONS.filter((integration) =>
     matchedIds.has(integration.id),
-  ).length;
+  );
+  const matchedCount = visibleIntegrations.length;
 
   useEffect(() => {
-    if (!enabled || shownRequest.current === request.requestId) return;
+    if (
+      !enabled ||
+      matchedCount === 0 ||
+      shownRequest.current === request.requestId
+    )
+      return;
     shownRequest.current = request.requestId;
     capture('setup_integrations_shown', { matchedCount });
   }, [capture, enabled, matchedCount, request.requestId]);
@@ -95,6 +99,21 @@ export function SetupIntegrationsCard({
       onError: (error) => toast.error(error.message),
     }),
   );
+  const { mutate } = submit;
+  useEffect(() => {
+    if (matchedCount !== 0 || skippedRequest.current === request.requestId)
+      return;
+    skippedRequest.current = request.requestId;
+    mutate({
+      sessionId,
+      requestId: request.requestId,
+      answers: {
+        [SETUP_INTEGRATIONS_QUESTION_ID]: {
+          answers: [SETUP_INTEGRATIONS_CONTINUE_OPTION.label],
+        },
+      },
+    });
+  }, [matchedCount, mutate, request.requestId, sessionId]);
   const refresh = () => {
     void onboarding.refetch();
     void enablements.refetch();
@@ -127,45 +146,56 @@ export function SetupIntegrationsCard({
   const getStatus = (integration: (typeof SETUP_INTEGRATIONS)[number]) => {
     if (statusPending || statusError) return null;
     if (integration.id === 'linear')
-      return onboarding.data?.orgHasLinear ? 'Connected' : 'Available';
+      return onboarding.data?.orgHasLinear ? 'Connected' : null;
     if (authenticatedIds.has(integration.id))
       return enabledIds.has(integration.id) ? 'Connected' : 'Not enabled';
-    return enabledIds.has(integration.id) ? 'Needs connection' : 'Available';
+    return enabledIds.has(integration.id) ? 'Needs connection' : null;
   };
-  const hasConnections = SETUP_INTEGRATIONS.some(
-    (integration) => getStatus(integration) === 'Connected',
-  );
-  const previewIds = new Set(
-    SETUP_INTEGRATION_CATEGORIES.map((category) => category.integrationIds[0]),
-  );
-  const visibleIntegrations = SETUP_INTEGRATIONS.filter(
-    (integration) =>
-      showAll ||
-      matchedIds.has(integration.id) ||
-      previewIds.has(integration.id),
-  );
   const authFailed =
     searchParams.get('mcp') === 'error' || searchParams.get('error') !== null;
 
-  if (continued)
-    return (
-      <p className="text-sm text-muted-foreground">
-        You can connect more tools any time in Settings.
-      </p>
-    );
+  if (continued) return null;
+
+  const keepGoing = (
+    <Button
+      type="button"
+      variant="outline"
+      disabled={submit.isPending}
+      onClick={() =>
+        mutate({
+          sessionId,
+          requestId: request.requestId,
+          answers: {
+            [SETUP_INTEGRATIONS_QUESTION_ID]: {
+              answers: [SETUP_INTEGRATIONS_CONTINUE_OPTION.label],
+            },
+          },
+        })
+      }
+    >
+      Keep going <ArrowRight />
+    </Button>
+  );
+  const continuationError = submit.isError ? (
+    <p role="alert" className="text-sm text-destructive">
+      Couldn&apos;t continue setup. Please try again.
+    </p>
+  ) : null;
+  if (matchedCount === 0) {
+    return submit.isError ? (
+      <div className="space-y-2">
+        {continuationError}
+        {keepGoing}
+      </div>
+    ) : null;
+  }
 
   return (
     <SetupSessionActionCard
       title="Bring your team's tools along"
       icon={<Plug />}
-      intro="Connect the tools you use so I can work with your team's context, not just your code. This is optional."
+      intro="Connect the tools you use so I can work with your team's context."
     >
-      {matchedCount > 0 ? (
-        <p className="text-sm text-muted-foreground">
-          I&apos;ve highlighted the available connectors that match your
-          answers.
-        </p>
-      ) : null}
       {authFailed ? (
         <p role="alert" className="text-sm text-destructive">
           Authorization didn&apos;t finish. You can try connecting again or
@@ -174,8 +204,8 @@ export function SetupIntegrationsCard({
       ) : null}
       {statusError ? (
         <p role="alert" className="text-sm text-destructive">
-          I couldn&apos;t refresh connection status. Try Refresh status, or
-          continue setup.
+          I couldn&apos;t load connection status. You can still connect a tool
+          or keep going.
         </p>
       ) : null}
       {availability.data?.enabled === false ? (
@@ -211,22 +241,18 @@ export function SetupIntegrationsCard({
                 <span className="font-medium">{integration.name}</span>
                 {statusPending ? (
                   <Skeleton className="mt-1 h-3 w-20" />
-                ) : (
+                ) : unavailable || status || statusError ? (
                   <p className="text-xs text-muted-foreground">
                     {unavailable
                       ? 'Unavailable on this instance'
                       : (status ?? 'Status unavailable')}
                   </p>
-                )}
+                ) : null}
               </div>
-              {matchedIds.has(integration.id) ? (
-                <Badge variant="secondary">Your tools</Badge>
-              ) : null}
               <Button
                 type="button"
-                variant="outline"
                 size="sm"
-                aria-label={`Configure ${integration.name}`}
+                aria-label={`${status === 'Connected' ? 'Manage' : 'Connect'} ${integration.name}`}
                 disabled={!isAdmin || unavailable || submit.isPending}
                 onClick={() => {
                   capture('setup_integration_configuration_opened', {
@@ -235,58 +261,14 @@ export function SetupIntegrationsCard({
                   setActiveId(integration.id);
                 }}
               >
-                {status === 'Connected' ? 'Manage' : 'Set up'}
+                {status === 'Connected' ? 'Manage' : 'Connect'}
               </Button>
             </li>
           );
         })}
       </ul>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowAll(!showAll)}
-        >
-          {showAll
-            ? 'Show fewer tools'
-            : `See all ${SETUP_INTEGRATIONS.length} integrations`}
-        </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={refresh}>
-          <RefreshCw />
-          Refresh status
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Don&apos;t see your tool? There may not be a built-in connector for it
-        yet. No credentials belong in this conversation.
-      </p>
-      <Button
-        type="button"
-        disabled={submit.isPending}
-        onClick={() =>
-          submit.mutate({
-            sessionId,
-            requestId: request.requestId,
-            answers: {
-              [SETUP_INTEGRATIONS_QUESTION_ID]: {
-                answers: [SETUP_INTEGRATIONS_CONTINUE_OPTION.label],
-              },
-            },
-          })
-        }
-      >
-        {submit.isPending
-          ? 'Continuing...'
-          : hasConnections
-            ? 'Continue setup'
-            : 'Continue without connections'}
-      </Button>
-      {submit.isError ? (
-        <p role="alert" className="text-sm text-destructive">
-          Couldn&apos;t continue setup. Please try again.
-        </p>
-      ) : null}
+      {keepGoing}
+      {continuationError}
       <Dialog
         open={active != null}
         onOpenChange={(open) => {
