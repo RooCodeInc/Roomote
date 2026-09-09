@@ -70,6 +70,50 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('keeps supported Bitbucket reads API-first without a checkout or task', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain(
+      'For focused Bitbucket Cloud reads and supported writes',
+    );
+    expect(prompt).toContain(
+      'discover the available Bitbucket tool schema with `find_integration_tools`',
+    );
+    expect(prompt).toContain('then use `call_integration_tool`');
+    expect(prompt).toContain(
+      'Apply the same scope-based exploration rule as other providers',
+    );
+    expect(prompt).toContain(
+      'Follow discovered schemas rather than guessing arguments',
+    );
+    expect(prompt).toContain(
+      'Otherwise apply the scope-based exploration rule above; delegate execution, code changes, or testing',
+    );
+  });
+
+  it('bounds Bitbucket search and distinguishes supported writes from unsupported actions', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain('Reads cap responses at 1 MiB');
+    expect(prompt).toContain('never claim a single page is exhaustive');
+    expect(prompt).toContain('Code search is deprecated November 1, 2026');
+    expect(prompt).toContain('not query operators or repository filters');
+    expect(prompt).toContain(
+      'without broadening the search or bypassing API permissions through a task',
+    );
+    const writes = prompt
+      .split('- Bitbucket writes require')[1]!
+      .split('\n')[0]!;
+    expect(writes).toContain(
+      'update PR titles/descriptions, decline PRs, or add comments and replies to a comment in the same PR',
+    );
+    expect(writes).toContain('Reading does not authorize writes');
+    expect(writes).toContain(
+      'Reopening/merging PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
+    );
+    expect(prompt).toContain(
+      'an actual code-review request still uses "review_pull_request"',
+    );
+  });
+
   it('supports explicit instance invocation and member creation without environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -612,6 +656,26 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('`call_integration_tool`');
   });
 
+  it('prefers discovered provider APIs without bypassing task and structured review delegation', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [],
+    });
+    expect(prompt).toContain(
+      'For focused repository reads and requested supported writes, prefer discovered source-control provider API tools',
+    );
+    expect(prompt).toContain('do not assume providers share capabilities');
+    expect(prompt).toContain('do not claim its API access is available');
+    expect(prompt).not.toContain('For GitLab API-only requests');
+    expect(prompt).toContain(
+      'Local checkout inspection, code edits, commands, and validation still require a delegated task',
+    );
+    expect(prompt).toContain(
+      'code reviews still use "review_pull_request" and its structured review pipeline',
+    );
+    expect(prompt).not.toContain('#### GitLab [id: gitlab]');
+  });
+
   it('includes shared memory guidance when a memory MCP is available', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -667,7 +731,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'regardless of whether the message is phrased as a question, request, or declarative feedback',
     );
     expect(prompt).toContain(
-      'Use direct API tools when sufficient; delegate work that requires a local workspace, execution, code changes, or testing',
+      'Otherwise apply the scope-based exploration rule above; delegate execution, code changes, or testing',
     );
     expect(prompt).not.toContain(
       'A question that requires repository or workspace inspection',
@@ -752,24 +816,16 @@ describe('buildFastAgentSystemPrompt', () => {
           : { turnSource: 'platform_event' as const, platformEventKind: turn }),
       });
 
-      for (const tool of [
-        'get_file_contents',
-        'search_code',
-        'list_branches',
-        'get_commit',
-        'list_commits',
-        'get_pull_request',
-        'pull_request_read',
-        'list_pull_requests',
-        'search_pull_requests',
-        'issue_read',
-        'get_issue',
-        'actions_get',
-        'actions_list',
-        'get_job_logs',
-      ]) {
-        expect(prompt).toContain(`\`${tool}\``);
-      }
+      expect(prompt).toContain(
+        'Repository code exploration does not inherently require a coding task or local clone',
+      );
+      expect(prompt).toContain(
+        'Discover the available source-control integrations and their actual tools for files, directories, code search, commits, and pull/merge request diffs when supported',
+      );
+      const explorationGuidance = prompt
+        .split('- Repository code exploration')[1]!
+        .split('- For requested GitHub updates')[0]!;
+      expect(explorationGuidance).not.toMatch(/GitHub|GitLab|Bitbucket/);
       expect(prompt).toContain(
         'Use only the methods and arguments exposed by the discovered schemas',
       );
@@ -785,9 +841,62 @@ describe('buildFastAgentSystemPrompt', () => {
         'when local checkout, local edits, execution, or testing is required',
       );
       expect(prompt).toContain('available API tools do not suffice');
+      expect(prompt).toContain(
+        'Prefer APIs for focused questions such as "Do we have X?" or locating a setting',
+      );
+      expect(prompt).toContain(
+        'choose "launch_task" directly, without mandatory API attempts',
+      );
+      for (const criterion of [
+        'expected file volume',
+        'broad cross-module tracing',
+        'exhaustive caller or coverage needs',
+        'indexing/search limitations',
+        'excessive API round trips',
+      ])
+        expect(prompt).toContain(criterion);
+      expect(prompt).toContain(
+        'Use judgment, not a fixed file-count threshold',
+      );
+      expect(prompt).toContain(
+        'escalate and carry useful paths, refs, symbols, and findings into the task prompt',
+      );
+      expect(prompt).toContain('Paginate or narrow sensibly');
+      expect(prompt).toContain(
+        'Authorization denials must never be bypassed via a task',
+      );
+      if (turn !== 'human') {
+        expect(prompt).toContain(
+          'same scope-based exploration and execution delegation rules',
+        );
+      }
+      expect(prompt).toContain(
+        'pin follow-up reads to an immutable commit ref when the provider tools support it',
+      );
+      expect(prompt).toContain('Do not invent a shared revision parameter');
+      expect(prompt).toContain(
+        'search may cover only an indexed/default branch',
+      );
+      expect(prompt).toContain(
+        'disclose that limitation rather than silently combining revisions',
+      );
+      expect(prompt).toContain(
+        'a partial or empty search is not proof of absence',
+      );
+      expect(prompt).toContain('source-inspected, not tested or reproduced');
+      expect(prompt).toContain(
+        'Local worktree state, generated files, dependency installation, builds, and reproduction require delegated execution when needed',
+      );
+      expect(prompt).toContain(
+        "A permission denial is not a reason to bypass the integration's authorization through another route",
+      );
+      expect(prompt).toContain(
+        'Use "review_pull_request" when the user asks for a code review of a pull request',
+      );
       expect(prompt).toContain('including documents grounded in API reads');
       for (const obsoleteRule of [
         'read_repository',
+        'inspect_repository',
         'rename_pull_request',
         'close_pull_request',
         'legacy installation-wide GitHub proxy',
@@ -796,6 +905,9 @@ describe('buildFastAgentSystemPrompt', () => {
         'requires repository or workspace inspection, execution, change, or validation',
         'when creating the output requires repository or filesystem work',
         'delegate a task when repository or workspace work is needed',
+        'API tools before launching workspace work',
+        'Do not clone a repository or use "launch_task" for these operations',
+        'launch a task only when repository or workspace execution is actually required',
       ]) {
         expect(prompt).not.toContain(obsoleteRule);
       }
@@ -808,7 +920,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'these bounded actions do not require a coding task',
     );
     expect(prompt).toContain(
-      'Other repository writes still require a coding task',
+      'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
     );
     expect(prompt).toContain(
       "A permission denial is not a reason to bypass the integration's authorization",
@@ -873,7 +985,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not launch a task or call an integration merely to re-check user-supplied facts unless the user asks for verification',
     );
     expect(prompt).toContain(
-      'Use the direct API path below when it suffices; otherwise delegate workspace work',
+      'For investigation requests, choose APIs or a task using the scope-based rule below',
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),

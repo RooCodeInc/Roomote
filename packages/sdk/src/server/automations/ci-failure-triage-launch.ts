@@ -26,6 +26,8 @@ import {
 } from '@roomote/slack';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
+  isCiFailureTriageRepositoryAllowed,
+  getCiFailureTriageRules,
   TaskPayloadKind,
   type SourceControlProvider,
   type TaskSurface,
@@ -41,9 +43,9 @@ import { resolveAutomationResultSubtitle } from '../lib/automation-result-metada
 import {
   buildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders,
-  resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
+import { resolveCiFailureTriageRepositoryDestination } from './ci-failure-triage-routing';
 import { findEnvironmentIdForRepositoryId } from './github-deployment-scope';
 import { finalizeAutomationLaunch } from './post-launch-finalization';
 
@@ -278,10 +280,18 @@ export async function launchCiFailureTriageForFailedRun(
     return { status: 'ok', message: 'CI failure triage is disabled' };
   }
 
+  if (!isCiFailureTriageRepositoryAllowed(runtime.settings, run.repositoryId)) {
+    return {
+      status: 'ok',
+      message: 'Repository is outside the CI failure triage scope',
+    };
+  }
+
   const connectedProviders = await listConnectedCommunicationProviders();
-  const destination = await resolveAutomationRuntimeDestination({
+  const destination = await resolveCiFailureTriageRepositoryDestination({
     runtime,
-    slackConnected: connectedProviders.includes('slack'),
+    repositoryId: run.repositoryId,
+    connectedProviders,
   });
   if (!destination) {
     return { status: 'ok', message: 'Manager channel is not configured' };
@@ -431,6 +441,8 @@ export async function launchCiFailureTriageForFailedRun(
               ? { sourceControlHost: run.repositoryHost }
               : {}),
             description: buildCiFailureTriagePrompt({
+              additionalInstructions: getCiFailureTriageRules(runtime.settings)
+                ?.instructions,
               channelId,
               repositoryFullNames: [run.repositoryFullName],
               repositoryCoverage,

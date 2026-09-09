@@ -39,7 +39,7 @@ const {
   };
 });
 
-vi.mock('@roomote/sdk/server', () => ({
+vi.mock('../../auth/sandbox-server-rpc', () => ({
   withSandboxServerRpcClient: mockWithSandboxServerRpcClient,
 }));
 
@@ -68,7 +68,9 @@ vi.mock('@roomote/db/server', () => ({
   },
 }));
 
-import { stopTaskRun } from '../task-stop';
+vi.mock('@roomote/telemetry/server', () => ({ captureTaskSettled: vi.fn() }));
+
+import { stopTaskRun } from '../stop-task-run';
 
 describe('stopTaskRun', () => {
   beforeEach(() => {
@@ -250,4 +252,43 @@ describe('stopTaskRun', () => {
     // covered by its real-DB tests in packages/db.
     expect(mockCancelTaskRunDirect).toHaveBeenCalledWith({ runId: 7 });
   });
+
+  it.each(['refresh', 'guarded write'])(
+    'uses RPC when a sandbox attaches during %s',
+    async (phase) => {
+      const run = {
+        id: 7,
+        status: RunStatus.Processing,
+        sandboxServerUrl: null,
+        actingUserId: null,
+      };
+      const attached = { ...run, sandboxServerUrl: 'https://sandbox.example' };
+      if (phase === 'guarded write') {
+        mockFindFirstTaskRun.mockResolvedValueOnce(run);
+        mockCancelTaskRunDirect.mockResolvedValueOnce(false);
+      }
+      mockFindFirstTaskRun.mockResolvedValueOnce(attached);
+
+      await expect(
+        stopTaskRun({
+          run,
+          authUserId: 'user-1',
+          terminate: true,
+          allowDirectCancelWithoutSandbox: true,
+        }),
+      ).resolves.toEqual({ success: true, mode: 'sandbox_stop' });
+      expect(mockWithSandboxServerRpcClient).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          runId: 7,
+          sandboxServerUrl: attached.sandboxServerUrl,
+        }),
+      );
+      expect(mockDbUpdateSet).toHaveBeenCalledWith({
+        cancelRequestedAt: expect.any(Date),
+      });
+      expect(mockCancelTaskRunDirect).toHaveBeenCalledTimes(
+        phase === 'guarded write' ? 1 : 0,
+      );
+    },
+  );
 });
