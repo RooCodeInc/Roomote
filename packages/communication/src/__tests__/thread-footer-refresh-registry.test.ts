@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('@roomote/env', () => ({
+  Env: { R_APP_URL: 'https://app.example.com' },
+}));
 const mocks = vi.hoisted(() => ({
   zadd: vi.fn(),
   zrem: vi.fn(),
@@ -9,9 +12,23 @@ import {
   claimThreadFooterRefreshTargets,
   scheduleThreadFooterRefresh,
   forgetThreadFooterRefresh,
+  getThreadFooterNavigationUrl,
 } from '../thread-footer-refresh';
 
 describe('bounded footer refresh registry', () => {
+  it('parses supported navigation links without consuming nested open parentheses', () => {
+    const url = 'https://app.example.com/sessions/session';
+    expect(getThreadFooterNavigationUrl(`_[Web app](${url})_`)?.href).toBe(url);
+    expect(getThreadFooterNavigationUrl(`_<${url}|Web app>_`)?.href).toBe(url);
+    expect(
+      getThreadFooterNavigationUrl('[Web app](('.repeat(20_000)),
+    ).toBeNull();
+    expect(
+      getThreadFooterNavigationUrl(
+        '_[Web app](https://other.example/sessions/session)_',
+      ),
+    ).toBeNull();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(Date, 'now').mockReturnValue(1000);

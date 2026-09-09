@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  redisState: new Map<string, string>(),
   acquireLock: vi.fn(),
   acquireRootBindingLock: vi.fn(),
   hasSession: vi.fn(),
@@ -20,13 +21,24 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/redis')>();
   return {
     ...actual,
-    // The sticky-footer state lives in Redis; unit tests run without a
-    // server (a real client would wait on commands forever), so serve
-    // empty state.
+    // Preserve lock ownership and footer state without a Redis server.
     getRedis: () => ({
-      set: async () => 'OK',
-      get: async () => null,
-      eval: async () => 1,
+      set: async (key: string, value: string, ...args: unknown[]) => {
+        if (args.includes('NX') && mocks.redisState.has(key)) return null;
+        mocks.redisState.set(key, value);
+        return 'OK';
+      },
+      get: async (key: string) => mocks.redisState.get(key) ?? null,
+      eval: async (
+        script: string,
+        _count: number,
+        key: string,
+        owner: string,
+      ) => {
+        if (mocks.redisState.get(key) !== owner) return 0;
+        if (script.includes("'del'")) mocks.redisState.delete(key);
+        return 1;
+      },
     }),
   };
 });
@@ -107,6 +119,7 @@ function createDeferred<T>() {
 describe('processFastAgentMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.redisState.clear();
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.acquireRootBindingLock.mockResolvedValue(
       mocks.releaseRootBindingLock,

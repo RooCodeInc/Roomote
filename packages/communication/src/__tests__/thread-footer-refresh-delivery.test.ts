@@ -82,6 +82,33 @@ const tick = (edit = vi.fn().mockResolvedValue(undefined)) =>
   refreshManagedThreadReplyFooter({ ...target, edit });
 
 describe('current footer refresh serialization', () => {
+  it.each(['competitor', 'current'])(
+    'cleans a late refresh only when another carrier is current (%s)',
+    async (currentId) => {
+      await write();
+      const edit = vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          store.set(
+            'discord:thread_reply_footer_lock:parent:thread',
+            'new-owner',
+          );
+          await write({ ...record, messageId: currentId });
+        })
+        .mockResolvedValue(undefined);
+      await tick(edit);
+      expect((await read())?.messageId).toBe(currentId);
+      expect((await read())?.refresh?.footerText).toBe('idle');
+      expect(edit).toHaveBeenCalledTimes(currentId === 'current' ? 1 : 2);
+      if (currentId !== 'current') {
+        expect(edit).toHaveBeenLastCalledWith(record, record.textWithoutFooter);
+      }
+      expect(store.get('discord:thread_reply_footer_lock:parent:thread')).toBe(
+        'new-owner',
+      );
+    },
+  );
+
   it('a post finishing after lease loss cannot overwrite the competing carrier and strips only its own footer', async () => {
     await write();
     const clearOwn = vi.fn().mockResolvedValue(undefined);

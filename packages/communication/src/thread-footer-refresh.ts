@@ -82,7 +82,7 @@ export async function forgetThreadFooterRefresh(
 export function getThreadFooterNavigationUrl(footerText: string): URL | null {
   const link =
     /<([^<>|]+)\|[Ww]eb app>/.exec(footerText)?.[1] ??
-    /\[[Ww]eb app\]\(([^)]+)\)/.exec(footerText)?.[1];
+    /\[[Ww]eb app\]\(([^()]+)\)/.exec(footerText)?.[1];
   if (!link) return null;
   try {
     const url = new URL(link.replaceAll('&amp;', '&'));

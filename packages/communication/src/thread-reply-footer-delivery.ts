@@ -264,14 +264,13 @@ export async function refreshManagedThreadReplyFooter(params: {
         });
         return;
       }
-      await assertLock();
-      await setThreadReplyFooterRecord(
-        params.provider,
-        params.channelId,
-        params.threadId,
-        { ...record, refresh: { ...record.refresh, footerText } },
-        { keepTtl: true },
-      );
+      await rememberThreadReplyFooterAfterEdit({
+        ...params,
+        record: { ...record, refresh: { ...record.refresh, footerText } },
+        assertLock,
+        clearOwnFooter: () => params.edit(record, record.textWithoutFooter),
+        keepTtl: true,
+      });
     },
   });
 }
@@ -284,6 +283,7 @@ export async function rememberThreadReplyFooterAfterEdit(params: {
   record: ThreadReplyFooterRecord;
   assertLock: () => Promise<void>;
   clearOwnFooter: () => Promise<void>;
+  keepTtl?: boolean;
 }): Promise<void> {
   try {
     await params.assertLock();
@@ -302,5 +302,6 @@ export async function rememberThreadReplyFooterAfterEdit(params: {
     params.channelId,
     params.threadId,
     params.record,
+    { keepTtl: params.keepTtl },
   );
 }

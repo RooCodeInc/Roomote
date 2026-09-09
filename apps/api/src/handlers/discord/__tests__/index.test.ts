@@ -77,6 +77,7 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   return {
     ...actual,
     getRedis: () => ({
+      zadd: async () => 1,
       set: mocks.redisSet,
       eval: mocks.redisEval,
       get: mocks.redisGet,
@@ -355,9 +356,24 @@ describe('Discord Gateway event handler', () => {
       messageId: 'message-1',
     });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
-    mocks.redisSet.mockResolvedValue('OK');
-    mocks.redisEval.mockResolvedValue(1);
-    mocks.redisGet.mockResolvedValue(null);
+    const redisState = new Map<string, string>();
+    mocks.redisSet.mockImplementation(
+      async (key: string, value: string, ...args: unknown[]) => {
+        if (args.includes('NX') && redisState.has(key)) return null;
+        redisState.set(key, value);
+        return 'OK';
+      },
+    );
+    mocks.redisEval.mockImplementation(
+      async (script: string, _count: number, key: string, owner: string) => {
+        if (redisState.get(key) !== owner) return 0;
+        if (script.includes("'del'")) redisState.delete(key);
+        return 1;
+      },
+    );
+    mocks.redisGet.mockImplementation(
+      async (key: string) => redisState.get(key) ?? null,
+    );
     mocks.redisGetdel.mockResolvedValue(null);
     mocks.redisDel.mockResolvedValue(1);
     mocks.component.mockResolvedValue('handled');
@@ -965,7 +981,7 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         replyToMessageId: 'message-1',
         text: expect.stringMatching(
-          /^A quick answer\n\n-# Reply or use the \[web app\]\(.*\/sessions\/fast-session-1.*\)\.$/,
+          /^A quick answer\n\n-# _\[Web app\]\(.*\/sessions\/fast-session-1\?utm_source=discord&utm_medium=link&utm_campaign=discord.fast_reply\)_$/,
         ),
       }),
     );

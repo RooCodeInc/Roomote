@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  redisState: new Map<string, string>(),
   acquireLock: vi.fn(),
   answerQuestion: vi.fn(),
   fetchHistory: vi.fn(),
@@ -23,12 +24,25 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/redis')>();
   return {
     ...actual,
-    // The sticky-footer lock and state live in Redis; unit tests run without
-    // a server, so satisfy lock acquisition and empty prior state.
+    // Preserve lock ownership and footer state without a Redis server.
     getRedis: () => ({
-      set: async () => 'OK',
-      get: async () => null,
-      eval: async () => 1,
+      zadd: async () => 1,
+      set: async (key: string, value: string, ...args: unknown[]) => {
+        if (args.includes('NX') && mocks.redisState.has(key)) return null;
+        mocks.redisState.set(key, value);
+        return 'OK';
+      },
+      get: async (key: string) => mocks.redisState.get(key) ?? null,
+      eval: async (
+        script: string,
+        _count: number,
+        key: string,
+        owner: string,
+      ) => {
+        if (mocks.redisState.get(key) !== owner) return 0;
+        if (script.includes("'del'")) mocks.redisState.delete(key);
+        return 1;
+      },
     }),
   };
 });
@@ -127,6 +141,7 @@ describe('getDiscordFastLaunchSourceEventId', () => {
 describe('processDiscordFastAgentMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.redisState.clear();
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.getSession.mockResolvedValue({ id: 'fast-session-1' });
     mocks.admitHumanFollowUp.mockResolvedValue({
@@ -420,7 +435,7 @@ describe('processDiscordFastAgentMessage', () => {
     expect(provider.editMessage).toHaveBeenCalledWith({
       channelId: 'channel-1',
       messageId: 'retry-1',
-      text: 'Connection restored.',
+      text: 'Connection restored.\n\n-# _[Web app](https://roomote.example.com/sessions/fast-session-1?utm_source=discord&utm_medium=link&utm_campaign=discord.fast_reply)_',
     });
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
