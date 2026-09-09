@@ -8,6 +8,7 @@ import {
   eq,
   sql,
   and,
+  or,
   isNotNull,
   isNull,
   desc,
@@ -64,8 +65,23 @@ export async function getUsersOnlyForFilterCommand(
     timePeriod?: TimePeriodFilter;
   },
 ): Promise<FilterOption[]> {
-  void auth;
   const whereConditions = [...getVisibleTaskHistoryConditions(auth)];
+
+  if (!auth.isAdmin) {
+    // Custom automation creator ownership is enforced by the history conditions.
+    whereConditions.push(
+      or(
+        and(
+          eq(tasks.initiatorKind, 'user'),
+          eq(tasks.initiatorUserId, auth.userId),
+        ),
+        and(
+          eq(tasks.initiatorKind, 'automation'),
+          eq(tasks.initiatorAutomation, 'custom_automation'),
+        ),
+      ),
+    );
+  }
 
   if (input.repositoryName) {
     whereConditions.push(eq(tasks.repositoryName, input.repositoryName));
