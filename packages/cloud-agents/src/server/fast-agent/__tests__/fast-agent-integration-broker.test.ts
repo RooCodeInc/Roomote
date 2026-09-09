@@ -9,16 +9,21 @@ const mocks = vi.hoisted(() => ({
   beginIntegrationCall: vi.fn(),
   completeIntegrationCall: vi.fn(),
   findGithubInstallation: vi.fn(),
+  findGitlabRepository: vi.fn(),
+  findGitlabConnection: vi.fn(),
+  resolveGitLabInstanceHost: vi.fn(),
+  env: {
+    R_CURATED_INTEGRATIONS_DISABLED: false,
+  },
   getBitbucketOAuthConnection: vi.fn(),
   resolveBitbucketInstanceHost: vi.fn(),
   findMember: vi.fn(),
   findRepository: vi.fn(),
-  curatedDisabled: false,
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/env')>()),
-  areCuratedIntegrationsDisabled: () => mocks.curatedDisabled,
+  Env: mocks.env,
 }));
 
 vi.mock('@roomote/bitbucket', () => ({
@@ -31,17 +36,32 @@ vi.mock('@roomote/auth', () => ({
   ROOMOTE_MCP_PATH: '/mcp',
 }));
 
+vi.mock('@roomote/gitlab', () => ({
+  resolveGitLabInstanceHost: mocks.resolveGitLabInstanceHost,
+}));
+
 vi.mock('@roomote/db/server', () => ({
   beginSlackFastIntegrationCall: mocks.beginIntegrationCall,
   completeSlackFastIntegrationCall: mocks.completeIntegrationCall,
   db: {
     query: {
       githubInstallations: { findFirst: mocks.findGithubInstallation },
+      repositories: {
+        findFirst: (options: { where: [string, unknown][] }) => {
+          const provider = options.where.find(
+            ([column]) => column === 'provider',
+          )?.[1];
+          if (provider === 'gitlab') return mocks.findGitlabRepository(options);
+          if (provider === 'bitbucket') return mocks.findRepository(options);
+          throw new Error(`Unexpected repository provider: ${provider}`);
+        },
+      },
+      deploymentSecrets: { findFirst: mocks.findGitlabConnection },
       users: { findFirst: mocks.findMember },
-      repositories: { findFirst: mocks.findRepository },
     },
   },
   githubInstallations: { suspendedAt: 'suspendedAt' },
+  deploymentSecrets: { name: 'name' },
   users: { id: 'user-id', deletedAt: 'deletedAt' },
   repositories: {
     sourceControlProvider: 'provider',
@@ -103,8 +123,13 @@ describe('fast-agent integration broker', () => {
     mocks.configuredServers = {};
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
+    mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
+    mocks.resolveGitLabInstanceHost.mockResolvedValue(
+      'gitlab.example.com:8443',
+    );
+    mocks.findGitlabRepository.mockResolvedValue(undefined);
+    mocks.findGitlabConnection.mockResolvedValue(undefined);
     mocks.getBitbucketOAuthConnection.mockResolvedValue(null);
-    mocks.curatedDisabled = false;
     mocks.resolveBitbucketInstanceHost.mockResolvedValue('bitbucket.org');
     mocks.findMember.mockResolvedValue({ role: 'member' });
     mocks.findRepository.mockResolvedValue({ externalRepoId: 'repo-uuid' });
@@ -234,6 +259,175 @@ describe('fast-agent integration broker', () => {
     });
   });
 
+  it('discovers GitLab from the existing connection without reading secrets and refreshes broker auth at call time', async () => {
+    mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
+    mocks.findGitlabConnection.mockResolvedValue({
+      name: 'gitlab_deployment_oauth_connection',
+    });
+    const integrations = await listFastAgentIntegrations(auditContext);
+    expect(integrations.map(({ id }) => id)).toEqual(['gitlab']);
+    expect(mocks.findGitlabRepository).toHaveBeenCalledWith({
+      where: [
+        ['provider', 'gitlab'],
+        ['active', true],
+        ['host', 'gitlab.example.com:8443'],
+      ],
+      columns: { id: true },
+    });
+    expect(mocks.findGitlabConnection).toHaveBeenCalledWith({
+      where: ['name', 'gitlab_deployment_oauth_connection'],
+      columns: { name: true },
+    });
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://api.example.com/api/mcp-routing/gitlab',
+      headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
+    });
+    mocks.createAuthToken.mockResolvedValue('fresh-token');
+    mocks.callMcpTool.mockResolvedValue({ results: [] });
+    await callFastAgentIntegration(auditContext, integrations, {
+      integrationId: 'gitlab',
+      toolName: 'search',
+      args: {},
+    });
+    expect(mocks.callMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://api.example.com/api/mcp-routing/gitlab',
+        headers: { Authorization: 'Bearer fresh-token' },
+      }),
+    );
+  });
+
+  it.each(['disabled', 'no repository', 'no connection', 'discovery denied'])(
+    'does not advertise GitLab with %s',
+    async (reason) => {
+      mocks.env.R_CURATED_INTEGRATIONS_DISABLED = reason === 'disabled';
+      mocks.findGitlabRepository.mockResolvedValue(
+        reason === 'no repository' ? undefined : { id: 'repo-1' },
+      );
+      mocks.findGitlabConnection.mockResolvedValue(
+        reason === 'no connection'
+          ? undefined
+          : { name: 'gitlab_deployment_oauth_connection' },
+      );
+      if (reason === 'discovery denied')
+        mocks.listMcpTools.mockRejectedValueOnce(new Error('Unauthorized'));
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+      if (reason !== 'discovery denied')
+        expect(mocks.listMcpTools).not.toHaveBeenCalled();
+      if (reason === 'disabled')
+        expect(mocks.findGitlabConnection).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['disabled', 'no repository', 'no connection'])(
+    'does not retain a GitLab catalog after %s',
+    async (reason) => {
+      mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
+      mocks.findGitlabConnection.mockResolvedValue({
+        name: 'gitlab_deployment_oauth_connection',
+      });
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([
+        expect.objectContaining({ id: 'gitlab' }),
+      ]);
+      mocks.env.R_CURATED_INTEGRATIONS_DISABLED = reason === 'disabled';
+      if (reason === 'no repository')
+        mocks.findGitlabRepository.mockResolvedValue(undefined);
+      if (reason === 'no connection')
+        mocks.findGitlabConnection.mockResolvedValue(undefined);
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+      expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['configuration', 'repository database', 'connection database'])(
+    'keeps Roomote and GitHub available when GitLab %s fails',
+    async (reason) => {
+      mocks.configuredServers = {
+        roomote: { url: 'https://api.example.com/mcp', headers: {} },
+      };
+      mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+      if (reason === 'configuration') {
+        mocks.resolveGitLabInstanceHost.mockImplementationOnce(() => {
+          throw new Error('Invalid GitLab configuration');
+        });
+      } else {
+        const lookup =
+          reason === 'repository database'
+            ? mocks.findGitlabRepository
+            : mocks.findGitlabConnection;
+        lookup.mockRejectedValueOnce(new Error('Database unavailable'));
+      }
+      const integrations = await listFastAgentIntegrations(auditContext);
+      expect(integrations.map(({ id }) => id)).toEqual(['roomote', 'github']);
+      expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('reuses GitLab schemas but preserves call-time actor revocation with fresh auth', async () => {
+    mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
+    mocks.findGitlabConnection.mockResolvedValue({
+      name: 'gitlab_deployment_oauth_connection',
+    });
+    await listFastAgentIntegrations(auditContext);
+    const integrations = await listFastAgentIntegrations(auditContext);
+    expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+
+    mocks.createAuthToken.mockResolvedValueOnce('fresh-revoked-actor-token');
+    mocks.callMcpTool.mockRejectedValueOnce(
+      new Error('Active member required'),
+    );
+    await expect(
+      callFastAgentIntegration(auditContext, integrations, {
+        integrationId: 'gitlab',
+        toolName: 'search',
+        args: {},
+      }),
+    ).rejects.toThrow('Active member required');
+    expect(mocks.callMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://api.example.com/api/mcp-routing/gitlab',
+        headers: { Authorization: 'Bearer fresh-revoked-actor-token' },
+      }),
+    );
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        error: 'Active member required',
+      }),
+    );
+  });
+
+  it('discovers GitLab and Bitbucket together with independent repository eligibility', async () => {
+    mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
+    mocks.findGitlabConnection.mockResolvedValue({
+      name: 'gitlab_deployment_oauth_connection',
+    });
+    mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
+
+    const integrations = await listFastAgentIntegrations(auditContext);
+    expect(integrations.map(({ id, endpoint }) => [id, endpoint?.url])).toEqual(
+      [
+        ['gitlab', 'https://api.example.com/api/mcp-routing/gitlab'],
+        ['bitbucket', 'https://api.example.com/api/mcp/bitbucket'],
+      ],
+    );
+    expect(mocks.findGitlabRepository).toHaveBeenCalledOnce();
+    expect(mocks.findRepository).toHaveBeenCalledOnce();
+
+    mocks.findGitlabRepository.mockResolvedValue(undefined);
+    expect(
+      (await listFastAgentIntegrations(auditContext)).map(({ id }) => id),
+    ).toEqual(['bitbucket']);
+
+    mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
+    mocks.findRepository.mockResolvedValue(undefined);
+    expect(
+      (await listFastAgentIntegrations(auditContext)).map(({ id }) => id),
+    ).toEqual(['gitlab']);
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+  });
+
   it.each([null, { status: 'reauthorization_required' }])(
     'omits Bitbucket without an active deployment OAuth connection: %j',
     async (connection) => {
@@ -247,7 +441,7 @@ describe('fast-agent integration broker', () => {
   it('hides cached Bitbucket tools when curated integrations are disabled', async () => {
     mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
     expect(await listFastAgentIntegrations(auditContext)).toHaveLength(1);
-    mocks.curatedDisabled = true;
+    mocks.env.R_CURATED_INTEGRATIONS_DISABLED = true;
     expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
     expect(mocks.listMcpTools).toHaveBeenCalledOnce();
     expect(mocks.getBitbucketOAuthConnection).toHaveBeenCalledOnce();

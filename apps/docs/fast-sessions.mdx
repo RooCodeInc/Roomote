@@ -58,9 +58,15 @@ also supports updates to existing pull requests, issue or PR comments,
 review-comment replies, and reactions using the deployment's GitHub App.
 See that guide for supported actions and access requirements.
 
-[GitLab MCP](https://docs.gitlab.com/user/model_context_protocol/mcp_server/)
-and [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
-are not enabled for this direct Fast path. Their compatibility with Roomote's
+[GitLab API tools](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
+reuse the existing deployment OAuth connection for bounded repository reads,
+merge request title, description and close/reopen updates, notes, and discussion
+replies. No additional MCP server or installation is needed. Tools require an
+active member, an active connected repository on the configured GitLab host, and
+valid deployment OAuth access; curated integrations must be enabled.
+
+The official [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
+is not enabled for this direct Fast path. Its compatibility with Roomote's
 existing credentials has not been verified; existing task workflows are unchanged.
 
 ## The session view
