@@ -1,3 +1,5 @@
+import { RunStatus } from '@roomote/types';
+
 const {
   findFirstMock,
   findManyMock,
@@ -30,6 +32,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
+  getSessionForTask: vi.fn().mockResolvedValue(null),
   taskPullRequests: {
     taskId: 'taskId',
   },
@@ -56,7 +59,10 @@ vi.mock('@roomote/redis', () => ({
   })),
 }));
 
-import { getSlackThreadFooterText } from '../thread-footer';
+import {
+  buildSlackThreadFooterText,
+  getSlackThreadFooterText,
+} from '../thread-footer';
 
 function mockEnvironmentBackedTaskRun(params?: {
   primaryPortName?: string | null;
@@ -64,10 +70,27 @@ function mockEnvironmentBackedTaskRun(params?: {
   taskRunFindFirstMock.mockResolvedValue({
     payload: { environmentId: 'env-1' },
     primaryPortName: params?.primaryPortName ?? null,
+    status: RunStatus.Idle,
   });
 }
 
 describe('getSlackThreadFooterText', () => {
+  it('renders the owning Session transcript separately from task navigation', () => {
+    expect(
+      buildSlackThreadFooterText({
+        taskUrl: 'https://app.example.com/task/task-1?utm_source=slack',
+        webAppUrl: 'https://app.example.com/sessions/owner',
+        runningTasks: {
+          count: 1,
+          url: 'https://app.example.com/sessions/owner?task=task-1',
+        },
+        explicitMentionRequired: false,
+      }),
+    ).toBe(
+      '_<https://app.example.com/sessions/owner?task=task-1|1 running task> · <https://app.example.com/sessions/owner?utm_source=slack|Web app>_',
+    );
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     findFirstMock.mockResolvedValue(null);
@@ -100,7 +123,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on <https://github.com/roomote/app/pull/4321|PR #4321>, reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://github.com/roomote/app/pull/4321|PR #4321> · <https://app.example.com/task/task-1|Web app> · Reply with @-mention_',
     );
   });
 
@@ -120,9 +143,7 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe(
-      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
-    );
+    ).resolves.toBe('_<https://app.example.com/task/task-1|Web app>_');
   });
 
   it('falls back to the task run PR when no linked task PR row exists', async () => {
@@ -136,7 +157,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Web app>_',
     );
   });
 
@@ -158,7 +179,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, <https://task-1-web.preview.example.com/auth/dev-login|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://task-1-web.preview.example.com/auth/dev-login|Live preview> · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Web app>_',
     );
   });
 
@@ -180,7 +201,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-web.preview.example.com/auth/dev-login|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://task-1-web.preview.example.com/auth/dev-login|Live preview> · <https://app.example.com/task/task-1|Web app>_',
     );
   });
 
@@ -210,7 +231,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-my-app.preview.example.com/?path=/story/example|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://task-1-my-app.preview.example.com/?path=/story/example|Live preview> · <https://app.example.com/task/task-1|Web app>_',
     );
   });
 
@@ -232,7 +253,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Web app>_',
     );
   });
 
@@ -255,7 +276,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Web app>_',
     );
   });
 
@@ -274,9 +295,7 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe(
-      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
-    );
+    ).resolves.toBe('_<https://app.example.com/task/task-1|Web app>_');
   });
 
   it('omits the live preview link for repo-only tasks without an environment', async () => {
@@ -295,7 +314,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, reply or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Web app>_',
     );
 
     expect(environmentFindFirstMock).not.toHaveBeenCalled();
@@ -323,9 +342,7 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe(
-      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
-    );
+    ).resolves.toBe('_<https://app.example.com/task/task-1|Web app>_');
   });
 
   it('keeps the explicit-mention instruction with the live preview link', async () => {
@@ -347,7 +364,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
+      '_<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Web app> · Reply with @-mention_',
     );
   });
 });

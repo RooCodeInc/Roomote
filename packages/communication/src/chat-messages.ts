@@ -289,10 +289,17 @@ export type ThreadReplyLinkedPr = {
   prUrl: string;
 };
 
+export type ThreadReplyRunningTasks = {
+  count: number;
+  url: string;
+};
+
 export function buildThreadReplyFooterText({
   taskUrl,
   linkedPrs,
   livePreviewUrl,
+  runningTasks,
+  webAppUrl,
   explicitMentionRequired = false,
   formatLink = formatMarkdownLink,
   formatFooterText = (text) => `_${text}_`,
@@ -300,48 +307,43 @@ export function buildThreadReplyFooterText({
   taskUrl: string;
   linkedPrs?: ThreadReplyLinkedPr[];
   livePreviewUrl?: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
+  webAppUrl?: string | null;
   explicitMentionRequired?: boolean;
   formatLink?: LinkFormatter;
   formatFooterText?: (text: string) => string;
 }): string {
-  const replyInstruction = explicitMentionRequired
-    ? 'reply with @-mention or use'
-    : 'reply or use';
-  const livePreviewLink = livePreviewUrl
-    ? formatLink('live preview', livePreviewUrl)
-    : null;
-  const webAppLink = formatLink('web app', taskUrl);
-
-  const activePullRequests = linkedPrs ?? [];
-
-  if (activePullRequests.length > 0) {
-    const prLinks = activePullRequests.map((pr) =>
+  const items: string[] = [];
+  if (runningTasks) {
+    items.push(
+      formatLink(
+        runningTasks.count === 0
+          ? 'No running tasks'
+          : `${runningTasks.count} running task${runningTasks.count === 1 ? '' : 's'}`,
+        runningTasks.url,
+      ),
+    );
+  }
+  if (livePreviewUrl) items.push(formatLink('Live preview', livePreviewUrl));
+  items.push(
+    ...(linkedPrs ?? []).map((pr) =>
       formatLink(`PR #${pr.prNumber}`, pr.prUrl),
-    );
-    const prLink =
-      prLinks.length === 1
-        ? prLinks[0]
-        : `${prLinks.slice(0, -1).join(', ')} and ${prLinks.at(-1)}`;
-    const workingOn = livePreviewLink
-      ? `${prLink}, ${livePreviewLink}`
-      : prLink;
-
-    return formatFooterText(
-      `Working on ${workingOn}, ${replyInstruction} the ${webAppLink}.`,
-    );
-  }
-
-  if (livePreviewLink) {
-    return formatFooterText(
-      `Working on a ${livePreviewLink}, ${replyInstruction} the ${webAppLink}.`,
-    );
-  }
-
-  return formatFooterText(
-    explicitMentionRequired
-      ? `Reply with @-mention or use the ${webAppLink}.`
-      : `Reply or use the ${webAppLink}.`,
+    ),
   );
+  const webUrl = new URL(webAppUrl ?? taskUrl);
+  if (webAppUrl) {
+    for (const [key, value] of new URL(taskUrl).searchParams) {
+      if (key.startsWith('utm_')) webUrl.searchParams.set(key, value);
+    }
+  }
+  if (webUrl.pathname.startsWith('/sessions/')) {
+    webUrl.searchParams.delete('task');
+    webUrl.searchParams.delete('artifact');
+    webUrl.searchParams.delete('v');
+  }
+  items.push(formatLink('Web app', webUrl.toString()));
+  if (explicitMentionRequired) items.push('Reply with @-mention');
+  return formatFooterText(items.join(' · '));
 }
 
 /**

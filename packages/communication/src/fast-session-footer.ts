@@ -14,9 +14,13 @@ import {
   buildThreadReplyFooterText,
   formatMarkdownLink,
   type ThreadReplyLinkedPr,
+  type ThreadReplyRunningTasks,
 } from './chat-messages';
 import { chunkDiscordMessage } from './discord-provider';
-import { resolveThreadReplyFooterContext } from './thread-reply-footer-context';
+import {
+  resolveSessionRunningTasks,
+  resolveThreadReplyFooterContext,
+} from './thread-reply-footer-context';
 
 export type FastSessionFooterProvider =
   | 'slack'
@@ -38,6 +42,7 @@ export type FastSessionPullRequestReference = {
 export type FastSessionReplyFooterContext = {
   linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
 };
 
 const TERMINAL_PULL_REQUEST_STATUSES = new Set(['closed', 'merged']);
@@ -65,9 +70,7 @@ function collectFastSessionLinkedPrs(params: {
   return [...uniquePrs.values()];
 }
 
-async function getFastSessionLinkedTaskIds(
-  sessionId: string,
-): Promise<string[]> {
+async function getFastSessionLinkedTasks(sessionId: string) {
   const session = await getSessionForFastConversation(db, sessionId);
   const linkedTasks = session
     ? await db
@@ -81,7 +84,7 @@ async function getFastSessionLinkedTaskIds(
         // across footer rebuilds.
         .orderBy(asc(sessionTasks.attachedAt), asc(sessionTasks.taskId))
     : [];
-  return linkedTasks.map(({ taskId }) => taskId);
+  return { session, linkedTaskIds: linkedTasks.map(({ taskId }) => taskId) };
 }
 
 export async function resolveFastSessionReplyFooterContext(params: {
@@ -89,18 +92,25 @@ export async function resolveFastSessionReplyFooterContext(params: {
   pullRequest?: FastSessionPullRequestReference | null;
   pullRequests?: readonly FastSessionPullRequestReference[];
 }): Promise<FastSessionReplyFooterContext> {
-  const linkedTaskIds = await getFastSessionLinkedTaskIds(params.sessionId);
+  const { session, linkedTaskIds } = await getFastSessionLinkedTasks(
+    params.sessionId,
+  );
+  const runningTasks = session
+    ? await resolveSessionRunningTasks(session.id, linkedTaskIds)
+    : null;
   const contexts = await Promise.all(
     linkedTaskIds.map((taskId) =>
       resolveThreadReplyFooterContext({
         taskId,
         prRepo: null,
         prNumber: null,
+        includeRunningTasks: false,
       }),
     ),
   );
 
   return {
+    ...(runningTasks ? { runningTasks } : {}),
     linkedPrs: collectFastSessionLinkedPrs({
       pullRequest: params.pullRequest,
       pullRequests: params.pullRequests,
@@ -135,8 +145,7 @@ export function buildSelectedTaskSessionUrl(params: {
 }
 
 /**
- * The Fast-session variant of the task thread-reply footer: always the plain
- * "Reply or use the web app." shape, linking to the session view.
+ * Compact Session links, with task navigation separate from the transcript.
  */
 export function buildFastSessionReplyFooterText(params: {
   provider: FastSessionFooterProvider;
@@ -145,6 +154,7 @@ export function buildFastSessionReplyFooterText(params: {
   pullRequests?: readonly FastSessionPullRequestReference[];
   linkedPrs?: readonly ThreadReplyLinkedPr[];
   livePreviewUrl?: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
 }): string {
   const sessionUrl = buildFastSessionUrl(params.provider, params.sessionId);
 
@@ -161,18 +171,19 @@ export function buildFastSessionReplyFooterText(params: {
     taskUrl: sessionUrl,
     linkedPrs: collectFastSessionLinkedPrs(params),
     livePreviewUrl: params.livePreviewUrl,
+    runningTasks: params.runningTasks,
     explicitMentionRequired,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
       : params.provider === 'discord'
         ? {
             formatLink: formatMarkdownLink,
-            formatFooterText: (text: string) => `-# ${text}`,
+            formatFooterText: (text: string) => `-# _${text}_`,
           }
         : params.provider === 'github'
           ? {
               formatLink: formatMarkdownLink,
-              formatFooterText: (text: string) => `<sub>${text}</sub>`,
+              formatFooterText: (text: string) => `<sub><em>${text}</em></sub>`,
             }
           : { formatLink: formatMarkdownLink }),
   });

@@ -46,6 +46,14 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('@roomote/communication', () => ({
   buildFastSessionReplyFooterText: ({ provider }: { provider: string }) =>
     `[footer:${provider}]`,
+  resolveFastSessionReplyFooterContext: async () => ({}),
+  withThreadReplyFooterLock: async ({
+    fn,
+  }: {
+    fn: (assertLock: () => Promise<void>) => Promise<unknown>;
+  }) => fn(async () => {}),
+  scheduleThreadFooterRefresh: async () => {},
+  forgetThreadFooterRefresh: async () => {},
 }));
 
 vi.mock('@roomote/github', () => ({

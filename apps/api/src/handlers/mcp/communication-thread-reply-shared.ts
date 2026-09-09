@@ -33,6 +33,7 @@ type CommunicationThreadReplyProvider = 'discord' | 'telegram' | 'teams';
 type PostedFooterRecord<T extends { messageId: string }> = T & {
   textWithoutFooter: string;
   images?: ThreadReplyFooterRecord['images'];
+  refresh?: ThreadReplyFooterRecord['refresh'];
 };
 
 function getThreadReplyWebPath(payload: unknown): string | null {
@@ -159,7 +160,7 @@ export async function deliverManagedThreadReplyFooter<
 }): Promise<TReply> {
   return withThreadReplyFooterLock({
     lockKey: params.lockKey,
-    fn: async () => {
+    fn: async (assertLock) => {
       let previousFooterRecord: ThreadReplyFooterRecord | null = null;
       try {
         previousFooterRecord = await getThreadReplyFooterRecord(
@@ -175,24 +176,11 @@ export async function deliverManagedThreadReplyFooter<
         );
       }
 
+      await assertLock();
       const posted = await params.postReplyWithFooter();
 
-      if (
-        previousFooterRecord &&
-        previousFooterRecord.messageId !== posted.messageId
-      ) {
-        try {
-          await params.clearPreviousFooter(previousFooterRecord);
-        } catch (error) {
-          console.error(
-            `[${params.logContext}] Failed to clear prior ${params.providerLabel} footer message ${previousFooterRecord.messageId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-      }
-
       try {
+        await assertLock();
         await setThreadReplyFooterRecord(
           params.provider,
           params.channelId,
@@ -200,6 +188,7 @@ export async function deliverManagedThreadReplyFooter<
           {
             messageId: posted.messageId,
             textWithoutFooter: posted.textWithoutFooter,
+            ...(posted.refresh ? { refresh: posted.refresh } : {}),
             ...(posted.images && posted.images.length > 0
               ? { images: posted.images }
               : {}),
@@ -211,6 +200,30 @@ export async function deliverManagedThreadReplyFooter<
             error instanceof Error ? error.message : String(error)
           }`,
         );
+        const current = await getThreadReplyFooterRecord(
+          params.provider,
+          params.channelId,
+          params.footerStateThreadId,
+        ).catch(() => undefined);
+        if (current !== undefined && current?.messageId !== posted.messageId) {
+          await params.clearPreviousFooter(posted).catch(() => {});
+        }
+        return posted;
+      }
+
+      if (
+        previousFooterRecord &&
+        previousFooterRecord.messageId !== posted.messageId
+      ) {
+        try {
+          await assertLock();
+          await params.clearPreviousFooter(previousFooterRecord);
+        } catch (error) {
+          console.error(
+            `[${params.logContext}] Failed to clear prior ${params.providerLabel} footer message ${previousFooterRecord.messageId}`,
+            error,
+          );
+        }
       }
 
       return posted;

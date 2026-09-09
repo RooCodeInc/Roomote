@@ -21,6 +21,8 @@ const {
   slackInstallationFindManyMock,
   suppressNextSlackReplyQuoteMock,
   taskRunFindFirstMock,
+  resolveThreadReplyFooterContextMock,
+  buildSlackThreadFooterTextMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImageBlocksMock: vi.fn(),
   clearNextSlackReplyQuoteSuppressionIfIdMock: vi.fn(),
@@ -39,6 +41,8 @@ const {
   slackInstallationFindManyMock: vi.fn(),
   suppressNextSlackReplyQuoteMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
+  resolveThreadReplyFooterContextMock: vi.fn(),
+  buildSlackThreadFooterTextMock: vi.fn().mockReturnValue('Task footer'),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -75,7 +79,7 @@ vi.mock('@roomote/slack', async (importOriginal) => {
   return {
     ...actual,
     SlackPostDeliveryError: actual.SlackPostDeliveryError,
-    buildSlackThreadFooterText: vi.fn().mockReturnValue('Task footer'),
+    buildSlackThreadFooterText: buildSlackThreadFooterTextMock,
     buildSlackThreadReplyFooterBlock: vi.fn(({ footerText }) => ({
       type: 'context',
       block_id: 'footer',
@@ -97,7 +101,7 @@ vi.mock('@roomote/slack', async (importOriginal) => {
     resolveSlackThreadLinkedPrs: vi.fn().mockResolvedValue([]),
     ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'roomote_thread_reply_quote',
     setLatestSlackBotReply: vi.fn().mockResolvedValue(undefined),
-    setSlackThreadReplyFooterMessageTs: vi.fn(),
+    setSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(undefined),
     SlackNotifier: vi.fn(
       class {
         isAppInChannel = isAppInChannelMock;
@@ -108,7 +112,11 @@ vi.mock('@roomote/slack', async (importOriginal) => {
     trackLatestUserMessageForSlackQuote: vi.fn(),
     trackSlackBotReply: vi.fn().mockResolvedValue(undefined),
     withSlackThreadReplyFooterLock: vi.fn(
-      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+      async ({
+        fn,
+      }: {
+        fn: (assertLock: () => Promise<void>) => Promise<unknown>;
+      }) => fn(async () => {}),
     ),
     THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE: 'busy',
   };
@@ -118,6 +126,11 @@ vi.mock('@roomote/communication/messages', () => ({
   clearLatestUserMessageForReplyQuoteIfId:
     clearLatestUserMessageForReplyQuoteIfIdMock,
   setLatestUserMessageForReplyQuote: vi.fn(),
+}));
+
+vi.mock('@roomote/communication', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/communication')>()),
+  resolveThreadReplyFooterContext: resolveThreadReplyFooterContextMock,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -166,6 +179,12 @@ vi.mock('@roomote/env', async (importOriginal) => {
 import { mcpAuthMiddleware } from '../middleware';
 import { slackMcp } from '../slack';
 import { eq } from '@roomote/db/server';
+import {
+  getSlackThreadReplyFooterMessageTs,
+  setSlackThreadReplyFooterMessageTs,
+  removeSlackThreadReplyFooter,
+  withSlackThreadReplyFooterLock,
+} from '@roomote/slack';
 
 const runToken: RunTokenContext = {
   runId: 42,
@@ -177,7 +196,7 @@ const runToken: RunTokenContext = {
 
 function createApp() {
   const app = new Hono<{ Variables: Variables }>();
-  app.onError(() => new Response(null, { status: 500 }));
+  app.onError((error) => new Response(error.message, { status: 500 }));
   app.use('*', async (c, next) => {
     c.set('authContext', runToken);
     await next();
@@ -188,8 +207,38 @@ function createApp() {
 }
 
 describe('Slack thread reply quotes', () => {
+  it('does not overwrite a newer reply carrier while binding an already-visible root', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    getCustomAutomationByIdMock.mockResolvedValue(null);
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    vi.mocked(getSlackThreadReplyFooterMessageTs).mockResolvedValueOnce(
+      'competitor',
+    );
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Root report' }),
+    });
+    expect(response.status, await response.text()).toBe(200);
+    expect(withSlackThreadReplyFooterLock).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C123', threadTs: '333.444' }),
+    );
+    expect(setSlackThreadReplyFooterMessageTs).not.toHaveBeenCalled();
+    expect(removeSlackThreadReplyFooter).toHaveBeenCalledWith(
+      expect.objectContaining({ messageTs: '333.444' }),
+    );
+  });
   beforeEach(() => {
     vi.clearAllMocks();
+    resolveThreadReplyFooterContextMock.mockResolvedValue({
+      linkedPrs: [],
+      livePreviewUrl: null,
+    });
     getActiveSlackRunReplyTargetMock.mockResolvedValue(null);
     taskRunFindFirstMock.mockResolvedValue({
       id: 42,
@@ -418,6 +467,56 @@ describe('Slack thread reply quotes', () => {
       }),
     );
   });
+
+  it.each([0, 1, 2])(
+    'propagates Session navigation, preview and %i running tasks into a late-bound root footer',
+    async (count) => {
+      const context = {
+        linkedPrs: [],
+        livePreviewUrl: 'https://preview.example.com',
+        runningTasks: {
+          count,
+          url:
+            count === 1
+              ? 'https://app.example.com/sessions/owner?task=task-1'
+              : 'https://app.example.com/tasks',
+        },
+        webAppUrl: 'https://app.example.com/sessions/owner',
+      };
+      resolveThreadReplyFooterContextMock.mockResolvedValue(context);
+      taskRunFindFirstMock.mockResolvedValue({
+        id: 42,
+        actingUserId: null,
+        taskId: 'task-1',
+        payload: { channel: 'C123', customAutomationId: 'automation-1' },
+      });
+      getCustomAutomationByIdMock.mockResolvedValue(null);
+      buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+      const response = await createApp().request('/mcp/thread_reply', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: 'Root report' }),
+      });
+      expect(response.status, await response.text()).toBe(200);
+      expect(resolveThreadReplyFooterContextMock).toHaveBeenCalledWith({
+        taskId: 'task-1',
+        prRepo: null,
+        prNumber: null,
+      });
+      expect(buildSlackThreadFooterTextMock).toHaveBeenCalledWith({
+        ...context,
+        taskUrl: expect.stringContaining('/task/task-1?'),
+        explicitMentionRequired: false,
+      });
+      expect(postMessageDetailedMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          blocks: expect.arrayContaining([
+            expect.objectContaining({ block_id: 'footer' }),
+          ]),
+        }),
+      );
+    },
+  );
 
   it('selects the Slack installation that owns a late-bound automation channel', async () => {
     taskRunFindFirstMock.mockResolvedValue({

@@ -23,7 +23,7 @@ import {
   getDiscordFooterlessFinalChunk,
   getThreadReplyFooterRecord,
   resolveFastSessionReplyFooterContext,
-  setThreadReplyFooterRecord,
+  rememberThreadReplyFooterAfterEdit,
   withThreadReplyFooterLock,
 } from '@roomote/communication';
 import {
@@ -334,6 +334,7 @@ export async function processDiscordFastAgentMessage(
               textWithFooter,
               footerText,
             }),
+            refresh: { footerText, channelId: footerMessageChannelId },
           };
         },
         clearPreviousFooter: async (previousFooterRecord) => {
@@ -513,7 +514,7 @@ export async function processDiscordFastAgentMessage(
           // and this replacement would re-mark the old message as carrier.
           const replaced = await withThreadReplyFooterLock({
             lockKey: `discord:thread_reply_footer_lock:${footerChannelId}:${footerStateThreadId}`,
-            fn: async () => {
+            fn: async (assertLock) => {
               const footerRecord = await getThreadReplyFooterRecord(
                 'discord',
                 footerChannelId,
@@ -523,6 +524,7 @@ export async function processDiscordFastAgentMessage(
               const replacementText = isFooterCarrier
                 ? `${text}\n\n${footerText}`
                 : text;
+              await assertLock();
 
               if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
                 const placeholder = 'Reconnected to the inference provider.';
@@ -537,12 +539,25 @@ export async function processDiscordFastAgentMessage(
                   // The relocation that follows rewrites this message to its
                   // stored footerless text; keep that text current so the
                   // edit does not resurrect the pre-retry notice.
-                  await setThreadReplyFooterRecord(
-                    'discord',
-                    footerChannelId,
-                    footerStateThreadId,
-                    { messageId, textWithoutFooter: placeholder },
-                  ).catch(() => {});
+                  await rememberThreadReplyFooterAfterEdit({
+                    provider: 'discord',
+                    channelId: footerChannelId,
+                    threadId: footerStateThreadId,
+                    assertLock,
+                    record: {
+                      ...footerRecord,
+                      messageId,
+                      textWithoutFooter: placeholder,
+                      refresh: { footerText, channelId: channel.channelId },
+                    },
+                    clearOwnFooter: () =>
+                      input.provider.editMessage({
+                        channelId: channel.channelId,
+                        messageId,
+                        text: placeholder,
+                        preserveButtons: true,
+                      }),
+                  }).catch(() => {});
                 }
                 return false;
               }
@@ -553,12 +568,25 @@ export async function processDiscordFastAgentMessage(
                 text: replacementText,
               });
               if (isFooterCarrier) {
-                await setThreadReplyFooterRecord(
-                  'discord',
-                  footerChannelId,
-                  footerStateThreadId,
-                  { messageId, textWithoutFooter: text },
-                ).catch(() => {});
+                await rememberThreadReplyFooterAfterEdit({
+                  provider: 'discord',
+                  channelId: footerChannelId,
+                  threadId: footerStateThreadId,
+                  assertLock,
+                  record: {
+                    ...footerRecord,
+                    messageId,
+                    textWithoutFooter: text,
+                    refresh: { footerText, channelId: channel.channelId },
+                  },
+                  clearOwnFooter: () =>
+                    input.provider.editMessage({
+                      channelId: channel.channelId,
+                      messageId,
+                      text,
+                      preserveButtons: true,
+                    }),
+                }).catch(() => {});
               }
               return true;
             },

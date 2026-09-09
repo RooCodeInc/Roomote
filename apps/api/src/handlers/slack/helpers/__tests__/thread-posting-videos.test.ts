@@ -22,8 +22,8 @@ vi.mock('@roomote/slack', () => ({
   withSlackThreadReplyFooterLock: async ({
     fn,
   }: {
-    fn: () => Promise<unknown>;
-  }) => fn(),
+    fn: (assertLock: () => Promise<void>) => Promise<unknown>;
+  }) => fn(async () => {}),
 }));
 vi.mock('@roomote/communication', () => ({
   buildFastSessionReplyFooterText: () => 'Session footer',

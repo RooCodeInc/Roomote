@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  redisStore: new Map<string, string>(),
   acquireTurnLock: vi.fn(),
   releaseTurnLock: Object.assign(vi.fn(), {
     signal: new AbortController().signal,
@@ -71,9 +72,23 @@ vi.mock('@roomote/redis', async (importOriginal) => {
     // The sticky-footer lock and state live in Redis; these tests run without
     // a server, so satisfy lock acquisition and empty prior state.
     getRedis: () => ({
-      set: async () => 'OK',
-      get: async () => null,
-      eval: async () => 1,
+      set: async (key: string, value: string, ...args: unknown[]) => {
+        if (args.includes('NX') && mocks.redisStore.has(key)) return null;
+        mocks.redisStore.set(key, value);
+        return 'OK';
+      },
+      get: async (key: string) => mocks.redisStore.get(key) ?? null,
+      eval: async (
+        script: string,
+        _count: number,
+        key: string,
+        owner: string,
+      ) => {
+        if (mocks.redisStore.get(key) !== owner) return 0;
+        if (script.includes("'del'")) mocks.redisStore.delete(key);
+        return 1;
+      },
+      zadd: async () => 1,
     }),
   };
 });
@@ -89,6 +104,19 @@ vi.mock('@roomote/communication', async (importOriginal) => ({
     }),
   ),
 }));
+
+vi.mock(
+  '@roomote/communication/thread-footer-refresh',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('@roomote/communication/thread-footer-refresh')
+    >()),
+    resolveCurrentThreadFooterText: async (
+      _provider: string,
+      footerText: string,
+    ) => footerText,
+  }),
+);
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
@@ -283,6 +311,7 @@ const event = {
 
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
+    mocks.redisStore.clear();
     vi.clearAllMocks();
     mocks.findWakeupSession.mockResolvedValue({ id: originSessionId });
     mocks.releaseTurnLock.signal = new AbortController().signal;
@@ -381,6 +410,7 @@ describe('deliverFastAgentParentEvent', () => {
       messageId: 'teams-message-1',
     });
     mocks.createTeamsProvider.mockResolvedValue({
+      provider: 'teams',
       postMessage: mocks.teamsPostMessage,
       updateMessage: mocks.teamsUpdateMessage,
     });
@@ -391,6 +421,7 @@ describe('deliverFastAgentParentEvent', () => {
       lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
+      provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       sendChatAction: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
@@ -801,7 +832,7 @@ describe('deliverFastAgentParentEvent', () => {
             elements: [
               {
                 type: 'mrkdwn',
-                text: expect.stringContaining('Reply or use the'),
+                text: expect.stringContaining('|Web app>'),
               },
             ],
           },
@@ -2014,7 +2045,7 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'channel-1',
       idempotencyKey: 'fast-parent-artifact:artifact-1:v1',
       text: expect.stringMatching(
-        /^The proof is ready\.\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^The proof is ready\.\n\n-# _\[Web app\]\(.*\/sessions\/.*\)_$/,
       ),
       textFormat: 'markdown',
       images: [
@@ -2095,7 +2126,7 @@ describe('deliverFastAgentParentEvent', () => {
           ...(threadId ? { threadId } : {}),
           text: expect.stringMatching(
             new RegExp(
-              `^The proof is ready\\.\\n\\n.*Reply or use the \\[web app\\]\\(.*utm_source=${surface}.*\\)\\..*$`,
+              `^The proof is ready\\.\\n\\n_\\[Web app\\]\\(.*utm_source=${surface}.*\\)_$`,
             ),
           ),
           textFormat: 'markdown',
@@ -2945,7 +2976,7 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
       text: expect.stringMatching(
-        /^There is new PR feedback\.\n\n-# Working on \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\), reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^There is new PR feedback\.\n\n-# _\[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Web app\]\(.*\/sessions\/.*\)_$/,
       ),
       textFormat: 'markdown',
       images: [],

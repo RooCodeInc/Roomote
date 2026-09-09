@@ -44,9 +44,47 @@ import {
 } from '../communication-thread-reply-shared';
 
 describe('deliverManagedThreadReplyFooter', () => {
+  it('a lease lost after posting leaves the competitor pointer untouched and cleans only the new reply', async () => {
+    let owned = true;
+    const competitor = { messageId: 'competitor', textWithoutFooter: 'B' };
+    const original = { messageId: 'original', textWithoutFooter: 'Old' };
+    getThreadReplyFooterRecordMock.mockResolvedValue(original);
+    withThreadReplyFooterLockMock.mockImplementation(async ({ fn }) =>
+      fn(async () => {
+        if (!owned) throw new Error('lease lost');
+      }),
+    );
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    const warning = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const result = await deliverManagedThreadReplyFooter({
+      provider: 'teams',
+      providerLabel: 'Teams',
+      channelId: 'C',
+      footerStateThreadId: 'T',
+      lockKey: 'lock',
+      runId: 1,
+      logContext: 'test',
+      postReplyWithFooter: async () => {
+        owned = false;
+        getThreadReplyFooterRecordMock.mockResolvedValue(competitor);
+        return { messageId: 'orphan', textWithoutFooter: 'A' };
+      },
+      clearPreviousFooter: cleanup,
+    });
+    expect(result.messageId).toBe('orphan');
+    expect(setThreadReplyFooterRecordMock).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledWith({
+      messageId: 'orphan',
+      textWithoutFooter: 'A',
+    });
+    warning.mockRestore();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
-    withThreadReplyFooterLockMock.mockImplementation(async ({ fn }) => fn());
+    withThreadReplyFooterLockMock.mockImplementation(async ({ fn }) =>
+      fn(async () => {}),
+    );
     setThreadReplyFooterRecordMock.mockResolvedValue(undefined);
     resolveThreadReplyFooterContextMock.mockResolvedValue({
       linkedPrs: [],

@@ -22,6 +22,10 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
+    get: async (key: string) =>
+      [...mockRedisSet.mock.calls]
+        .reverse()
+        .find((call) => call[0] === key)?.[1] ?? null,
     set: mockRedisSet,
     eval: mockRedisEval,
   }),
@@ -209,6 +213,35 @@ describe('thread-reply-footer-ops', () => {
       expect.objectContaining({ ts: '111.000' }),
     );
     expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '333.000');
+  });
+
+  it('preserves awake preview, zero status and Session navigation in reply-only posts', async () => {
+    const context = {
+      linkedPrs: [{ prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }],
+      livePreviewUrl: 'https://preview.example.com',
+      runningTasks: { count: 0, url: 'https://app.example.com/tasks' },
+      webAppUrl: 'https://app.example.com/sessions/owner',
+      explicitMentionRequired: true,
+    };
+    mockResolveFooterContext.mockResolvedValue(context);
+    mockGetFooterTs.mockResolvedValue(null);
+    await postSlackThreadMessageWithStickyFooter({
+      slack: {
+        postMessage: vi.fn().mockResolvedValue('222.000'),
+        getMessageBlocks: vi.fn(),
+        updateMessage: vi.fn(),
+      },
+      channel: 'C1',
+      threadTs: '100.000',
+      taskId: 'task-1',
+      text: 'PR merged',
+      footerStyle: 'reply-only',
+    });
+    expect(mockBuildFooterText).toHaveBeenCalledWith({
+      ...context,
+      taskUrl: expect.stringContaining('/task/task-1?'),
+      linkedPrs: [],
+    });
   });
 
   it('takes the footer back off a rewritten message when the pointer cannot be saved', async () => {

@@ -5,7 +5,12 @@ import {
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, repositories } from '@roomote/db/server';
-import { buildFastSessionReplyFooterText } from '@roomote/communication';
+import {
+  buildFastSessionReplyFooterText,
+  resolveFastSessionReplyFooterContext,
+  withThreadReplyFooterLock,
+  forgetThreadFooterRefresh,
+} from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -20,6 +25,11 @@ import {
 import {
   getSourceControlThreadCommentRecord,
   setSourceControlThreadCommentRecord,
+  sourceControlFooterTarget,
+  getSourceControlFooterRecord,
+  setSourceControlFooterRecord,
+  clearSourceControlFooterRecord,
+  type SourceControlFooterRecord,
 } from './source-control-thread-comment-state';
 
 export type SourceControlDiscussionKind = 'pull' | 'issues';
@@ -917,19 +927,31 @@ export function buildSourceControlFastAdapter(params: {
   const discussion = parseSourceControlFastConversation(params.conversation);
   const threadId = params.conversation.replyTarget.threadId;
   const threaded = Boolean(discussion?.reviewCommentId && threadId);
-  const footer = discussion
-    ? buildFastSessionReplyFooterText({
-        provider: discussion.provider,
-        sessionId: params.sessionId,
-      })
-    : '';
+  const target = sourceControlFooterTarget(params.conversation);
+  const lockKey = `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`;
+  let footer = '';
   const quote = threaded ? null : params.quote;
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
   // True while the turn is editing a comment it adopted from the thread's
   // record rather than one it posted itself.
   let adoptedThreadComment = false;
-  const renderBody = () => `${turnBody}\n\n${footer}`;
+  const renderBody = async () => {
+    const current = await getSourceControlFooterRecord(
+      target.channelId,
+      target.threadId,
+    );
+    if (turnComment && current && current.messageId !== turnComment.messageId)
+      return turnBody;
+    footer = buildFastSessionReplyFooterText({
+      provider: params.conversation.surface,
+      sessionId: params.sessionId,
+      ...(await resolveFastSessionReplyFooterContext({
+        sessionId: params.sessionId,
+      })),
+    });
+    return `${turnBody}\n\n${footer}`;
+  };
   const editorFor = (messageId: string): SourceControlPostedComment => ({
     messageId,
     ...(params.delivery.updateCommentById && discussion
@@ -945,18 +967,63 @@ export function buildSourceControlFastAdapter(params: {
   });
   // The thread's comment record is a best-effort nicety: losing it costs one
   // extra comment, never the reply.
-  const rememberThreadComment = async () => {
-    if (!threaded || !threadId || !turnComment) {
-      return;
-    }
-    await setSourceControlThreadCommentRecord(params.sessionId, threadId, {
-      messageId: turnComment.messageId,
-      body: turnBody,
-    }).catch((error) => {
-      console.warn(
-        `[Fast Agent] Failed to remember the review thread comment: ${formatErrorForLog(error)}`,
+  const rememberThreadComment = async (
+    assertLock: () => Promise<void>,
+    relocate = false,
+  ) => {
+    const comment = turnComment;
+    if (!comment) return;
+    const body = turnBody;
+    const footerText = footer;
+    let current: SourceControlFooterRecord | null = null;
+    try {
+      await assertLock();
+      current = await getSourceControlFooterRecord(
+        target.channelId,
+        target.threadId,
       );
-    });
+      await assertLock();
+      if (!relocate && current && current.messageId !== comment.messageId)
+        return;
+      await setSourceControlFooterRecord({
+        conversation: params.conversation,
+        sessionId: params.sessionId,
+        messageId: comment.messageId,
+        body,
+        footerText,
+      });
+      if (!threaded || !threadId) return;
+      await assertLock();
+      await setSourceControlThreadCommentRecord(params.sessionId, threadId, {
+        messageId: comment.messageId,
+        body,
+      });
+    } catch (error) {
+      // A successful provider write is not permission to mutate a pointer
+      // after losing its lease. Even persistence-failure cleanup is fenced.
+      try {
+        await assertLock();
+        if (current)
+          await clearSourceControlFooterRecord(
+            target.channelId,
+            target.threadId,
+            current,
+          );
+      } catch {
+        /* The current pointer may belong to another delivery. */
+      }
+      const latest = await getSourceControlFooterRecord(
+        target.channelId,
+        target.threadId,
+      ).catch(() => undefined);
+      if (latest !== undefined && latest?.messageId !== comment.messageId) {
+        const update = comment.update ?? editorFor(comment.messageId).update;
+        await update?.(body).catch(() => {});
+      }
+      console.warn(
+        `[Fast Agent] Failed to remember the current comment footer: ${formatErrorForLog(error)}`,
+      );
+    }
   };
   const adoptThreadComment = async (): Promise<boolean> => {
     if (
@@ -987,14 +1054,18 @@ export function buildSourceControlFastAdapter(params: {
   const postTurnComment = async (
     discussion: SourceControlFastDiscussion,
     message: string,
+    assertLock: () => Promise<void>,
   ) => {
     turnBody = quote ? `${quote}\n\n${message}` : message;
+    turnComment = null;
+    const body = await renderBody();
+    await assertLock();
     turnComment = await params.delivery.postComment({
       discussion,
-      body: renderBody(),
+      body,
     });
     adoptedThreadComment = false;
-    await rememberThreadComment();
+    await rememberThreadComment(assertLock, true);
     params.onReplyPosted?.();
     return { messageId: turnComment.messageId };
   };
@@ -1007,57 +1078,143 @@ export function buildSourceControlFastAdapter(params: {
         : {}),
       resolveTarget: params.delivery.resolveTarget,
     }),
-    postReply: async ({ message }) => {
-      if (!discussion) {
-        throw new Error(
-          'The discussion for this Session could not be resolved.',
-        );
-      }
-      if (!turnComment) {
-        await adoptThreadComment();
-      }
-      if (turnComment?.update) {
-        const previousBody = turnBody;
-        turnBody = `${turnBody}\n\n${message}`;
-        try {
-          await turnComment.update(renderBody());
-        } catch (error) {
-          // The remembered comment can be gone (deleted by its author or a
-          // maintainer). Treat that as a miss on the thread record and post
-          // this turn's own comment, which replaces the stale record so
-          // later turns stop adopting it. Any other failure rethrows so the
-          // normal retry path keeps one comment per human turn.
-          if (!adoptedThreadComment || !isCommentGoneError(error)) {
-            throw error;
+    postReply: async ({ message }) =>
+      withThreadReplyFooterLock({
+        lockKey,
+        fn: async (assertLock) => {
+          if (!discussion) {
+            throw new Error(
+              'The discussion for this Session could not be resolved.',
+            );
           }
-          console.warn(
-            `[Fast Agent] The remembered review thread comment could not be updated; posting a new comment: ${formatErrorForLog(error)}`,
-          );
-          turnBody = previousBody;
-          turnComment = null;
-          return postTurnComment(discussion, message);
-        }
-        await rememberThreadComment();
-        params.onReplyPosted?.();
-        return { messageId: turnComment.messageId };
-      }
-      return postTurnComment(discussion, message);
-    },
+          if (!turnComment) {
+            await adoptThreadComment();
+          }
+          if (turnComment?.update) {
+            // Another resumed turn may have appended to this same comment
+            // since this adapter last used it. The locked pointer owns the body.
+            const current = await getSourceControlFooterRecord(
+              target.channelId,
+              target.threadId,
+            );
+            if (current?.messageId === turnComment.messageId)
+              turnBody = current.body;
+            const previousBody = turnBody;
+            turnBody = `${turnBody}\n\n${message}`;
+            try {
+              const body = await renderBody();
+              await assertLock();
+              await turnComment.update(body);
+            } catch (error) {
+              // The remembered comment can be gone (deleted by its author or a
+              // maintainer). Treat that as a miss on the thread record and post
+              // this turn's own comment, which replaces the stale record so
+              // later turns stop adopting it. Any other failure rethrows so the
+              // normal retry path keeps one comment per human turn.
+              if (!adoptedThreadComment || !isCommentGoneError(error)) {
+                turnBody = previousBody;
+                throw error;
+              }
+              console.warn(
+                `[Fast Agent] The remembered review thread comment could not be updated; posting a new comment: ${formatErrorForLog(error)}`,
+              );
+              turnBody = previousBody;
+              turnComment = null;
+              return postTurnComment(discussion, message, assertLock);
+            }
+            await rememberThreadComment(assertLock);
+            params.onReplyPosted?.();
+            return { messageId: turnComment.messageId };
+          }
+          return postTurnComment(discussion, message, assertLock);
+        },
+      }),
     ...(params.delivery.updateCommentById && discussion
       ? {
           // A resumed turn only carries the prior comment's id: rebuild the
           // editor from it, replace the comment's body, and adopt it as the
           // turn's comment so later replies keep appending in place.
-          replaceReply: async ({ messageId }, { message }) => {
-            turnComment = editorFor(messageId);
-            adoptedThreadComment = false;
-            turnBody = message;
-            await turnComment.update!(renderBody());
-            await rememberThreadComment();
-            params.onReplyPosted?.();
-            return { messageId };
-          },
+          replaceReply: async ({ messageId }, { message }) =>
+            withThreadReplyFooterLock({
+              lockKey,
+              fn: async (assertLock) => {
+                turnComment = editorFor(messageId);
+                adoptedThreadComment = false;
+                turnBody = message;
+                const body = await renderBody();
+                await assertLock();
+                await turnComment.update!(body);
+                await rememberThreadComment(assertLock);
+                params.onReplyPosted?.();
+                return { messageId };
+              },
+            }),
         }
       : {}),
   };
+}
+
+/** Refresh only the recorded carrier; missing comments never trigger a post. */
+export async function refreshSourceControlThreadFooter(target: {
+  channelId: string;
+  threadId: string;
+}): Promise<void> {
+  await withThreadReplyFooterLock({
+    lockKey: `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
+    maxAcquireAttempts: 1,
+    fn: async (assertLock) => {
+      const record = await getSourceControlFooterRecord(
+        target.channelId,
+        target.threadId,
+      );
+      if (!record) {
+        await assertLock();
+        await forgetThreadFooterRefresh({
+          provider: 'source-control',
+          ...target,
+        });
+        return;
+      }
+      const footerText = buildFastSessionReplyFooterText({
+        provider: record.conversation.surface,
+        sessionId: record.sessionId,
+        ...(await resolveFastSessionReplyFooterContext({
+          sessionId: record.sessionId,
+        })),
+      });
+      if (footerText === record.footerText) return;
+      const delivery = await buildSourceControlFastDelivery(
+        record.conversation,
+      );
+      const discussion = parseSourceControlFastConversation(
+        record.conversation,
+      );
+      if (!delivery?.updateCommentById || !discussion) {
+        await assertLock();
+        await forgetThreadFooterRefresh({
+          provider: 'source-control',
+          ...target,
+        });
+        return;
+      }
+      await assertLock();
+      try {
+        await delivery.updateCommentById({
+          discussion,
+          messageId: record.messageId,
+          body: `${record.body}\n\n${footerText}`,
+        });
+      } catch (error) {
+        if (!isCommentGoneError(error)) throw error;
+        await assertLock();
+        await forgetThreadFooterRefresh({
+          provider: 'source-control',
+          ...target,
+        });
+        return;
+      }
+      await assertLock();
+      await setSourceControlFooterRecord({ ...record, footerText }, true);
+    },
+  });
 }

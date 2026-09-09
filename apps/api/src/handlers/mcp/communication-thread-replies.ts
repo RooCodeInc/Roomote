@@ -4,6 +4,7 @@ import {
   chunkDiscordMessage,
   getLatestInboundMessageId,
   getLatestUserMessageForReplyQuote,
+  postTextThreadReplyWithFooter,
   type DiscordCommunicationProvider,
   type TelegramCommunicationProvider,
 } from '@roomote/communication';
@@ -403,6 +404,7 @@ async function sendTeamsThreadReply(params: {
         postReplyWithFooter: async () => ({
           ...(await postTeamsReply()),
           textWithoutFooter: text ?? '',
+          refresh: { footerText, channelId, serviceUrl },
           ...(images.length > 0 ? { images } : {}),
         }),
         clearPreviousFooter: async (previousFooterRecord) => {
@@ -529,14 +531,23 @@ async function sendTelegramThreadReply(params: {
 
   let reply;
   try {
-    reply = await provider.postMessage({
+    const footerText = await buildCommunicationThreadReplyFooterTextBestEffort({
+      provider: 'telegram',
+      providerLabel: 'Telegram',
+      taskRun: params.taskRun,
+      logContext: LOG_CONTEXT,
+    });
+    const input = {
       channelId,
       ...(threadId ? { threadId } : {}),
       replyToMessageId: replyToMessageId ?? undefined,
       ...(text ? { text } : {}),
-      textFormat: 'markdown',
+      textFormat: 'markdown' as const,
       images,
-    });
+    };
+    reply = footerText
+      ? await postTextThreadReplyWithFooter({ provider, input, footerText })
+      : await provider.postMessage(input);
   } finally {
     stopTyping();
   }
@@ -667,6 +678,7 @@ async function sendDiscordThreadReply(params: {
             ...posted,
             messageId: posted.lastTextMessageId ?? posted.messageId,
             textWithoutFooter: footerlessFinalChunk,
+            refresh: { footerText, channelId: footerMessageChannelId },
           };
         },
         clearPreviousFooter: async (previousFooterRecord) => {

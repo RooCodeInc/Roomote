@@ -1,5 +1,7 @@
 import { getRedis } from '@roomote/redis';
 import type { CommunicationProvider } from '@roomote/types';
+import { scheduleThreadFooterRefresh } from './thread-footer-refresh';
+import type { CommunicationMessageButton } from './provider';
 
 const THREAD_REPLY_FOOTER_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -23,6 +25,13 @@ export type ThreadReplyFooterRecord = {
    * re-edits do not drop attachment content.
    */
   images?: ThreadReplyFooterImage[];
+  buttons?: CommunicationMessageButton[][];
+  refresh?: {
+    footerText: string;
+    /** Discord thread channels differ from the pointer's parent channel. */
+    channelId: string;
+    serviceUrl?: string;
+  };
 };
 
 function parseThreadReplyFooterImages(
@@ -106,6 +115,12 @@ export async function getThreadReplyFooterRecord(
         messageId: parsed.messageId,
         textWithoutFooter: parsed.textWithoutFooter,
         ...(images ? { images } : {}),
+        ...(Array.isArray(parsed.buttons) ? { buttons: parsed.buttons } : {}),
+        ...(parsed.refresh &&
+        typeof parsed.refresh.footerText === 'string' &&
+        typeof parsed.refresh.channelId === 'string'
+          ? { refresh: parsed.refresh }
+          : {}),
       };
     }
 
@@ -120,12 +135,28 @@ export async function setThreadReplyFooterRecord(
   channelId: string,
   threadId: string,
   record: ThreadReplyFooterRecord,
+  options?: { keepTtl?: boolean },
 ): Promise<void> {
   const redis = getRedis();
+  if (options?.keepTtl) {
+    await redis.set(
+      getThreadReplyFooterKey(provider, channelId, threadId),
+      JSON.stringify(record),
+      'KEEPTTL',
+      'XX',
+    );
+    return;
+  }
   await redis.set(
     getThreadReplyFooterKey(provider, channelId, threadId),
     JSON.stringify(record),
     'EX',
     THREAD_REPLY_FOOTER_TTL_SECONDS,
   );
+  if (record.refresh)
+    await scheduleThreadFooterRefresh({ provider, channelId, threadId }).catch(
+      (error) => {
+        console.warn('[threadFooter] Failed to schedule footer refresh', error);
+      },
+    );
 }

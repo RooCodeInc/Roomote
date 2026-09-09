@@ -6,6 +6,7 @@ import {
   resolveThreadReplyLivePreviewUrl,
   type ThreadReplyFooterContext,
   type ThreadReplyLinkedPr,
+  type ThreadReplyRunningTasks,
 } from '@roomote/communication';
 
 import { isSlackThreadExplicitMentionRequired } from './slack-messages';
@@ -44,12 +45,16 @@ export function buildSlackThreadFooterText(params: {
   taskUrl: string;
   linkedPrs?: SlackThreadLinkedPr[];
   livePreviewUrl?: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
+  webAppUrl?: string | null;
   explicitMentionRequired: boolean;
 }): string {
   return buildThreadReplyFooterText({
     taskUrl: params.taskUrl,
     linkedPrs: params.linkedPrs,
     livePreviewUrl: params.livePreviewUrl,
+    runningTasks: params.runningTasks,
+    webAppUrl: params.webAppUrl,
     explicitMentionRequired: params.explicitMentionRequired,
     formatLink: (label, url) => `<${url}|${label}>`,
   });
@@ -70,6 +75,8 @@ export async function getSlackThreadFooterText(params: {
     taskUrl: params.taskUrl,
     linkedPrs: params.linkedPrs ?? context.linkedPrs,
     livePreviewUrl: context.livePreviewUrl,
+    runningTasks: context.runningTasks,
+    webAppUrl: context.webAppUrl,
     explicitMentionRequired: context.explicitMentionRequired,
   });
 }
