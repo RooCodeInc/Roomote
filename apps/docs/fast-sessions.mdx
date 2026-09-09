@@ -54,8 +54,15 @@ the connected integration's tools and permissions. Reading CI results is not the
 same as running tests: local checkout, code edits, command execution, and testing
 are delegated to a task, as are investigations that need a workspace.
 
-For example, ask "Where is request authentication handled on the develop
-branch?" or "Summarize the changes in this pull request." Roomote uses immutable
+APIs are preferred for focused questions such as "Do we have X?" or locating a
+setting, not mandatory for every investigation. Roomote can choose a coding
+task directly when expected file volume, broad cross-module tracing, exhaustive
+caller or coverage needs, search-index limits, or excessive API round trips make
+a local checkout substantially more appropriate. There is no fixed file-count
+threshold. If a focused search grows into broad investigation, Roomote carries
+useful findings into the task rather than continuing endless API calls.
+
+Roomote paginates or narrows searches sensibly and uses immutable
 commit references for consistent follow-up reads where supported and identifies
 limitations when results are partial, truncated, or limited to a search index.
 An empty search is not proof that code is absent. Source inspection is not a

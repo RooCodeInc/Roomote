@@ -72,19 +72,21 @@ describe.each([
 describe('buildFastAgentSystemPrompt', () => {
   it('keeps supported Bitbucket reads API-first without a checkout or task', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
-    expect(prompt).toContain('Bitbucket Cloud is API-first');
+    expect(prompt).toContain(
+      'For focused Bitbucket Cloud reads and supported writes',
+    );
     expect(prompt).toContain(
       'discover the available Bitbucket tool schema with `find_integration_tools`',
     );
     expect(prompt).toContain('then use `call_integration_tool`');
     expect(prompt).toContain(
-      'Do not clone a repository or use "launch_task" for these operations',
+      'Apply the same scope-based exploration rule as other providers',
     );
     expect(prompt).toContain(
       'Follow discovered schemas rather than guessing arguments',
     );
     expect(prompt).toContain(
-      'Use direct API tools when sufficient; delegate work that requires a local workspace, execution, code changes, or testing',
+      'Otherwise apply the scope-based exploration rule above; delegate execution, code changes, or testing',
     );
   });
 
@@ -108,7 +110,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Reopening/merging PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
     );
     expect(prompt).toContain(
-      'An actual code-review request still uses "review_pull_request"',
+      'an actual code-review request still uses "review_pull_request"',
     );
   });
 
@@ -660,7 +662,7 @@ describe('buildFastAgentSystemPrompt', () => {
       availableIntegrations: [],
     });
     expect(prompt).toContain(
-      'For bounded repository reads and requested supported writes, discover and use the available source-control provider API tools before launching workspace work',
+      'For focused repository reads and requested supported writes, prefer discovered source-control provider API tools',
     );
     expect(prompt).toContain('do not assume providers share capabilities');
     expect(prompt).toContain('do not claim its API access is available');
@@ -729,7 +731,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'regardless of whether the message is phrased as a question, request, or declarative feedback',
     );
     expect(prompt).toContain(
-      'Use direct API tools when sufficient; delegate work that requires a local workspace, execution, code changes, or testing',
+      'Otherwise apply the scope-based exploration rule above; delegate execution, code changes, or testing',
     );
     expect(prompt).not.toContain(
       'A question that requires repository or workspace inspection',
@@ -836,6 +838,35 @@ describe('buildFastAgentSystemPrompt', () => {
       );
       expect(prompt).toContain('available API tools do not suffice');
       expect(prompt).toContain(
+        'Prefer APIs for focused questions such as "Do we have X?" or locating a setting',
+      );
+      expect(prompt).toContain(
+        'choose "launch_task" directly, without mandatory API attempts',
+      );
+      for (const criterion of [
+        'expected file volume',
+        'broad cross-module tracing',
+        'exhaustive caller or coverage needs',
+        'indexing/search limitations',
+        'excessive API round trips',
+      ])
+        expect(prompt).toContain(criterion);
+      expect(prompt).toContain(
+        'Use judgment, not a fixed file-count threshold',
+      );
+      expect(prompt).toContain(
+        'escalate and carry useful paths, refs, symbols, and findings into the task prompt',
+      );
+      expect(prompt).toContain('Paginate or narrow sensibly');
+      expect(prompt).toContain(
+        'Authorization denials must never be bypassed via a task',
+      );
+      if (turn !== 'human') {
+        expect(prompt).toContain(
+          'same scope-based exploration and execution delegation rules',
+        );
+      }
+      expect(prompt).toContain(
         'pin follow-up reads to an immutable commit ref when the provider tools support it',
       );
       expect(prompt).toContain('Do not invent a shared revision parameter');
@@ -870,6 +901,9 @@ describe('buildFastAgentSystemPrompt', () => {
         'requires repository or workspace inspection, execution, change, or validation',
         'when creating the output requires repository or filesystem work',
         'delegate a task when repository or workspace work is needed',
+        'API tools before launching workspace work',
+        'Do not clone a repository or use "launch_task" for these operations',
+        'launch a task only when repository or workspace execution is actually required',
       ]) {
         expect(prompt).not.toContain(obsoleteRule);
       }
@@ -947,7 +981,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not launch a task or call an integration merely to re-check user-supplied facts unless the user asks for verification',
     );
     expect(prompt).toContain(
-      'Use the direct API path below when it suffices; otherwise delegate workspace work',
+      'For investigation requests, choose APIs or a task using the scope-based rule below',
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),
