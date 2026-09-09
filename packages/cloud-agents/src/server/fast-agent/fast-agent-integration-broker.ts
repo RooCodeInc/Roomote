@@ -1,10 +1,19 @@
 import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import {
+  getBitbucketOAuthConnection,
+  resolveBitbucketInstanceHost,
+} from '@roomote/bitbucket';
+import {
+  and,
   beginSlackFastIntegrationCall,
   completeSlackFastIntegrationCall,
   db,
+  eq,
   githubInstallations,
   isNull,
+  repositories,
+  users,
 } from '@roomote/db/server';
 import {
   createMemoryMcpInstructions,
@@ -325,6 +334,35 @@ async function resolveBrokerAuth(context: BrokerContext) {
   };
 }
 
+async function isBitbucketAvailable(userId: string): Promise<boolean> {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED))
+    return false;
+  const connection = await getBitbucketOAuthConnection();
+  if (connection?.status !== 'active') return false;
+  const host = await resolveBitbucketInstanceHost();
+  if (host !== 'bitbucket.org' && host !== 'www.bitbucket.org') return false;
+
+  const [member, repository] = await Promise.all([
+    db.query.users.findFirst({
+      where: and(eq(users.id, userId), isNull(users.deletedAt)),
+      columns: { role: true },
+    }),
+    db.query.repositories.findFirst({
+      where: and(
+        eq(repositories.sourceControlProvider, 'bitbucket'),
+        eq(repositories.host, host),
+        eq(repositories.isActive, true),
+      ),
+      columns: { externalRepoId: true },
+    }),
+  ]);
+  return !!(
+    member &&
+    ['admin', 'member'].includes(member.role) &&
+    repository?.externalRepoId
+  );
+}
+
 /**
  * Actor-resolved remote MCP servers only. Local transports and filesystem
  * tools remain sandbox-only. Tools disabled by the deployment remain
@@ -344,17 +382,23 @@ export async function listFastAgentIntegrations(
   const configuredServersPromise: Promise<
     Record<string, FastAgentMcpServerConfig>
   > = resolveMcpServerConfigs?.() ?? Promise.resolve({});
-  const [configuredServers, githubInstallation] = await Promise.all([
-    configuredServersPromise,
-    isRouterMcpServerEnabled('github')
-      ? db.query.githubInstallations.findFirst({
-          where: isNull(githubInstallations.suspendedAt),
-          columns: { id: true },
-        })
-      : Promise.resolve(undefined),
-  ]);
+  const [configuredServers, githubInstallation, bitbucketAvailable] =
+    await Promise.all([
+      configuredServersPromise,
+      isRouterMcpServerEnabled('github')
+        ? db.query.githubInstallations.findFirst({
+            where: isNull(githubInstallations.suspendedAt),
+            columns: { id: true },
+          })
+        : Promise.resolve(undefined),
+      isBitbucketAvailable(context.userId),
+    ]);
 
-  if (Object.keys(configuredServers).length === 0 && !githubInstallation) {
+  if (
+    Object.keys(configuredServers).length === 0 &&
+    !githubInstallation &&
+    !bitbucketAvailable
+  ) {
     return [];
   }
 
@@ -381,6 +425,21 @@ export async function listFastAgentIntegrations(
         'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App. In active connected repositories, use native update_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, and comment reactions. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
+        headers: { Authorization: `Bearer ${authToken}` },
+        deploymentProxy: true,
+      },
+      disabledTools: new Set<string>(),
+    });
+  }
+
+  if (bitbucketAvailable && !configuredServers.bitbucket) {
+    candidates.push({
+      id: 'bitbucket',
+      name: 'Bitbucket',
+      description:
+        'Read bounded files, directories, code search, commits, and pull requests from active connected Bitbucket Cloud repositories; update PR titles/descriptions, decline PRs, and add comments or replies.',
+      endpoint: {
+        url: integrationProxyUrl(apiBaseUrl, 'bitbucket'),
         headers: { Authorization: `Bearer ${authToken}` },
         deploymentProxy: true,
       },
