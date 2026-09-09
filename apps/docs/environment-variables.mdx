@@ -150,7 +150,7 @@ catalog's enablement policy.
 
 | Env var | Required | Used for |
 | --- | --- | --- |
-| `R_HTTP_INTEGRATIONS_ENABLED` | Optional | Enables shared HTTP-integration discovery and the API endpoint. Defaults to `false`. Set consistently on API, web, and background control-plane services. |
+| `R_HTTP_INTEGRATIONS_ENABLED` | Optional | Enables operator-manifest integrations. Defaults to `false`. The shared API broker remains available for owner-approved Session grants without a manifest. Set consistently on API, web, and background control-plane services. |
 | `R_HTTP_INTEGRATIONS_CONFIG_PATH` | When enabled, API only | Absolute path to the read-only JSON manifest of HTTPS origins, method/path rules, actor access, and credential environment-variable references. |
 
 Referenced credential variables belong only on the API server, never in task

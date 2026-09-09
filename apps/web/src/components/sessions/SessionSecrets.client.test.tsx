@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { SessionSecrets } from './SessionSecrets';
 
 const sessionId = '6a1f8f1e-0000-4000-8000-000000000006';
@@ -29,20 +29,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
-async function open(
-  onUse = vi.fn().mockResolvedValue(true),
-  useDisabled = false,
-) {
-  render(
-    <SessionSecrets
-      sessionId={sessionId}
-      onUse={onUse}
-      useDisabled={useDisabled}
-    />,
-  );
+async function open() {
+  render(<SessionSecrets sessionId={sessionId} />);
   fireEvent.click(screen.getByRole('button', { name: 'Session secrets' }));
   await screen.findByLabelText('API key');
-  return onUse;
 }
 function fill() {
   fireEvent.change(screen.getByLabelText('API key'), {
@@ -56,8 +46,7 @@ it('does not approve while requests are loading', async () => {
       finish = resolve;
     }),
   );
-  const onUse = vi.fn();
-  render(<SessionSecrets sessionId={sessionId} onUse={onUse} />);
+  render(<SessionSecrets sessionId={sessionId} />);
   fireEvent.click(screen.getByRole('button', { name: 'Session secrets' }));
   expect(screen.queryByLabelText('API key')).not.toBeInTheDocument();
   expect(
@@ -68,12 +57,11 @@ it('does not approve while requests are loading', async () => {
   finish(new Response(JSON.stringify({ pending: [pending], secrets: [] })));
   await screen.findByLabelText('API key');
   expect(fetchMock).toHaveBeenCalledOnce();
-  expect(onUse).not.toHaveBeenCalled();
 });
-it('prefills a single-key consent flow and automatically sends only a nonsecret continuation', async () => {
+it('prefills a single-key consent flow and reports server-scheduled continuation without another client request', async () => {
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-  const onUse = await open();
+  await open();
   expect(
     screen.getByRole('heading', { name: 'Add your Demo service API key' }),
   ).toBeInTheDocument();
@@ -103,12 +91,16 @@ it('prefills a single-key consent flow and automatically sends only a nonsecret 
   fill();
   expect(fetchMock).toHaveBeenCalledOnce();
   fetchMock.mockResolvedValueOnce(
-    new Response(JSON.stringify({ secret: metadata }), { status: 201 }),
+    new Response(JSON.stringify({ secret: metadata, resumed: true }), {
+      status: 201,
+    }),
   );
   fireEvent.click(
     screen.getByRole('button', { name: 'Allow for this Session' }),
   );
-  await waitFor(() => expect(onUse).toHaveBeenCalledOnce());
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    'API key saved. The Session has been notified without sharing your key.',
+  );
   expect(fetchMock).toHaveBeenLastCalledWith(
     `/api/sessions/${sessionId}/secrets`,
     expect.objectContaining({
@@ -118,12 +110,12 @@ it('prefills a single-key consent flow and automatically sends only a nonsecret 
       body: JSON.stringify({ pendingRef, secret: credential }),
     }),
   );
-  expect(onUse.mock.calls[0]![0]).toContain('list_session_secrets');
-  expect(onUse.mock.calls[0]![0]).toContain(
-    'Do not ask me to paste credentials into chat',
-  );
-  for (const value of [credential, secretRef, pendingRef, policy.label])
-    expect(onUse.mock.calls[0]![0]).not.toContain(value);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(
+    fetchMock.mock.calls.every(
+      ([url]) => url === `/api/sessions/${sessionId}/secrets`,
+    ),
+  ).toBe(true);
   expect(document.body.textContent).not.toContain(credential);
   expect(document.body.textContent).not.toContain(secretRef);
   expect(
@@ -178,7 +170,7 @@ it.each([
         }),
       ),
     );
-    const onUse = await open();
+    await open();
     expect(
       screen.getByRole('heading', { name: `Add your ${label} API key` }),
     ).toBeInTheDocument();
@@ -199,7 +191,6 @@ it.each([
         screen.queryByText(JSON.stringify(headerPrefix)),
       ).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(onUse).not.toHaveBeenCalled();
   },
 );
 it('clears the revealed key immediately on save and leaves the next request masked', async () => {
@@ -214,7 +205,7 @@ it('clears the revealed key immediately on save and leaves the next request mask
       }),
     ),
   );
-  const onUse = await open();
+  await open();
   fill();
   fireEvent.click(screen.getByRole('button', { name: 'Show value' }));
   let finish!: (response: Response) => void;
@@ -231,8 +222,13 @@ it('clears the revealed key immediately on save and leaves the next request mask
   expect(
     screen.getByRole('button', { name: 'Allow for this Session' }),
   ).toBeDisabled();
-  finish(new Response(JSON.stringify({ secret: metadata }), { status: 201 }));
-  await waitFor(() => expect(onUse).toHaveBeenCalledOnce());
+  finish(
+    new Response(JSON.stringify({ secret: metadata, resumed: true }), {
+      status: 201,
+    }),
+  );
+  await screen.findByRole('status');
+  expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(
     screen.getByRole('heading', { name: 'Add your Second API key' }),
   ).toBeInTheDocument();
@@ -275,7 +271,7 @@ it('clears the key and asks for a new request when the prepared approval has exp
       }),
     ),
   );
-  const onUse = await open();
+  await open();
   fill();
   fireEvent.click(
     screen.getByRole('button', { name: 'Allow for this Session' }),
@@ -285,10 +281,9 @@ it('clears the key and asks for a new request when the prepared approval has exp
   );
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(fetchMock).toHaveBeenCalledOnce();
-  expect(onUse).not.toHaveBeenCalled();
 });
 it('clears key on failed save and close without echoing response content', async () => {
-  const onUse = await open();
+  await open();
   fill();
   fireEvent.click(screen.getByRole('button', { name: 'Show value' }));
   fetchMock.mockResolvedValueOnce(new Response(credential, { status: 400 }));
@@ -298,7 +293,7 @@ it('clears key on failed save and close without echoing response content', async
   await screen.findByRole('alert');
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
-  expect(onUse).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(document.body.textContent).not.toContain(credential);
   fill();
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
@@ -337,28 +332,31 @@ it('revokes without exposing references and clears any entered key', async () =>
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
 });
-it.each(['disabled', 'failed', 'throws'])(
-  'keeps saved status with native-tool fallback when notification is %s',
-  async (mode) => {
-    const onUse = vi.fn().mockImplementation(async () => {
-      if (mode === 'throws') throw new Error(credential);
-      return false;
-    });
-    await open(onUse, mode === 'disabled');
-    fill();
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ secret: metadata }), { status: 201 }),
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Allow for this Session' }),
-    );
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'list_session_secrets',
-    );
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    if (mode === 'disabled') expect(onUse).not.toHaveBeenCalled();
-  },
-);
+it('keeps saved status with native-tool fallback when server continuation was not scheduled', async () => {
+  await open();
+  fill();
+  fetchMock.mockResolvedValueOnce(
+    new Response(JSON.stringify({ secret: metadata, resumed: false }), {
+      status: 201,
+    }),
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Allow for this Session' }),
+  );
+  expect(await screen.findByRole('status')).toHaveTextContent(
+    'API key saved. The Session could not be notified. Ask the agent to check list_session_secrets and continue.',
+  );
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(screen.queryByLabelText('API key')).not.toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Manage approved secrets' }),
+  );
+  expect(screen.getByText('Demo service (ready)')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Revoke' })).toBeEnabled();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(document.body.textContent).not.toContain(credential);
+});
 it('opens from initial deep links and hash changes while retaining the header button', async () => {
   window.location.hash = '#session-secrets';
   render(<SessionSecrets sessionId={sessionId} />);

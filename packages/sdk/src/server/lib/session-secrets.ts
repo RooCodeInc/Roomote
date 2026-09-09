@@ -4,23 +4,17 @@ import {
   listOwnedSessionSecretApprovals,
   listOwnedSessionSecrets,
   revokeOwnedSessionSecret,
-  resolveOwnedSessionSecret,
-  recordSessionSecretAudit,
   type SessionSecretContext,
 } from '@roomote/db/server';
 import {
   sessionSecretCreateSchema,
   sessionSecretPrepareSchema,
   sessionSecretRevokeSchema,
-  sessionSecretRequestSchema,
-  type SessionSecretRequestResult,
 } from '@roomote/types';
 
-import { assertEgressUrlAllowed, safeFetch } from './safe-fetch';
+import { assertEgressUrlAllowed } from './safe-fetch';
 
 const ERROR = 'Secret request unavailable' as const;
-const MAX_RESPONSE_BYTES = 64 * 1024;
-const MAX_DURATION_MS = 10_000;
 
 function approvedOrigin(input: string): string {
   if (/[\s\\%]/.test(input)) throw new Error(ERROR);
@@ -38,40 +32,16 @@ function approvedOrigin(input: string): string {
   return url.origin;
 }
 
-function destination(origin: string, path: string): URL {
-  let decoded = path;
-  // Inspect nested encodings before URL normalization can erase traversal.
-  for (let i = 0; i < 5; i++) {
-    if (
-      !decoded.startsWith('/') ||
-      decoded.startsWith('//') ||
-      /[\\\s#\x00-\x1f\x7f]/.test(decoded)
-    )
-      throw new Error(ERROR);
-    const pathname = decoded.split('?')[0]!;
-    if (
-      pathname.includes('//') ||
-      pathname.split('/').some((segment) => segment === '.' || segment === '..')
-    )
-      throw new Error(ERROR);
-    const next = decodeURIComponent(decoded);
-    if (next === decoded) {
-      const url = new URL(path, origin);
-      if (url.origin !== origin || url.username || url.password)
-        throw new Error(ERROR);
-      return url;
-    }
-    decoded = next;
-  }
-  throw new Error(ERROR);
-}
-
 /**
  * Conservative whole-body suppression for exact and common encoded echoes.
  * Arbitrary upstream transformations, partial leaks, hashes, and covert channels
  * cannot be universally redacted. Only approve an origin trusted with the secret.
  */
-function redactEcho(body: string, secret: string, headerValue: string): string {
+export function redactEcho(
+  body: string,
+  secret: string,
+  headerValue: string,
+): string {
   const needles = new Set<string>();
   for (const value of new Set([
     secret,
@@ -228,127 +198,5 @@ export async function revokeSessionSecret(
     await revokeOwnedSessionSecret(context, secretRef);
   } catch {
     throw new Error(ERROR);
-  }
-}
-
-export async function requestWithSessionSecret(
-  context: SessionSecretContext,
-  rawArgs: unknown,
-): Promise<SessionSecretRequestResult> {
-  let audit: Parameters<typeof recordSessionSecretAudit>[0] = {
-    outcome: 'denied',
-  };
-  let response: Response | undefined;
-  let bodyReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const args = sessionSecretRequestSchema.parse(rawArgs);
-    // Only trusted actor and schema-validated opaque IDs enter the audit. Never
-    // record attacker-controlled paths, query strings, headers, or error causes.
-    audit = {
-      actorUserId: context.userId ?? null,
-      secretRef: args.secretRef,
-      method: args.method,
-      outcome: 'denied',
-    };
-    const grant = await resolveOwnedSessionSecret(context, args.secretRef);
-    const origin = approvedOrigin(grant.origin);
-    const url = destination(origin, args.path);
-    audit.destination = origin;
-    const headerValue = grant.headerPrefix + grant.value;
-    // Revalidate stored policy as well as entry input before using credentials.
-    if (
-      !['authorization', 'x-api-key', 'api-key'].includes(grant.headerName) ||
-      !['', 'Bearer ', 'Basic ', 'Token '].includes(grant.headerPrefix) ||
-      /[^\x20-\x7e]/.test(headerValue)
-    )
-      throw new Error(ERROR);
-    await recordSessionSecretAudit({ ...audit, outcome: 'started' });
-    const timeoutMs = Math.min(
-      MAX_DURATION_MS,
-      Date.parse(grant.expiresAt) - Date.now(),
-    );
-    if (timeoutMs <= 0) throw new Error(ERROR);
-    const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new Error(ERROR));
-      }, timeoutMs);
-    });
-    const perform = async (): Promise<SessionSecretRequestResult> => {
-      await resolveOwnedSessionSecret(context, args.secretRef);
-      if (controller.signal.aborted) throw new Error(ERROR);
-      // No CIDR override is accepted or inherited from deployment configuration.
-      response = await safeFetch(url, {
-        method: args.method,
-        headers: {
-          accept: args.accept ?? 'application/json',
-          'accept-encoding': 'identity',
-          [grant.headerName]: headerValue,
-        },
-        signal: controller.signal,
-      });
-      // The deadline can win before fetch settles; outer cleanup has already run.
-      if (controller.signal.aborted) {
-        void response.body?.cancel().catch(() => {});
-        throw new Error(ERROR);
-      }
-      if (response.status >= 300 && response.status < 400)
-        throw new Error(ERROR);
-      const length = response.headers.get('content-length');
-      if (
-        length &&
-        (!/^\d+$/.test(length) || Number(length) > MAX_RESPONSE_BYTES)
-      )
-        throw new Error(ERROR);
-      const chunks: Uint8Array[] = [];
-      let bytes = 0;
-      if (args.method === 'GET' && response.body) {
-        const reader = response.body.getReader();
-        bodyReader = reader;
-        try {
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            bytes += value.byteLength;
-            if (bytes > MAX_RESPONSE_BYTES) throw new Error(ERROR);
-            chunks.push(value);
-          }
-        } finally {
-          void reader.cancel().catch(() => {});
-          reader.releaseLock();
-          bodyReader = undefined;
-        }
-      }
-      const body = new TextDecoder('utf-8', { fatal: true }).decode(
-        Buffer.concat(chunks),
-      );
-      // Revocation/ownership changes during the request suppress its result.
-      // A request already sent cannot be recalled from the approved upstream.
-      await resolveOwnedSessionSecret(context, args.secretRef);
-      if (controller.signal.aborted) throw new Error(ERROR);
-      const result = {
-        success: true as const,
-        status: response.status,
-        body: redactEcho(body, grant.value, headerValue),
-      };
-      return result;
-    };
-    const result = await Promise.race([perform(), deadline]);
-    await recordSessionSecretAudit({ ...audit, outcome: 'succeeded' });
-    return result;
-  } catch {
-    await recordSessionSecretAudit({
-      ...audit,
-      outcome: audit.destination ? 'failed' : 'denied',
-    }).catch(() => {});
-    return { success: false, error: ERROR };
-  } finally {
-    clearTimeout(timer);
-    controller.abort();
-    if (bodyReader) void bodyReader.cancel().catch(() => {});
-    if (response?.body && !response.body.locked)
-      void response.body.cancel().catch(() => {});
   }
 }

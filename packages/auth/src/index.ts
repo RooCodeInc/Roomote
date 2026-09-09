@@ -81,3 +81,4 @@ export {
 } from './decode-es256-key';
 
 export { validateToken } from './validate-token';
+export * from './session-broker-token';

@@ -595,6 +595,7 @@ export default {
     method: z.enum(["GET", "HEAD"]),
     path: z.string().min(1).max(2048),
     accept: z.enum(["application/json", "text/plain"]).optional(),
+    body: z.literal("").nullish().describe("GET/HEAD have no body. Omit, use null, or use an empty string."),
   },
   execute: (args, context) => invoke("request_with_session_secret", args, context),
 }

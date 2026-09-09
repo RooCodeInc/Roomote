@@ -1,4 +1,8 @@
-import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
+import {
+  createAuthToken,
+  createSessionBrokerToken,
+  ROOMOTE_MCP_PATH,
+} from '@roomote/auth';
 import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import {
   HTTP_INTEGRATIONS_MCP_ID,
@@ -70,6 +74,7 @@ type BrokerContext = {
 };
 
 type IntegrationAuditContext = BrokerContext & {
+  humanTurn?: boolean;
   sessionId: string;
   conversation: FastAgentConversation;
   messageId: string;
@@ -608,7 +613,10 @@ export async function callFastAgentIntegration(
     slackMessageTs: context.messageId,
     integrationId: integration.id,
     toolName: request.toolName,
-    arguments: request.args,
+    arguments:
+      integration.id === HTTP_INTEGRATIONS_MCP_ID
+        ? { toolName: request.toolName }
+        : request.args,
   });
 
   try {
@@ -631,6 +639,22 @@ export async function callFastAgentIntegration(
             headers: { Authorization: `Bearer ${authToken}` },
           };
     }
+    if (
+      integration.id === HTTP_INTEGRATIONS_MCP_ID &&
+      endpoint.deploymentProxy &&
+      context.humanTurn
+    ) {
+      endpoint = {
+        ...endpoint,
+        headers: {
+          ...endpoint.headers,
+          Authorization: `Bearer ${await createSessionBrokerToken({
+            userId: context.userId,
+            fastConversationId: context.sessionId,
+          })}`,
+        },
+      };
+    }
     const result = await withFastIntegrationTimeout(
       (signal) =>
         callMcpTool({
@@ -649,7 +673,10 @@ export async function callFastAgentIntegration(
       await completeSlackFastIntegrationCall({
         id: audit.id,
         status: 'succeeded',
-        resultPreview: serializeAuditPreview(result, 30_000),
+        resultPreview:
+          integration.id === HTTP_INTEGRATIONS_MCP_ID
+            ? '[Broker result omitted]'
+            : serializeAuditPreview(result, 30_000),
         startedAt: audit.startedAt,
       });
     } catch (error) {

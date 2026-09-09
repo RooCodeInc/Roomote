@@ -749,17 +749,6 @@ export function FastSessionTranscript({
                 <SessionSecrets
                   key={secretSessionId}
                   sessionId={secretSessionId}
-                  useDisabled={
-                    isSending || !canReply || Boolean(pendingInputRequest)
-                  }
-                  onUse={(text) =>
-                    sendReply({
-                      text,
-                      files: [],
-                      model: sessionModel,
-                      reasoningEffort: sessionReasoningEffort,
-                    })
-                  }
                 />
               ) : null}
               {headerActions}

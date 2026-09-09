@@ -1691,6 +1691,66 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it.each([undefined, null, ''] as const)(
+    'preserves the opaque Session request reference and empty body through the native bridge: %j',
+    async (body) => {
+      const runtime = await getFastAgentNativeToolRuntime(
+        'session-secret-bridge',
+        [],
+      );
+      const executor = vi.fn(async () => ({
+        success: true,
+        status: 200,
+        body: 'healthy',
+      }));
+      const unbind = bindFastAgentNativeToolExecutor(
+        'opencode-secret-session',
+        'persisted-conversation',
+        executor,
+        { allowSpillRecovery: false },
+      );
+      const args = {
+        secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+        method: 'GET',
+        path: '/status',
+        ...(body === undefined ? {} : { body }),
+      };
+      try {
+        const response = await fetch(
+          runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!,
+          {
+            method: 'POST',
+            headers: {
+              authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              sessionID: 'opencode-secret-session',
+              tool: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+              args,
+            }),
+          },
+        );
+        expect(response.status).toBe(200);
+        expect(executor).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            sessionId: 'opencode-secret-session',
+            name: FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+            args,
+          }),
+        );
+        expect(await response.json()).toMatchObject({
+          ok: true,
+          metadata: {
+            roomoteResult: { success: true, status: 200, body: 'healthy' },
+          },
+        });
+      } finally {
+        unbind();
+      }
+    },
+  );
+
   it.each([
     FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
     FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,

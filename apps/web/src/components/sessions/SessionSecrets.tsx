@@ -19,18 +19,7 @@ import {
   Skeleton,
 } from '@/components/system';
 
-const continuation =
-  'I saved a Session secret approval securely. Check list_session_secrets for ready approvals and continue the requested GET or HEAD request with request_with_session_secret. Ask for the request path if it is not already specified. Do not ask me to paste credentials into chat.';
-
-export function SessionSecrets({
-  sessionId,
-  onUse,
-  useDisabled = false,
-}: {
-  sessionId: string;
-  onUse?: (text: string) => Promise<boolean>;
-  useDisabled?: boolean;
-}) {
+export function SessionSecrets({ sessionId }: { sessionId: string }) {
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const handleHash = () => {
@@ -57,12 +46,7 @@ export function SessionSecrets({
             </DialogDescription>
           </DialogHeader>
           {open ? (
-            <SessionSecretsForm
-              key={sessionId}
-              sessionId={sessionId}
-              onUse={onUse}
-              useDisabled={useDisabled}
-            />
+            <SessionSecretsForm key={sessionId} sessionId={sessionId} />
           ) : null}
         </DialogContent>
       </Dialog>
@@ -70,15 +54,7 @@ export function SessionSecrets({
   );
 }
 
-function SessionSecretsForm({
-  sessionId,
-  onUse,
-  useDisabled,
-}: {
-  sessionId: string;
-  onUse?: (text: string) => Promise<boolean>;
-  useDisabled: boolean;
-}) {
+function SessionSecretsForm({ sessionId }: { sessionId: string }) {
   const [pending, setPending] = useState<SessionSecretPendingMetadata[]>([]);
   const [selectedRef, setSelectedRef] = useState('');
   const [secrets, setSecrets] = useState<SessionSecretMetadata[]>([]);
@@ -240,6 +216,7 @@ function SessionSecretsForm({
                       if (!response.ok) throw new Error('Unavailable');
                       const data = (await response.json()) as {
                         secret: SessionSecretMetadata;
+                        resumed: boolean;
                       };
                       setSecrets((current) => [data.secret, ...current]);
                       const remaining = pending.filter(
@@ -248,18 +225,10 @@ function SessionSecretsForm({
                       setPending(remaining);
                       setSelectedRef(remaining[0]?.pendingRef ?? '');
                       setNotice(
-                        'API key saved. The agent can check approval status with list_session_secrets.',
+                        data.resumed
+                          ? 'API key saved. The Session has been notified without sharing your key.'
+                          : 'API key saved. The Session could not be notified. Ask the agent to check list_session_secrets and continue.',
                       );
-                      if (onUse && !useDisabled) {
-                        try {
-                          if (await onUse(continuation))
-                            setNotice(
-                              'API key saved. The Session has been notified without sharing your key.',
-                            );
-                        } catch {
-                          // Saving succeeded even if the nonsecret notification could not be sent.
-                        }
-                      }
                     } catch {
                       clearForm();
                       setError(

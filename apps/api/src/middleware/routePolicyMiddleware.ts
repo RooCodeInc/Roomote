@@ -269,7 +269,11 @@ export const routePolicyMiddleware = createMiddleware<{
     }
   }
 
-  const rejection = evaluateRoutePolicy(rule.policy, c.get('authContext'));
+  const sessionBroker =
+    c.req.path === '/api/mcp/http-integrations' && c.get('sessionBrokerAuth');
+  const rejection = sessionBroker
+    ? undefined
+    : evaluateRoutePolicy(rule.policy, c.get('authContext'));
 
   if (rejection) {
     return rejectionResponse(c, rule, rejection);

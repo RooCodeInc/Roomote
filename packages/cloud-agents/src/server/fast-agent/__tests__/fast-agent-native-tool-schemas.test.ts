@@ -281,6 +281,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     )!;
     expect(Object.keys(tool.args!).sort()).toEqual([
       'accept',
+      'body',
       'method',
       'path',
       'secretRef',
@@ -294,6 +295,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         method: { enum: ['GET', 'HEAD'] },
         path: { type: 'string', minLength: 1, maxLength: 2048 },
         accept: { enum: ['application/json', 'text/plain'] },
+        body: expect.any(Object),
       },
       required: ['secretRef', 'method', 'path'],
     });
@@ -303,12 +305,24 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       path: '/status',
     };
     expect(sessionSecretRequestSchema.safeParse(args).success).toBe(true);
+    for (const body of [undefined, null, '']) {
+      expect(
+        sessionSecretRequestSchema.safeParse({ ...args, body }).success,
+      ).toBe(true);
+      expect(validator.compile(schema)({ ...args, body })).toBe(true);
+    }
+    for (const body of ['nonempty', ' ', {}]) {
+      expect(validator.compile(schema)({ ...args, body })).toBe(false);
+    }
     for (const invalid of [
       { ...args, userId: 'caller' },
       { ...args, sessionId: 'caller' },
       { ...args, method: 'POST' },
       { ...args, path: 'x'.repeat(2049) },
       { ...args, accept: 'text/html' },
+      { ...args, body: 'nonempty' },
+      { ...args, body: ' ' },
+      { ...args, body: {} },
     ]) {
       expect(sessionSecretRequestSchema.safeParse(invalid).success).toBe(false);
     }
@@ -588,12 +602,13 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
               method: { enum: ['GET', 'HEAD'] },
               path: { type: 'string' },
               accept: { enum: ['application/json', 'text/plain'] },
+              body: expect.any(Object),
             },
             required: expect.arrayContaining(['secretRef', 'method', 'path']),
           });
           expect(
             Object.keys((schema as { properties: object }).properties).sort(),
-          ).toEqual(['accept', 'method', 'path', 'secretRef']);
+          ).toEqual(['accept', 'body', 'method', 'path', 'secretRef']);
           // OpenCode strips string constraints for OpenAI; the server-side
           // schema above remains responsible for enforcing these bounds.
           if (providerID === 'anthropic') {

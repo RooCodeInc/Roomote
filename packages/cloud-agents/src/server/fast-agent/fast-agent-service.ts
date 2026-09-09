@@ -4,7 +4,6 @@ import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   listSessionSecretApprovals,
   prepareSessionSecret,
-  requestWithSessionSecret,
 } from '@roomote/sdk/server/session-secrets';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -20,6 +19,7 @@ import {
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
   ROOMOTE_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
@@ -3592,6 +3592,7 @@ export async function answerFastAgentQuestion({
             userId,
             apiBaseUrl,
             sessionId: session.id,
+            humanTurn: !platformEvent,
             conversation,
             messageId: currentMessageId ?? conversation.conversationId,
           },
@@ -4313,10 +4314,30 @@ export async function answerFastAgentQuestion({
               ) {
                 return await listSessionSecretApprovals(context);
               }
-              return await requestWithSessionSecret(
-                context,
-                sessionSecretRequestSchema.parse(args.data),
+              const request = sessionSecretRequestSchema.parse(args.data);
+              const result = await callFastAgentIntegration(
+                {
+                  userId,
+                  apiBaseUrl,
+                  sessionId: session.id,
+                  humanTurn: true,
+                  conversation,
+                  messageId: currentMessageId ?? conversation.conversationId,
+                },
+                availableIntegrations,
+                {
+                  integrationId: HTTP_INTEGRATIONS_MCP_ID,
+                  toolName: 'integration_request',
+                  args: {
+                    integrationId: `session:${request.secretRef}`,
+                    method: request.method,
+                    path: request.path,
+                    body: request.body,
+                    accept: request.accept,
+                  },
+                },
               );
+              return { success: true, ...(result as Record<string, unknown>) };
             } catch {
               return { success: false, error: 'Secret request unavailable' };
             }

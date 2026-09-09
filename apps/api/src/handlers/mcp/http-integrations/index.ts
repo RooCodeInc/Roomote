@@ -2,7 +2,20 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { db, eq, users } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  users,
+  resolveSessionSecretContext,
+  listOwnedSessionSecrets,
+  type SessionSecretContext,
+} from '@roomote/db/server';
+import { Env } from '@roomote/env';
+import {
+  listSessionSecretApprovals,
+  prepareSessionSecret,
+} from '@roomote/sdk/server/session-secrets';
+import { sessionSecretPrepareSchema } from '@roomote/types';
 import type { Variables } from '../../../types';
 import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
 import {
@@ -17,8 +30,10 @@ import {
 } from './broker';
 
 export function createHttpIntegrationsMcp() {
-  // Validate once before registering an enabled route. No credentials enter tool metadata.
-  const config = loadHttpIntegrationsConfig();
+  // Only operator integrations require a startup manifest; Session grants are live.
+  const config = Env.R_HTTP_INTEGRATIONS_ENABLED
+    ? loadHttpIntegrationsConfig()
+    : { integrations: [] };
   const app = new Hono<{ Variables: Variables }>();
   app.use(
     '*',
@@ -41,11 +56,26 @@ export function createHttpIntegrationsMcp() {
   app.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
     let server: McpServer | undefined;
     try {
-      const auth = await resolveDeploymentMcpAuth(
-        c.get('authContext'),
-        'HTTP integrations',
-      );
-      const userId = await resolveActingUserIdOrNull(auth);
+      const auth =
+        c.get('sessionBrokerAuth') ??
+        (await resolveDeploymentMcpAuth(
+          c.get('authContext'),
+          'HTTP integrations',
+        ));
+      const userId =
+        auth.tokenType === 'session-broker'
+          ? auth.userId
+          : await resolveActingUserIdOrNull(auth);
+      const resolveContext: (() => Promise<SessionSecretContext>) | undefined =
+        auth.tokenType === 'session-broker'
+          ? () => resolveSessionSecretContext(auth)
+          : auth.tokenType === 'run' && auth.runId
+            ? () =>
+                resolveSessionSecretContext({
+                  tokenType: 'run',
+                  runId: auth.runId!,
+                })
+            : undefined;
       const user = userId
         ? await db.query.users.findFirst({
             where: eq(users.id, userId),
@@ -70,7 +100,7 @@ export function createHttpIntegrationsMcp() {
         'list_integrations',
         {
           description:
-            'List administrator-authorized integrations and allowed methods/paths. Credentials are never returned.',
+            'List allowed operator integrations and live owner-approved Session grants with their methods/paths. Credentials are never returned. Session grants do not require an operator manifest.',
           inputSchema: {},
           annotations: {
             readOnlyHint: true,
@@ -79,26 +109,100 @@ export function createHttpIntegrationsMcp() {
             openWorldHint: false,
           },
         },
-        async () =>
-          toMcpToolResult({
-            integrations: config.integrations
-              .filter(
-                (item) =>
-                  !item.allowedUserIds || item.allowedUserIds.includes(user.id),
-              )
-              .map(({ id, description, origin, rules }) => ({
-                id,
-                description,
-                origin,
-                rules,
-              })),
-          }),
+        async () => {
+          const grants = resolveContext
+            ? await resolveContext()
+                .then(listOwnedSessionSecrets)
+                .catch(() => [])
+            : [];
+          return toMcpToolResult({
+            integrations: [
+              ...config.integrations
+                .filter(
+                  (item) =>
+                    !item.allowedUserIds ||
+                    item.allowedUserIds.includes(user.id),
+                )
+                .map(({ id, description, origin, rules }) => ({
+                  id,
+                  description,
+                  origin,
+                  rules,
+                })),
+              ...grants
+                .filter(
+                  (grant) =>
+                    !grant.revokedAt &&
+                    Date.parse(grant.expiresAt) > Date.now(),
+                )
+                .map((grant) => ({
+                  id: `session:${grant.secretRef}`,
+                  description: grant.label,
+                  origin: grant.origin,
+                  rules: [
+                    { method: 'GET', pathPrefix: '/' },
+                    { method: 'HEAD', pathPrefix: '/' },
+                  ],
+                  expiresAt: grant.expiresAt,
+                })),
+            ],
+          });
+        },
+      );
+      server.registerTool(
+        'prepare_session_secret',
+        {
+          description:
+            'Request owner approval for an exact HTTPS origin. Supply only nonsecret policy. The owner enters the key outside chat in the Session UI; saving resumes the same Session.',
+          inputSchema: sessionSecretPrepareSchema,
+        },
+        async (args) => {
+          try {
+            if (!resolveContext) throw new Error();
+            const context = await resolveContext();
+            const pending = await prepareSessionSecret(context, args);
+            return toMcpToolResult({
+              pending,
+              sessionUrl: `${Env.R_APP_URL}/sessions/${context.sessionId}#session-secrets`,
+            });
+          } catch {
+            return {
+              isError: true,
+              content: [
+                { type: 'text' as const, text: 'Secret request unavailable' },
+              ],
+            };
+          }
+        },
+      );
+      server.registerTool(
+        'list_session_secrets',
+        {
+          description:
+            "List this Session owner's nonsecret pending approvals and key metadata. Active grants also appear in list_integrations; use their opaque id with integration_request.",
+          inputSchema: {},
+        },
+        async () => {
+          try {
+            if (!resolveContext) throw new Error();
+            return toMcpToolResult(
+              await listSessionSecretApprovals(await resolveContext()),
+            );
+          } catch {
+            return {
+              isError: true,
+              content: [
+                { type: 'text' as const, text: 'Secret request unavailable' },
+              ],
+            };
+          }
+        },
       );
       server.registerTool(
         'integration_request',
         {
           description:
-            'Make an administrator-authorized integration request through the credential broker. Mutating methods require explicit manifest authorization. Supply only integrationId, method, relative path (optional query), body and contentType; never supply credentials or headers.',
+            'Make a credential-broker request using an ID from list_integrations. Session grants allow GET/HEAD only; mutating methods require operator manifest authorization. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
           inputSchema: integrationRequestSchema,
           annotations: {
             readOnlyHint: false,
@@ -116,6 +220,7 @@ export function createHttpIntegrationsMcp() {
                 args,
                 user.id,
                 c.req.raw.signal,
+                resolveContext,
               ),
             );
           } catch {

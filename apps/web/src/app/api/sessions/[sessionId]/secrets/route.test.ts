@@ -6,6 +6,9 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   list: vi.fn(),
   revoke: vi.fn(),
+  findSession: vi.fn(),
+  reply: vi.fn(),
+  eq: vi.fn((column, value) => ({ column, value })),
   env: {
     R_PUBLIC_URL: 'https://roomote.example' as string | undefined,
     R_APP_URL: 'http://localhost:3000',
@@ -13,6 +16,14 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/server/auth-context', () => ({ authorize: mocks.authorize }));
 vi.mock('@/lib/server/env', () => ({ Env: mocks.env }));
+vi.mock('@roomote/db/server', () => ({
+  db: { query: { sessions: { findFirst: mocks.findSession } } },
+  sessions: { id: 'sessions.id' },
+  eq: mocks.eq,
+}));
+vi.mock('@/trpc/commands/fast-sessions', () => ({
+  replyToFastSessionCommand: mocks.reply,
+}));
 vi.mock('@roomote/sdk/server/session-secrets', () => ({
   createSessionSecret: mocks.create,
   listSessionSecretApprovals: mocks.list,
@@ -28,6 +39,14 @@ const createArgs = {
   secret: plaintext,
 };
 const metadata = { secretRef, label: 'API' };
+const auth = { success: true, userId: 'cookie-user' };
+const fastConversationId = '5f70fe3f-1c97-4875-a33b-723ab48ec915';
+const liveSession = {
+  fastConversationId,
+  ownerKind: 'user',
+  ownerUserId: auth.userId,
+  archivedAt: null,
+};
 function request(
   method: string,
   body?: unknown,
@@ -52,7 +71,9 @@ async function expectError(response: Response, status: number) {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.env.R_PUBLIC_URL = 'https://roomote.example';
-  mocks.authorize.mockResolvedValue({ success: true, userId: 'cookie-user' });
+  mocks.authorize.mockResolvedValue(auth);
+  mocks.findSession.mockResolvedValue(liveSession);
+  mocks.reply.mockResolvedValue({ success: true });
   mocks.create.mockResolvedValue(metadata);
   mocks.list.mockResolvedValue({
     pending: [{ pendingRef: secretRef, label: 'API' }],
@@ -107,6 +128,8 @@ describe('session secret route boundary', () => {
       expect(mocks.create).not.toHaveBeenCalled();
       expect(mocks.list).not.toHaveBeenCalled();
       expect(mocks.revoke).not.toHaveBeenCalled();
+      expect(mocks.findSession).not.toHaveBeenCalled();
+      expect(mocks.reply).not.toHaveBeenCalled();
     },
   );
   it('lists metadata using only the server identity', async () => {
@@ -122,6 +145,8 @@ describe('session secret route boundary', () => {
       sessionId,
       userId: 'cookie-user',
     });
+    expect(mocks.findSession).not.toHaveBeenCalled();
+    expect(mocks.reply).not.toHaveBeenCalled();
   });
   it('creates behind a proxy using the configured public origin', async () => {
     const response = await POST(
@@ -132,12 +157,109 @@ describe('session secret route boundary', () => {
     );
     expect(response.status).toBe(201);
     expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(await response.json()).toEqual({ secret: metadata });
+    expect(await response.json()).toEqual({ secret: metadata, resumed: true });
     expect(mocks.create).toHaveBeenCalledWith(
       { sessionId, userId: 'cookie-user' },
       createArgs,
     );
+    expect(mocks.eq).toHaveBeenCalledExactlyOnceWith('sessions.id', sessionId);
+    expect(mocks.findSession).toHaveBeenCalledExactlyOnceWith({
+      where: { column: 'sessions.id', value: sessionId },
+      columns: {
+        fastConversationId: true,
+        ownerKind: true,
+        ownerUserId: true,
+        archivedAt: true,
+      },
+    });
+    expect(mocks.reply).toHaveBeenCalledExactlyOnceWith(auth, {
+      sessionId: fastConversationId,
+      text: expect.stringContaining('Check list_session_secrets'),
+    });
+    expect(mocks.create.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.findSession.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.findSession.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.reply.mock.invocationCallOrder[0]!,
+    );
+    const text = mocks.reply.mock.calls[0]![1].text;
+    for (const value of [plaintext, secretRef, sessionId, fastConversationId]) {
+      expect(text).not.toContain(value);
+    }
   });
+
+  it('uses fixed nonsecret continuation text independent of the saved credential metadata', async () => {
+    await POST(request('POST', createArgs), props);
+    const text = mocks.reply.mock.calls[0]![1].text;
+    const otherRef = '603dbf6f-baea-446f-83fd-63923f9d464a';
+    const otherSecret = 'another-private-key-canary';
+    mocks.create.mockResolvedValueOnce({
+      secretRef: otherRef,
+      label: 'untrusted-label-canary',
+    });
+    const response = await POST(
+      request('POST', { pendingRef: otherRef, secret: otherSecret }),
+      props,
+    );
+    expect(response.status).toBe(201);
+    expect(mocks.reply).toHaveBeenLastCalledWith(auth, {
+      sessionId: fastConversationId,
+      text,
+    });
+    for (const value of [otherRef, otherSecret, 'untrusted-label-canary'])
+      expect(text).not.toContain(value);
+  });
+
+  it.each([
+    undefined,
+    { ...liveSession, fastConversationId: null },
+    { ...liveSession, ownerKind: 'deployment' },
+    { ...liveSession, ownerUserId: 'different-owner' },
+    { ...liveSession, archivedAt: new Date('2026-09-09T00:00:00Z') },
+  ])(
+    'preserves successful save without continuation for an ineligible mapped Session: %j',
+    async (session) => {
+      mocks.findSession.mockResolvedValueOnce(session);
+      const response = await POST(request('POST', createArgs), props);
+      expect(response.status).toBe(201);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(await response.json()).toEqual({
+        secret: metadata,
+        resumed: false,
+      });
+      expect(mocks.create).toHaveBeenCalledOnce();
+      expect(mocks.reply).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['lookup', 'scheduling'] as const)(
+    'preserves successful save after %s fails without retrying insertion or exposing errors',
+    async (failure) => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        (failure === 'lookup'
+          ? mocks.findSession
+          : mocks.reply
+        ).mockRejectedValueOnce(new Error(plaintext));
+        const response = await POST(request('POST', createArgs), props);
+        expect(response.status).toBe(201);
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        expect(await response.json()).toEqual({
+          secret: metadata,
+          resumed: false,
+        });
+        expect(mocks.create).toHaveBeenCalledExactlyOnceWith(
+          { sessionId, userId: auth.userId },
+          createArgs,
+        );
+        expect(mocks.findSession).toHaveBeenCalledOnce();
+        expect(mocks.reply).toHaveBeenCalledTimes(failure === 'lookup' ? 0 : 1);
+        expect(log).not.toHaveBeenCalled();
+      } finally {
+        log.mockRestore();
+      }
+    },
+  );
   it('revokes using the strict secret reference body', async () => {
     const response = await DELETE(request('DELETE', { secretRef }), props);
     expect(response.status).toBe(204);
@@ -147,6 +269,8 @@ describe('session secret route boundary', () => {
       { sessionId, userId: 'cookie-user' },
       { secretRef },
     );
+    expect(mocks.findSession).not.toHaveBeenCalled();
+    expect(mocks.reply).not.toHaveBeenCalled();
   });
   it.each([POST, DELETE])(
     'rejects foreign, absent, opaque, or malformed origins despite forged proxy headers',
@@ -226,6 +350,11 @@ describe('session secret route boundary', () => {
   );
   it('rejects caller identity, extra revoke fields, invalid references and policy overrides', async () => {
     for (const policy of [
+      { sessionId: 'forged-session' },
+      { fastConversationId: 'forged-fast-conversation' },
+      { auth: { userId: 'attacker' } },
+      { context: { sessionId: 'forged-session', userId: 'attacker' } },
+      { text: 'caller-controlled-continuation' },
       { label: 'Other' },
       { origin: 'https://other.example' },
       { headerName: 'authorization' },
@@ -259,6 +388,8 @@ describe('session secret route boundary', () => {
     );
     expect(mocks.create).not.toHaveBeenCalled();
     expect(mocks.revoke).not.toHaveBeenCalled();
+    expect(mocks.findSession).not.toHaveBeenCalled();
+    expect(mocks.reply).not.toHaveBeenCalled();
   });
   it('rejects invalid session IDs and malformed JSON without echoing content', async () => {
     await expectError(
@@ -294,6 +425,8 @@ describe('session secret route boundary', () => {
         500,
       );
       expect(log).not.toHaveBeenCalled();
+      expect(mocks.findSession).not.toHaveBeenCalled();
+      expect(mocks.reply).not.toHaveBeenCalled();
       log.mockRestore();
     },
   );

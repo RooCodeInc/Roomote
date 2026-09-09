@@ -47,7 +47,6 @@ const mocks = vi.hoisted(() => ({
   findActiveRetryNotice: vi.fn(),
   loadTurnAttempt: vi.fn(),
   getUnifiedSession: vi.fn(),
-  requestWithSessionSecret: vi.fn(),
   prepareSessionSecret: vi.fn(),
   listSessionSecretApprovals: vi.fn(),
   touchSessionActivity: vi.fn(),
@@ -109,7 +108,6 @@ const fastAgentSessionPermissions = vi.hoisted(() => [
 const fastAgentSessionToolFilter = vi.hoisted(() => ({ task: true }));
 
 vi.mock('@roomote/sdk/server/session-secrets', () => ({
-  requestWithSessionSecret: mocks.requestWithSessionSecret,
   prepareSessionSecret: mocks.prepareSessionSecret,
   listSessionSecretApprovals: mocks.listSessionSecretApprovals,
 }));
@@ -1143,7 +1141,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         id: 'canonical-session-1',
         createdBy: 'different-owner',
       });
-      mocks.requestWithSessionSecret.mockResolvedValue({
+      mocks.callIntegration.mockResolvedValue({
         success: true,
         status: 200,
         body: 'healthy',
@@ -1160,7 +1158,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               error:
                 'Post an acknowledgement with send_chat_reply before this action.',
             });
-            expect(mocks.requestWithSessionSecret).not.toHaveBeenCalled();
+            expect(mocks.callIntegration).not.toHaveBeenCalled();
             await invokeTool(nativeToolNames.sendChatReply, {
               purpose: 'ack',
               message: 'Checking the approved endpoint.',
@@ -1173,7 +1171,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
               userId: 'injected-user',
             }),
           ).toEqual({ success: false, error: 'Secret request unavailable' });
-          expect(mocks.requestWithSessionSecret).not.toHaveBeenCalled();
+          expect(mocks.callIntegration).not.toHaveBeenCalled();
           expect(
             await mocks.nativeExecutor!({
               name: nativeToolNames.requestWithSessionSecret,
@@ -1199,9 +1197,146 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.anything(),
         'conversation-1',
       );
-      expect(mocks.requestWithSessionSecret).toHaveBeenCalledExactlyOnceWith(
-        { sessionId: 'canonical-session-1', userId: 'user-1' },
-        args,
+      expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          userId: 'user-1',
+          humanTurn: true,
+        }),
+        expect.any(Array),
+        {
+          integrationId: '_roomote_http_integrations',
+          toolName: 'integration_request',
+          args: {
+            integrationId: `session:${args.secretRef}`,
+            method: args.method,
+            path: args.path,
+            body: undefined,
+            accept: 'application/json',
+          },
+        },
+      );
+    },
+  );
+
+  it.each([undefined, null, '', 'nonempty', ' '] as const)(
+    'accepts only empty Session request bodies: %j',
+    async (body) => {
+      mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
+      mocks.callIntegration.mockResolvedValue({ status: 200, body: 'healthy' });
+      const allowed = body === undefined || body === null || body === '';
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          expect(
+            await invokeTool(nativeToolNames.requestWithSessionSecret, {
+              secretRef: 'e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+              ...(body === undefined ? {} : { body }),
+            }),
+          ).toEqual(
+            allowed
+              ? { success: true, status: 200, body: 'healthy' }
+              : {
+                  success: false,
+                  error: 'Secret request unavailable',
+                },
+          );
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Checked.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: { ...baseParams.conversation, surface: 'web' },
+        adapter: callbacks(),
+      });
+      if (allowed) {
+        expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            sessionId: 'conversation-1',
+            userId: 'user-1',
+            humanTurn: true,
+          }),
+          expect.any(Array),
+          {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args: {
+              integrationId: 'session:e9d35700-56b8-4bf0-b088-c1cb498905d9',
+              method: 'GET',
+              path: '/status',
+              body,
+              accept: undefined,
+            },
+          },
+        );
+      } else expect(mocks.callIntegration).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['human', 'platform_event'] as const)(
+    'passes trusted %s context to operator HTTP requests without argument authority',
+    async (turnSource) => {
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: '_roomote_http_integrations',
+          name: 'HTTP integrations',
+          description: 'Broker',
+          tools: [{ name: 'integration_request' }],
+        },
+      ]);
+      const args = {
+        integrationId: 'operator-service',
+        method: 'GET',
+        path: '/status',
+        userId: 'forged-user',
+        sessionId: 'forged-session',
+        humanTurn: true,
+      };
+      mocks.callIntegration.mockResolvedValue({ status: 200 });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          options.onPromptStarted?.();
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Checking the service.',
+          });
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args,
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Checked.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        turnSource,
+        adapter: callbacks(),
+      });
+      expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          userId: 'user-1',
+          humanTurn: turnSource === 'human',
+        }),
+        expect.any(Array),
+        {
+          integrationId: '_roomote_http_integrations',
+          toolName: 'integration_request',
+          args,
+        },
       );
     },
   );
@@ -1250,7 +1385,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   });
 
   it.each(['openai/gpt-5.6', 'anthropic/claude-sonnet-5'])(
-    'keeps Session-secret SDK errors out of %s model input, tool results, and emitted telemetry',
+    'keeps Session-secret broker errors out of %s model input, tool results, and emitted telemetry',
     async (model) => {
       const secret = 'session-secret-error-canary-7e2b9c';
       const secretRef = 'e9d35700-56b8-4bf0-b088-c1cb498905d9';
@@ -1267,7 +1402,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         telemetry.captureFastAgentTurnSettled,
       );
       mocks.getUnifiedSession.mockResolvedValue({ id: 'canonical-session-1' });
-      mocks.requestWithSessionSecret.mockRejectedValueOnce(
+      mocks.callIntegration.mockRejectedValueOnce(
         new Error(`Upstream echoed Authorization: Bearer ${secret}`, {
           cause: { headers: { Authorization: `Bearer ${secret}` } },
         }),
@@ -1308,9 +1443,24 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         adapter,
       });
 
-      expect(mocks.requestWithSessionSecret).toHaveBeenCalledExactlyOnceWith(
-        { sessionId: 'canonical-session-1', userId: 'user-1' },
-        { secretRef, method: 'GET', path: '/status' },
+      expect(mocks.callIntegration).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sessionId: 'conversation-1',
+          userId: 'user-1',
+          humanTurn: true,
+        }),
+        expect.any(Array),
+        {
+          integrationId: '_roomote_http_integrations',
+          toolName: 'integration_request',
+          args: {
+            integrationId: `session:${secretRef}`,
+            method: 'GET',
+            path: '/status',
+            body: undefined,
+            accept: undefined,
+          },
+        },
       );
       expect(modelPayloads).toHaveLength(2);
       expect(JSON.stringify(modelPayloads)).toContain(secretRef);
@@ -1411,7 +1561,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
 
       expect(toolResult).toMatchObject({ success: false });
-      expect(mocks.requestWithSessionSecret).not.toHaveBeenCalled();
+      expect(mocks.callIntegration).not.toHaveBeenCalled();
       expect(mocks.prepareSessionSecret).not.toHaveBeenCalled();
       expect(mocks.listSessionSecretApprovals).not.toHaveBeenCalled();
     },

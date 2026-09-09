@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { db, eq, sessions } from '@roomote/db/server';
+import { replyToFastSessionCommand } from '@/trpc/commands/fast-sessions';
 
 import {
   createSessionSecret,
@@ -110,7 +112,33 @@ async function handle(
       const args = sessionSecretCreateSchema.safeParse(rawArgs);
       if (!args.success) return error(400);
       const secret = await createSessionSecret(context, args.data);
-      return NextResponse.json({ secret }, { status: 201, headers });
+      let resumed = false;
+      try {
+        const session = await db.query.sessions.findFirst({
+          where: eq(sessions.id, context.sessionId),
+          columns: {
+            fastConversationId: true,
+            ownerKind: true,
+            ownerUserId: true,
+            archivedAt: true,
+          },
+        });
+        if (
+          session?.fastConversationId &&
+          session.ownerKind === 'user' &&
+          session.ownerUserId === auth.userId &&
+          !session.archivedAt
+        ) {
+          await replyToFastSessionCommand(auth, {
+            sessionId: session.fastConversationId,
+            text: 'I saved an API key approval securely for this Session. Check list_session_secrets or the HTTP broker list_integrations for ready approvals and continue the requested GET or HEAD request through the broker. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.',
+          });
+          resumed = true;
+        }
+      } catch {
+        // Saving succeeded. Never retry secret insertion to retry a continuation.
+      }
+      return NextResponse.json({ secret, resumed }, { status: 201, headers });
     }
     const args = sessionSecretRevokeSchema.safeParse(rawArgs);
     if (!args.success) return error(400);

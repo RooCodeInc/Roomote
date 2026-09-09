@@ -14,6 +14,8 @@ import {
   sessionSecrets,
   sessions,
   users,
+  sessionTasks,
+  taskRuns,
 } from '../schema';
 import { decrypt, encrypt } from './encryption';
 
@@ -21,6 +23,57 @@ import { decrypt, encrypt } from './encryption';
 export interface SessionSecretContext {
   sessionId: string;
   userId: string | null | undefined;
+  runId?: number;
+  fastConversationId?: string;
+}
+
+/** Resolve only signed server context. A caller-supplied Session ID is not authority. */
+export async function resolveSessionSecretContext(
+  auth:
+    | {
+        tokenType: 'session-broker';
+        userId: string;
+        fastConversationId: string;
+      }
+    | { tokenType: 'run'; runId: number },
+): Promise<SessionSecretContext> {
+  const [row] =
+    auth.tokenType === 'run'
+      ? await db
+          .select({ sessionId: sessions.id, userId: taskRuns.actingUserId })
+          .from(taskRuns)
+          .innerJoin(sessionTasks, eq(sessionTasks.taskId, taskRuns.taskId))
+          .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
+          .innerJoin(users, eq(users.id, taskRuns.actingUserId))
+          .where(
+            and(
+              eq(taskRuns.id, auth.runId),
+              eq(sessions.ownerKind, 'user'),
+              eq(sessions.ownerUserId, taskRuns.actingUserId),
+              isNull(users.deletedAt),
+              isNull(sessions.archivedAt),
+            ),
+          )
+      : await db
+          .select({ sessionId: sessions.id, userId: users.id })
+          .from(sessions)
+          .innerJoin(users, eq(users.id, sessions.ownerUserId))
+          .where(
+            and(
+              eq(sessions.fastConversationId, auth.fastConversationId),
+              eq(sessions.ownerKind, 'user'),
+              eq(users.id, auth.userId),
+              isNull(users.deletedAt),
+              isNull(sessions.archivedAt),
+            ),
+          );
+  if (!row?.userId) throw new Error('Secret unavailable');
+  return {
+    ...row,
+    ...(auth.tokenType === 'run'
+      ? { runId: auth.runId }
+      : { fastConversationId: auth.fastConversationId }),
+  };
 }
 
 const metadataColumns = {
@@ -69,6 +122,19 @@ function ownerWhere(context: SessionSecretContext, includeArchived = false) {
     eq(users.id, context.userId),
     isNull(users.deletedAt),
     includeArchived ? undefined : isNull(sessions.archivedAt),
+    context.fastConversationId
+      ? eq(sessions.fastConversationId, context.fastConversationId)
+      : undefined,
+    // Keep attachment and actor checks in the grant query's own snapshot too.
+    context.runId
+      ? sql`exists (
+      select 1 from ${taskRuns}
+      inner join ${sessionTasks} on ${sessionTasks.taskId} = ${taskRuns.taskId}
+      where ${taskRuns.id} = ${context.runId}
+        and ${taskRuns.actingUserId} = ${users.id}
+        and ${sessionTasks.sessionId} = ${sessions.id}
+    )`
+      : undefined,
   );
 }
 
@@ -258,7 +324,14 @@ export async function resolveOwnedSessionSecret(
 }
 
 export async function recordSessionSecretAudit(
-  input: Omit<typeof sessionSecretAudit.$inferInsert, 'id' | 'createdAt'>,
+  input: Omit<typeof sessionSecretAudit.$inferInsert, 'createdAt'>,
 ) {
-  await db.insert(sessionSecretAudit).values(input);
+  // A final authorization check can correct completion to failed, never its metadata.
+  await db
+    .insert(sessionSecretAudit)
+    .values(input)
+    .onConflictDoUpdate({
+      target: sessionSecretAudit.id,
+      set: { outcome: input.outcome },
+    });
 }

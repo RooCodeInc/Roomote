@@ -23,8 +23,16 @@ integration tools remain available and should be used first.
 
 ## Configure the deployment
 
-This feature is opt-in and configured by the deployment operator, not through
-the curated integration connection dialogs.
+Operator-managed integrations are opt-in and configured by the deployment
+operator, not through the curated integration connection dialogs. The same API
+broker also serves [Session secrets](/session-secrets), which are individually
+approved by the Session owner and do not require an operator manifest.
+
+For Session grants only, leave `R_HTTP_INTEGRATIONS_ENABLED` unset or `false` and
+`R_HTTP_INTEGRATIONS_CONFIG_PATH` unset. No per-service credential environment
+variables are needed on the Roomote API: the owner saves each key in the secure
+Session form. Existing deployment encryption and job-signing configuration remain
+required. See [dynamic-only setup](/session-secrets#dynamic-only-setup).
 
 1. Create a JSON manifest on the API server and mount it read-only. Use narrow
    paths and least-privilege upstream credentials.
@@ -38,7 +46,11 @@ the curated integration connection dialogs.
    environment variables or sandbox images.
 4. Restart the affected services and start a new session or refresh the task's
    integration configuration. An enabled API refuses to register the feature
-   if its manifest is missing or invalid.
+    if its manifest is missing or invalid.
+
+An explicitly enabled but invalid operator configuration never falls back to
+dynamic-only mode. Disable operator mode intentionally if only Session grants
+are wanted.
 
 Example manifest, using a placeholder domain and Roomote user ID:
 
@@ -153,10 +165,12 @@ environment per request; updating deployment environment variables normally
 requires restarting or recreating that process. Apply configuration and secret
 changes to every API replica.
 
-To disable the feature, set `R_HTTP_INTEGRATIONS_ENABLED=false` on the same
-control-plane services and restart them. New requests then have no broker
-endpoint, and refreshed agent configurations remove its tools. This does not
-cancel an already-running request.
+To disable operator-managed integrations, set `R_HTTP_INTEGRATIONS_ENABLED=false`
+on the same control-plane services and restart them. The broker remains available
+for owner-approved Session grants, but no operator manifest entries are loaded.
+This does not cancel an already-running operator request. Revoke Session grants
+separately in the Session UI; those changes are checked live before dispatch and
+before returning upstream responses, without reloading the manifest or restarting.
 
 ## Verify and troubleshoot
 

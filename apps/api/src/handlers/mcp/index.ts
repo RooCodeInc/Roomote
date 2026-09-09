@@ -36,9 +36,8 @@ import { createHttpIntegrationsMcp } from './http-integrations';
 
 export const mcp = new Hono<{ Variables: Variables }>();
 
-if (Env.R_HTTP_INTEGRATIONS_ENABLED) {
-  mcp.route('/http-integrations', createHttpIntegrationsMcp());
-}
+// Session grants are live; the operator flag controls only manifest integrations.
+mcp.route('/http-integrations', createHttpIntegrationsMcp());
 
 const requireCuratedIntegrations: MiddlewareHandler<{
   Variables: Variables;
