@@ -1,7 +1,15 @@
-import { createFastAgentConversationArtifact } from './create-session-artifact';
+import {
+  createFastAgentConversationArtifact,
+  createFastAgentConversationMediaArtifact,
+} from './create-session-artifact';
 
 type FastAgentArtifactInput = Omit<
   Parameters<typeof createFastAgentConversationArtifact>[0],
+  'fastConversationId'
+>;
+
+type FastAgentMediaArtifactInput = Omit<
+  Parameters<typeof createFastAgentConversationMediaArtifact>[0],
   'fastConversationId'
 >;
 
@@ -14,4 +22,17 @@ type FastAgentArtifactInput = Omit<
 export function buildFastAgentArtifactCreator(fastConversationId: string) {
   return (artifact: FastAgentArtifactInput) =>
     createFastAgentConversationArtifact({ fastConversationId, ...artifact });
+}
+
+/**
+ * Binary sibling for the `browse` tool's screenshots and recordings. Wire it
+ * wherever `buildFastAgentArtifactCreator` is wired so captures are never
+ * unavailable on one surface only.
+ */
+export function buildFastAgentMediaArtifactCreator(fastConversationId: string) {
+  return (artifact: FastAgentMediaArtifactInput) =>
+    createFastAgentConversationMediaArtifact({
+      fastConversationId,
+      ...artifact,
+    });
 }

@@ -50,13 +50,18 @@ export function isFastAgentNativeIntegration(integrationId: string): boolean {
 
 export function buildFastAgentToolFilter(
   integrationIds: string[],
-  options: { surface?: FastAgentSurface } = {},
+  options: { surface?: FastAgentSurface; browserEnabled?: boolean } = {},
 ): Record<string, boolean> {
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
     ...(options.surface && options.surface !== 'web'
       ? { [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false }
       : {}),
+    // `browse` needs a configured browser provider on the control plane;
+    // without one the tool is hidden rather than left to fail on every call.
+    ...(options.browserEnabled
+      ? {}
+      : { [FAST_AGENT_NATIVE_TOOL_NAMES.browse]: false }),
     ...Object.fromEntries(integrationIds.map((id) => [`${id}_*`, true])),
   };
 }

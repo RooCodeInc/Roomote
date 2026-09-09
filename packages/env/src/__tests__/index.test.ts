@@ -104,6 +104,9 @@ describe('Env', () => {
     for (const key of [
       'R_MODEL',
       'R_ORCHESTRATION_MODEL',
+      'R_FAST_BROWSER_PROVIDER',
+      'R_BROWSER_USE_API_KEY',
+      'R_AGENT_BROWSER_PATH',
       'R_SMALL_MODEL',
       'R_VISION_MODEL',
       'R_CODE_REVIEW_MODEL',

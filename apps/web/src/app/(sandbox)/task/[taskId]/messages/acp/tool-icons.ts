@@ -10,6 +10,7 @@ import {
   FolderIcon,
   GalleryVerticalEnd,
   GitPullRequest,
+  Globe,
   HardDriveUpload,
   List,
   ListChecks,
@@ -40,6 +41,7 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'message') return MessageSquareText;
   if (key === 'memory') return BookOpenText;
   if (key === 'artifact') return HardDriveUpload;
+  if (key === 'globe') return Globe;
   if (key === 'widget') return GalleryVerticalEnd;
   if (key === 'roomote') return RoomoteR;
   if (key === 'video') return Video;

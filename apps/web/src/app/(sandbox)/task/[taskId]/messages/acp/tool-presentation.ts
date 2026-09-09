@@ -43,6 +43,7 @@ export type ToolIconKey =
   | 'environment'
   | 'alert'
   | 'messages'
+  | 'globe'
   | 'tool';
 
 type ToolPresentationPhase = 'running' | 'completed' | 'failed';
@@ -106,6 +107,7 @@ const COMMUNICATION_TOOL_NAMES = new Set([
   'ignore_event',
 ]);
 const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
+  browse: 'globe',
   manage_custom_automations: 'task',
   manage_wakeups: 'task',
   get_about_me: 'roomote',
@@ -426,6 +428,16 @@ function resolveReceiptLanguage(
       verb: byPhase('Inspecting', 'Inspected', 'Failed to Inspect'),
       object: 'Images',
     };
+  if (toolName === 'browse') {
+    const command = stringArgument(args, 'command');
+    const summary = command
+      ? command.split(/\s+/u).slice(0, 2).join(' ')
+      : null;
+    return {
+      verb: byPhase('Browsing', 'Browsed', 'Failed to Browse'),
+      object: summary ?? 'browser',
+    };
+  }
   if (nativeToolName === 'skill' || nativeToolName === 'load_skill') {
     const name = stringArgument(args, 'name');
     return {

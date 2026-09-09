@@ -253,11 +253,13 @@ function getVisibleToolInput(
         ? 'message'
         : toolName === 'inspect_images'
           ? 'question'
-          : toolName === 'post_to_channel'
-            ? 'text'
-            : toolName === 'send_chat_reaction_emoji'
-              ? 'name'
-              : null;
+          : toolName === 'browse'
+            ? 'command'
+            : toolName === 'post_to_channel'
+              ? 'text'
+              : toolName === 'send_chat_reaction_emoji'
+                ? 'name'
+                : null;
   if (!visibleField && toolName !== 'receive_task_report') {
     return null;
   }

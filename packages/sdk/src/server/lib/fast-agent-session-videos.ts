@@ -7,6 +7,7 @@ import {
   db,
   eq,
   inArray,
+  sessions,
   slackInstallations,
   taskArtifacts,
   taskRuns,
@@ -65,6 +66,7 @@ export async function resolveFastAgentSessionVideos(params: {
     columns: {
       id: true,
       taskId: true,
+      sessionId: true,
       runId: true,
       path: true,
       version: true,
@@ -77,10 +79,21 @@ export async function resolveFastAgentSessionVideos(params: {
     artifact.runId === null ? [] : [artifact.runId],
   );
   const sessionRunTaskById = new Map<number, string>();
+  const lookupIds = await fastAgentConversationRepository.getLookupIds(
+    params.sessionId,
+  );
+  // Session-owned artifacts (the `browse` tool's recordings) are owned by the
+  // unified `sessions` row, not the Fast conversation id, so map every
+  // lookup id to its Session before comparing.
+  const ownedSessionIds = new Set<string>(
+    (
+      await db.query.sessions.findMany({
+        where: inArray(sessions.fastConversationId, lookupIds),
+        columns: { id: true },
+      })
+    ).map((session) => session.id),
+  );
   if (runIds.length > 0) {
-    const lookupIds = await fastAgentConversationRepository.getLookupIds(
-      params.sessionId,
-    );
     const runs = await db.query.taskRuns.findMany({
       where: and(
         inArray(taskRuns.id, runIds),
@@ -94,12 +107,19 @@ export async function resolveFastAgentSessionVideos(params: {
   // Validate the entire batch before any storage reads, conversion, KV writes or Slack calls.
   return artifactIds.map((id) => {
     const artifact = byId.get(id);
+    const ownedByRun =
+      artifact?.runId !== null &&
+      artifact?.runId !== undefined &&
+      artifact.taskId !== null &&
+      artifact.taskId === sessionRunTaskById.get(artifact.runId);
+    const ownedBySession =
+      artifact?.sessionId !== null &&
+      artifact?.sessionId !== undefined &&
+      ownedSessionIds.has(artifact.sessionId);
     if (
       !artifact ||
       !artifact.uploaded ||
-      artifact.runId === null ||
-      artifact.taskId === null ||
-      artifact.taskId !== sessionRunTaskById.get(artifact.runId) ||
+      !(ownedByRun || ownedBySession) ||
       !artifact.contentType.startsWith('video/')
     ) {
       throw new Error(`Invalid Fast parent video artifact: ${id}`);
@@ -109,11 +129,19 @@ export async function resolveFastAgentSessionVideos(params: {
       .map(encodeURIComponent)
       .join('/');
     const baseUrl = (Env.R_PUBLIC_URL ?? Env.R_APP_URL).replace(/\/+$/, '');
+    const owner: ArtifactStorageOwner =
+      artifact.taskId !== null && ownedByRun
+        ? { taskId: artifact.taskId }
+        : { sessionId: artifact.sessionId! };
+    const viewUrl =
+      artifact.taskId !== null && ownedByRun
+        ? `${baseUrl}/task/${encodeURIComponent(artifact.taskId)}/artifacts/${encodedPath}?v=${artifact.version}`
+        : `${baseUrl}/sessions/${artifact.sessionId!}?artifact=${encodeURIComponent(artifact.path)}&v=${artifact.version}`;
     return {
       ...artifact,
-      taskId: artifact.taskId,
+      owner,
       filename: basename(artifact.path) || 'video',
-      viewUrl: `${baseUrl}/task/${encodeURIComponent(artifact.taskId)}/artifacts/${encodedPath}?v=${artifact.version}`,
+      viewUrl,
     };
   });
 }
@@ -182,7 +210,7 @@ export async function deliverFastAgentSessionVideos(params: {
       stage = 'storage';
       const signal = AbortSignal.timeout(IO_TIMEOUT_MS);
       const object = await getOwnedArtifactObject(
-        { taskId: video.taskId },
+        video.owner,
         video.id,
         video.path,
         video.version,

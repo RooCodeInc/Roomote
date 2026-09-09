@@ -24,6 +24,7 @@ import {
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
   admitFastAgentHumanFollowUp,
+  buildFastAgentMediaArtifactCreator,
   createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
   wakeFastAgentParentEventAt,
@@ -308,6 +309,7 @@ export async function processFastAgentMessage(params: {
             fastConversationId: session.id,
             ...artifact,
           }),
+        createMediaArtifact: buildFastAgentMediaArtifactCreator(session.id),
         ...(durableTurn
           ? {
               requestDurableResume: () =>

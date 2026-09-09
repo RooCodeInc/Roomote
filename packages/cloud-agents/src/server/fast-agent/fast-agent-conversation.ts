@@ -98,6 +98,22 @@ export type FastAgentReaction = {
   messageId: string;
 };
 
+/** Stores a browser capture (PNG/WebM) as a `visual-proof` Session artifact. */
+export type CreateFastAgentMediaArtifact = (params: {
+  path: string;
+  content: Buffer;
+  contentType: string;
+}) => Promise<{
+  id: string;
+  path: string;
+  version: number;
+  artifactType: 'visual-proof';
+  contentType: string;
+  size: number;
+  viewUrl: string;
+  rawUrl: string;
+}>;
+
 export type CreateFastAgentArtifact = (params: {
   path: string;
   content: string;
@@ -184,6 +200,7 @@ export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
   /** Persist inline text output against the owning Session. */
   createArtifact?: CreateFastAgentArtifact;
+  createMediaArtifact?: CreateFastAgentMediaArtifact;
   /**
    * Optional surface-specific launch gate. Use this for durable product
    * readiness conditions that the model prompt alone must not enforce.

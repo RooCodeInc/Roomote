@@ -153,6 +153,11 @@ import {
   isFastAgentNativeIntegration,
 } from './fast-agent-tool-policy';
 import {
+  isFastAgentBrowserEnabled,
+  runBrowseCommand,
+  validateBrowseCommand,
+} from './fast-agent-browser';
+import {
   callFastAgentIntegration,
   listFastAgentIntegrations,
   type FastAgentIntegration,
@@ -483,6 +488,16 @@ const inspectImagesArgsSchema = z.object({
   question: z.string().min(1),
   imageIds: z.array(z.string().min(1)).nullable().optional(),
 });
+const browseArgsSchema = z.object({
+  command: z.string().min(1),
+  question: z.string().nullable().optional(),
+  deliverToUser: z.boolean().nullable().optional(),
+});
+const FAST_AGENT_BROWSER_SCREENSHOT_SYSTEM_PROMPT = [
+  'You are Roomote visual information extraction support for a chat assistant that cannot view images itself.',
+  'The attached image is a screenshot the assistant just took in a browser. Answer the question with concise factual observations the assistant can rely on as evidence: visible text, UI state, layout, errors, and any detail relevant to the question.',
+  'If the visual evidence is ambiguous, say what is uncertain. Do not speculate beyond what is visible, do not address the end user directly, and do not make product decisions.',
+].join('\n');
 const callIntegrationToolArgsSchema = z.object(
   CALL_INTEGRATION_TOOL_TOOL.inputSchema,
 );
@@ -3194,6 +3209,38 @@ export async function answerFastAgentQuestion({
       }
     };
 
+    // Captures the model asked to deliver (`browse` with deliverToUser) that
+    // no reply has carried yet. GPT-family models treat a screenshot as
+    // presented by their final message, so the delivery decision is taken on
+    // the capture itself and the next visible reply honours it.
+    const pendingDeliveryImageArtifactIds: string[] = [];
+    const pendingDeliveryVideoArtifactIds: string[] = [];
+    const attachRequestedCaptures = (reply: FastAgentReply): FastAgentReply => {
+      const explicitImages = reply.imageArtifactIds ?? [];
+      const explicitVideos = reply.videoArtifactIds ?? [];
+      const images = [
+        ...new Set([
+          ...(explicitImages.length > 0 ? explicitImages : []),
+          ...pendingDeliveryImageArtifactIds.splice(0),
+        ]),
+      ];
+      const videos = [
+        ...new Set([
+          ...explicitVideos,
+          ...pendingDeliveryVideoArtifactIds.splice(0),
+        ]),
+      ];
+      return {
+        ...reply,
+        ...(images.length > 0
+          ? { imageArtifactIds: images }
+          : defaultImageArtifactIds.length > 0
+            ? { imageArtifactIds: defaultImageArtifactIds }
+            : {}),
+        ...(videos.length > 0 ? { videoArtifactIds: videos } : {}),
+      };
+    };
+
     const postReply = async (
       reply: FastAgentReply,
       mirrorImmediately = false,
@@ -3202,10 +3249,7 @@ export async function answerFastAgentQuestion({
       /** The streamed partial this reply finalizes, if one was shown. */
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
-      const replyWithImages =
-        !reply.imageArtifactIds?.length && defaultImageArtifactIds.length
-          ? { ...reply, imageArtifactIds: defaultImageArtifactIds }
-          : reply;
+      const replyWithImages = attachRequestedCaptures(reply);
       const replacedRetry = await replaceInferenceRetryReply(
         replyWithImages,
         true,
@@ -4421,6 +4465,120 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages: {
             return inspectTurnImages(inspectImagesArgsSchema.parse(call.args));
           }
+          case FAST_AGENT_NATIVE_TOOL_NAMES.browse: {
+            const args = browseArgsSchema.parse(call.args);
+            const validated = validateBrowseCommand(args.command);
+            if ('error' in validated) {
+              return { success: false, error: validated.error };
+            }
+            const command = validated.tokens.join(' ');
+            const result = await runBrowseCommand({
+              conversationId:
+                canonicalConversationId ?? conversation.conversationId,
+              command: validated,
+            });
+            if (!result.success) {
+              return {
+                success: false,
+                command,
+                error: result.error ?? 'Browser command failed.',
+              };
+            }
+            if (!result.capture) {
+              return { success: true, command, data: result.data };
+            }
+            if (!adapter.createMediaArtifact) {
+              return {
+                success: false,
+                command,
+                error:
+                  'Artifact storage is unavailable for this Session, so the capture could not be saved.',
+              };
+            }
+            const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
+            const artifact = await adapter.createMediaArtifact({
+              path:
+                result.capture.kind === 'screenshot'
+                  ? `browser/screenshot-${stamp}.png`
+                  : `browser/recording-${stamp}.webm`,
+              content: result.capture.bytes,
+              contentType: result.capture.contentType,
+            });
+            if (conversation.surface === 'web') visibleUpdatePosted = true;
+            const deliverToUser = args.deliverToUser === true;
+            if (deliverToUser) {
+              (result.capture.kind === 'screenshot'
+                ? pendingDeliveryImageArtifactIds
+                : pendingDeliveryVideoArtifactIds
+              ).push(artifact.id);
+            }
+            let observations: string | undefined;
+            const question = args.question?.trim();
+            if (result.capture.kind === 'screenshot' && question) {
+              const delivery = await resolveImageDelivery();
+              if (delivery.delivery !== 'unsupported') {
+                const visionModel =
+                  delivery.delivery === 'helper'
+                    ? delivery.helperModel
+                    : delivery.model;
+                observations = await generateTrackedNonTaskText({
+                  surface:
+                    NON_TASK_INFERENCE_SURFACES.fastAgentBrowserScreenshot,
+                  userId,
+                  fastConversationId: canonicalConversationId,
+                  model: visionModel,
+                  ...(delivery.delivery === 'helper' &&
+                  delivery.helperReasoningEffort
+                    ? { reasoningEffort: delivery.helperReasoningEffort }
+                    : {}),
+                  system: FAST_AGENT_BROWSER_SCREENSHOT_SYSTEM_PROMPT,
+                  prompt: `Question from the assistant:\n${question}`,
+                  files: [
+                    {
+                      mime: result.capture.contentType,
+                      filename: artifact.path.split('/').pop(),
+                      url: `data:${result.capture.contentType};base64,${result.capture.bytes.toString('base64')}`,
+                    },
+                  ],
+                  requiredInputModality: 'image',
+                  timeoutMs: FAST_AGENT_IMAGE_INSPECTION_TIMEOUT_MS,
+                });
+              }
+            }
+            const attachmentField =
+              result.capture.kind === 'screenshot'
+                ? 'imageArtifactIds'
+                : 'videoArtifactIds';
+            return {
+              success: true,
+              command,
+              // The next step leads so a model skimming the result cannot
+              // miss it; on chat surfaces the capture is invisible until a
+              // reply carries its ID.
+              ...(conversation.surface === 'web'
+                ? {
+                    nextStep:
+                      'Saved as a Session artifact; the web transcript shows it inline next to this call.',
+                  }
+                : deliverToUser
+                  ? {
+                      delivery: 'attached_to_next_reply',
+                      nextStep: `This ${result.capture.kind} will be attached to your next reply. Write the reply text and finish the turn.`,
+                    }
+                  : {
+                      delivery: 'not_delivered',
+                      nextStep: `The user cannot see this ${result.capture.kind}. To show it, pass ${attachmentField}: ["${artifact.id}"] in send_chat_reply, or take it again with deliverToUser: true.`,
+                    }),
+              artifactId: artifact.id,
+              artifactType: artifact.artifactType,
+              contentType: artifact.contentType,
+              path: artifact.path,
+              size: artifact.size,
+              viewUrl: artifact.viewUrl,
+              rawUrl: artifact.rawUrl,
+              ...(observations !== undefined ? { observations } : {}),
+            };
+          }
           case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
             const args = callIntegrationToolArgsSchema.parse(call.args);
             if (isFastAgentNativeIntegration(args.integrationId)) {
@@ -4584,7 +4742,10 @@ export async function answerFastAgentQuestion({
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
-          { surface: conversation.surface },
+          {
+            surface: conversation.surface,
+            browserEnabled: isFastAgentBrowserEnabled(),
+          },
         );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();

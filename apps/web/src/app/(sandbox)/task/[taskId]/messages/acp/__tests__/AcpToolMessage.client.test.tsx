@@ -462,6 +462,7 @@ describe('AcpToolMessage', () => {
     ['report_to_parent_session', 'Sent', 'report to Session'],
     ['receive_task_report', 'Received', 'task report'],
     ['inspect_images', 'Inspected', 'Images'],
+    ['browse', 'Browsed', 'browser'],
   ])('renders %s as an expandable receipt', (toolName, action, object) => {
     render(
       <AcpToolMessage

@@ -115,10 +115,16 @@ export {
 export { createTaskArtifactRecord } from './lib/artifacts/create-record';
 export {
   createFastAgentConversationArtifact,
+  createFastAgentConversationMediaArtifact,
   createFastAgentSessionArtifact,
+  createFastAgentSessionMediaArtifact,
   createSessionArtifact,
+  createSessionMediaArtifact,
 } from './lib/artifacts/create-session-artifact';
-export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
+export {
+  buildFastAgentArtifactCreator,
+  buildFastAgentMediaArtifactCreator,
+} from './lib/artifacts/fast-agent-artifact-creator';
 export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,

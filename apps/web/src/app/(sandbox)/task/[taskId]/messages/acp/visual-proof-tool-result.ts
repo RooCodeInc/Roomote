@@ -5,12 +5,15 @@ import { isSubagentToolPayload } from './subagent-tool';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
 const MANAGE_ARTIFACTS_TOOL_NAME = 'manage_artifacts';
+const BROWSE_TOOL_NAME = 'browse';
 
 type VisualProofUploadExtraction = {
   artifactId: string;
   artifactType: 'visual-proof';
   viewUrl: string;
   rawUrl?: string;
+  /** Set by the Fast `browse` tool so a recording's rawUrl renders as video. */
+  contentType?: string;
 };
 
 export type VisualProofDisplayMedia =
@@ -103,6 +106,7 @@ function parseVisualProofSuccessPayload(
   const viewUrl = asNonEmptyString(record.viewUrl);
   const artifactType = asNonEmptyString(record.artifactType);
   const rawUrl = asNonEmptyString(record.rawUrl) ?? undefined;
+  const contentType = asNonEmptyString(record.contentType) ?? undefined;
 
   if (!artifactId || !viewUrl || artifactType !== 'visual-proof') {
     return null;
@@ -113,6 +117,7 @@ function parseVisualProofSuccessPayload(
     artifactType: 'visual-proof',
     viewUrl,
     ...(rawUrl ? { rawUrl } : {}),
+    ...(contentType ? { contentType } : {}),
   };
 }
 
@@ -134,14 +139,22 @@ function extractVisualProofUploadFromToolMessage(
     return null;
   }
 
-  if (msg.data.isMcp !== true) {
-    return null;
-  }
-
   const toolName = getMcpToolName(msg.data);
+  // The Fast `browse` native tool saves its screenshots and recordings the
+  // same way task sandboxes upload visual proof.
+  const isBrowseCapture =
+    msg.data.isMcp === false &&
+    msg.data.isRoomoteNativeTool === true &&
+    toolName === BROWSE_TOOL_NAME;
 
-  if (toolName !== MANAGE_ARTIFACTS_TOOL_NAME) {
-    return null;
+  if (!isBrowseCapture) {
+    if (msg.data.isMcp !== true) {
+      return null;
+    }
+
+    if (toolName !== MANAGE_ARTIFACTS_TOOL_NAME) {
+      return null;
+    }
   }
 
   const output = asNonEmptyString(msg.data.output);
@@ -228,7 +241,20 @@ function resolveVisualProofDisplayMedia(
     }
   }
 
-  // Upload contract: rawUrl is only set for images.
+  // The Fast browse tool signs rawUrl for recordings too; the raw route
+  // serves WebM, so play it inline rather than treating it as an image.
+  if (extraction.rawUrl && extraction.contentType?.startsWith('video/')) {
+    return {
+      kind: 'video',
+      src: extraction.rawUrl,
+      viewUrl: extraction.viewUrl,
+      artifactId: extraction.artifactId,
+      path,
+      version,
+    };
+  }
+
+  // Upload contract: otherwise rawUrl is only set for images.
   if (extraction.rawUrl) {
     return {
       kind: 'image',
