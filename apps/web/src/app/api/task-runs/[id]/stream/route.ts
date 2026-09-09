@@ -6,7 +6,7 @@ import { RunStatus, isExitedRunStatus } from '@roomote/types';
 import { db, eq, taskRuns } from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
-import { canAccessTask } from '@/lib/server/custom-automation-task-access';
+import { canReadTask } from '@/lib/server/custom-automation-task-access';
 
 export const runtime = 'nodejs';
 
@@ -30,9 +30,7 @@ export async function GET(
     const run = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, runId),
     });
-    return run && (await canAccessTask(authResult, run.taskId))
-      ? run
-      : undefined;
+    return run && (await canReadTask(authResult, run.taskId)) ? run : undefined;
   };
 
   const taskRun = await findTaskRun();

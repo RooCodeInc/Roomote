@@ -22,7 +22,7 @@ import {
   getTaskPullRequestsByTaskId,
 } from '@/lib/server';
 import { resolveTaskCreatorDisplay } from '@/lib/server/tasks';
-import { customAutomationTaskAccess } from '@/lib/server/custom-automation-task-access';
+import { canAccessTask } from '@/lib/server/custom-automation-task-access';
 
 export type TaskByIdAccessResult =
   | {
@@ -68,6 +68,7 @@ async function getTaskByIdForCurrentOrg(
     includeArtifacts = false,
   }: { taskId: string; includeArtifacts?: boolean },
 ): Promise<TaskWithAssociations | null> {
+  if (!auth.userId) return null;
   const [
     [result],
     taskPullRequestsByTaskId,
@@ -79,13 +80,7 @@ async function getTaskByIdForCurrentOrg(
       .from(tasks)
       .leftJoin(users, eq(tasks.initiatorUserId, users.id))
       .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-      .where(
-        and(
-          eq(tasks.id, taskId),
-          isNull(tasks.deletedAt),
-          customAutomationTaskAccess(auth),
-        ),
-      )
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
       .orderBy(desc(taskRuns.id))
       .limit(1),
     getLatestTaskPullRequestsByTaskId([taskId]),
@@ -137,6 +132,8 @@ export async function resolveTaskByIdAccessCommand(
     includeArtifacts = false,
   }: { taskId: string; includeArtifacts?: boolean },
 ): Promise<TaskByIdAccessResult> {
+  // Execution, sandbox and secret callers rely on this restrictive resolver.
+  if (!(await canAccessTask(auth, taskId))) return { kind: 'not-found' };
   const task = await getTaskByIdForCurrentOrg(auth, {
     taskId,
     includeArtifacts,
@@ -159,14 +156,8 @@ export async function getTaskByIdCommand(
     includeArtifacts = false,
   }: { taskId: string; includeArtifacts?: boolean },
 ): Promise<TaskWithAssociations | null> {
-  const taskAccess = await resolveTaskByIdAccessCommand(auth, {
+  return getTaskByIdForCurrentOrg(auth, {
     taskId,
     includeArtifacts,
   });
-
-  if (taskAccess.kind !== 'resolved') {
-    return null;
-  }
-
-  return taskAccess.task;
 }

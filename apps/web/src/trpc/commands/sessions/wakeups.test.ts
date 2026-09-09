@@ -1,5 +1,6 @@
 import {
   db,
+  customAutomations,
   eq,
   fastAgentConversations,
   getSessionWakeupById,
@@ -57,6 +58,46 @@ async function fixture(canonical = true) {
 }
 
 describe('Session wakeup commands', () => {
+  it.each([true, false])(
+    'shares custom automation wakeups without granting cancellation (canonical=%s)',
+    async (canonical) => {
+      const { auth, sessionId, conversationId, wakeup } =
+        await fixture(canonical);
+      const owner = await userFactory.create();
+      const other = await userFactory.create();
+      const [automation] = await db
+        .insert(customAutomations)
+        .values({
+          name: `Wakeup access ${owner.id}`,
+          prompt: 'Report',
+          createdByUserId: owner.id,
+        })
+        .returning();
+      await db
+        .update(fastAgentConversations)
+        .set({
+          conversationId: `${automation!.id}:${new Date().toISOString()}`,
+        })
+        .where(eq(fastAgentConversations.id, conversationId));
+      // Even the run-as user cannot cancel another user's custom automation.
+      for (const reader of [auth, { ...auth, userId: other.id }]) {
+        for (const id of new Set([sessionId, conversationId])) {
+          expect(await getSessionWakeupsCommand(reader, id)).toMatchObject({
+            canCancel: false,
+            wakeups: [{ id: wakeup.id }],
+          });
+          await expect(
+            cancelSessionWakeupCommand(reader, {
+              sessionId: id,
+              wakeupId: wakeup.id,
+            }),
+          ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+        }
+      }
+      expect((await getSessionWakeupById(wakeup.id))?.status).toBe('active');
+    },
+  );
+
   it('lists active summaries and server time through canonical and Fast IDs', async () => {
     const { auth, sessionId, conversationId, wakeup } = await fixture();
     for (const id of [sessionId, conversationId]) {

@@ -42,7 +42,7 @@ import {
   getArtifactsForTask,
   getArtifactVersionsByPath,
 } from './artifacts';
-import { canAccessTask } from './custom-automation-task-access';
+import { canAccessTask, canReadTask } from './custom-automation-task-access';
 
 vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
@@ -390,24 +390,27 @@ describe('custom automation task history access', () => {
     );
   });
 
-  it('gates guessed detail, messages, events and artifact IDs despite participation', async () => {
+  it('allows authenticated direct-link reads while denying anonymous reads', async () => {
     const { task, artifact, ownerAuth, otherAuth, adminAuth } = await fixture();
-    await expect(
-      getTaskByIdCommand(otherAuth, {
-        taskId: task.id,
-        includeArtifacts: true,
-      }),
-    ).resolves.toBeNull();
     await expect(
       getTaskByIdCommand(ownerAuth, { taskId: 'missing-task' }),
     ).resolves.toBeNull();
+    const anonymous = {
+      userId: null,
+      isAdmin: false,
+    } as unknown as UserAuthSuccess;
+    expect(await canReadTask(anonymous, task.id)).toBe(false);
+    expect(await canReadTask(otherAuth, 'missing-task')).toBe(false);
     await expect(
-      getTaskMessageEnvelopesCommand(otherAuth, { taskId: task.id }),
+      getTaskByIdCommand(anonymous, { taskId: task.id }),
+    ).resolves.toBeNull();
+    await expect(
+      getTaskMessageEnvelopesCommand(anonymous, { taskId: task.id }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(
-      getTaskRunEventsCommand(otherAuth, { taskId: task.id }),
+      getTaskRunEventsCommand(anonymous, { taskId: task.id }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    for (const auth of [otherAuth, { userId: null, isAdmin: false }]) {
+    for (const auth of [anonymous]) {
       await expect(
         getArtifactById({ auth, taskId: task.id, artifactId: artifact.id }),
       ).resolves.toBeNull();
@@ -425,7 +428,7 @@ describe('custom automation task history access', () => {
         getArtifactsForTask({ auth, taskId: task.id }),
       ).resolves.toEqual([]);
     }
-    for (const auth of [ownerAuth, adminAuth]) {
+    for (const auth of [ownerAuth, otherAuth, adminAuth]) {
       await expect(
         getTaskByIdCommand(auth, { taskId: task.id, includeArtifacts: true }),
       ).resolves.toMatchObject({
@@ -451,6 +454,9 @@ describe('custom automation task history access', () => {
           path: artifact.path,
         }),
       ).resolves.toHaveLength(1);
+      await expect(
+        getArtifactsForTask({ auth, taskId: task.id }),
+      ).resolves.toHaveLength(1);
     }
   });
 
@@ -467,7 +473,7 @@ describe('custom automation task history access', () => {
       expect(await canAccessTask(ownerAuth, task.id)).toBe(false);
       await expect(
         getTaskByIdCommand(ownerAuth, { taskId: task.id }),
-      ).resolves.toBeNull();
+      ).resolves.toMatchObject({ id: task.id });
       expect(await canAccessTask(adminAuth, task.id)).toBe(true);
     }
   });
