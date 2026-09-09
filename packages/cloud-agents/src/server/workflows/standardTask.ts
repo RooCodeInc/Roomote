@@ -183,7 +183,7 @@ export function standardTask({
   if (deliverySkill !== 'push') {
     if (prBodyAttributionLine) {
       delegatedPrMetadataInstructions.push(
-        `For this run, the delegated PR-delivery skill must prepend \`${prBodyAttributionLine}\` at the top of the PR body file before creating or refreshing the pull request. This is the initial attribution, not an exact-output requirement: the source-control tool owns the final canonical attribution and follow-up URL. It uses a verified visible parent Session URL for delegated tasks, otherwise the task URL, and preserves the original opener identity on updates when \`prAttribution\` is omitted. \`prAttribution\` selects an eligible credited person, not a URL override. Do not retry or edit the PR to force the initial task URL when the tool returns a canonical Session URL.`,
+        `For this run, the delegated PR-delivery skill must prepend \`${prBodyAttributionLine}\` at the top of the PR body file before creating or refreshing the pull request. This is the initial attribution, not an exact-output requirement: the source-control tool owns the final canonical attribution and follow-up URL. It uses a verified visible parent Session URL for delegated tasks, otherwise the task URL, and preserves the original opener identity on GitHub updates when \`prAttribution\` is omitted. \`prAttribution\` selects an eligible credited person, not a URL override. Do not retry or edit the PR to force the initial task URL when the tool returns a canonical Session URL.`,
       );
     }
     if (resolvedConflictResolverLabel) {

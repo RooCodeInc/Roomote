@@ -253,7 +253,7 @@ describe('request_user_input guidance in workflow prompts', () => {
       'This is the initial attribution, not an exact-output requirement: the source-control tool owns the final canonical attribution and follow-up URL.',
     );
     expect(harnessInstructions).toContain(
-      'It uses a verified visible parent Session URL for delegated tasks, otherwise the task URL, and preserves the original opener identity on updates when `prAttribution` is omitted.',
+      'It uses a verified visible parent Session URL for delegated tasks, otherwise the task URL, and preserves the original opener identity on GitHub updates when `prAttribution` is omitted.',
     );
     expect(harnessInstructions).toContain(
       '`prAttribution` selects an eligible credited person, not a URL override.',
