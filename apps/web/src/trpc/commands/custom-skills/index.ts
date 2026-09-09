@@ -165,7 +165,7 @@ function createSkillId(selection: SkillSelection): string {
   return `${selection.source}@${selection.isAllSelection ? ALL_SKILLS_SENTINEL : selection.name}`;
 }
 
-function parseSkillId(skillId: string): SkillSelection {
+export function parseSkillId(skillId: string): SkillSelection {
   if (skillId.startsWith(MANUAL_SKILL_ID_PREFIX)) {
     const manualSkillPayload = skillId.slice(MANUAL_SKILL_ID_PREFIX.length);
     const variantSeparatorIndex = manualSkillPayload.lastIndexOf(
@@ -297,7 +297,7 @@ function parseSkillsMarketplaceApiResponse(
   return Array.from(bySkillId.values()).slice(0, limit);
 }
 
-async function runSkillsMarketplaceSearch(
+export async function runSkillsMarketplaceSearch(
   query: string,
 ): Promise<CustomSkillRecord[]> {
   try {

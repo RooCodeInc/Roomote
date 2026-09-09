@@ -10,6 +10,14 @@ import {
 } from '@roomote/db/server';
 import type { UserAuthSuccess } from '@/types';
 
+const { loadMarketplaceSkillBundleMock } = vi.hoisted(() => ({
+  loadMarketplaceSkillBundleMock: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  loadMarketplaceSkillBundle: loadMarketplaceSkillBundleMock,
+}));
+
 // createCaller supplies auth directly; keep the real protected procedure and DB.
 vi.mock('@/lib/server', () => ({ authorize: vi.fn() }));
 
@@ -52,6 +60,22 @@ async function createSkill(auth = memberAuth, input = definition()) {
 }
 
 beforeEach(async () => {
+  loadMarketplaceSkillBundleMock.mockReset().mockResolvedValue({
+    name: 'marketplace-skill',
+    description: 'Use the marketplace skill.',
+    content: '# Marketplace instructions',
+    document:
+      '---\nname: marketplace-skill\ndescription: Use the marketplace skill.\n---\n\n# Marketplace instructions',
+    source: 'owner/catalog',
+    revision: 'a'.repeat(40),
+    resources: [
+      {
+        path: 'guides/setup.md',
+        contentBase64: Buffer.from('# Setup').toString('base64'),
+        executable: false,
+      },
+    ],
+  });
   adminAuth = await createActor('admin');
   memberAuth = await createActor('member');
   otherAuth = await createActor('member');
@@ -90,6 +114,35 @@ describe('instanceSkills router with real database authorization', () => {
         canManage: auth.userId !== otherAuth.userId,
       });
     }
+  });
+
+  it('lets a member install a marketplace bundle globally without an environment', async () => {
+    const result = await caller(memberAuth).installMarketplace({
+      skillId: 'owner/catalog@marketplace-skill',
+    });
+    skillIds.push(result.skillId);
+
+    expect(loadMarketplaceSkillBundleMock).toHaveBeenCalledWith(
+      'owner/catalog',
+      'marketplace-skill',
+    );
+    expect(
+      await caller(otherAuth).get({ skillId: result.skillId }),
+    ).toMatchObject({
+      name: 'marketplace-skill',
+      marketplaceSource: 'owner/catalog',
+      marketplaceRevision: 'a'.repeat(40),
+      resources: [expect.objectContaining({ path: 'guides/setup.md' })],
+      canManage: false,
+    });
+    await expect(
+      caller(otherAuth).delete({ skillId: result.skillId }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(
+      caller(memberAuth).installMarketplace({
+        skillId: 'owner/catalog@marketplace-skill',
+      }),
+    ).rejects.toMatchObject({ code: 'CONFLICT' });
   });
 
   it.each([false, true])(

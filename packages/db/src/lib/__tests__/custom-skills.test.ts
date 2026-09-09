@@ -17,6 +17,7 @@ import {
 import { instanceSkills } from '../../schema';
 import {
   createCustomSkill,
+  createMarketplaceSkill,
   deleteCustomSkill,
   getCustomSkill,
   listCustomSkills,
@@ -96,6 +97,10 @@ it('lets members create instance skills and exposes full records with actor-spec
   expect(stored).toEqual({
     ...skill,
     id: result.skillId,
+    marketplaceSource: null,
+    marketplaceRevision: null,
+    document: null,
+    resources: [],
     createdByUserId: creator,
     createdAt: expect.any(Date),
     updatedAt: expect.any(Date),
@@ -110,12 +115,75 @@ it('lets members create instance skills and exposes full records with actor-spec
       canManage,
     });
     expect(await listCustomSkills(actor)).toContainEqual({
-      ...stored,
+      ...skill,
+      id: result.skillId,
+      marketplaceSource: null,
+      marketplaceRevision: null,
+      createdByUserId: creator,
+      createdAt: expect.any(Date),
+      updatedAt: expect.any(Date),
+      resourceCount: 0,
       createdByName: expect.any(String),
       canManage,
     });
   }
-  expect(await listInstanceSkillDefinitions()).toContainEqual(skill);
+  expect(await listInstanceSkillDefinitions()).toContainEqual({
+    ...skill,
+    document: null,
+    resources: [],
+  });
+});
+
+it('stores a marketplace bundle with member ownership and no environment dependency', async () => {
+  const creator = await user();
+  const resource = {
+    path: 'scripts/check.sh',
+    contentBase64: Buffer.from('#!/bin/sh\necho ok\n').toString('base64'),
+    executable: true,
+  };
+  const skill = definition();
+  const document = `---\nname: ${skill.name}\ndescription: ${skill.description}\n---\n\n${skill.content}`;
+  const result = await createMarketplaceSkill({
+    ...skill,
+    actorUserId: creator,
+    document,
+    marketplaceSource: 'owner/catalog',
+    marketplaceRevision: 'a'.repeat(40),
+    resources: [resource],
+  });
+  skillIds.push(result.skillId);
+
+  expect(await read(result.skillId)).toMatchObject({
+    ...skill,
+    createdByUserId: creator,
+    marketplaceSource: 'owner/catalog',
+    marketplaceRevision: 'a'.repeat(40),
+    document,
+    resources: [resource],
+  });
+  expect(await listInstanceSkillDefinitions()).toContainEqual({
+    ...skill,
+    document,
+    resources: [resource],
+  });
+  expect(await listCustomSkills(creator)).toContainEqual(
+    expect.objectContaining({
+      id: result.skillId,
+      resourceCount: 1,
+      canManage: true,
+    }),
+  );
+  await updateCustomSkill({
+    actorUserId: creator,
+    skillId: result.skillId,
+    ...skill,
+    content: 'Edited marketplace instructions.\n',
+  });
+  expect(await read(result.skillId)).toMatchObject({
+    document: null,
+    marketplaceSource: 'owner/catalog',
+    resources: [resource],
+  });
 });
 
 it.each(['creator', 'admin'] as const)(

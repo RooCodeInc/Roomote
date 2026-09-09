@@ -3,6 +3,7 @@ import {
   CREATE_CUSTOM_SKILL_TOOL,
   customSkillDefinitionSchema,
   createCustomSkillInputSchema,
+  instanceSkillRuntimeDefinitionSchema,
   isSafeSkillName,
 } from './create-custom-skill-tool';
 
@@ -104,4 +105,30 @@ it.each([
   expect(
     createCustomSkillInputSchema.safeParse({ ...skill, name }).success,
   ).toBe(false);
+});
+
+it('accepts bounded supporting resources and rejects unsafe or duplicate paths', () => {
+  const resource = {
+    path: 'guides/setup.md',
+    contentBase64: Buffer.from('# Setup').toString('base64'),
+    executable: false,
+  };
+  expect(
+    instanceSkillRuntimeDefinitionSchema.parse({
+      ...skill,
+      resources: [resource],
+    }),
+  ).toEqual({ ...skill, document: null, resources: [resource] });
+  for (const resources of [
+    [{ ...resource, path: '../secret' }],
+    [{ ...resource, path: '/absolute' }],
+    [{ ...resource, path: 'SKILL.md' }],
+    [resource, resource],
+    [{ ...resource, contentBase64: 'not base64' }],
+  ]) {
+    expect(
+      instanceSkillRuntimeDefinitionSchema.safeParse({ ...skill, resources })
+        .success,
+    ).toBe(false);
+  }
 });

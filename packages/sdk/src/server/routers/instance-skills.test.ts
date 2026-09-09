@@ -9,6 +9,8 @@ import {
 import {
   CUSTOM_SKILL_MAX_COUNT,
   CUSTOM_SKILL_MAX_DOCUMENT_BYTES,
+  CUSTOM_SKILL_MAX_RUNTIME_BYTES,
+  getCustomSkillBundleByteLength,
   renderManualSkillMarkdown,
   RunStatus,
   TaskPayloadKind,
@@ -28,6 +30,8 @@ const definition = {
   name: 'runtime-guide',
   description: 'Use for runtime testing',
   content: '# Runtime guide\nFollow these steps.\n',
+  document: null,
+  resources: [],
 };
 
 describe('instanceSkills runtime authorization (real database)', () => {
@@ -174,5 +178,33 @@ describe('instanceSkills runtime authorization (real database)', () => {
     expect(Buffer.byteLength(renderManualSkillMarkdown(result[0]!))).toBe(
       CUSTOM_SKILL_MAX_DOCUMENT_BYTES,
     );
+  });
+
+  it('bounds the aggregate runtime catalog including supporting resources', async () => {
+    const resourceContent = Buffer.alloc(512 * 1024, 'x').toString('base64');
+    listDefinitions.mockResolvedValue(
+      Array.from({ length: 20 }, (_, index) => ({
+        ...definition,
+        name: `resource-skill-${index}`,
+        resources: [
+          {
+            path: 'assets/data.bin',
+            contentBase64: resourceContent,
+            executable: false,
+          },
+        ],
+      })),
+    );
+
+    const result = await caller(await createRun()).listForRuntime();
+
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.length).toBeLessThan(20);
+    expect(
+      result.reduce(
+        (total, skill) => total + getCustomSkillBundleByteLength(skill),
+        0,
+      ),
+    ).toBeLessThanOrEqual(CUSTOM_SKILL_MAX_RUNTIME_BYTES);
   });
 });

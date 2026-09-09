@@ -6,6 +6,7 @@ import { environmentConfigSchema } from '@roomote/types';
 import {
   RemoteFastAgentSettingsSkillSource,
   loadFastAgentSettingsMarketplaceSnapshot,
+  loadMarketplaceSkillBundle,
   type SettingsSkillMarketplaceSnapshot,
 } from '../fast-agent-settings-skill-source';
 
@@ -454,5 +455,75 @@ describe('RemoteFastAgentSettingsSkillSource', () => {
     await expect(
       loadFastAgentSettingsMarketplaceSnapshot('owner/..'),
     ).rejects.toThrow('Unsupported settings skill source.');
+  });
+
+  it('snapshots all safe supporting files for a global marketplace install', async () => {
+    const skillDocument = [
+      '---',
+      'name: example',
+      'description: Example skill.',
+      '---',
+      '',
+      '# Example',
+    ].join('\n');
+    const metadataTree = [
+      '100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tlib/SKILL.md',
+      '',
+    ].join('\0');
+    const sizedMarkdownTree = [
+      `100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ${Buffer.byteLength(skillDocument)}\tlib/SKILL.md`,
+      '',
+    ].join('\0');
+    const bundleTree = [
+      `100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ${Buffer.byteLength(skillDocument)}\tlib/SKILL.md`,
+      '100755 blob bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 18\tlib/scripts/check.sh',
+      '100644 blob cccccccccccccccccccccccccccccccccccccccc 4\tlib/assets/icon.bin',
+      '',
+    ].join('\0');
+    const executeGit = vi.fn(async (args: string[]) => {
+      if (args.includes('rev-parse')) return 'abc123\n';
+      if (
+        args.includes('ls-tree') &&
+        args.includes('-r') &&
+        args.includes('-l')
+      )
+        return bundleTree;
+      if (args.includes('ls-tree') && args.includes('-l'))
+        return sizedMarkdownTree;
+      if (args.includes('ls-tree')) return metadataTree;
+      if (args.includes('show')) return skillDocument;
+      return '';
+    });
+    const executeGitBuffer = vi.fn(async (args: string[]) =>
+      Buffer.from(
+        args.at(-1)?.endsWith('check.sh') ? '#!/bin/sh\necho ok\n' : 'ICON',
+      ),
+    );
+
+    const bundle = await loadMarketplaceSkillBundle('owner/source', 'example', {
+      executeGit,
+      executeGitBuffer,
+    });
+
+    expect(bundle).toMatchObject({
+      content: '# Example',
+      description: 'Example skill.',
+      document: skillDocument,
+      name: 'example',
+      revision: 'abc123',
+      source: 'owner/source',
+    });
+    expect(bundle.resources).toEqual([
+      {
+        contentBase64: Buffer.from('#!/bin/sh\necho ok\n').toString('base64'),
+        executable: true,
+        path: 'scripts/check.sh',
+      },
+      {
+        contentBase64: Buffer.from('ICON').toString('base64'),
+        executable: false,
+        path: 'assets/icon.bin',
+      },
+    ]);
   });
 });

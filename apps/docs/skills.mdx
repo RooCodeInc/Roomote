@@ -38,22 +38,29 @@ Instance skills are stored once for the Roomote instance, independently of
 environments. Any member can create or read them. Only the creator or an admin
 can edit or delete them; these permissions also apply to conversational creation.
 
-Environment skills and marketplace installation controls are not shown in
-**Settings > Skills**. Existing environment skills remain stored and available
-to Roomote within their authorized environment scope. Admins manage them in
-the environment editor's **YAML** view: use `manualSkills` for inline custom
-instructions and `skills` for published skills. See the
+Open **Browse skill marketplace** to search published skills and install one
+for the whole Roomote instance. Marketplace installs join the shared catalog;
+they do not require an environment and use the same creator/admin management
+permissions as other instance skills. Roomote stores the installed revision and
+its supporting files so Fast and coding tasks use the same snapshot instead of
+fetching mutable instructions at task startup.
+
+Existing environment skills remain stored and available to Roomote within
+their authorized environment scope. Admins can manage them in the environment
+editor's **YAML** view: use `manualSkills` for inline custom instructions and
+`skills` for published skills. See the
 [environment definition reference](/environments/definition#skills) for examples.
 They are not automatically migrated, copied, or removed.
 
 | Skill type        | How it is added                                      | Availability                                                           |
 | ----------------- | ---------------------------------------------------- | ---------------------------------------------------------------------- |
 | Instance skill    | Ask in conversation or use Add Skill in Settings      | All Sessions and coding tasks on this instance                          |
+| Marketplace skill | Search and install from Settings                       | All Sessions and coding tasks on this instance                          |
 | Environment skill | Admins edit `manualSkills` or `skills` in environment YAML | Selected environments only                                             |
 | Repository skill  | Maintain a skill in the repository                    | The authorized repository or environment scope                          |
 
-Instance skills do not have an environment selection. Environment skills apply
-to the environments whose YAML includes them.
+Instance and marketplace skills do not have an environment selection.
+Environment skills apply to the environments whose YAML includes them.
 
 ## When to use a custom skill
 
@@ -102,7 +109,8 @@ same conversation. Coding tasks fetch a fresh catalog at startup and on resumed
 runs; an already-running agent does not reload skill files mid-turn. A failure
 to fetch that catalog stops startup rather than silently using stale skills.
 
-Instance skill names are unique. A duplicate is rejected without overwriting;
+Shared skill names are unique. A duplicate marketplace or custom skill is
+rejected without overwriting;
 choose another slug or edit the existing skill if you own it or are an admin.
 Names use lowercase letters, numbers, and hyphens, up to 64 characters. Each
 description is limited to 1,024 characters, and the rendered Markdown document
@@ -142,8 +150,9 @@ codebase.
 
 Skills configured in Roomote settings are different:
 
-- **Instance skills are shared across the instance.** They are available to all
-  members, Sessions, and coding tasks without environment configuration.
+- **Instance skills are shared across the instance.** Custom and marketplace
+  skills are available to all members, Sessions, and coding tasks without
+  environment configuration.
 - **Environment skills keep their existing scope.** They apply only to their
   selected environments and remain admin-managed.
 - **Repository-defined skills are codebase-level.** They apply when the task

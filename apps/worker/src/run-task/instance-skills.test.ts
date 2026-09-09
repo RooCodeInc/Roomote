@@ -161,6 +161,48 @@ describe('activateSkillsFolder instance skills', () => {
     expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual([]);
   });
 
+  it('materializes marketplace supporting files and executable modes in both homes', () => {
+    const definition = {
+      ...skill('marketplace-skill'),
+      document:
+        '---\nname: marketplace-skill\ndescription: Exact marketplace document\nallowed-tools: Read\n---\n\n# Exact body',
+      resources: [
+        {
+          path: 'guides/setup.md',
+          contentBase64: Buffer.from('# Setup').toString('base64'),
+          executable: false,
+        },
+        {
+          path: 'scripts/check.sh',
+          contentBase64: Buffer.from('#!/bin/sh\necho ok\n').toString('base64'),
+          executable: true,
+        },
+      ],
+    };
+
+    expect(activate({ instanceSkills: [definition] })).toBe(true);
+    expectMirrored(definition.name, definition.document);
+
+    for (const root of [skillsDir, claudeSkillsDir]) {
+      expect(
+        readFileSync(join(root, definition.name, 'guides', 'setup.md'), 'utf8'),
+      ).toBe('# Setup');
+      expect(
+        readFileSync(
+          join(root, definition.name, 'scripts', 'check.sh'),
+          'utf8',
+        ),
+      ).toBe('#!/bin/sh\necho ok\n');
+    }
+    expect(
+      lstatSync(join(skillsDir, definition.name, 'scripts', 'check.sh')).mode &
+        0o111,
+    ).not.toBe(0);
+    expect(JSON.parse(readFileSync(manifestPath, 'utf8'))).toEqual([
+      expect.objectContaining({ name: definition.name, version: 2 }),
+    ]);
+  });
+
   it('keeps packaged skills authoritative despite forged manifest ownership', () => {
     writeDocument(join(packagedDir, 'protected'), 'Packaged instructions');
     writeDocument(join(skillsDir, 'protected'), 'Forged instance instructions');

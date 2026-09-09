@@ -1,15 +1,18 @@
 import {
   createCustomSkill,
+  createMarketplaceSkill,
   CreateCustomSkillError,
   deleteCustomSkill,
   getCustomSkill,
   listCustomSkills,
   updateCustomSkill,
 } from '@roomote/db/server';
+import { loadMarketplaceSkillBundle } from '@roomote/cloud-agents/server';
 import { ZodError, type z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import type { createCustomSkillInputSchema } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
+import { parseSkillId, runSkillsMarketplaceSearch } from './custom-skills';
 
 type SkillDefinition = z.infer<typeof createCustomSkillInputSchema>;
 
@@ -58,6 +61,47 @@ export function createInstanceSkillCommand(
 ) {
   return withSkillErrors(
     createCustomSkill({ ...input, actorUserId: auth.userId }),
+  );
+}
+
+export async function searchInstanceMarketplaceSkillsCommand(
+  auth: UserAuthSuccess,
+  input: { query: string },
+) {
+  await withSkillErrors(listCustomSkills(auth.userId));
+  const query = input.query.trim();
+  return query.length < 2 ? [] : runSkillsMarketplaceSearch(query);
+}
+
+export async function installInstanceMarketplaceSkillCommand(
+  auth: UserAuthSuccess,
+  input: { skillId: string },
+) {
+  await withSkillErrors(listCustomSkills(auth.userId));
+  const selection = parseSkillId(input.skillId);
+  if (selection.kind !== 'marketplace' || selection.isAllSelection) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Choose one marketplace skill to install.',
+    });
+  }
+  let bundle: Awaited<ReturnType<typeof loadMarketplaceSkillBundle>>;
+  try {
+    bundle = await loadMarketplaceSkillBundle(selection.source, selection.name);
+  } catch (error) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Could not install this marketplace skill.',
+      cause: error,
+    });
+  }
+  return withSkillErrors(
+    createMarketplaceSkill({
+      actorUserId: auth.userId,
+      ...bundle,
+      marketplaceSource: bundle.source,
+      marketplaceRevision: bundle.revision,
+    }),
   );
 }
 

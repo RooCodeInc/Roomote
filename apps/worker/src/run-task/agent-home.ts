@@ -22,9 +22,10 @@ import {
   CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
-  customSkillDefinitionSchema,
+  instanceSkillRuntimeDefinitionSchema,
   CUSTOM_SKILL_MAX_COUNT,
   CUSTOM_SKILL_MAX_DOCUMENT_BYTES,
+  CUSTOM_SKILL_MAX_RUNTIME_BYTES,
   isSafeSkillName,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getInferenceGatewayProvider,
@@ -63,6 +64,7 @@ import {
   TASK_MODEL_COSTS_ENV_VAR_NAME,
   TaskPayloadKind,
   type EnvironmentManualSkill,
+  type CustomSkillResource,
   type OpenRouterVariantModelAlias,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -233,7 +235,9 @@ interface ActivateSkillsFolderOptions {
   sourceHomeDir?: string;
   skillsFolderName: string;
   manualSkills?: EnvironmentManualSkill[];
-  instanceSkills?: EnvironmentManualSkill[];
+  instanceSkills?: Array<
+    EnvironmentManualSkill & { resources?: CustomSkillResource[] }
+  >;
   repoLocalSkills?: RepoLocalSkill[];
   /**
    * Packaged skill directory names to keep out of the task skill catalog.
@@ -259,6 +263,36 @@ function replaceMaterializedSkillEntry({
 }): void {
   removeSkillEntry(destinationPath);
   fs.cpSync(sourcePath, destinationPath, { recursive: true, force: true });
+}
+
+function hashSkillFiles(files: Map<string, Buffer>): string {
+  const hash = createHash('sha256');
+  for (const [relativePath, content] of [...files].sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    hash.update(relativePath).update('\0').update(content).update('\0');
+  }
+  return hash.digest('hex');
+}
+
+function readSafeSkillFiles(directory: string): Map<string, Buffer> | null {
+  const files = new Map<string, Buffer>();
+  const visit = (current: string, prefix: string): boolean => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) return false;
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (!visit(entryPath, relativePath)) return false;
+      } else if (entry.isFile()) {
+        files.set(relativePath, fs.readFileSync(entryPath));
+      } else {
+        return false;
+      }
+    }
+    return true;
+  };
+  return visit(directory, '') ? files : null;
 }
 
 function restoreConfiguredManualSkills({
@@ -395,26 +429,43 @@ export function activateSkillsFolder({
   if (instanceSkills.length > CUSTOM_SKILL_MAX_COUNT) {
     throw new Error('Too many instance skills');
   }
-  const instanceDocuments = new Map<string, string>();
+  const instanceBundles = new Map<
+    string,
+    {
+      definition: ReturnType<typeof instanceSkillRuntimeDefinitionSchema.parse>;
+      files: Map<string, Buffer>;
+    }
+  >();
   let totalBytes = 0;
   for (const definition of instanceSkills) {
-    const skill = customSkillDefinitionSchema.parse(definition);
+    const skill = instanceSkillRuntimeDefinitionSchema.parse(definition);
     if (!SKILLS_FOLDER_NAME_PATTERN.test(skill.name)) {
       throw new Error('Unsafe instance skill name');
     }
-    const document = renderManualSkillMarkdown(skill);
+    const document = skill.document ?? renderManualSkillMarkdown(skill);
     const bytes = Buffer.byteLength(document, 'utf8');
     totalBytes += bytes;
-    if (
-      bytes > CUSTOM_SKILL_MAX_DOCUMENT_BYTES ||
-      totalBytes > 8 * 1024 * 1024
-    ) {
+    if (bytes > CUSTOM_SKILL_MAX_DOCUMENT_BYTES) {
       throw new Error('Instance skills exceed the document size limit');
     }
-    if (instanceDocuments.has(skill.name)) {
+    if (totalBytes > CUSTOM_SKILL_MAX_RUNTIME_BYTES) {
+      throw new Error('Instance skills exceed the catalog size limit');
+    }
+    if (instanceBundles.has(skill.name)) {
       throw new Error('Duplicate instance skill name');
     }
-    instanceDocuments.set(skill.name, document);
+    const files = new Map<string, Buffer>([
+      ['SKILL.md', Buffer.from(document, 'utf8')],
+    ]);
+    for (const resource of skill.resources) {
+      const content = Buffer.from(resource.contentBase64, 'base64');
+      totalBytes += content.byteLength;
+      if (totalBytes > CUSTOM_SKILL_MAX_RUNTIME_BYTES) {
+        throw new Error('Instance skills exceed the catalog size limit');
+      }
+      files.set(resource.path, content);
+    }
+    instanceBundles.set(skill.name, { definition: skill, files });
   }
 
   // Refuse redirected HOME containers before cleanup or any writes beneath them.
@@ -468,6 +519,7 @@ export function activateSkillsFolder({
     for (const entry of previous as Array<{
       name?: unknown;
       sha256?: unknown;
+      version?: unknown;
     }>) {
       if (
         !entry ||
@@ -481,26 +533,32 @@ export function activateSkillsFolder({
       const directory = path.join(targetSkillsDir, entry.name);
       const stat = fs.lstatSync(directory, { throwIfNoEntry: false });
       if (!stat?.isDirectory() || stat.isSymbolicLink()) continue;
-      const children = fs.readdirSync(directory);
-      if (children.length !== 1 || children[0] !== 'SKILL.md') continue;
-      const documentPath = path.join(directory, 'SKILL.md');
-      const documentStat = fs.lstatSync(documentPath);
-      if (
-        !documentStat.isFile() ||
-        documentStat.size > CUSTOM_SKILL_MAX_DOCUMENT_BYTES
-      )
-        continue;
-      const documentFd = fs.openSync(
-        documentPath,
-        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
-      );
       let digest: string;
-      try {
-        digest = createHash('sha256')
-          .update(fs.readFileSync(documentFd))
-          .digest('hex');
-      } finally {
-        fs.closeSync(documentFd);
+      if (entry.version === 2) {
+        const files = readSafeSkillFiles(directory);
+        if (!files) continue;
+        digest = hashSkillFiles(files);
+      } else {
+        const children = fs.readdirSync(directory);
+        if (children.length !== 1 || children[0] !== 'SKILL.md') continue;
+        const documentPath = path.join(directory, 'SKILL.md');
+        const documentStat = fs.lstatSync(documentPath);
+        if (
+          !documentStat.isFile() ||
+          documentStat.size > CUSTOM_SKILL_MAX_DOCUMENT_BYTES
+        )
+          continue;
+        const documentFd = fs.openSync(
+          documentPath,
+          fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+        );
+        try {
+          digest = createHash('sha256')
+            .update(fs.readFileSync(documentFd))
+            .digest('hex');
+        } finally {
+          fs.closeSync(documentFd);
+        }
       }
       // An unrelated replacement or locally extended directory is not ours to delete.
       if (digest === entry.sha256)
@@ -508,12 +566,22 @@ export function activateSkillsFolder({
     }
   }
 
-  const instanceManifest = [...instanceDocuments]
+  const instanceManifest = [...instanceBundles]
     .filter(([name]) => !packagedNames.has(name))
-    .map(([name, document]) => ({
-      name,
-      sha256: createHash('sha256').update(document).digest('hex'),
-    }));
+    .map(([name, bundle]) =>
+      bundle.definition.resources.length
+        ? {
+            name,
+            sha256: hashSkillFiles(bundle.files),
+            version: 2,
+          }
+        : {
+            name,
+            sha256: createHash('sha256')
+              .update(bundle.files.get('SKILL.md')!)
+              .digest('hex'),
+          },
+    );
   // Record planned ownership first so an interrupted materialization can be retried.
   const temporaryManifestPath = `${manifestPath}.${randomUUID()}.tmp`;
   const manifestFd = fs.openSync(
@@ -555,11 +623,20 @@ export function activateSkillsFolder({
     const directory = path.join(targetSkillsDir, name);
     removeSkillEntry(directory);
     fs.mkdirSync(directory);
-    fs.writeFileSync(
-      path.join(directory, 'SKILL.md'),
-      instanceDocuments.get(name)!,
-      'utf8',
-    );
+    const bundle = instanceBundles.get(name)!;
+    for (const [relativePath, content] of bundle.files) {
+      const destination = path.join(directory, relativePath);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, content, {
+        mode:
+          relativePath === 'SKILL.md' ||
+          !bundle.definition.resources.find(
+            (resource) => resource.path === relativePath,
+          )?.executable
+            ? 0o644
+            : 0o755,
+      });
+    }
     materializedSkillNames.add(name);
   }
   restoreConfiguredManualSkills({

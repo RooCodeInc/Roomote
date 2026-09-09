@@ -46,18 +46,40 @@ export class RemoteFastAgentInstanceSkillSource {
       /^instance:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/iu.exec(
         id,
       );
-    if (!match?.[1] || resource !== 'SKILL.md') {
+    const resourceIsSafe =
+      resource === 'SKILL.md' ||
+      (resource.endsWith('.md') &&
+        !resource.startsWith('/') &&
+        !resource.includes('\\') &&
+        resource
+          .split('/')
+          .every((segment) => segment && segment !== '.' && segment !== '..'));
+    if (!match?.[1] || !resourceIsSafe) {
       throw new Error('Unknown instance skill or resource.');
     }
     const skill = await getCustomSkill(this.userId, match[1]);
     if (!skill) throw new Error('Unknown instance skill.');
-    const content = renderManualSkillMarkdown(skill);
+    const storedResource = skill.resources.find(
+      (candidate) => candidate.path === resource && resource.endsWith('.md'),
+    );
+    if (resource !== 'SKILL.md' && !storedResource) {
+      throw new Error('Unknown instance skill or resource.');
+    }
+    const content = storedResource
+      ? Buffer.from(storedResource.contentBase64, 'base64').toString('utf8')
+      : (skill.document ?? renderManualSkillMarkdown(skill));
+    const resources = [
+      'SKILL.md',
+      ...skill.resources
+        .map((candidate) => candidate.path)
+        .filter((path) => path.endsWith('.md')),
+    ].sort();
     return {
       ...summarize(skill),
       content,
       byteLength: Buffer.byteLength(content, 'utf8'),
       resource,
-      resources: ['SKILL.md'],
+      resources,
     };
   }
 }

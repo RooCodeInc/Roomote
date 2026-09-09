@@ -8,32 +8,36 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
-const { state, createMock, updateMock, deleteMock } = vi.hoisted(() => ({
-  state: {
-    skills: [
-      {
-        id: '00000000-0000-4000-8000-000000000001',
-        name: 'my-skill',
-        description: 'My instructions',
-        content: '# My skill body',
-        canManage: true,
-        createdByName: 'Me',
-      },
-      {
-        id: '00000000-0000-4000-8000-000000000002',
-        name: 'shared-skill',
-        description: 'Another member created this',
-        content: '# Shared skill body',
-        canManage: false,
-        createdByName: 'Teammate',
-      },
-    ],
-    isAdmin: false,
-  },
-  createMock: vi.fn(async (_input: unknown) => ({ success: true })),
-  updateMock: vi.fn(async (_input: unknown) => ({ success: true })),
-  deleteMock: vi.fn(async (_input: unknown) => ({ success: true })),
-}));
+const { state, createMock, updateMock, deleteMock, installMarketplaceMock } =
+  vi.hoisted(() => ({
+    state: {
+      skills: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          name: 'my-skill',
+          description: 'My instructions',
+          content: '# My skill body',
+          canManage: true,
+          createdByName: 'Me',
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          name: 'shared-skill',
+          description: 'Another member created this',
+          content: '# Shared skill body',
+          canManage: false,
+          createdByName: 'Teammate',
+        },
+      ],
+      isAdmin: false,
+    },
+    createMock: vi.fn(async (_input: unknown) => ({ success: true })),
+    updateMock: vi.fn(async (_input: unknown) => ({ success: true })),
+    deleteMock: vi.fn(async (_input: unknown) => ({ success: true })),
+    installMarketplaceMock: vi.fn(async (_input: unknown) => ({
+      success: true,
+    })),
+  }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@/trpc/client', () => ({
@@ -61,6 +65,34 @@ vi.mock('@/trpc/client', () => ({
       delete: {
         mutationOptions: (options = {}) => ({
           mutationFn: deleteMock,
+          ...options,
+        }),
+      },
+      searchMarketplace: {
+        queryOptions: (input: { query: string }, options = {}) => ({
+          queryKey: ['instanceSkills', 'searchMarketplace', input],
+          queryFn: async () =>
+            input.query
+              ? [
+                  {
+                    kind: 'marketplace',
+                    source: 'owner/catalog',
+                    name: 'marketplace-skill',
+                    skillId: 'owner/catalog@marketplace-skill',
+                    isAllSelection: false,
+                    installsLabel: '1.2K installs',
+                    url: 'https://skills.sh/owner/catalog/marketplace-skill',
+                    description: null,
+                    content: null,
+                  },
+                ]
+              : [],
+          ...options,
+        }),
+      },
+      installMarketplace: {
+        mutationOptions: (options = {}) => ({
+          mutationFn: installMarketplaceMock,
           ...options,
         }),
       },
@@ -116,9 +148,7 @@ it('makes Skills navigation and creation available to members without environmen
   ).toBe(true);
   const { invalidate } = renderSkills();
   await screen.findByText('my-skill');
-  expect(
-    screen.queryByText(/marketplace|environment/i),
-  ).not.toBeInTheDocument();
+  expect(screen.queryByText(/environment/i)).not.toBeInTheDocument();
   expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(1);
   expect(
     within(screen.getByRole('banner')).getByRole('button', {
@@ -244,6 +274,28 @@ it('requires confirmation before deleting and refreshes the catalog', async () =
   );
 });
 
+it('searches and installs a marketplace skill globally without environment selection', async () => {
+  const { invalidate } = renderSkills();
+  fireEvent.click(await screen.findByText('Browse skill marketplace'));
+  fireEvent.change(screen.getByLabelText('Search skill marketplace'), {
+    target: { value: 'marketplace' },
+  });
+  const resultList = await screen.findByRole('list', {
+    name: 'Marketplace skills',
+  });
+  expect(within(resultList).getByText(/owner\/catalog/)).toBeInTheDocument();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(screen.queryByText(/select.*environment/i)).not.toBeInTheDocument();
+  fireEvent.click(within(resultList).getByRole('button', { name: 'Install' }));
+  await waitFor(() => expect(installMarketplaceMock).toHaveBeenCalled());
+  expect(installMarketplaceMock.mock.calls[0]?.[0]).toEqual({
+    skillId: 'owner/catalog@marketplace-skill',
+  });
+  await waitFor(() =>
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['instanceSkills'] }),
+  );
+});
+
 it('shows only shared skills for admins with one add action in the header', async () => {
   state.isAdmin = true;
   renderSkills();
@@ -254,8 +306,7 @@ it('shows only shared skills for admins with one add action in the header', asyn
       name: 'Add Skill',
     }),
   ).toBeVisible();
-  expect(
-    screen.queryByText(/marketplace|environment/i),
-  ).not.toBeInTheDocument();
+  expect(screen.getByText('Browse skill marketplace')).toBeVisible();
+  expect(screen.queryByText(/environment/i)).not.toBeInTheDocument();
   expect(screen.getByRole('list', { name: 'Shared skills' })).toBeVisible();
 });

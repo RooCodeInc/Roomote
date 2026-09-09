@@ -159,6 +159,15 @@ export const instanceSkills = pgTable(
     name: text('name').notNull(),
     description: text('description').notNull(),
     content: text('content').notNull(),
+    document: text('document'),
+    marketplaceSource: text('marketplace_source'),
+    marketplaceRevision: text('marketplace_revision'),
+    resources: jsonb('resources')
+      .$type<
+        Array<{ path: string; contentBase64: string; executable: boolean }>
+      >()
+      .notNull()
+      .default([]),
     createdByUserId: text('created_by_user_id').references(() => users.id, {
       onDelete: 'set null',
     }),

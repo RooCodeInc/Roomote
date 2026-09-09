@@ -2,7 +2,9 @@ import { and, asc, count, eq, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   createCustomSkillInputSchema,
+  instanceSkillRuntimeDefinitionSchema,
   CUSTOM_SKILL_MAX_COUNT,
+  type CustomSkillResource,
   type CreateCustomSkillInput,
 } from '@roomote/types';
 import { db } from '../db';
@@ -67,18 +69,32 @@ export async function listCustomSkills(actorUserId: string) {
     const actor = await requireMember(tx, actorUserId);
     const skills = await tx
       .select({
-        skill: instanceSkills,
+        skill: {
+          id: instanceSkills.id,
+          name: instanceSkills.name,
+          description: instanceSkills.description,
+          content: instanceSkills.content,
+          marketplaceSource: instanceSkills.marketplaceSource,
+          marketplaceRevision: instanceSkills.marketplaceRevision,
+          createdByUserId: instanceSkills.createdByUserId,
+          createdAt: instanceSkills.createdAt,
+          updatedAt: instanceSkills.updatedAt,
+        },
+        resourceCount: sql<number>`jsonb_array_length(${instanceSkills.resources})`,
         createdByName: users.name,
         createdByEmail: users.email,
       })
       .from(instanceSkills)
       .leftJoin(users, eq(users.id, instanceSkills.createdByUserId))
       .orderBy(asc(instanceSkills.name));
-    return skills.map(({ skill, createdByName, createdByEmail }) => ({
-      ...skill,
-      createdByName: createdByName || createdByEmail || null,
-      canManage: actor.role === 'admin' || skill.createdByUserId === actor.id,
-    }));
+    return skills.map(
+      ({ skill, resourceCount, createdByName, createdByEmail }) => ({
+        ...skill,
+        resourceCount,
+        createdByName: createdByName || createdByEmail || null,
+        canManage: actor.role === 'admin' || skill.createdByUserId === actor.id,
+      }),
+    );
   });
 }
 
@@ -124,6 +140,59 @@ export async function createCustomSkill(
     .catch(duplicateError);
 }
 
+export async function createMarketplaceSkill(input: {
+  actorUserId: string;
+  name: string;
+  description: string;
+  content: string;
+  document: string;
+  marketplaceSource: string;
+  marketplaceRevision: string;
+  resources: CustomSkillResource[];
+}) {
+  return db
+    .transaction(async (tx) => {
+      const actor = await requireMember(tx, input.actorUserId);
+      z.string()
+        .regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*\/[A-Za-z0-9_.][A-Za-z0-9_.-]*$/u)
+        .parse(input.marketplaceSource);
+      z.string()
+        .regex(/^[0-9a-f]{40}$/u)
+        .parse(input.marketplaceRevision);
+      const definition = instanceSkillRuntimeDefinitionSchema.parse({
+        name: input.name,
+        description: input.description,
+        content: input.content,
+        document: input.document,
+        resources: input.resources,
+      });
+      await tx.execute(sql`select pg_advisory_xact_lock(1936419180, 1)`);
+      const [total] = await tx.select({ value: count() }).from(instanceSkills);
+      if (total!.value >= CUSTOM_SKILL_MAX_COUNT)
+        throw new CreateCustomSkillError(
+          'The instance skill limit has been reached (128).',
+          409,
+        );
+      const [created] = await tx
+        .insert(instanceSkills)
+        .values({
+          ...definition,
+          marketplaceSource: input.marketplaceSource,
+          marketplaceRevision: input.marketplaceRevision,
+          createdByUserId: actor.id,
+        })
+        .returning();
+      return {
+        success: true as const,
+        persisted: true as const,
+        skillId: created!.id,
+        name: created!.name,
+        scope: 'instance' as const,
+      };
+    })
+    .catch(duplicateError);
+}
+
 export async function updateCustomSkill(
   input: CreateCustomSkillInput & { actorUserId: string; skillId: string },
 ) {
@@ -140,7 +209,7 @@ export async function updateCustomSkill(
       const parsed = createCustomSkillInputSchema.parse(definition);
       await tx
         .update(instanceSkills)
-        .set({ ...parsed, updatedAt: new Date() })
+        .set({ ...parsed, document: null, updatedAt: new Date() })
         .where(eq(instanceSkills.id, skillId));
       return {
         success: true as const,
@@ -176,13 +245,21 @@ export async function deleteCustomSkill(input: {
 
 /** Internal trusted caller only: SDK must first authenticate a signed, nonterminal run bound to this DB. */
 export async function listInstanceSkillDefinitions(): Promise<
-  Array<{ name: string; description: string; content: string }>
+  Array<{
+    name: string;
+    description: string;
+    content: string;
+    document: string | null;
+    resources: CustomSkillResource[];
+  }>
 > {
   return db
     .select({
       name: instanceSkills.name,
       description: instanceSkills.description,
       content: instanceSkills.content,
+      document: instanceSkills.document,
+      resources: instanceSkills.resources,
     })
     .from(instanceSkills)
     .orderBy(asc(instanceSkills.name));

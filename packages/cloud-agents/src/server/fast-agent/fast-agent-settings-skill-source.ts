@@ -15,6 +15,10 @@ import {
   repositories,
 } from '@roomote/db/server';
 import {
+  CUSTOM_SKILL_MAX_BUNDLE_BYTES,
+  CUSTOM_SKILL_MAX_RESOURCE_BYTES,
+  CUSTOM_SKILL_MAX_RESOURCES,
+  CUSTOM_SKILL_MAX_RESOURCE_PATH_CHARS,
   environmentConfigSchema,
   renderManualSkillMarkdown,
   type EnvironmentConfig,
@@ -70,7 +74,7 @@ export type SettingsSkillMarketplaceSnapshot = {
     Omit<
       SettingsSkillRecord,
       'environmentIds' | 'id' | 'invocation' | 'snapshot'
-    >
+    > & { root?: string }
   >;
   revision: string;
   source: string;
@@ -140,6 +144,22 @@ async function runGit(
   const result = await execFileAsync('git', args, {
     cwd: options.cwd,
     encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'gc.auto',
+      GIT_CONFIG_VALUE_0: '0',
+      GIT_TERMINAL_PROMPT: '0',
+    },
+    maxBuffer: SETTINGS_SKILL_GIT_OUTPUT_LIMIT_BYTES,
+    timeout: SETTINGS_SKILL_FETCH_TIMEOUT_MS,
+  });
+  return result.stdout;
+}
+
+async function runGitBuffer(args: string[]): Promise<Buffer> {
+  const result = await execFileAsync('git', args, {
+    encoding: 'buffer',
     env: {
       ...process.env,
       GIT_CONFIG_COUNT: '1',
@@ -311,6 +331,7 @@ export async function loadFastAgentSettingsMarketplaceSnapshot(
         description: getFastAgentSkillDescription(content),
         name,
         resources,
+        root,
         sourceName: source,
       });
     }
@@ -323,6 +344,133 @@ export async function loadFastAgentSettingsMarketplaceSnapshot(
   } catch (error) {
     await rm(directory, { recursive: true, force: true });
     throw error;
+  }
+}
+
+export type MarketplaceSkillBundle = {
+  content: string;
+  description: string;
+  document: string;
+  name: string;
+  resources: Array<{
+    contentBase64: string;
+    executable: boolean;
+    path: string;
+  }>;
+  revision: string;
+  source: string;
+};
+
+export async function loadMarketplaceSkillBundle(
+  source: string,
+  name: string,
+  options: {
+    executeGit?: typeof runGit;
+    executeGitBuffer?: typeof runGitBuffer;
+  } = {},
+): Promise<MarketplaceSkillBundle> {
+  const snapshot = await loadFastAgentSettingsMarketplaceSnapshot(
+    source,
+    options.executeGit,
+  );
+  try {
+    const record = snapshot.records.find(
+      (candidate) => candidate.name === name,
+    );
+    if (!record) throw new Error('Marketplace skill not found.');
+    const skillRoot = record.root ?? '';
+    const tree = parseGitTree(
+      await (options.executeGit ?? runGit)([
+        '-C',
+        snapshot.directory,
+        'ls-tree',
+        '-r',
+        '-z',
+        '-l',
+        snapshot.revision,
+        '--',
+        skillRoot || '.',
+      ]),
+    );
+    if (
+      tree.some(
+        (entry) =>
+          entry.type !== 'blob' ||
+          (entry.mode !== '100644' && entry.mode !== '100755') ||
+          entry.path.length > CUSTOM_SKILL_MAX_RESOURCE_PATH_CHARS,
+      )
+    ) {
+      throw new Error('Marketplace skill contains an unsupported resource.');
+    }
+    const nestedRoots = tree
+      .filter(
+        (entry) =>
+          entry.path.endsWith('/SKILL.md') && dirname(entry.path) !== skillRoot,
+      )
+      .map((entry) => dirname(entry.path));
+    const files = tree.filter(
+      (entry) => !nestedRoots.some((root) => entry.path.startsWith(`${root}/`)),
+    );
+    const mainPath = skillRoot ? `${skillRoot}/SKILL.md` : 'SKILL.md';
+    if (!files.some((file) => file.path === mainPath)) {
+      throw new Error('Marketplace skill is missing SKILL.md.');
+    }
+    if (files.length - 1 > CUSTOM_SKILL_MAX_RESOURCES) {
+      throw new Error('Marketplace skill has too many supporting files.');
+    }
+    const resources: MarketplaceSkillBundle['resources'] = [];
+    let totalBytes = Buffer.byteLength(record.content, 'utf8');
+    for (const file of files) {
+      const relativePath = skillRoot
+        ? file.path.slice(skillRoot.length + 1)
+        : file.path;
+      if (relativePath === 'SKILL.md') continue;
+      if (
+        !relativePath ||
+        relativePath.startsWith('/') ||
+        relativePath.includes('\\') ||
+        relativePath
+          .split('/')
+          .some((segment) => !segment || segment === '.' || segment === '..')
+      ) {
+        throw new Error('Marketplace skill contains an unsafe resource path.');
+      }
+      if (file.byteLength > CUSTOM_SKILL_MAX_RESOURCE_BYTES) {
+        throw new Error('Marketplace skill contains an oversized resource.');
+      }
+      totalBytes += file.byteLength;
+      if (totalBytes > CUSTOM_SKILL_MAX_BUNDLE_BYTES) {
+        throw new Error('Marketplace skill exceeds the bundle size limit.');
+      }
+      const content = await (options.executeGitBuffer ?? runGitBuffer)([
+        '-C',
+        snapshot.directory,
+        'show',
+        `${snapshot.revision}:${file.path}`,
+      ]);
+      if (content.byteLength !== file.byteLength) {
+        throw new Error('Marketplace skill resource changed while installing.');
+      }
+      resources.push({
+        contentBase64: content.toString('base64'),
+        executable: file.mode === '100755',
+        path: relativePath,
+      });
+    }
+    const body = record.content
+      .replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u, '')
+      .replace(/^\r?\n/u, '');
+    return {
+      content: body,
+      description: record.description,
+      document: record.content,
+      name: record.name,
+      resources,
+      revision: snapshot.revision,
+      source,
+    };
+  } finally {
+    await rm(dirname(snapshot.directory), { recursive: true, force: true });
   }
 }
 

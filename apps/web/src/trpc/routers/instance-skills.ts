@@ -9,6 +9,8 @@ import {
   deleteInstanceSkillCommand,
   getInstanceSkillCommand,
   listInstanceSkillsCommand,
+  installInstanceMarketplaceSkillCommand,
+  searchInstanceMarketplaceSkillsCommand,
   updateInstanceSkillCommand,
 } from '../commands/instance-skills';
 
@@ -25,6 +27,16 @@ export const instanceSkillsRouter = createRouter({
     .input(createCustomSkillInputSchema)
     .mutation(({ ctx: { auth }, input }) =>
       createInstanceSkillCommand(auth, input),
+    ),
+  searchMarketplace: protectedProcedure
+    .input(z.object({ query: z.string().max(200) }).strict())
+    .query(({ ctx: { auth }, input }) =>
+      searchInstanceMarketplaceSkillsCommand(auth, input),
+    ),
+  installMarketplace: protectedProcedure
+    .input(z.object({ skillId: z.string().max(256) }).strict())
+    .mutation(({ ctx: { auth }, input }) =>
+      installInstanceMarketplaceSkillCommand(auth, input),
     ),
   update: protectedProcedure
     .input(

@@ -51,10 +51,18 @@ it('refreshes actual member-created instance definitions for coding runs without
       ...definition,
     });
     skillId = created.skillId;
-    expect(await caller.listForRuntime()).toContainEqual(definition);
+    expect(await caller.listForRuntime()).toContainEqual({
+      ...definition,
+      document: null,
+      resources: [],
+    });
     const updated = { ...definition, content: 'Updated instructions.\n' };
     await updateCustomSkill({ actorUserId: member.id, skillId, ...updated });
-    expect(await caller.listForRuntime()).toContainEqual(updated);
+    expect(await caller.listForRuntime()).toContainEqual({
+      ...updated,
+      document: null,
+      resources: [],
+    });
     await deleteCustomSkill({ actorUserId: member.id, skillId });
     expect(
       (await caller.listForRuntime()).find(
