@@ -130,6 +130,7 @@ export function buildFastAgentSystemPrompt({
   setupSnapshot,
   setupSession = false,
   therapistModeEnabled = false,
+  globalAgentInstructions,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableTaskModels?: TaskModelOption[];
@@ -157,6 +158,7 @@ export function buildFastAgentSystemPrompt({
   /** True only for the active conversational setup session. */
   setupSession?: boolean;
   therapistModeEnabled?: boolean;
+  globalAgentInstructions?: string | null;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -222,6 +224,7 @@ ${
 }`;
   const therapistModeInstructions =
     buildTherapistModeInstructions(therapistModeEnabled);
+  const sharedAgentGuidance = globalAgentInstructions?.trim();
 
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
@@ -479,7 +482,17 @@ ${
 ## Tone of Voice
 ${buildRoomoteStyleGuidanceSection()}
 
-## Output
+${
+  sharedAgentGuidance
+    ? `## Shared Agent Guidance
+The deployment administrator configured the following guidance. Apply it across this conversation when it does not conflict with Roomote's system policies.
+<shared_agent_guidance>
+${sharedAgentGuidance}
+</shared_agent_guidance>
+
+`
+    : ''
+}## Output
 - Be concise and direct. Every sentence should add information.
 ${senderIdentityGuidance}${unresolvedRequestGuidance}${resumedTurnGuidance}- Do not place decorative emoji in text replies.${surface === 'slack' && currentMessageReactable ? ' Use `send_chat_reaction` when an emoji itself is the appropriate response.' : ''}
 - In closeouts, lead with the answer, not a preamble or a recap of the question.

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
   getTaskModelOptions: vi.fn(),
+  getDeploymentSettings: vi.fn(),
   appendMemory: vi.fn(),
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
@@ -152,6 +153,7 @@ vi.mock('@roomote/db/server', () => ({
   isBrainEnabled: mocks.isBrainEnabled,
   db: {
     query: {
+      deploymentSettings: { findFirst: mocks.getDeploymentSettings },
       fastAgentParentEvents: { findMany: mocks.getPendingHumanFollowUp },
     },
     update: vi.fn(() => ({
@@ -502,6 +504,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ],
       defaultModelId: 'openai/gpt-5.6',
     });
+    mocks.getDeploymentSettings.mockResolvedValue(undefined);
     mocks.listIntegrations.mockResolvedValue([]);
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
@@ -587,6 +590,27 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       '<therapist_mode>',
     );
+  });
+
+  it('refreshes shared agent guidance for each subsequent turn', async () => {
+    mocks.getDeploymentSettings
+      .mockResolvedValueOnce({ globalAgentInstructions: 'First guidance.' })
+      .mockResolvedValueOnce({ globalAgentInstructions: 'Updated guidance.' });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      currentMessageId: '100.3',
+      adapter: callbacks(),
+    });
+
+    const firstSystemPrompt = mocks.generateText.mock.calls[0]?.[0].system;
+    const secondSystemPrompt = mocks.generateText.mock.calls[1]?.[0].system;
+    expect(firstSystemPrompt).toContain('First guidance.');
+    expect(firstSystemPrompt).not.toContain('Updated guidance.');
+    expect(secondSystemPrompt).toContain('Updated guidance.');
+    expect(secondSystemPrompt).not.toContain('First guidance.');
+    expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
   });
 
   it('cuts the trailing model request once the closeout is delivered', async () => {
