@@ -3,6 +3,9 @@ import {
   db,
   eq,
   runFactory,
+  sessionFactory,
+  sessions,
+  sessionTasks,
   taskFactory,
   taskRuns,
 } from '@roomote/db/server';
@@ -13,10 +16,23 @@ import {
 } from '@roomote/types';
 import { captureTaskSettled } from '@roomote/telemetry/server';
 import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
+import { TRPCClientError } from '@trpc/client';
+import { withSandboxServerRpcClient } from '../../../../../../packages/sdk/src/server/lib/auth/sandbox-server-rpc';
 import type { UserAuthSuccess } from '@/types';
 
 vi.mock('@roomote/telemetry/server', () => ({ captureTaskSettled: vi.fn() }));
 vi.mock('@roomote/slack', () => ({ settleSlackLiveTaskCardForRun: vi.fn() }));
+vi.mock('@roomote/sdk/server', async () => ({
+  stopTaskRun: (
+    await import('../../../../../../packages/sdk/src/server/lib/task-runs/stop-task-run')
+  ).stopTaskRun,
+}));
+vi.mock(
+  '../../../../../../packages/sdk/src/server/lib/auth/sandbox-server-rpc',
+  () => ({
+    withSandboxServerRpcClient: vi.fn(),
+  }),
+);
 vi.mock('../sandbox-session', () => ({ sendSandboxPromptCommand: vi.fn() }));
 vi.mock('../tasks/by-id', () => ({ resolveTaskByIdAccessCommand: vi.fn() }));
 vi.mock('./retry-failed-start', () => ({
@@ -73,7 +89,9 @@ describe('cancelTaskRunCommand', () => {
       expect(await readRun(selected.id)).toMatchObject({
         status: RunStatus.Canceled,
         canceledAt: expect.any(Date),
+        cancelRequestedAt: expect.any(Date),
       });
+      expect(withSandboxServerRpcClient).not.toHaveBeenCalled();
       expect(await readRun(newer.id)).toEqual(newer);
       expect(captureTaskSettled).toHaveBeenCalledExactlyOnceWith(
         selected.id,
@@ -86,6 +104,92 @@ describe('cancelTaskRunCommand', () => {
       });
     },
   );
+
+  it.each([RunStatus.Running, RunStatus.Idle])(
+    'terminates an attached %s run through RPC without settling it prematurely',
+    async (status) => {
+      const selected = await runFactory.create({
+        status,
+        sandboxServerUrl: 'https://sandbox.example',
+      });
+      const sibling = await runFactory.create({ taskId: selected.taskId });
+      const cancelTask = vi.fn().mockResolvedValue({ success: true });
+      vi.mocked(withSandboxServerRpcClient).mockImplementationOnce(
+        async (options) => {
+          expect(await readRun(selected.id)).toMatchObject({
+            status,
+            cancelRequestedAt: expect.any(Date),
+            canceledAt: null,
+          });
+          return options.call({
+            commands: { cancelTask: { mutate: cancelTask } },
+          } as unknown as Parameters<typeof options.call>[0]);
+        },
+      );
+
+      await expect(
+        cancelTaskRunCommand(auth, {
+          taskId: selected.taskId,
+          runId: selected.id,
+        }),
+      ).resolves.toEqual({ success: true });
+      expect(withSandboxServerRpcClient).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          runId: selected.id,
+          userId: auth.userId,
+          sandboxServerUrl: selected.sandboxServerUrl,
+        }),
+      );
+      expect(cancelTask).toHaveBeenCalledExactlyOnceWith({
+        terminate: true,
+        cancelledBy: { name: auth.name, source: 'web' },
+      });
+      expect(await readRun(sibling.id)).toEqual(sibling);
+      expect(captureTaskSettled).not.toHaveBeenCalled();
+      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reports RPC failure while retaining the earliest recovery marker on only the selected run', async () => {
+    const selected = await runFactory.create({
+      status: RunStatus.Idle,
+      sandboxServerUrl: 'https://sandbox.example',
+    });
+    const sibling = await runFactory.create({ taskId: selected.taskId });
+    const other = await runFactory.create();
+    const parent = await sessionFactory.create({ cachedStatus: 'active' });
+    await db.insert(sessionTasks).values([
+      {
+        sessionId: parent.id,
+        taskId: selected.taskId,
+        origin: 'fast_delegation',
+      },
+      { sessionId: parent.id, taskId: other.taskId, origin: 'fast_delegation' },
+    ]);
+    vi.mocked(withSandboxServerRpcClient).mockRejectedValue(
+      new TRPCClientError('sandbox unreachable'),
+    );
+    const input = { taskId: selected.taskId, runId: selected.id };
+    await expect(cancelTaskRunCommand(auth, input)).resolves.toEqual({
+      success: false,
+      error: 'Sandbox error: sandbox unreachable',
+    });
+    const requested = await readRun(selected.id);
+    expect(requested).toMatchObject({
+      status: RunStatus.Idle,
+      cancelRequestedAt: expect.any(Date),
+      canceledAt: null,
+    });
+    await cancelTaskRunCommand(auth, input);
+    expect(await readRun(selected.id)).toEqual(requested);
+    expect(await readRun(sibling.id)).toEqual(sibling);
+    expect(await readRun(other.id)).toEqual(other);
+    expect(
+      await db.query.sessions.findFirst({ where: eq(sessions.id, parent.id) }),
+    ).toEqual(parent);
+    expect(captureTaskSettled).not.toHaveBeenCalled();
+    expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+  });
 
   it.each(['mismatched', 'missing'])(
     'does not fall back for a %s run ID',

@@ -16,6 +16,7 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
+import { stopTaskRun } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
@@ -119,6 +120,27 @@ export async function cancelTaskRunCommand(
     }
 
     if (!isExitedRunStatus(job.status)) {
+      if (input.runId !== undefined) {
+        const result = await stopTaskRun({
+          run: job,
+          authUserId: auth.userId,
+          terminate: true,
+          allowDirectCancelWithoutSandbox: true,
+          cancelledBy: { name: auth.name ?? undefined, source: 'web' },
+        });
+        if (!result.success) {
+          return { success: false, error: result.error };
+        }
+        if (result.mode === 'direct_cancel') {
+          void settleSlackLiveTaskCardForRun({
+            taskId: job.taskId,
+            payload: job.payload,
+            status: RunStatus.Canceled,
+          });
+        }
+        return { success: true };
+      }
+
       const endedAt = new Date();
 
       const canceledRun = await db.transaction(async (tx) => {
