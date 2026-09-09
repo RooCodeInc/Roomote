@@ -182,7 +182,6 @@ export {
   Square,
   SquareArrowOutUpRight,
   SquareCheck,
-  SquareDashed,
   SquareDashedIcon,
   SquareDashedMousePointer,
   SquareIcon,
