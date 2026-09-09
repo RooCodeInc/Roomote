@@ -291,9 +291,17 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     );
     expect(saved.success).toBe(true);
     if (!saved.success) throw new Error(JSON.stringify(saved.fieldErrors));
-    expect(saved.settings.ciFailureTriageRepositoryRoutes).toEqual(routes);
+    const verifiedRoutes = routes.map((route) => ({
+      ...route,
+      target: { ...route.target, metadata: { teamId: 'T123' } },
+    }));
+    expect(saved.settings.ciFailureTriageRepositoryRoutes).toEqual(
+      verifiedRoutes,
+    );
     const read = await getBackgroundAgentSettingsCommand(adminAuth);
-    expect(read.settings.ciFailureTriageRepositoryRoutes).toEqual(routes);
+    expect(read.settings.ciFailureTriageRepositoryRoutes).toEqual(
+      verifiedRoutes,
+    );
     expect(read.resolvedDestinations.ci_failure_triage).toBeNull();
     await triggerAutomationCommand(adminAuth, {
       automationKey: 'ci_failure_triage',
@@ -309,7 +317,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     expect(
       (await getBackgroundAgentSettingsForDeployment())
         .ciFailureTriageRepositoryRoutes,
-    ).toEqual(routes);
+    ).toEqual(verifiedRoutes);
     await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({ savingAutomation: 'ciFailureTriage' }),
@@ -317,7 +325,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     expect(
       (await getBackgroundAgentSettingsForDeployment())
         .ciFailureTriageRepositoryRoutes,
-    ).toEqual(routes);
+    ).toEqual(verifiedRoutes);
     const empty = await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({

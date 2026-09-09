@@ -157,7 +157,7 @@ function SelectedRoutes({
         const repositoryNames = route.repositoryIds
           .map(
             (id) =>
-              repositories.data?.find((repo) => repo.id === id)?.fullName ??
+              routeOptions.find((option) => option.id === id)?.fullName ??
               `Unavailable repository (${id})`,
           )
           .join(', ');

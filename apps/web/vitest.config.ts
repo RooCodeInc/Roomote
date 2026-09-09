@@ -26,10 +26,25 @@ export default defineConfig({
             'src/**/*.server.test.{js,jsx,ts,tsx}',
             '!src/**/*.client.test.{js,jsx,ts,tsx}',
             '!src/{hooks,components}/**/*.test.{js,jsx,ts,tsx}',
+            '!src/trpc/commands/automations/__tests__/ci-failure-triage-routing.test.ts',
           ],
           environment: 'node',
           // Keep DB-backed server tests below the local Postgres connection limit.
           maxWorkers: 4,
+          globalSetup: './vitest.setup.server.ts',
+          setupFiles: './vitest.setup.mocks.ts',
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'server-global-db-state',
+          include: [
+            'src/trpc/commands/automations/__tests__/ci-failure-triage-routing.test.ts',
+          ],
+          environment: 'node',
+          sequence: { groupOrder: 1 },
+          fileParallelism: false,
           globalSetup: './vitest.setup.server.ts',
           setupFiles: './vitest.setup.mocks.ts',
         },

@@ -1,4 +1,7 @@
-import type { AutomationRuntime } from '@roomote/db/server';
+import {
+  findActiveSlackInstallationForChannel,
+  type AutomationRuntime,
+} from '@roomote/db/server';
 import {
   getCiFailureTriageRepositoryRoutes,
   type CommunicationProvider,
@@ -24,6 +27,27 @@ export async function resolveCiFailureTriageRepositoryDestination(params: {
   if (params.destination) return params.destination;
   if (route && !params.connectedProviders.includes(route.target.provider))
     return null;
+  if (route?.target.provider === 'slack') {
+    const teamId = route.target.metadata?.teamId;
+    if (
+      typeof teamId !== 'string' ||
+      !teamId.trim() ||
+      teamId !== teamId.trim()
+    )
+      return null;
+    const installation = await findActiveSlackInstallationForChannel(
+      route.target.externalRef,
+      teamId,
+    );
+    return installation
+      ? {
+          provider: 'slack',
+          channelId: route.target.externalRef,
+          teamId: installation.teamId,
+          source: 'automation_target',
+        }
+      : null;
+  }
   return resolveAutomationRuntimeDestination({
     runtime: route
       ? {

@@ -19,6 +19,12 @@ vi.mock('@/hooks/source-control', () => ({
         sourceControlProvider: 'gitlab',
         host: 'git.example.com',
       },
+      {
+        id: 'repo-c',
+        fullName: 'acme/api',
+        sourceControlProvider: 'github',
+        host: 'github.com',
+      },
     ],
     isPending: false,
     isError: false,
@@ -110,6 +116,34 @@ describe('CI repository group editor', () => {
     fireEvent.change(destinations[0]!, { target: { value: 'new-team' } });
     expect(destinations[0]).toHaveValue('new-team');
     expect(destinations[1]).toHaveValue('chat-b');
+  });
+
+  it('distinguishes same-name repositories across providers and hosts after collapsing', () => {
+    render(
+      <Editor
+        initial={[
+          ...initialRoutes,
+          { ...initialRoutes[0]!, repositoryIds: ['repo-c'] },
+        ]}
+      />,
+    );
+    const labels = [
+      'acme/api (gitlab | gitlab.com)',
+      'acme/api (gitlab | git.example.com)',
+      'acme/api (github | github.com)',
+    ];
+    for (const [index, label] of labels.entries()) {
+      const group = screen.getByRole('group', {
+        name: `Repository destination ${index + 1}`,
+      });
+      fireEvent.click(within(group).getByRole('button', { name: 'Edit' }));
+      expect(
+        within(group).getByRole('checkbox', { name: label }),
+      ).toBeChecked();
+      fireEvent.click(within(group).getByRole('button', { name: 'Done' }));
+      expect(within(group).queryByRole('checkbox')).not.toBeInTheDocument();
+      expect(within(group).getByText(label)).toBeInTheDocument();
+    }
   });
 
   it('removing every group leaves explicit empty scope, not the shared destination', () => {

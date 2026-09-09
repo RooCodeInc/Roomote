@@ -19,6 +19,7 @@ const {
   mockResolveAutomationResultSubtitle,
   mockUpdateMessage,
   mockDbSelect,
+  mockFindActiveSlackInstallationForChannel,
 } = vi.hoisted(() => ({
   mockGetAutomationRuntime: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
@@ -43,6 +44,7 @@ const {
   mockResolveAutomationResultSubtitle: vi.fn(),
   mockUpdateMessage: vi.fn(),
   mockDbSelect: vi.fn(),
+  mockFindActiveSlackInstallationForChannel: vi.fn(),
 }));
 
 vi.mock('../destination', () => ({
@@ -104,6 +106,8 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => [left, right]),
   and: vi.fn((...args: unknown[]) => args),
   getAutomationRuntime: mockGetAutomationRuntime,
+  findActiveSlackInstallationForChannel:
+    mockFindActiveSlackInstallationForChannel,
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
   upsertBackgroundAutomationSlackThread:
     mockUpsertBackgroundAutomationSlackThread,
@@ -248,6 +252,9 @@ describe('launchCiFailureTriageForFailedRun', () => {
       },
     });
     mockListConnectedCommunicationProviders.mockResolvedValue(['slack']);
+    mockFindActiveSlackInstallationForChannel.mockResolvedValue({
+      teamId: 'TROUTE',
+    });
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
       provider: 'slack',
       channelId: 'C123MANAGER',
@@ -308,6 +315,7 @@ describe('launchCiFailureTriageForFailedRun', () => {
                 provider: 'slack',
                 targetKind: 'slack_channel',
                 externalRef: 'CROUTE',
+                metadata: { teamId: 'TROUTE' },
               },
             },
           ],
@@ -342,6 +350,7 @@ describe('launchCiFailureTriageForFailedRun', () => {
                 provider: 'slack',
                 targetKind: 'slack_channel',
                 externalRef: 'CROUTE',
+                metadata: { teamId: 'TROUTE' },
               },
             },
           ],
@@ -357,6 +366,14 @@ describe('launchCiFailureTriageForFailedRun', () => {
         repositoryId,
       });
       expect(result.taskId).toBe('task-scan-1');
+      expect(mockFindActiveSlackInstallationForChannel).toHaveBeenCalledWith(
+        'CROUTE',
+        'TROUTE',
+      );
+      expect(mockResolveAutomationRuntimeDestination).not.toHaveBeenCalled();
+      expect(mockBuildDestinationTaskPayloadFields).toHaveBeenCalledWith(
+        expect.objectContaining({ teamId: 'TROUTE' }),
+      );
       expect(mockPostMessage).toHaveBeenCalledWith(
         expect.objectContaining({ channel: 'CROUTE' }),
       );

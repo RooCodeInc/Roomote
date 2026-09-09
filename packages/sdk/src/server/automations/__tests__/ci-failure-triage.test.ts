@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   mockGetAutomationRuntime,
+  mockFindActiveSlackInstallationForChannel,
   mockRecordAutomationRunOutcome,
   mockListConnectedCommunicationProviders,
   mockResolveAutomationRuntimeDestination,
@@ -25,6 +26,7 @@ const {
   mockEnqueueTask,
 } = vi.hoisted(() => ({
   mockGetAutomationRuntime: vi.fn(),
+  mockFindActiveSlackInstallationForChannel: vi.fn(),
   mockRecordAutomationRunOutcome: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
@@ -51,6 +53,8 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {},
   getAutomationRuntime: mockGetAutomationRuntime,
+  findActiveSlackInstallationForChannel:
+    mockFindActiveSlackInstallationForChannel,
   recordAutomationRunOutcome: mockRecordAutomationRunOutcome,
 }));
 
@@ -342,6 +346,76 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     expect(mockTryClaimCiFailureTriageInvestigation).not.toHaveBeenCalled();
     expect(mockFindEnvironmentIdForRepositoryId).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    'uses verified scoped Slack ownership unless a one-off destination overrides delivery=%s',
+    async (override) => {
+      const repositoryId = '10000000-0000-4000-8000-000000000001';
+      mockGetAutomationRuntime.mockResolvedValue({
+        enabled: true,
+        scheduleMode: 'daily',
+        settings: {
+          repositoryRoutes: [
+            {
+              repositoryIds: [repositoryId],
+              target: {
+                provider: 'slack',
+                targetKind: 'slack_channel',
+                externalRef: 'CROUTE',
+                metadata: { teamId: 'TROUTE' },
+              },
+            },
+          ],
+        },
+      });
+      mockListConnectedCommunicationProviders.mockResolvedValue(['slack']);
+      mockGetActiveRepositoriesForProviders.mockResolvedValue([
+        {
+          id: repositoryId,
+          fullName: 'acme/api',
+          sourceControlProvider: 'github',
+          host: 'github.com',
+          defaultBranch: 'main',
+        },
+      ]);
+      mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-api');
+      mockFindActiveSlackInstallationForChannel.mockResolvedValue({
+        teamId: 'TROUTE',
+      });
+      const destination = {
+        provider: 'slack' as const,
+        channelId: 'COVERRIDE',
+        teamId: 'TOVERRIDE',
+        source: 'automation_target' as const,
+      };
+      const result = await ciFailureTriageJob({
+        manualTrigger: true,
+        ...(override ? { destination } : {}),
+      });
+      expect(result.launchedTaskId).toBe('task-1');
+      expect(mockResolveAutomationRuntimeDestination).not.toHaveBeenCalled();
+      if (override) {
+        expect(
+          mockFindActiveSlackInstallationForChannel,
+        ).not.toHaveBeenCalled();
+      } else {
+        expect(mockFindActiveSlackInstallationForChannel).toHaveBeenCalledWith(
+          'CROUTE',
+          'TROUTE',
+        );
+      }
+      expect(mockBuildDestinationTaskPayloadFields).toHaveBeenCalledWith(
+        override
+          ? destination
+          : {
+              provider: 'slack',
+              channelId: 'CROUTE',
+              teamId: 'TROUTE',
+              source: 'automation_target',
+            },
+      );
+    },
+  );
 
   it('stamps GitLab provider on the payload for GitLab repos', async () => {
     mockGetActiveRepositoriesForProviders.mockResolvedValue([
