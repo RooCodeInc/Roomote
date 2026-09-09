@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, type Ref } from 'react';
+import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -13,6 +13,7 @@ import {
 
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
+import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
@@ -28,6 +29,14 @@ type SubmissionSnapshot = {
   description?: string;
   images?: string[];
   attachmentTexts?: string[];
+};
+
+type FastSessionSubmission = {
+  text: string;
+  images?: string[];
+  attachmentTexts?: string[];
+  model?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
 };
 
 type NewTaskFormProps = {
@@ -67,23 +76,36 @@ export function NewTaskForm({
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   const startFastSessionMutation = useStartFastSession();
+  const fastConversationRetryRef = useRef<{
+    conversationId: string;
+    payloadKey: string;
+  } | null>(null);
 
   const startFastSession = useCallback(
-    async (payload: {
-      text: string;
-      images?: string[];
-      attachmentTexts?: string[];
-      model?: string | null;
-      reasoningEffort?: ReasoningEffort | null;
-    }): Promise<void> => {
+    async (payload: FastSessionSubmission): Promise<void> => {
       // A second submit while the first is in flight would mint a second
       // session and orphan one of them.
       if (startFastSessionMutation.isPending) {
         return;
       }
+      const payloadKey = JSON.stringify(payload);
+      const conversationId =
+        fastConversationRetryRef.current?.payloadKey === payloadKey
+          ? fastConversationRetryRef.current.conversationId
+          : crypto.randomUUID();
+      fastConversationRetryRef.current = { conversationId, payloadKey };
       try {
-        const { sessionId } =
-          await startFastSessionMutation.mutateAsync(payload);
+        const { sessionId, fastConversationId } =
+          await startFastSessionMutation.mutateAsync({
+            ...payload,
+            conversationId,
+          });
+        stagePendingFastSessionLaunch(sessionId, {
+          fastConversationId: fastConversationId ?? conversationId,
+          text: payload.text,
+          images: payload.images,
+        });
+        fastConversationRetryRef.current = null;
         onTaskStarted?.();
         router.push(`/sessions/${sessionId}`);
       } catch (error) {
