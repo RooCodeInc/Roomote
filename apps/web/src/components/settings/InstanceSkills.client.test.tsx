@@ -84,6 +84,9 @@ vi.mock('@/components/settings/SettingsShell', () => ({
     </>
   ),
 }));
+vi.mock('@/components/settings/EnvironmentSkills', () => ({
+  EnvironmentSkills: () => <div>Environment skill management</div>,
+}));
 
 import { SkillsSettingsPage } from './pages/SkillsSettingsPage';
 import { getAccessibleSettingsNavigation } from './settings-navigation';
@@ -244,7 +247,7 @@ it('requires confirmation before deleting and refreshes the catalog', async () =
   );
 });
 
-it('shows only shared skills for admins with one add action in the header', async () => {
+it('shows collapsed environment management only to admins with one shared add action', async () => {
   state.isAdmin = true;
   renderSkills();
   await screen.findByText('my-skill');
@@ -254,8 +257,6 @@ it('shows only shared skills for admins with one add action in the header', asyn
       name: 'Add Skill',
     }),
   ).toBeVisible();
-  expect(
-    screen.queryByText(/marketplace|environment/i),
-  ).not.toBeInTheDocument();
+  expect(screen.getByText('Environment skill management')).toBeInTheDocument();
   expect(screen.getByRole('list', { name: 'Shared skills' })).toBeVisible();
 });
