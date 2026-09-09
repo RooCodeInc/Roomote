@@ -1,3 +1,5 @@
+import { createPrivateKey } from 'node:crypto';
+
 import { decrypt } from '@roomote/db/encryption';
 import type { McpConnectionSnowflakeConfig } from '@roomote/types';
 import snowflakeSdk from 'snowflake-sdk';
@@ -19,6 +21,41 @@ class SnowflakeConfigError extends Error {
   }
 }
 
+function normalizePrivateKey(
+  privateKeyPem: string,
+  passphrase: string | undefined,
+): string {
+  try {
+    const trimmedPrivateKey = privateKeyPem.trim();
+    if (
+      !/^-----BEGIN (?:ENCRYPTED )?PRIVATE KEY-----/.test(trimmedPrivateKey)
+    ) {
+      throw new Error('Unsupported private key format');
+    }
+
+    const privateKey = createPrivateKey({
+      key: trimmedPrivateKey,
+      format: 'pem',
+      passphrase,
+    });
+    const modulusLength = privateKey.asymmetricKeyDetails?.modulusLength;
+
+    if (
+      privateKey.asymmetricKeyType !== 'rsa' ||
+      !modulusLength ||
+      modulusLength < 2048
+    ) {
+      throw new Error('Unsupported private key parameters');
+    }
+
+    return privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+  } catch {
+    throw new SnowflakeConfigError(
+      'Snowflake private key or passphrase is invalid',
+    );
+  }
+}
+
 function maybeDecryptSecret(value: string | undefined): string | undefined {
   if (!value) {
     return undefined;
@@ -34,26 +71,22 @@ function maybeDecryptSecret(value: string | undefined): string | undefined {
 export function resolveSnowflakeConnectionConfig(
   config: McpConnectionSnowflakeConfig,
 ): ResolvedSnowflakeConnectionConfig {
-  const password = maybeDecryptSecret(config.encryptedPassword);
   const privateKey = maybeDecryptSecret(config.encryptedPrivateKey);
   const privateKeyPass = maybeDecryptSecret(
     config.encryptedPrivateKeyPassphrase,
   );
 
-  if (!password && !privateKey) {
+  if (!privateKey) {
     throw new SnowflakeConfigError(
-      'Snowflake connection requires either a password or a private key',
+      'Snowflake connection requires a private key',
     );
   }
 
   return {
     account: config.account,
     username: config.username,
-    ...(privateKey
-      ? { authenticator: 'SNOWFLAKE_JWT' as const }
-      : { password }),
-    privateKey,
-    privateKeyPass,
+    authenticator: 'SNOWFLAKE_JWT' as const,
+    privateKey: normalizePrivateKey(privateKey, privateKeyPass),
     role: config.role,
     ...(config.warehouse ? { warehouse: config.warehouse } : {}),
     database: config.database,
@@ -110,9 +143,14 @@ export async function withSnowflakeConnection<T>(
   config: ResolvedSnowflakeConnectionConfig,
   callback: (connection: Connection) => Promise<T>,
 ): Promise<T> {
-  const connection = snowflakeSdk.createConnection(config);
+  let connection: Connection;
 
-  await connect(connection);
+  try {
+    connection = snowflakeSdk.createConnection(config);
+    await connect(connection);
+  } catch {
+    throw new Error('Snowflake connection failed');
+  }
 
   try {
     return await callback(connection);
