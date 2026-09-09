@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   HTTP_INTEGRATIONS_INSTRUCTIONS,
   HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_PATH,
 } from '@roomote/sdk/client';
 
 import {
@@ -688,6 +689,20 @@ export type OpenCodeConfigMcpServer =
   | OpenCodeRemoteMcpServerConfig
   | OpenCodeLocalMcpServerConfig;
 
+function isHttpIntegrationsBroker(mcpServer: OpenCodeConfigMcpServer): boolean {
+  if (
+    mcpServer.type !== 'remote' ||
+    mcpServer.name !== HTTP_INTEGRATIONS_MCP_ID
+  ) {
+    return false;
+  }
+  try {
+    return new URL(mcpServer.url).pathname.endsWith(HTTP_INTEGRATIONS_MCP_PATH);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Composes agent-facing usage guidance for attached built-in MCP integrations.
  * Integration catalog entries can declare `instructions` describing when the
@@ -722,7 +737,7 @@ function splitOnDemandMcpServers(
     (mcpServer): mcpServer is OpenCodeRemoteMcpServerConfig =>
       mcpServer.type === 'remote' &&
       mcpServer.name !== ROOMOTE_MCP_SERVER_NAME &&
-      mcpServer.name !== HTTP_INTEGRATIONS_MCP_ID &&
+      !isHttpIntegrationsBroker(mcpServer) &&
       !isMemoryMcpServer(mcpServer.name),
   );
   const onDemandNames = new Set(onDemand.map((mcpServer) => mcpServer.name));
@@ -815,10 +830,7 @@ export function createIntegrationMcpInstructions(
 ): string | undefined {
   let hasPrimaryMemory = false;
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
-    if (
-      mcpServer.type === 'remote' &&
-      mcpServer.name === HTTP_INTEGRATIONS_MCP_ID
-    ) {
+    if (isHttpIntegrationsBroker(mcpServer)) {
       return [HTTP_INTEGRATIONS_INSTRUCTIONS];
     }
 

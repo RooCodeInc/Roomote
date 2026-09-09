@@ -36,7 +36,7 @@ export const CUSTOM_MCP_SERVER_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  */
 export const ROOMOTE_MCP_ID = 'roomote';
 
-// Leading underscore keeps infrastructure outside the valid custom-name namespace.
+// Leading underscore keeps infrastructure outside the valid deployment custom-name namespace.
 export const HTTP_INTEGRATIONS_MCP_ID = '_roomote_http_integrations';
 
 export const RESERVED_CUSTOM_MCP_SERVER_NAMES: ReadonlySet<string> = new Set([

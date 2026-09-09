@@ -19,6 +19,25 @@ import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
 import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
 
 describe('createIntegrationMcpInstructions', () => {
+  it.each([
+    ['https://operator.test/mcp', false],
+    ['not a URL', false],
+    ['https://api.test/api/mcp/http-integrations/', false],
+    ['https://api.test/api/mcp/http-integrations?query=1', true],
+    ['https://api.test/_roomote-api/api/mcp/http-integrations', true],
+  ] as const)(
+    'classifies broker guidance by the canonical pathname: %s',
+    (url, broker) => {
+      const instructions = createIntegrationMcpInstructions([
+        { type: 'remote', name: '_roomote_http_integrations', url },
+      ]);
+      if (broker) {
+        expect(instructions).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
+      } else {
+        expect(instructions).toBeUndefined();
+      }
+    },
+  );
   it('includes shared HTTP integrations guidance only when its remote server is present', () => {
     expect(
       createIntegrationMcpInstructions([
@@ -167,7 +186,7 @@ describe('generateOpenCodeConfig provider support', () => {
           {
             type: 'remote',
             name: '_roomote_http_integrations',
-            url: 'https://api.test/api/mcp/http-integrations',
+            url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
             headers: {
               Authorization:
                 'Bearer {env:ROOMOTE_DIRECT_MCP_BEARER_TOKEN_HTTP_INTEGRATIONS}',
@@ -183,7 +202,7 @@ describe('generateOpenCodeConfig provider support', () => {
       const config = JSON.parse(result.configContent);
       expect(config.mcp._roomote_http_integrations).toMatchObject({
         type: 'remote',
-        url: 'https://api.test/api/mcp/http-integrations',
+        url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
       });
       expect(config.mcp).not.toHaveProperty('pylon');
       const instructionsPath = join(
@@ -228,6 +247,79 @@ describe('generateOpenCodeConfig provider support', () => {
     });
 
     expect(JSON.parse(result.configContent).subagent_depth).toBe(2);
+  });
+
+  it.each([
+    'https://operator.test/mcp',
+    'not a URL',
+    'https://api.test/api/mcp/http-integrations/',
+  ])('keeps a same-name non-broker remote server on demand: %s', (url) => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: { R_MODEL: 'openai/gpt-5' },
+      mcpServers: [
+        { type: 'local', name: 'roomote', command: 'node' },
+        { type: 'remote', name: '_roomote_http_integrations', url },
+      ],
+    });
+    expect(JSON.parse(result.configContent).mcp).not.toHaveProperty(
+      '_roomote_http_integrations',
+    );
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(result.openCodeConfigDir, 'on-demand-mcp-servers.json'),
+          'utf8',
+        ),
+      ).servers,
+    ).toEqual([
+      {
+        name: '_roomote_http_integrations',
+        displayName: '_roomote_http_integrations',
+        url,
+      },
+    ]);
+    const instructions = readFileSync(
+      join(
+        result.openCodeConfigDir,
+        'roomote-opencode-integration-instructions.md',
+      ),
+      'utf8',
+    );
+    expect(instructions).toContain('# On-demand integrations');
+    expect(instructions).not.toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
+  });
+
+  it('mounts a same-name local server without broker guidance', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: { R_MODEL: 'openai/gpt-5' },
+      mcpServers: [
+        { type: 'local', name: 'roomote', command: 'node' },
+        {
+          type: 'local',
+          name: '_roomote_http_integrations',
+          command: 'operator-mcp',
+        },
+      ],
+    });
+    expect(
+      JSON.parse(result.configContent).mcp._roomote_http_integrations,
+    ).toMatchObject({
+      type: 'local',
+      command: ['operator-mcp'],
+    });
+    expect(
+      existsSync(
+        join(
+          result.openCodeConfigDir,
+          'roomote-opencode-integration-instructions.md',
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      existsSync(join(result.openCodeConfigDir, 'on-demand-mcp-servers.json')),
+    ).toBe(false);
   });
 
   it('installs the Roomote identity plugin for standard task sessions', () => {

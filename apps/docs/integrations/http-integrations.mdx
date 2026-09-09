@@ -103,6 +103,12 @@ server exposes `list_integrations` and `integration_request` to both Fast and
 sandbox agents. Listings contain permitted origins and rules, never credential
 values or environment-variable references.
 
+If an environment or deployment already defines an MCP server named
+`_roomote_http_integrations`, sandbox tasks preserve that server and skip the HTTP
+integrations broker with a warning. Rename the operator-defined server to receive
+both. Environment definitions still take precedence over deployment definitions;
+Fast sessions are unaffected.
+
 For example, a request after listing `inventory` is:
 
 ```json

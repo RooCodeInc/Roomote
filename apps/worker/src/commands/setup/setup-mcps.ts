@@ -409,6 +409,17 @@ export function resolveBuiltInMcpServers(
   // Add integration-provided MCP servers.
   if (integrations?.userMcpServers) {
     for (const [name, config] of Object.entries(integrations.userMcpServers)) {
+      if (
+        name === HTTP_INTEGRATIONS_MCP_ID &&
+        (Object.hasOwn(environmentMcpServers ?? {}, name) ||
+          Object.hasOwn(deploymentMcpServers ?? {}, name))
+      ) {
+        console.warn(
+          `[resolveBuiltInMcpServers] Skipping HTTP integrations broker: preserving operator MCP '${HTTP_INTEGRATIONS_MCP_ID}'. Rename the operator server to receive both.`,
+        );
+        continue;
+      }
+
       if (!config.url) {
         continue;
       }

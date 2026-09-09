@@ -82,6 +82,99 @@ describe('resolveBuiltInMcpServers', () => {
     );
   });
 
+  it.each(['environment', 'deployment', 'both'] as const)(
+    'preserves %s operator HTTP integrations configuration without broker credentials',
+    (source) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      process.env.TRPC_URL = 'https://api.test/_roomote-api';
+      const operator = {
+        _roomote_http_integrations: {
+          url: 'https://operator.test/mcp',
+          headers: { Authorization: 'Bearer ${OPERATOR_KEY}' },
+        },
+      };
+      const servers = resolveBuiltInMcpServers(
+        {
+          ROOMOTE_CLOUD_TOKEN: 'run-token',
+          ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'X-Preview-Bypass',
+          ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-secret',
+        },
+        {
+          userMcpServers: {
+            _roomote_http_integrations: { url: '/api/mcp/http-integrations' },
+            notion: { url: '/api/mcp/notion' },
+          },
+        },
+        source === 'deployment' ? undefined : operator,
+        { OPERATOR_KEY: 'operator-secret' },
+        source === 'environment'
+          ? undefined
+          : source === 'both'
+            ? { _roomote_http_integrations: { command: 'deployment-mcp' } }
+            : operator,
+      );
+      expect(servers._roomote_http_integrations).toEqual({
+        type: 'streamable-http',
+        url: 'https://operator.test/mcp',
+        headers: { Authorization: 'Bearer operator-secret' },
+      });
+      expect(servers.roomote).toMatchObject({ type: 'stdio' });
+      expect(servers.notion).toEqual({
+        type: 'streamable-http',
+        url: 'https://api.test/_roomote-api/api/mcp/notion',
+        headers: {
+          Authorization: 'Bearer run-token',
+          'X-Preview-Bypass': 'bypass-secret',
+        },
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "[resolveBuiltInMcpServers] Skipping HTTP integrations broker: preserving operator MCP '_roomote_http_integrations'. Rename the operator server to receive both.",
+      );
+      expect(warn).toHaveBeenCalledTimes(source === 'both' ? 2 : 1);
+      expect(JSON.stringify(warn.mock.calls)).not.toMatch(
+        /https?:|secret|run-token/,
+      );
+      warn.mockRestore();
+    },
+  );
+
+  it.each(['environment', 'deployment'] as const)(
+    'preserves %s operator stdio server at the broker name',
+    (source) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const operator = {
+        _roomote_http_integrations: {
+          command: 'operator-mcp',
+          args: ['--stdio'],
+          env: { API_KEY: '${OPERATOR_KEY}' },
+        },
+      };
+      const servers = resolveBuiltInMcpServers(
+        { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+        {
+          userMcpServers: {
+            _roomote_http_integrations: { url: '/api/mcp/http-integrations' },
+          },
+        },
+        source === 'environment' ? operator : undefined,
+        { OPERATOR_KEY: 'operator-secret' },
+        source === 'deployment' ? operator : undefined,
+      );
+      expect(servers._roomote_http_integrations).toEqual({
+        type: 'stdio',
+        command: 'operator-mcp',
+        args: ['--stdio'],
+        env: {
+          MISE_DATA_DIR: '/opt/mise',
+          MISE_CACHE_DIR: '/opt/mise/cache',
+          API_KEY: 'operator-secret',
+        },
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockRestore();
+    },
+  );
+
   it.each<{ taskEnv: Record<string, string>; url: string }>([
     {
       taskEnv: { R_APP_URL: 'https://api.test' },
