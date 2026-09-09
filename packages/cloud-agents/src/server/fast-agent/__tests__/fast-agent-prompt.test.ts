@@ -570,7 +570,17 @@ describe('buildFastAgentSystemPrompt', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
     expect(prompt).toContain(
-      'ongoing process has a concrete unresolved outcome',
+      'eligible under the exclusions below reports an outcome and is about to close, make one silent decision before the closeout',
+    );
+    expect(prompt).toContain(
+      'leave an ongoing process with a concrete unresolved outcome',
+    );
+    expect(prompt).toContain(
+      'include one specific bounded-check offer after the outcome in that same closeout',
+    );
+    expect(prompt).toContain('close normally without mentioning monitoring');
+    expect(prompt).toContain(
+      'not a blanket offer after every tool call, fix, or update',
     );
     expect(prompt).toContain('Verify capability before offering');
     expect(prompt).toContain(
@@ -625,6 +635,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('do not inspect or schedule from them');
     expect(prompt).toContain(
       'not an offer to save work as a deployment automation',
+    );
+    expect(prompt).toContain(
+      "the automation rule against pitching one-off fixes does not suppress an otherwise eligible check of a deployed fix's unresolved observable outcome",
     );
   });
 

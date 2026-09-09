@@ -1,0 +1,279 @@
+{
+  "name": "slack-fast-monitoring-decisions",
+  "description": "Matched Fast threads exercise the closeout decision for bounded ongoing-process monitoring, including eligible, suppressed, previously offered, and explicitly requested cases.",
+  "criteria": [
+    "In the deployed-fix thread, the bot reports the known outcome and offers one specific optional check of the still-warming public health endpoint, with a concrete time and finite stop bound; it does not schedule before consent",
+    "In the unresolved-rollout thread, the bot offers one specific optional bounded follow-up for the observable rollout result after reporting current progress, rather than appending a generic monitoring footer",
+    "In the draft-PR thread, the bot does not offer or schedule monitoring because the existing PR lifecycle notification already covers the unresolved checks",
+    "In the no-capability thread, the bot does not offer or promise monitoring because the only evidence source is an inaccessible private dashboard",
+    "In the declined-offer and ignored-offer threads, the bot does not repeat the earlier monitoring offer",
+    "In the explicit-request thread, the bot schedules the requested bounded check directly without asking for another opt-in, confirms a finite one-hour plan, and avoids creating a duplicate schedule",
+    "Across all threads, the bot does not claim a deployment, rollout, check result, or process completion beyond the facts already present in that thread",
+    "Every bot reply stays in its originating thread and no channel-level bot messages are posted"
+  ],
+  "state": {
+    "team": {
+      "id": "TROOMOTE",
+      "domain": "roomote-mock",
+      "timezone": "America/Los_Angeles"
+    },
+    "acceptedBotTokens": [],
+    "botUserId": "BROOMOTE",
+    "botId": "BMOCKAPP",
+    "channels": [
+      {
+        "id": "C123ABC456",
+        "name": "release-ops",
+        "type": "public_channel",
+        "isMember": true,
+        "members": ["UGRACE", "BROOMOTE"]
+      }
+    ],
+    "users": [
+      { "id": "BROOMOTE", "name": "roomote", "displayName": "Roomote" },
+      {
+        "id": "UGRACE",
+        "name": "grace",
+        "displayName": "Grace Hopper",
+        "email": "local@roomote.dev"
+      }
+    ],
+    "messages": [
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS1",
+        "text": "<@BROOMOTE> Deploy the checkout timeout fix and verify the public health endpoint.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS2",
+        "thread_ts": "$TS1",
+        "text": "The fix is deployed. The public health endpoint is reachable and still reports warming; it can be checked for the next hour.",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS4",
+        "text": "<@BROOMOTE> Track the staged rollout using its public rollout-status endpoint.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS5",
+        "thread_ts": "$TS4",
+        "text": "The rollout is at 25%. The endpoint remains available, and the unresolved outcome is whether it reaches 100% within two hours.",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS7",
+        "text": "<@BROOMOTE> Open a draft PR for this fix.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS8",
+        "thread_ts": "$TS7",
+        "text": "Draft PR #42 is open with checks pending. This conversation already receives the PR lifecycle and review notifications.",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS10",
+        "text": "<@BROOMOTE> The data backfill is running, but progress exists only in our private vendor dashboard.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS11",
+        "thread_ts": "$TS10",
+        "text": "The backfill remains unresolved. I confirmed that I do not have access to that private dashboard or another evidence source.",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS13",
+        "text": "<@BROOMOTE> The deployment is warming. Its public health endpoint can be checked for one hour.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS14",
+        "thread_ts": "$TS13",
+        "text": "The endpoint still reports warming. Want me to check it every 10 minutes for the next hour and let you know when it is healthy?",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS15",
+        "thread_ts": "$TS13",
+        "text": "No thanks. Just summarize where things stand.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS17",
+        "text": "<@BROOMOTE> The rollout is at 50%. Its public status endpoint can be checked for one hour.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS18",
+        "thread_ts": "$TS17",
+        "text": "The rollout remains at 50%. Want me to check the status endpoint every 15 minutes for the next hour?",
+        "user": "BROOMOTE",
+        "bot_id": "BMOCKAPP",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS19",
+        "thread_ts": "$TS17",
+        "text": "Also note that the release owner is already aware.",
+        "user": "UGRACE",
+        "type": "message"
+      },
+      {
+        "channel": "C123ABC456",
+        "ts": "$TS21",
+        "text": "<@BROOMOTE> The public health endpoint reports warming and can be checked without authentication.",
+        "user": "UGRACE",
+        "type": "message"
+      }
+    ]
+  },
+  "events": [
+    {
+      "delayMs": 0,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E1",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> What is the outcome?",
+          "ts": "$TS3",
+          "thread_ts": "$TS1",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E2",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> Give me the current result.",
+          "ts": "$TS6",
+          "thread_ts": "$TS4",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E3",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> Anything else I need to do?",
+          "ts": "$TS9",
+          "thread_ts": "$TS7",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E4",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> Summarize the current outcome.",
+          "ts": "$TS12",
+          "thread_ts": "$TS10",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E5",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> No thanks. Just summarize where things stand.",
+          "ts": "$TS16",
+          "thread_ts": "$TS13",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E6",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> What does that change?",
+          "ts": "$TS20",
+          "thread_ts": "$TS17",
+          "channel_type": "channel"
+        }
+      }
+    },
+    {
+      "delayMs": 8000,
+      "envelope": {
+        "kind": "event_callback",
+        "eventId": "$E7",
+        "event": {
+          "type": "app_mention",
+          "channel": "C123ABC456",
+          "user": "UGRACE",
+          "text": "<@BROOMOTE> Check it every 10 minutes for the next hour and tell me only when it becomes healthy.",
+          "ts": "$TS22",
+          "thread_ts": "$TS21",
+          "channel_type": "channel"
+        }
+      }
+    }
+  ],
+  "settleMs": 20000,
+  "timeoutMs": 240000
+}
