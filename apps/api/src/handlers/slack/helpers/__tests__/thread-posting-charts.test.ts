@@ -157,4 +157,38 @@ describe('Slack reply chart delivery', () => {
       'data_visualization',
     ]);
   });
+
+  it('caps images after reserving Markdown, charts, and the sticky footer', async () => {
+    const images = Array.from({ length: 48 }, (_, index) => ({
+      url: `https://example.com/image-${index}.png`,
+      altText: `Screenshot ${index}`,
+    }));
+
+    await postSlackThreadMarkdownMessage({
+      ...base,
+      charts: [chart, { ...chart, title: 'Second' }],
+      images,
+      fastSessionFooter: {
+        sessionId: 'session-1',
+        linkedPrs: [],
+        livePreviewUrl: null,
+      },
+      deliverVideos: vi.fn(
+        async () => '[View video](https://example.com/video)',
+      ),
+    });
+
+    const bodyBlocks = mocks.postWithFooter.mock.calls[0]![0]
+      .bodyBlocks as Array<{ type: string; image_url?: string }>;
+    expect(bodyBlocks).toHaveLength(49);
+    expect(bodyBlocks.filter((block) => block.type === 'image')).toHaveLength(
+      46,
+    );
+    expect(bodyBlocks.at(-1)?.image_url).toBe(
+      'https://example.com/image-45.png',
+    );
+    expect(slack.updateMessage.mock.calls[0]![0].message.blocks).toHaveLength(
+      50,
+    );
+  });
 });

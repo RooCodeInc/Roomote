@@ -26,6 +26,8 @@ type SlackThreadMarkdownPostResult =
   | 'suppressed'
   | 'failed';
 
+const SLACK_MAX_MESSAGE_BLOCKS = 50;
+
 export async function postSlackThreadMarkdownMessage({
   slack,
   channel,
@@ -56,15 +58,27 @@ export async function postSlackThreadMarkdownMessage({
   /** Upload only after the source guard permits a successful text post. */
   deliverVideos?: () => Promise<string>;
 }): Promise<SlackThreadMarkdownPostResult> {
-  const buildBodyBlocks = (bodyText: string) => [
-    { type: 'markdown' as const, text: bodyText },
-    ...buildDataVisualizationBlocks(charts),
-    ...images.map((image) => ({
-      type: 'image' as const,
-      image_url: image.url,
-      alt_text: image.altText,
-    })),
-  ];
+  const buildBodyBlocks = (bodyText: string) => {
+    const leadingBlocks = [
+      { type: 'markdown' as const, text: bodyText },
+      ...buildDataVisualizationBlocks(charts),
+    ];
+    const imageCapacity = Math.max(
+      0,
+      SLACK_MAX_MESSAGE_BLOCKS -
+        leadingBlocks.length -
+        (fastSessionFooter ? 1 : 0),
+    );
+
+    return [
+      ...leadingBlocks,
+      ...images.slice(0, imageCapacity).map((image) => ({
+        type: 'image' as const,
+        image_url: image.url,
+        alt_text: image.altText,
+      })),
+    ];
+  };
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
       channel,
