@@ -98,26 +98,21 @@ export async function cancelTaskRunCommand(
     const taskFilter = eq(taskRuns.taskId, input.taskId);
 
     const job =
-      // Snapshot resumes reuse taskId, so a stale runId can still point at
-      // an older non-terminal row. Always prefer the newest active run for the
-      // task over the supplied ID.
-      (await db.query.taskRuns.findFirst({
-        where: and(
-          taskFilter,
-          inArray(taskRuns.status, [...activeRunStatuses]),
-        ),
-        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
-      })) ??
-      (input.runId !== undefined
+      input.runId !== undefined
         ? await db.query.taskRuns.findFirst({
             where: and(eq(taskRuns.id, input.runId), taskFilter),
-            orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
           })
-        : null) ??
-      (await db.query.taskRuns.findFirst({
-        where: taskFilter,
-        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
-      }));
+        : ((await db.query.taskRuns.findFirst({
+            where: and(
+              taskFilter,
+              inArray(taskRuns.status, [...activeRunStatuses]),
+            ),
+            orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
+          })) ??
+          (await db.query.taskRuns.findFirst({
+            where: taskFilter,
+            orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
+          })));
 
     if (!job) {
       return { success: false, error: 'Task run not found' };
