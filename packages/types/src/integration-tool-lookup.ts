@@ -49,7 +49,11 @@ export function matchIntegrationTools(
     }
     if (params.toolName && tool.name !== params.toolName) continue;
     const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase();
-    if (terms.length > 0 && !terms.every((term) => haystack.includes(term))) {
+    if (
+      !params.toolName &&
+      terms.length > 0 &&
+      !terms.every((term) => haystack.includes(term))
+    ) {
       continue;
     }
     matches.push({
@@ -70,7 +74,8 @@ export const FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS = {
   integrationId:
     "Exact on-demand integration id from the integrations listed in your instructions; lists that integration's tools",
   toolName: "Exact tool name to fetch one tool's input schema",
-  query: 'Keywords matched against tool names and descriptions',
+  query:
+    'Keywords matched against tool names and descriptions; ignored when toolName is provided',
   limit: `Maximum tools to return (default ${INTEGRATION_TOOL_LOOKUP_DEFAULT_LIMIT}, at most ${INTEGRATION_TOOL_LOOKUP_MAX_LIMIT})`,
 } as const;
 
