@@ -305,6 +305,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
 } from '@roomote/types';
 
 import {
@@ -7929,6 +7930,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
     );
     expect(launchTask.mock.calls[0]?.[0]).not.toHaveProperty('images');
+  });
+
+  it('accepts an explicit Blank slate Session launch target', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+      await postKickoff({ taskId: 'task-blank' });
+      return { success: true, taskId: 'task-blank' };
+    });
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting a Blank slate sandbox.',
+        });
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Create a standalone artifact.',
+          environmentId: NO_REPOSITORIES,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: NO_REPOSITORIES }),
+    );
   });
 
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(

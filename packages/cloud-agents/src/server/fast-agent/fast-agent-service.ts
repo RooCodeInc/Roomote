@@ -14,6 +14,7 @@ import {
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
+  NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
@@ -3784,6 +3785,7 @@ export async function answerFastAgentQuestion({
             const validSuggestionEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               FAST_EXECUTION,
+              NO_REPOSITORIES,
               ...availableEnvironments.map((environment) => environment.id),
             ]);
             if (
@@ -3986,6 +3988,7 @@ export async function answerFastAgentQuestion({
             const args = launchTaskArgsSchema.parse(call.args);
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
+              NO_REPOSITORIES,
               ...availableEnvironments.map((environment) => environment.id),
             ]);
             if (

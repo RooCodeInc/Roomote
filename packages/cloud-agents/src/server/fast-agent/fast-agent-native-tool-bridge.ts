@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  NO_REPOSITORIES,
   REASONING_EFFORT_VALUES,
   MANAGE_WAKEUPS_TOOL_DESCRIPTION,
   SESSION_WAKEUP_NAME_MAX_LENGTH,
@@ -311,7 +312,7 @@ export default {
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
-      environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
+      environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
     })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),
@@ -356,7 +357,7 @@ export default {
   description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID. Supported current-turn attachments are forwarded only when includeAttachments is true.",
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
-    environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact environment ID from the system prompt; omit, pass null, or pass "${ALL_REPOSITORIES}" to run against all active repositories`)}),
+    environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact launch target ID from the system prompt; pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" for all active repositories, or omit/pass null to use normal workspace routing`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
   },

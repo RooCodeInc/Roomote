@@ -8,7 +8,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 import {
   SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
   SHOW_WIDGET_HEIGHT_DESCRIPTION,
@@ -181,8 +181,10 @@ describe('Fast native OpenCode tool bridge', () => {
       'explanation of what is being delegated',
     );
     expect(launchTaskSource).toContain(ALL_REPOSITORIES);
+    expect(launchTaskSource).toContain(NO_REPOSITORIES);
+    expect(launchTaskSource).toContain('for all active repositories');
     expect(launchTaskSource).toContain(
-      'to run against all active repositories',
+      'for a Blank slate sandbox without repositories',
     );
     expect(sendTaskMessageSource).toContain(
       'includeAttachments: z.boolean().optional()',
