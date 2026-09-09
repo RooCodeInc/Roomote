@@ -43,6 +43,50 @@ dashboard page.
 You do not need to choose a separate conversation mode. The Session grows from
 conversation to execution to review without changing identity.
 
+## Source-control work without a workspace
+
+Fast discovers the available tools and capabilities of configured source-control
+integrations for focused repository exploration. Reading files and directories,
+searching code, or inspecting commits, pull/merge request diffs, and reported CI
+results does not require a
+coding task, local clone, or workspace provisioning. Available reads depend on
+the connected integration's tools and permissions. Reading CI results is not the
+same as running tests: local checkout, code edits, command execution, and testing
+are delegated to a task, as are investigations that need a workspace.
+
+APIs are preferred for focused questions such as "Do we have X?" or locating a
+setting, not mandatory for every investigation. Roomote can choose a coding
+task directly when expected file volume, broad cross-module tracing, exhaustive
+caller or coverage needs, search-index limits, or excessive API round trips make
+a local checkout substantially more appropriate. There is no fixed file-count
+threshold. If a focused search grows into broad investigation, Roomote carries
+useful findings into the task rather than continuing endless API calls.
+
+Roomote paginates or narrows searches sensibly and uses immutable
+commit references for consistent follow-up reads where supported and identifies
+limitations when results are partial, truncated, or limited to a search index.
+An empty search is not proof that code is absent. Source inspection is not a
+test run or reproduction, and an access denial is not bypassed through a task.
+Requests for a code review still use the structured Review Code pipeline.
+
+The existing [GitHub integration](/providers/source-control/github#daily-github-management)
+also supports updates to existing pull requests, issue or PR comments,
+review-comment replies, and reactions using the deployment's GitHub App.
+See that guide for supported actions and access requirements.
+
+[GitLab API tools](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
+reuse the existing deployment OAuth connection for bounded repository reads,
+merge request title, description and close/reopen updates, notes, and discussion
+replies. No additional MCP server or installation is needed. Tools require an
+active member, an active connected repository on the configured GitLab host, and
+valid deployment OAuth access; curated integrations must be enabled.
+
+[Bitbucket Cloud API tools](/providers/source-control/bitbucket#api-first-work-in-fast)
+reuse the existing deployment OAuth connection for files, directories, code
+search, commits, pull requests, diffs, and comments, plus supported PR updates
+and replies. No additional MCP server is needed. See that guide for access
+requirements, pagination limits, and the code-search deprecation.
+
 ## The session view
 
 A Session header shows the other people currently viewing that Session. Your
@@ -215,12 +259,15 @@ later.
 
 ## Session and execution access
 
-Any signed-in deployment user with a Session link can view its timeline and
-contribute to the conversation, matching task access. The Sessions list remains
-focused: administrators see every Session, while other users see Sessions they
-own, participate in, or have spoken in. Replies are attributed to the teammate
-who sent them.
+Any signed-in deployment member with a Session link can view its timeline,
+including custom automation Sessions and their linked task transcripts, logs,
+and artifacts. A Session link does not provide anonymous or public access.
 
-Full execution details keep the existing task permissions, so joining a shared
-channel does not grant access to logs, terminals, diffs, previews, or private
-artifacts.
+Viewing is separate from acting. Custom automation management remains restricted
+to its creator and administrators. Existing permissions still apply to replies,
+edits, deletion, execution, terminals, previews, and secrets; a link does not
+grant those permissions. Replies are attributed to the teammate who sent them.
+
+The Sessions list and filter options remain scoped to the member's existing
+visibility permissions. Direct-link viewing does not make other members' custom
+automations discoverable in those lists.

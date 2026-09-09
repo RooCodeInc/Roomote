@@ -61,6 +61,7 @@ export function buildCiFailureTriagePrompt({
   hasAnnouncementThread,
   destinationProvider = 'slack',
   sourceControlProvider,
+  additionalInstructions,
 }: {
   channelId: string;
   repositoryFullNames: string[];
@@ -76,6 +77,7 @@ export function buildCiFailureTriagePrompt({
   destinationProvider?: CommunicationProvider;
   /** Repository SCM provider for manual runs without a triggering_run. */
   sourceControlProvider?: string;
+  additionalInstructions?: string;
 }): string {
   const repository =
     repositoryFullNames[0] ??
@@ -172,6 +174,7 @@ export function buildCiFailureTriagePrompt({
 You own this CI failure end-to-end in this environment-backed workspace. Investigate and, when the failure is real and fixable, fix and open a PR in this same task. Do not re-run remote CI workflows/pipelines.
 
 ${focus}
+${additionalInstructions ? `\nAdditional investigation guidance (repository scope and report destination are already enforced; do not change either):\n${escapeTaskContextText(additionalInstructions)}\n` : ''}
 
 If it is already green on a newer run, clearly flaky, or already covered by an open Roomote PR: close out with short evidence and stop.
 

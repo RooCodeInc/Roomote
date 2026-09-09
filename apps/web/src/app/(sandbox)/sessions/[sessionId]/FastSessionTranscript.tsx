@@ -798,9 +798,7 @@ export function FastSessionTranscript({
             {reviewOffers.map((offer) => (
               <PrReviewActionOffer
                 key={offer.deliveryId}
-                className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
                 offer={offer}
-                showQuestion
                 onAction={(choice) =>
                   handleReviewAction(offer.deliveryId, choice)
                 }

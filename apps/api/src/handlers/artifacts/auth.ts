@@ -10,19 +10,11 @@ import {
 import { findTaskRunByRunTokenClaims } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
+import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 
-type ArtifactRouteAuthContext = {
-  /**
-   * Null for deployment-principal run tokens. Authorization is scoped to the
-   * task run itself: `findTaskRunByRunTokenClaims` resolves by `runId`
-   * only. The token's userId is mint-time attribution and is never compared
-   * against the mutable `task_runs.actingUserId`, which web steer and
-   * follow-up delivery legitimately switch mid-run.
-   */
-  userId: string | null;
-  runId: number;
-  tokenType: 'run';
-};
+// Run binding is independent of mutable actingUserId. Retain the authenticated
+// principal as well so history reads can distinguish human and deployment runs.
+type ArtifactRouteAuthContext = RunTokenContext;
 
 type ArtifactRouteAuthResult =
   | { ok: true; auth: ArtifactRouteAuthContext }
@@ -52,11 +44,7 @@ export function resolveArtifactRouteAuth(
   if (isRunTokenContext(auth)) {
     return {
       ok: true,
-      auth: {
-        userId: auth.userId,
-        runId: auth.runId,
-        tokenType: 'run',
-      },
+      auth,
     };
   }
 
@@ -107,8 +95,8 @@ const TASK_READ_ACCESS_DENIED: ArtifactRouteTaskBindingResult = {
 /**
  * Verify that the calling task run may read artifacts for the requested
  * task. Unlike the strict write-path binding above, reads are also allowed
- * for any other visible task, matching the cross-task read access that the
- * MCP task routes (summary, messages, search) already grant to task run
+ * for other visible tasks the caller can access, matching the history access
+ * that MCP task routes (summary, messages, search) grant to task run
  * tokens. This lets an agent consume artifacts produced by earlier tasks
  * (for example downloading a plan artifact published by a planning task).
  * Artifact writes stay bound to the job's own task.
@@ -123,15 +111,18 @@ export async function verifyArtifactRouteTaskReadAccess(
     return TASK_READ_ACCESS_DENIED;
   }
 
-  if (taskRun.taskId === taskId) {
-    return { ok: true };
-  }
-
   const requestedTask = await db.query.tasks.findFirst({
     columns: {
       id: true,
     },
-    where: and(eq(tasks.id, taskId), isVisibleTask()),
+    where: and(
+      eq(tasks.id, taskId),
+      taskRun.taskId === taskId ? undefined : isVisibleTask(),
+      customAutomationHistoryAccess(
+        { userId: auth.userId ?? undefined, authContext: auth },
+        'task',
+      ),
+    ),
   });
 
   if (requestedTask) {

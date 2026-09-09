@@ -1,4 +1,3 @@
-import { createAuthToken } from '@roomote/auth';
 import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -154,22 +153,19 @@ async function probeSourceControlTools(input: {
   provider: SourceControlProvider;
   tool: SourceControlConnectionTool;
 }): Promise<boolean> {
-  // The built-in GitHub broker is currently the only provider-specific MCP catalog.
-  if (input.provider !== 'github') return false;
-  const { getRouterMcpServerPolicy, listMcpTools, resolveApiBaseUrl } =
+  const { listFastAgentIntegrations } =
     await import('@roomote/cloud-agents/server');
-  const baseUrl = resolveApiBaseUrl();
-  if (!baseUrl || !getRouterMcpServerPolicy('github').enabled) return false;
-  const token = await createAuthToken({
-    userId: input.actorUserId,
-    timeoutMs: 60_000,
-  });
-  const tools = await listMcpTools({
-    url: new URL('api/mcp-routing/github', `${baseUrl}/`).toString(),
-    headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(10_000),
-  });
-  return tools.some((tool) => tool.name === input.tool.toolName);
+  // Reuse the broker's provider availability, routing and tool-policy gates.
+  // Only built-in source-control catalogs can authorize this continuation.
+  const integrations = await listFastAgentIntegrations(
+    { userId: input.actorUserId, forceFreshDiscovery: true },
+    async () => ({}),
+  );
+  return integrations.some(
+    (integration) =>
+      integration.id === input.provider &&
+      integration.tools.some((tool) => tool.name === input.tool.toolName),
+  );
 }
 
 /** Dependency seam shared by web and all persisted parent-event surfaces. */

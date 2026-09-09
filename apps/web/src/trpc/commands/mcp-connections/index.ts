@@ -57,17 +57,6 @@ import type {
   SaveXConnectionInput,
 } from '@/types';
 
-type LegacySnowflakePasswordInput = Omit<
-  SaveSnowflakeConnectionInput,
-  'authMethod'
-> & {
-  authMethod: 'password';
-};
-
-type SaveSnowflakeConnectionCommandInput =
-  | SaveSnowflakeConnectionInput
-  | LegacySnowflakePasswordInput;
-
 type VercelConnectionData = {
   authStatus?: 'pending' | 'authenticated' | 'error' | null;
   defaultTeamIdOrSlug?: string;
@@ -783,9 +772,6 @@ export async function getSnowflakeConnectionCommand(auth: UserAuthSuccess) {
 
   return {
     authStatus: connection.authStatus,
-    authMethod: connection.authConfig.encryptedPrivateKey
-      ? ('key_pair' as const)
-      : ('password' as const),
     account: connection.authConfig.account,
     username: connection.authConfig.username,
     role: connection.authConfig.role,
@@ -977,7 +963,7 @@ export async function getGrafanaConnectionCommand(
 
 export async function saveSnowflakeConnectionCommand(
   auth: UserAuthSuccess,
-  input: SaveSnowflakeConnectionCommandInput,
+  input: SaveSnowflakeConnectionInput,
 ) {
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
@@ -997,32 +983,16 @@ export async function saveSnowflakeConnectionCommand(
   )
     ? existingConnection.authConfig
     : null;
-  const preservingExistingCredential =
-    input.authMethod === 'password' && input.password.length === 0;
-  const nextEncryptedPassword =
-    input.authMethod === 'password'
-      ? input.password.length > 0
-        ? encrypt(input.password)
-        : existingConfig?.encryptedPassword
-      : undefined;
-  const nextEncryptedPrivateKey =
-    input.authMethod === 'key_pair'
-      ? input.privateKey.trim().length > 0
-        ? encrypt(input.privateKey)
-        : existingConfig?.encryptedPrivateKey
-      : preservingExistingCredential
-        ? existingConfig?.encryptedPrivateKey
-        : undefined;
+  const providedPrivateKey = input.privateKey.trim().length > 0;
+  const nextEncryptedPrivateKey = providedPrivateKey
+    ? encrypt(input.privateKey)
+    : existingConfig?.encryptedPrivateKey;
   const nextEncryptedPrivateKeyPassphrase =
-    input.authMethod === 'key_pair'
-      ? input.privateKeyPassphrase.length > 0
-        ? encrypt(input.privateKeyPassphrase)
-        : input.privateKey.trim().length > 0
-          ? undefined
-          : existingConfig?.encryptedPrivateKeyPassphrase
-      : preservingExistingCredential
-        ? existingConfig?.encryptedPrivateKeyPassphrase
-        : undefined;
+    input.privateKeyPassphrase.length > 0
+      ? encrypt(input.privateKeyPassphrase)
+      : providedPrivateKey
+        ? undefined
+        : existingConfig?.encryptedPrivateKeyPassphrase;
 
   const authConfig = {
     type: 'snowflake' as const,
@@ -1039,9 +1009,6 @@ export async function saveSnowflakeConnectionCommand(
       : existingConfig?.database
         ? { database: existingConfig.database }
         : {}),
-    ...(nextEncryptedPassword
-      ? { encryptedPassword: nextEncryptedPassword }
-      : {}),
     ...(nextEncryptedPrivateKey
       ? { encryptedPrivateKey: nextEncryptedPrivateKey }
       : {}),
@@ -1056,17 +1023,7 @@ export async function saveSnowflakeConnectionCommand(
       : {}),
   };
 
-  if (
-    input.authMethod === 'password' &&
-    !authConfig.encryptedPassword &&
-    !authConfig.encryptedPrivateKey
-  ) {
-    throw new Error(
-      'Programmatic Access Token is required when no Snowflake credential is already stored.',
-    );
-  }
-
-  if (input.authMethod === 'key_pair' && !authConfig.encryptedPrivateKey) {
+  if (!authConfig.encryptedPrivateKey) {
     throw new Error(
       'Private key is required when no Snowflake key pair is already stored.',
     );
@@ -1127,9 +1084,6 @@ export async function saveSnowflakeConnectionCommand(
   }
 
   return {
-    authMethod: nextEncryptedPrivateKey
-      ? ('key_pair' as const)
-      : ('password' as const),
     account: authConfig.account,
     username: authConfig.username,
     role: authConfig.role,

@@ -89,7 +89,7 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
    * list_pull_request_comments or a prior write result.
    */
   commentId: optionalTrimmedNonEmptyStringSchema,
-  /** Required for dismiss_pull_request_review. */
+  /** Required for dismissal; optional for submitting a specific pending GitHub review. */
   reviewId: optionalTrimmedNonEmptyStringSchema,
   /** Required for reply, create_comment, and update_comment; optional for review. */
   body: z.string().optional(),
@@ -181,15 +181,23 @@ const ADO_REVIEW_VOTES = {
   request_changes: -5,
 } as const;
 
-const gitHubReplyMutationResponseSchema = z.object({
-  addPullRequestReviewThreadReply: z
+const gitHubReplyThreadResponseSchema = z.object({
+  node: z
     .object({
-      comment: z
-        .object({
-          databaseId: z.number().nullable().optional(),
-          url: z.string().nullable().optional(),
-        })
-        .nullable(),
+      __typename: z.literal('PullRequestReviewThread'),
+      pullRequest: z.object({
+        number: z.number().int().positive(),
+        repository: z.object({ nameWithOwner: z.string() }),
+      }),
+      comments: z.object({
+        nodes: z.array(
+          z
+            .object({
+              databaseId: z.number().int().positive().safe().nullable(),
+            })
+            .nullable(),
+        ),
+      }),
     })
     .nullable(),
 });
@@ -322,6 +330,22 @@ export async function writeSourceControlPullRequestForTaskRun({
     repositoryFullName: input.repositoryFullName,
     host: payloadHost,
   });
+
+  if (
+    input.action === 'submit_pull_request_review' &&
+    input.reviewId &&
+    provider !== 'github'
+  ) {
+    return buildWriteResult({
+      input,
+      provider,
+      repository,
+      applied: false,
+      warnings: [
+        `${getSourceControlProviderLabel(provider)} does not support submitting an existing review by reviewId through this source-control interface.`,
+      ],
+    });
+  }
 
   let result: SourceControlPullRequestWriteResult;
   switch (provider) {
@@ -810,27 +834,54 @@ async function writeGitHubPullRequest({
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const response = await octokit.graphql(
-        `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
-          addPullRequestReviewThreadReply(
-            input: { pullRequestReviewThreadId: $threadId, body: $body }
-          ) {
-            comment { databaseId url }
+        `query PullRequestReplyThread($threadId: ID!) {
+          node(id: $threadId) {
+            __typename
+            ... on PullRequestReviewThread {
+              pullRequest { number repository { nameWithOwner } }
+              comments(first: 1) { nodes { databaseId } }
+            }
           }
         }`,
-        { threadId, body: requireBody(input) },
+        { threadId },
       );
-      const comment =
-        gitHubReplyMutationResponseSchema.parse(response)
-          .addPullRequestReviewThreadReply?.comment;
+      const parsed = gitHubReplyThreadResponseSchema.safeParse(response);
+      const thread = parsed.success ? parsed.data.node : null;
+      if (
+        !thread ||
+        thread.pullRequest.number !== input.prNumber ||
+        thread.pullRequest.repository.nameWithOwner.toLowerCase() !==
+          repository.fullName.toLowerCase()
+      ) {
+        throw new SourceControlWriteError(
+          404,
+          `GitHub review thread ${threadId} was not found on pull request #${input.prNumber} in ${repository.fullName}.`,
+        );
+      }
+      const commentId = thread.comments.nodes[0]?.databaseId;
+      if (!commentId) {
+        throw new SourceControlWriteError(
+          422,
+          `GitHub review thread ${threadId} has no root comment available to reply to.`,
+        );
+      }
+      // REST publishes the reply immediately without creating or submitting a pending review.
+      const { data: comment } =
+        await octokit.rest.pulls.createReplyForReviewComment({
+          owner,
+          repo,
+          pull_number: input.prNumber,
+          comment_id: commentId,
+          body: requireBody(input),
+        });
 
       return buildWriteResult({
         input,
         provider,
         repository,
         threadId,
-        commentId:
-          comment?.databaseId != null ? String(comment.databaseId) : null,
-        url: comment?.url ?? null,
+        commentId: String(comment.id),
+        url: comment.html_url ?? null,
       });
     }
     case 'create_pull_request_comment': {
@@ -965,13 +1016,34 @@ async function writeGitHubPullRequest({
       // GitHub requires a body string for COMMENT reviews; approvals and
       // change requests may omit it entirely.
       const body = reviewEvent === 'comment' ? (input.body ?? '') : input.body;
-      const { data } = await octokit.rest.pulls.createReview({
+      const request = {
         owner,
         repo,
         pull_number: input.prNumber,
         event: GITHUB_REVIEW_EVENTS[reviewEvent],
         ...(body !== undefined ? { body } : {}),
-      });
+      };
+      let response;
+      if (input.reviewId) {
+        const reviewId = Number(input.reviewId);
+        if (
+          !/^\d+$/.test(input.reviewId) ||
+          !Number.isSafeInteger(reviewId) ||
+          reviewId <= 0
+        ) {
+          throw new SourceControlWriteError(
+            400,
+            'reviewId must be a positive safe integer for GitHub review submission.',
+          );
+        }
+        response = await octokit.rest.pulls.submitReview({
+          ...request,
+          review_id: reviewId,
+        });
+      } else {
+        response = await octokit.rest.pulls.createReview(request);
+      }
+      const { data } = response;
 
       return buildWriteResult({
         input,

@@ -10,6 +10,7 @@ import {
   PRODUCT_NAME,
   buildRepositoryCloneUrl,
   renderManualSkillMarkdown,
+  isSafeSkillName,
   stripCloneUrlUserInfo,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -1394,7 +1395,7 @@ export class WorkspaceManager {
   ): Promise<void> {
     const entries = manualSkills.filter(
       (manualSkill) =>
-        manualSkill.name.trim().length > 0 &&
+        isSafeSkillName(manualSkill.name.trim()) &&
         manualSkill.content.trim().length > 0,
     );
 

@@ -2,6 +2,7 @@ import { configDefaults, defineConfig } from 'vitest/config';
 
 const globalDbStateTests = [
   'src/server/lib/source-control-connection.test.ts',
+  'src/server/automations/__tests__/ci-failure-triage-routing.integration.test.ts',
   'src/server/lib/task-runs/__tests__/platform-issue-alert-delivery.test.ts',
 ];
 

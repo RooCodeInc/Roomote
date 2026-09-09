@@ -5,12 +5,14 @@ const {
   authorizeMock,
   disconnectSessionPresenceMock,
   findAccessibleSessionMock,
+  findReadableSessionMock,
   refreshSessionPresenceMock,
   listSessionPresentUserIdsMock,
 } = vi.hoisted(() => ({
   authorizeMock: vi.fn(),
   disconnectSessionPresenceMock: vi.fn(),
   findAccessibleSessionMock: vi.fn(),
+  findReadableSessionMock: vi.fn(),
   refreshSessionPresenceMock: vi.fn(),
   listSessionPresentUserIdsMock: vi.fn(),
 }));
@@ -18,6 +20,7 @@ const {
 vi.mock('@/lib/server/auth-context', () => ({ authorize: authorizeMock }));
 vi.mock('@/lib/server/sessions', () => ({
   findAccessibleSession: findAccessibleSessionMock,
+  findReadableSession: findReadableSessionMock,
 }));
 vi.mock('@roomote/redis', () => ({
   disconnectSessionPresence: disconnectSessionPresenceMock,
@@ -60,6 +63,7 @@ describe('/api/sessions/[sessionId]/presence', () => {
       isAdmin: false,
     });
     findAccessibleSessionMock.mockResolvedValue({ id: SESSION_ID });
+    findReadableSessionMock.mockResolvedValue({ id: SESSION_ID });
     refreshSessionPresenceMock.mockResolvedValue({ expiresAt: 31_000 });
     listSessionPresentUserIdsMock.mockResolvedValue([]);
   });
@@ -81,7 +85,7 @@ describe('/api/sessions/[sessionId]/presence', () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(findAccessibleSessionMock).toHaveBeenCalledWith(
+    expect(findReadableSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({ userId: USER_ID }),
       SESSION_ID,
     );
@@ -105,7 +109,7 @@ describe('/api/sessions/[sessionId]/presence', () => {
     'rejects GET with %s before reading presence',
     async (status) => {
       if (status === 401) authorizeMock.mockResolvedValue({ success: false });
-      if (status === 404) findAccessibleSessionMock.mockResolvedValue(null);
+      if (status === 404) findReadableSessionMock.mockResolvedValue(null);
       const response = await GET(
         new NextRequest('http://localhost'),
         status === 400
@@ -115,7 +119,7 @@ describe('/api/sessions/[sessionId]/presence', () => {
       expect(response.status).toBe(status);
       expect(listSessionPresentUserIdsMock).not.toHaveBeenCalled();
       if (status !== 404)
-        expect(findAccessibleSessionMock).not.toHaveBeenCalled();
+        expect(findReadableSessionMock).not.toHaveBeenCalled();
     },
   );
 
@@ -159,6 +163,17 @@ describe('/api/sessions/[sessionId]/presence', () => {
 
     expect(response.status).toBe(404);
     expect(refreshSessionPresenceMock).not.toHaveBeenCalled();
+  });
+
+  it('allows direct-link reads without granting presence writes', async () => {
+    findAccessibleSessionMock.mockResolvedValue(null);
+    expect((await GET(new NextRequest('http://localhost'), props)).status).toBe(
+      200,
+    );
+    expect((await POST(request('POST'), props)).status).toBe(404);
+    expect((await DELETE(request('DELETE'), props)).status).toBe(404);
+    expect(refreshSessionPresenceMock).not.toHaveBeenCalled();
+    expect(disconnectSessionPresenceMock).not.toHaveBeenCalled();
   });
 
   it('rejects malformed client identifiers', async () => {

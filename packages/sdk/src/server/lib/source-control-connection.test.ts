@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
   wake: vi.fn(),
   deliver: vi.fn(),
   acquireLock: vi.fn(),
-  listTools: vi.fn(),
+  listIntegrations: vi.fn(),
 }));
 vi.mock('bullmq', () => ({
   Queue: class {
@@ -32,9 +32,7 @@ vi.mock('@roomote/redis', () => ({ getRedis: () => ({}) }));
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   findFastAgentDurableRetryScheduledError: () => null,
-  getRouterMcpServerPolicy: () => ({ enabled: true }),
-  resolveApiBaseUrl: () => 'https://roomote.example',
-  listMcpTools: mocks.listTools,
+  listFastAgentIntegrations: mocks.listIntegrations,
 }));
 vi.mock('@roomote/auth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/auth')>()),
@@ -1140,11 +1138,15 @@ describe('source-control connection requests (PostgreSQL)', () => {
       capability: 'source_control_tool' as const,
       tool: { integrationId: 'github', toolName: 'get_file_contents' },
     };
-    mocks.listTools.mockResolvedValue([{ name: 'get_issue' }]);
+    mocks.listIntegrations.mockResolvedValue([
+      { id: 'github', tools: [{ name: 'get_issue' }] },
+    ]);
     expect(await getSourceControlReadiness(operation)).toMatchObject({
       status: 'discovery_unavailable',
     });
-    mocks.listTools.mockResolvedValue([{ name: 'get_file_contents' }]);
+    mocks.listIntegrations.mockResolvedValue([
+      { id: 'github', tools: [{ name: 'get_file_contents' }] },
+    ]);
     expect(await getSourceControlReadiness(operation)).toMatchObject({
       status: 'ready',
     });
@@ -1155,6 +1157,50 @@ describe('source-control connection requests (PostgreSQL)', () => {
       }),
     ).toMatchObject({ status: 'discovery_unavailable' });
   });
+
+  it.each(['gitlab', 'bitbucket'] as const)(
+    'uses fresh actor-scoped broker discovery for native %s tools',
+    async (provider) => {
+      vi.stubEnv(`${provider.toUpperCase()}_CLIENT_ID`, 'test-client');
+      vi.stubEnv(`${provider.toUpperCase()}_CLIENT_SECRET`, 'test-secret');
+      vi.stubEnv('GITLAB_BASE_URL', 'https://gitlab.com');
+      const repo = await repositoryFactory.create({
+        sourceControlProvider: provider,
+        fullName: repositoryFullName,
+        linkedByUserId: admin.id,
+      });
+      try {
+        const operation = {
+          ...input(),
+          provider,
+          capability: 'source_control_tool' as const,
+          tool: { integrationId: provider, toolName: 'get_file_contents' },
+        };
+        mocks.listIntegrations.mockResolvedValue([
+          { id: provider, tools: [{ name: operation.tool.toolName }] },
+        ]);
+        expect(await getSourceControlReadiness(operation)).toMatchObject({
+          status: 'ready',
+        });
+        expect(mocks.listIntegrations).toHaveBeenCalledWith(
+          { userId: user.id, forceFreshDiscovery: true },
+          expect.any(Function),
+        );
+        mocks.listIntegrations.mockResolvedValue([]);
+        expect(await getSourceControlReadiness(operation)).toMatchObject({
+          status: 'discovery_unavailable',
+        });
+        mocks.listIntegrations.mockResolvedValue([
+          { id: provider, tools: [{ name: 'different_tool' }] },
+        ]);
+        expect(await getSourceControlReadiness(operation)).toMatchObject({
+          status: 'discovery_unavailable',
+        });
+      } finally {
+        await db.delete(repositories).where(eq(repositories.id, repo.id));
+      }
+    },
+  );
 
   it('carries only the matching attempted tool from adapter preflight into persisted continuation', async () => {
     const target = { ...input(), capability: 'source_control_tool' as const };

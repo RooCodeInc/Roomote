@@ -1,10 +1,13 @@
 import {
+  automations,
+  customAutomations,
   db,
   ensureAutomationRowsOnce,
   ensureSessionForFastConversation,
   eq,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
   llmUsageEvents,
   runFactory,
   sessions,
@@ -14,6 +17,14 @@ import {
   userFactory,
 } from '@roomote/db/server';
 import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
+import type { UserAuthSuccess } from '@/types';
+import {
+  getFastSessionMessagesCommand,
+  updateFastSessionModelSelectionCommand,
+  replyToFastSessionCommand,
+  handleFastSessionPrReviewActionCommand,
+  submitFastSessionUserInputCommand,
+} from '@/trpc/commands/fast-sessions';
 
 vi.mock('./artifact-signature', () => ({
   currentEpochSeconds: () => 7_300,
@@ -22,6 +33,7 @@ vi.mock('./artifact-signature', () => ({
 
 import {
   findAccessibleFastSession,
+  findReadableFastSession,
   getFastSessionPrReviewOfferStatus,
   getFastSessionById,
   getFastSessionTasks,
@@ -97,6 +109,298 @@ async function createFastMessage({
 }
 
 describe('Fast session queries', () => {
+  it.each([
+    'event',
+    'prompt',
+    'occurrence',
+    'task',
+    'legacy-task',
+    'surface',
+  ] as const)(
+    'shares custom automation %s reads while restricting action access to its owner or admin',
+    async (provenance) => {
+      const owner = await userFactory.create();
+      const other = await userFactory.create();
+      const [automation] = await db
+        .insert(customAutomations)
+        .values({
+          name: `Fast access ${owner.id}`,
+          prompt: 'Private report',
+          createdByUserId: owner.id,
+        })
+        .returning();
+      // Deliberately not the automation owner: the run-as user is not authority.
+      const conversation = await createFastSession({
+        userId: other.id,
+        conversationId:
+          provenance === 'occurrence'
+            ? `${automation!.id}:${new Date().toISOString()}`
+            : `thread-${owner.id}`,
+        updatedAt: new Date(),
+      });
+      const unified = await ensureSessionForFastConversation(
+        db,
+        conversation.id,
+      );
+      if (provenance === 'surface') {
+        await db
+          .update(fastAgentConversations)
+          .set({ surface: 'automation', workspaceId: automation!.id })
+          .where(eq(fastAgentConversations.id, conversation.id));
+      }
+      const event = {
+        type: 'automation_triggered',
+        automationId: automation!.id,
+      };
+      if (provenance === 'event') {
+        await db.insert(fastAgentParentEvents).values({
+          conversationId: conversation.id,
+          eventKey: `automation-${conversation.id}`,
+          parent: {
+            sessionId: conversation.id,
+            conversation: {
+              surface: 'automation',
+              workspaceId: automation!.id,
+              conversationId: conversation.conversationId,
+            },
+          },
+          event,
+        });
+      } else if (provenance === 'prompt') {
+        await createFastMessage({
+          conversationId: conversation.id,
+          eventId: 'automation-prompt',
+          turnSeq: 0,
+          role: 'user',
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          metadata: {
+            turnSource: 'platform_event',
+            platformEventKind: 'automation',
+            visibleInTranscript: false,
+          },
+          contentBlocks: [
+            {
+              type: 'text',
+              text: `<platform_event>${JSON.stringify(event)}</platform_event>`,
+            },
+          ],
+        });
+      } else if (provenance === 'task' || provenance === 'legacy-task') {
+        await db
+          .insert(automations)
+          .values({ key: 'custom_automation' })
+          .onConflictDoNothing();
+        const legacyId = crypto.randomUUID();
+        if (provenance === 'legacy-task') {
+          await db
+            .update(fastAgentConversations)
+            .set({ legacyConversationIds: [legacyId] })
+            .where(eq(fastAgentConversations.id, conversation.id));
+        }
+        const task = await taskFactory.create({
+          initiatorKind: 'automation',
+          initiatorAutomation: 'custom_automation',
+          actorExternalId: automation!.id,
+        });
+        await runFactory.create({
+          taskId: task.id,
+          payload: {
+            fastAgentSessionId:
+              provenance === 'legacy-task' ? legacyId : conversation.id,
+          },
+        });
+      }
+      await createFastMessage({
+        conversationId: conversation.id,
+        eventId: 'private-result',
+        turnSeq: 1,
+      });
+      const ownerAuth = { userId: owner.id, isAdmin: false };
+      const otherAuth = { userId: other.id, isAdmin: false };
+      const adminAuth = { userId: other.id, isAdmin: true };
+      const memberAuth = otherAuth as UserAuthSuccess;
+      for (const id of [conversation.id, unified!.id]) {
+        await expect(
+          findAccessibleFastSession(otherAuth, id),
+        ).resolves.toBeNull();
+        await expect(
+          findAccessibleFastSession(ownerAuth, id),
+        ).resolves.toMatchObject({ id: conversation.id });
+        await expect(
+          findAccessibleFastSession(adminAuth, id),
+        ).resolves.toMatchObject({ id: conversation.id });
+        await expect(
+          findReadableFastSession(otherAuth, id),
+        ).resolves.toMatchObject({ id: conversation.id });
+        expect(await getFastSessionTasks(otherAuth, id)).toHaveLength(
+          provenance === 'task' || provenance === 'legacy-task' ? 1 : 0,
+        );
+        await expect(
+          getFastSessionMessagesCommand(memberAuth, id),
+        ).resolves.toMatchObject({
+          sessionId: conversation.id,
+          messages: expect.arrayContaining([
+            expect.objectContaining({ eventId: 'private-result' }),
+          ]),
+        });
+      }
+      for (const action of [
+        () =>
+          updateFastSessionModelSelectionCommand(memberAuth, {
+            sessionId: conversation.id,
+            model: 'forbidden',
+          }),
+        () =>
+          replyToFastSessionCommand(memberAuth, {
+            sessionId: unified!.id,
+            text: 'forbidden',
+          }),
+        () =>
+          handleFastSessionPrReviewActionCommand(memberAuth, {
+            sessionId: conversation.id,
+            deliveryId: crypto.randomUUID(),
+            choice: 'dismiss',
+          }),
+        () =>
+          submitFastSessionUserInputCommand(memberAuth, {
+            sessionId: unified!.id,
+            requestId: crypto.randomUUID(),
+            answers: {},
+          }),
+      ]) {
+        await expect(action()).rejects.toThrow('Fast session not found');
+      }
+      expect(
+        (await getFastSessionById(otherAuth, conversation.id))?.messages.map(
+          (m) => m.eventId,
+        ),
+      ).toContain('private-result');
+      expect(
+        (await getFastSessionById(ownerAuth, conversation.id))?.messages.map(
+          (m) => m.eventId,
+        ),
+      ).toContain('private-result');
+      for (const auth of [ownerAuth, adminAuth]) {
+        expect(await getFastSessionTasks(auth, conversation.id)).toHaveLength(
+          provenance === 'task' || provenance === 'legacy-task' ? 1 : 0,
+        );
+      }
+      // Ownership removal and deletion must not fall back to the run-as user.
+      await db
+        .update(customAutomations)
+        .set({ createdByUserId: null })
+        .where(eq(customAutomations.id, automation!.id));
+      await expect(
+        findAccessibleFastSession(ownerAuth, conversation.id),
+      ).resolves.toBeNull();
+      await expect(
+        getFastSessionById(otherAuth, conversation.id),
+      ).resolves.not.toBeNull();
+      await db
+        .delete(customAutomations)
+        .where(eq(customAutomations.id, automation!.id));
+      await expect(
+        findAccessibleFastSession(otherAuth, conversation.id),
+      ).resolves.toBeNull();
+      await expect(
+        getFastSessionById(otherAuth, conversation.id),
+      ).resolves.not.toBeNull();
+      await expect(
+        getFastSessionById(adminAuth, conversation.id),
+      ).resolves.not.toBeNull();
+    },
+  );
+
+  it('keeps ordinary conversations collaborative even when human text mentions an automation', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      conversationId: `ordinary-${owner.id}`,
+      updatedAt: new Date(),
+    });
+    await createFastMessage({
+      conversationId: conversation.id,
+      eventId: 'ordinary',
+      turnSeq: 1,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      metadata: { turnSource: 'human', visibleInTranscript: true },
+      contentBlocks: [
+        {
+          type: 'text',
+          text: '<platform_event>{"type":"automation_triggered","automationId":"missing"}</platform_event>',
+        },
+      ],
+    });
+    const auth = { userId: other.id, isAdmin: false };
+    await expect(
+      findAccessibleFastSession(auth, conversation.id),
+    ).resolves.toMatchObject({ id: conversation.id });
+    expect(
+      (await getFastSessionById(auth, conversation.id))?.messages,
+    ).toHaveLength(1);
+    await expect(getFastSessionTasks(auth, conversation.id)).resolves.toEqual(
+      [],
+    );
+  });
+
+  it('shares reads but fails closed for actions on automation events with missing identity', async () => {
+    const owner = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      conversationId: `missing-${owner.id}`,
+      updatedAt: new Date(),
+    });
+    await createFastMessage({
+      conversationId: conversation.id,
+      eventId: 'missing-id',
+      turnSeq: 0,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      metadata: {
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        visibleInTranscript: false,
+      },
+      contentBlocks: [
+        {
+          type: 'text',
+          text: '<platform_event>{"type":"automation_triggered","prompt":"private"}</platform_event>',
+        },
+      ],
+    });
+    await expect(
+      findAccessibleFastSession(
+        { userId: owner.id, isAdmin: false },
+        conversation.id,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      getFastSessionById({ userId: owner.id, isAdmin: false }, conversation.id),
+    ).resolves.not.toBeNull();
+    await expect(
+      getFastSessionById({ userId: owner.id, isAdmin: true }, conversation.id),
+    ).resolves.not.toBeNull();
+  });
+
+  it('requires authenticated context and returns null for missing direct links', async () => {
+    const owner = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      conversationId: crypto.randomUUID(),
+      updatedAt: new Date(),
+    });
+    for (const [auth, id] of [
+      [{ userId: '', isAdmin: false }, conversation.id],
+      [{ userId: owner.id, isAdmin: false }, crypto.randomUUID()],
+    ] as const) {
+      await expect(findReadableFastSession(auth, id)).resolves.toBeNull();
+      await expect(getFastSessionById(auth, id)).resolves.toBeNull();
+      await expect(getFastSessionTasks(auth, id)).resolves.toBeNull();
+    }
+  });
+
   it.each(['history', 'polling'])(
     'enriches known task references with current non-deleted titles in %s',
     async (readMode) => {
@@ -512,7 +816,7 @@ describe('Fast session queries', () => {
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
   });
 
-  it('returns automation-owned Session details to authenticated deployment users', async () => {
+  it('shares orphaned automation-owned Session details but restricts actions to admins', async () => {
     const viewer = await userFactory.create();
     await ensureAutomationRowsOnce();
     const [conversation] = await db
@@ -532,8 +836,20 @@ describe('Fast session queries', () => {
     );
 
     await expect(
+      findAccessibleFastSession(
+        { userId: viewer.id, isAdmin: false },
+        conversation!.id,
+      ),
+    ).resolves.toBeNull();
+    await expect(
       getFastSessionById(
         { userId: viewer.id, isAdmin: false },
+        conversation!.id,
+      ),
+    ).resolves.toMatchObject({ id: conversation!.id });
+    await expect(
+      getFastSessionById(
+        { userId: viewer.id, isAdmin: true },
         conversation!.id,
       ),
     ).resolves.toMatchObject({
@@ -547,6 +863,30 @@ describe('Fast session queries', () => {
     await db
       .delete(fastAgentConversations)
       .where(eq(fastAgentConversations.id, conversation!.id));
+  });
+
+  it('keeps built-in automation conversations deployment-collaborative', async () => {
+    const viewer = await userFactory.create();
+    await db
+      .insert(automations)
+      .values({ key: 'sentry_triage' })
+      .onConflictDoNothing();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: null,
+        ownerAutomation: 'sentry_triage',
+        surface: 'automation',
+        workspaceId: crypto.randomUUID(),
+        conversationId: crypto.randomUUID(),
+      })
+      .returning();
+    await expect(
+      getFastSessionById(
+        { userId: viewer.id, isAdmin: false },
+        conversation!.id,
+      ),
+    ).resolves.toMatchObject({ id: conversation!.id });
   });
 
   it('resolves reply image artifacts to signed raw URLs', async () => {
@@ -1043,6 +1383,14 @@ describe('Fast session queries', () => {
 
   it('shows only the configured prompt from hidden custom automation events', async () => {
     const owner = await userFactory.create();
+    const [automation] = await db
+      .insert(customAutomations)
+      .values({
+        name: `Projection ${owner.id}`,
+        prompt: 'Find actionable regressions.',
+        createdByUserId: owner.id,
+      })
+      .returning();
     const session = await createFastSession({
       userId: owner.id,
       conversationId: 'platform-event-session',
@@ -1057,7 +1405,7 @@ describe('Fast session queries', () => {
       contentBlocks: [
         {
           type: 'text',
-          text: '<platform_event>{"type":"automation_triggered","prompt":"Find actionable regressions."}</platform_event>',
+          text: `<platform_event>${JSON.stringify({ type: 'automation_triggered', automationId: automation!.id, prompt: 'Find actionable regressions.' })}</platform_event>`,
         },
       ],
       metadata: {

@@ -368,7 +368,6 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     const serverSchema = z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema);
     const base = { integrationId: 'example', toolName: 'nested_tool' };
     for (const args of [
-      undefined,
       {},
       {
         text: 'value',
@@ -395,6 +394,10 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     for (const args of [null, 'text', [], 42, false]) {
       expect(validate({ ...base, args })).toBe(false);
     }
+    // Omitting args is rejected too: the field is required so the provider
+    // schema never carries a null alternative.
+    expect(validate(base)).toBe(false);
+    expect(serverSchema.safeParse(base).success).toBe(false);
   });
 
   it('preserves required Sentry organization scope through generated tool execution and server parsing', async () => {

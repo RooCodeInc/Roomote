@@ -57,6 +57,7 @@ import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
 import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleFastSession,
+  findReadableFastSession,
   buildFastSessionPrReviewDestinationKey,
   getFastSessionById,
   getFastSessionPrReviewOfferStatus,
@@ -616,11 +617,11 @@ export async function getFastSessionMessagesCommand(
   auth: UserAuthSuccess,
   sessionId: string,
 ) {
-  const session = await findAccessibleFastSession(auth, sessionId);
+  const session = await findReadableFastSession(auth, sessionId);
   if (!session) {
     throw new Error('Fast session not found');
   }
-  const detail = await getFastSessionById(auth, sessionId);
+  const detail = await getFastSessionById(auth, session.id);
   if (!detail) {
     throw new Error('Fast session not found');
   }

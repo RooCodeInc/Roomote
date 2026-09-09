@@ -188,7 +188,56 @@ If you add Organization projects permission to an existing app, an organization
 owner must approve the updated permission before Roomote can manage project
 items.
 
+## Multiple installations and searches
+
+GitHub tool discovery supports multiple installations of the configured GitHub
+App. Repository reads and supported writes use the installation connected to the
+requested active repository, with a token scoped to that repository. Suspended
+installations, inactive or disconnected repositories, and installations of a
+different app are not eligible. Personal GitHub account linkage is not required
+for these deployment-connected tools; coding-run tokens remain read-only on this
+MCP path.
+
+Identify the repository with `owner` and `repo` for repository tools. For code,
+pull request, and repository searches, include exactly one `repo:owner/name`
+qualifier, for example `repo:example/service is:open`. Searches without a
+repository scope, across multiple repositories, or with ambiguous boolean,
+negation, grouping, quoted, or regex syntax are rejected with guidance to split
+the request. Optional `owner` and `repo` search arguments must match the query.
+This applies with one installation too: Roomote does not silently choose one
+installation or return partial cross-installation search coverage. Run separate,
+bounded searches for each connected repository when investigating several.
+
 ## Daily GitHub management
+
+Fast can use the native `update_pull_request`, `add_issue_comment`, and
+`add_reply_to_pull_request_comment` tools without starting a coding task.
+Their discovered descriptions and schemas define the supported arguments,
+including reviewer requests, draft status, base retargeting, maintainer edit
+permission, comments, replies, and reactions. These actions use the deployment
+GitHub App, require an active Roomote member and an active connected repository,
+and remain subject to the installation's issue or pull request write permission.
+No personal GitHub OAuth connection is required. Ask for the specific change and
+identify the repository and target issue, pull request, or comment. Authorization
+is repository-scoped, not restricted to pull requests. A reaction-only call on an
+existing review comment can use `commentId` without `pullNumber` when allowed by
+the discovered native schema.
+
+For example, ask Roomote to:
+
+- mark PR #42 in `example/repo` ready for review
+- request a review from `octocat` on that PR
+- add a thumbs-up reaction to an existing comment, providing its GitHub URL
+
+Retargeting a pull request's base to an existing branch does not write a branch
+or change files. Merging, creating or deleting pull requests, writing branches
+or files, editing or deleting comments, and repository administration are
+not available through this bounded Fast path; those requests still require a
+coding task. Other source-control providers are unchanged.
+
+Native updates that combine several actions are not guaranteed to be atomic.
+After an error, Roomote inspects the resulting state before retrying so an action
+that already succeeded is not blindly repeated.
 
 Roomote tasks can manage routine repository work through the GitHub App
 installation. Requests default to the repository mapped to the task:

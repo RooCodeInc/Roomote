@@ -5,10 +5,8 @@ const requiredSnowflakeField = (label: string) =>
   z.string().trim().min(1, `${label} is required`);
 
 export const saveSnowflakeConnectionSchema = z.object({
-  authMethod: z.literal('key_pair').default('key_pair'),
   account: requiredSnowflakeField('Account identifier'),
   username: requiredSnowflakeField('Username'),
-  password: z.string().default(''),
   privateKey: z.string(),
   privateKeyPassphrase: z.string(),
   role: requiredSnowflakeField('Role'),

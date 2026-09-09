@@ -1,1 +1,0 @@
-ALTER TABLE "source_control_connection_requests" ADD COLUMN "tool" jsonb;

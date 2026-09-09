@@ -70,6 +70,87 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('keeps supported Bitbucket reads API-first without a checkout or task', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain(
+      'For focused Bitbucket Cloud reads and supported writes',
+    );
+    expect(prompt).toContain(
+      'discover the available Bitbucket tool schema with `find_integration_tools`',
+    );
+    expect(prompt).toContain('then use `call_integration_tool`');
+    expect(prompt).toContain(
+      'Apply the same scope-based exploration rule as other providers',
+    );
+    expect(prompt).toContain(
+      'Follow discovered schemas rather than guessing arguments',
+    );
+    expect(prompt).toContain(
+      'Otherwise apply the scope-based exploration rule above; delegate execution, code changes, or testing',
+    );
+  });
+
+  it('bounds Bitbucket search and distinguishes supported writes from unsupported actions', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain('Reads cap responses at 1 MiB');
+    expect(prompt).toContain('never claim a single page is exhaustive');
+    expect(prompt).toContain('Code search is deprecated November 1, 2026');
+    expect(prompt).toContain('not query operators or repository filters');
+    expect(prompt).toContain(
+      'without broadening the search or bypassing API permissions through a task',
+    );
+    const writes = prompt
+      .split('- Bitbucket writes require')[1]!
+      .split('\n')[0]!;
+    expect(writes).toContain(
+      'update PR titles/descriptions, decline PRs, or add comments and replies to a comment in the same PR',
+    );
+    expect(writes).toContain('Reading does not authorize writes');
+    expect(writes).toContain(
+      'Reopening/merging PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
+    );
+    expect(prompt).toContain(
+      'an actual code-review request still uses "review_pull_request"',
+    );
+  });
+
+  it('supports explicit instance invocation and member creation without environments', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(prompt).toContain(
+      'packaged > instance > legacy Settings > repository',
+    );
+    expect(prompt).toContain(
+      'load the instance match without asking for an environment',
+    );
+    expect(prompt).toContain('Instance skills have no `environmentIds`');
+    expect(prompt).toContain(
+      'select an environment only if its work requires a coding task',
+    );
+    expect(prompt).toContain('supplemental guidance, not packaged routers');
+    expect(prompt).toContain('cannot replace packaged first-hop routing');
+    const creationGuidance = prompt
+      .split('- Use `roomote_create_custom_skill`')[1]!
+      .split('\n')[0]!;
+    expect(creationGuidance).toContain('only when the user explicitly asks');
+    expect(creationGuidance).toContain('Any active deployment member');
+    expect(creationGuidance).toContain(
+      'do not supply environmentIds or ask for environment selection',
+    );
+    expect(creationGuidance).toContain(
+      'including when no environments are configured',
+    );
+    expect(creationGuidance).toContain('only after persistence succeeds');
+    expect(creationGuidance).toContain('exact returned `instance:<uuid>` ID');
+    expect(creationGuidance).toContain(
+      'Advisor and judge subagents cannot create skills',
+    );
+    expect(creationGuidance).not.toContain('admin-only');
+    expect(creationGuidance).not.toContain('enabled environments');
+  });
+
   it('bounds evidence-driven autonomy without weakening investigation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
     expect(prompt).toContain(
@@ -141,10 +222,9 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('guides admins through explicit recurring work and offers automation only when enabled', () => {
+  it('guides every member through recurring work and offers automation when enabled', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
     });
 
     expect(prompt).toContain('## Recurring Work and Automations');
@@ -155,31 +235,28 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('ask one explicit confirmation question');
     expect(prompt).toContain('By the way — if you want this weekly');
     expect(prompt).toContain('when in doubt, do not offer');
+    expect(prompt).toContain('When a user explicitly asks for recurring work');
+    expect(prompt).not.toContain('do not attempt creation');
+    expect(prompt).not.toContain('provide a copy-pasteable draft');
   });
 
-  it('suppresses implicit offers for non-admins, automation events, and the deployment kill switch', () => {
-    const nonAdminPrompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-    });
+  it('suppresses implicit offers for automation events and the deployment kill switch', () => {
     const eventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
       turnSource: 'platform_event',
       platformEventKind: 'automation',
     });
     const disabledPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      isCurrentUserAdmin: true,
       implicitAutomationOffersEnabled: false,
     });
 
-    for (const prompt of [nonAdminPrompt, eventPrompt, disabledPrompt]) {
+    for (const prompt of [eventPrompt, disabledPrompt]) {
       expect(prompt).not.toContain('By the way — if you want this weekly');
       expect(prompt).toContain(
         'Do not proactively offer to save work as an automation on this turn',
       );
     }
-    expect(nonAdminPrompt).toContain('provide a copy-pasteable draft');
   });
 
   it('tells human turns how to handle an unresolved earlier request', () => {
@@ -365,7 +442,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('settings-defined playbook');
     expect(prompt).toContain('repository-defined method');
     expect(prompt).toContain(
-      'without arguments for the complete packaged and Settings inventory',
+      'without arguments for the complete packaged, instance, and authorized legacy Settings inventory',
     );
     expect(prompt).toContain('this never inspects repositories');
     expect(prompt).toContain(
@@ -378,7 +455,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Dollar-prefixed prose without this marker is not an explicit skill invocation',
     );
     expect(prompt).toContain(
-      'An unscoped exact `name` lookup searches packaged and settings-defined skills',
+      'An unscoped exact `name` lookup searches packaged, instance, and authorized legacy Settings skills',
     );
     expect(prompt).toContain(
       'whenever a result includes `nextSourceOffset`, call `list_skills` again',
@@ -409,9 +486,30 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
     expect(prompt).toContain('manage_custom_automations');
+    expect(prompt).toContain('roomote_create_custom_skill');
+    expect(prompt).toContain('user explicitly asks to save');
+    expect(prompt).toContain(
+      'do not supply environmentIds or ask for environment selection',
+    );
+    expect(prompt).toContain('exact returned `instance:<uuid>` ID');
     expect(prompt).not.toContain('integration_call');
     expect(prompt).toContain('roomote_manage_tasks');
     expect(prompt).toContain("current user's deployment authorization");
+    expect(prompt).toContain(
+      'members can create and manage their own custom automations',
+    );
+    expect(prompt).toContain(
+      'admins can manage all custom automations, including those without a creator',
+    );
+    expect(prompt).toContain(
+      "do not refuse a member's own-automation request merely because they are not an admin",
+    );
+    expect(prompt).toContain(
+      'Built-in automations and deployment settings remain admin-only',
+    );
+    expect(prompt).toContain(
+      'This tool is unavailable to advisor and judge subagents',
+    );
     expect(prompt).toContain('use "run_now" rather than "launch_task"');
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
@@ -558,6 +656,26 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('`call_integration_tool`');
   });
 
+  it('prefers discovered provider APIs without bypassing task and structured review delegation', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [],
+    });
+    expect(prompt).toContain(
+      'For focused repository reads and requested supported writes, prefer discovered source-control provider API tools',
+    );
+    expect(prompt).toContain('do not assume providers share capabilities');
+    expect(prompt).toContain('do not claim its API access is available');
+    expect(prompt).not.toContain('For GitLab API-only requests');
+    expect(prompt).toContain(
+      'Local checkout inspection, code edits, commands, and validation still require a delegated task',
+    );
+    expect(prompt).toContain(
+      'code reviews still use "review_pull_request" and its structured review pipeline',
+    );
+    expect(prompt).not.toContain('#### GitLab [id: gitlab]');
+  });
+
   it('includes shared memory guidance when a memory MCP is available', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -613,7 +731,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'regardless of whether the message is phrased as a question, request, or declarative feedback',
     );
     expect(prompt).toContain(
-      'A message that requires repository or workspace inspection, execution, change, or validation should be delegated',
+      'Otherwise apply the scope-based exploration rule above; delegate execution, code changes, or testing',
     );
     expect(prompt).not.toContain(
       'A question that requires repository or workspace inspection',
@@ -688,6 +806,136 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it.each(['human', 'automation', 'scheduled_wakeup'] as const)(
+    'keeps bounded source reads API-first on %s turns',
+    (turn) => {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        ...(turn === 'human'
+          ? {}
+          : { turnSource: 'platform_event' as const, platformEventKind: turn }),
+      });
+
+      expect(prompt).toContain(
+        'Repository code exploration does not inherently require a coding task or local clone',
+      );
+      expect(prompt).toContain(
+        'Discover the available source-control integrations and their actual tools for files, directories, code search, commits, and pull/merge request diffs when supported',
+      );
+      const explorationGuidance = prompt
+        .split('- Repository code exploration')[1]!
+        .split('- For requested GitHub updates')[0]!;
+      expect(explorationGuidance).not.toMatch(/GitHub|GitLab|Bitbucket/);
+      expect(prompt).toContain(
+        'Use only the methods and arguments exposed by the discovered schemas',
+      );
+      expect(prompt).toContain('Scope searches to the target repository');
+      expect(prompt).toContain('bound pagination to the question');
+      expect(prompt).toContain(
+        'These API reads do not require a clone, workspace provisioning, or task delegation',
+      );
+      expect(prompt).toContain(
+        'Distinguish API evidence, including reported CI results, from execution or testing you performed yourself',
+      );
+      expect(prompt).toContain(
+        'when local checkout, local edits, execution, or testing is required',
+      );
+      expect(prompt).toContain('available API tools do not suffice');
+      expect(prompt).toContain(
+        'Prefer APIs for focused questions such as "Do we have X?" or locating a setting',
+      );
+      expect(prompt).toContain(
+        'choose "launch_task" directly, without mandatory API attempts',
+      );
+      for (const criterion of [
+        'expected file volume',
+        'broad cross-module tracing',
+        'exhaustive caller or coverage needs',
+        'indexing/search limitations',
+        'excessive API round trips',
+      ])
+        expect(prompt).toContain(criterion);
+      expect(prompt).toContain(
+        'Use judgment, not a fixed file-count threshold',
+      );
+      expect(prompt).toContain(
+        'escalate and carry useful paths, refs, symbols, and findings into the task prompt',
+      );
+      expect(prompt).toContain('Paginate or narrow sensibly');
+      expect(prompt).toContain(
+        'Authorization denials must never be bypassed via a task',
+      );
+      if (turn !== 'human') {
+        expect(prompt).toContain(
+          'same scope-based exploration and execution delegation rules',
+        );
+      }
+      expect(prompt).toContain(
+        'pin follow-up reads to an immutable commit ref when the provider tools support it',
+      );
+      expect(prompt).toContain('Do not invent a shared revision parameter');
+      expect(prompt).toContain(
+        'search may cover only an indexed/default branch',
+      );
+      expect(prompt).toContain(
+        'disclose that limitation rather than silently combining revisions',
+      );
+      expect(prompt).toContain(
+        'a partial or empty search is not proof of absence',
+      );
+      expect(prompt).toContain('source-inspected, not tested or reproduced');
+      expect(prompt).toContain(
+        'Local worktree state, generated files, dependency installation, builds, and reproduction require delegated execution when needed',
+      );
+      expect(prompt).toContain(
+        "A permission denial is not a reason to bypass the integration's authorization through another route",
+      );
+      expect(prompt).toContain(
+        'Use "review_pull_request" when the user asks for a code review of a pull request',
+      );
+      expect(prompt).toContain('including documents grounded in API reads');
+      for (const obsoleteRule of [
+        'read_repository',
+        'inspect_repository',
+        'rename_pull_request',
+        'close_pull_request',
+        'legacy installation-wide GitHub proxy',
+        'when inspection, editing, execution, or validation is required',
+        'when external inspection, editing, execution, or validation is required',
+        'requires repository or workspace inspection, execution, change, or validation',
+        'when creating the output requires repository or filesystem work',
+        'delegate a task when repository or workspace work is needed',
+        'API tools before launching workspace work',
+        'Do not clone a repository or use "launch_task" for these operations',
+        'launch a task only when repository or workspace execution is actually required',
+      ]) {
+        expect(prompt).not.toContain(obsoleteRule);
+      }
+    },
+  );
+
+  it('keeps bounded GitHub updates in Fast without bypassing denied writes', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain(
+      'these bounded actions do not require a coding task',
+    );
+    expect(prompt).toContain(
+      'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
+    );
+    expect(prompt).toContain(
+      "A permission denial is not a reason to bypass the integration's authorization",
+    );
+    for (const guidance of [
+      '`update_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
+      'Follow their discovered descriptions, schemas, and arguments',
+      'Read the target first, send only the requested fields',
+      'report success only after the tool confirms it',
+      'inspect the resulting state before retrying an error',
+    ]) {
+      expect(prompt).toContain(guidance);
+    }
+  });
+
   it('treats replies as continuations of the existing conversation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
@@ -737,7 +985,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not launch a task or call an integration merely to re-check user-supplied facts unless the user asks for verification',
     );
     expect(prompt).toContain(
-      'If the message actually requires repository or workspace inspection, execution, change, or validation, delegate it',
+      'For investigation requests, choose APIs or a task using the scope-based rule below',
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),
@@ -1029,6 +1277,24 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Post its supplied information, then stop');
     expect(prompt).not.toContain(
       'The normal tools remain available. Use them only when the event and conversation context justify the action',
+    );
+  });
+
+  it('summarizes PR feedback without a closing question or offer', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventHandling: 'present_only',
+    });
+
+    expect(prompt).toContain(
+      'Summarize the findings only in one closeout, then stop. Do not ask a closing question, repeat or paraphrase a supplied question, or offer to resolve the issues in your message.',
+    );
+    expect(prompt).toContain(
+      'The conversation adapter supplies any pending user-approvable actions.',
+    );
+    expect(prompt).toContain(
+      'Do not launch a fix or call "send_task_message" until the user explicitly responds or clicks an action.',
     );
   });
 

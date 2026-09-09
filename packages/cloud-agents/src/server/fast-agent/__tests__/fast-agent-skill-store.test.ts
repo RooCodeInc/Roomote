@@ -184,6 +184,7 @@ describe('FastAgentSkillStore', () => {
       environmentId: 'environment-1',
     });
     expect(catalog.counts).toEqual({
+      instance: 0,
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 1,
       settings: 0,
@@ -207,6 +208,7 @@ describe('FastAgentSkillStore', () => {
     const packagedOnlyCatalog = await store.list();
     expect(repositorySkills.list).not.toHaveBeenCalled();
     expect(packagedOnlyCatalog.counts).toEqual({
+      instance: 0,
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 0,
       settings: 0,
@@ -280,6 +282,7 @@ describe('FastAgentSkillStore', () => {
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 0,
       settings: 2,
+      instance: 0,
       total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 2,
     });
   });
@@ -343,6 +346,7 @@ describe('FastAgentSkillStore', () => {
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 0,
       settings: 1,
+      instance: 0,
       total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
     });
   });
