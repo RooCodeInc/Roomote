@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { store, resolveFooter, schedule, forget, renew, failures } = vi.hoisted(
-  () => ({
+const { store, get, resolveFooter, schedule, forget, renew, failures } =
+  vi.hoisted(() => ({
     store: new Map<string, string>(),
+    get: vi.fn(),
     resolveFooter: vi.fn(),
     schedule: vi.fn().mockResolvedValue(undefined),
     forget: vi.fn(),
     renew: vi.fn(),
     failures: { recordWrite: false },
-  }),
-);
+  }));
 vi.mock('../thread-footer-refresh', () => ({
   resolveCurrentThreadFooterText: resolveFooter,
   scheduleThreadFooterRefresh: schedule,
@@ -17,7 +17,7 @@ vi.mock('../thread-footer-refresh', () => ({
 }));
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
-    get: async (key: string) => store.get(key) ?? null,
+    get,
     set: async (key: string, value: string, ...args: unknown[]) => {
       if (failures.recordWrite && key.includes(':thread_reply_footer:'))
         throw new Error('Redis write unavailable');
@@ -91,6 +91,41 @@ const tick = (edit = vi.fn().mockResolvedValue(undefined)) =>
   refreshManagedThreadReplyFooter({ ...target, edit });
 
 describe('current footer refresh serialization', () => {
+  it('rejects an initial write when the lease changes after the final check', async () => {
+    await write();
+    const lockKey = 'discord:thread_reply_footer_lock:parent:thread';
+    const competitor = { ...record, messageId: 'competitor' };
+    const posted = { ...record, messageId: 'orphan' };
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    const warning = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      deliverManagedThreadReplyFooter({
+        provider: 'discord',
+        providerLabel: 'Discord',
+        channelId: 'parent',
+        footerStateThreadId: 'thread',
+        lockKey,
+        logRef: 'test',
+        logContext: 'test',
+        clearPreviousFooter: cleanup,
+        postReplyWithFooter: async () => {
+          get.mockImplementationOnce(async (key: string) => {
+            expect(key).toBe(lockKey);
+            const owner = store.get(key);
+            store.set(key, 'competitor-owner');
+            await write(competitor);
+            return owner;
+          });
+          return posted;
+        },
+      }),
+    ).resolves.toEqual(posted);
+    expect(await read()).toEqual(competitor);
+    expect(cleanup).toHaveBeenCalledExactlyOnceWith(posted);
+    expect(store.get(lockKey)).toBe('competitor-owner');
+    expect(schedule).toHaveBeenCalledTimes(2);
+    warning.mockRestore();
+  });
   it.each(['competitor', 'current'])(
     'cleans a late refresh only when another carrier is current (%s)',
     async (currentId) => {
@@ -290,6 +325,9 @@ describe('current footer refresh serialization', () => {
     expect(payload).not.toHaveProperty('components');
   });
   beforeEach(() => {
+    get
+      .mockReset()
+      .mockImplementation(async (key: string) => store.get(key) ?? null);
     store.clear();
     vi.clearAllMocks();
     failures.recordWrite = false;

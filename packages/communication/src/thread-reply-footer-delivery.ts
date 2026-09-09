@@ -130,7 +130,7 @@ export async function deliverManagedThreadReplyFooter<
 }): Promise<TReply> {
   return withThreadReplyFooterLock({
     lockKey: params.lockKey,
-    fn: async (assertLock) => {
+    fn: async (assertLock, lock) => {
       let previousFooterRecord: ThreadReplyFooterRecord | null = null;
       try {
         previousFooterRecord = await getThreadReplyFooterRecord(
@@ -151,7 +151,7 @@ export async function deliverManagedThreadReplyFooter<
 
       try {
         await assertLock();
-        await setThreadReplyFooterRecord(
+        const written = await setThreadReplyFooterRecord(
           params.provider,
           params.channelId,
           params.footerStateThreadId,
@@ -164,7 +164,9 @@ export async function deliverManagedThreadReplyFooter<
               ? { images: posted.images }
               : {}),
           },
+          { lock },
         );
+        if (!written) throw new Error('Thread reply footer lock lease lost');
       } catch (error) {
         console.error(
           `[${params.logContext}] Failed to persist latest ${params.providerLabel} footer record ${posted.messageId}: ${

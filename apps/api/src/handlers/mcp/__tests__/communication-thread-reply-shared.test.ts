@@ -44,6 +44,58 @@ import {
 } from '../communication-thread-reply-shared';
 
 describe('deliverManagedThreadReplyFooter', () => {
+  it('rejects an initial write when the lease changes after the final check', async () => {
+    const lock = { key: 'lock', ownerId: 'original-owner' };
+    const original = { messageId: 'original', textWithoutFooter: 'Old' };
+    const competitor = { messageId: 'competitor', textWithoutFooter: 'B' };
+    const posted = { messageId: 'orphan', textWithoutFooter: 'A' };
+    let current = original;
+    let owner = lock.ownerId;
+    const assertLock = vi.fn(async () => {
+      expect(owner).toBe(lock.ownerId);
+      if (assertLock.mock.calls.length === 2) {
+        owner = 'competitor-owner';
+        current = competitor;
+      }
+    });
+    withThreadReplyFooterLockMock.mockImplementation(async ({ fn }) =>
+      fn(assertLock, lock),
+    );
+    getThreadReplyFooterRecordMock.mockImplementation(async () => current);
+    setThreadReplyFooterRecordMock.mockImplementation(
+      async (_provider, _channel, _thread, record, options) => {
+        if (options?.lock && options.lock.ownerId !== owner) return false;
+        current = record;
+        return true;
+      },
+    );
+    const cleanup = vi.fn().mockResolvedValue(undefined);
+    const warning = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(
+      deliverManagedThreadReplyFooter({
+        provider: 'teams',
+        providerLabel: 'Teams',
+        channelId: 'C',
+        footerStateThreadId: 'T',
+        lockKey: 'lock',
+        runId: 1,
+        logContext: 'test',
+        postReplyWithFooter: async () => posted,
+        clearPreviousFooter: cleanup,
+      }),
+    ).resolves.toEqual(posted);
+    expect(current).toEqual(competitor);
+    expect(setThreadReplyFooterRecordMock).toHaveBeenCalledExactlyOnceWith(
+      'teams',
+      'C',
+      'T',
+      posted,
+      { lock },
+    );
+    expect(cleanup).toHaveBeenCalledExactlyOnceWith(posted);
+    expect(owner).toBe('competitor-owner');
+    warning.mockRestore();
+  });
   it('a lease lost after posting leaves the competitor pointer untouched and cleans only the new reply', async () => {
     let owned = true;
     const competitor = { messageId: 'competitor', textWithoutFooter: 'B' };
@@ -82,10 +134,10 @@ describe('deliverManagedThreadReplyFooter', () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
-    withThreadReplyFooterLockMock.mockImplementation(async ({ fn }) =>
-      fn(async () => {}),
+    withThreadReplyFooterLockMock.mockImplementation(async ({ fn, lockKey }) =>
+      fn(async () => {}, { key: lockKey, ownerId: 'owner' }),
     );
-    setThreadReplyFooterRecordMock.mockResolvedValue(undefined);
+    setThreadReplyFooterRecordMock.mockResolvedValue(true);
     resolveThreadReplyFooterContextMock.mockResolvedValue({
       linkedPrs: [],
       livePreviewUrl: null,
@@ -163,6 +215,7 @@ describe('deliverManagedThreadReplyFooter', () => {
           },
         ],
       },
+      { lock: { key: 'lock-1', ownerId: 'owner' } },
     );
     expect(reply).toEqual({
       messageId: 'new-message',
@@ -208,6 +261,7 @@ describe('deliverManagedThreadReplyFooter', () => {
         messageId: 'same-message',
         textWithoutFooter: '',
       },
+      { lock: { key: 'lock-1', ownerId: 'owner' } },
     );
   });
 });
