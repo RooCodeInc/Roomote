@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, type Ref } from 'react';
+import { useState, useCallback, useEffect, useRef, type Ref } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
@@ -62,6 +62,7 @@ export function NewTaskForm({
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<
     ReasoningEffort | null | undefined
   >(undefined);
+  const emptySessionConversationIdRef = useRef<string | null>(null);
 
   useEffect(() => setPromptText(promptParam), [promptParam]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
@@ -75,6 +76,8 @@ export function NewTaskForm({
       attachmentTexts?: string[];
       model?: string | null;
       reasoningEffort?: ReasoningEffort | null;
+      conversationId?: string;
+      empty?: true;
     }): Promise<void> => {
       // A second submit while the first is in flight would mint a second
       // session and orphan one of them.
@@ -180,11 +183,21 @@ export function NewTaskForm({
       };
 
       if (!environmentIdParam) {
-        if (
+        const isEmpty =
           !submission.description &&
           !submission.images?.length &&
-          !submission.attachmentTexts?.length
-        ) {
+          !submission.attachmentTexts?.length;
+        if (isEmpty) {
+          emptySessionConversationIdRef.current ??= crypto.randomUUID();
+          await startFastSession({
+            text: '',
+            conversationId: emptySessionConversationIdRef.current,
+            empty: true,
+            model: selectedModelOverrideId,
+            ...(selectedReasoningEffort !== undefined
+              ? { reasoningEffort: selectedReasoningEffort }
+              : {}),
+          });
           return;
         }
         await startFastSession({

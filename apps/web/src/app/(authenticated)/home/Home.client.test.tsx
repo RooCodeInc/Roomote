@@ -18,6 +18,7 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 let currentEnvironmentsPending = false;
 let capturedSubmitWithMetaKey: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
+let submittedPromptText = 'Test prompt';
 
 const {
   mockPush,
@@ -160,8 +161,8 @@ vi.mock('@/components/tasks', async () => {
             if (submitDisabledReason) {
               return;
             }
-            onPromptTextChange?.('Test prompt');
-            const result = onSubmit({ text: 'Test prompt', files: [] });
+            onPromptTextChange?.(submittedPromptText);
+            const result = onSubmit({ text: submittedPromptText, files: [] });
 
             if (result instanceof Promise) {
               void result.catch(() => {});
@@ -234,6 +235,7 @@ describe('Home', () => {
     currentEnvironmentsPending = false;
     capturedSubmitWithMetaKey = undefined;
     capturedDefaultReasoningEffort = undefined;
+    submittedPromptText = 'Test prompt';
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -372,6 +374,23 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
+  });
+
+  it('starts an idempotent empty Session from the existing send button', async () => {
+    submittedPromptText = '';
+    render(<NewTaskForm />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: '',
+        conversationId: expect.any(String),
+        empty: true,
+        model: undefined,
+      });
+    });
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
   });
 
   it('starts a Fast session with an image-only prompt', async () => {

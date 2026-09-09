@@ -56,11 +56,22 @@ function requireFastSessionContent(
     images?: string[];
     attachmentTexts?: string[];
     pinnedLaunch?: unknown;
+    empty?: true;
   },
   ctx: z.RefinementCtx,
 ): void {
   // A pinned launch may open a blank workspace with nothing to say yet.
   if (input.pinnedLaunch) {
+    return;
+  }
+  if (input.empty) {
+    if (input.text || input.images?.length || input.attachmentTexts?.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'An empty session cannot include message content',
+        path: ['empty'],
+      });
+    }
     return;
   }
   if (!input.text && !input.images?.length && !input.attachmentTexts?.length) {
@@ -87,9 +98,20 @@ function requireFastSessionContent(
 export const startFastSessionInputSchema = z
   .object({
     ...fastSessionMessageInputShape,
+    conversationId: z.string().uuid().optional(),
+    empty: z.literal(true).optional(),
     pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
   })
-  .superRefine(requireFastSessionContent);
+  .superRefine((input, ctx) => {
+    requireFastSessionContent(input, ctx);
+    if (input.empty && !input.conversationId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Empty session starts require a conversation ID',
+        path: ['conversationId'],
+      });
+    }
+  });
 
 export const replyToFastSessionInputSchema = z
   .object({

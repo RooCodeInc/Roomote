@@ -66,6 +66,31 @@ describe('Fast session input schemas', () => {
     ).toThrow('Text or at least one attachment is required');
   });
 
+  it('accepts an explicit idempotent empty Session start', () => {
+    expect(
+      startFastSessionInputSchema.parse({
+        text: '',
+        empty: true,
+        conversationId: '11111111-1111-4111-8111-111111111111',
+      }),
+    ).toEqual({
+      text: '',
+      empty: true,
+      conversationId: '11111111-1111-4111-8111-111111111111',
+    });
+
+    expect(() =>
+      startFastSessionInputSchema.parse({ text: '', empty: true }),
+    ).toThrow('Empty session starts require a conversation ID');
+    expect(() =>
+      startFastSessionInputSchema.parse({
+        text: 'Unexpected prompt',
+        empty: true,
+        conversationId: '11111111-1111-4111-8111-111111111111',
+      }),
+    ).toThrow('An empty session cannot include message content');
+  });
+
   it('rejects image values the Fast service cannot use', () => {
     expect(() =>
       startFastSessionInputSchema.parse({

@@ -159,6 +159,9 @@ export default async function SessionDetailPage({
                   hasOlderMessages={session.hasOlderMessages}
                   canReply
                   initialTitle={unifiedSession.title}
+                  initialResponsePending={
+                    unifiedSession.sourceTrigger !== 'manual'
+                  }
                   fallbackTitle={unifiedSession.title}
                   sessionModel={session.model}
                   sessionReasoningEffort={session.reasoningEffort}

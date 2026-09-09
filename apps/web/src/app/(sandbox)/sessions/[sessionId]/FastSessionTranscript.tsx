@@ -107,7 +107,11 @@ type PendingResponseState = {
 };
 
 type PendingResponseAction =
-  | { type: 'hydrate'; messages: TranscriptMessage[] }
+  | {
+      type: 'hydrate';
+      messages: TranscriptMessage[];
+      initialResponsePending?: boolean;
+    }
   | {
       type: 'messages';
       messages: TranscriptMessage[];
@@ -147,7 +151,8 @@ export function pendingResponseReducer(
   if (action.type === 'hydrate' || action.type === 'messages') {
     let pendingAfter =
       action.type === 'hydrate'
-        ? action.messages.length === 0
+        ? action.initialResponsePending !== false &&
+          action.messages.length === 0
           ? { id: '', ts: 0, turnSeq: -1 }
           : null
         : state.pendingAfter;
@@ -262,6 +267,7 @@ export function FastSessionTranscript({
   hasOlderMessages,
   canReply,
   initialTitle = null,
+  initialResponsePending = true,
   fallbackTitle = 'New session',
   sessionModel = null,
   sessionReasoningEffort = null,
@@ -277,6 +283,8 @@ export function FastSessionTranscript({
   hasOlderMessages?: boolean;
   canReply?: boolean;
   initialTitle?: string | null;
+  /** Whether an empty initial transcript is waiting on a scheduled kickoff. */
+  initialResponsePending?: boolean;
   fallbackTitle?: string;
   sessionModel?: string | null;
   sessionReasoningEffort?: ReasoningEffort | null;
@@ -320,7 +328,7 @@ export function FastSessionTranscript({
           latestVisibleResponse: null,
           optimisticRollback: null,
         },
-        { type: 'hydrate', messages },
+        { type: 'hydrate', messages, initialResponsePending },
       ),
   );
   const [replyError, setReplyError] = useState<string | null>(null);

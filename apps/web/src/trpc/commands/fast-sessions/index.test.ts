@@ -250,6 +250,9 @@ describe('startFastSessionCommand', () => {
       where: () => ({ limit: mocks.dbSelectLimit }),
     });
     mocks.dbSelectLimit.mockResolvedValue([]);
+    mocks.dbUpdate.mockReturnValue({ set: mocks.dbSet });
+    mocks.dbSet.mockReturnValue({ where: mocks.dbWhere });
+    mocks.dbWhere.mockResolvedValue(undefined);
   });
 
   it('recovers an idempotent Session without scheduling its first turn twice', async () => {
@@ -297,6 +300,39 @@ describe('startFastSessionCommand', () => {
     });
 
     expect(mocks.after).toHaveBeenCalledOnce();
+  });
+
+  it('idempotently creates an empty Session without scheduling a Fast turn', async () => {
+    const input = {
+      text: '',
+      empty: true as const,
+      conversationId: '11111111-1111-4111-8111-111111111111',
+    };
+
+    await expect(startFastSessionCommand(auth, input)).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      fastConversationId: 'fast-session-1',
+    });
+    mocks.getOrCreateSession.mockResolvedValueOnce({
+      id: 'fast-session-1',
+      created: false,
+    });
+    await expect(startFastSessionCommand(auth, input)).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      fastConversationId: 'fast-session-1',
+    });
+
+    expect(mocks.getOrCreateSession).toHaveBeenCalledTimes(2);
+    expect(mocks.getOrCreateSession).toHaveBeenLastCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: input.conversationId,
+      },
+    });
+    expect(mocks.dbSet).toHaveBeenCalledWith({ sourceTrigger: 'manual' });
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   it('lets the initial Fast Session turn create a Session-owned artifact', async () => {
