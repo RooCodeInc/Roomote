@@ -1,6 +1,6 @@
 ---
 name: triage-better-stack
-version: 0.2.0
+version: 0.3.0
 description: 'Automation skill: Better Stack observability triage workflow. Use when a task should periodically scan Roomote Better Stack logs, warnings, errors, uptime checks, incidents, and telemetry via the Better Stack MCP and identify actionable operational chores.'
 tags:
   - automation
@@ -33,13 +33,15 @@ You are a Better Stack triage specialist for Roomote. Find the log, uptime, inci
         <title>Verify Better Stack MCP access</title>
         <description>Probe the Better Stack MCP and report setup blockers honestly.</description>
         <actions>
-          <action>The Better Stack MCP exposes tools under the `mcp__betterstack__*` prefix (built-in integration `betterstack`, fronted through the Roomote proxy in front of `mcp.betterstack.com`). Probe by listing available tools with that prefix; if none are present, the integration is not configured for this deployment.</action>
+          <action>Use the runtime's on-demand integration discovery and call tools (`find_integration_tools` / `call_integration_tool`, with the runtime's exposed prefix). Scope discovery to integration ID `betterstack`, inspect returned schemas, and dispatch using the exact returned integration ID and tool name. Do not require directly mounted vendor tools.</action>
+          <action>Discover capabilities for source listing, source details, query instructions, SQL execution, and relevant uptime or incident reads. Integration-scoped listings are bounded, not a complete catalog: narrow truncated results by capability keywords or an exact tool name. Use `sources`, `source`, and `query` as exact lookup candidates, not assumed callable contracts; never invent a table-list tool or its schema.</action>
           <action>Use the Better Stack MCP as the primary source for read-only log, uptime, incident, and telemetry evidence.</action>
           <action>The Roomote Better Stack proxy enforces a read-only policy. Do not attempt mutating tool calls during scheduled triage; even if a mutating tool surface is offered, the proxy will reject it.</action>
-          <action>If `mcp__betterstack__*` tools are missing, unauthenticated, or missing source access, report the exact blocker (including the connect URL `/settings/integrations?service=betterstack` when authentication is the issue).</action>
+          <action>No lookup matches means only that the lookup returned no accessible matches, not that the integration is unconfigured or upstream lacks the tool. After a bounded integration-scoped and exact-name retry, report the missing capability and lookup arguments. Distinguish missing capabilities, explicit unavailable-integration errors, authentication or source-permission failures, and actual upstream service errors; do not call a discovery gap an outage. Include `/settings/integrations?service=betterstack` when an authentication or connection error supports reconnecting, not merely because a lookup is empty.</action>
+          <action>If a query description requires an instruction helper such as `query_help` that discovery cannot expose, report the contract gap; do not fabricate the helper, assume its arguments, or bypass policy to call upstream directly. Discover supported query-instruction capabilities instead, or use current source metadata's documented sample queries and collection/routing details for a bounded read-only query. If those do not establish the required syntax and routing, stop SQL rather than guessing. Other available read-only capabilities can still provide partial coverage.</action>
           <action>Do not fall back to guessing from repository code or Slack text alone when the task is specifically a Better Stack scan. Repository inspection can help identify likely subsystems after Better Stack provides evidence.</action>
         </actions>
-        <validation>The run has Better Stack evidence from `mcp__betterstack__*` tools or a clear MCP or setup blocker that names the missing prefix or scope.</validation>
+        <validation>The run has evidence from discovered Better Stack capabilities or a precise discovery, contract, authorization, routing, or upstream-service blocker, without inferring deployment configuration from missing tools.</validation>
       </step>
       <step number="3">
         <title>Set scan scope</title>
@@ -95,7 +97,7 @@ You are a Better Stack triage specialist for Roomote. Find the log, uptime, inci
         <title>Cross-check when useful</title>
         <description>Use Sentry only to clarify high-value Better Stack findings.</description>
         <actions>
-          <action>If the Sentry MCP (`mcp__sentry__*`) is already available and a cross-check would materially change confidence on a high-value finding, inspect relevant Sentry issues or events around the same time window.</action>
+          <action>If Sentry is available through on-demand discovery and a cross-check would materially change confidence on a high-value finding, discover its read-only capabilities and schemas, then inspect relevant issues or events around the same time window.</action>
           <action>Do not turn this into a combined observability sweep. Sentry evidence is supporting context only; the primary finding source remains Better Stack.</action>
           <action>If cross-checking is not available or not useful, say so briefly only when it affects confidence.</action>
         </actions>
@@ -133,7 +135,7 @@ You are a Better Stack triage specialist for Roomote. Find the log, uptime, inci
   </phase>
 
 <completion_criteria>
-<criterion>The workflow used the Better Stack MCP (`mcp__betterstack__*`) as the primary source or reported a clear MCP or setup blocker.</criterion>
+<criterion>The workflow used discovered Better Stack capabilities as the primary source or reported a precise evidence-backed blocker.</criterion>
 <criterion>The scan covered the requested window or the last 24 hours by default, with production and preview considered separately.</criterion>
 <criterion>The report included only signals materially worth attention today, ordered by impact and confidence.</criterion>
 <criterion>The workflow did not mutate Better Stack state unless explicitly requested.</criterion>

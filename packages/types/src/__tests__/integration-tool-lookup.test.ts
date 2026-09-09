@@ -40,4 +40,35 @@ describe('matchIntegrationTools', () => {
     expect(result.truncated).toBe(true);
     expect(matchIntegrationTools(many, { limit: 12 }).truncated).toBe(false);
   });
+
+  it('prioritizes exact names over keywords without relaxing integration scope', () => {
+    const tools = [
+      { integrationId: 'betterstack', name: 'sources' },
+      { integrationId: 'betterstack', name: 'source' },
+      { integrationId: 'betterstack', name: 'query' },
+      { integrationId: 'other', name: 'sources' },
+    ];
+    for (const tool of tools.slice(0, 3)) {
+      expect(
+        matchIntegrationTools(tools, {
+          integrationId: 'betterstack',
+          toolName: tool.name,
+          query: 'source table metadata',
+        }).tools,
+      ).toEqual([tool]);
+    }
+    expect(
+      matchIntegrationTools(tools, {
+        integrationId: 'unattached',
+        toolName: 'sources',
+      }).tools,
+    ).toEqual([]);
+    expect(
+      matchIntegrationTools(tools, {
+        integrationId: 'betterstack',
+        toolName: 'missing',
+        query: 'sources',
+      }).tools,
+    ).toEqual([]);
+  });
 });
