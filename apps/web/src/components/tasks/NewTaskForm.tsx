@@ -21,6 +21,7 @@ import { useStartFastSession } from '@/hooks/task-runs';
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
+import { PromptTemplates } from '@/components/tasks/PromptTemplates';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
 
@@ -238,16 +239,23 @@ export function NewTaskForm({
         submitWithMetaKey={false}
         submitDisabledReason={submitDisabledReason}
         tools={
-          <SessionModelSwitcher
-            model={selectedModelOverrideId ?? ''}
-            onModelChange={(model) =>
-              setSelectedModelOverrideId(model || undefined)
-            }
-            reasoningEffort={selectedReasoningEffort ?? null}
-            onReasoningEffortChange={setSelectedReasoningEffort}
-            defaultModelId={defaultModelId}
-            defaultReasoningEffort={defaultReasoningEffort}
-          />
+          <>
+            <SessionModelSwitcher
+              model={selectedModelOverrideId ?? ''}
+              onModelChange={(model) =>
+                setSelectedModelOverrideId(model || undefined)
+              }
+              reasoningEffort={selectedReasoningEffort ?? null}
+              onReasoningEffortChange={setSelectedReasoningEffort}
+              defaultModelId={defaultModelId}
+              defaultReasoningEffort={defaultReasoningEffort}
+            />
+            <PromptTemplates
+              prompt={promptText}
+              onLoad={setPromptText}
+              disabled={isBusy}
+            />
+          </>
         }
       />
     </div>

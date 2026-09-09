@@ -11,6 +11,7 @@ import type { PromptInputMessage } from '@/components/ai-elements';
 
 let currentSearchParams = '';
 let currentIsAdmin = true;
+let currentReadOnly = false;
 let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-1', name: 'Primary Env' },
   { id: 'env-2', name: 'Secondary Env' },
@@ -59,6 +60,7 @@ vi.mock('@/hooks/useUser', () => ({
   }),
   useAuthorizedUser: () => ({
     userId: 'user-1',
+    managedAccess: { state: currentReadOnly ? 'read_only' : 'active' },
     isAdmin: currentIsAdmin,
     name: 'Test User',
     primaryEmail: 'test@example.com',
@@ -160,8 +162,10 @@ vi.mock('@/components/tasks', async () => {
             if (submitDisabledReason) {
               return;
             }
-            onPromptTextChange?.('Test prompt');
-            const result = onSubmit({ text: 'Test prompt', files: [] });
+            const result = onSubmit({
+              text: promptText || 'Test prompt',
+              files: [],
+            });
 
             if (result instanceof Promise) {
               void result.catch(() => {});
@@ -227,6 +231,7 @@ describe('Home', () => {
   beforeEach(() => {
     currentSearchParams = '';
     currentIsAdmin = true;
+    currentReadOnly = false;
     currentEnvironments = [
       { id: 'env-1', name: 'Primary Env' },
       { id: 'env-2', name: 'Secondary Env' },
@@ -267,6 +272,60 @@ describe('Home', () => {
         ],
       },
     });
+  });
+
+  it('loads a saved template into the shared composer, allows editing, then starts through the existing mutation', async () => {
+    const exact = '  Review <changes>\n\nKeep $variables.  ';
+    render(<Home initialPlaceholderIndex={0} />);
+    const composer = screen.getByRole('textbox', { name: 'Task prompt' });
+    fireEvent.change(composer, { target: { value: exact } });
+    fireEvent.click(screen.getByRole('button', { name: 'Templates' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Template name' }), {
+      target: { value: 'Code review' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save current prompt' }),
+    );
+    fireEvent.change(composer, { target: { value: 'Replace this' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Load Code review' }));
+    expect(composer).toHaveValue(exact);
+    expect(mockStartFastSession).not.toHaveBeenCalled();
+    fireEvent.change(composer, {
+      target: { value: `${exact}\nFocus on tests.` },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() =>
+      expect(mockStartFastSession).toHaveBeenCalledWith({
+        text: `${exact}\nFocus on tests.`.trim(),
+        images: undefined,
+        attachmentTexts: undefined,
+        model: undefined,
+      }),
+    );
+    expect(mockStartFastSession).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1');
+  });
+
+  it('keeps managed-access launch restrictions after loading a template', () => {
+    currentReadOnly = true;
+    localStorage.setItem(
+      'roomote-prompt-templates:v1:user-1',
+      JSON.stringify({
+        version: 1,
+        templates: [{ name: 'Review', prompt: 'Review code' }],
+      }),
+    );
+    render(<NewTaskForm />);
+    fireEvent.click(screen.getByRole('button', { name: 'Templates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load Review' }));
+    expect(screen.getByRole('textbox', { name: 'Task prompt' })).toHaveValue(
+      'Review code',
+    );
+    expect(
+      screen.getByRole('button', { name: 'Submit prompt' }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    expect(mockStartFastSession).not.toHaveBeenCalled();
   });
 
   it('leaves an untouched Fast session on the orchestration default', async () => {
