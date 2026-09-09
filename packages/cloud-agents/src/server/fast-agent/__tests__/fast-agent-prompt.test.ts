@@ -1266,6 +1266,47 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it.each(['human', 'platform_event'] as const)(
+    'bounds recovery of authorized work on %s turns',
+    (turnSource) => {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        turnSource,
+      });
+      expect(prompt).toContain(
+        'inspect the current task state and conversation history first',
+      );
+      expect(prompt).toContain(
+        'at most one automatic recovery attempt per task for the outstanding user request, across turns and run IDs',
+      );
+      expect(prompt).toContain(
+        'Duplicate events, later check-ins, and new run IDs do not reset this limit',
+      );
+      expect(prompt).toContain(
+        'Never auto-resume canceled or user-stopped work, needs-input or approval waits',
+      );
+      expect(prompt).toContain(
+        'A generic provider error is not proof it is transient',
+      );
+      expect(prompt).toContain(
+        'require a new explicit user instruction before another attempt',
+      );
+      expect(prompt).toContain(
+        'Do not launch a replacement task or schedule a retry loop',
+      );
+      expect(prompt).toContain('Outside presentation-only events');
+      expect(prompt).toContain(
+        'Say work is continuing only when current execution or an accepted continuation supports it',
+      );
+      if (turnSource === 'platform_event') {
+        expect(prompt).toContain(
+          'A stored error that interrupted unfinished work is a changed outcome',
+        );
+        expect(prompt).not.toContain('Report or ignore it without retrying');
+      }
+    },
+  );
+
   it('requires presentation-only platform events to stop after posting', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

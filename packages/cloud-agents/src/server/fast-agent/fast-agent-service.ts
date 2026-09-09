@@ -5099,6 +5099,17 @@ export async function answerFastAgentQuestion({
         );
       }
     }
+    // Silent/ignored turns have no text reply to retire their retry marker.
+    // Leaving it active would make reconciliation report a false interruption.
+    if (inferenceRetryCanonicalEvent) {
+      await replaceInferenceRetryReply(
+        { purpose: 'closeout', message: 'The retry completed.' },
+        true,
+      );
+      inferenceRetryReply = undefined;
+      inferenceRetryMessageIndex = undefined;
+      inferenceRetryCanonicalEvent = undefined;
+    }
     await settleDurableTurn();
     await mirrorPendingMessages();
     return lastVisibleMessage;

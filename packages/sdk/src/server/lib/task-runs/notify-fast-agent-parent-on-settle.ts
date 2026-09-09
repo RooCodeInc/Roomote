@@ -57,12 +57,15 @@ export async function notifyFastAgentParentOnSettle(
     return;
   }
 
+  const hasIdleError =
+    status === RunStatus.Idle && Boolean(run.error?.trim() || run.errorCode);
+
   // A review child's outcome reaches the session through exactly one pipe,
   // the PR feedback relay built from its summary comment. That holds for
   // automatic reviews of a session-owned PR and for reviews the session
   // requested itself, so a successful settle never announces here; only
-  // failures do, because a failed review never posts a summary.
-  if (isPrReviewRun(run) && status !== RunStatus.Failed) {
+  // failures and idle runs with stored errors do, since they may lack a summary.
+  if (isPrReviewRun(run) && status !== RunStatus.Failed && !hasIdleError) {
     return;
   }
 
@@ -123,7 +126,14 @@ export async function notifyFastAgentParentOnSettle(
               error: formatFastAgentTerminalError(run),
               ...(run.errorCode ? { errorCode: run.errorCode } : {}),
             }
-          : {}),
+          : hasIdleError
+            ? {
+                ...(run.error?.trim()
+                  ? { error: formatFastAgentTerminalError(run) }
+                  : {}),
+                ...(run.errorCode ? { errorCode: run.errorCode } : {}),
+              }
+            : {}),
         taskUrl: getTaskUrl({
           taskId: run.taskId,
           utm: {

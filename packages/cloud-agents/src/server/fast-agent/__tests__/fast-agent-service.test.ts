@@ -10099,6 +10099,104 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it.each(['ignored event', 'empty response', 'reaction'] as const)(
+    'retires a hidden retry marker after successful %s completion',
+    async (completion) => {
+      vi.useFakeTimers();
+      try {
+        mocks.generateText
+          .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+          .mockImplementationOnce(async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            if (completion === 'ignored event') {
+              await invokeTool(nativeToolNames.ignoreEvent, {
+                reason: 'Duplicate task update.',
+              });
+            } else if (completion === 'reaction') {
+              await invokeTool(nativeToolNames.sendChatReaction, {
+                name: 'thumbsup',
+                purpose: 'closeout',
+              });
+            }
+            return '';
+          });
+        const adapter = callbacks();
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          ...(completion === 'reaction'
+            ? { allowSilentAmbientReply: true }
+            : { turnSource: 'platform_event' as const }),
+          adapter,
+        });
+        await vi.runAllTimersAsync();
+        await result;
+
+        const retryWrites = mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter((message) => message.eventId === '100.2:retry-notice:0');
+        expect(retryWrites[0]?.metadata).toMatchObject({
+          inferenceRetryActive: true,
+          visibleInTranscript: false,
+        });
+        expect(retryWrites.at(-1)?.metadata).toMatchObject({
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+          visibleInTranscript: false,
+        });
+        expect(adapter.postReply).not.toHaveBeenCalled();
+        expect(mocks.reconcileRetryNotices).toHaveBeenCalledWith(
+          'conversation-1',
+          'turn_settled_reconcile',
+          {},
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('replaces a visible retry notice when an ambient turn recovers and is ignored', async () => {
+    vi.useFakeTimers();
+    try {
+      const error = Object.assign(new Error('429 Too Many Requests'), {
+        providerError: { data: { responseHeaders: { 'retry-after': '45' } } },
+      });
+      mocks.generateText
+        .mockRejectedValueOnce(error)
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.ignoreEvent, {
+            reason: 'No response needed.',
+          });
+          return '';
+        });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter: callbacks({ postReply, replaceReply }),
+      });
+      await vi.runAllTimersAsync();
+      await result;
+
+      expect(postReply).toHaveBeenCalledOnce();
+      expect(replaceReply).toHaveBeenLastCalledWith(
+        { messageId: 'retry-1' },
+        { purpose: 'closeout', message: 'The retry completed.' },
+      );
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        inferenceRetryActive: false,
+        platformMessageId: 'retry-1',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rethrows native prompt failures for platform event retry', async () => {
     mocks.generateText.mockRejectedValue(new Error('OpenCode unavailable'));
     const activity = {
