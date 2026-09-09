@@ -391,32 +391,6 @@ export async function updateWorkspaceRoutingSettingsCommand(
   return settings;
 }
 
-/** Member workspace selection intentionally exposes no configuration or state. */
-export async function getAvailableEnvironmentsCommand(
-  _auth: UserAuthSuccess,
-  input?: { repository?: string },
-): Promise<Array<{ id: string; name: string }>> {
-  const envs = await db
-    .select({
-      id: environments.id,
-      name: environments.name,
-      config: environments.config,
-    })
-    .from(environments)
-    .where(and(buildOwnershipFilter(), eq(environments.isEval, false)))
-    .orderBy(desc(environments.updatedAt));
-
-  return envs
-    .filter((environment) =>
-      input?.repository
-        ? (environment.config as EnvironmentConfig).repositories?.some(
-            (repository) => repository.repository === input.repository,
-          )
-        : true,
-    )
-    .map(({ id, name }) => ({ id, name }));
-}
-
 export async function getEnvironmentNamesByIdsCommand(
   auth: UserAuthSuccess,
   input: { ids: string[] },
