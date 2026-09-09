@@ -80,9 +80,14 @@ CI. Repeat validation after any candidate refresh or reconciliation.
 
 When production hotfix history conflicts with a frozen candidate, use the
 explicitly authorized **Reconcile Release Candidate** workflow, not a manual
-release-branch push. It applies an independently reviewed merge tree with exact
-candidate/main pins and no newer develop content. The ordinary resolution PR is
-review-only and must not be merged. See the
+release-branch push. With exact candidate/main pins and no newer develop content,
+CI can apply a verified file-identical history reconciliation without a resolution
+branch or approval-record PR: omit `resolution_sha`. This requires automatic
+merge output to match the candidate outside narrowly checked version/changelog
+conflicts, proving production changes are retained rather than trusting tree
+equality alone. Code/docs conflicts and content-changing resolutions still need
+an independently approved, exact-head resolution PR; that PR is review-only and
+must not be merged. Final promotion approval remains required. See the
 [release skill's reconciliation procedure](.agents/skills/changeset-release-pr/SKILL.md#reconcile-a-frozen-candidate-with-production)
 for preparation, approval, dispatch, and post-push monitoring. This procedure
 does not merge the Promote PR, tag, publish, or deploy a release.

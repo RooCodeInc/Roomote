@@ -354,15 +354,31 @@ the current develop tree. No tag may exist for the candidate, and the candidate
 must not already be contained in `main`.
 
 1. Fetch and pin the full candidate and main SHAs. Revalidate the published
-   baseline and open Promote PR. On an ordinary `reconcile/vX.Y.Z` branch rooted
-   at that exact candidate, merge only the pinned main with `--no-commit --no-ff`.
-   Do not merge develop or use blanket ours/theirs resolution.
-2. Resolve each conflict by intent, retaining production hotfixes and candidate
+   baseline and open Promote PR. For a verified file-identical reconciliation,
+   dispatch on `develop` with `version` (without `v`), `expected_candidate_sha`,
+   and `expected_main_sha`; omit `resolution_sha`. No resolution branch or
+   approval-record PR is needed. CI creates the exact candidate/main merge
+   parents using the unchanged candidate tree only after proving preservation.
+   Tree equality alone is not proof that production hotfixes survived.
+2. The no-review path requires one merge base and automatic merge output equal
+   to the candidate outside conflicts limited to root `package.json` and
+   `CHANGELOG.md`. A conflicted root manifest must have only version changes on
+   main since the merge base. A conflicted changelog must be exactly the main
+   header, the candidate's first release section, then all published main
+   history. Code/docs conflicts still require explicit review, even if a human
+   believes the candidate is a superset of the hotfix. This is deliberately
+   conservative, not a semantic hotfix detector. A clean merge that adds a
+   main-only fix changes the candidate and also requires the reviewed path.
+3. If CI cannot prove preservation or the resolution changes files, prepare an
+   ordinary `reconcile/vX.Y.Z` branch rooted at the pinned candidate and merge
+   only pinned main with `--no-commit --no-ff`. Do not merge develop or use
+   blanket ours/theirs resolution.
+   Resolve each conflict by intent, retaining production hotfixes and candidate
    features/tests. Keep automatically merged files unchanged. Preserve the root
    candidate version, its complete release section, and all published main
    changelog history; do not run versioning or author new release notes. This is
    reconciliation of existing generated artifacts, not a new release cut.
-3. Validate the actual merged tree with focused tests and ordinary commit/push
+   Validate the actual merged tree with focused tests and ordinary commit/push
    gates. The review commit must have exactly two parents in order: pinned
    candidate, pinned main. Push only the ordinary `reconcile/vX.Y.Z` branch and
    open a **review-only** PR targeting `release/vX.Y.Z`. Clearly mark it
@@ -370,26 +386,33 @@ must not already be contained in `main`.
    conflict decision, hotfix preservation evidence, and validation. Resolve all
    review threads and obtain an independent human collaborator's approval at the
    exact resolution SHA. Do not self-approve or merge this PR.
-4. Dispatch **Reconcile Release Candidate** on `develop` with `version` (without
-   `v`), `expected_candidate_sha`, `expected_main_sha`, and `resolution_sha`.
-   It requires `RELEASE_BOT_TOKEN` so the candidate push can trigger fresh PR CI.
-   CI verifies the open PR identities, approval and thread state, exact merge
+4. For that reviewed path, dispatch **Reconcile Release Candidate** on `develop`
+   with `version` (without `v`), `expected_candidate_sha`, `expected_main_sha`,
+   and `resolution_sha`. Both paths require `RELEASE_BOT_TOKEN` so the candidate
+   push can trigger fresh PR CI. With a supplied resolution, CI verifies the
+   open PR identities, approval and thread state, exact merge
    parents, unchanged automatic-merge paths, release artifacts, and repeated
    remote pins before creating its own merge commit and fast-forwarding the
-   release branch. It never executes code from the candidate or resolution.
+   release branch. Supplying a resolution SHA always requires exact-head review,
+   even if its tree is identical. Neither path executes code from the candidate
+   or resolution, imports newer develop, or bypasses final promotion approval.
 5. Inspect the run and actual remote head, then monitor the Promote PR's new CI
    **and reviews** using step 11. CI appends reconciliation provenance to the
-   existing Promote PR body. If metadata fails after a successful push, report
-   that partial result; do not retry with stale pins or claim no change occurred.
-   The review-only PR remains unmerged; it can be closed separately once its
-   outcome is verified and closure is authorized.
+   existing Promote PR body, distinguishing verified-identical and reviewed
+   modes. It retries only an old-candidate PR head briefly lagging behind the
+   pushed Git ref (five reads, one second apart), with fresh pin and identity
+   checks on each read; it never retries the push. Closure, changed base, or any
+   unexpected head fails immediately. If metadata fails after a successful push,
+   report that partial result; do not retry with stale pins or claim no change
+   occurred. If used, the review-only PR remains unmerged; it can be closed
+   separately once its outcome is verified and closure is authorized.
 
 After reconciliation the candidate generally diverges from develop. Ordinary
 Release refresh deliberately refuses that state; push-triggered Release runs
 also refuse to replace its metadata with the original version-bump SHA. Do not
 force the candidate back onto develop. Reconcile a later pinned production base
-through another reviewed run, or obtain a separately audited replacement-release
-decision if newer develop work is needed. If any pin, approval, publication, or
+through another pinned reconciliation run, or obtain a separately audited
+replacement-release decision if newer develop work is needed. If any pin, approval, publication, or
 scope guard fails, stop and re-audit rather than bypassing it.
 
 ## Emergency direct-to-main hotfix path
@@ -575,7 +598,7 @@ validation results, current merge-order gate, and rollback risks.
   candidate reaches `main`, maintainers may amend its notes with
   `pnpm run version -- --amend` and explicitly dispatch the Release workflow to
   fast-forward the open candidate from `develop`. Production-base conflicts use
-  the explicitly authorized, reviewed CI reconciliation procedure above.
+   the explicitly authorized CI reconciliation procedure above.
 - Never leave an older Promote PR open when an explicit superseding release is
   prepared. Close it so versions cannot be promoted out of order.
 - Never merge an out-of-date release PR. Regenerate it from the latest
