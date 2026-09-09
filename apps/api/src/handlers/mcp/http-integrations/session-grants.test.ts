@@ -121,7 +121,7 @@ beforeEach(async () => {
   };
   const attached = await run(ownerId, row.id);
   taskId = attached.taskId;
-  runAuth = { tokenType: 'run', runId: attached.id };
+  runAuth = { tokenType: 'run', runId: attached.id, userId: ownerId };
   const pending = await prepareSessionSecret(context, {
     label: 'API test credential',
     origin,
@@ -202,10 +202,10 @@ it.each([
       auth =
         kind === 'unrelated-Fast'
           ? { ...fastAuth, fastConversationId: unrelated.fastConversationId! }
-          : { tokenType: 'run', runId: (await run(ownerId, unrelated.id)).id };
+          : { ...runAuth, runId: (await run(ownerId, unrelated.id)).id };
     }
     if (kind === 'unattached-run')
-      auth = { tokenType: 'run', runId: (await run(ownerId)).id };
+      auth = { ...runAuth, runId: (await run(ownerId)).id };
     if (kind === 'deleted-owner')
       await db
         .update(users)

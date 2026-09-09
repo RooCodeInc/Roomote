@@ -18,11 +18,14 @@ import {
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
+  NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
   HTTP_INTEGRATIONS_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
+  buildDataVisualizationBlocks,
+  dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
   manageWakeupsInputSchema,
@@ -36,6 +39,7 @@ import {
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
   type IntegrationToolCandidate,
+  type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
 } from '@roomote/types';
@@ -168,6 +172,7 @@ import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
   sendFastAgentTaskMessage,
+  stopFastAgentTask,
 } from './fast-agent-tasks';
 import { FastAgentTaskMessageGuard } from './fast-agent-task-message-guard';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -247,6 +252,7 @@ const chatReplyArgsSchema = z.object({
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
   videoArtifactIds: z.array(z.string()).optional(),
+  charts: dataVisualizationInputsSchema.optional(),
   suggestions: z
     .array(
       z.object({
@@ -481,6 +487,9 @@ const taskMessageArgsSchema = z.object({
 });
 const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
+});
+const stopTaskArgsSchema = taskIdArgsSchema.extend({
+  userInitiated: z.boolean(),
 });
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
@@ -1584,6 +1593,7 @@ export async function answerFastAgentQuestion({
   platformEventKind = 'delegated_task',
   automationReport = false,
   defaultImageArtifactIds = [],
+  defaultCharts = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
@@ -1625,6 +1635,8 @@ export async function answerFastAgentQuestion({
   /** Child-selected images to carry through when the parent model omits the
    * optional attachment argument while composing the child update. */
   defaultImageArtifactIds?: string[];
+  /** Child-selected charts to preserve when the parent model omits them. */
+  defaultCharts?: DataVisualizationInput[];
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
@@ -2477,7 +2489,10 @@ export async function answerFastAgentQuestion({
         ts: ts ?? nativeMessage?.completedAtMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
         role: 'assistant',
-        contentBlocks: [{ type: 'text', text: reply.message }],
+        contentBlocks: [
+          { type: 'text', text: reply.message },
+          ...buildDataVisualizationBlocks(reply.charts),
+        ],
         metadata: {
           visibleInTranscript,
           purpose: reply.purpose,
@@ -2864,6 +2879,7 @@ export async function answerFastAgentQuestion({
       discoveredIntegrations,
       currentUser,
       therapistModeEnabled,
+      agentBehaviorSettings,
     ] = await Promise.all([
       getAvailableEnvironments(),
       getDeploymentTaskModelOptions().catch((error) => {
@@ -2903,6 +2919,17 @@ export async function answerFastAgentQuestion({
         );
         return false;
       }),
+      db.query.deploymentSettings
+        .findFirst({
+          columns: { globalAgentInstructions: true },
+        })
+        .catch((error) => {
+          degradedContextComponents.add('agent_guidance');
+          console.warn(
+            `[Fast Agent] Shared agent guidance unavailable: ${formatErrorForLog(error)}`,
+          );
+          return undefined;
+        }),
     ]);
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
@@ -3147,6 +3174,7 @@ export async function answerFastAgentQuestion({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       therapistModeEnabled,
+      globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -3196,10 +3224,15 @@ export async function answerFastAgentQuestion({
       /** The streamed partial this reply finalizes, if one was shown. */
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
-      const replyWithImages =
-        !reply.imageArtifactIds?.length && defaultImageArtifactIds.length
-          ? { ...reply, imageArtifactIds: defaultImageArtifactIds }
-          : reply;
+      const replyWithImages = {
+        ...reply,
+        ...(!reply.imageArtifactIds?.length && defaultImageArtifactIds.length
+          ? { imageArtifactIds: defaultImageArtifactIds }
+          : {}),
+        ...(!reply.charts?.length && defaultCharts.length
+          ? { charts: defaultCharts }
+          : {}),
+      };
       const replacedRetry = await replaceInferenceRetryReply(
         replyWithImages,
         true,
@@ -3769,6 +3802,7 @@ export async function answerFastAgentQuestion({
             const validSuggestionEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               FAST_EXECUTION,
+              NO_REPOSITORIES,
               ...availableEnvironments.map((environment) => environment.id),
             ]);
             if (
@@ -3822,6 +3856,7 @@ export async function answerFastAgentQuestion({
               signatureImageArtifactIds,
               requestedVideoArtifactIds,
               args.suggestions ?? [],
+              args.charts ?? defaultCharts,
             ]);
             if (completedChatReplySignatures.has(signature)) {
               replyTextTracker.consumeUnconsumed();
@@ -3852,6 +3887,7 @@ export async function answerFastAgentQuestion({
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
                   : {}),
+                ...(args.charts?.length ? { charts: args.charts } : {}),
               },
               false,
               undefined,
@@ -3969,6 +4005,7 @@ export async function answerFastAgentQuestion({
             const args = launchTaskArgsSchema.parse(call.args);
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
+              NO_REPOSITORIES,
               ...availableEnvironments.map((environment) => environment.id),
             ]);
             if (
@@ -4341,6 +4378,38 @@ export async function answerFastAgentQuestion({
             } catch {
               return { success: false, error: 'Secret request unavailable' };
             }
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.stopTask: {
+            const args = stopTaskArgsSchema.parse(call.args);
+            const target = selectActiveTaskId(args.taskId, currentTasks);
+            if (!target.taskId) return { success: false, error: target.error };
+            const targetTask = currentTasks.get(target.taskId);
+            if (
+              targetTask?.status !== undefined &&
+              !(activeRunStatuses as readonly RunStatus[]).includes(
+                targetTask.status,
+              )
+            ) {
+              return {
+                success: false,
+                error: `Task ${target.taskId} is not active in this conversation.`,
+              };
+            }
+            const signature = `stop_task:${target.taskId}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error: 'That task was already stopped.',
+              };
+            }
+            completedTaskActions.add(signature);
+            throwIfTurnCancelled();
+            const result = await stopFastAgentTask(
+              { userId, apiBaseUrl },
+              { taskId: target.taskId, userInitiated: args.userInitiated },
+            );
+            return result;
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups: {

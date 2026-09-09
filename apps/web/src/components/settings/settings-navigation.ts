@@ -143,7 +143,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     label: 'Agent Guidance',
     title: 'Agent Guidance',
     description:
-      'Configure shared instructions that apply to every task in this workspace.',
+      'Configure shared instructions that apply to every session and task in this workspace.',
     href: SETTINGS_PATHS.agentGuidance,
     icon: ScrollText,
     adminOnly: true,

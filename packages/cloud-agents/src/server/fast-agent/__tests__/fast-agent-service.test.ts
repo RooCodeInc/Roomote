@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
   getTaskModelOptions: vi.fn(),
+  getDeploymentSettings: vi.fn(),
   appendMemory: vi.fn(),
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
+  stopTask: vi.fn(),
   launchPrReview: vi.fn(),
   getUserIdentity: vi.fn(),
   getTherapistMode: vi.fn(),
@@ -99,6 +101,7 @@ const nativeToolNames = vi.hoisted(
       showWidget: 'show_widget',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',
+      stopTask: 'stop_task',
     }) as const,
 );
 
@@ -168,6 +171,7 @@ vi.mock('@roomote/db/server', () => ({
   isBrainEnabled: mocks.isBrainEnabled,
   db: {
     query: {
+      deploymentSettings: { findFirst: mocks.getDeploymentSettings },
       fastAgentParentEvents: { findMany: mocks.getPendingHumanFollowUp },
     },
     update: vi.fn(() => ({
@@ -254,6 +258,7 @@ vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
   launchFastAgentPrReview: mocks.launchPrReview,
+  stopFastAgentTask: mocks.stopTask,
 }));
 
 vi.mock('../fast-agent-user-identity', () => ({
@@ -317,6 +322,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
 } from '@roomote/types';
 
 import {
@@ -519,10 +525,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ],
       defaultModelId: 'openai/gpt-5.6',
     });
+    mocks.getDeploymentSettings.mockResolvedValue(undefined);
     mocks.listIntegrations.mockResolvedValue([]);
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
+    mocks.stopTask.mockResolvedValue({ success: true });
     mocks.launchPrReview.mockResolvedValue({
       success: true,
       taskId: 'review-task',
@@ -604,6 +612,27 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       '<therapist_mode>',
     );
+  });
+
+  it('refreshes shared agent guidance for each subsequent turn', async () => {
+    mocks.getDeploymentSettings
+      .mockResolvedValueOnce({ globalAgentInstructions: 'First guidance.' })
+      .mockResolvedValueOnce({ globalAgentInstructions: 'Updated guidance.' });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      currentMessageId: '100.3',
+      adapter: callbacks(),
+    });
+
+    const firstSystemPrompt = mocks.generateText.mock.calls[0]?.[0].system;
+    const secondSystemPrompt = mocks.generateText.mock.calls[1]?.[0].system;
+    expect(firstSystemPrompt).toContain('First guidance.');
+    expect(firstSystemPrompt).not.toContain('Updated guidance.');
+    expect(secondSystemPrompt).toContain('Updated guidance.');
+    expect(secondSystemPrompt).not.toContain('First guidance.');
+    expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
   });
 
   it('cuts the trailing model request once the closeout is delivered', async () => {
@@ -897,6 +926,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       purpose: 'closeout',
       imageArtifactIds: ['11111111-1111-4111-8111-111111111111'],
     });
+  });
+
+  it('persists child-selected charts when the parent omits the optional chart argument', async () => {
+    const chart = {
+      title: 'Traffic sources',
+      chart: {
+        type: 'pie' as const,
+        segments: [{ label: 'Search', value: 65 }],
+      },
+    };
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Search accounts for most visits.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultCharts: [chart],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Search accounts for most visits.',
+      charts: [chart],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.contentBlocks).toEqual([
+      { type: 'text', text: 'Search accounts for most visits.' },
+      { type: 'data_visualization', ...chart },
+    ]);
   });
 
   it('persists child-selected image IDs on a text-only terminal closeout', async () => {
@@ -8410,6 +8483,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(launchTask.mock.calls[0]?.[0]).not.toHaveProperty('images');
   });
 
+  it('accepts an explicit Blank slate Session launch target', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+      await postKickoff({ taskId: 'task-blank' });
+      return { success: true, taskId: 'task-blank' };
+    });
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting a Blank slate sandbox.',
+        });
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Create a standalone artifact.',
+          environmentId: NO_REPOSITORIES,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: NO_REPOSITORIES }),
+    );
+  });
+
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
     'passes structured suggestions through a %s automation closeout',
     async (surface) => {
@@ -9304,7 +9405,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'ack',
-            message: 'I’ll stop it.',
+            message: 'I’ll cancel it.',
           });
           await expect(
             invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
@@ -9322,6 +9423,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.cancelTask).toHaveBeenCalledOnce();
     },
   );
+
+  it('soft-stops an associated task without removing the association', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll stop it.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.stopTask, {
+            taskId: 'task-1',
+            userInitiated: true,
+          }),
+        ).resolves.toEqual({ success: true });
+        await expect(
+          invokeTool(nativeToolNames.stopTask, {
+            taskId: 'task-1',
+            userInitiated: true,
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'That task was already stopped.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.stopTask).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      { taskId: 'task-1', userInitiated: true },
+    );
+  });
 
   it('silently ignores optional human reaction input through the existing native tool', async () => {
     mocks.generateText.mockImplementation(

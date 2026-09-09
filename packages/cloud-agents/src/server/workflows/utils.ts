@@ -833,6 +833,10 @@ export async function getWorkspaceRepositoryFullNames(
 ): Promise<string[] | undefined> {
   const workspace = resolveTaskWorkspace(taskSpec.payload);
 
+  if (workspace.type === 'no_repositories') {
+    return [];
+  }
+
   if (workspace.type === 'repository') {
     return undefined;
   }

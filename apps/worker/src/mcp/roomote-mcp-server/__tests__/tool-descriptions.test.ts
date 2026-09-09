@@ -604,6 +604,29 @@ describe('roomote MCP tool descriptions', () => {
     expect(replyTool.config.inputSchema.questions).toBeUndefined();
     expect(replyTool.config.inputSchema.suggestedNextSteps).toBeUndefined();
     expect(replyTool.config.inputSchema.suggestions).toBeUndefined();
+    const charts = getInputSchemaField(replyTool, 'charts');
+    const chartsSchema = replyTool.config.inputSchema
+      .charts as unknown as z.ZodTypeAny;
+    expect(charts.description).toContain(
+      'native Slack data visualization blocks',
+    );
+    expect(
+      chartsSchema.safeParse([
+        {
+          title: 'Weekly sales',
+          chart: {
+            type: 'line',
+            series: [
+              {
+                name: 'Online',
+                data: [{ label: 'Week 1', value: 12 }],
+              },
+            ],
+            axis_config: { categories: ['Week 2'] },
+          },
+        },
+      ]).success,
+    ).toBe(false);
   });
 
   it('documents the Teams chat reply tool when Teams communication context exists', async () => {
@@ -635,6 +658,7 @@ describe('roomote MCP tool descriptions', () => {
       'Teams-visible reply',
     );
     expect(replyTool.config.inputSchema.suggestions).toBeUndefined();
+    expect(replyTool.config.inputSchema.charts).toBeUndefined();
     const reactionTool = getRegisteredTool(
       registeredTools,
       'send_chat_reaction_emoji',

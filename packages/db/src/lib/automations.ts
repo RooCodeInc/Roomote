@@ -1112,6 +1112,10 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(['off', 'daily'] as const),
     ),
     ciFailureTriageLastRunAt: ciFailureTriage?.lastRunAt ?? null,
+    ciFailureTriageAdditionalRules:
+      typeof ciFailureTriage?.settings?.additionalRules === 'string'
+        ? ciFailureTriage.settings.additionalRules
+        : '',
     ciFailureTriageScanCursor: ciFailureTriage?.scanCursor ?? null,
 
     mergeAnnouncerFrequency: getAutomationFrequency(

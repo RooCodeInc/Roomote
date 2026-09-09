@@ -35,8 +35,9 @@ export async function resolveSessionSecretContext(
         userId: string;
         fastConversationId: string;
       }
-    | { tokenType: 'run'; runId: number },
+    | { tokenType: 'run'; runId: number; userId: string | null },
 ): Promise<SessionSecretContext> {
+  if (!auth.userId) throw new Error('Secret unavailable');
   const [row] =
     auth.tokenType === 'run'
       ? await db
@@ -48,6 +49,8 @@ export async function resolveSessionSecretContext(
           .where(
             and(
               eq(taskRuns.id, auth.runId),
+              // Task access alone must not let a collaborator use the owner's key.
+              eq(taskRuns.actingUserId, auth.userId),
               eq(sessions.ownerKind, 'user'),
               eq(sessions.ownerUserId, taskRuns.actingUserId),
               isNull(users.deletedAt),

@@ -48,6 +48,8 @@ export function AutomationDestinationPicker({
   noneLabel = 'None',
   noneDescription = 'Results appear only in the task view.',
   disabled = false,
+  allowNone = true,
+  allowDirectMessage = true,
   onChange,
 }: {
   id: string;
@@ -62,6 +64,8 @@ export function AutomationDestinationPicker({
   noneLabel?: string;
   noneDescription?: string;
   disabled?: boolean;
+  allowNone?: boolean;
+  allowDirectMessage?: boolean;
   onChange: (value: AutomationDestinationValue) => void;
 }) {
   const visibleProviders = availableProviders.includes(
@@ -105,7 +109,9 @@ export function AutomationDestinationPicker({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">{noneLabel}</SelectItem>
+            {allowNone ? (
+              <SelectItem value="none">{noneLabel}</SelectItem>
+            ) : null}
             {visibleProviders.map((provider) => (
               <SelectItem key={provider} value={provider}>
                 {PROVIDER_LABELS[provider]}
@@ -119,30 +125,40 @@ export function AutomationDestinationPicker({
             {noneDescription}
           </p>
         ) : (
-          <div className="grid min-w-0 gap-2 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center">
-            <Select
-              value={value.mode}
-              disabled={disabled}
-              onValueChange={(mode) =>
-                onChange({
-                  ...value,
-                  mode: mode as AutomationDestinationMode,
-                  channelId:
-                    mode === 'channel' ? defaultChannelId(value.provider) : '',
-                })
-              }
-            >
-              <SelectTrigger
-                aria-label={`${providerLabel} destination type`}
-                className="w-full"
+          <div
+            className={
+              allowDirectMessage
+                ? 'grid min-w-0 gap-2 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center'
+                : 'grid min-w-0 gap-2'
+            }
+          >
+            {allowDirectMessage ? (
+              <Select
+                value={value.mode}
+                disabled={disabled}
+                onValueChange={(mode) =>
+                  onChange({
+                    ...value,
+                    mode: mode as AutomationDestinationMode,
+                    channelId:
+                      mode === 'channel'
+                        ? defaultChannelId(value.provider)
+                        : '',
+                  })
+                }
               >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="channel">Channel</SelectItem>
-                <SelectItem value="direct_message">DM me</SelectItem>
-              </SelectContent>
-            </Select>
+                <SelectTrigger
+                  aria-label={`${providerLabel} destination type`}
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="channel">Channel</SelectItem>
+                  <SelectItem value="direct_message">DM me</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : null}
 
             {value.mode === 'direct_message' ? (
               <p className="self-center text-sm text-muted-foreground">
@@ -162,7 +178,7 @@ export function AutomationDestinationPicker({
               />
             ) : value.provider === 'discord' && channelCatalogAvailable ? (
               <Select
-                value={value.channelId || undefined}
+                value={value.channelId}
                 disabled={disabled}
                 onValueChange={(channelId) => onChange({ ...value, channelId })}
               >

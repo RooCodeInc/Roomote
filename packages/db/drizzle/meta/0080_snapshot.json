@@ -1,6 +1,4 @@
 {
-  "id": "1eb13490-b720-438c-a4fe-1d91ecf578a1",
-  "prevId": "1f5d0bb9-0bdc-4f95-8a95-d4bef9757ea4",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1243,6 +1241,13 @@
         },
         "all_repositories": {
           "name": "all_repositories",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "no_repositories": {
+          "name": "no_repositories",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
@@ -8495,122 +8500,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.session_secret_approvals": {
-      "name": "session_secret_approvals",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "owner_user_id": {
-          "name": "owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "label": {
-          "name": "label",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "origin": {
-          "name": "origin",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "header_name": {
-          "name": "header_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "header_prefix": {
-          "name": "header_prefix",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "consumed_at": {
-          "name": "consumed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "session_secret_approvals_session_owner_idx": {
-          "name": "session_secret_approvals_session_owner_idx",
-          "columns": [
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "owner_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "session_secret_approvals_session_id_sessions_id_fk": {
-          "name": "session_secret_approvals_session_id_sessions_id_fk",
-          "tableFrom": "session_secret_approvals",
-          "tableTo": "sessions",
-          "columnsFrom": ["session_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "session_secret_approvals_owner_user_id_users_id_fk": {
-          "name": "session_secret_approvals_owner_user_id_users_id_fk",
-          "tableFrom": "session_secret_approvals",
-          "tableTo": "users",
-          "columnsFrom": ["owner_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.session_secret_audit": {
       "name": "session_secret_audit",
       "schema": "",
@@ -14780,8 +14669,10 @@
   "policies": {},
   "views": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
-  }
+    "tables": {},
+    "columns": {}
+  },
+  "id": "f9d2f00a-7a0a-4437-b3e8-2ee32ca430a7",
+  "prevId": "a0b28d54-e9c7-4dda-be12-dee5eb3c30a9"
 }

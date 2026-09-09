@@ -74,6 +74,7 @@ export function createHttpIntegrationsMcp() {
                 resolveSessionSecretContext({
                   tokenType: 'run',
                   runId: auth.runId!,
+                  userId: auth.userId,
                 })
             : undefined;
       const user = userId

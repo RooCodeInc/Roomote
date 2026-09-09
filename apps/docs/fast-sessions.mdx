@@ -45,13 +45,38 @@ conversation to execution to review without changing identity.
 
 ## Source-control work without a workspace
 
-Fast uses existing integration APIs for bounded repository inspection when the
-available tools can answer the question. Reading files, searching a repository,
-or inspecting commits, pull requests, and reported CI results does not require
-cloning a repository or provisioning a workspace. Available reads depend on the
-connected integration's tools and permissions. Reading CI results is not the
+Fast discovers the available tools and capabilities of configured source-control
+integrations for focused repository exploration. Reading files and directories,
+searching code, or inspecting commits, pull/merge request diffs, and reported CI
+results does not require a
+coding task, local clone, or workspace provisioning. Available reads depend on
+the integration's tools and permissions. Reading CI results is not the
 same as running tests: local checkout, code edits, command execution, and testing
 are delegated to a task, as are investigations that need a workspace.
+
+APIs are preferred for focused questions such as "Do we have X?" or locating a
+setting, not mandatory for every investigation. Roomote can choose a coding
+task directly when expected file volume, broad cross-module tracing, exhaustive
+caller or coverage needs, search-index limits, or excessive API round trips make
+a local checkout substantially more appropriate. There is no fixed file-count
+threshold. If a focused search grows into broad investigation, Roomote carries
+useful findings into the task rather than continuing endless API calls.
+
+Roomote paginates or narrows searches sensibly and uses immutable
+commit references for consistent follow-up reads where supported and identifies
+limitations when results are partial, truncated, or limited to a search index.
+An empty search is not proof that code is absent. Source inspection is not a
+test run or reproduction, and an access denial is not bypassed through a task.
+Requests for a code review still use the structured Review Code pipeline.
+
+With an eligible deployment GitHub App installation and an active connected
+repository, active Roomote members can use the existing GitHub tools to read
+public `github.com` repositories, including source and code search. Public
+repositories do not themselves need to be connected, and no personal GitHub
+account linkage is required. See
+[public GitHub reads](/providers/source-control/github#public-github-reads)
+for access requirements. Private reads and writes still require the target to
+be connected; access denials are not retried anonymously.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
 also supports updates to existing pull requests, issue or PR comments,
@@ -65,9 +90,11 @@ replies. No additional MCP server or installation is needed. Tools require an
 active member, an active connected repository on the configured GitLab host, and
 valid deployment OAuth access; curated integrations must be enabled.
 
-The official [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
-is not enabled for this direct Fast path. Its compatibility with Roomote's
-existing credentials has not been verified; existing task workflows are unchanged.
+[Bitbucket Cloud API tools](/providers/source-control/bitbucket#api-first-work-in-fast)
+reuse the existing deployment OAuth connection for files, directories, code
+search, commits, pull requests, diffs, and comments, plus supported PR updates
+and replies. No additional MCP server is needed. See that guide for access
+requirements, pagination limits, and the code-search deprecation.
 
 ## The session view
 
@@ -80,6 +107,11 @@ error, and cost. Select a card to open its details panel. For a live nested
 task, you can reply, attach files, use commands, answer pending requests, cancel
 work, or wake a sleeping task without leaving the Session. Choose **Open full
 workspace** for terminal, logs, diff, and preview tools.
+
+To stop just one active coding task, select **Stop** on its Session card. This
+requires execution access and stops the displayed task run without stopping the
+parent Session or sibling tasks. Cancellation errors appear on the card; check
+the resulting task status rather than assuming the request succeeded.
 
 On desktop, you can keep several task workspaces open beside the Session,
 resize them, and switch between the conversation and task panels without losing

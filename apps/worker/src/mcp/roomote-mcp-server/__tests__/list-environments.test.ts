@@ -1,4 +1,4 @@
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 
 import { handleListEnvironments } from '../list-environments.js';
 import * as tasksApiClient from '../tasks-api-client.js';
@@ -32,6 +32,12 @@ describe('handleListEnvironments', () => {
     expect(payload.instructions).toContain('Do not invent or guess');
     expect(payload.environments).toEqual([
       {
+        environmentId: NO_REPOSITORIES,
+        name: 'Blank slate',
+        description:
+          'Pass this environmentId to "launch" to start a sandbox without repositories',
+      },
+      {
         environmentId: ALL_REPOSITORIES,
         name: 'All repositories',
         description:
@@ -54,6 +60,12 @@ describe('handleListEnvironments', () => {
 
     const payload = JSON.parse(result.content[0]?.text ?? '{}');
     expect(payload.environments).toEqual([
+      {
+        environmentId: NO_REPOSITORIES,
+        name: 'Blank slate',
+        description:
+          'Pass this environmentId to "launch" to start a sandbox without repositories',
+      },
       {
         environmentId: ALL_REPOSITORIES,
         name: 'All repositories',

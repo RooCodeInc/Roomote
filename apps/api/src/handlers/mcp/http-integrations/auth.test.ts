@@ -1084,6 +1084,45 @@ it.each(['broker', 'run'] as const)(
   },
 );
 
+it.each(['collaborator', 'deployment'] as const)(
+  'does not grant owner secrets to a %s token for the same run',
+  async (kind) => {
+    const fixture = await sessionGrant();
+    const collaborator = await member();
+    const token = await createRunToken({
+      runId: fixture.runId,
+      userId: kind === 'collaborator' ? collaborator.id : null,
+      timeoutMs: 60_000,
+    });
+    const list = await tool(token, 'list_integrations');
+    expect(
+      JSON.parse(list.content[0].text).integrations.map(
+        (entry: { id: string }) => entry.id,
+      ),
+    ).toEqual(['example']);
+    expect((await tool(token, 'list_session_secrets')).isError).toBe(true);
+    expect(
+      (await tool(token, 'prepare_session_secret', sessionPolicy)).isError,
+    ).toBe(true);
+    expect(
+      (
+        await tool(token, 'integration_request', {
+          integrationId: `session:${fixture.grant.secretRef}`,
+          method: 'GET',
+          path: '/items',
+        })
+      ).isError,
+    ).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    const ownerList = await tool(fixture.runToken, 'list_integrations');
+    expect(
+      JSON.parse(ownerList.content[0].text).integrations.map(
+        (entry: { id: string }) => entry.id,
+      ),
+    ).toContain(`session:${fixture.grant.secretRef}`);
+  },
+);
+
 it('denies a still-valid signed run token after its live bound actor drifts', async () => {
   const fixture = await sessionGrant();
   const requestArgs = {

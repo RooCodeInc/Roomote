@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   beginIntegrationCall: vi.fn(),
   completeIntegrationCall: vi.fn(),
   findGithubInstallation: vi.fn(),
+  isRouterMcpServerEnabled: vi.fn(),
   findGitlabRepository: vi.fn(),
   findGitlabConnection: vi.fn(),
   resolveGitLabInstanceHost: vi.fn(),
@@ -76,7 +77,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../../mcp-policy', () => ({
-  isRouterMcpServerEnabled: vi.fn(() => true),
+  isRouterMcpServerEnabled: mocks.isRouterMcpServerEnabled,
 }));
 
 vi.mock('../../mcp-tool-client', () => ({
@@ -128,6 +129,7 @@ describe('fast-agent integration broker', () => {
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.createSessionBrokerToken.mockResolvedValue('session-broker-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
+    mocks.isRouterMcpServerEnabled.mockReturnValue(false);
     mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
     mocks.resolveGitLabInstanceHost.mockResolvedValue(
       'gitlab.example.com:8443',
@@ -524,7 +526,284 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
+  it('requires an installation before discovering native GitHub tools for public reads', async () => {
+    mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+    expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+    expect(mocks.listMcpTools).not.toHaveBeenCalled();
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+    const tools = [
+      'get_file_contents',
+      'issue_read',
+      'pull_request_read',
+      'list_pull_requests',
+      'search_pull_requests',
+      'search_code',
+    ].map((name) => ({ name, inputSchema: { type: 'object' } }));
+    mocks.listMcpTools.mockResolvedValue(tools);
+    const integrations = await listFastAgentIntegrations(auditContext);
+    expect(integrations.map(({ id }) => id)).toEqual(['github']);
+    expect(integrations[0]?.tools).toEqual(tools);
+    expect(mocks.isRouterMcpServerEnabled).toHaveBeenCalledWith('github');
+    expect(mocks.findGithubInstallation).toHaveBeenCalledTimes(2);
+    expect(mocks.findMember).not.toHaveBeenCalled();
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://api.example.com/api/mcp-routing/github',
+      headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
+    });
+    mocks.isRouterMcpServerEnabled.mockReturnValue(false);
+    expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+    expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+  });
+
+  it('preserves custom GitHub configuration and disabled tools without adding a default server', async () => {
+    mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+    mocks.configuredServers.github = {
+      url: 'https://github-mcp.example.com/mcp',
+      headers: { Authorization: 'Bearer custom-token' },
+      disabledTools: ['issue_read'],
+    };
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'get_file_contents', inputSchema: { type: 'object' } },
+      { name: 'issue_read', inputSchema: { type: 'object' } },
+    ]);
+    const integrations = await listFastAgentIntegrations(auditContext);
+    expect(integrations.map(({ id }) => id)).toEqual(['github']);
+    expect(integrations[0]?.tools.map(({ name }) => name)).toEqual([
+      'get_file_contents',
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://github-mcp.example.com/mcp',
+      headers: { Authorization: 'Bearer custom-token' },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  // Synthetic upstream contracts exercise transport, not the live Better Stack API.
+  it.each([
+    {
+      name: 'sources',
+      fields: [],
+      properties: {
+        name: { type: 'string' },
+        page: { type: 'integer' },
+        per_page: { type: 'integer' },
+      },
+      args: {},
+    },
+    {
+      name: 'source',
+      fields: ['id'],
+      properties: { id: { type: 'integer' } },
+      args: { id: 42 },
+    },
+    {
+      name: 'query',
+      fields: ['source_id', 'table', 'query'],
+      properties: {
+        source_id: { type: 'number' },
+        table: { type: 'string' },
+        host: { type: 'string' },
+        query: { type: 'string' },
+      },
+      args: {
+        source_id: 42,
+        table: 'observed_logs_7',
+        host: 'cluster.example.test',
+        query: 'SELECT count() FROM observed_logs_7',
+      },
+    },
+  ])(
+    'discovers exact Better Stack $name in integration scope and forwards without defaults',
+    async ({ name, fields, properties, args }) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+        'other-server': { url: 'https://other.example.test/mcp', headers: {} },
+      };
+      const inputSchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties,
+        required: fields,
+      };
+      const upstreamTool = {
+        name,
+        description: `Synthetic ${name} contract`,
+        inputSchema,
+      };
+      mocks.listMcpTools.mockResolvedValue([upstreamTool]);
+      mocks.callMcpTool.mockImplementation(async ({ args: forwarded }) => {
+        z.object(
+          Object.fromEntries(
+            Object.entries(properties).map(([field, { type }]) => {
+              const schema =
+                type === 'integer'
+                  ? z.number().int()
+                  : type === 'number'
+                    ? z.number()
+                    : z.string();
+              return [
+                field,
+                fields.some((required) => required === field)
+                  ? schema
+                  : schema.optional(),
+              ];
+            }),
+          ),
+        )
+          .strict()
+          .parse(forwarded);
+        return { result: [] };
+      });
+      const available = await listFastAgentIntegrations(auditContext);
+      const catalog = available.flatMap((integration) =>
+        integration.tools.map((tool) => ({
+          ...tool,
+          integrationId: integration.id,
+        })),
+      );
+      expect(
+        matchIntegrationTools(catalog, {
+          integrationId: 'betterstack',
+          toolName: name,
+          query: 'source table metadata',
+        }).tools,
+      ).toEqual([{ ...upstreamTool, integrationId: 'betterstack' }]);
+      const request = z
+        .object(CALL_INTEGRATION_TOOL_TOOL.inputSchema)
+        .parse({ integrationId: 'betterstack', toolName: name, args });
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          ...request,
+          args: request.args!,
+        }),
+      ).resolves.toEqual({ result: [] });
+      expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: { Authorization: 'Bearer control-plane-token' },
+          toolName: name,
+          args,
+        }),
+      );
+      if (name === 'query') {
+        const withoutHost = Object.fromEntries(
+          Object.entries(args).filter(([key]) => key !== 'host'),
+        );
+        await expect(
+          callFastAgentIntegration(auditContext, available, {
+            ...request,
+            args: withoutHost,
+          }),
+        ).resolves.toEqual({ result: [] });
+        expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+          expect.objectContaining({ args: withoutHost }),
+        );
+      }
+      for (const missing of fields) {
+        const incomplete = Object.fromEntries(
+          Object.entries(args).filter(([key]) => key !== missing),
+        );
+        await expect(
+          callFastAgentIntegration(auditContext, available, {
+            ...request,
+            args: incomplete,
+          }),
+        ).rejects.toThrow();
+        expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+          expect.objectContaining({ args: incomplete }),
+        );
+      }
+      expect(mocks.callMcpTool).toHaveBeenCalledTimes(
+        1 + fields.length + (name === 'query' ? 1 : 0),
+      );
+    },
+  );
+
+  it.each(['Unauthorized', 'integration unavailable'])(
+    'fails closed when Better Stack discovery rejects with %s',
+    async (message) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+      };
+      mocks.listMcpTools.mockRejectedValueOnce(new Error(message));
+      const available = await listFastAgentIntegrations(auditContext);
+      expect(available).toEqual([]);
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'betterstack',
+          toolName: 'query',
+          args: {},
+        }),
+      ).rejects.toThrow('not available');
+      expect(mocks.callMcpTool).not.toHaveBeenCalled();
+      expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an undiscovered Better Stack query even when another integration exposes it', async () => {
+    mocks.configuredServers = {
+      betterstack: {
+        url: 'https://api.example.com/api/mcp/betterstack',
+        headers: {},
+      },
+      'other-server': { url: 'https://other.example.test/mcp', headers: {} },
+    };
+    mocks.listMcpTools.mockImplementation(async ({ url }) => [
+      {
+        name: url.includes('betterstack') ? 'sources' : 'query',
+        inputSchema: { type: 'object' },
+      },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'betterstack',
+        toolName: 'query',
+        args: {},
+      }),
+    ).rejects.toThrow('not available');
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
+  });
+
+  it.each(['Unauthorized', 'tool unavailable'])(
+    'preserves Better Stack call-time rejection: %s',
+    async (message) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+      };
+      mocks.listMcpTools.mockResolvedValue([
+        { name: 'query', inputSchema: { type: 'object' } },
+      ]);
+      const available = await listFastAgentIntegrations(auditContext);
+      mocks.callMcpTool.mockRejectedValueOnce(new Error(message));
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'betterstack',
+          toolName: 'query',
+          args: {},
+        }),
+      ).rejects.toThrow(message);
+      expect(mocks.callMcpTool).toHaveBeenCalledOnce();
+      expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed', error: message }),
+      );
+    },
+  );
+
   it('exposes GitHub reads and bounded writes through the existing router MCP', async () => {
+    mocks.isRouterMcpServerEnabled.mockReturnValue(true);
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     mocks.listMcpTools.mockResolvedValue([
       { name: 'actions_get', inputSchema: { type: 'object' } },
@@ -654,6 +933,7 @@ describe('fast-agent integration broker', () => {
       mocks.configuredServers = {
         roomote: { url: 'https://api.example.com/mcp', headers: {} },
       };
+      mocks.isRouterMcpServerEnabled.mockReturnValue(true);
       mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
       if (reason === 'configuration') {
         mocks.resolveGitLabInstanceHost.mockImplementationOnce(() => {
@@ -977,6 +1257,7 @@ describe('fast-agent integration broker', () => {
   ])(
     'preserves discovered $name descriptions, schemas, and arguments',
     async ({ name, args }) => {
+      mocks.isRouterMcpServerEnabled.mockReturnValue(true);
       mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
       const nativeTool = {
         name,

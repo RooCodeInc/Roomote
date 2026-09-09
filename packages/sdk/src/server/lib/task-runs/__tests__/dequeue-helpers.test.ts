@@ -1,4 +1,4 @@
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import { NO_REPOSITORIES, RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { TaskRun } from '@roomote/db/server';
 
 const {
@@ -225,6 +225,32 @@ describe('createSourceControlTokenForTaskRun', () => {
     expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
       taskRun,
     );
+  });
+
+  it('does not require or mint source-control credentials for Blank slate', async () => {
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: NO_REPOSITORIES,
+        description: 'Create a standalone artifact',
+      }),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'github',
+      token: '',
+      envVars: {},
+      source: 'app',
+      expiresAt: null,
+    });
+    expect(
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+    ).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunScopedGitLabTokens).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunGiteaCredentials).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunAdoCredentials).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunBitbucketCredentials).not.toHaveBeenCalled();
   });
 
   it('creates GitLab token metadata from repo-scoped credentials', async () => {

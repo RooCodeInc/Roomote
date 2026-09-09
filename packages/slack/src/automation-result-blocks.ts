@@ -124,7 +124,12 @@ export function buildAutomationResultBlocks(params: {
       ),
   );
 
-  if (!contentBlocks.some((block) => block.type === 'markdown')) {
+  if (
+    !contentBlocks.some(
+      (block) =>
+        block.type === 'markdown' || block.type === 'data_visualization',
+    )
+  ) {
     const groups: SlackBlock[][] = [];
     let remainingBlocks = contentBlocks;
     const finalContentCapacity = MAX_CONTAINER_CHILDREN - actionGroups.length;

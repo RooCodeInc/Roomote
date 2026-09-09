@@ -27,7 +27,6 @@ import {
   createFastAgentSlackSessionActivity,
   postSlackThreadMessageWithFooterText,
   SlackNotifier,
-  ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
 } from '@roomote/slack';
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
@@ -43,6 +42,7 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
 import {
   createDiscordFastReplyReplacer,
   createSlackFastReplyReplacer,
@@ -319,6 +319,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           message,
           imageArtifactIds = [],
           videoArtifactIds = [],
+          charts = [],
         }) => {
           const quote = pendingQuote;
           pendingQuote = null;
@@ -340,23 +341,12 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
             channel: conversation.replyTarget.channelId,
             threadTs: threadId,
             text: quote ? `${quote}\n${message}` : message,
-            bodyBlocks: [
-              ...(quote
-                ? [
-                    {
-                      type: 'section' as const,
-                      block_id: ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
-                      text: { type: 'mrkdwn' as const, text: quote },
-                    },
-                  ]
-                : []),
-              { type: 'markdown' as const, text: message },
-              ...images.map((image) => ({
-                type: 'image' as const,
-                image_url: image.url,
-                alt_text: image.altText,
-              })),
-            ],
+            bodyBlocks: buildFastAgentSlackReplyBodyBlocks({
+              message,
+              quote,
+              charts,
+              images,
+            }),
             footerText: buildFastSessionReplyFooterText({
               provider: 'slack',
               sessionId: session.id,
