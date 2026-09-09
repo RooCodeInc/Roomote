@@ -484,18 +484,28 @@ For Gitea, repository webhook resync includes the `workflow_run` event so
 Actions completions reach Roomote; host matching uses the deployment
 `GITEA_BASE_URL`.
 
-In **Settings > Automations > CI Failure Triage**, choose **All repositories**
-to retain the shared destination, or **Selected repository groups** to limit
-triage to specific repositories. Add a group, select its repositories, and
-choose its own Slack, Discord, Teams, or Telegram destination. Each repository
-can belong to only one group. Provider and host labels distinguish repositories
-with the same name on different source-control instances.
+In **Settings > Automations > CI Failure Triage**, choose the standard report
+destination and optionally describe **Additional rules** in natural language:
 
-Selected groups apply to both webhook failures and **Run now**. Removing all
-groups selects no repositories; it does not restore **All repositories**.
+> Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.
+
+Roomote checks rules against accessible repositories and connected destinations
+when you save. Include the source-control provider or host, or the communication
+workspace, when names could be ambiguous. Unclear, contradictory, unavailable,
+or unsupported rules cannot be saved. An inference provider must be available
+to interpret new rules. A failed save leaves the previous configuration intact.
+
+Repository restrictions apply to webhook failures and **Run now**. Explicit
+restrictions select the matching repositories at save time; save revised rules
+to include newly added repositories. Destination-only rules do not limit scope:
+other repositories continue using the standard destination. Investigation and
+report-writing guidance can also be included. Workflow, job, branch, and time
+conditions are not supported in additional rules. Clear the rules to restore
+all-repository triage using the standard destination.
+
 Repositories still need an active connection and a configured environment.
 **Run now** starts at most one eligible investigation per click, using that
-repository's group destination. CI Failure Triage is webhook-driven; scheduled
+repository's configured destination. CI Failure Triage is webhook-driven; scheduled
 checks do not scan repositories.
 
 Follow the [CI failure auto-fix recipe](/cookbook/ci-failure-auto-fix) for a

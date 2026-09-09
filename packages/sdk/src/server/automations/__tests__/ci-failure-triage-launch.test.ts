@@ -308,17 +308,13 @@ describe('launchCiFailureTriageForFailedRun', () => {
         enabled: true,
         scheduleMode: 'daily',
         settings: {
-          repositoryRoutes: [
-            {
-              repositoryIds: ['10000000-0000-4000-8000-000000000001'],
-              target: {
-                provider: 'slack',
-                targetKind: 'slack_channel',
-                externalRef: 'CROUTE',
-                metadata: { teamId: 'TROUTE' },
-              },
-            },
-          ],
+          additionalRules: 'Only backend',
+          compiledRules: {
+            text: 'Only backend',
+            repositoryIds: ['10000000-0000-4000-8000-000000000001'],
+            destinations: [],
+            instructions: '',
+          },
         },
       });
       const result = await launchCiFailureTriageForFailedRun({
@@ -336,24 +332,29 @@ describe('launchCiFailureTriageForFailedRun', () => {
   );
 
   it.each(['github', 'gitlab', 'ado', 'gitea', 'bitbucket'] as const)(
-    'routes selected %s webhook announcements and tasks to their group',
+    'routes selected %s webhook announcements and tasks to the explicit destination',
     async (provider) => {
       const repositoryId = '10000000-0000-4000-8000-000000000001';
       mockGetAutomationRuntime.mockResolvedValue({
         enabled: true,
         scheduleMode: 'daily',
         settings: {
-          repositoryRoutes: [
-            {
-              repositoryIds: [repositoryId],
-              target: {
-                provider: 'slack',
-                targetKind: 'slack_channel',
-                externalRef: 'CROUTE',
-                metadata: { teamId: 'TROUTE' },
+          additionalRules: 'Only backend',
+          compiledRules: {
+            text: 'Only backend',
+            repositoryIds: [repositoryId],
+            instructions: '',
+            destinations: [
+              {
+                repositoryId,
+                target: {
+                  provider: 'slack',
+                  externalRef: 'CROUTE',
+                  workspaceId: 'TROUTE',
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       });
       mockFindEnvironmentIdForRepositoryId.mockResolvedValue('env-api');
@@ -392,16 +393,31 @@ describe('launchCiFailureTriageForFailedRun', () => {
   );
 
   it.each([
-    { repositoryRoutes: [] },
-    { repositoryRoutes: null },
-    { repositoryRoutes: [{ repositoryIds: ['invalid'], target: {} }] },
+    { compiledRules: undefined },
+    { compiledRules: null },
+    {
+      compiledRules: {
+        text: 'different',
+        repositoryIds: null,
+        destinations: [],
+        instructions: '',
+      },
+    },
+    {
+      compiledRules: {
+        text: 'Only backend',
+        repositoryIds: [],
+        destinations: [],
+        instructions: '',
+      },
+    },
   ])(
     'does not fall back to all repositories for empty or malformed config',
-    async ({ repositoryRoutes }) => {
+    async ({ compiledRules }) => {
       mockGetAutomationRuntime.mockResolvedValue({
         enabled: true,
         scheduleMode: 'daily',
-        settings: { repositoryRoutes },
+        settings: { additionalRules: 'Only backend', compiledRules },
       });
       await launchCiFailureTriageForFailedRun(failedRun);
       expect(mockRedisSet).not.toHaveBeenCalled();
@@ -410,22 +426,28 @@ describe('launchCiFailureTriageForFailedRun', () => {
     },
   );
 
-  it('does not use another destination when the group provider is disconnected', async () => {
+  it('does not use another destination when an override provider is disconnected', async () => {
     const repositoryId = '10000000-0000-4000-8000-000000000001';
     mockGetAutomationRuntime.mockResolvedValue({
       enabled: true,
       scheduleMode: 'daily',
       settings: {
-        repositoryRoutes: [
-          {
-            repositoryIds: [repositoryId],
-            target: {
-              provider: 'discord',
-              targetKind: 'discord_channel',
-              externalRef: 'route',
+        additionalRules: 'Only backend',
+        compiledRules: {
+          text: 'Only backend',
+          repositoryIds: [repositoryId],
+          instructions: '',
+          destinations: [
+            {
+              repositoryId,
+              target: {
+                provider: 'discord',
+                workspaceId: 'guild',
+                externalRef: 'route',
+              },
             },
-          },
-        ],
+          ],
+        },
       },
     });
     await launchCiFailureTriageForFailedRun({ ...failedRun, repositoryId });

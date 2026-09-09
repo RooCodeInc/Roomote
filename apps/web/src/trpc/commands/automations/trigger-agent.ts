@@ -1,6 +1,7 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
-  getCiFailureTriageRepositoryRoutes,
+  getCiFailureTriageRules,
+  isCiFailureTriageRepositoryAllowed,
   isTriggerableBackgroundAutomationKey,
   type CommunicationProvider,
   type TriggerableBackgroundAutomationKey,
@@ -46,13 +47,13 @@ async function assertManualTriggerIsRunnable(
   }
 
   if (automationKey === 'ci_failure_triage') {
-    const routes = getCiFailureTriageRepositoryRoutes(runtime.settings);
-    if (routes !== undefined) {
+    const rules = getCiFailureTriageRules(runtime.settings);
+    if (rules !== undefined) {
       const repositories = (await getRepositories(auth)).filter(
         (repo) =>
           descriptor.supportedSourceControlProviders.some(
             (provider) => provider === repo.sourceControlProvider,
-          ) && routes.some((route) => route.repositoryIds.includes(repo.id)),
+          ) && isCiFailureTriageRepositoryAllowed(runtime.settings, repo.id),
       );
       if (!repositories.length)
         throw new Error(
@@ -67,7 +68,7 @@ async function assertManualTriggerIsRunnable(
             connectedProviders,
           })
         ) {
-          // Let the runner select a repository and its own route, never override all groups with one destination.
+          // The runner resolves each repository's explicit override or default.
           return null;
         }
       }

@@ -44,7 +44,8 @@ import {
 } from '@roomote/gitlab';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
-  getCiFailureTriageRepositoryRoutes,
+  getCiFailureTriageRules,
+  isCiFailureTriageRepositoryAllowed,
   TaskPayloadKind,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -92,10 +93,15 @@ export async function ciFailureTriageJob(
       return result;
     }
 
+    const rules = getCiFailureTriageRules(runtime.settings);
+    if (rules === null) {
+      result.skippedReason =
+        'CI failure triage rules are invalid. Save the rules again.';
+      return result;
+    }
     const connectedProviders = await listConnectedCommunicationProviders();
-    const routes = getCiFailureTriageRepositoryRoutes(runtime.settings);
     const legacyDestination =
-      routes === undefined
+      rules === undefined
         ? (opts.destination ??
           (await resolveAutomationRuntimeDestination({
             runtime,
@@ -103,7 +109,7 @@ export async function ciFailureTriageJob(
           })))
         : undefined;
 
-    if (routes === undefined && !legacyDestination) {
+    if (rules === undefined && !legacyDestination) {
       result.skippedReason = 'Manager channel is not configured.';
       return result;
     }
@@ -116,10 +122,8 @@ export async function ciFailureTriageJob(
 
     const selectedRepositories = (
       await getActiveRepositoriesForProviders(supportedProviders)
-    ).filter(
-      (repository) =>
-        routes === undefined ||
-        routes.some((route) => route.repositoryIds.includes(repository.id)),
+    ).filter((repository) =>
+      isCiFailureTriageRepositoryAllowed(runtime.settings, repository.id),
     );
 
     if (selectedRepositories.length === 0) {
@@ -543,6 +547,7 @@ export async function ciFailureTriageJob(
                   ? { sourceControlHost: selectedRepository.host }
                   : {}),
                 description: buildCiFailureTriagePrompt({
+                  additionalInstructions: rules?.instructions,
                   channelId,
                   repositoryFullNames: [selectedRepository.fullName],
                   repositoryCoverage: coverageSlice,

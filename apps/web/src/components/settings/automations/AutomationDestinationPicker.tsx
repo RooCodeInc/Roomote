@@ -28,7 +28,7 @@ type DestinationOption = {
   label: string;
 };
 
-export const PROVIDER_LABELS = {
+const PROVIDER_LABELS = {
   slack: 'Slack',
   discord: 'Discord',
   teams: 'Teams',

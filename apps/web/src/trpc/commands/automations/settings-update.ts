@@ -38,7 +38,7 @@ import { captureActivationAutomationChanged } from '@roomote/telemetry/server';
 import type { ActivationAutomation } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
-import { resolveCiFailureTriageRepositoryRoutes } from './ci-failure-triage-routing';
+import { resolveCiFailureTriageRules } from './ci-failure-triage-routing';
 
 import {
   hasActiveGitHubInstallation,
@@ -340,20 +340,23 @@ export async function updateBackgroundAgentSettingsCommand(
       ? (input.platformIssueAlertsEnabled ??
         existingSettings.platformIssueAlertsEnabled)
       : existingSettings.platformIssueAlertsEnabled;
-  const savingCiRoutes =
+  const savingCiRules =
     input.savingAutomation === 'ciFailureTriage' &&
-    input.ciFailureTriageRepositoryRoutes !== undefined;
-  let ciRoutes = savingCiRoutes
-    ? (input.ciFailureTriageRepositoryRoutes ?? undefined)
-    : existingSettings.ciFailureTriageRepositoryRoutes;
-  if (savingCiRoutes && ciRoutes !== undefined) {
+    input.ciFailureTriageAdditionalRules !== undefined;
+  let ciRules: Awaited<ReturnType<typeof resolveCiFailureTriageRules>>;
+  const ciRulesText = input.ciFailureTriageAdditionalRules?.trim() ?? '';
+  if (savingCiRules) {
     try {
-      ciRoutes = await resolveCiFailureTriageRepositoryRoutes(auth, ciRoutes);
+      ciRules = await resolveCiFailureTriageRules(
+        auth,
+        ciRulesText,
+        (await getAutomationByKey('ci_failure_triage'))?.settings ?? {},
+      );
     } catch (error) {
       return {
         success: false,
         fieldErrors: {
-          ciFailureTriageRepositoryRoutes:
+          ciFailureTriageAdditionalRules:
             error instanceof Error ? error.message : String(error),
         },
       };
@@ -526,10 +529,6 @@ export async function updateBackgroundAgentSettingsCommand(
     destinationDescriptors.some(
       (descriptor) =>
         input.savingAutomation === descriptor.automationId &&
-        !(
-          descriptor.automationId === 'ciFailureTriage' &&
-          ciRoutes !== undefined
-        ) &&
         Boolean(submittedDestinations[descriptor.automationId].slackChannel),
     );
 
@@ -590,12 +589,7 @@ export async function updateBackgroundAgentSettingsCommand(
         })
       : keepPersistedDiscordChannel(existingSettings.managerDiscordChannelId),
     ...destinationDescriptors.map(async (descriptor) => {
-      const shouldUpdate =
-        input.savingAutomation === descriptor.automationId &&
-        !(
-          descriptor.automationId === 'ciFailureTriage' &&
-          ciRoutes !== undefined
-        );
+      const shouldUpdate = input.savingAutomation === descriptor.automationId;
       const submitted = submittedDestinations[descriptor.automationId];
       const [slack, discord] = await Promise.all([
         shouldUpdate
@@ -1126,8 +1120,7 @@ export async function updateBackgroundAgentSettingsCommand(
   for (const validation of managerChannelAutomationValidations) {
     if (
       input.savingAutomation !== validation.automationId ||
-      validation.frequency === 'off' ||
-      (validation.automationId === 'ciFailureTriage' && ciRoutes !== undefined)
+      validation.frequency === 'off'
     ) {
       continue;
     }
@@ -1505,7 +1498,7 @@ export async function updateBackgroundAgentSettingsCommand(
       updatedAt: now,
     });
 
-    const ciSettings = savingCiRoutes
+    const ciSettings = savingCiRules
       ? {
           ...(
             await tx.query.automations.findFirst({
@@ -1515,8 +1508,13 @@ export async function updateBackgroundAgentSettingsCommand(
         }
       : undefined;
     if (ciSettings) {
-      if (ciRoutes === undefined) delete ciSettings.repositoryRoutes;
-      else ciSettings.repositoryRoutes = ciRoutes;
+      if (!ciRules) {
+        delete ciSettings.additionalRules;
+        delete ciSettings.compiledRules;
+      } else {
+        ciSettings.additionalRules = ciRulesText;
+        ciSettings.compiledRules = ciRules;
+      }
     }
     await upsertAutomation(tx, {
       key: 'ci_failure_triage',

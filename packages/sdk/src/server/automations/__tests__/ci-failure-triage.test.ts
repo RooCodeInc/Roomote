@@ -274,16 +274,22 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     'limits manual runs by repository ID with destination override=%s',
     async (override) => {
       const repositoryId = '10000000-0000-4000-8000-000000000001';
-      const target = {
-        provider: 'teams',
-        targetKind: 'teams_channel',
-        externalRef: 'route-channel',
-      };
       mockGetAutomationRuntime.mockResolvedValue({
         enabled: true,
         scheduleMode: 'daily',
+        destination: {
+          provider: 'teams',
+          channelId: 'route-channel',
+          source: 'automation_target',
+        },
         settings: {
-          repositoryRoutes: [{ repositoryIds: [repositoryId], target }],
+          additionalRules: 'Only backend',
+          compiledRules: {
+            text: 'Only backend',
+            repositoryIds: [repositoryId],
+            destinations: [],
+            instructions: '',
+          },
         },
       });
       mockGetActiveRepositoriesForProviders.mockResolvedValue([
@@ -332,7 +338,7 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
     mockGetAutomationRuntime.mockResolvedValue({
       enabled: true,
       scheduleMode: 'daily',
-      settings: { repositoryRoutes: [] },
+      settings: { additionalRules: 'Only backend' },
     });
     await ciFailureTriageJob({
       manualTrigger: true,
@@ -348,24 +354,29 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
   });
 
   it.each([false, true])(
-    'uses verified scoped Slack ownership unless a one-off destination overrides delivery=%s',
+    'preserves explicit Slack ownership even with one-off destination=%s',
     async (override) => {
       const repositoryId = '10000000-0000-4000-8000-000000000001';
       mockGetAutomationRuntime.mockResolvedValue({
         enabled: true,
         scheduleMode: 'daily',
         settings: {
-          repositoryRoutes: [
-            {
-              repositoryIds: [repositoryId],
-              target: {
-                provider: 'slack',
-                targetKind: 'slack_channel',
-                externalRef: 'CROUTE',
-                metadata: { teamId: 'TROUTE' },
+          additionalRules: 'Only backend',
+          compiledRules: {
+            text: 'Only backend',
+            repositoryIds: [repositoryId],
+            instructions: '',
+            destinations: [
+              {
+                repositoryId,
+                target: {
+                  provider: 'slack',
+                  externalRef: 'CROUTE',
+                  workspaceId: 'TROUTE',
+                },
               },
-            },
-          ],
+            ],
+          },
         },
       });
       mockListConnectedCommunicationProviders.mockResolvedValue(['slack']);
@@ -394,26 +405,16 @@ describe('ciFailureTriageJob multi-comms destinations', () => {
       });
       expect(result.launchedTaskId).toBe('task-1');
       expect(mockResolveAutomationRuntimeDestination).not.toHaveBeenCalled();
-      if (override) {
-        expect(
-          mockFindActiveSlackInstallationForChannel,
-        ).not.toHaveBeenCalled();
-      } else {
-        expect(mockFindActiveSlackInstallationForChannel).toHaveBeenCalledWith(
-          'CROUTE',
-          'TROUTE',
-        );
-      }
-      expect(mockBuildDestinationTaskPayloadFields).toHaveBeenCalledWith(
-        override
-          ? destination
-          : {
-              provider: 'slack',
-              channelId: 'CROUTE',
-              teamId: 'TROUTE',
-              source: 'automation_target',
-            },
+      expect(mockFindActiveSlackInstallationForChannel).toHaveBeenCalledWith(
+        'CROUTE',
+        'TROUTE',
       );
+      expect(mockBuildDestinationTaskPayloadFields).toHaveBeenCalledWith({
+        provider: 'slack',
+        channelId: 'CROUTE',
+        teamId: 'TROUTE',
+        source: 'automation_target',
+      });
     },
   );
 

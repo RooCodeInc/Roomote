@@ -9,7 +9,6 @@ import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   type BackgroundAutomationKey,
   type CommunicationProvider,
-  type CiFailureTriageRepositoryRoute,
   communicationProviders,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
@@ -69,7 +68,7 @@ import {
 } from './ScheduleOnlyAutomationContent';
 import { CustomAutomationsSection } from './CustomAutomationsSection';
 import { AutomationDestinationPicker } from './AutomationDestinationPicker';
-import { CiFailureTriageRepositoryRoutesEditor } from './CiFailureTriageRepositoryRoutesEditor';
+import { CiFailureTriageAdditionalRules } from './CiFailureTriageAdditionalRules';
 import {
   buildAutomationDiscordDestinationOptions,
   buildManagerSlackChannelOptions,
@@ -133,7 +132,7 @@ import {
 type FieldErrors = Partial<
   Record<
     | 'general'
-    | 'ciFailureTriageRepositoryRoutes'
+    | 'ciFailureTriageAdditionalRules'
     | 'reviewerEnvironmentIds'
     | 'reviewerCollaborators'
     | 'reviewerExcludedAuthors'
@@ -839,7 +838,7 @@ function mapSettingsToFormState(
     ciFailureTriageSlackChannelId: string | null;
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
-    ciFailureTriageRepositoryRoutes?: CiFailureTriageRepositoryRoute[];
+    ciFailureTriageAdditionalRules?: string;
     mergeAnnouncerTargetProvider: CommunicationProvider | null;
     mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
     mergeAnnouncerTargetChannelId: string | null;
@@ -980,7 +979,7 @@ function mapSettingsToFormState(
       '',
     ciFailureTriageDiscordChannel:
       settings.ciFailureTriageDiscordChannelId ?? '',
-    ciFailureTriageRepositoryRoutes: settings.ciFailureTriageRepositoryRoutes,
+    ciFailureTriageAdditionalRules: settings.ciFailureTriageAdditionalRules,
     mergeAnnouncerTargetProvider:
       settings.mergeAnnouncerTargetProvider ?? 'none',
     mergeAnnouncerTargetMode: settings.mergeAnnouncerTargetMode ?? 'channel',
@@ -2586,10 +2585,6 @@ export function AutomationsSettings() {
       null,
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
-  if (formState?.ciFailureTriageRepositoryRoutes?.length === 0) {
-    scheduleOnlyAutomationBlockedReasons.ciFailureTriage =
-      'Select at least one repository group first';
-  }
   return (
     <div className="space-y-6">
       {!settingsQuery.isPending &&
@@ -3398,25 +3393,19 @@ export function AutomationsSettings() {
                         }
                       />
                     ) : (
-                      <CiFailureTriageRepositoryRoutesEditor
-                        routes={formState.ciFailureTriageRepositoryRoutes}
-                        onChange={(routes) =>
+                      <CiFailureTriageAdditionalRules
+                        value={formState.ciFailureTriageAdditionalRules ?? ''}
+                        onChange={(value) =>
                           setFormState((previous) =>
                             previous
                               ? {
                                   ...previous,
-                                  ciFailureTriageRepositoryRoutes: routes,
+                                  ciFailureTriageAdditionalRules: value,
                                 }
                               : previous,
                           )
                         }
-                        availableProviders={communicationProviders.filter(
-                          (provider) =>
-                            capabilities?.[`${provider}Connected`] === true,
-                        )}
-                        slackOptions={buildSlackDestinationOptions(null)}
-                        discordOptions={channelAutoStartDiscordOptions}
-                        error={fieldErrors.ciFailureTriageRepositoryRoutes}
+                        error={fieldErrors.ciFailureTriageAdditionalRules}
                         globalDestination={renderSlackDestinationField({
                           field: 'ciFailureTriageSlackChannel',
                           inputId: 'ciFailureTriage-slack-channel',

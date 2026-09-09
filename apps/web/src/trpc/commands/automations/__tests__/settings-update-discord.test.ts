@@ -27,6 +27,11 @@ import { triggerAutomationCommand } from '../trigger-agent';
 import type { UpdateBackgroundAgentSettingsInput } from '../types';
 
 const mockCaptureActivationAutomationChanged = vi.hoisted(() => vi.fn());
+const mockResolveRules = vi.hoisted(() => vi.fn());
+vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/cloud-agents/server')>()),
+  generateTrackedNonTaskObject: mockResolveRules,
+}));
 const mockRunAutomationNow = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ outcome: 'completed' }),
 );
@@ -259,23 +264,23 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     );
   });
 
-  it('roundtrips scoped CI routes, preserves unrelated/old-client saves, and clears to all explicitly', async () => {
+  it('roundtrips CI rules, preserves unrelated/omitted-field saves, and clears to all explicitly', async () => {
     await insertSlackInstallation();
     const repo = await repositoryFactory.create({
       sourceControlProvider: 'gitlab',
       linkedByUserId: adminAuth.userId,
     });
     createdRepositoryIds.push(repo.id);
-    const routes = [
-      {
+    const text = 'Only triage the backend repository.';
+    mockResolveRules.mockResolvedValue({
+      object: {
+        status: 'resolved',
         repositoryIds: [repo.id],
-        target: {
-          provider: 'slack' as const,
-          targetKind: 'slack_channel' as const,
-          externalRef: 'C123ROUTE',
-        },
+        destinations: [],
+        instructions: '',
+        clarification: null,
       },
-    ];
+    });
     await upsertAutomation(db, {
       key: 'ci_failure_triage',
       enabled: false,
@@ -286,23 +291,16 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       buildInput({
         savingAutomation: 'ciFailureTriage',
         ciFailureTriageFrequency: 'daily',
-        ciFailureTriageRepositoryRoutes: routes,
+        ciFailureTriageAdditionalRules: text,
+        ciFailureTriageSlackChannel: 'C123LEGACY',
       }),
     );
     expect(saved.success).toBe(true);
     if (!saved.success) throw new Error(JSON.stringify(saved.fieldErrors));
-    const verifiedRoutes = routes.map((route) => ({
-      ...route,
-      target: { ...route.target, metadata: { teamId: 'T123' } },
-    }));
-    expect(saved.settings.ciFailureTriageRepositoryRoutes).toEqual(
-      verifiedRoutes,
-    );
+    expect(saved.settings.ciFailureTriageAdditionalRules).toEqual(text);
     const read = await getBackgroundAgentSettingsCommand(adminAuth);
-    expect(read.settings.ciFailureTriageRepositoryRoutes).toEqual(
-      verifiedRoutes,
-    );
-    expect(read.resolvedDestinations.ci_failure_triage).toBeNull();
+    expect(read.settings.ciFailureTriageAdditionalRules).toEqual(text);
+    expect(read.resolvedDestinations.ci_failure_triage).not.toBeNull();
     await triggerAutomationCommand(adminAuth, {
       automationKey: 'ci_failure_triage',
     });
@@ -311,34 +309,44 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       adminAuth,
       buildInput({
         savingAutomation: 'announcer',
-        ciFailureTriageRepositoryRoutes: null,
+        ciFailureTriageAdditionalRules: null,
       }),
     );
     expect(
       (await getBackgroundAgentSettingsForDeployment())
-        .ciFailureTriageRepositoryRoutes,
-    ).toEqual(verifiedRoutes);
+        .ciFailureTriageAdditionalRules,
+    ).toEqual(text);
     await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({ savingAutomation: 'ciFailureTriage' }),
     );
     expect(
       (await getBackgroundAgentSettingsForDeployment())
-        .ciFailureTriageRepositoryRoutes,
-    ).toEqual(verifiedRoutes);
+        .ciFailureTriageAdditionalRules,
+    ).toEqual(text);
+    mockResolveRules.mockResolvedValue({
+      object: {
+        status: 'resolved',
+        repositoryIds: [],
+        destinations: [],
+        instructions: '',
+        clarification: null,
+      },
+    });
     const empty = await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({
         savingAutomation: 'ciFailureTriage',
         ciFailureTriageFrequency: 'daily',
-        ciFailureTriageRepositoryRoutes: [],
+        ciFailureTriageAdditionalRules: 'Do not triage any repositories.',
+        ciFailureTriageSlackChannel: 'C123LEGACY',
       }),
     );
     expect(empty.success).toBe(true);
     expect(
       (await getBackgroundAgentSettingsForDeployment())
-        .ciFailureTriageRepositoryRoutes,
-    ).toEqual([]);
+        .ciFailureTriageAdditionalRules,
+    ).toEqual('Do not triage any repositories.');
     mockRunAutomationNow.mockClear();
     await expect(
       triggerAutomationCommand(adminAuth, {
@@ -350,13 +358,13 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       adminAuth,
       buildInput({
         savingAutomation: 'ciFailureTriage',
-        ciFailureTriageRepositoryRoutes: null,
+        ciFailureTriageAdditionalRules: '',
       }),
     );
     expect(
       (await getBackgroundAgentSettingsForDeployment())
-        .ciFailureTriageRepositoryRoutes,
-    ).toBeUndefined();
+        .ciFailureTriageAdditionalRules,
+    ).toBe('');
     expect(
       (
         await db.query.automations.findFirst({
@@ -380,6 +388,58 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     });
   });
 
+  it.each(['unavailable', 'ambiguous', 'malformed'])(
+    'preserves saved CI rules, destination and enabled state on %s model failure',
+    async (failure) => {
+      const settings = {
+        additionalRules: 'Keep reports short.',
+        compiledRules: {
+          text: 'Keep reports short.',
+          repositoryIds: null,
+          destinations: [],
+          instructions: 'Keep reports short.',
+        },
+      };
+      await upsertAutomation(db, {
+        key: 'ci_failure_triage',
+        enabled: true,
+        schedule: { mode: 'daily' },
+        settings,
+      });
+      const before = await db.query.automations.findFirst({
+        where: eq(automations.key, 'ci_failure_triage'),
+      });
+      if (failure === 'unavailable')
+        mockResolveRules.mockRejectedValueOnce(new Error('Model unavailable'));
+      else
+        mockResolveRules.mockResolvedValueOnce({
+          object:
+            failure === 'ambiguous'
+              ? {
+                  status: 'ambiguous',
+                  repositoryIds: null,
+                  destinations: [],
+                  instructions: '',
+                  clarification: 'Which repository?',
+                }
+              : { status: 'resolved', repositoryIds: 'all' },
+        });
+      const result = await updateBackgroundAgentSettingsCommand(
+        adminAuth,
+        buildInput({
+          savingAutomation: 'ciFailureTriage',
+          ciFailureTriageAdditionalRules: 'Only triage backend.',
+        }),
+      );
+      expect(result.success).toBe(false);
+      expect(
+        await db.query.automations.findFirst({
+          where: eq(automations.key, 'ci_failure_triage'),
+        }),
+      ).toEqual(before);
+    },
+  );
+
   it('rejects missing, inactive, and overlapping CI repositories without changing persisted scope', async () => {
     await insertSlackInstallation();
     const repo = await repositoryFactory.create({
@@ -388,31 +448,35 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       isActive: false,
     });
     createdRepositoryIds.push(repo.id);
-    const target = {
-      provider: 'slack' as const,
-      targetKind: 'slack_channel' as const,
-      externalRef: 'C123ROUTE',
-    };
     for (const repositoryIds of [
       [repo.id],
       ['10000000-0000-4000-8000-000000000001'],
       [repo.id, repo.id],
     ]) {
+      mockResolveRules.mockResolvedValue({
+        object: {
+          status: 'resolved',
+          repositoryIds,
+          destinations: [],
+          instructions: '',
+          clarification: null,
+        },
+      });
       const result = await updateBackgroundAgentSettingsCommand(
         adminAuth,
         buildInput({
           savingAutomation: 'ciFailureTriage',
-          ciFailureTriageRepositoryRoutes: [{ repositoryIds, target }],
+          ciFailureTriageAdditionalRules: 'Only triage backend.',
         }),
       );
       expect(result.success).toBe(false);
       if (result.success) throw new Error('Expected validation failure');
-      expect(result.fieldErrors.ciFailureTriageRepositoryRoutes).toBeTruthy();
+      expect(result.fieldErrors.ciFailureTriageAdditionalRules).toBeTruthy();
     }
     expect(
       (await getBackgroundAgentSettingsForDeployment())
-        .ciFailureTriageRepositoryRoutes,
-    ).toBeUndefined();
+        .ciFailureTriageAdditionalRules,
+    ).toBe('');
   });
 
   it('does not track a built-in automation when its enabled state is unchanged', async () => {

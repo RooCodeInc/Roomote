@@ -1,6 +1,5 @@
 import {
   USER_FACING_AUTOMATION_KEYS,
-  getCiFailureTriageRepositoryRoutes,
   type BackgroundAutomationKey,
   type PrReviewSettings,
   type TaskTrigger,
@@ -223,13 +222,6 @@ async function resolveAutomationDestinations(params: {
   const entries = await Promise.all(
     MANAGER_REPORTING_AUTOMATION_KEYS.map(async (key) => {
       const runtime = runtimes[key];
-      // Scoped CI groups have separate destinations, not a single global report channel.
-      if (
-        key === 'ci_failure_triage' &&
-        getCiFailureTriageRepositoryRoutes(runtime.settings) !== undefined
-      ) {
-        return [key, null] as const;
-      }
       // Platform issue alerts use deployment-admin DMs as their final tail;
       // unlike scheduled automations, they never post to a primary channel.
       const destination =

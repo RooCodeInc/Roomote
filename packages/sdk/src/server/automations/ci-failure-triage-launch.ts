@@ -26,7 +26,8 @@ import {
 } from '@roomote/slack';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
-  getCiFailureTriageRepositoryRoutes,
+  isCiFailureTriageRepositoryAllowed,
+  getCiFailureTriageRules,
   TaskPayloadKind,
   type SourceControlProvider,
   type TaskSurface,
@@ -279,11 +280,7 @@ export async function launchCiFailureTriageForFailedRun(
     return { status: 'ok', message: 'CI failure triage is disabled' };
   }
 
-  const routes = getCiFailureTriageRepositoryRoutes(runtime.settings);
-  if (
-    routes !== undefined &&
-    !routes.some((route) => route.repositoryIds.includes(run.repositoryId))
-  ) {
+  if (!isCiFailureTriageRepositoryAllowed(runtime.settings, run.repositoryId)) {
     return {
       status: 'ok',
       message: 'Repository is outside the CI failure triage scope',
@@ -444,6 +441,8 @@ export async function launchCiFailureTriageForFailedRun(
               ? { sourceControlHost: run.repositoryHost }
               : {}),
             description: buildCiFailureTriagePrompt({
+              additionalInstructions: getCiFailureTriageRules(runtime.settings)
+                ?.instructions,
               channelId,
               repositoryFullNames: [run.repositoryFullName],
               repositoryCoverage,

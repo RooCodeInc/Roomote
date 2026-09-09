@@ -96,17 +96,22 @@ describe('CI triage Slack ownership through the webhook launch path', () => {
     metadata: Record<string, unknown> | null = { teamId: b.teamId },
   ) {
     await configure({
-      repositoryRoutes: [
-        {
-          repositoryIds: [repositoryId],
-          target: {
-            provider: 'slack',
-            targetKind: 'slack_channel',
-            externalRef: 'C_OWNER_B',
-            ...(metadata === null ? {} : { metadata }),
+      additionalRules: 'Only the configured repository',
+      compiledRules: {
+        text: 'Only the configured repository',
+        repositoryIds: [repositoryId],
+        instructions: '',
+        destinations: [
+          {
+            repositoryId,
+            target: {
+              provider: 'slack',
+              externalRef: 'C_OWNER_B',
+              workspaceId: metadata?.teamId,
+            },
           },
-        },
-      ],
+        ],
+      },
     });
   }
 
@@ -235,7 +240,7 @@ describe('CI triage Slack ownership through the webhook launch path', () => {
       await scope(metadata as Record<string, unknown> | null);
       expect(await launch()).toEqual({
         status: 'ok',
-        message: 'Manager channel is not configured',
+        message: expect.stringMatching(/outside|not configured/),
       });
       expect(mockSlackConstructor).not.toHaveBeenCalled();
       expect(mockPostMessage).not.toHaveBeenCalled();
@@ -359,7 +364,43 @@ describe('CI triage Slack ownership through the webhook launch path', () => {
     });
   });
 
-  it('preserves an explicit one-off override but never lets it bypass repository scope', async () => {
+  it('keeps unoverridden repositories on the default with all-scope destination rules', async () => {
+    await configure({
+      additionalRules: 'Route this repository',
+      compiledRules: {
+        text: 'Route this repository',
+        repositoryIds: null,
+        instructions: '',
+        destinations: [
+          {
+            repositoryId,
+            target: {
+              provider: 'slack',
+              externalRef: 'C_OWNER_B',
+              workspaceId: b.teamId,
+            },
+          },
+        ],
+      },
+    });
+    const runtime = await getAutomationRuntime('ci_failure_triage');
+    expect(
+      await resolveCiFailureTriageRepositoryDestination({
+        runtime,
+        repositoryId,
+        connectedProviders: ['slack'],
+      }),
+    ).toMatchObject({ channelId: 'C_OWNER_B', teamId: b.teamId });
+    expect(
+      await resolveCiFailureTriageRepositoryDestination({
+        runtime,
+        repositoryId: '10000000-0000-4000-8000-000000000099',
+        connectedProviders: ['slack'],
+      }),
+    ).toMatchObject({ channelId: 'C_FALLBACK' });
+  });
+
+  it('never lets a one-off destination bypass malformed rules or repository scope', async () => {
     await scope({});
     const runtime = await getAutomationRuntime('ci_failure_triage');
     const destination = {
@@ -374,7 +415,7 @@ describe('CI triage Slack ownership through the webhook launch path', () => {
         connectedProviders: ['slack'],
         destination,
       }),
-    ).toEqual(destination);
+    ).toBeNull();
     expect(
       await resolveCiFailureTriageRepositoryDestination({
         runtime,

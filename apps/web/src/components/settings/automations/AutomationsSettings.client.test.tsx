@@ -97,20 +97,23 @@ const baseFormState: FormState = {
 };
 
 describe('Automations selection helpers', () => {
-  it('saves and resets CI scope without conflating all repositories and none', () => {
-    const scoped = { ...baseFormState, ciFailureTriageRepositoryRoutes: [] };
+  it('saves and clears CI rules while preserving unrelated card values', () => {
+    const scoped = {
+      ...baseFormState,
+      ciFailureTriageAdditionalRules: 'Only triage backend.',
+    };
     expect(
       buildAutomationSettingsSaveInput(scoped, baseFormState, 'ciFailureTriage')
-        .ciFailureTriageRepositoryRoutes,
-    ).toEqual([]);
+        .ciFailureTriageAdditionalRules,
+    ).toEqual('Only triage backend.');
     expect(
       buildAutomationSettingsSaveInput(baseFormState, scoped, 'ciFailureTriage')
-        .ciFailureTriageRepositoryRoutes,
-    ).toBeNull();
+        .ciFailureTriageAdditionalRules,
+    ).toBe('');
     expect(
       buildAutomationSettingsSaveInput(scoped, baseFormState, 'announcer')
-        .ciFailureTriageRepositoryRoutes,
-    ).toBeNull();
+        .ciFailureTriageAdditionalRules,
+    ).toBe('');
   });
   it('saves Merge announcer through the standard provider/mode destination fields', () => {
     const input = buildAutomationSettingsSaveInput(
