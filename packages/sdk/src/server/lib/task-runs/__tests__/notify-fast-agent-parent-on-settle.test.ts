@@ -189,6 +189,98 @@ describe('notifyFastAgentParentOnSettle', () => {
     );
   });
 
+  it.each([
+    undefined,
+    TaskPayloadKind.GithubPrReview,
+    TaskPayloadKind.GithubPrReviewSync,
+  ])(
+    'preserves redacted idle errors without retry controls for payload kind %s',
+    async (payloadKind) => {
+      mocks.canRetryFailedStart.mockResolvedValue(true);
+      await notifyFastAgentParentOnSettle(
+        makeRun(
+          { fastAgentParent: fastParent },
+          {
+            payloadKind,
+            error:
+              ' Invalid credential xoxb-1234567890-abcdefghijklmnop while running. ',
+            errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
+          },
+        ),
+        RunStatus.Idle,
+      );
+
+      expect(mocks.enqueueParentEvent).toHaveBeenCalledExactlyOnceWith({
+        parent: fastParent,
+        event: {
+          type: 'task_settled',
+          taskId: 'child-task',
+          runId: 200,
+          status: RunStatus.Idle,
+          error: 'Invalid credential [redacted] while running.',
+          errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
+          taskUrl: 'https://roomote.example/task/child-task',
+          pullRequests: [],
+        },
+      });
+      expect(mocks.canRetryFailedStart).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([null, '   '])(
+    'does not synthesize an idle error for %s',
+    async (error) => {
+      await notifyFastAgentParentOnSettle(
+        makeRun({ fastAgentParent: fastParent }, { error }),
+        RunStatus.Idle,
+      );
+
+      const notification = mocks.enqueueParentEvent.mock.calls[0]?.[0];
+      expect(notification.event).not.toHaveProperty('error');
+      expect(notification.event).not.toHaveProperty('errorCode');
+      expect(notification).not.toHaveProperty('retryTaskStartRunId');
+      expect(mocks.canRetryFailedStart).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves an idle review error code without synthesizing an error', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent },
+        {
+          payloadKind: TaskPayloadKind.GithubPrReview,
+          errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
+        },
+      ),
+      RunStatus.Idle,
+    );
+
+    const notification = mocks.enqueueParentEvent.mock.calls[0]?.[0];
+    expect(notification.event).toMatchObject({
+      status: RunStatus.Idle,
+      errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
+    });
+    expect(notification.event).not.toHaveProperty('error');
+    expect(notification).not.toHaveProperty('retryTaskStartRunId');
+    expect(mocks.canRetryFailedStart).not.toHaveBeenCalled();
+  });
+
+  it('keeps canceled fallback diagnostics without retry controls', async () => {
+    await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Canceled,
+    );
+
+    const notification = mocks.enqueueParentEvent.mock.calls[0]?.[0];
+    expect(notification.event).toMatchObject({
+      status: RunStatus.Canceled,
+      error:
+        'The task stopped without a detailed error. Open the task for diagnostics.',
+    });
+    expect(notification).not.toHaveProperty('retryTaskStartRunId');
+    expect(mocks.canRetryFailedStart).not.toHaveBeenCalled();
+  });
+
   it('carries custom automation identity into the settlement event', async () => {
     await notifyFastAgentParentOnSettle(
       makeRun({

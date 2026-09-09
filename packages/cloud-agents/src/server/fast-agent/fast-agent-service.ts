@@ -138,6 +138,7 @@ import {
   type FastAgentTurnAttemptSummary,
   type FastAgentUnresolvedRequest,
   loadFastAgentTurnAttemptSummary,
+  loadFastAgentTaskMessageHistory,
 } from './fast-agent-conversation-repository';
 import {
   bindFastAgentNativeToolExecutor,
@@ -471,6 +472,10 @@ const taskMessageArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
   message: z.string().trim().min(1),
   includeAttachments: z.boolean().optional().default(false),
+  continuation: z
+    .enum(['instruction', 'recovery'])
+    .optional()
+    .default('recovery'),
 });
 const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
@@ -1664,6 +1669,15 @@ export async function answerFastAgentQuestion({
   const reactionInput =
     !platformEvent && humanInput.type === FAST_AGENT_REACTION_INPUT_TYPE;
   const substantiveHumanInput = !platformEvent && !reactionInput;
+  let taskMessageInstructionId =
+    substantiveHumanInput && !allowSilentAmbientReply ? turnId : undefined;
+  const taskMessageContinuation = (args: Record<string, unknown>) =>
+    args.continuation === 'instruction' && taskMessageInstructionId
+      ? {
+          kind: 'instruction' as const,
+          instructionId: taskMessageInstructionId,
+        }
+      : { kind: 'recovery' as const };
   const currentMessageReactable = substantiveHumanInput;
   const transcriptPayload = reactionInput
     ? { externalInput: humanInput.externalInput }
@@ -2413,6 +2427,7 @@ export async function answerFastAgentQuestion({
       // directed.
       if (batch.some(({ followUp }) => followUp.directedAtRoomote !== false)) {
         steeredDirectedFollowUp = true;
+        taskMessageInstructionId = batch.at(-1)!.row.id;
       }
       injectedHumanFollowUpMessages.push(...batchMessages);
       injectedHumanFollowUpFiles.push(...batchFiles);
@@ -2523,6 +2538,19 @@ export async function answerFastAgentQuestion({
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
+    const continuation =
+      title === FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage
+        ? taskMessageContinuation(args)
+        : undefined;
+    const continuationMetadata = continuation
+      ? {
+          taskMessageContinuation: continuation.kind,
+          taskMessageInstructionId:
+            'instructionId' in continuation
+              ? continuation.instructionId
+              : undefined,
+        }
+      : {};
     await persistCanonicalMessage(
       {
         ...canonicalEvent,
@@ -2531,7 +2559,7 @@ export async function answerFastAgentQuestion({
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
         role: 'tool',
         contentBlocks: [],
-        metadata: { visibleInTranscript },
+        metadata: { visibleInTranscript, ...continuationMetadata },
         payload: {
           toolCallId,
           title,
@@ -2551,7 +2579,7 @@ export async function answerFastAgentQuestion({
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
       },
-      true,
+      !continuation,
     );
     return {
       ordinal,
@@ -2564,6 +2592,7 @@ export async function answerFastAgentQuestion({
       kind,
       visibleInTranscript,
       canonicalEvent,
+      continuationMetadata,
     };
   };
   const finishCanonicalToolEvent = async (
@@ -2585,7 +2614,11 @@ export async function answerFastAgentQuestion({
         eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
         role: 'tool',
         contentBlocks: output ? [{ type: 'text', text: output }] : [],
-        metadata: { visibleInTranscript: event.visibleInTranscript, truncated },
+        metadata: {
+          visibleInTranscript: event.visibleInTranscript,
+          truncated,
+          ...event.continuationMetadata,
+        },
         payload: {
           toolCallId: event.toolCallId,
           title: event.title,
@@ -2916,6 +2949,19 @@ export async function answerFastAgentQuestion({
         ? await loadFastAgentTurnAttemptSummary(session.id, turnId)
         : null;
     if (previousAttempt) {
+      // A human steer may have advanced the request inside this same turn.
+      // Replaying it must not mint a fresh instruction identity/reset budget.
+      const lastInstruction = [...previousAttempt.events]
+        .reverse()
+        .find(
+          (event) =>
+            event.kind === 'action' &&
+            event.continuation === 'instruction' &&
+            event.instructionId,
+        );
+      if (lastInstruction?.kind === 'action') {
+        taskMessageInstructionId = lastInstruction.instructionId;
+      }
       nextAssistantOrdinal = previousAttempt.next.assistantOrdinal;
       nextToolOrdinal = previousAttempt.next.toolOrdinal;
       nextRetryNoticeOrdinal = previousAttempt.next.retryNoticeOrdinal;
@@ -3080,6 +3126,10 @@ export async function answerFastAgentQuestion({
     ];
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
+    );
+    taskMessageGuard.restoreRecoveryHistory(
+      await loadFastAgentTaskMessageHistory(session.id),
+      [...currentTasks.keys()],
     );
     taskMessageGuard.restore(previousAttempt?.events ?? [], [
       ...currentTasks.keys(),
@@ -4189,6 +4239,17 @@ export async function answerFastAgentQuestion({
               };
             }
             const args = parsed.data;
+            if (
+              args.continuation === 'instruction' &&
+              !taskMessageInstructionId
+            ) {
+              return {
+                success: false,
+                delivery: 'not_accepted',
+                error:
+                  'Only a current human instruction may reset the recovery budget.',
+              };
+            }
             const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) {
               return {
@@ -4205,17 +4266,21 @@ export async function answerFastAgentQuestion({
                   attachmentTexts,
                 })
               : args.message;
-            return await taskMessageGuard.send(taskId, args, () =>
-              sendFastAgentTaskMessage(
-                { userId, apiBaseUrl },
-                {
-                  taskId,
-                  message,
-                  ...(args.includeAttachments && images.length > 0
-                    ? { images }
-                    : {}),
-                },
-              ),
+            return await taskMessageGuard.send(
+              taskId,
+              args,
+              () =>
+                sendFastAgentTaskMessage(
+                  { userId, apiBaseUrl },
+                  {
+                    taskId,
+                    message,
+                    ...(args.includeAttachments && images.length > 0
+                      ? { images }
+                      : {}),
+                  },
+                ),
+              taskMessageContinuation(args),
             );
           }
 
@@ -5098,6 +5163,17 @@ export async function answerFastAgentQuestion({
           ),
         );
       }
+    }
+    // Silent/ignored turns have no text reply to retire their retry marker.
+    // Leaving it active would make reconciliation report a false interruption.
+    if (inferenceRetryCanonicalEvent) {
+      await replaceInferenceRetryReply(
+        { purpose: 'closeout', message: 'The retry completed.' },
+        true,
+      );
+      inferenceRetryReply = undefined;
+      inferenceRetryMessageIndex = undefined;
+      inferenceRetryCanonicalEvent = undefined;
     }
     await settleDurableTurn();
     await mirrorPendingMessages();

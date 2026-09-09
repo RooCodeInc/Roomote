@@ -45,6 +45,7 @@ const mocks = vi.hoisted(() => ({
   scheduleDurableRetry: vi.fn(),
   findActiveRetryNotice: vi.fn(),
   loadTurnAttempt: vi.fn(),
+  loadTaskMessageHistory: vi.fn(),
   getUnifiedSession: vi.fn(),
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
@@ -123,6 +124,7 @@ vi.mock('../fast-agent-conversation-repository', () => ({
   scheduleFastAgentDurableTurnRetry: mocks.scheduleDurableRetry,
   findFastAgentActiveInferenceRetryNotice: mocks.findActiveRetryNotice,
   loadFastAgentTurnAttemptSummary: mocks.loadTurnAttempt,
+  loadFastAgentTaskMessageHistory: mocks.loadTaskMessageHistory,
 }));
 
 vi.mock('../../available-environments', () => ({
@@ -466,6 +468,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.setOpenCodeSession.mockResolvedValue(undefined);
     mocks.upsertMessage.mockResolvedValue({ initialHumanTurn: true });
     mocks.reconcileRetryNotices.mockResolvedValue(0);
+    mocks.loadTaskMessageHistory.mockResolvedValue([]);
     mocks.markRetryNoticeInterruption.mockResolvedValue(undefined);
     mocks.renewRespondingLease.mockResolvedValue(true);
     mocks.findUnresolvedRequest.mockResolvedValue(null);
@@ -8594,7 +8597,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             message: 'Run tests',
           }),
         ).toMatchObject({ success: false });
-        const args = { taskId: 'task-1', message: 'Run tests' };
+        const args = {
+          taskId: 'task-1',
+          message: 'Run tests',
+          continuation: 'instruction',
+        };
         const first = await invokeTool(nativeToolNames.sendTaskMessage, args);
         expect(await invokeTool(nativeToolNames.sendTaskMessage, args)).toEqual(
           first,
@@ -8676,6 +8683,150 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       );
     },
   );
+
+  it('enforces recovery receipts across platform turns, check-ins, and new run IDs', async () => {
+    const persisted = new Map<
+      string,
+      {
+        eventType: string;
+        payload: {
+          toolName?: string;
+          rawInput?: { arguments?: unknown };
+          output?: string;
+        };
+        metadata: Record<string, unknown>;
+      }
+    >();
+    mocks.upsertMessage.mockImplementation(async ({ message }) => {
+      persisted.set(message.eventId, message);
+      return { initialHumanTurn: false };
+    });
+    mocks.loadTaskMessageHistory.mockImplementation(async () =>
+      [...persisted.values()]
+        .filter((message) => message.payload.toolName === 'send_task_message')
+        .map((message) => ({
+          kind: 'action',
+          tool: 'send_task_message',
+          arguments: message.payload.rawInput?.arguments,
+          continuation: message.metadata.taskMessageContinuation,
+          instructionId: message.metadata.taskMessageInstructionId,
+          status:
+            message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall
+              ? 'unknown'
+              : 'completed',
+          result: message.payload.output,
+        })),
+    );
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'idle' },
+    ]);
+    const outcomes: unknown[] = [];
+    let human = false;
+    let instruction = false;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        if (human) {
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Checking the existing work.',
+          });
+        }
+        outcomes.push(
+          await invokeTool(nativeToolNames.sendTaskMessage, {
+            taskId: 'task-1',
+            message: 'Continue the saved work',
+            ...(instruction ? { continuation: 'instruction' } : {}),
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Reported the outcome.',
+        });
+        return '';
+      },
+    );
+    const turn = async (id: string) =>
+      answerFastAgentQuestion({
+        ...baseParams,
+        currentMessageId: id,
+        turnSource: human ? 'human' : 'platform_event',
+        question: human
+          ? instruction
+            ? 'Resume the task now.'
+            : 'Any update?'
+          : `<platform_event>task_settled runId=${id}</platform_event>`,
+        adapter: callbacks(),
+      });
+    await turn('run-1');
+    await turn('run-2');
+    instruction = true;
+    await turn('run-3'); // A platform event cannot manufacture a human reset.
+    human = true;
+    instruction = false;
+    await turn('check-in');
+    instruction = true;
+    await turn('explicit-request');
+    human = false;
+    instruction = false;
+    await turn('run-4');
+    await turn('run-5');
+
+    expect(outcomes[0]).toMatchObject({ success: true });
+    for (const index of [1, 3, 6]) {
+      expect(outcomes[index]).toMatchObject({
+        success: false,
+        delivery: 'not_accepted',
+        recovery: 'budget_exhausted',
+      });
+    }
+    expect(outcomes[2]).toMatchObject({
+      success: false,
+      delivery: 'not_accepted',
+    });
+    expect(outcomes[4]).toMatchObject({ success: true });
+    expect(outcomes[5]).toMatchObject({ success: true });
+    expect(mocks.sendTaskMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not send a continuation when its durable claim cannot be stored', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'idle' },
+    ]);
+    mocks.upsertMessage.mockImplementation(async ({ message }) => {
+      if (message.payload?.toolName === 'send_task_message') {
+        throw new Error('Claim storage unavailable');
+      }
+      return { initialHumanTurn: false };
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await expect(
+          invokeTool(nativeToolNames.sendTaskMessage, {
+            taskId: 'task-1',
+            message: 'Continue',
+          }),
+        ).rejects.toThrow('Claim storage unavailable');
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      adapter: callbacks(),
+    });
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not execute tools when recovery history cannot be loaded', async () => {
+    mocks.loadTaskMessageHistory.mockRejectedValue(
+      new Error('History unavailable'),
+    );
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(mocks.generateText).not.toHaveBeenCalled();
+  });
 
   it('does not execute tools when a resumed turn cannot load its delivery history', async () => {
     mocks.loadTurnAttempt.mockRejectedValueOnce(
@@ -10094,6 +10245,104 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(adapter.postReply).toHaveBeenCalledWith(
         expect.objectContaining({ purpose: 'closeout' }),
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['ignored event', 'empty response', 'reaction'] as const)(
+    'retires a hidden retry marker after successful %s completion',
+    async (completion) => {
+      vi.useFakeTimers();
+      try {
+        mocks.generateText
+          .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+          .mockImplementationOnce(async (_params, _session, options) => {
+            await options.onSessionReady('opencode-session-1');
+            if (completion === 'ignored event') {
+              await invokeTool(nativeToolNames.ignoreEvent, {
+                reason: 'Duplicate task update.',
+              });
+            } else if (completion === 'reaction') {
+              await invokeTool(nativeToolNames.sendChatReaction, {
+                name: 'thumbsup',
+                purpose: 'closeout',
+              });
+            }
+            return '';
+          });
+        const adapter = callbacks();
+        const result = answerFastAgentQuestion({
+          ...baseParams,
+          ...(completion === 'reaction'
+            ? { allowSilentAmbientReply: true }
+            : { turnSource: 'platform_event' as const }),
+          adapter,
+        });
+        await vi.runAllTimersAsync();
+        await result;
+
+        const retryWrites = mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter((message) => message.eventId === '100.2:retry-notice:0');
+        expect(retryWrites[0]?.metadata).toMatchObject({
+          inferenceRetryActive: true,
+          visibleInTranscript: false,
+        });
+        expect(retryWrites.at(-1)?.metadata).toMatchObject({
+          inferenceRetryNotice: true,
+          inferenceRetryActive: false,
+          visibleInTranscript: false,
+        });
+        expect(adapter.postReply).not.toHaveBeenCalled();
+        expect(mocks.reconcileRetryNotices).toHaveBeenCalledWith(
+          'conversation-1',
+          'turn_settled_reconcile',
+          {},
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('replaces a visible retry notice when an ambient turn recovers and is ignored', async () => {
+    vi.useFakeTimers();
+    try {
+      const error = Object.assign(new Error('429 Too Many Requests'), {
+        providerError: { data: { responseHeaders: { 'retry-after': '45' } } },
+      });
+      mocks.generateText
+        .mockRejectedValueOnce(error)
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.ignoreEvent, {
+            reason: 'No response needed.',
+          });
+          return '';
+        });
+      const postReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+      const replaceReply = vi.fn().mockResolvedValue({ messageId: 'retry-1' });
+      const result = answerFastAgentQuestion({
+        ...baseParams,
+        allowSilentAmbientReply: true,
+        adapter: callbacks({ postReply, replaceReply }),
+      });
+      await vi.runAllTimersAsync();
+      await result;
+
+      expect(postReply).toHaveBeenCalledOnce();
+      expect(replaceReply).toHaveBeenLastCalledWith(
+        { messageId: 'retry-1' },
+        { purpose: 'closeout', message: 'The retry completed.' },
+      );
+      const retryWrites = mocks.upsertMessage.mock.calls
+        .map(([input]) => input.message)
+        .filter((message) => message.eventId === '100.2:retry-notice:0');
+      expect(retryWrites.at(-1)?.metadata).toMatchObject({
+        inferenceRetryActive: false,
+        platformMessageId: 'retry-1',
+      });
     } finally {
       vi.useRealTimers();
     }
