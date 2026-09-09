@@ -15,8 +15,11 @@ describe('triage-better-stack skill', () => {
       'utf8',
     );
 
-    expect(skillContent).toContain('find_integration_tools');
-    expect(skillContent).toContain('call_integration_tool');
+    expect(skillContent).toContain(
+      'discover and invoke on-demand integrations',
+    );
+    expect(skillContent).not.toContain('find_integration_tools');
+    expect(skillContent).not.toContain('call_integration_tool');
     expect(skillContent).toContain(
       'Scope discovery to integration ID `betterstack`',
     );
