@@ -778,19 +778,18 @@ export const prReviewNotificationJob = async (
               suggestedActionPrompt: followUp.prompt,
             }
           : {}),
-        canonicalDeliveryOwned: data.ownershipVersion === 'canonical',
         ...(options.reviewActionDeliveryId
           ? { reviewActionDeliveryId: options.reviewActionDeliveryId }
           : {}),
       });
-    const deliveredToFastParent = await notifyFastParent({
+    const admittedToFastParent = await notifyFastParent({
       includeSuggestedAction: Boolean(followUp && !autoHandleUserId),
       ...(webReviewActionDeliveryId
         ? { reviewActionDeliveryId: webReviewActionDeliveryId }
         : {}),
     });
 
-    if (deliveredToFastParent && webReviewActionDeliveryId) {
+    if (admittedToFastParent && webReviewActionDeliveryId) {
       const { attached } =
         await attachPendingPrReviewActionMessageWithRetirement(
           webReviewActionDeliveryId,
@@ -812,7 +811,7 @@ export const prReviewNotificationJob = async (
 
     let autoHandledText: string | null = null;
     const ownsAutoHandleDispatch =
-      directAutoHandleRoute !== null || deliveredToFastParent;
+      directAutoHandleRoute !== null || admittedToFastParent;
     if (
       followUp &&
       autoHandlePreference &&
@@ -947,7 +946,7 @@ ${delivery.text}`;
       }
     }
 
-    if (deliveredToFastParent && (!autoHandleUserId || autoHandledText)) {
+    if (admittedToFastParent && (!autoHandleUserId || autoHandledText)) {
       await recordPrReviewNotificationDeliveryBestEffort({
         runId: latestJob.id,
         taskId: data.taskId,
