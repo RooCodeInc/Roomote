@@ -789,6 +789,26 @@ export async function findAccessibleSession(
   return session ?? null;
 }
 
+/** Direct-link reads for authenticated deployment members, not action authorization. */
+export async function findReadableSession(
+  auth: SessionAuth,
+  sessionId: string,
+) {
+  if (!auth.userId) return null;
+  const [session] = await db
+    .select(baseSelection)
+    .from(sessions)
+    .leftJoin(users, eq(users.id, sessions.ownerUserId))
+    .where(
+      or(
+        eq(sessions.id, sessionId),
+        eq(sessions.fastConversationId, sessionId),
+      ),
+    )
+    .limit(1);
+  return session ?? null;
+}
+
 export async function findAccessibleSessionByFastConversationId(
   auth: SessionAuth,
   fastConversationId: string,
@@ -968,9 +988,7 @@ async function getSessionArtifacts(sessionId: string) {
 }
 
 export async function getSessionById(auth: SessionAuth, sessionId: string) {
-  const session =
-    (await findAccessibleSession(auth, sessionId)) ??
-    (await findAccessibleSessionByFastConversationId(auth, sessionId));
+  const session = await findReadableSession(auth, sessionId);
   if (!session) return null;
   // Fetch the task rollups once and feed them into hydration; this endpoint
   // is polled, so the duplicate linked-tasks join was pure waste.
@@ -1011,7 +1029,7 @@ export async function getSessionTimeline(
   sessionId: string,
   cursor?: number | { at: number; seenIdsAtTimestamp: string[] },
 ) {
-  const session = await findAccessibleSession(auth, sessionId);
+  const session = await findReadableSession(auth, sessionId);
   if (!session) return null;
   const legacySince = typeof cursor === 'number' ? cursor : null;
   const after =
@@ -1019,7 +1037,7 @@ export async function getSessionTimeline(
       ? { at: cursor, seenIdsAtTimestamp: [] }
       : (cursor ?? { at: 0, seenIdsAtTimestamp: [] });
   const seenIdsAtTimestamp = new Set(after.seenIdsAtTimestamp);
-  const taskRows = await getSessionTasks(sessionId);
+  const taskRows = await getSessionTasks(session.id);
   const fast = session.fastConversationId
     ? await getFastSessionById(auth, session.fastConversationId)
     : null;
@@ -1139,11 +1157,12 @@ export async function getLatestExternalSessionEvent(
 }
 
 export async function getSessionForTask(auth: SessionAuth, taskId: string) {
+  if (!auth.userId) return null;
   const [row] = await db
     .select({ sessionId: sessions.id, title: sessions.title })
     .from(sessionTasks)
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
-    .where(and(eq(sessionTasks.taskId, taskId), sessionScope(auth)))
+    .where(eq(sessionTasks.taskId, taskId))
     .limit(1);
   return row ?? null;
 }

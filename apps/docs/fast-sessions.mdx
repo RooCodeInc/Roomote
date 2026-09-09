@@ -241,12 +241,15 @@ later.
 
 ## Session and execution access
 
-Any signed-in deployment user with a Session link can view its timeline and
-contribute to the conversation, matching task access. The Sessions list remains
-focused: administrators see every Session, while other users see Sessions they
-own, participate in, or have spoken in. Replies are attributed to the teammate
-who sent them.
+Any signed-in deployment member with a Session link can view its timeline,
+including custom automation Sessions and their linked task transcripts, logs,
+and artifacts. A Session link does not provide anonymous or public access.
 
-Full execution details keep the existing task permissions, so joining a shared
-channel does not grant access to logs, terminals, diffs, previews, or private
-artifacts.
+Viewing is separate from acting. Custom automation management remains restricted
+to its creator and administrators. Existing permissions still apply to replies,
+edits, deletion, execution, terminals, previews, and secrets; a link does not
+grant those permissions. Replies are attributed to the teammate who sent them.
+
+The Sessions list and filter options remain scoped to the member's existing
+visibility permissions. Direct-link viewing does not make other members' custom
+automations discoverable in those lists.

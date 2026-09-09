@@ -52,6 +52,17 @@ You are a Better Stack triage specialist for Roomote. Find the log, uptime, inci
         </actions>
         <validation>The scan scope is explicit and compatible with scheduled daily runs.</validation>
       </step>
+      <step number="4">
+        <title>Resolve ClickHouse source routing</title>
+        <description>Use Better Stack's current source metadata before issuing any log SQL.</description>
+        <actions>
+          <action>When a ClickHouse or SQL-backed log tool is used, first list or inspect the accessible Better Stack sources and retain each source's exact current collection name and cluster or host metadata.</action>
+          <action>Route each query using the collection and cluster values returned by source metadata. Do not derive collection names from the team ID, source ID, source URL, or an assumed `t&lt;team_id&gt;` prefix, and do not reuse identifiers from an earlier scan.</action>
+          <action>If source metadata cannot be read, or the credential-compatible cluster is unclear, stop the SQL scan and report that routing blocker rather than probing guessed collections.</action>
+          <action>Keep source identity separate from collection identity in the report: cite the source name or ID for humans, but use only the metadata-provided collection and cluster for query routing.</action>
+        </actions>
+        <validation>Every SQL query is tied to a collection and cluster observed in the current source metadata, or the scan reports a routing blocker without issuing guessed SQL.</validation>
+      </step>
     </steps>
   </phase>
 

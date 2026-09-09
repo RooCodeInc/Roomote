@@ -70,6 +70,48 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('keeps supported Bitbucket reads API-first without a checkout or task', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain('Bitbucket Cloud is API-first');
+    expect(prompt).toContain(
+      'discover the available Bitbucket tool schema with `find_integration_tools`',
+    );
+    expect(prompt).toContain('then use `call_integration_tool`');
+    expect(prompt).toContain(
+      'Do not clone a repository or use "launch_task" for these operations',
+    );
+    expect(prompt).toContain(
+      'Follow discovered schemas rather than guessing arguments',
+    );
+    expect(prompt).toContain(
+      'Use direct API tools when sufficient; delegate work that requires a local workspace, execution, code changes, or testing',
+    );
+  });
+
+  it('bounds Bitbucket search and distinguishes supported writes from unsupported actions', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain('Reads cap responses at 1 MiB');
+    expect(prompt).toContain('never claim a single page is exhaustive');
+    expect(prompt).toContain('Code search is deprecated November 1, 2026');
+    expect(prompt).toContain('not query operators or repository filters');
+    expect(prompt).toContain(
+      'without broadening the search or bypassing API permissions through a task',
+    );
+    const writes = prompt
+      .split('- Bitbucket writes require')[1]!
+      .split('\n')[0]!;
+    expect(writes).toContain(
+      'update PR titles/descriptions, decline PRs, or add comments and replies to a comment in the same PR',
+    );
+    expect(writes).toContain('Reading does not authorize writes');
+    expect(writes).toContain(
+      'Reopening/merging PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
+    );
+    expect(prompt).toContain(
+      'An actual code-review request still uses "review_pull_request"',
+    );
+  });
+
   it('supports explicit instance invocation and member creation without environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

@@ -449,7 +449,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
           username: 'roomote',
           role: 'ANALYST',
           warehouse: 'ROOMOTE_WH',
-          encryptedPassword: 'enc:secret',
+          encryptedPrivateKey: 'enc:private-key',
         },
       }),
     ]);
@@ -832,7 +832,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
           account: 'xy12345.us-east-1',
           username: 'roomote',
           role: 'ANALYST',
-          encryptedPassword: 'enc:secret',
+          encryptedPrivateKey: 'enc:private-key',
         },
       }),
     ]);

@@ -17,6 +17,14 @@ import {
   userFactory,
 } from '@roomote/db/server';
 import { ACP_ENVELOPE_EVENT_TYPES, RunStatus } from '@roomote/types';
+import type { UserAuthSuccess } from '@/types';
+import {
+  getFastSessionMessagesCommand,
+  updateFastSessionModelSelectionCommand,
+  replyToFastSessionCommand,
+  handleFastSessionPrReviewActionCommand,
+  submitFastSessionUserInputCommand,
+} from '@/trpc/commands/fast-sessions';
 
 vi.mock('./artifact-signature', () => ({
   currentEpochSeconds: () => 7_300,
@@ -25,6 +33,7 @@ vi.mock('./artifact-signature', () => ({
 
 import {
   findAccessibleFastSession,
+  findReadableFastSession,
   getFastSessionPrReviewOfferStatus,
   getFastSessionById,
   getFastSessionTasks,
@@ -108,7 +117,7 @@ describe('Fast session queries', () => {
     'legacy-task',
     'surface',
   ] as const)(
-    'restricts user-owned custom automation %s provenance to its current owner or admin',
+    'shares custom automation %s reads while restricting action access to its owner or admin',
     async (provenance) => {
       const owner = await userFactory.create();
       const other = await userFactory.create();
@@ -209,6 +218,7 @@ describe('Fast session queries', () => {
       const ownerAuth = { userId: owner.id, isAdmin: false };
       const otherAuth = { userId: other.id, isAdmin: false };
       const adminAuth = { userId: other.id, isAdmin: true };
+      const memberAuth = otherAuth as UserAuthSuccess;
       for (const id of [conversation.id, unified!.id]) {
         await expect(
           findAccessibleFastSession(otherAuth, id),
@@ -219,11 +229,52 @@ describe('Fast session queries', () => {
         await expect(
           findAccessibleFastSession(adminAuth, id),
         ).resolves.toMatchObject({ id: conversation.id });
-        await expect(getFastSessionTasks(otherAuth, id)).resolves.toBeNull();
+        await expect(
+          findReadableFastSession(otherAuth, id),
+        ).resolves.toMatchObject({ id: conversation.id });
+        expect(await getFastSessionTasks(otherAuth, id)).toHaveLength(
+          provenance === 'task' || provenance === 'legacy-task' ? 1 : 0,
+        );
+        await expect(
+          getFastSessionMessagesCommand(memberAuth, id),
+        ).resolves.toMatchObject({
+          sessionId: conversation.id,
+          messages: expect.arrayContaining([
+            expect.objectContaining({ eventId: 'private-result' }),
+          ]),
+        });
       }
-      await expect(
-        getFastSessionById(otherAuth, conversation.id),
-      ).resolves.toBeNull();
+      for (const action of [
+        () =>
+          updateFastSessionModelSelectionCommand(memberAuth, {
+            sessionId: conversation.id,
+            model: 'forbidden',
+          }),
+        () =>
+          replyToFastSessionCommand(memberAuth, {
+            sessionId: unified!.id,
+            text: 'forbidden',
+          }),
+        () =>
+          handleFastSessionPrReviewActionCommand(memberAuth, {
+            sessionId: conversation.id,
+            deliveryId: crypto.randomUUID(),
+            choice: 'dismiss',
+          }),
+        () =>
+          submitFastSessionUserInputCommand(memberAuth, {
+            sessionId: unified!.id,
+            requestId: crypto.randomUUID(),
+            answers: {},
+          }),
+      ]) {
+        await expect(action()).rejects.toThrow('Fast session not found');
+      }
+      expect(
+        (await getFastSessionById(otherAuth, conversation.id))?.messages.map(
+          (m) => m.eventId,
+        ),
+      ).toContain('private-result');
       expect(
         (await getFastSessionById(ownerAuth, conversation.id))?.messages.map(
           (m) => m.eventId,
@@ -242,12 +293,18 @@ describe('Fast session queries', () => {
       await expect(
         findAccessibleFastSession(ownerAuth, conversation.id),
       ).resolves.toBeNull();
+      await expect(
+        getFastSessionById(otherAuth, conversation.id),
+      ).resolves.not.toBeNull();
       await db
         .delete(customAutomations)
         .where(eq(customAutomations.id, automation!.id));
       await expect(
         findAccessibleFastSession(otherAuth, conversation.id),
       ).resolves.toBeNull();
+      await expect(
+        getFastSessionById(otherAuth, conversation.id),
+      ).resolves.not.toBeNull();
       await expect(
         getFastSessionById(adminAuth, conversation.id),
       ).resolves.not.toBeNull();
@@ -288,7 +345,7 @@ describe('Fast session queries', () => {
     );
   });
 
-  it('fails closed on automation platform events with missing identity', async () => {
+  it('shares reads but fails closed for actions on automation events with missing identity', async () => {
     const owner = await userFactory.create();
     const conversation = await createFastSession({
       userId: owner.id,
@@ -314,11 +371,34 @@ describe('Fast session queries', () => {
       ],
     });
     await expect(
-      getFastSessionById({ userId: owner.id, isAdmin: false }, conversation.id),
+      findAccessibleFastSession(
+        { userId: owner.id, isAdmin: false },
+        conversation.id,
+      ),
     ).resolves.toBeNull();
+    await expect(
+      getFastSessionById({ userId: owner.id, isAdmin: false }, conversation.id),
+    ).resolves.not.toBeNull();
     await expect(
       getFastSessionById({ userId: owner.id, isAdmin: true }, conversation.id),
     ).resolves.not.toBeNull();
+  });
+
+  it('requires authenticated context and returns null for missing direct links', async () => {
+    const owner = await userFactory.create();
+    const conversation = await createFastSession({
+      userId: owner.id,
+      conversationId: crypto.randomUUID(),
+      updatedAt: new Date(),
+    });
+    for (const [auth, id] of [
+      [{ userId: '', isAdmin: false }, conversation.id],
+      [{ userId: owner.id, isAdmin: false }, crypto.randomUUID()],
+    ] as const) {
+      await expect(findReadableFastSession(auth, id)).resolves.toBeNull();
+      await expect(getFastSessionById(auth, id)).resolves.toBeNull();
+      await expect(getFastSessionTasks(auth, id)).resolves.toBeNull();
+    }
   });
 
   it.each(['history', 'polling'])(
@@ -736,7 +816,7 @@ describe('Fast session queries', () => {
     ).resolves.toMatchObject({ id: session.id, userId: owner.id });
   });
 
-  it('restricts orphaned automation-owned Session details to admins', async () => {
+  it('shares orphaned automation-owned Session details but restricts actions to admins', async () => {
     const viewer = await userFactory.create();
     await ensureAutomationRowsOnce();
     const [conversation] = await db
@@ -756,11 +836,17 @@ describe('Fast session queries', () => {
     );
 
     await expect(
-      getFastSessionById(
+      findAccessibleFastSession(
         { userId: viewer.id, isAdmin: false },
         conversation!.id,
       ),
     ).resolves.toBeNull();
+    await expect(
+      getFastSessionById(
+        { userId: viewer.id, isAdmin: false },
+        conversation!.id,
+      ),
+    ).resolves.toMatchObject({ id: conversation!.id });
     await expect(
       getFastSessionById(
         { userId: viewer.id, isAdmin: true },
