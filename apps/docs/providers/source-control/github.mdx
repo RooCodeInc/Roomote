@@ -205,14 +205,13 @@ qualifier, for example `Hello repo:octocat/Hello-World`. GitHub's tool
 availability, permissions, rate limits, pagination, and search-index limits
 apply; partial or empty search results are not proof of absence.
 
-Native reads of unconnected public repositories are limited to 2 MiB of response
+Native reads of unconnected repositories are limited to 2 MiB of response
 bytes and a 15-second upstream deadline, including JSON or SSE body reads.
 Oversized, timed-out, or failed reads are not retried through another path.
-The anonymous visibility check has a separate 64 KiB limit and 15-second deadline.
 These additional limits do not apply to connected repository calls.
 
-Before reading an unconnected target, Roomote checks its public visibility
-without credentials. If visibility cannot be confirmed, the read is denied.
+Unconnected reads use a token scoped to one active connected repository.
+GitHub denies private repositories outside that token's scope.
 Private reads and all writes still require an eligible connection to the
 target repository. Connected access keeps its existing authorization; Roomote
 does not retry lookup or authorization failures through another credential.

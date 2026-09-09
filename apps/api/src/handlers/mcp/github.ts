@@ -32,7 +32,6 @@ import {
 
 const DEFAULT_GITHUB_MCP_URL = 'https://api.githubcopilot.com/mcp/';
 const ROUTER_GITHUB_SERVER_ID: RouterMcpServerId = 'github';
-const MAX_PUBLIC_METADATA_BYTES = 64 * 1024;
 
 const repositoryArgs = z.object({
   owner: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]*$/),
@@ -286,61 +285,16 @@ export function createGithubMcp(options?: {
           extraHeaders: buildRouterGitHubHeaders(false),
         };
       }
-      // Public targets may use a representative scoped credential only after
-      // GitHub confirms their visibility without credentials.
+      // Unconnected targets use a single connected repository's credential;
+      // GitHub denies private repositories outside that token's scope.
       const target = name
         ? getReadTarget(name, rpc?.params?.arguments)
         : undefined;
       const fullName = target ? `${target.owner}/${target.repo}` : undefined;
       const credentials = await resolveRuntimeGitHubAppCredentials();
       let connected = await findRepository(credentials, fullName);
-      const publicRead = !connected && Boolean(fullName);
+      const unconnectedRead = !connected && Boolean(fullName);
       if (!connected && fullName) {
-        const response = await fetch(
-          `https://api.github.com/repos/${fullName}`,
-          {
-            headers: { Accept: 'application/vnd.github+json' },
-            redirect: 'manual',
-            signal: AbortSignal.timeout(15_000),
-          },
-        );
-        const visibilityError = new McpProxyError(
-          403,
-          'GitHub target must be an active connected repository or a verified public repository',
-        );
-        if (
-          !response.ok ||
-          Number(response.headers.get('content-length')) >
-            MAX_PUBLIC_METADATA_BYTES ||
-          !response.body
-        ) {
-          void response.body?.cancel().catch(() => {});
-          throw visibilityError;
-        }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let text = '';
-        let bytes = 0;
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            bytes += value.byteLength;
-            if (bytes > MAX_PUBLIC_METADATA_BYTES) throw visibilityError;
-            text += decoder.decode(value, { stream: true });
-          }
-          text += decoder.decode();
-        } finally {
-          void reader.cancel().catch(() => {});
-        }
-        const metadata = z
-          .object({ private: z.literal(false), full_name: z.string() })
-          .safeParse(JSON.parse(text));
-        if (
-          !metadata.success ||
-          metadata.data.full_name.toLowerCase() !== fullName.toLowerCase()
-        )
-          throw visibilityError;
         connected = await findRepository(credentials);
       }
       if (!connected)
@@ -360,7 +314,7 @@ export function createGithubMcp(options?: {
 
       return {
         authHeader: githubToken,
-        ...(publicRead
+        ...(unconnectedRead
           ? { maxResponseBodyBytes: 2 * 1024 * 1024, timeoutMs: 15_000 }
           : {}),
         disabledToolNames:
