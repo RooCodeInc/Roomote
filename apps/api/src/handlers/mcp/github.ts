@@ -6,6 +6,8 @@ import {
 import {
   createGitHubToken,
   resolveRuntimeGitHubAppCredentials,
+  tryResolveRuntimeGitHubAppCredentials,
+  type GitHubAppCredentials,
 } from '@roomote/auth';
 import {
   and,
@@ -22,6 +24,7 @@ import {
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
+import { githubPublicResponse } from './github-public';
 
 import {
   createMcpProxy,
@@ -46,7 +49,7 @@ const writeToolNames = [
 ];
 
 const searchScopeError =
-  'Split searches by connected repository. Use one positive repo:owner/name qualifier with no boolean operators, negation, grouping, quotes, or regex. Any owner or repo argument must match the query scope.';
+  'Split searches by repository. Use one positive repo:owner/name qualifier with no boolean operators, negation, grouping, quotes, or regex. Any owner or repo argument must match the query scope.';
 
 function getReadTarget(name: string, args: unknown) {
   if (
@@ -107,7 +110,24 @@ function getReadTarget(name: string, args: unknown) {
 }
 
 async function resolveRepository(fullName?: string) {
-  const appCredentials = await resolveRuntimeGitHubAppCredentials();
+  const match = await findRepository(
+    await resolveRuntimeGitHubAppCredentials(),
+    fullName,
+  );
+  if (!match)
+    throw new McpProxyError(
+      fullName ? 403 : 404,
+      fullName
+        ? 'GitHub target must be an active connected repository on the configured app'
+        : 'No active connected GitHub repository found for the configured app',
+    );
+  return match;
+}
+
+async function findRepository(
+  appCredentials: GitHubAppCredentials,
+  fullName?: string,
+) {
   const matches = await db
     .select({ repository: repositories, installation: githubInstallations })
     .from(repositories)
@@ -132,8 +152,8 @@ async function resolveRepository(fullName?: string) {
     .orderBy(githubInstallations.id, repositories.id)
     .limit(fullName ? 2 : 1);
   const match = matches[0];
+  if (!match) return null;
   if (
-    !match ||
     matches.length !== 1 ||
     match.repository.githubRepoId === null ||
     !Number.isSafeInteger(match.repository.githubRepoId)
@@ -272,10 +292,23 @@ export function createGithubMcp(options?: {
       const target = name
         ? getReadTarget(name, rpc?.params?.arguments)
         : undefined;
-      const { repository, installation, appCredentials } =
-        await resolveRepository(
-          target ? `${target.owner}/${target.repo}` : undefined,
-        );
+      const fullName = target ? `${target.owner}/${target.repo}` : undefined;
+      // Missing config or a missing configured-App connection permits anonymous
+      // member reads. Lookup errors and authenticated failures never downgrade.
+      const connected =
+        auth.tokenType === 'auth'
+          ? await tryResolveRuntimeGitHubAppCredentials().then((credentials) =>
+              credentials ? findRepository(credentials, fullName) : null,
+            )
+          : await resolveRepository(fullName);
+      if (!connected) {
+        return {
+          authHeader: null,
+          localResponse: (httpRequest) =>
+            githubPublicResponse(request, httpRequest, target),
+        };
+      }
+      const { repository, installation, appCredentials } = connected;
       const githubToken = await createGitHubToken(
         {
           type: 'installationId',

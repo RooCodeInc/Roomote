@@ -45,6 +45,7 @@ export {
   createGitHubTokenWithMetadata,
   resolveGitHubAppCredentials,
   resolveRuntimeGitHubAppCredentials,
+  tryResolveRuntimeGitHubAppCredentials,
 } from './github-token';
 
 export {

@@ -824,8 +824,20 @@ describe('buildFastAgentSystemPrompt', () => {
       );
       const explorationGuidance = prompt
         .split('- Repository code exploration')[1]!
-        .split('- For requested GitHub updates')[0]!;
+        .split('- For GitHub,')[0]!;
       expect(explorationGuidance).not.toMatch(/GitHub|GitLab|Bitbucket/);
+      for (const guidance of [
+        'without a GitHub connection or personal GitHub account linkage',
+        '`get_file_contents`, `issue_read`, `pull_request_read`, `list_pull_requests`, and `search_pull_requests`',
+        'use exact paths via contents for source reads',
+        'Anonymous code search, repository search, Actions, and review threads',
+        '`get_review_comments`, which requires GraphQL',
+        'exactly one positive `repo:owner/name` qualifier',
+        'Bound pages to the question and disclose incomplete results',
+        'Private reads and writes still require eligible connections',
+        'never retry an authorization denial anonymously or through a task',
+      ])
+        expect(prompt).toContain(guidance);
       expect(prompt).toContain(
         'Use only the methods and arguments exposed by the discovered schemas',
       );

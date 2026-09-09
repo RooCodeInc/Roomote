@@ -85,6 +85,7 @@ import {
   createGitHubTokenWithMetadata,
   resolveGitHubAppCredentials,
   resolveRuntimeGitHubAppCredentials,
+  tryResolveRuntimeGitHubAppCredentials,
 } from '../github-token';
 
 describe('resolveGitHubAppCredentials', () => {
@@ -176,6 +177,34 @@ describe('resolveRuntimeGitHubAppCredentials', () => {
     await expect(resolveRuntimeGitHubAppCredentials()).rejects.toThrow(
       'GitHub App credentials are not configured.',
     );
+  });
+
+  it('returns null only for missing configuration in the optional resolver', async () => {
+    mockEnv.R_GITHUB_APP_ID = undefined;
+    mockEnv.R_GITHUB_APP_PRIVATE_KEY = undefined;
+    await expect(tryResolveRuntimeGitHubAppCredentials()).resolves.toBeNull();
+    await expect(resolveRuntimeGitHubAppCredentials()).rejects.toThrow(
+      'GitHub App credentials are not configured.',
+    );
+  });
+
+  it('preserves explicit credentials and environment fallback in the optional resolver', async () => {
+    const explicit = { appId: 'explicit', privateKey: 'key' };
+    await expect(tryResolveRuntimeGitHubAppCredentials(explicit)).resolves.toBe(
+      explicit,
+    );
+    expect(mockResolveDeploymentEnvVar).not.toHaveBeenCalled();
+    await expect(tryResolveRuntimeGitHubAppCredentials()).resolves.toEqual({
+      appId: 'default-app-id',
+      privateKey: 'default-private-key',
+    });
+  });
+
+  it('propagates deployment lookup errors instead of treating them as missing config', async () => {
+    const error = new Error('Deployment database unavailable');
+    mockResolveDeploymentEnvVar.mockRejectedValue(error);
+    await expect(tryResolveRuntimeGitHubAppCredentials()).rejects.toBe(error);
+    await expect(resolveRuntimeGitHubAppCredentials()).rejects.toBe(error);
   });
 });
 

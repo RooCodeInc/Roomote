@@ -335,6 +335,8 @@ function isJsonResponse(contentType: string | null): boolean {
 interface ResolvedCredentials {
   /** `null` for upstreams that take no Authorization header. */
   authHeader: string | null;
+  /** Runs only after the proxy's tool policy checks, with no upstream auth. */
+  localResponse?: (request: Request) => Promise<Response>;
   extraHeaders?: Record<string, string>;
   /**
    * Per-request allowlist override. `null` explicitly removes a static
@@ -938,7 +940,7 @@ export function createMcpProxy(config: McpProxyConfig) {
 
     const effectiveUpstream = credentials.upstream ?? upstream;
 
-    if (!effectiveUpstream) {
+    if (!effectiveUpstream && !credentials.localResponse) {
       console.error(
         formatSingleLineLog(`${logPrefix} No upstream URL resolved`, {
           requestId,
@@ -1018,6 +1020,30 @@ export function createMcpProxy(config: McpProxyConfig) {
         }
       }
 
+      if (credentials.localResponse) {
+        try {
+          const response = await credentials.localResponse(c.req.raw);
+          if (getJsonRpcMethod(parsedBody) === 'tools/list' && response.ok) {
+            return Response.json(
+              filterToolsListPayload(await response.json(), {
+                allowedToolNames: effectiveAllowedToolNames,
+                disabledToolNames: credentials.disabledToolNames,
+              }),
+            );
+          }
+          return response;
+        } catch (error) {
+          return jsonRpcErrorResponse(
+            error instanceof McpProxyError ? error.httpStatus : 502,
+            -32000,
+            error instanceof McpProxyError
+              ? error.message
+              : `${name} MCP local request failed`,
+            getJsonRpcRequestId(parsedBody),
+          );
+        }
+      }
+
       const proxyHeaders = buildProxyRequestHeaders(
         credentials.authHeader,
         c.req.raw.headers,
@@ -1055,11 +1081,11 @@ export function createMcpProxy(config: McpProxyConfig) {
 
       if (guardUpstreamEgress) {
         assertEgressUrlAllowed(
-          effectiveUpstream,
+          effectiveUpstream!,
           guardUpstreamEgress.allowedPrivateCidrs,
         );
 
-        upstreamResponse = await fetch(effectiveUpstream, {
+        upstreamResponse = await fetch(effectiveUpstream!, {
           ...upstreamRequestInit,
           dispatcher: isLongLivedStreamableTransportRequest
             ? guardedLongLivedDispatcher!
@@ -1085,10 +1111,10 @@ export function createMcpProxy(config: McpProxyConfig) {
       } else {
         upstreamResponse = isLongLivedStreamableTransportRequest
           ? await fetchWithLongLivedStreamDispatcher(
-              effectiveUpstream,
+              effectiveUpstream!,
               upstreamRequestInit,
             )
-          : await fetch(effectiveUpstream, upstreamRequestInit);
+          : await fetch(effectiveUpstream!, upstreamRequestInit);
       }
 
       const elapsedMs = Date.now() - startedAt;

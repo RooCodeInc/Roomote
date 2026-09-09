@@ -382,6 +382,16 @@ export function resolveGitHubAppCredentials(
 export async function resolveRuntimeGitHubAppCredentials(
   options?: GitHubAppCredentials,
 ): Promise<GitHubAppCredentials> {
+  const credentials = await tryResolveRuntimeGitHubAppCredentials(options);
+  if (!credentials)
+    throw new Error('GitHub App credentials are not configured.');
+  return credentials;
+}
+
+/** Missing configuration is optional; deployment lookup errors still propagate. */
+export async function tryResolveRuntimeGitHubAppCredentials(
+  options?: GitHubAppCredentials,
+): Promise<GitHubAppCredentials | null> {
   if (options) {
     return options;
   }
@@ -401,7 +411,7 @@ export async function resolveRuntimeGitHubAppCredentials(
     return envCredentials;
   }
 
-  throw new Error('GitHub App credentials are not configured.');
+  return null;
 }
 
 function getOctokit(options?: GitHubAppCredentials): Octokit {

@@ -188,6 +188,34 @@ If you add Organization projects permission to an existing app, an organization
 owner must approve the updated permission before Roomote can manage project
 items.
 
+## Public GitHub reads in Fast
+
+Active Roomote members can inspect public `github.com` source, issues, and pull
+requests in Fast without connecting GitHub or linking a personal GitHub account.
+No coding task or clone is needed for these bounded reads when the built-in
+GitHub tools are enabled:
+
+- `get_file_contents` reads an exact file or directory path
+- `issue_read` reads issue details, comments, sub-issues, and labels
+- `pull_request_read` reads PR details, diffs, status, check runs, changed files,
+  reviews, and ordinary discussion comments
+- `list_pull_requests` lists PRs in one repository
+- `search_pull_requests` searches with exactly one positive `repo:owner/name`
+  qualifier, for example `repo:example/service is:open`
+
+Anonymous code search, repository search, Actions, and review-thread reads are
+not supported. In particular, `get_review_comments` requires GraphQL and is not
+available anonymously. Use exact paths through contents for public source reads.
+Each request has a 15-second timeout and a 2 MiB response limit. Paginated reads
+return one page of at most 100 items per call, with page numbers up to 1,000;
+directory listings have GitHub's 1,000-entry limit. Narrow large requests and do
+not treat partial results as exhaustive. GitHub's anonymous rate limits apply.
+
+Private reads and writes still require an eligible connection. Connected
+repository access keeps its existing authorization; Roomote does not retry an
+authorization denial anonymously. Other source-control providers and coding-run
+tokens are unchanged.
+
 ## Multiple installations and searches
 
 GitHub tool discovery supports multiple installations of the configured GitHub
