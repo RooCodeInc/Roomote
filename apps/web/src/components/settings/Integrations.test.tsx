@@ -62,7 +62,6 @@ const state = vi.hoisted(() => ({
   isAdmin: true,
   snowflakeConnection: null as null | {
     authStatus?: string | null;
-    authMethod: 'key_pair' | 'password';
     account: string;
     username: string;
     role: string;
@@ -2029,10 +2028,8 @@ describe('Integrations settings', () => {
 
     expect(mutations.saveSnowflakeConnection).toHaveBeenCalledWith(
       {
-        authMethod: 'key_pair',
         account: 'xy12345.us-east-1',
         username: 'roomote_user',
-        password: '',
         privateKey:
           '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----',
         privateKeyPassphrase: 'pem-passphrase',
@@ -2072,10 +2069,8 @@ describe('Integrations settings', () => {
 
     expect(mutations.saveSnowflakeConnection).toHaveBeenCalledWith(
       {
-        authMethod: 'key_pair',
         account: 'xy12345.us-east-1',
         username: 'roomote_user',
-        password: '',
         privateKey:
           '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----',
         privateKeyPassphrase: '',
@@ -2088,44 +2083,6 @@ describe('Integrations settings', () => {
     );
   });
 
-  it('warns when the Snowflake connection still signs in with a password', () => {
-    state.deploymentEnablements = [{ mcpId: 'snowflake', enabled: true }];
-    state.userConnections = [
-      {
-        mcpId: 'snowflake',
-        authStatus: 'authenticated',
-      },
-    ];
-    state.snowflakeConnection = {
-      authStatus: 'authenticated',
-      authMethod: 'password',
-      account: 'xy12345.us-east-1',
-      username: 'roomote_user',
-      role: 'ANALYST',
-      warehouse: 'COMPUTE_WH',
-      database: 'ROOMOTE',
-    };
-
-    render(<Integrations />);
-
-    expect(
-      screen.getByText(
-        /signs in to Snowflake with a password.*Edit the connection to switch to a key pair/,
-      ),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Edit Snowflake connection' }),
-    );
-
-    expect(
-      screen.getByText(/Paste the private key below and save to switch/),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText('Leave blank to keep the existing private key.'),
-    ).not.toBeInTheDocument();
-  });
-
   it('shows Snowflake connected controls without status copy and supports editing', () => {
     state.deploymentEnablements = [{ mcpId: 'snowflake', enabled: true }];
     state.userConnections = [
@@ -2136,7 +2093,6 @@ describe('Integrations settings', () => {
     ];
     state.snowflakeConnection = {
       authStatus: 'authenticated',
-      authMethod: 'key_pair',
       account: 'xy12345.us-east-1',
       username: 'roomote_user',
       role: 'ANALYST',
@@ -2184,35 +2140,6 @@ describe('Integrations settings', () => {
     expect(
       screen.getByText('Leave blank to keep the existing private key.'),
     ).toBeInTheDocument();
-  });
-
-  it('requires a new private key when editing a legacy PAT-backed Snowflake connection', () => {
-    state.userConnections = [
-      { mcpId: 'snowflake', authStatus: 'authenticated' },
-    ];
-    state.deploymentEnablements = [{ mcpId: 'snowflake', enabled: true }];
-    state.snowflakeConnection = {
-      authStatus: 'authenticated',
-      authMethod: 'password',
-      account: 'xy12345.us-east-1',
-      username: 'roomote_user',
-      role: 'ANALYST',
-    };
-
-    render(<Integrations />);
-
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Edit Snowflake connection' }),
-    );
-
-    expect(
-      screen.queryByText('Leave blank to keep the existing private key.'),
-    ).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-    expect(screen.getByText('Private key is required')).toBeInTheDocument();
-    expect(mutations.saveSnowflakeConnection).not.toHaveBeenCalled();
   });
 
   it('preserves unsaved tool toggles when the same upstream tool state is returned again', () => {

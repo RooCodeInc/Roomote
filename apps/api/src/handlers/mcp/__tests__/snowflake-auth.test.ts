@@ -168,7 +168,7 @@ function mockConnectionRow(overrides?: Record<string, unknown>) {
       username: 'roomote',
       role: 'ANALYST',
       warehouse: 'ROOMOTE_WH',
-      encryptedPassword: 'enc:secret',
+      encryptedPrivateKey: `enc:${unencryptedPrivateKey}`,
       ...(overrides ?? {}),
     },
   } as Awaited<ReturnType<typeof db.query.mcpConnections.findFirst>>;
@@ -305,7 +305,7 @@ describe('snowflake MCP auth and tool handling', () => {
       expect.objectContaining({
         account: 'xy12345.us-east-1',
         username: 'roomote',
-        password: 'secret',
+        authenticator: 'SNOWFLAKE_JWT',
       }),
     );
   });
@@ -340,7 +340,7 @@ describe('snowflake MCP auth and tool handling', () => {
       expect.objectContaining({
         account: 'xy12345.us-east-1',
         username: 'roomote',
-        password: 'secret',
+        authenticator: 'SNOWFLAKE_JWT',
       }),
     );
     expect(connectionConfig).not.toHaveProperty('warehouse');
@@ -349,7 +349,6 @@ describe('snowflake MCP auth and tool handling', () => {
   it('uses Snowflake JWT auth when a private key is configured', async () => {
     mockFindConnection.mockResolvedValue(
       mockConnectionRow({
-        encryptedPassword: 'enc:legacy-password',
         encryptedPrivateKey: `enc:${encryptedPrivateKey}`,
         encryptedPrivateKeyPassphrase: `enc:${PRIVATE_KEY_PASSPHRASE}`,
       }),
@@ -385,7 +384,6 @@ describe('snowflake MCP auth and tool handling', () => {
         privateKey: expect.stringContaining('-----BEGIN PRIVATE KEY-----'),
       }),
     );
-    expect(connectionConfig).not.toHaveProperty('password');
     expect(connectionConfig).not.toHaveProperty('privateKeyPass');
     expect(connectionConfig.privateKey).not.toBe(encryptedPrivateKey);
     expect(() =>
@@ -399,7 +397,6 @@ describe('snowflake MCP auth and tool handling', () => {
   it('continues to accept unencrypted PKCS8 private keys', async () => {
     mockFindConnection.mockResolvedValue(
       mockConnectionRow({
-        encryptedPassword: undefined,
         encryptedPrivateKey: `enc:${unencryptedPrivateKey}`,
         encryptedPrivateKeyPassphrase: undefined,
       }),
@@ -417,7 +414,6 @@ describe('snowflake MCP auth and tool handling', () => {
   it('rejects an incorrect private key passphrase without exposing secrets', async () => {
     mockFindConnection.mockResolvedValue(
       mockConnectionRow({
-        encryptedPassword: undefined,
         encryptedPrivateKey: `enc:${encryptedPrivateKey}`,
         encryptedPrivateKeyPassphrase: 'enc:wrong-secret-passphrase',
       }),
@@ -449,7 +445,6 @@ describe('snowflake MCP auth and tool handling', () => {
     });
     mockFindConnection.mockResolvedValue(
       mockConnectionRow({
-        encryptedPassword: undefined,
         encryptedPrivateKey: `enc:${encryptedEcPrivateKey}`,
         encryptedPrivateKeyPassphrase: `enc:${PRIVATE_KEY_PASSPHRASE}`,
       }),
@@ -470,7 +465,6 @@ describe('snowflake MCP auth and tool handling', () => {
   it('rejects RSA private keys smaller than 2048 bits', async () => {
     mockFindConnection.mockResolvedValue(
       mockConnectionRow({
-        encryptedPassword: undefined,
         encryptedPrivateKey: `enc:${WEAK_RSA_PRIVATE_KEY}`,
         encryptedPrivateKeyPassphrase: undefined,
       }),

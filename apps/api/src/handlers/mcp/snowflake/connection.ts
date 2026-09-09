@@ -71,29 +71,22 @@ function maybeDecryptSecret(value: string | undefined): string | undefined {
 export function resolveSnowflakeConnectionConfig(
   config: McpConnectionSnowflakeConfig,
 ): ResolvedSnowflakeConnectionConfig {
-  const password = maybeDecryptSecret(config.encryptedPassword);
   const privateKey = maybeDecryptSecret(config.encryptedPrivateKey);
   const privateKeyPass = maybeDecryptSecret(
     config.encryptedPrivateKeyPassphrase,
   );
 
-  if (!password && !privateKey) {
+  if (!privateKey) {
     throw new SnowflakeConfigError(
-      'Snowflake connection requires either a password or a private key',
+      'Snowflake connection requires a private key',
     );
   }
-
-  const authentication = privateKey
-    ? {
-        authenticator: 'SNOWFLAKE_JWT' as const,
-        privateKey: normalizePrivateKey(privateKey, privateKeyPass),
-      }
-    : { password };
 
   return {
     account: config.account,
     username: config.username,
-    ...authentication,
+    authenticator: 'SNOWFLAKE_JWT' as const,
+    privateKey: normalizePrivateKey(privateKey, privateKeyPass),
     role: config.role,
     ...(config.warehouse ? { warehouse: config.warehouse } : {}),
     database: config.database,

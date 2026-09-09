@@ -31,21 +31,13 @@ run `umask 077`, then use `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bi
   warehouse context.
 </Warning>
 
-## Switch from password sign-in to a key pair
-
-Snowflake is retiring password-only sign-in for service users. Connections
-that still store a password show a warning in **Settings > Integrations**
-until an admin edits the connection and saves a private key. Saving a key
-removes the stored password, so Snowflake can drop the password from the
-user afterwards without affecting Roomote.
-
 ## Rotate from an existing credential
 
 1. Install the new public key in Snowflake's unused `RSA_PUBLIC_KEY_2` slot and verify its fingerprint before changing Roomote.
 2. Enter the encrypted PKCS8 private key and passphrase in **Settings > Integrations > Snowflake**. Leave both fields blank on later edits to keep the stored key.
 3. Run a Roomote task that calls `list_databases`, `list_schemas`, and `execute_sql` with `SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_WAREHOUSE()`. Confirm the configured role can read only the intended data.
 4. Review Roomote and Snowflake login logs for a successful JWT login without credential material. A saved connection is not proof that Snowflake accepted it.
-5. After an observation window, revoke the previous password, programmatic access token, or public-key slot and verify a fresh Roomote task still connects.
+5. After an observation window, revoke the previous public-key slot and verify a fresh Roomote task still connects.
 
 ## What to expect
 
