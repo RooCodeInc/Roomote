@@ -306,7 +306,9 @@ export function Analytics({
     });
   };
 
-  const hasChartData = (chart?.total ?? 0) > 0;
+  const hasChartData =
+    (chart?.total ?? 0) > 0 ||
+    (object === 'costs' && (chart?.tokenTotal ?? 0) > 0);
   const isRegularDownloadDisabled =
     isExporting ||
     activeChartQuery.isLoading ||

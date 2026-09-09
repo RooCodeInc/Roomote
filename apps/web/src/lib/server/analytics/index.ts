@@ -107,6 +107,7 @@ function getAnalyticsDetailsColumns(
         { key: 'provider', label: 'Provider' },
         { key: 'model', label: 'Model' },
         { key: 'cost', label: 'Cost (USD)' },
+        { key: 'tokens', label: 'Tokens' },
         { key: 'taskTitle', label: 'Task' },
       ];
   }
