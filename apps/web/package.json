@@ -9,7 +9,7 @@
     "check-types": "NODE_OPTIONS='--max-old-space-size=4096' tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
     "test": "dotenvx run -f ../../.env.test -- pnpm run --parallel \"/^test:(server|client)$/\"",
-    "test:server": "vitest run --project server --project server-global-db-state",
+    "test:server": "vitest run --project server",
     "test:client": "vitest run --project client",
     "automation:icons": "node ./scripts/generate-automation-icons.mjs",
     "task-robot:icons": "node ./scripts/generate-task-robot-icons.mjs",

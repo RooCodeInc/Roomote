@@ -1,19 +1,40 @@
+import { randomUUID } from 'node:crypto';
 import {
-  db,
-  eq,
-  slackInstallationChannels,
   slackInstallationFactory,
-  slackInstallations,
-  userFactory,
-  users,
+  slackInstallationChannels,
 } from '@roomote/db/server';
 import type { UserAuthSuccess } from '@/types';
 import { resolveCiFailureTriageRules } from '../ci-failure-triage-routing';
 
-const { membership, model, catalog } = vi.hoisted(() => ({
+const {
+  membership,
+  model,
+  catalog,
+  installations,
+  mappings,
+  insert,
+  values,
+  onConflictDoNothing,
+} = vi.hoisted(() => ({
   membership: vi.fn(),
   model: vi.fn(),
   catalog: vi.fn(),
+  installations: vi.fn(),
+  mappings: vi.fn(),
+  insert: vi.fn(),
+  values: vi.fn(),
+  onConflictDoNothing: vi.fn(),
+}));
+// Keep compiler decision tests local; SDK integration tests cover persisted ownership.
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  db: {
+    query: {
+      slackInstallations: { findMany: installations },
+      slackInstallationChannels: { findMany: mappings },
+    },
+    insert,
+  },
 }));
 vi.mock('@roomote/cloud-agents/server', () => ({
   generateTrackedNonTaskObject: model,
@@ -57,7 +78,10 @@ vi.mock('@/lib/server/source-control', () => ({
 }));
 
 describe('CI natural-language rule compilation and Slack ownership', () => {
-  let userId: string;
+  const userId = randomUUID();
+  let fixtures: Array<
+    ReturnType<typeof slackInstallationFactory.build> & { id: string }
+  >;
   const text =
     'Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.';
   const channelId = 'C123ROUTE';
@@ -67,16 +91,27 @@ describe('CI natural-language rule compilation and Slack ownership', () => {
       value,
       settings,
     );
-  const installation = (isActive = true) =>
-    slackInstallationFactory.create({
-      installedByUserId: userId,
-      isActive,
-      teamName: 'Engineering',
-    });
-  const map = (slackInstallationId: string) =>
-    db
-      .insert(slackInstallationChannels)
-      .values({ slackInstallationId, channelId });
+  const installation = (isActive = true) => {
+    const fixture = {
+      ...slackInstallationFactory.build({
+        installedByUserId: userId,
+        isActive,
+        teamName: 'Engineering',
+      }),
+      id: randomUUID(),
+    };
+    fixtures.push(fixture);
+    installations.mockResolvedValue(fixtures);
+    return fixture;
+  };
+  const map = (...owners: ReturnType<typeof installation>[]) =>
+    mappings.mockResolvedValue(
+      owners.map((owner) => ({
+        slackInstallationId: owner.id,
+        channelId,
+        slackInstallation: owner,
+      })),
+    );
   const resolution = (workspaceId: string) => ({
     status: 'resolved',
     repositoryIds: [backend, platform],
@@ -89,9 +124,13 @@ describe('CI natural-language rule compilation and Slack ownership', () => {
     instructions: '',
     clarification: null,
   });
-  beforeEach(async () => {
-    await db.delete(slackInstallations);
-    userId = (await userFactory.create()).id;
+  beforeEach(() => {
+    fixtures = [];
+    installations.mockReset().mockResolvedValue([]);
+    mappings.mockReset().mockResolvedValue([]);
+    insert.mockReset().mockReturnValue({ values });
+    values.mockReset().mockReturnValue({ onConflictDoNothing });
+    onConflictDoNothing.mockReset().mockResolvedValue(undefined);
     membership.mockReset().mockResolvedValue(true);
     catalog
       .mockReset()
@@ -100,16 +139,10 @@ describe('CI natural-language rule compilation and Slack ownership', () => {
       ]);
     model.mockReset();
   });
-  afterEach(async () => {
-    await db
-      .delete(slackInstallations)
-      .where(eq(slackInstallations.installedByUserId, userId));
-    await db.delete(users).where(eq(users.id, userId));
-  });
   it('compiles the natural language example against provider/host and workspace catalogs, preserving exact owner B', async () => {
-    await installation();
-    const owner = await installation();
-    await map(owner.id);
+    installation();
+    const owner = installation();
+    map(owner);
     model.mockResolvedValue({ object: resolution(owner.teamId) });
     const rules = await save();
     expect(rules).toEqual({
@@ -140,25 +173,32 @@ describe('CI natural-language rule compilation and Slack ownership', () => {
       'never ignore any scope or routing constraint',
     );
   });
-  it('probes all installations and persists only the verified unmapped owner', async () => {
-    await installation();
-    const owner = await installation();
+  it('probes all installations and inserts only the verified unmapped owner', async () => {
+    installation();
+    const owner = installation();
+    map(owner);
+    mappings.mockResolvedValueOnce([]);
     model.mockResolvedValue({ object: resolution(owner.teamId) });
     membership.mockImplementation(
       async (token) => token === owner.botAccessToken,
     );
     await save();
-    expect(
-      await db.query.slackInstallationChannels.findMany({
-        where: eq(slackInstallationChannels.channelId, channelId),
-      }),
-    ).toEqual([expect.objectContaining({ slackInstallationId: owner.id })]);
+    expect(membership.mock.calls).toEqual(
+      fixtures.map((fixture) => [fixture.botAccessToken, channelId]),
+    );
+    expect(insert).toHaveBeenCalledExactlyOnceWith(slackInstallationChannels);
+    expect(values).toHaveBeenCalledExactlyOnceWith({
+      slackInstallationId: owner.id,
+      channelId,
+    });
+    expect(onConflictDoNothing).toHaveBeenCalledExactlyOnceWith();
+    expect(mappings).toHaveBeenCalledTimes(2);
   });
   it.each([false, null, 'throw'])(
     'rejects uncertain mapped owner membership %s',
     async (result) => {
-      const owner = await installation();
-      await map(owner.id);
+      const owner = installation();
+      map(owner);
       model.mockResolvedValue({ object: resolution(owner.teamId) });
       membership.mockImplementation(async () => {
         if (result === 'throw') throw new Error('Slack unavailable');
@@ -172,8 +212,8 @@ describe('CI natural-language rule compilation and Slack ownership', () => {
     [true, null],
     [false, false],
   ])('rejects nonunique or uncertain unmapped ownership %j', async (a, b) => {
-    const first = await installation();
-    const second = await installation();
+    const first = installation();
+    const second = installation();
     model.mockResolvedValue({ object: resolution(first.teamId) });
     membership.mockImplementation(async (token) =>
       token === second.botAccessToken ? b : a,
@@ -181,31 +221,26 @@ describe('CI natural-language rule compilation and Slack ownership', () => {
     await expect(save()).rejects.toThrow('Could not verify');
   });
   it('rejects a conflicting mapping introduced during probing', async () => {
-    const first = await installation();
-    const second = await installation();
+    const first = installation();
+    const second = installation();
+    map(first, second);
+    mappings.mockResolvedValueOnce([]);
     model.mockResolvedValue({ object: resolution(first.teamId) });
-    membership.mockImplementation(async (token) => {
-      if (token !== first.botAccessToken) return false;
-      await map(second.id);
-      return true;
-    });
+    membership.mockImplementation(
+      async (token) => token === first.botAccessToken,
+    );
     await expect(save()).rejects.toThrow('ownership changed');
   });
   it('rejects inactive and ambiguous mappings and wrong workspace instead of selecting a default', async () => {
-    const first = await installation();
-    const second = await installation();
-    await map(first.id);
+    const first = installation();
+    const second = installation();
+    map(first);
     model.mockResolvedValue({ object: resolution(second.teamId) });
     await expect(save()).rejects.toThrow('another workspace');
-    await map(second.id);
+    map(first, second);
     await expect(save()).rejects.toThrow('ambiguous or inactive');
-    await db
-      .delete(slackInstallationChannels)
-      .where(eq(slackInstallationChannels.slackInstallationId, second.id));
-    await db
-      .update(slackInstallations)
-      .set({ isActive: false })
-      .where(eq(slackInstallations.id, first.id));
+    first.isActive = false;
+    map(first);
     await expect(save()).rejects.toThrow('ambiguous or inactive');
   });
   it.each([
@@ -256,7 +291,9 @@ describe('CI natural-language rule compilation and Slack ownership', () => {
     expect(model).not.toHaveBeenCalled();
   });
   it('keeps all scope for destination-only rules and revalidates unchanged compilation without another inference', async () => {
-    const owner = await installation();
+    const owner = installation();
+    map(owner);
+    mappings.mockResolvedValueOnce([]);
     model.mockResolvedValue({
       object: {
         ...resolution(owner.teamId),
