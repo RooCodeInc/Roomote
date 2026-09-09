@@ -44,7 +44,7 @@ describe('resolveBuiltInMcpServers', () => {
     expect(Object.keys(BUILT_IN_MCPS).sort()).toEqual(expectedBuiltInMcpNames);
   });
 
-  it('provides the GitHub proxy without integration connections, using only run-token auth', () => {
+  it('provides the GitHub proxy with run-token auth, leaving installation eligibility to the API', () => {
     process.env.TRPC_URL = 'https://api.example.com/';
     const servers = resolveBuiltInMcpServers(
       {

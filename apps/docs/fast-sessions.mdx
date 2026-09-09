@@ -69,14 +69,14 @@ An empty search is not proof that code is absent. Source inspection is not a
 test run or reproduction, and an access denial is not bypassed through a task.
 Requests for a code review still use the structured Review Code pipeline.
 
-For public `github.com` repositories, active Roomote members can read exact
-source paths, issues, and pull requests without a GitHub connection or personal
-account linkage. Public reads include bounded PR search in one repository,
-diffs, reviews, ordinary discussion, status, and check runs, but not anonymous
-code or repository search, Actions, or review threads. See
+With an eligible deployment GitHub App installation and an active connected
+repository, active Roomote members can use the existing GitHub tools to read
+public `github.com` repositories, including source and code search. Public
+repositories do not themselves need to be connected, and no personal GitHub
+account linkage is required. See
 [public GitHub reads](/providers/source-control/github#public-github-reads)
-for supported tools and limits. Private reads and writes still need an eligible
-connection; access denials are not retried anonymously.
+for access requirements. Private reads and writes still require the target to
+be connected; access denials are not retried anonymously.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
 also supports updates to existing pull requests, issue or PR comments,

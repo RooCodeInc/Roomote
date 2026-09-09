@@ -335,9 +335,10 @@ function isJsonResponse(contentType: string | null): boolean {
 interface ResolvedCredentials {
   /** `null` for upstreams that take no Authorization header. */
   authHeader: string | null;
-  /** Runs only after the proxy's tool policy checks, with no upstream auth. */
-  localResponse?: (request: Request) => Promise<Response>;
   extraHeaders?: Record<string, string>;
+  /** Bound the native operation, including streamed response consumption. */
+  timeoutMs?: number;
+  maxResponseBodyBytes?: number;
   /**
    * Per-request allowlist override. `null` explicitly removes a static
    * allowlist, while `undefined` keeps the proxy's configured default.
@@ -940,7 +941,7 @@ export function createMcpProxy(config: McpProxyConfig) {
 
     const effectiveUpstream = credentials.upstream ?? upstream;
 
-    if (!effectiveUpstream && !credentials.localResponse) {
+    if (!effectiveUpstream) {
       console.error(
         formatSingleLineLog(`${logPrefix} No upstream URL resolved`, {
           requestId,
@@ -1020,30 +1021,6 @@ export function createMcpProxy(config: McpProxyConfig) {
         }
       }
 
-      if (credentials.localResponse) {
-        try {
-          const response = await credentials.localResponse(c.req.raw);
-          if (getJsonRpcMethod(parsedBody) === 'tools/list' && response.ok) {
-            return Response.json(
-              filterToolsListPayload(await response.json(), {
-                allowedToolNames: effectiveAllowedToolNames,
-                disabledToolNames: credentials.disabledToolNames,
-              }),
-            );
-          }
-          return response;
-        } catch (error) {
-          return jsonRpcErrorResponse(
-            error instanceof McpProxyError ? error.httpStatus : 502,
-            -32000,
-            error instanceof McpProxyError
-              ? error.message
-              : `${name} MCP local request failed`,
-            getJsonRpcRequestId(parsedBody),
-          );
-        }
-      }
-
       const proxyHeaders = buildProxyRequestHeaders(
         credentials.authHeader,
         c.req.raw.headers,
@@ -1059,12 +1036,18 @@ export function createMcpProxy(config: McpProxyConfig) {
       const isLongLivedStreamableTransportRequest =
         method === 'GET' || method === 'POST';
 
-      const signal = isLongLivedStreamableTransportRequest
-        ? c.req.raw.signal
-        : AbortSignal.any([
-            AbortSignal.timeout(timeoutMs),
-            ...(c.req.raw.signal ? [c.req.raw.signal] : []),
-          ]);
+      const signal =
+        credentials.timeoutMs !== undefined
+          ? AbortSignal.any([
+              AbortSignal.timeout(credentials.timeoutMs),
+              c.req.raw.signal,
+            ])
+          : isLongLivedStreamableTransportRequest
+            ? c.req.raw.signal
+            : AbortSignal.any([
+                AbortSignal.timeout(timeoutMs),
+                ...(c.req.raw.signal ? [c.req.raw.signal] : []),
+              ]);
 
       const upstreamRequestInit = {
         method,
@@ -1081,11 +1064,11 @@ export function createMcpProxy(config: McpProxyConfig) {
 
       if (guardUpstreamEgress) {
         assertEgressUrlAllowed(
-          effectiveUpstream!,
+          effectiveUpstream,
           guardUpstreamEgress.allowedPrivateCidrs,
         );
 
-        upstreamResponse = await fetch(effectiveUpstream!, {
+        upstreamResponse = await fetch(effectiveUpstream, {
           ...upstreamRequestInit,
           dispatcher: isLongLivedStreamableTransportRequest
             ? guardedLongLivedDispatcher!
@@ -1111,14 +1094,74 @@ export function createMcpProxy(config: McpProxyConfig) {
       } else {
         upstreamResponse = isLongLivedStreamableTransportRequest
           ? await fetchWithLongLivedStreamDispatcher(
-              effectiveUpstream!,
+              effectiveUpstream,
               upstreamRequestInit,
             )
-          : await fetch(effectiveUpstream!, upstreamRequestInit);
+          : await fetch(effectiveUpstream, upstreamRequestInit);
       }
 
       const elapsedMs = Date.now() - startedAt;
       const contentType = upstreamResponse.headers.get('content-type');
+
+      if (credentials.maxResponseBodyBytes !== undefined) {
+        const maxBytes = credentials.maxResponseBodyBytes;
+        const sizeError = new Error(
+          `${name} MCP response exceeds the size limit`,
+        );
+        if (Number(upstreamResponse.headers.get('content-length')) > maxBytes) {
+          void upstreamResponse.body?.cancel().catch(() => {});
+          throw sizeError;
+        }
+        if (upstreamResponse.body) {
+          const reader = upstreamResponse.body.getReader();
+          let bytes = 0;
+          let settled = false;
+          let abort: () => void;
+          const finish = () => {
+            settled = true;
+            signal.removeEventListener('abort', abort);
+            // Cancellation must not wait for a stalled upstream to settle.
+            void reader.cancel().catch(() => {});
+          };
+          const body = new ReadableStream<Uint8Array>(
+            {
+              start(controller) {
+                abort = () => {
+                  if (settled) return;
+                  finish();
+                  controller.error(signal.reason);
+                };
+                signal.addEventListener('abort', abort, { once: true });
+                if (signal.aborted) abort();
+              },
+              async pull(controller) {
+                try {
+                  const { done, value } = await reader.read();
+                  if (settled) return;
+                  if (done) {
+                    finish();
+                    controller.close();
+                  } else {
+                    bytes += value.byteLength;
+                    if (bytes > maxBytes) throw sizeError;
+                    controller.enqueue(value);
+                  }
+                } catch (error) {
+                  if (settled) return;
+                  finish();
+                  controller.error(error);
+                }
+              },
+              cancel: finish,
+            },
+            { highWaterMark: 0 },
+          );
+          upstreamResponse = new Response(body, {
+            status: upstreamResponse.status,
+            headers: upstreamResponse.headers,
+          });
+        }
+      }
 
       if (!upstreamResponse.ok) {
         console.warn(
@@ -1200,7 +1243,9 @@ export function createMcpProxy(config: McpProxyConfig) {
         contentType?.includes('text/event-stream') &&
         getJsonRpcRequestId(parsedBody) !== null &&
         !Array.isArray(parsedBody)
-          ? upstreamResponse.clone().body
+          ? credentials.maxResponseBodyBytes !== undefined
+            ? upstreamResponse.body
+            : upstreamResponse.clone().body
           : null;
 
       if (sseResponseBody) {
@@ -1222,9 +1267,21 @@ export function createMcpProxy(config: McpProxyConfig) {
               headers,
             });
           }
-        } catch {
+        } catch (error) {
+          if (credentials.maxResponseBodyBytes !== undefined) throw error;
           // Fall through to streaming the raw upstream response.
         }
+        if (credentials.maxResponseBodyBytes !== undefined)
+          throw new Error(
+            'No matching JSON-RPC response in upstream SSE stream',
+          );
+      }
+
+      if (credentials.maxResponseBodyBytes !== undefined) {
+        return new Response(await upstreamResponse.text(), {
+          status: upstreamResponse.status,
+          headers: buildProxyResponseHeaders(upstreamResponse.headers),
+        });
       }
 
       return new Response(

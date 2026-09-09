@@ -218,21 +218,25 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
-  it('discovers public GitHub tools without an installation or a broker member gate', async () => {
+  it('requires an installation before discovering native GitHub tools for public reads', async () => {
     mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+    expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+    expect(mocks.listMcpTools).not.toHaveBeenCalled();
+    mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     const tools = [
       'get_file_contents',
       'issue_read',
       'pull_request_read',
       'list_pull_requests',
       'search_pull_requests',
+      'search_code',
     ].map((name) => ({ name, inputSchema: { type: 'object' } }));
     mocks.listMcpTools.mockResolvedValue(tools);
     const integrations = await listFastAgentIntegrations(auditContext);
     expect(integrations.map(({ id }) => id)).toEqual(['github']);
     expect(integrations[0]?.tools).toEqual(tools);
     expect(mocks.isRouterMcpServerEnabled).toHaveBeenCalledWith('github');
-    expect(mocks.findGithubInstallation).not.toHaveBeenCalled();
+    expect(mocks.findGithubInstallation).toHaveBeenCalledTimes(2);
     expect(mocks.findMember).not.toHaveBeenCalled();
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
@@ -622,6 +626,7 @@ describe('fast-agent integration broker', () => {
         roomote: { url: 'https://api.example.com/mcp', headers: {} },
       };
       mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+      mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
       if (reason === 'configuration') {
         mocks.resolveGitLabInstanceHost.mockImplementationOnce(() => {
           throw new Error('Invalid GitLab configuration');
@@ -945,6 +950,7 @@ describe('fast-agent integration broker', () => {
     'preserves discovered $name descriptions, schemas, and arguments',
     async ({ name, args }) => {
       mocks.isRouterMcpServerEnabled.mockReturnValue(true);
+      mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
       const nativeTool = {
         name,
         description: `Native ${name} description`,

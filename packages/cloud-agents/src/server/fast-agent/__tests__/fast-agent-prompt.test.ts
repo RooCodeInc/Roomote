@@ -827,14 +827,12 @@ describe('buildFastAgentSystemPrompt', () => {
         .split('- For GitHub,')[0]!;
       expect(explorationGuidance).not.toMatch(/GitHub|GitLab|Bitbucket/);
       for (const guidance of [
-        'without a GitHub connection or personal GitHub account linkage',
-        '`get_file_contents`, `issue_read`, `pull_request_read`, `list_pull_requests`, and `search_pull_requests`',
-        'use exact paths via contents for source reads',
-        'Anonymous code search, repository search, Actions, and review threads',
-        '`get_review_comments`, which requires GraphQL',
+        'an eligible deployment GitHub App installation with an active connected repository is required',
+        'without connecting the public target or linking a personal GitHub account',
+        'including source, code search, issues, and pull requests',
         'exactly one positive `repo:owner/name` qualifier',
-        'Bound pages to the question and disclose incomplete results',
-        'Private reads and writes still require eligible connections',
+        'Respect upstream pagination and search-index limits and disclose incomplete results',
+        'Private reads and all writes still require an eligible connection to the target repository',
         'never retry an authorization denial anonymously or through a task',
       ])
         expect(prompt).toContain(guidance);

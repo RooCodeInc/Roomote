@@ -1130,7 +1130,7 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(integrationInstructions).toContain('roomote_call_integration_tool');
     expect(integrationInstructions).toContain('- github [id: github]');
     expect(integrationInstructions).toContain(
-      'without a GitHub connection, just as in Fast',
+      'An eligible deployment GitHub App installation with an active connected repository is required, just as in Fast',
     );
     expect(integrationInstructions).toContain(
       'This task MCP path is read-only',

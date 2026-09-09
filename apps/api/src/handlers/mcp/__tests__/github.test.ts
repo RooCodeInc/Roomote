@@ -1,9 +1,6 @@
 import { Hono } from 'hono';
 import { generateKeyPairSync } from 'node:crypto';
-import { createRunToken } from '@roomote/auth';
 import { configureAuthClientEnv } from '@roomote/auth/client';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   db,
   eq,
@@ -24,7 +21,6 @@ import type { Variables } from '../../../types';
 const mocks = vi.hoisted(() => ({
   mint: vi.fn(),
   credentials: vi.fn(),
-  tryCredentials: vi.fn(),
   upstream: vi.fn(),
   publicFetch: vi.fn(),
 }));
@@ -32,16 +28,12 @@ vi.mock('@roomote/auth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/auth')>()),
   createGitHubToken: mocks.mint,
   resolveRuntimeGitHubAppCredentials: mocks.credentials,
-  tryResolveRuntimeGitHubAppCredentials: mocks.tryCredentials,
 }));
 vi.mock('../../long-lived-fetch', () => ({
   fetchWithLongLivedStreamDispatcher: mocks.upstream,
 }));
 
 import { createGithubMcp } from '../github';
-import { createMcpProxy } from '../proxy-utils';
-import { githubPublicTools } from '../github-public-tools';
-import { tokenAuthMiddleware } from '../../../middleware/tokenAuthMiddleware';
 
 describe('GitHub MCP bounded writes', () => {
   let actor: Awaited<ReturnType<typeof userFactory.create>>;
@@ -109,7 +101,6 @@ describe('GitHub MCP bounded writes', () => {
     );
     mocks.mint.mockReset().mockResolvedValue('scoped-test-token');
     mocks.credentials.mockReset().mockResolvedValue(appCredentials);
-    mocks.tryCredentials.mockReset().mockResolvedValue(appCredentials);
     mocks.upstream
       .mockReset()
       .mockImplementation(async () =>
@@ -698,9 +689,7 @@ describe('GitHub MCP bounded writes', () => {
         ['search_code', { query: `repo:${owner}/example fix` }],
         ['search_repositories', { query: `repo:${owner}/example` }],
       ] as const)
-        expect((await call(name, arguments_)).status).toBe(
-          name === 'get_file_contents' ? 404 : 400,
-        );
+        expect((await call(name, arguments_)).status).toBe(403);
       expect(mocks.mint).not.toHaveBeenCalled();
       expect(mocks.upstream).not.toHaveBeenCalled();
     },
@@ -715,7 +704,7 @@ describe('GitHub MCP bounded writes', () => {
         .where(eq(githubInstallations.id, installation.id));
       expect(
         (await call('get_file_contents', { owner, repo: 'example' })).status,
-      ).toBe(404);
+      ).toBe(403);
       expect(mocks.mint).not.toHaveBeenCalled();
       expect(
         (await post({ jsonrpc: '2.0', id: 7, method: 'initialize' })).status,
@@ -734,20 +723,20 @@ describe('GitHub MCP bounded writes', () => {
   it('rejects disconnected and unspecified reads without using the discovery credential', async () => {
     expect(
       (await call('get_file_contents', { owner, repo: 'disconnected' })).status,
-    ).toBe(404);
+    ).toBe(403);
     expect(
       (
         await call('search_repositories', {
           query: `repo:${owner}/disconnected`,
         })
       ).status,
-    ).toBe(400);
+    ).toBe(403);
     expect((await call('get_file_contents', {})).status).toBe(400);
     expect(mocks.mint).not.toHaveBeenCalled();
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it('skips inactive repositories for discovery and uses public discovery when none remain connected', async () => {
+  it('skips inactive repositories for discovery and rejects discovery when none remain connected', async () => {
     await db
       .update(repositories)
       .set({ isActive: false })
@@ -770,7 +759,7 @@ describe('GitHub MCP bounded writes', () => {
     try {
       expect(
         (await post({ jsonrpc: '2.0', id: 7, method: 'initialize' })).status,
-      ).toBe(200);
+      ).toBe(404);
       expect(mocks.mint).toHaveBeenCalledTimes(1);
     } finally {
       await db
@@ -1112,929 +1101,449 @@ describe('GitHub MCP bounded writes', () => {
   });
 
   const publicTarget = { owner: 'public-owner', repo: 'public-repository' };
-  const publicRoot =
-    'https://api.github.com/repos/public-owner/public-repository';
-  function publicMetadata() {
-    return Response.json({
-      private: false,
-      full_name: 'public-owner/public-repository',
-    });
-  }
-
-  it.each(['inactive', 'uninstalled'])(
-    'discovers native read contracts with %s repositories and no app credentials',
-    async (connectionState) => {
-      await db.transaction(async (tx) => {
-        for (const repo of [repository, secondRepository]) {
-          if (connectionState === 'inactive')
-            await tx
-              .update(repositories)
-              .set({ isActive: false })
-              .where(eq(repositories.id, repo.id));
-          else
-            await tx.delete(repositories).where(eq(repositories.id, repo.id));
-        }
-        if (connectionState === 'uninstalled') {
-          for (const installed of [installation, secondInstallation])
-            await tx
-              .delete(githubInstallations)
-              .where(eq(githubInstallations.id, installed.id));
-        }
-      });
-      mocks.credentials.mockRejectedValue(
-        new Error('No GitHub App configured'),
-      );
-      mocks.tryCredentials.mockResolvedValue(null);
-      const run = await runFactory.create({ actingUserId: actor.id });
-      try {
-        const initialized = await post({
-          jsonrpc: '2.0',
-          id: 'init',
-          method: 'initialize',
-          params: {
-            protocolVersion: '2025-06-18',
-            capabilities: {},
-            clientInfo: { name: 'test', version: '1' },
-          },
-        });
-        expect(await initialized.json()).toMatchObject({
-          id: 'init',
-          result: {
-            protocolVersion: '2025-06-18',
-            capabilities: { tools: {} },
-          },
-        });
-        expect(
-          (await post({ jsonrpc: '2.0', method: 'notifications/initialized' }))
-            .status,
-        ).toBe(202);
-        const response = await post({
-          jsonrpc: '2.0',
-          id: 'list',
-          method: 'tools/list',
-        });
-        const tools = (await response.json()).result.tools;
-        expect(tools).toEqual(githubPublicTools);
-        expect(tools.map((tool: { name: string }) => tool.name)).toEqual([
-          'get_file_contents',
-          'issue_read',
-          'pull_request_read',
-          'list_pull_requests',
-          'search_pull_requests',
-        ]);
-        expect(
-          tools.find(
-            (tool: { name: string }) => tool.name === 'get_file_contents',
-          ).inputSchema,
-        ).toMatchObject({
-          required: ['owner', 'repo'],
-          properties: {
-            path: { default: '/' },
-            ref: { type: 'string' },
-            sha: { type: 'string' },
-          },
-        });
-        const restricted = await post(
-          { jsonrpc: '2.0', id: 7, method: 'tools/list' },
-          app(undefined, true, ['issue_read']),
-        );
-        expect((await restricted.json()).result.tools).toEqual([
-          githubPublicTools.find((tool) => tool.name === 'issue_read'),
-        ]);
-        const localApp = new Hono<{ Variables: Variables }>();
-        localApp.use('*', tokenAuthMiddleware());
-        localApp.route('/github', createGithubMcp());
-        const token = await createRunToken({
-          runId: run.id,
-          userId: actor.id,
-          timeoutMs: 60_000,
-        });
-        const client = new Client({ name: 'public-github-test', version: '1' });
-        try {
-          await client.connect(
-            new StreamableHTTPClientTransport(
-              new URL('http://localhost/github'),
-              {
-                requestInit: { headers: { authorization: `Bearer ${token}` } },
-                fetch: async (input, init) =>
-                  localApp.request(new Request(input, init)),
-              },
-            ),
-          );
-          expect((await client.listTools()).tools).toEqual(githubPublicTools);
-          mocks.publicFetch
-            .mockResolvedValueOnce(publicMetadata())
-            .mockResolvedValueOnce(Response.json({ title: 'Public issue' }));
-          const result = await client.callTool({
-            name: 'issue_read',
-            arguments: { ...publicTarget, method: 'get', issue_number: 17 },
-          });
-          expect(result.content).toEqual([
-            { type: 'text', text: '{"title":"Public issue"}' },
-          ]);
-        } finally {
-          await client.close();
-        }
-        expect(mocks.credentials).not.toHaveBeenCalled();
-        expect(mocks.mint).not.toHaveBeenCalled();
-        expect(mocks.upstream).not.toHaveBeenCalled();
-        expect(mocks.publicFetch).toHaveBeenCalledTimes(2);
-      } finally {
-        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
-        await db.delete(tasks).where(eq(tasks.id, run.taskId));
-        if (connectionState === 'uninstalled') {
-          await db.transaction(async (tx) => {
-            await tx
-              .insert(githubInstallations)
-              .values([installation, secondInstallation]);
-            await tx
-              .insert(repositories)
-              .values([repository, secondRepository]);
-          });
-        } else {
-          await db
-            .update(repositories)
-            .set({ isActive: true })
-            .where(eq(repositories.id, secondRepository.id));
-        }
-      }
-    },
-  );
+  const publicFullName = `${publicTarget.owner}/${publicTarget.repo}`;
 
   it.each([
-    ['issue_read', { method: 'get', issue_number: 17 }, '/issues/17'],
+    ['get_file_contents', { ...publicTarget, path: 'README.md', ref: 'main' }],
     [
-      'issue_read',
-      { method: 'get_comments', issue_number: 17 },
-      '/issues/17/comments?page=1&per_page=30',
+      'search_code',
+      { query: `Hello repo:${publicFullName}`, perPage: 5, page: 2 },
     ],
+    ['search_repositories', { query: `repo:${publicFullName}`, perPage: 5 }],
     [
-      'issue_read',
-      { method: 'get_sub_issues', issue_number: 17 },
-      '/issues/17/sub_issues?page=1&per_page=30',
-    ],
-    [
-      'issue_read',
-      { method: 'get_labels', issue_number: 17 },
-      '/issues/17/labels?page=1&per_page=30',
-    ],
-    ['pull_request_read', { method: 'get', pullNumber: 18 }, '/pulls/18'],
-    [
-      'pull_request_read',
-      { method: 'get_files', pullNumber: 18, page: 2, perPage: 5 },
-      '/pulls/18/files?page=2&per_page=5',
+      'search_pull_requests',
+      { query: `repo:${publicFullName} is:open`, sort: 'updated' },
     ],
     [
       'pull_request_read',
-      { method: 'get_reviews', pullNumber: 18 },
-      '/pulls/18/reviews?page=1&per_page=30',
+      { ...publicTarget, method: 'get_review_comments', pullNumber: 42 },
     ],
-    [
-      'pull_request_read',
-      { method: 'get_comments', pullNumber: 18 },
-      '/issues/18/comments?page=1&per_page=30',
-    ],
-    [
-      'list_pull_requests',
-      {
-        state: 'closed',
-        head: 'fork:fix/thing',
-        base: 'main',
-        sort: 'updated',
-        direction: 'asc',
-      },
-      '/pulls?page=1&per_page=30&state=closed&head=fork%3Afix%2Fthing&base=main&sort=updated&direction=asc',
-    ],
-  ] as const)(
-    'reads public %s %j with no installation token or caller headers',
-    async (name, fields, suffix) => {
-      mocks.publicFetch
-        .mockResolvedValueOnce(publicMetadata())
-        .mockResolvedValueOnce(Response.json({ evidence: 'public result' }));
-      const response = await call(name, { ...publicTarget, ...fields });
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({
-        jsonrpc: '2.0',
-        id: 7,
-        result: {
-          content: [{ type: 'text', text: '{"evidence":"public result"}' }],
-        },
-      });
-      expect(mocks.publicFetch.mock.calls.map(([url]) => String(url))).toEqual([
-        publicRoot,
-        publicRoot + suffix,
-      ]);
-      for (const [, init] of mocks.publicFetch.mock.calls) {
-        expect(init.method).toBe('GET');
-        expect(init.redirect).toBe('manual');
-        expect(new Headers(init.headers).get('authorization')).toBeNull();
-        expect(new Headers(init.headers).get('cookie')).toBeNull();
-        expect(new Headers(init.headers).get('x-github-token')).toBeNull();
-        expect(init.signal).toBeInstanceOf(AbortSignal);
-      }
-      expect(mocks.credentials).not.toHaveBeenCalled();
-      expect(mocks.mint).not.toHaveBeenCalled();
-      expect(mocks.upstream).not.toHaveBeenCalled();
-    },
-  );
-
-  it('reads exact source paths with encoded ref, sha precedence, and no raw URL downloads', async () => {
-    for (const [fields, query] of [
-      [
-        { ref: 'refs/heads/feature/source' },
-        'ref=refs%2Fheads%2Ffeature%2Fsource',
-      ],
-      [
-        { ref: 'refs/heads/feature/source', sha: 'a'.repeat(40) },
-        `ref=${'a'.repeat(40)}`,
-      ],
-    ] as const) {
-      mocks.publicFetch
-        .mockResolvedValueOnce(publicMetadata())
-        .mockResolvedValueOnce(
-          Response.json({
-            type: 'file',
-            encoding: 'base64',
-            content: Buffer.from('public source').toString('base64'),
-            size: 13,
-            sha: 'abc',
-            download_url: 'https://private.example/secret',
-          }),
-        );
-      const response = await call('get_file_contents', {
-        ...publicTarget,
-        path: '/src/file #1.ts',
-        ...fields,
-      });
-      expect(response.status).toBe(200);
-      expect((await response.json()).result.content[0].text).toBe(
-        'File SHA: abc\npublic source',
-      );
-      expect(String(mocks.publicFetch.mock.lastCall![0])).toBe(
-        `${publicRoot}/contents/src/file%20%231.ts?${query}`,
-      );
-    }
-    expect(mocks.publicFetch).toHaveBeenCalledTimes(4);
-    expect(mocks.mint).not.toHaveBeenCalled();
-  });
-
-  it('reads the repository root without inventing a file path', async () => {
-    mocks.publicFetch
-      .mockResolvedValueOnce(publicMetadata())
-      .mockResolvedValueOnce(Response.json([{ name: 'src', type: 'dir' }]));
-    const response = await call('get_file_contents', publicTarget);
-    expect(response.status).toBe(200);
-    expect(String(mocks.publicFetch.mock.lastCall![0])).toBe(
-      `${publicRoot}/contents/`,
-    );
-    expect(JSON.parse((await response.json()).result.content[0].text)).toEqual([
-      { name: 'src', type: 'dir' },
-    ]);
-  });
-
-  it('reads PR diffs using the GitHub diff media type', async () => {
-    mocks.publicFetch
-      .mockResolvedValueOnce(publicMetadata())
-      .mockResolvedValueOnce(new Response('diff --git a/x b/x'));
-    const response = await call('pull_request_read', {
-      ...publicTarget,
-      pullNumber: 18,
-      method: 'get_diff',
-    });
-    expect((await response.json()).result.content[0].text).toBe(
-      'diff --git a/x b/x',
-    );
-    expect(
-      new Headers(mocks.publicFetch.mock.lastCall![1].headers).get('accept'),
-    ).toBe('application/vnd.github.diff');
-  });
-
-  it.each(['get_status', 'get_check_runs'])(
-    'reads %s against the validated head SHA, never a returned URL',
-    async (method) => {
-      mocks.publicFetch
-        .mockResolvedValueOnce(publicMetadata())
-        .mockResolvedValueOnce(
-          Response.json({
-            head: {
-              sha: 'a'.repeat(40),
-              repo: { url: 'https://private.example' },
-            },
-          }),
-        )
-        .mockResolvedValueOnce(Response.json({ state: 'success' }));
-      const response = await call('pull_request_read', {
-        ...publicTarget,
-        pullNumber: 18,
-        method,
-      });
-      expect(response.status).toBe(200);
-      expect(String(mocks.publicFetch.mock.lastCall![0])).toBe(
-        `${publicRoot}/commits/${'a'.repeat(40)}/${method === 'get_status' ? 'status' : 'check-runs'}?page=1&per_page=30`,
-      );
-      expect(mocks.publicFetch).toHaveBeenCalledTimes(3);
-    },
-  );
-
-  it('uses bounded anonymous repository-scoped PR search', async () => {
-    mocks.publicFetch
-      .mockResolvedValueOnce(publicMetadata())
-      .mockResolvedValueOnce(
-        Response.json({ total_count: 1, items: [{ number: 18 }] }),
-      );
-    const response = await call('search_pull_requests', {
-      query: 'repo:public-owner/public-repository fix',
-      page: 2,
-      perPage: 5,
-      sort: 'updated',
-      order: 'desc',
-    });
-    expect(response.status).toBe(200);
-    const url = mocks.publicFetch.mock.lastCall![0] as URL;
-    expect(url.origin).toBe('https://api.github.com');
-    expect(url.pathname).toBe('/search/issues');
-    expect(url.searchParams.get('q')).toBe(
-      'repo:public-owner/public-repository fix is:pr',
-    );
-    expect(url.searchParams.get('per_page')).toBe('5');
-    expect(mocks.mint).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    { private: true },
-    {},
-    { private: 'false' },
-    { private: false, full_name: 'different/repository' },
+    ['issue_read', { ...publicTarget, method: 'get', issue_number: 42 }],
   ])(
-    'rejects unconfirmed public visibility %j before the requested operation',
+    'forwards public %s with untouched native arguments after public confirmation',
+    async (name, arguments_) => {
+      mocks.publicFetch.mockImplementationOnce(async () => {
+        expect(mocks.mint).not.toHaveBeenCalled();
+        return Response.json({
+          private: false,
+          full_name: publicFullName.toUpperCase(),
+        });
+      });
+      expect((await call(name as string, arguments_)).status).toBe(200);
+      expect(mocks.publicFetch).toHaveBeenCalledExactlyOnceWith(
+        `https://api.github.com/repos/${publicFullName}`,
+        {
+          headers: { Accept: 'application/vnd.github+json' },
+          redirect: 'manual',
+          signal: expect.any(AbortSignal),
+        },
+      );
+      const expected =
+        installation.id < secondInstallation.id
+          ? { installation, repository }
+          : { installation: secondInstallation, repository: secondRepository };
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: expected.installation.id,
+          repositoryIds: [expected.repository.githubRepoId],
+        },
+        appCredentials,
+      );
+      expect(mocks.upstream).toHaveBeenCalledOnce();
+      const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+      expect(JSON.parse(init.body as string).params.arguments).toEqual(
+        arguments_,
+      );
+      expect(new Headers(init.headers).get('X-MCP-Readonly')).toBe('true');
+      expect(new Headers(init.headers).get('authorization')).toBe(
+        'Bearer scoped-test-token',
+      );
+    },
+  );
+
+  it.each([
+    { private: true, full_name: publicFullName },
+    { full_name: publicFullName },
+    { private: false, full_name: 'another/repository' },
+    { private: false },
+    null,
+  ])(
+    'denies unconfirmed public visibility %j without minting or retrying',
     async (metadata) => {
       mocks.publicFetch.mockResolvedValueOnce(Response.json(metadata));
-      const response = await call('issue_read', {
-        ...publicTarget,
-        method: 'get',
-        issue_number: 1,
-      });
-      expect(response.status).toBe(403);
-      expect(mocks.publicFetch).toHaveBeenCalledTimes(1);
+      expect((await call('get_file_contents', publicTarget)).status).toBe(403);
+      expect(mocks.publicFetch).toHaveBeenCalledOnce();
       expect(mocks.mint).not.toHaveBeenCalled();
       expect(mocks.upstream).not.toHaveBeenCalled();
     },
   );
 
   it.each([301, 302, 401, 403, 404, 429, 500])(
-    'never retries public metadata HTTP %s with authentication',
+    'denies metadata HTTP %s without following redirects or retrying',
     async (status) => {
+      const cancel = vi.fn();
       mocks.publicFetch.mockResolvedValueOnce(
-        new Response('secret upstream detail', {
+        new Response(new ReadableStream({ cancel }), {
           status,
-          headers: {
-            location: 'https://private.example/redirect',
-            'retry-after': '1',
-          },
+          headers: { location: 'https://another.example/private' },
         }),
       );
-      const response = await call('issue_read', {
-        ...publicTarget,
-        method: 'get',
-        issue_number: 1,
-      });
-      expect(response.status).toBe(
-        status >= 400 && status < 500 ? status : 502,
-      );
-      expect(await response.text()).not.toContain('secret upstream detail');
-      expect(mocks.publicFetch).toHaveBeenCalledTimes(1);
-      expect(mocks.credentials).not.toHaveBeenCalled();
+      expect(
+        (await call('search_code', { query: `Hello repo:${publicFullName}` }))
+          .status,
+      ).toBe(403);
+      expect(mocks.publicFetch).toHaveBeenCalledOnce();
       expect(mocks.mint).not.toHaveBeenCalled();
       expect(mocks.upstream).not.toHaveBeenCalled();
+      expect(cancel).toHaveBeenCalledOnce();
     },
   );
 
-  it.each([302, 403, 404, 429, 500])(
-    'never retries public operation HTTP %s or falls back to a default ref',
-    async (status) => {
-      mocks.publicFetch
-        .mockResolvedValueOnce(publicMetadata())
-        .mockResolvedValueOnce(new Response(null, { status }));
-      const response = await call('get_file_contents', {
-        ...publicTarget,
-        path: 'missing',
-        ref: 'missing-branch',
-      });
-      expect(response.status).toBe(
-        status >= 400 && status < 500 ? status : 502,
-      );
-      expect(mocks.publicFetch).toHaveBeenCalledTimes(2);
-      expect(mocks.mint).not.toHaveBeenCalled();
-      expect(mocks.upstream).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([
-    ['get_file_contents', { path: '../secret' }],
-    ['get_file_contents', { path: 'src/../../secret' }],
-    ['get_file_contents', { path: '%2e%2e/secret' }],
-    ['get_file_contents', { path: '//api.example' }],
-    ['get_file_contents', { path: 'src\\..\\secret' }],
-    ['get_file_contents', { ref: 'main\nAuthorization: secret' }],
-    ['get_file_contents', { ref: 'x?secret=true' }],
-    ['get_file_contents', { ref: 'refs/heads/../secret' }],
-    ['get_file_contents', { sha: 'x'.repeat(1025) }],
-    ['issue_read', { method: 'get', issue_number: -1 }],
-    ['issue_read', { method: 'get', issue_number: 1.5 }],
-    ['issue_read', { method: 'get' }],
-    ['issue_read', { method: 'delete', issue_number: 1 }],
-    ['issue_read', { method: 'get', issue_number: 1, perPage: 101 }],
-    ['issue_read', { method: 'get', issue_number: 1, page: 1001 }],
-    ['issue_read', { method: 'get', issue_number: 1, page: 0 }],
-    [
-      'issue_read',
-      { method: 'get', issue_number: 1, url: 'https://private.example' },
-    ],
-    ['pull_request_read', { method: 'get_review_comments', pullNumber: 18 }],
-    ['list_pull_requests', { state: 'merged' }],
-  ] as const)(
-    'rejects unsupported or unsafe public %s arguments %j before HTTP',
-    async (name, fields) => {
-      const response = await call(name, { ...publicTarget, ...fields });
-      expect(response.status).toBe(400);
-      expect(mocks.publicFetch).not.toHaveBeenCalled();
-      expect(mocks.mint).not.toHaveBeenCalled();
-    },
-  );
-
-  it('reports anonymous code search as unsupported, not empty results', async () => {
-    const response = await call('search_code', {
-      query: 'repo:public-owner/public-repository fix',
-    });
-    expect(response.status).toBe(400);
-    expect((await response.json()).error.message).toContain(
-      'code search is unsupported',
-    );
-    expect(mocks.publicFetch).not.toHaveBeenCalled();
-    expect(mocks.mint).not.toHaveBeenCalled();
-  });
-
-  it.each(['declared', 'streamed', 'combined'])(
-    'bounds %s response bytes and cancels oversized bodies',
+  it.each(['declared', 'missing length', 'understated length', 'multibyte'])(
+    'cancels oversized public metadata (%s) before minting or forwarding',
     async (kind) => {
       const cancel = vi.fn();
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            new Uint8Array(
-              kind === 'combined' ? 2 * 1024 * 1024 - 1 : 2 * 1024 * 1024 + 1,
-            ),
-          );
-        },
-        cancel,
-      });
-      const oversized = new Response(body, {
-        headers:
-          kind === 'declared'
-            ? { 'content-length': String(2 * 1024 * 1024 + 1) }
-            : {},
-      });
-      if (kind === 'combined')
-        mocks.publicFetch
-          .mockResolvedValueOnce(publicMetadata())
-          .mockResolvedValueOnce(oversized);
-      else mocks.publicFetch.mockResolvedValueOnce(oversized);
-      const response = await call('issue_read', {
-        ...publicTarget,
-        method: 'get',
-        issue_number: 1,
-      });
-      expect(response.status).toBe(413);
-      expect(cancel).toHaveBeenCalled();
-      expect(mocks.publicFetch).toHaveBeenCalledTimes(
-        kind === 'combined' ? 2 : 1,
+      let reads = 0;
+      const chunk = new TextEncoder().encode(
+        kind === 'multibyte'
+          ? '\u00e9'.repeat(16 * 1024)
+          : ' '.repeat(32 * 1024),
       );
+      const response = new Response(
+        new ReadableStream(
+          {
+            pull(controller) {
+              reads++;
+              controller.enqueue(chunk);
+            },
+            cancel,
+          },
+          { highWaterMark: 0 },
+        ),
+        {
+          headers:
+            kind === 'declared'
+              ? { 'content-length': String(64 * 1024 + 1) }
+              : kind === 'understated length'
+                ? { 'content-length': '1' }
+                : {},
+        },
+      );
+      mocks.publicFetch.mockResolvedValueOnce(response);
+      expect((await call('get_file_contents', publicTarget)).status).toBe(403);
+      expect(reads).toBe(kind === 'declared' ? 0 : 3);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(mocks.publicFetch).toHaveBeenCalledOnce();
       expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
     },
   );
 
-  it('uses one deadline for metadata and the operation and sanitizes network errors', async () => {
-    mocks.publicFetch
-      .mockResolvedValueOnce(publicMetadata())
-      .mockRejectedValueOnce(new Error('sensitive network details'));
-    const response = await call('issue_read', {
-      ...publicTarget,
-      method: 'get',
-      issue_number: 1,
+  it('accepts exactly 64 KiB of streamed metadata and 2 MiB of native JSON', async () => {
+    const metadata = JSON.stringify({
+      private: false,
+      full_name: publicFullName,
     });
-    expect(response.status).toBe(502);
-    expect(await response.text()).not.toContain('sensitive network details');
-    expect(mocks.publicFetch.mock.calls[0]![1].signal).toBe(
-      mocks.publicFetch.mock.calls[1]![1].signal,
+    const bytes = new TextEncoder().encode(metadata.padEnd(64 * 1024));
+    mocks.publicFetch.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes.slice(0, 17));
+            controller.enqueue(bytes.slice(17));
+            controller.close();
+          },
+        }),
+      ),
     );
-    expect(mocks.publicFetch).toHaveBeenCalledTimes(2);
+    const output = 'x'.repeat(
+      2 * 1024 * 1024 - JSON.stringify({ result: '' }).length,
+    );
+    mocks.upstream.mockResolvedValueOnce(Response.json({ result: output }));
+    const response = await call('get_file_contents', publicTarget);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ result: output });
+    expect(mocks.mint).toHaveBeenCalledOnce();
+    expect(mocks.upstream).toHaveBeenCalledOnce();
   });
 
-  it.each(['headers', 'body'])(
-    'aborts stalled public %s at the shared deadline without retry',
-    async (phase) => {
-      const deadline = new AbortController();
+  it.each([
+    ['application/json', 'declared'],
+    ['application/json', 'missing length'],
+    ['application/json', 'understated length'],
+    ['text/event-stream', 'declared'],
+    ['text/event-stream', 'missing length'],
+    ['text/event-stream', 'understated length'],
+  ])('bounds actual native bytes for %s (%s)', async (contentType, kind) => {
+    mocks.publicFetch.mockResolvedValueOnce(
+      Response.json({ private: false, full_name: publicFullName }),
+    );
+    const cancel = vi.fn().mockRejectedValue(new Error('cancel failed'));
+    let reads = 0;
+    // Multibyte text catches accidental character-count rather than byte limits.
+    const chunk = new TextEncoder().encode('\u00e9'.repeat(256 * 1024));
+    mocks.upstream.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream(
+          {
+            pull(controller) {
+              reads++;
+              controller.enqueue(chunk);
+            },
+            cancel,
+          },
+          { highWaterMark: 0 },
+        ),
+        {
+          headers: {
+            'content-type': contentType!,
+            ...(kind === 'declared'
+              ? { 'content-length': String(2 * 1024 * 1024 + 1) }
+              : kind === 'understated length'
+                ? { 'content-length': '1' }
+                : {}),
+          },
+        },
+      ),
+    );
+    const response = await call('get_file_contents', publicTarget);
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.message).toContain('size limit');
+    expect(reads).toBe(kind === 'declared' ? 0 : 5);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.upstream).toHaveBeenCalledOnce();
+    expect(mocks.mint).toHaveBeenCalledOnce();
+  });
+
+  it('returns a normal native SSE reply without waiting for closure', async () => {
+    mocks.publicFetch.mockResolvedValueOnce(
+      Response.json({ private: false, full_name: publicFullName }),
+    );
+    const payload = { jsonrpc: '2.0', id: 7, result: { content: [] } };
+    const cancel = vi.fn();
+    const bytes = new TextEncoder().encode(
+      `data: ${JSON.stringify(payload)}\n\n`,
+    );
+    mocks.upstream.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes.slice(0, 11));
+            controller.enqueue(bytes.slice(11));
+          },
+          cancel,
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+    );
+    const response = await call('get_file_contents', publicTarget);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(payload);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each(['application/json', 'text/event-stream'])(
+    'keeps the native 15-second deadline active through a stalled %s body',
+    async (contentType) => {
+      mocks.publicFetch.mockResolvedValueOnce(
+        Response.json({ private: false, full_name: publicFullName }),
+      );
+      const abort = new AbortController();
       const timeout = vi
         .spyOn(AbortSignal, 'timeout')
-        .mockReturnValue(deadline.signal);
-      mocks.publicFetch.mockImplementationOnce(
-        async (_url, init: RequestInit) => {
-          const signal = init.signal!;
-          setTimeout(
-            () =>
-              deadline.abort(
-                new DOMException('Deadline exceeded', 'TimeoutError'),
-              ),
-            0,
-          );
-          if (phase === 'headers')
-            return new Promise((_resolve, reject) =>
-              signal.addEventListener('abort', () => reject(signal.reason), {
-                once: true,
-              }),
-            );
-          return new Response(
-            new ReadableStream({
-              start(controller) {
-                signal.addEventListener(
-                  'abort',
-                  () => controller.error(signal.reason),
-                  { once: true },
-                );
+        .mockReturnValueOnce(new AbortController().signal)
+        .mockReturnValueOnce(abort.signal);
+      const cancel = vi.fn();
+      mocks.upstream.mockImplementationOnce(async (_url, init: RequestInit) => {
+        expect(init.signal!.aborted).toBe(false);
+        return new Response(
+          new ReadableStream(
+            {
+              pull() {
+                abort.abort(new DOMException('Timed out', 'TimeoutError'));
               },
-            }),
-          );
-        },
-      );
+              cancel,
+            },
+            { highWaterMark: 0 },
+          ),
+          { headers: { 'content-type': contentType } },
+        );
+      });
       try {
-        const response = await call('issue_read', {
-          ...publicTarget,
-          method: 'get',
-          issue_number: 1,
-        });
-        expect(response.status).toBe(504);
-        expect(timeout).toHaveBeenCalledWith(15_000);
-        expect(mocks.publicFetch).toHaveBeenCalledTimes(1);
-        expect(mocks.mint).not.toHaveBeenCalled();
+        const response = await call('get_file_contents', publicTarget);
+        expect(response.status).toBe(502);
+        expect((await response.json()).error.message).toContain('Timed out');
+        expect(timeout.mock.calls).toEqual([[15_000], [15_000]]);
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(mocks.upstream).toHaveBeenCalledOnce();
       } finally {
         timeout.mockRestore();
       }
     },
   );
 
-  it.each([
-    { isActive: false },
-    { host: 'enterprise.example' },
-    { sourceControlProvider: 'gitlab' as const },
-  ])(
-    'reads public github.com independently of an ineligible same-name connection %j',
-    async (update) => {
-      await db
-        .update(repositories)
-        .set(update)
-        .where(eq(repositories.id, repository.id));
-      mocks.publicFetch
-        .mockResolvedValueOnce(
-          Response.json({ private: false, full_name: `${owner}/example` }),
-        )
-        .mockResolvedValueOnce(Response.json({ title: 'Public issue' }));
-      const response = await call('issue_read', {
-        owner,
-        repo: 'example',
-        method: 'get',
-        issue_number: 1,
-      });
-      expect(response.status).toBe(200);
-      expect(mocks.credentials).not.toHaveBeenCalled();
-      expect(mocks.mint).not.toHaveBeenCalled();
-      expect(mocks.upstream).not.toHaveBeenCalled();
-    },
-  );
-
-  it('rejects malformed metadata and does not read source or retry', async () => {
-    mocks.publicFetch.mockResolvedValueOnce(new Response('not-json'));
-    expect((await call('get_file_contents', publicTarget)).status).toBe(502);
-    expect(mocks.publicFetch).toHaveBeenCalledTimes(1);
-    expect(mocks.mint).not.toHaveBeenCalled();
-  });
-
-  it('does not retry an authenticated connected read through the anonymous route', async () => {
-    mocks.upstream.mockResolvedValueOnce(
-      Response.json(
-        { error: 'Resource not accessible by integration' },
-        { status: 403 },
-      ),
-    );
-    expect(
-      (await call('get_file_contents', { owner, repo: 'example' })).status,
-    ).toBe(403);
-    expect(mocks.mint).toHaveBeenCalledTimes(1);
-    expect(mocks.upstream).toHaveBeenCalledTimes(1);
-    expect(mocks.publicFetch).not.toHaveBeenCalled();
-  });
-
-  it('keeps connected private repository reads on their scoped installation credential', async () => {
-    await db
-      .update(repositories)
-      .set({ private: true })
-      .where(eq(repositories.id, repository.id));
-    expect(
-      (
-        await call('issue_read', {
+  it.each(['application/json', 'text/event-stream'])(
+    'does not apply public byte or deadline bounds to connected %s calls',
+    async (contentType) => {
+      const timeout = vi.spyOn(AbortSignal, 'timeout');
+      const payload = {
+        jsonrpc: '2.0',
+        id: 7,
+        result: 'x'.repeat(2 * 1024 * 1024 + 1),
+      };
+      mocks.upstream.mockResolvedValueOnce(
+        new Response(
+          contentType === 'application/json'
+            ? JSON.stringify(payload)
+            : `data: ${JSON.stringify(payload)}\n\n`,
+          { headers: { 'content-type': contentType } },
+        ),
+      );
+      try {
+        const response = await call('get_file_contents', {
           owner,
           repo: 'example',
-          method: 'get',
-          issue_number: 1,
-        })
-      ).status,
-    ).toBe(200);
-    expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
-      {
-        type: 'installationId',
-        installationId: installation.id,
-        repositoryIds: [repository.githubRepoId],
-      },
-      appCredentials,
-    );
-    expect(mocks.upstream).toHaveBeenCalledTimes(1);
-    expect(mocks.publicFetch).not.toHaveBeenCalled();
-  });
-
-  it('denies public reads to missing, deleted, and actorless members', async () => {
-    const arguments_ = { ...publicTarget, method: 'get', issue_number: 1 };
-    for (const auth of [
-      null,
-      { tokenType: 'auth', version: 1, userId: crypto.randomUUID() },
-      { tokenType: 'auth', version: 1, userId: '' },
-    ] as const) {
-      expect((await call('issue_read', arguments_, app(auth))).status).toBe(
-        auth ? 403 : 401,
-      );
-    }
-    await db
-      .update(users)
-      .set({ deletedAt: new Date() })
-      .where(eq(users.id, actor.id));
-    expect((await call('issue_read', arguments_)).status).toBe(403);
-    expect(mocks.publicFetch).not.toHaveBeenCalled();
-    expect(mocks.mint).not.toHaveBeenCalled();
-  });
-
-  it.each([true, false])(
-    'supports public reads and discovery with signed run tokens but denies private reads and writes (human actor: %s)',
-    async (human) => {
-      const run = await runFactory.create({
-        actingUserId: human ? actor.id : null,
-      });
-      try {
-        const token = await createRunToken({
-          runId: run.id,
-          userId: human ? actor.id : null,
-          timeoutMs: 60_000,
         });
-        const target = new Hono<{ Variables: Variables }>();
-        target.use('*', tokenAuthMiddleware());
-        target.route('/github', createGithubMcp());
-        const request = (method: string, params?: unknown) =>
-          target.request('/github', {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 7, method, params }),
-          });
-        mocks.tryCredentials.mockResolvedValue(null);
-        expect((await request('initialize')).status).toBe(200);
-        expect(
-          (await (await request('tools/list')).json()).result.tools,
-        ).toEqual(githubPublicTools);
-        mocks.publicFetch
-          .mockResolvedValueOnce(publicMetadata())
-          .mockResolvedValueOnce(Response.json({ number: 1 }));
-        const read = () =>
-          request('tools/call', {
-            name: 'issue_read',
-            arguments: { ...publicTarget, method: 'get', issue_number: 1 },
-          });
-        expect((await read()).status).toBe(200);
-        expect(mocks.publicFetch).toHaveBeenCalledTimes(2);
-        for (const [, init] of mocks.publicFetch.mock.calls) {
-          expect(new Headers(init.headers).has('authorization')).toBe(false);
-        }
-        mocks.tryCredentials.mockResolvedValue(appCredentials);
-        mocks.publicFetch
-          .mockResolvedValueOnce(publicMetadata())
-          .mockResolvedValueOnce(Response.json({ number: 1 }));
-        expect((await read()).status).toBe(200);
-        mocks.publicFetch
-          .mockReset()
-          .mockResolvedValue(
-            Response.json({ message: 'Not Found' }, { status: 404 }),
-          );
-        expect((await read()).status).toBe(404);
-        expect(mocks.publicFetch).toHaveBeenCalledTimes(1);
-        mocks.publicFetch.mockResolvedValueOnce(
-          Response.json({
-            private: true,
-            full_name: 'public-owner/public-repository',
-          }),
-        );
-        expect((await read()).status).toBe(403);
-        mocks.publicFetch.mockClear();
-        for (const [name, fields] of writeCases) {
-          expect(
-            (
-              await request('tools/call', {
-                name,
-                arguments: { ...publicTarget, ...fields },
-              })
-            ).status,
-          ).toBe(403);
-        }
-        expect(mocks.mint).not.toHaveBeenCalled();
-        expect(mocks.publicFetch).not.toHaveBeenCalled();
-
-        // A connected private target must stay on scoped installation auth,
-        // including after an upstream denial or a credential-minting failure.
-        mocks.tryCredentials.mockResolvedValue(appCredentials);
-        await db
-          .update(repositories)
-          .set({ private: true })
-          .where(eq(repositories.id, repository.id));
-        mocks.upstream.mockResolvedValue(
-          Response.json({ error: 'denied' }, { status: 403 }),
-        );
-        const connectedRead = () =>
-          request('tools/call', {
-            name: 'issue_read',
-            arguments: {
-              owner,
-              repo: 'example',
-              method: 'get',
-              issue_number: 1,
-            },
-          });
-        expect((await connectedRead()).status).toBe(403);
-        expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
-          {
-            type: 'installationId',
-            installationId: installation.id,
-            repositoryIds: [repository.githubRepoId],
-          },
-          appCredentials,
-        );
-        expect(
-          new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
-            'X-MCP-Readonly',
-          ),
-        ).toBe('true');
-        mocks.mint.mockRejectedValueOnce(new Error('installation denied'));
-        expect((await connectedRead()).status).toBe(500);
-        expect(mocks.upstream).toHaveBeenCalledTimes(1);
-        expect(mocks.publicFetch).not.toHaveBeenCalled();
-
-        if (human) {
-          await db
-            .update(users)
-            .set({ deletedAt: new Date() })
-            .where(eq(users.id, actor.id));
-          expect((await read()).status).toBe(401);
-          await db
-            .update(users)
-            .set({ deletedAt: null })
-            .where(eq(users.id, actor.id));
-          expect(mocks.publicFetch).not.toHaveBeenCalled();
-        }
-        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
-        expect((await read()).status).toBe(404);
-        expect((await request('tools/list')).status).toBe(404);
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual(payload);
+        expect(timeout).not.toHaveBeenCalled();
         expect(mocks.publicFetch).not.toHaveBeenCalled();
       } finally {
-        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
-        await db.delete(tasks).where(eq(tasks.id, run.taskId));
+        timeout.mockRestore();
       }
     },
   );
 
-  it('enforces endpoint policy before anonymous reads and writes', async () => {
-    expect(
-      (
-        await call(
-          'issue_read',
-          { ...publicTarget, method: 'get', issue_number: 1 },
-          app(undefined, true, ['get_file_contents']),
-        )
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await call('issue_write', {
-          ...publicTarget,
-          method: 'create',
-          title: 'write',
-        })
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await call('add_issue_comment', {
-          ...publicTarget,
-          issue_number: 1,
-          body: 'write',
-        })
-      ).status,
-    ).toBe(403);
-    expect(mocks.publicFetch).not.toHaveBeenCalled();
-    expect(mocks.mint).not.toHaveBeenCalled();
-  });
-
-  it('runs the local response hook only after per-request proxy policy', async () => {
-    const handler = vi.fn(async () =>
-      Response.json({ jsonrpc: '2.0', id: 7, result: {} }),
-    );
-    const target = new Hono<{ Variables: Variables }>();
-    target.use('*', async (c, next) => {
-      c.set('authContext', { tokenType: 'auth', version: 1, userId: actor.id });
-      await next();
-    });
-    target.route(
-      '/github',
-      createMcpProxy({
-        name: 'test-local',
-        allowAuthTokens: true,
-        allowedToolNames: ['issue_read'],
-        resolveCredentials: async () => ({
-          authHeader: null,
-          disabledToolNames: ['issue_read'],
-          localResponse: handler,
-        }),
-      }),
-    );
-    expect(
-      (
-        await call(
-          'issue_read',
-          { ...publicTarget, method: 'get', issue_number: 1 },
-          target,
-        )
-      ).status,
-    ).toBe(403);
-    expect(handler).not.toHaveBeenCalled();
-  });
-
-  it.each([null, { appId: '999', privateKey: 'other-app-key' }])(
-    'ignores stale wrong-App connections for public discovery and targets with configuration %j',
-    async (credentials) => {
-      mocks.tryCredentials.mockResolvedValue(credentials);
-      mocks.credentials.mockRejectedValue(
-        new Error('Throwing resolver must not be used for public reads'),
+  it.each(['application/json', 'text/event-stream'])(
+    'fails closed on a native %s body error without retrying',
+    async (contentType) => {
+      mocks.publicFetch.mockResolvedValueOnce(
+        Response.json({ private: false, full_name: publicFullName }),
       );
-      expect(
-        (await post({ jsonrpc: '2.0', id: 7, method: 'initialize' })).status,
-      ).toBe(200);
-      const discovered = await post({
-        jsonrpc: '2.0',
-        id: 7,
-        method: 'tools/list',
-      });
-      expect((await discovered.json()).result.tools).toEqual(githubPublicTools);
-      mocks.publicFetch
-        .mockResolvedValueOnce(
-          Response.json({ private: false, full_name: `${owner}/example` }),
-        )
-        .mockResolvedValueOnce(Response.json({ title: 'Public issue' }));
-      expect(
-        (
-          await call('issue_read', {
-            owner,
-            repo: 'example',
-            method: 'get',
-            issue_number: 1,
-          })
-        ).status,
-      ).toBe(200);
-      expect(mocks.tryCredentials).toHaveBeenCalledTimes(3);
-      expect(mocks.credentials).not.toHaveBeenCalled();
-      expect(mocks.mint).not.toHaveBeenCalled();
-      expect(mocks.upstream).not.toHaveBeenCalled();
-      expect(mocks.publicFetch).toHaveBeenCalledTimes(2);
+      mocks.upstream.mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new Error('Body failed'));
+            },
+          }),
+          { headers: { 'content-type': contentType } },
+        ),
+      );
+      const response = await call('get_file_contents', publicTarget);
+      expect(response.status).toBe(502);
+      expect((await response.json()).error.message).toContain('Body failed');
+      expect(mocks.upstream).toHaveBeenCalledOnce();
     },
   );
 
-  it('propagates configuration lookup failures without public downgrade', async () => {
-    mocks.tryCredentials.mockRejectedValue(
-      new Error('Deployment lookup failed'),
+  it('fails closed when public SSE ends without a matching response', async () => {
+    mocks.publicFetch.mockResolvedValueOnce(
+      Response.json({ private: false, full_name: publicFullName }),
     );
-    expect(
-      (
-        await call('issue_read', {
-          ...publicTarget,
-          method: 'get',
-          issue_number: 1,
-        })
-      ).status,
-    ).toBe(500);
+    mocks.upstream.mockResolvedValueOnce(
+      new Response('data: {"id":8,"result":{}}\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    const response = await call('get_file_contents', publicTarget);
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.message).toContain('No matching');
+    expect(mocks.upstream).toHaveBeenCalledOnce();
+  });
+
+  it('applies the public native deadline before response headers arrive', async () => {
+    mocks.publicFetch.mockResolvedValueOnce(
+      Response.json({ private: false, full_name: publicFullName }),
+    );
+    const abort = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValueOnce(new AbortController().signal)
+      .mockReturnValueOnce(abort.signal);
+    mocks.upstream.mockImplementationOnce(
+      (_url, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal!.addEventListener(
+            'abort',
+            () => reject(init.signal!.reason),
+            { once: true },
+          );
+          abort.abort(new DOMException('Timed out', 'TimeoutError'));
+        }),
+    );
+    try {
+      const response = await call('get_file_contents', publicTarget);
+      expect(response.status).toBe(502);
+      expect((await response.json()).error.message).toContain('Timed out');
+      expect(timeout.mock.calls).toEqual([[15_000], [15_000]]);
+      expect(mocks.upstream).toHaveBeenCalledOnce();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('keeps the 15-second metadata deadline active during body reads', async () => {
+    const abort = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValue(abort.signal);
+    mocks.publicFetch.mockImplementationOnce(
+      async (_url, init: RequestInit) =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              init.signal!.addEventListener('abort', () =>
+                controller.error(init.signal!.reason),
+              );
+            },
+            pull() {
+              abort.abort(new DOMException('Timed out', 'TimeoutError'));
+            },
+          }),
+        ),
+    );
+    try {
+      expect((await call('get_file_contents', publicTarget)).status).toBe(500);
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(15_000);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it.each(['', 'null', '[]', '{', '{"private":false,"full_name":42}'])(
+    'fails closed on empty or malformed metadata %j',
+    async (body) => {
+      mocks.publicFetch.mockResolvedValueOnce(new Response(body));
+      expect((await call('get_file_contents', publicTarget)).status).toBe(
+        body === '' || body === '{' ? 500 : 403,
+      );
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['network', 'timeout', 'invalid JSON'])(
+    'does not select a credential after a metadata %s failure',
+    async (failure) => {
+      if (failure === 'invalid JSON')
+        mocks.publicFetch.mockResolvedValueOnce(new Response('invalid JSON'));
+      else mocks.publicFetch.mockRejectedValueOnce(new Error(failure));
+      expect((await call('get_file_contents', publicTarget)).status).toBe(500);
+      expect(mocks.publicFetch).toHaveBeenCalledOnce();
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it('requires configured App credentials for public reads and discovery', async () => {
+    mocks.credentials.mockRejectedValue(
+      new Error('GitHub App credentials are not configured.'),
+    );
+    expect((await call('get_file_contents', publicTarget)).status).toBe(500);
     expect(
       (await post({ jsonrpc: '2.0', id: 7, method: 'tools/list' })).status,
     ).toBe(500);
@@ -2043,102 +1552,149 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it('preserves configuration lookup failures for writes and run-token reads', async () => {
-    mocks.credentials.mockRejectedValue(
-      new Error('GitHub App credentials are not configured.'),
-    );
-    const write = await call('add_issue_comment', {
-      owner,
-      repo: 'example',
-      issue_number: 1,
-      body: 'comment',
+  it('requires an eligible connected repository even for confirmed public targets', async () => {
+    mocks.credentials.mockResolvedValue({
+      appId: '999999',
+      privateKey: 'other-key',
     });
-    expect(write.status).toBe(500);
-    expect((await write.json()).error.message).toContain(
-      'GitHub App credentials are not configured.',
+    mocks.publicFetch.mockResolvedValueOnce(
+      Response.json({ private: false, full_name: publicFullName }),
     );
-    expect(mocks.tryCredentials).not.toHaveBeenCalled();
-    mocks.tryCredentials.mockRejectedValue(
-      new Error('Deployment lookup failed'),
-    );
-    const run = await runFactory.create({ actingUserId: actor.id });
+    expect((await call('get_file_contents', publicTarget)).status).toBe(404);
+    expect(
+      (await post({ jsonrpc: '2.0', id: 7, method: 'tools/list' })).status,
+    ).toBe(404);
+    expect(mocks.publicFetch).toHaveBeenCalledOnce();
+    expect(mocks.mint).not.toHaveBeenCalled();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it('propagates repository lookup errors without attempting public access', async () => {
+    const select = vi
+      .spyOn(Object.getPrototypeOf(db.select().from(repositories)), 'limit')
+      .mockImplementationOnce(() => {
+        throw new Error('lookup failed');
+      });
     try {
+      expect((await call('get_file_contents', publicTarget)).status).toBe(500);
+      expect(mocks.publicFetch).not.toHaveBeenCalled();
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    } finally {
+      select.mockRestore();
+    }
+  });
+
+  it('does not retry token mint failures through a different credential', async () => {
+    mocks.publicFetch.mockResolvedValueOnce(
+      Response.json({ private: false, full_name: publicFullName }),
+    );
+    mocks.mint.mockRejectedValueOnce(new Error('installation token denied'));
+    expect((await call('get_file_contents', publicTarget)).status).toBe(500);
+    expect(mocks.publicFetch).toHaveBeenCalledOnce();
+    expect(mocks.mint).toHaveBeenCalledOnce();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'never retries an upstream authorization denial (connected=%s)',
+    async (connected) => {
+      mocks.publicFetch.mockResolvedValueOnce(
+        Response.json({ private: false, full_name: publicFullName }),
+      );
+      mocks.upstream.mockResolvedValueOnce(
+        new Response('Denied', { status: 403 }),
+      );
+      expect(
+        (
+          await call(
+            'get_file_contents',
+            connected ? { owner, repo: 'example' } : publicTarget,
+          )
+        ).status,
+      ).toBe(403);
+      expect(mocks.publicFetch).toHaveBeenCalledTimes(connected ? 0 : 1);
+      expect(mocks.mint).toHaveBeenCalledOnce();
+      expect(mocks.upstream).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('preserves connected private reads without checking public visibility', async () => {
+    await db
+      .update(repositories)
+      .set({ private: true })
+      .where(eq(repositories.id, repository.id));
+    expect(
+      (await call('get_file_contents', { owner, repo: 'example' })).status,
+    ).toBe(200);
+    expect(mocks.publicFetch).not.toHaveBeenCalled();
+    expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+      {
+        type: 'installationId',
+        installationId: installation.id,
+        repositoryIds: [repository.githubRepoId],
+      },
+      appCredentials,
+    );
+  });
+
+  it.each(writeCases)(
+    'never permits public-only %s writes or checks public visibility',
+    async (name, arguments_) => {
+      expect(
+        (await call(name, { ...arguments_, ...publicTarget })).status,
+      ).toBe(403);
+      expect(mocks.publicFetch).not.toHaveBeenCalled();
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([true, false])(
+    'keeps public native search read-only for persisted runs (human=%s)',
+    async (human) => {
+      const run = await runFactory.create({
+        actingUserId: human ? actor.id : null,
+      });
       const target = app({
         tokenType: 'run',
         version: 1,
         runId: run.id,
-        userId: actor.id,
-        principal: 'user',
+        userId: human ? actor.id : null,
+        principal: human ? 'user' : 'deployment',
       });
-      const response = await call(
-        'get_file_contents',
-        { owner, repo: 'example' },
-        target,
+      const arguments_ = { query: `Hello repo:${publicFullName}`, perPage: 5 };
+      mocks.publicFetch.mockResolvedValueOnce(
+        Response.json({ private: false, full_name: publicFullName }),
       );
-      expect(response.status).toBe(500);
-      expect((await response.json()).error.message).toContain(
-        'Deployment lookup failed',
-      );
-      expect(mocks.tryCredentials).toHaveBeenCalledTimes(1);
-      expect(mocks.publicFetch).not.toHaveBeenCalled();
-      expect(mocks.mint).not.toHaveBeenCalled();
-    } finally {
-      await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
-      await db.delete(tasks).where(eq(tasks.id, run.taskId));
-    }
-  });
-
-  it.each([403, 429])(
-    'explains anonymous HTTP %s rate limits and safe retry/reset headers without retrying',
-    async (status) => {
-      mocks.publicFetch
-        .mockResolvedValueOnce(publicMetadata())
-        .mockResolvedValueOnce(
-          new Response('private upstream body', {
-            status,
-            headers: {
-              'x-ratelimit-remaining': '0',
-              'retry-after': '60',
-              'x-ratelimit-reset': '2000000000',
-            },
-          }),
+      try {
+        expect((await call('search_code', arguments_, target)).status).toBe(
+          200,
         );
-      const response = await call('issue_read', {
-        ...publicTarget,
-        method: 'get',
-        issue_number: 1,
-      });
-      expect(response.status).toBe(status);
-      const message = (await response.json()).error.message;
-      expect(message).toContain('GitHub rate limit reached');
-      expect(message).toContain('outbound IP limit (normally 60 requests/hour');
-      expect(message).toContain('Retry after 60 seconds');
-      expect(message).toContain('2033-05-18T03:33:20.000Z');
-      expect(message).not.toContain('private upstream body');
-      expect(mocks.publicFetch).toHaveBeenCalledTimes(2);
-      expect(mocks.mint).not.toHaveBeenCalled();
+        const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+        expect(JSON.parse(init.body as string).params.arguments).toEqual(
+          arguments_,
+        );
+        expect(new Headers(init.headers).get('X-MCP-Readonly')).toBe('true');
+        expect(
+          (
+            await call(
+              'add_issue_comment',
+              { ...publicTarget, issue_number: 1, body: 'No write' },
+              target,
+            )
+          ).status,
+        ).toBe(403);
+        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+        expect((await call('search_code', arguments_, target)).status).toBe(
+          404,
+        );
+        expect(mocks.publicFetch).toHaveBeenCalledOnce();
+        expect(mocks.mint).toHaveBeenCalledOnce();
+      } finally {
+        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+        await db.delete(tasks).where(eq(tasks.id, run.taskId));
+      }
     },
   );
-
-  it('does not echo unsafe rate-limit headers or misclassify an ordinary 403', async () => {
-    mocks.publicFetch.mockResolvedValueOnce(
-      new Response(null, {
-        status: 403,
-        headers: {
-          'retry-after': 'secret-value',
-          'x-ratelimit-reset': '999999999999999999999',
-        },
-      }),
-    );
-    const response = await call('issue_read', {
-      ...publicTarget,
-      method: 'get',
-      issue_number: 1,
-    });
-    const message = (await response.json()).error.message;
-    expect(message).toContain('may be denying access or applying a rate limit');
-    expect(message).not.toContain('secret-value');
-    expect(message).not.toContain('999999999999999999999');
-    expect(mocks.publicFetch).toHaveBeenCalledTimes(1);
-  });
 });

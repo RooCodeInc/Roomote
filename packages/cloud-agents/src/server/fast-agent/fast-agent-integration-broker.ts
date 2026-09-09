@@ -11,6 +11,7 @@ import {
   db,
   deploymentSecrets,
   eq,
+  githubInstallations,
   isNull,
   repositories,
   users,
@@ -405,17 +406,26 @@ export async function listFastAgentIntegrations(
   const configuredServersPromise: Promise<
     Record<string, FastAgentMcpServerConfig>
   > = resolveMcpServerConfigs?.() ?? Promise.resolve({});
-  const githubEnabled = isRouterMcpServerEnabled('github');
-  const [configuredServers, gitlabConnection, bitbucketAvailable] =
-    await Promise.all([
-      configuredServersPromise,
-      hasGitLabDiscoveryConnection().catch(() => false),
-      isBitbucketAvailable(context.userId),
-    ]);
+  const [
+    configuredServers,
+    githubInstallation,
+    gitlabConnection,
+    bitbucketAvailable,
+  ] = await Promise.all([
+    configuredServersPromise,
+    isRouterMcpServerEnabled('github')
+      ? db.query.githubInstallations.findFirst({
+          where: isNull(githubInstallations.suspendedAt),
+          columns: { id: true },
+        })
+      : Promise.resolve(undefined),
+    hasGitLabDiscoveryConnection().catch(() => false),
+    isBitbucketAvailable(context.userId),
+  ]);
 
   if (
     Object.keys(configuredServers).length === 0 &&
-    !githubEnabled &&
+    !githubInstallation &&
     !gitlabConnection &&
     !bitbucketAvailable
   ) {
@@ -437,12 +447,12 @@ export async function listFastAgentIntegrations(
     disabledTools: new Set(config.disabledTools ?? []),
   }));
 
-  if (githubEnabled && !configuredServers.github) {
+  if (githubInstallation && !configuredServers.github) {
     candidates.push({
       id: 'github',
       name: 'GitHub',
       description:
-        'Read bounded public github.com files, directories, issues, and pull requests without a GitHub connection. Broader reads use the deployment GitHub App. In active connected repositories, use native update_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, and comment reactions. Follow the discovered native tool descriptions and schemas for supported arguments.',
+        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use native update_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, and comment reactions. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
