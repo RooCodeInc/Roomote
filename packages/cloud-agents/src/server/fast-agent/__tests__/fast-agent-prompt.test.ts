@@ -820,8 +820,12 @@ describe('buildFastAgentSystemPrompt', () => {
         'Repository code exploration does not inherently require a coding task or local clone',
       );
       expect(prompt).toContain(
-        'files, directories, code search, commits, and pull/merge request diffs when supported, including GitHub, GitLab, and Bitbucket',
+        'Discover the available source-control integrations and their actual tools for files, directories, code search, commits, and pull/merge request diffs when supported',
       );
+      const explorationGuidance = prompt
+        .split('- Repository code exploration')[1]!
+        .split('- For requested GitHub updates')[0]!;
+      expect(explorationGuidance).not.toMatch(/GitHub|GitLab|Bitbucket/);
       expect(prompt).toContain(
         'Use only the methods and arguments exposed by the discovered schemas',
       );
