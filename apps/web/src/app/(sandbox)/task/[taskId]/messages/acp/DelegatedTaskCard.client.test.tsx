@@ -63,7 +63,7 @@ describe('DelegatedTaskCard', () => {
       document.querySelector('[data-task-robot-icon]'),
     ).toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole('button', { name: 'View coding agent: Fix checkout' }),
+      screen.getByRole('button', { name: 'View coding task: Fix checkout' }),
     );
     expect(onOpen).toHaveBeenCalledWith('child-1');
 
@@ -110,11 +110,11 @@ describe('DelegatedTaskCard', () => {
     expect(screen.getByText('Code review agent')).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: 'View code review agent: Check the latest changes',
+        name: 'View code review task: Check the latest changes',
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Stop code review agent' }),
+      screen.getByRole('button', { name: 'Stop code review task' }),
     ).toBeEnabled();
   });
 
@@ -180,7 +180,7 @@ describe('DelegatedTaskCard', () => {
 
     expect(screen.getByLabelText('Error')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Stop coding agent' }),
+      screen.queryByRole('button', { name: 'Stop coding task' }),
     ).not.toBeInTheDocument();
   });
 
@@ -192,7 +192,7 @@ describe('DelegatedTaskCard', () => {
         <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={onOpen} />
       </div>,
     );
-    const stop = screen.getByRole('button', { name: 'Stop coding agent' });
+    const stop = screen.getByRole('button', { name: 'Stop coding task' });
     expect(stop.parentElement?.closest('button')).toBeNull();
     fireEvent.click(stop);
     expect(mutateMock).toHaveBeenCalledWith({ taskId: 'child-1', runId: 42 });
@@ -222,7 +222,7 @@ describe('DelegatedTaskCard', () => {
     render(
       <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={onOpen} />,
     );
-    const stop = screen.getByRole('button', { name: 'Stop coding agent' });
+    const stop = screen.getByRole('button', { name: 'Stop coding task' });
     expect(stop).toBeDisabled();
     expect(stop).toHaveAttribute('aria-busy', 'true');
     fireEvent.click(stop);
@@ -239,7 +239,7 @@ describe('DelegatedTaskCard', () => {
     render(
       <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Stop coding agent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop coding task' }));
     expect(refetchMock).toHaveBeenCalledOnce();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -258,9 +258,7 @@ describe('DelegatedTaskCard', () => {
       render(
         <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={onOpen} />,
       );
-      fireEvent.click(
-        screen.getByRole('button', { name: 'Stop coding agent' }),
-      );
+      fireEvent.click(screen.getByRole('button', { name: 'Stop coding task' }));
       expect(screen.getByRole('alert')).toHaveTextContent('Cannot stop task');
       expect(refetchMock).not.toHaveBeenCalled();
       expect(onOpen).not.toHaveBeenCalled();
@@ -275,7 +273,7 @@ describe('DelegatedTaskCard', () => {
         <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
       );
       expect(
-        screen.getByRole('button', { name: 'Stop coding agent' }),
+        screen.getByRole('button', { name: 'Stop coding task' }),
       ).toBeEnabled();
     },
   );
@@ -290,7 +288,7 @@ describe('DelegatedTaskCard', () => {
         <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
       );
       expect(
-        screen.queryByRole('button', { name: 'Stop coding agent' }),
+        screen.queryByRole('button', { name: 'Stop coding task' }),
       ).not.toBeInTheDocument();
     },
   );

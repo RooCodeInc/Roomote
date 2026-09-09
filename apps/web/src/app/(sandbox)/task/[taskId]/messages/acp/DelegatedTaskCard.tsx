@@ -46,9 +46,11 @@ export function DelegatedTaskCard({
     ),
   );
   const title = data?.task?.title?.trim() || prompt || 'Delegated task';
-  const taskLabel =
-    data?.task?.workflow === 'pr_review' ? 'Code review agent' : 'Coding agent';
-  const agentDescription = taskLabel.toLowerCase();
+  const isCodeReviewTask = data?.task?.workflow === 'pr_review';
+  const taskLabel = isCodeReviewTask ? 'Code review agent' : 'Coding agent';
+  const agentDescription = isCodeReviewTask
+    ? 'code review task'
+    : 'coding task';
   const cancel = useCancelTaskRun({
     onSuccess: (result) => {
       if (result.success) {
