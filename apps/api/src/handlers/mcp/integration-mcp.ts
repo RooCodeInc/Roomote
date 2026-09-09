@@ -22,6 +22,7 @@ import {
   resolveActingUserId,
   resolveActingUserIdOrNull,
 } from './proxy-utils';
+import { railwayDeploymentLogsTool } from './railway';
 
 async function resolveUpstreamAccessToken(
   mcpId: string,
@@ -114,6 +115,8 @@ export function createIntegrationMcpProxy(
     upstream: upstreamUrl,
     allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: options?.allowedToolNames,
+    localTools:
+      integration.id === 'railway' ? [railwayDeploymentLogsTool] : undefined,
     // Resend's z.email() tool schemas include regex lookarounds that Azure
     // OpenAI rejects. The upstream Resend server still validates tool calls.
     stripToolSchemaPatterns: integration.id === 'resend',
