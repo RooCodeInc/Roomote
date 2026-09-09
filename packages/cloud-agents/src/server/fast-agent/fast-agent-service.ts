@@ -1669,6 +1669,7 @@ export async function answerFastAgentQuestion({
     ? { externalInput: humanInput.externalInput }
     : platformEventTranscriptPayload;
   const turnVisibleMessages: ModelMessage[] = [];
+  let steerCompatibilityMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
   let durableOpenCodeSessionId: string | null = null;
@@ -1678,21 +1679,26 @@ export async function answerFastAgentQuestion({
   let currentInstructionVersion = 0;
   const assistantInstructionVersions = new Map<string, number>();
   const closedInstructionVersions = new Set<number>();
-  // Set once a native steer injects a follow-up its surface did not mark as
-  // ambient. Ending silently after that drops a request, so it is never
-  // settled as an ignore.
-  let steeredDirectedFollowUp = false;
+  const initiallySilentEligible =
+    Boolean(reactionInput) || Boolean(platformEvent) || allowSilentAmbientReply;
+  const directedInstructionVersions = new Set<number>(
+    initiallySilentEligible ? [] : [0],
+  );
   /**
    * Mirrors the `ignore_event` tool's rule: the turn may end without any
    * visible reply only when an explicit ignore would have been accepted for
-   * it, and no steered follow-up since then was directed at Roomote.
+   * it. Slack asides must not silently close an outstanding directed request.
    */
-  const silentCompletionAllowed = () =>
+  const silentCompletionAllowed = (instructionVersion: number) =>
     !(platformEvent && platformEventVisibility === 'required') &&
-    (Boolean(reactionInput) ||
-      Boolean(platformEvent) ||
-      allowSilentAmbientReply) &&
-    !steeredDirectedFollowUp;
+    (conversation.surface === 'slack'
+      ? !directedInstructionVersions.has(instructionVersion) &&
+        [...directedInstructionVersions].every(
+          (version) =>
+            version > instructionVersion ||
+            closedInstructionVersions.has(version),
+        )
+      : initiallySilentEligible && directedInstructionVersions.size === 0);
   const getInstructionVersion = (messageId?: string) =>
     (messageId ? assistantInstructionVersions.get(messageId) : undefined) ??
     currentInstructionVersion;
@@ -2261,8 +2267,14 @@ export async function answerFastAgentQuestion({
         });
         const { turnMessages } = buildFastAgentMessages({
           question: followUp.question,
-          threadContext: [],
-          compatibilityMessages: [],
+          threadContext: followUp.threadContext ?? [],
+          compatibilityMessages: [
+            ...steerCompatibilityMessages,
+            ...turnVisibleMessages,
+            ...batch.map(({ followUp }) =>
+              buildUserTextMessage(normalizeThreadText(followUp.question)),
+            ),
+          ],
           currentMessageTs: followUp.currentMessageId,
           currentMessageSender: {
             slackUserId: followUp.senderExternalId,
@@ -2384,6 +2396,11 @@ export async function answerFastAgentQuestion({
       const previousInstructionVersion = currentInstructionVersion;
       const steerInstructionVersion = previousInstructionVersion + 1;
       currentInstructionVersion = steerInstructionVersion;
+      // A mixed batch still owes a response. Register before native dispatch
+      // so a tool call racing the steer acknowledgement sees the obligation.
+      if (batch.some(({ followUp }) => followUp.directedAtRoomote !== false)) {
+        directedInstructionVersions.add(steerInstructionVersion);
+      }
       try {
         await nativeSteer({
           messageId: buildFastAgentNativeSteerMessageId(
@@ -2394,6 +2411,7 @@ export async function answerFastAgentQuestion({
           files: batchFiles,
         });
       } catch (error) {
+        directedInstructionVersions.delete(steerInstructionVersion);
         if (currentInstructionVersion === steerInstructionVersion) {
           currentInstructionVersion = previousInstructionVersion;
         }
@@ -2408,12 +2426,6 @@ export async function answerFastAgentQuestion({
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
       );
       for (const { row } of batch) injectedHumanFollowUpIds.add(row.id);
-      // Only a surface that classified the message as ambient may leave it
-      // unanswered; an unmarked follow-up (web, PR, older rows) counts as
-      // directed.
-      if (batch.some(({ followUp }) => followUp.directedAtRoomote !== false)) {
-        steeredDirectedFollowUp = true;
-      }
       injectedHumanFollowUpMessages.push(...batchMessages);
       injectedHumanFollowUpFiles.push(...batchFiles);
       // Native steering starts a new human instruction boundary inside the
@@ -3069,6 +3081,7 @@ export async function answerFastAgentQuestion({
         (title) => adapter.activity?.updateTitle?.(title),
       );
     }
+    steerCompatibilityMessages = session.compatibilityMessages;
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
       ...new Map(
@@ -3229,6 +3242,15 @@ export async function answerFastAgentQuestion({
         replyWithImages.purpose === 'clarification'
       ) {
         closedInstructionVersions.add(instructionVersion);
+        if (conversation.surface === 'slack') {
+          // A newer closeout answers the outstanding request even when an
+          // ambient steer arrived before that answer was ready.
+          for (const version of directedInstructionVersions) {
+            if (version < instructionVersion) {
+              closedInstructionVersions.add(version);
+            }
+          }
+        }
       }
       if (mirrorImmediately) {
         await mirrorPendingMessages(true);
@@ -4427,7 +4449,11 @@ export async function answerFastAgentQuestion({
                 error: 'This platform event requires a user-visible closeout.',
               };
             }
-            if (!reactionInput && !platformEvent && !allowSilentAmbientReply) {
+            if (
+              conversation.surface === 'slack'
+                ? !silentCompletionAllowed(instructionVersion)
+                : !reactionInput && !platformEvent && !allowSilentAmbientReply
+            ) {
               return {
                 success: false,
                 error:
@@ -5066,7 +5092,7 @@ export async function answerFastAgentQuestion({
         // steered URL after an ignored aside is the typical case. Otherwise a
         // request went unanswered, so say that plainly rather than narrate a
         // budget that never existed.
-        if (silentCompletionAllowed()) {
+        if (silentCompletionAllowed(terminalInstructionVersion)) {
           closedInstructionVersions.add(terminalInstructionVersion);
           diagnostics.recordSilentCompletion();
           console.info(

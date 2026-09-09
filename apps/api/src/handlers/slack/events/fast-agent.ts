@@ -200,13 +200,6 @@ export async function processFastAgentMessage(params: {
         ts: message.ts,
         bot_id: message.bot_id,
       }));
-    const hasOtherHumanParticipant = threadContext.some(
-      (message) =>
-        message.ts !== event.ts &&
-        !message.bot_id &&
-        Boolean(message.user) &&
-        message.user !== event.user,
-    );
 
     const needsCanonicalAdmission =
       !releaseFastAgentLock ||
@@ -219,12 +212,16 @@ export async function processFastAgentMessage(params: {
       currentMessageId: event.ts,
       userId,
       question,
+      threadContext: serializedThreadContext,
       ...(attachments.images.length ? { images: attachments.images } : {}),
       ...(currentMessage?.username
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
-      directedAtRoomote,
+      directedAtRoomote:
+        directedAtRoomote ||
+        event.channel_type === 'im' ||
+        event.channel_type === 'mpim',
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (needsCanonicalAdmission) {
@@ -299,7 +296,6 @@ export async function processFastAgentMessage(params: {
       allowSilentAmbientReply:
         event.channel_type !== 'im' &&
         event.channel_type !== 'mpim' &&
-        hasOtherHumanParticipant &&
         !directedAtRoomote,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {

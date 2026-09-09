@@ -231,6 +231,18 @@ export const fastAgentPlatformEventVisibilitySchema = z.enum([
   'required',
 ]);
 
+export const fastAgentThreadMessageSchema = z.object({
+  ts: z.string(),
+  user: z.string(),
+  username: z.string().optional(),
+  text: z.string(),
+  bot_id: z.string().optional(),
+});
+
+export type FastAgentThreadMessage = z.infer<
+  typeof fastAgentThreadMessageSchema
+>;
+
 export const fastAgentHumanFollowUpEventSchema = z.object({
   type: z.literal(FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE),
   eventId: z.string().min(1),
@@ -238,6 +250,8 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   userId: z.string().min(1),
   question: z.string().min(1),
   images: z.array(z.string()).optional(),
+  /** Fetched conversation history, rendered as supplemental context only. */
+  threadContext: z.array(fastAgentThreadMessageSchema).optional(),
   senderDisplayName: z.string().min(1).optional(),
   senderExternalId: z.string().min(1).optional(),
   /**

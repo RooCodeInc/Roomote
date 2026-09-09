@@ -185,6 +185,33 @@ describe('processFastAgentMessage', () => {
     expect(slack.normalizeIncomingText).not.toHaveBeenCalled();
   });
 
+  it('keeps a peer-directed message quiet-eligible even when history is unavailable', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U222',
+        text: '<@U111> what do you think?',
+        ts: '100.002',
+        thread_ts: '100.000',
+      } as never,
+      slack: slack as never,
+      userId: 'user-2',
+      teamId: 'T123',
+      isExistingConversation: true,
+    });
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ allowSilentAmbientReply: true }),
+    );
+    expect(slack.addReaction).not.toHaveBeenCalled();
+  });
+
   it('creates artifacts against the canonical Fast conversation', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
@@ -356,11 +383,16 @@ describe('processFastAgentMessage', () => {
     mocks.acquireLock.mockResolvedValue(null);
     mocks.hasSession.mockResolvedValue(true);
     mocks.admitHumanFollowUp.mockResolvedValue({ kind: 'steered', abort });
+    const discussion = {
+      user: 'U222',
+      text: '<@U123> Should we keep these consistent?',
+      ts: '100.002',
+    };
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
       normalizeIncomingText: vi.fn(async (text: string) => text),
-      fetchThreadMessages: vi.fn(async () => []),
+      fetchThreadMessages: vi.fn(async () => [discussion]),
     };
 
     await processFastAgentMessage({
@@ -385,6 +417,8 @@ describe('processFastAgentMessage', () => {
           type: 'human_follow_up',
           eventId: '100.003',
           question: 'Use the corrected requirement',
+          directedAtRoomote: false,
+          threadContext: [expect.objectContaining(discussion)],
         }),
       }),
     );
