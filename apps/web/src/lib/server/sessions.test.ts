@@ -38,6 +38,7 @@ vi.mock('@roomote/sdk/server', () => ({
 import {
   findAccessibleSession,
   findAccessibleSessionByFastConversationId,
+  findReadableSession,
   getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
@@ -210,21 +211,25 @@ describe('unified Session queries', () => {
     expect(
       (await getSessions(otherAuth, { ids: [session.id] })).sessions,
     ).toEqual([]);
-    await expect(getSessionById(otherAuth, session.id)).resolves.toBeNull();
+    await expect(getSessionById(otherAuth, session.id)).resolves.toMatchObject({
+      id: session.id,
+    });
     await db
       .delete(customAutomations)
       .where(eq(customAutomations.id, automation!.id));
     expect(
       (await getSessions(ownerAuth, { ids: [session.id] })).sessions,
     ).toEqual([]);
-    await expect(getSessionById(ownerAuth, session.id)).resolves.toBeNull();
+    await expect(getSessionById(ownerAuth, session.id)).resolves.toMatchObject({
+      id: session.id,
+    });
     await expect(
       getSessionById({ ...otherAuth, isAdmin: true }, session.id),
     ).resolves.toMatchObject({ id: session.id });
   });
 
   it.each(['task', 'fast'] as const)(
-    'gates custom automation %s lists, detail, timeline and results without participant bypass',
+    'shares custom automation %s reads but preserves list and action gates',
     async (provenance) => {
       const owner = await userFactory.create();
       const other = await userFactory.create();
@@ -296,12 +301,35 @@ describe('unified Session queries', () => {
       await expect(
         findAccessibleSessionByFastConversationId(denied, conversation!.id),
       ).resolves.toBeNull();
-      await expect(getSessionById(denied, session.id)).resolves.toBeNull();
+      for (const id of [session.id, conversation!.id]) {
+        await expect(findReadableSession(denied, id)).resolves.toMatchObject({
+          id: session.id,
+        });
+        await expect(getSessionById(denied, id)).resolves.toMatchObject({
+          id: session.id,
+        });
+        await expect(getSessionTimeline(denied, id)).resolves.toMatchObject({
+          events: expect.arrayContaining([
+            expect.objectContaining({ id: 'fast:private-report' }),
+            expect.objectContaining({ id: `task:${task.id}:delegated` }),
+          ]),
+        });
+      }
+      await expect(getSessionForTask(denied, task.id)).resolves.toMatchObject({
+        sessionId: session.id,
+      });
       await expect(
-        getSessionById(denied, conversation!.id),
+        setSessionPinned(denied, { sessionId: session.id, pinned: true }),
+      ).resolves.toMatchObject({ success: false });
+      await expect(
+        updateSessionMetadata(denied, session.id, {
+          title: 'Forbidden',
+          archivedAt: new Date(),
+        }),
       ).resolves.toBeNull();
-      await expect(getSessionTimeline(denied, session.id)).resolves.toBeNull();
-      await expect(getSessionForTask(denied, task.id)).resolves.toBeNull();
+      await expect(
+        getLatestExternalSessionEvent(denied, session.id),
+      ).resolves.toBeNull();
       for (const q of [undefined, 'confidential']) {
         expect(
           (await getSessions(denied, { ids: [session.id], q })).sessions,
@@ -327,6 +355,9 @@ describe('unified Session queries', () => {
       await expect(
         findAccessibleSession(ownerAuth, session.id),
       ).resolves.toBeNull();
+      await expect(getSessionById(denied, session.id)).resolves.toMatchObject({
+        id: session.id,
+      });
       await db
         .delete(customAutomations)
         .where(eq(customAutomations.id, automation!.id));
@@ -336,8 +367,27 @@ describe('unified Session queries', () => {
       await expect(
         findAccessibleSession(adminAuth, session.id),
       ).resolves.not.toBeNull();
+      await expect(getSessionById(denied, session.id)).resolves.toMatchObject({
+        id: session.id,
+      });
     },
   );
+
+  it('requires authenticated context and returns null for missing direct links', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    for (const [auth, id] of [
+      [{ userId: '', isAdmin: false }, session.id],
+      [{ userId: owner.id, isAdmin: false }, crypto.randomUUID()],
+    ] as const) {
+      await expect(findReadableSession(auth, id)).resolves.toBeNull();
+      await expect(getSessionById(auth, id)).resolves.toBeNull();
+      await expect(getSessionTimeline(auth, id)).resolves.toBeNull();
+    }
+  });
 
   beforeEach(() => {
     syncFastSlackTitle.mockReset();

@@ -13,6 +13,7 @@ import {
 import type { Variables } from '../../types';
 
 import { asanaMcp } from './asana';
+import { bitbucketMcp } from './bitbucket';
 import { communicationMcp } from './communication';
 import { environmentsRouter } from '../environments';
 import { customAutomationsRouter } from '../custom-automations';
@@ -31,8 +32,13 @@ import { notionMcp } from './notion';
 import { slackMcp } from './slack';
 import { snowflakeMcp } from './snowflake';
 import { vercelMcp } from './vercel';
+import { createHttpIntegrationsMcp } from './http-integrations';
 
 export const mcp = new Hono<{ Variables: Variables }>();
+
+if (Env.R_HTTP_INTEGRATIONS_ENABLED) {
+  mcp.route('/http-integrations', createHttpIntegrationsMcp());
+}
 
 const requireCuratedIntegrations: MiddlewareHandler<{
   Variables: Variables;
@@ -72,6 +78,9 @@ mcp.route('/custom/:serverId', createCustomMcpProxy());
 mcp.route('/gbrain', createGbrainMcpProxy({ allowAuthTokens: true }));
 
 mcp.route('/asana', asanaMcp);
+mcp.use('/bitbucket', requireCuratedIntegrations);
+mcp.use('/bitbucket/*', requireCuratedIntegrations);
+mcp.route('/bitbucket', bitbucketMcp);
 mcp.route('/granola', granolaMcp);
 mcp.route('/grafana', grafanaMcp);
 mcp.route('/linear', createLinearMcp({ allowAuthTokens: true }));

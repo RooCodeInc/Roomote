@@ -70,6 +70,48 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('keeps supported Bitbucket reads API-first without a checkout or task', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain('Bitbucket Cloud is API-first');
+    expect(prompt).toContain(
+      'discover the available Bitbucket tool schema with `find_integration_tools`',
+    );
+    expect(prompt).toContain('then use `call_integration_tool`');
+    expect(prompt).toContain(
+      'Do not clone a repository or use "launch_task" for these operations',
+    );
+    expect(prompt).toContain(
+      'Follow discovered schemas rather than guessing arguments',
+    );
+    expect(prompt).toContain(
+      'Use direct API tools when sufficient; delegate work that requires a local workspace, execution, code changes, or testing',
+    );
+  });
+
+  it('bounds Bitbucket search and distinguishes supported writes from unsupported actions', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain('Reads cap responses at 1 MiB');
+    expect(prompt).toContain('never claim a single page is exhaustive');
+    expect(prompt).toContain('Code search is deprecated November 1, 2026');
+    expect(prompt).toContain('not query operators or repository filters');
+    expect(prompt).toContain(
+      'without broadening the search or bypassing API permissions through a task',
+    );
+    const writes = prompt
+      .split('- Bitbucket writes require')[1]!
+      .split('\n')[0]!;
+    expect(writes).toContain(
+      'update PR titles/descriptions, decline PRs, or add comments and replies to a comment in the same PR',
+    );
+    expect(writes).toContain('Reading does not authorize writes');
+    expect(writes).toContain(
+      'Reopening/merging PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
+    );
+    expect(prompt).toContain(
+      'An actual code-review request still uses "review_pull_request"',
+    );
+  });
+
   it('supports explicit instance invocation and member creation without environments', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -622,6 +664,26 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('`call_integration_tool`');
   });
 
+  it('prefers discovered provider APIs without bypassing task and structured review delegation', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [],
+    });
+    expect(prompt).toContain(
+      'For bounded repository reads and requested supported writes, discover and use the available source-control provider API tools before launching workspace work',
+    );
+    expect(prompt).toContain('do not assume providers share capabilities');
+    expect(prompt).toContain('do not claim its API access is available');
+    expect(prompt).not.toContain('For GitLab API-only requests');
+    expect(prompt).toContain(
+      'Local checkout inspection, code edits, commands, and validation still require a delegated task',
+    );
+    expect(prompt).toContain(
+      'code reviews still use "review_pull_request" and its structured review pipeline',
+    );
+    expect(prompt).not.toContain('#### GitLab [id: gitlab]');
+  });
+
   it('includes shared memory guidance when a memory MCP is available', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -677,7 +739,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'regardless of whether the message is phrased as a question, request, or declarative feedback',
     );
     expect(prompt).toContain(
-      'A message that requires repository or workspace inspection, execution, change, or validation should be delegated',
+      'Use direct API tools when sufficient; delegate work that requires a local workspace, execution, code changes, or testing',
     );
     expect(prompt).not.toContain(
       'A question that requires repository or workspace inspection',
@@ -752,6 +814,88 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it.each(['human', 'automation', 'scheduled_wakeup'] as const)(
+    'keeps bounded source reads API-first on %s turns',
+    (turn) => {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        ...(turn === 'human'
+          ? {}
+          : { turnSource: 'platform_event' as const, platformEventKind: turn }),
+      });
+
+      for (const tool of [
+        'get_file_contents',
+        'search_code',
+        'list_branches',
+        'get_commit',
+        'list_commits',
+        'get_pull_request',
+        'pull_request_read',
+        'list_pull_requests',
+        'search_pull_requests',
+        'issue_read',
+        'get_issue',
+        'actions_get',
+        'actions_list',
+        'get_job_logs',
+      ]) {
+        expect(prompt).toContain(`\`${tool}\``);
+      }
+      expect(prompt).toContain(
+        'Use only the methods and arguments exposed by the discovered schemas',
+      );
+      expect(prompt).toContain('Scope searches to the target repository');
+      expect(prompt).toContain('bound pagination to the question');
+      expect(prompt).toContain(
+        'These API reads do not require a clone, workspace provisioning, or task delegation',
+      );
+      expect(prompt).toContain(
+        'Distinguish API evidence, including reported CI results, from execution or testing you performed yourself',
+      );
+      expect(prompt).toContain(
+        'when local checkout, local edits, execution, or testing is required',
+      );
+      expect(prompt).toContain('available API tools do not suffice');
+      expect(prompt).toContain('including documents grounded in API reads');
+      for (const obsoleteRule of [
+        'read_repository',
+        'rename_pull_request',
+        'close_pull_request',
+        'legacy installation-wide GitHub proxy',
+        'when inspection, editing, execution, or validation is required',
+        'when external inspection, editing, execution, or validation is required',
+        'requires repository or workspace inspection, execution, change, or validation',
+        'when creating the output requires repository or filesystem work',
+        'delegate a task when repository or workspace work is needed',
+      ]) {
+        expect(prompt).not.toContain(obsoleteRule);
+      }
+    },
+  );
+
+  it('keeps bounded GitHub updates in Fast without bypassing denied writes', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    expect(prompt).toContain(
+      'these bounded actions do not require a coding task',
+    );
+    expect(prompt).toContain(
+      'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
+    );
+    expect(prompt).toContain(
+      "A permission denial is not a reason to bypass the integration's authorization",
+    );
+    for (const guidance of [
+      '`update_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
+      'Follow their discovered descriptions, schemas, and arguments',
+      'Read the target first, send only the requested fields',
+      'report success only after the tool confirms it',
+      'inspect the resulting state before retrying an error',
+    ]) {
+      expect(prompt).toContain(guidance);
+    }
+  });
+
   it('treats replies as continuations of the existing conversation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
@@ -801,7 +945,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not launch a task or call an integration merely to re-check user-supplied facts unless the user asks for verification',
     );
     expect(prompt).toContain(
-      'If the message actually requires repository or workspace inspection, execution, change, or validation, delegate it',
+      'Use the direct API path below when it suffices; otherwise delegate workspace work',
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),

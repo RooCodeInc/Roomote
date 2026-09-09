@@ -176,7 +176,6 @@ type SnowflakeFormState = {
 
 type SnowflakeConnectionData = {
   authStatus?: 'pending' | 'authenticated' | 'error' | null;
-  authMethod?: 'key_pair' | 'password';
   account: string;
   username: string;
   role: string;
@@ -777,6 +776,7 @@ function SnowflakeConnectionFields({
             </Label>
             <Input
               id="snowflake-private-key-passphrase"
+              type="password"
               value={form.privateKeyPassphrase}
               onChange={(event) =>
                 onFieldChange('privateKeyPassphrase', event.target.value)
@@ -1617,8 +1617,6 @@ export function Integrations() {
   const xConnection = useXConnection(
     isAdmin && (isXConnected || isXDialogOpen),
   );
-  const allowsBlankSnowflakePrivateKey =
-    snowflakeConnection.data?.authMethod === 'key_pair';
 
   useEffect(() => {
     if (!isAsanaDialogOpen) {
@@ -2788,10 +2786,8 @@ export function Integrations() {
     event.preventDefault();
 
     const parsed = saveSnowflakeConnectionSchema.safeParse({
-      authMethod: 'key_pair',
       account: snowflakeForm.account,
       username: snowflakeForm.username,
-      password: '',
       privateKey: snowflakeForm.privateKey,
       privateKeyPassphrase: snowflakeForm.privateKeyPassphrase,
       role: snowflakeForm.role,
@@ -2801,10 +2797,7 @@ export function Integrations() {
       return;
     }
 
-    if (
-      !allowsBlankSnowflakePrivateKey &&
-      parsed.data.privateKey.trim().length === 0
-    ) {
+    if (!isSnowflakeConnected && parsed.data.privateKey.trim().length === 0) {
       setSnowflakeFieldErrors({
         privateKey: ['Private key is required'],
       });
@@ -3088,7 +3081,7 @@ export function Integrations() {
           form={snowflakeForm}
           fieldErrors={snowflakeFieldErrors}
           formError={snowflakeFormError}
-          allowBlankPrivateKey={allowsBlankSnowflakePrivateKey}
+          allowBlankPrivateKey={isSnowflakeConnected}
           onFieldChange={handleSnowflakeFieldChange}
         />
       </AdminConfiguredIntegrationDialog>

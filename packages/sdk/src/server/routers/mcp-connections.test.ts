@@ -4,6 +4,7 @@ const mockEnv = vi.hoisted(() => ({
   R_CURATED_INTEGRATIONS_DISABLED: false,
   R_CUSTOM_MCP_DISABLED: false,
   R_GBRAIN_URL: undefined as string | undefined,
+  R_HTTP_INTEGRATIONS_ENABLED: false,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -233,6 +234,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     vi.clearAllMocks();
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
     mockEnv.R_GBRAIN_URL = undefined;
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
     mockIsBrainEnabled.mockResolvedValue(false);
     mockFindTaskRun.mockResolvedValue({
       actingUserId: null,
@@ -250,6 +252,35 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     expect(result).toEqual({ servers: {} });
     expect(mockSelect).not.toHaveBeenCalled();
     expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('adds only the API infrastructure endpoint and removes it on the next actor resolution', async () => {
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
+    const caller = createJobCaller('https://api.example.com/trpc');
+    expect(await caller.getMcpServerConfigs()).toEqual({ servers: {} });
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = true;
+    const expected = {
+      _roomote_http_integrations: {
+        url: 'https://api.example.com/api/mcp/http-integrations',
+        headers: {},
+      },
+    };
+    expect(await caller.getMcpServerConfigs()).toEqual({ servers: expected });
+    expect(
+      await resolveUserMcpServerConfigs({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).toEqual(expected);
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
+    expect(await caller.getMcpServerConfigs()).toEqual({ servers: {} });
+    expect(
+      await resolveUserMcpServerConfigs({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).toEqual({});
   });
 
   it('includes the member-capable Roomote MCP for Fast user sessions', async () => {
@@ -449,7 +480,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
           username: 'roomote',
           role: 'ANALYST',
           warehouse: 'ROOMOTE_WH',
-          encryptedPassword: 'enc:secret',
+          encryptedPrivateKey: 'enc:private-key',
         },
       }),
     ]);
@@ -832,7 +863,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
           account: 'xy12345.us-east-1',
           username: 'roomote',
           role: 'ANALYST',
-          encryptedPassword: 'enc:secret',
+          encryptedPrivateKey: 'enc:private-key',
         },
       }),
     ]);
@@ -1010,6 +1041,7 @@ describe('custom MCP server delivery', () => {
     mockFindConnectionFirst.mockResolvedValue(undefined);
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
     mockEnv.R_CUSTOM_MCP_DISABLED = false;
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
   });
 
   const remoteRow = {
@@ -1020,6 +1052,43 @@ describe('custom MCP server delivery', () => {
     stdio: null,
     enabled: true,
   };
+
+  it.each([false, true])(
+    'preserves persisted http-integrations custom delivery with broker enabled=%s',
+    async (enabled) => {
+      mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
+      mockEnv.R_HTTP_INTEGRATIONS_ENABLED = enabled;
+      mockFindCustomServers.mockResolvedValue([
+        { ...remoteRow, name: 'http-integrations' },
+      ]);
+      const expected = {
+        'http-integrations': {
+          url: 'https://api.example.com/api/mcp/custom/server-uuid-1',
+          headers: { 'X-MCP-Client': 'Roomote' },
+        },
+        ...(enabled
+          ? {
+              _roomote_http_integrations: {
+                url: 'https://api.example.com/api/mcp/http-integrations',
+                headers: {},
+              },
+            }
+          : {}),
+      };
+
+      expect(
+        await createJobCaller(
+          'https://api.example.com/trpc',
+        ).getMcpServerConfigs(),
+      ).toEqual({ servers: expected });
+      expect(
+        await resolveUserMcpServerConfigs({
+          userId: 'user-1',
+          apiBaseUrl: 'https://api.example.com',
+        }),
+      ).toEqual(expected);
+    },
+  );
 
   it('delivers custom proxy entries even when curated integrations are disabled', async () => {
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;

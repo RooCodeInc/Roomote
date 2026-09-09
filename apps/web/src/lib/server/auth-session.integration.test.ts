@@ -70,6 +70,7 @@ describe('browser session renewal with real Better Auth, Next cookies and Postgr
         outgoing.splice(0, outgoing.length, ...cookies);
       },
       undefined,
+      undefined,
     );
     store.phase = phase;
     const result = await workAsyncStorage.run(

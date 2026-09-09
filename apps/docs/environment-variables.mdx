@@ -142,6 +142,21 @@ as per-task auth tokens or workspace paths.
 | `WEB_DEV_LOGIN_ENABLED` | Local only           | Explicit opt-in (`true` or `1`) for the `/auth/dev-login` development login route. Dev login stays disabled without it, even in development app envs. `pnpm dev` sets it automatically for local development.                                                                                                                                                                                                                           |
 | `SKIP_ENV_VALIDATION`   | Avoid                | Skips env validation when present. Useful for narrow tooling cases, not normal deployments.                                                                                                                                                                                                                                                                                                                                             |
 
+### HTTP integrations
+
+These opt-in settings configure [HTTP integrations](/integrations/http-integrations)
+for Fast and sandbox agents. They are independent of the curated integration
+catalog's enablement policy.
+
+| Env var | Required | Used for |
+| --- | --- | --- |
+| `R_HTTP_INTEGRATIONS_ENABLED` | Optional | Enables shared HTTP-integration discovery and the API endpoint. Defaults to `false`. Set consistently on API, web, and background control-plane services. |
+| `R_HTTP_INTEGRATIONS_CONFIG_PATH` | When enabled, API only | Absolute path to the read-only JSON manifest of HTTPS origins, method/path rules, actor access, and credential environment-variable references. |
+
+Referenced credential variables belong only on the API server, never in task
+environment configuration. Restart services after deployment environment or
+manifest changes.
+
 ### Database, Redis, and artifacts
 
 | Env var                 | Required    | Used for                                                                                                                                       |

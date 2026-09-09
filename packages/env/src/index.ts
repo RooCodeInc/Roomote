@@ -136,6 +136,8 @@ const serverSchema = {
   // independent of R_CURATED_INTEGRATIONS_DISABLED: operators who disable the
   // curated catalog are the primary custom-server audience.
   R_CUSTOM_MCP_DISABLED: optInBoolean(),
+  // Opt-in deployment credential mediation; transport configuration is API-only.
+  R_HTTP_INTEGRATIONS_ENABLED: optInBoolean(),
   // Comma-separated CIDR ranges the custom-MCP egress guard may connect to in
   // addition to public addresses. Self-host escape hatch for MCP servers on
   // private networks; a CIDR list rather than a boolean so opening one

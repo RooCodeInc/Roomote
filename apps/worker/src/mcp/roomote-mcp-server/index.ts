@@ -947,7 +947,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Required for dismiss_pull_request_review: the review id from list_pull_request_comments.',
+          'Required for dismiss_pull_request_review. Optional for submit_pull_request_review on GitHub: a positive numeric review id explicitly selects an existing pending review to publish, including its draft comments. Omit to create a new review; existing drafts are never selected automatically. Other providers do not support submission by reviewId.',
         ),
       resolved: z
         .boolean()

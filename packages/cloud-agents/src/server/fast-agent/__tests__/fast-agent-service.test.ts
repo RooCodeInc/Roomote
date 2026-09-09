@@ -8972,6 +8972,128 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('does not reserve invalid arguments or missing targets and caches only accepted matching messages', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+      { taskId: 'task-2', title: 'Other', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'On it.',
+        });
+        expect(
+          await invokeTool(nativeToolNames.sendTaskMessage, {
+            taskId: 'task-1',
+            message: '',
+          }),
+        ).toMatchObject({ success: false, delivery: 'not_accepted' });
+        expect(
+          await invokeTool(nativeToolNames.sendTaskMessage, {
+            message: 'Run tests',
+          }),
+        ).toMatchObject({ success: false });
+        const args = { taskId: 'task-1', message: 'Run tests' };
+        const first = await invokeTool(nativeToolNames.sendTaskMessage, args);
+        expect(await invokeTool(nativeToolNames.sendTaskMessage, args)).toEqual(
+          first,
+        );
+        await invokeTool(nativeToolNames.sendTaskMessage, {
+          ...args,
+          message: 'Review results',
+        });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    expect(mocks.sendTaskMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['success', 'failure', 'lost', 'rejected'] as const)(
+    'restores send reservations from a replayed %s',
+    async (outcome) => {
+      mocks.getActiveTasks.mockResolvedValue([
+        { taskId: 'task-1', title: 'Checkout', status: 'running' },
+      ]);
+      mocks.loadTurnAttempt.mockResolvedValueOnce({
+        events: [
+          {
+            kind: 'action',
+            tool: 'send_task_message',
+            arguments: { message: 'Run tests' },
+            status:
+              outcome === 'lost'
+                ? 'unknown'
+                : outcome === 'failure'
+                  ? 'failed'
+                  : 'completed',
+            result:
+              outcome === 'lost'
+                ? undefined
+                : JSON.stringify({
+                    success: outcome === 'success',
+                    ...(outcome === 'rejected'
+                      ? { delivery: 'not_accepted' }
+                      : {}),
+                  }),
+          },
+        ],
+        next: {
+          assistantOrdinal: 0,
+          toolOrdinal: 1,
+          retryNoticeOrdinal: 0,
+          turnSeq: 2,
+        },
+        prompt: { ts: 1_700_000_000_000, turnSeq: 0 },
+      });
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'On it.',
+          });
+          const result = await invokeTool(nativeToolNames.sendTaskMessage, {
+            message: 'Run tests',
+          });
+          expect(result).toMatchObject(
+            outcome === 'success' || outcome === 'rejected'
+              ? { success: true }
+              : { success: false, delivery: 'unknown' },
+          );
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks(),
+        durableAdmission: { eventId: 'durable-row-1' },
+        resumedAfterInterruption: true,
+      });
+      expect(mocks.sendTaskMessage).toHaveBeenCalledTimes(
+        outcome === 'rejected' ? 1 : 0,
+      );
+    },
+  );
+
+  it('does not execute tools when a resumed turn cannot load its delivery history', async () => {
+    mocks.loadTurnAttempt.mockRejectedValueOnce(
+      new Error('history unavailable'),
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+      durableAdmission: { eventId: 'durable-row-1' },
+      resumedAfterInterruption: true,
+    });
+
+    expect(mocks.generateText).not.toHaveBeenCalled();
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+  });
+
   it('does not forward current-turn attachments without opt-in', async () => {
     mocks.getActiveTasks.mockResolvedValue([
       { taskId: 'task-1', title: 'Checkout', status: 'running' },
