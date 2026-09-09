@@ -478,6 +478,26 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       ).toEqual(request);
     },
   );
+  it('preserves discovery prose preferences through the native bridge', async () => {
+    const inputTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    )!;
+    const request = {
+      preset: 'setup_integrations',
+      setupIntegrationAnswers: { communication: { answers: ['Slack'] } },
+    };
+    const parsed = zod.z
+      .object(inputTool.args as Record<string, never>)
+      .parse(request);
+    const execute = inputTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    expect(await execute(parsed, {})).toEqual({
+      name: 'request_user_input',
+      args: request,
+    });
+  });
 
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {
     const { z } = zod;

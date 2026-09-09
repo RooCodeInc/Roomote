@@ -174,12 +174,12 @@ export type FastAgentInputRequest = {
     question: string;
     isOther: boolean;
     isSecret: boolean;
-    options?: Array<{ label: string; description: string }>;
+    options?: Array<{ id?: string; label: string; description: string }>;
     multiple?: boolean;
   }>;
 };
 
-export type FastAgentInputPreset = 'setup_starter_tasks';
+export type FastAgentInputPreset = 'setup_starter_tasks' | 'setup_integrations';
 
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
@@ -210,6 +210,7 @@ export type FastAgentTurnAdapter = {
   /** Resolve a trusted preset without accepting model-supplied options. */
   resolveUserInputPreset?: (
     preset: FastAgentInputPreset,
+    setupIntegrationAnswers?: Record<string, { answers: string[] }>,
   ) => Promise<FastAgentInputRequest['questions']>;
   /**
    * Called when an interrupted turn is still safe to replay and has handed

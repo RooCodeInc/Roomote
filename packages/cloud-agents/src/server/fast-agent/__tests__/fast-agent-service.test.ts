@@ -1100,6 +1100,109 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it.each([undefined, { documents: { answers: ['Notion'] } }])(
+    'resolves integration discovery with optional prose preferences: %j',
+    async (setupIntegrationAnswers) => {
+      const questions = [
+        {
+          id: 'setup-integrations',
+          header: 'Connections',
+          question: 'Which tools would you like to connect?',
+          isOther: false,
+          isSecret: false,
+          options: [
+            { id: 'notion', label: 'Notion', description: 'Documents' },
+          ],
+        },
+      ];
+      const requestUserInput = vi.fn();
+      const resolveUserInputPreset = vi.fn(async () => questions);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.requestUserInput, {
+            preset: 'setup_integrations',
+            ...(setupIntegrationAnswers !== undefined
+              ? { setupIntegrationAnswers }
+              : {}),
+            questions: [
+              { id: 'ignored', header: 'Ignored', question: 'Ignored' },
+            ],
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'deployment-1',
+          conversationId: 'setup-session-1',
+        },
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+        setupSession: true,
+        adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+      });
+      expect(resolveUserInputPreset.mock.calls).toEqual([
+        setupIntegrationAnswers === undefined
+          ? ['setup_integrations']
+          : ['setup_integrations', setupIntegrationAnswers],
+      ]);
+      expect(requestUserInput).toHaveBeenCalledWith({
+        requestId: expect.any(String),
+        preset: 'setup_integrations',
+        questions,
+      });
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            payload: expect.objectContaining({ questions }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each(['setup_starter_tasks', undefined])(
+    'rejects integration preferences outside their preset: %s',
+    async (preset) => {
+      const resolveUserInputPreset = vi.fn();
+      const requestUserInput = vi.fn();
+      let toolResult: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+            ...(preset
+              ? { preset }
+              : {
+                  questions: [
+                    { id: 'q', header: 'Tools', question: 'Which tools?' },
+                  ],
+                }),
+            setupIntegrationAnswers: { documents: { answers: ['Notion'] } },
+          });
+          return 'Please choose your tools.';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'deployment-1',
+          conversationId: 'setup-session-1',
+        },
+        setupSession: true,
+        adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+      });
+      expect(toolResult).toEqual(expect.objectContaining({ success: false }));
+      expect(resolveUserInputPreset).not.toHaveBeenCalled();
+      expect(requestUserInput).not.toHaveBeenCalled();
+    },
+  );
+
   it('rejects request_user_input calls with neither questions nor a preset', async () => {
     let toolResult: unknown;
     const requestUserInput = vi.fn();

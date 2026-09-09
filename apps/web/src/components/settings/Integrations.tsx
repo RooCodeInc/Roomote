@@ -1379,7 +1379,11 @@ function VercelConnectionFields({
   );
 }
 
-export function Integrations() {
+export function Integrations({
+  integrationIds,
+}: {
+  integrationIds?: readonly string[];
+} = {}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { isAdmin } = useAuthorizedUser();
@@ -1479,7 +1483,9 @@ export function Integrations() {
   const [isLinearOauthSetupOpen, setIsLinearOauthSetupOpen] = useState(false);
 
   const linearInstallation = useLinearInstallation();
-  const connectLinear = useConnectLinear(`${pathname}?service=linear`);
+  const connectLinear = useConnectLinear(
+    integrationIds === undefined ? `${pathname}?service=linear` : pathname,
+  );
   const disconnectLinear = useDisconnectLinear();
 
   const deploymentEnablements = useDeploymentMcpEnablements();
@@ -2228,7 +2234,13 @@ export function Integrations() {
         }),
     ];
 
-    return sortIntegrationItems(baseItems, highlightedIntegrationId);
+    return integrationIds === undefined
+      ? sortIntegrationItems(baseItems, highlightedIntegrationId)
+      : [...new Set(integrationIds)].flatMap((id) =>
+          baseItems.filter(
+            (item) => item.id === (id === 'sentry' ? 'sentry-mcp' : id),
+          ),
+        );
   }, [
     connectLinear,
     connectMcp,
@@ -2257,6 +2269,7 @@ export function Integrations() {
     saveVercelConnection.isPending,
     deploymentEnablements.data,
     pathname,
+    integrationIds,
     setDeploymentEnabled,
     saveSnowflakeConnection.isPending,
     asanaConnection.isPending,
@@ -2906,7 +2919,7 @@ export function Integrations() {
             instance.
           </AlertDescription>
         </Alert>
-        {customMcpEnabled ? (
+        {integrationIds === undefined && customMcpEnabled ? (
           <>
             {customMcpDialogs}
             <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
@@ -3170,32 +3183,42 @@ export function Integrations() {
           deepLinkDialogItem.onAction?.();
         }}
       />
-      {customMcpDialogs}
-      {customMcpEnabled ? (
-        <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
-      ) : null}
-      <IntegrationSection
-        id="installed-integrations"
-        title="Connected"
-        items={installed}
-        emptyState={
-          <p className="text-sm text-muted-foreground">
-            You haven&apos;t connected any integrations yet.
-          </p>
-        }
-      />
-      {configured.length > 0 && (
+      {integrationIds !== undefined ? (
         <IntegrationSection
-          id="configured-integrations"
-          title="Configured"
-          items={configured}
+          id="selected-integrations"
+          title="Integrations"
+          items={items}
         />
+      ) : (
+        <>
+          {customMcpDialogs}
+          {customMcpEnabled ? (
+            <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
+          ) : null}
+          <IntegrationSection
+            id="installed-integrations"
+            title="Connected"
+            items={installed}
+            emptyState={
+              <p className="text-sm text-muted-foreground">
+                You haven&apos;t connected any integrations yet.
+              </p>
+            }
+          />
+          {configured.length > 0 && (
+            <IntegrationSection
+              id="configured-integrations"
+              title="Configured"
+              items={configured}
+            />
+          )}
+          <IntegrationSection
+            id="available-integrations"
+            title="Available"
+            items={available}
+          />
+        </>
       )}
-      <IntegrationSection
-        id="available-integrations"
-        title="Available"
-        items={available}
-      />
     </div>
   );
 }

@@ -132,6 +132,36 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).not.toContain('update_plan');
   });
 
+  it('keeps discovery optional, ordered, resumable, and server-resolved', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      ...baseInput,
+      setupSession: true,
+    });
+    for (const rule of [
+      'Integration discovery is optional and never gates setup completion',
+      'documents, monitoring, and project-tracking',
+      'those existing provider flows are unaffected',
+      'Do not ask provider-configuration questions in this optional discovery',
+      'integrationDiscovery.categories',
+      'setup-tools-<id>',
+      'Offer skipping early',
+      'already supplied in prose',
+      'setupIntegrationAnswers',
+      'keyed by category IDs (not question IDs)',
+      'server exact-matches its catalog',
+      'Continue without connections',
+      'no need to fill missing answers',
+      'All asynchronous setup events must preserve active discovery',
+      'Never emit the starter preset until discovery is completed',
+      'Existing starter selection or completed old setup means no restart',
+      'answeredCategoryIds',
+      'matchedIntegrationIds',
+      'unsupportedTools',
+    ])
+      expect(prompt).toContain(rule);
+    expect(prompt).not.toContain('Naturally ask about communication');
+  });
+
   it('omits setup sections for ordinary sessions', () => {
     const prompt = buildFastAgentSystemPrompt(baseInput);
 

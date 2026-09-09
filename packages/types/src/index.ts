@@ -80,6 +80,7 @@ export * from './control-plane-env-vars';
 export * from './setup-auth-config';
 export * from './setup-compute-config';
 export * from './setup-new';
+export * from './onboarding-integrations';
 export * from './setup-source-control-config';
 export * from './source-control';
 export * from './slack';

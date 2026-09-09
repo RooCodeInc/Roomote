@@ -103,6 +103,23 @@ describe('request_user_input multi-select payloads', () => {
       })?.preset,
     ).toBe('setup_starter_tasks');
     expect(
+      parseAcpRequestUserInputPayload({
+        ...payload,
+        preset: 'setup_integrations',
+        questions: [
+          {
+            ...singleQuestion,
+            options: [
+              { id: 'slack', label: 'Slack', description: 'Connect Slack' },
+            ],
+          },
+        ],
+      }),
+    ).toMatchObject({
+      preset: 'setup_integrations',
+      questions: [{ options: [{ id: 'slack', label: 'Slack' }] }],
+    });
+    expect(
       parseAcpRequestUserInputPayload({ ...payload, preset: 'untrusted' })
         ?.preset,
     ).toBeUndefined();

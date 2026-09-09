@@ -43,6 +43,7 @@ import {
   formatErrorForLog,
   getAcpRequestUserInputValidationError,
   getUserDisplayName,
+  isSetupIntegrationDiscoveryQuestionId,
   parseAcpRequestUserInputAnswers,
   parseAcpRequestUserInputPayload,
   parseAcpRequestUserInputResponsePayload,
@@ -666,6 +667,9 @@ export async function replyToFastSessionCommand(
   if (!session) {
     throw new Error('Fast session not found');
   }
+  const { resolveSetupSessionTurnContext } =
+    await import('../setup/setup-session');
+  const setupContext = await resolveSetupSessionTurnContext(auth, session.id);
 
   const senderDisplayName =
     getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
@@ -708,6 +712,7 @@ export async function replyToFastSessionCommand(
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),
     durableSessionId: session.id,
+    ...setupContext,
   });
 
   return { success: true };
@@ -778,6 +783,10 @@ export async function submitFastSessionUserInputCommand(
   if (!session) {
     throw new Error('Fast session not found');
   }
+  const { resolveSetupSessionTurnContext, submitSetupSessionUserInputCommand } =
+    await import('../setup/setup-session');
+  // Check setup ownership before persisting input; rebuild its snapshot after the write.
+  const setupContext = await resolveSetupSessionTurnContext(auth, session.id);
 
   const [request] = await db
     .select({
@@ -832,7 +841,19 @@ export async function submitFastSessionUserInputCommand(
     throw new Error(validationError);
   }
 
-  const scheduleResponseTurn = (answers: AcpRequestUserInputAnswers) => {
+  const scheduleResponseTurn = async (
+    answers: AcpRequestUserInputAnswers,
+    responseResolution: 'submitted' | 'cancelled',
+  ) => {
+    const freshSetupContext = setupContext
+      ? await resolveSetupSessionTurnContext(auth, session.id)
+      : null;
+    const skippedDiscovery =
+      freshSetupContext &&
+      requestPayload.questions.some((question) =>
+        isSetupIntegrationDiscoveryQuestionId(question.id),
+      );
+    if (responseResolution === 'cancelled' && !skippedDiscovery) return;
     const responseTurnId = `input-response:${input.requestId}`;
     const conversation =
       session.surface === 'automation'
@@ -861,6 +882,9 @@ export async function submitFastSessionUserInputCommand(
       question: `<structured_input_response>${JSON.stringify({
         requestId: input.requestId,
         answers,
+        ...(responseResolution === 'cancelled'
+          ? { resolution: responseResolution }
+          : {}),
       })}</structured_input_response>`,
       turnSource: 'platform_event',
       platformEventKind: 'input_response',
@@ -878,6 +902,7 @@ export async function submitFastSessionUserInputCommand(
         ? { setupSnapshot: options.setupSnapshot }
         : {}),
       setupSession: options.setupSession ?? false,
+      ...freshSetupContext,
     });
   };
 
@@ -885,17 +910,20 @@ export async function submitFastSessionUserInputCommand(
     const persistedResponse = parseAcpRequestUserInputResponsePayload(
       existingResponse.payload,
     );
-    if (
-      !requestPayload.preset &&
-      persistedResponse?.resolution === 'submitted'
-    ) {
-      scheduleResponseTurn(persistedResponse.answers);
+    if (!requestPayload.preset && persistedResponse) {
+      await scheduleResponseTurn(
+        persistedResponse.answers,
+        persistedResponse.resolution,
+      );
     }
     return { success: true };
   }
 
   const responseEventId = `${request.eventId}:response`;
   if (requestPayload.preset) {
+    if (setupContext && !options.persistSetupPresetResponse) {
+      return submitSetupSessionUserInputCommand(auth, input);
+    }
     if (!options.persistSetupPresetResponse || resolution !== 'submitted') {
       throw new Error('This trusted setup response cannot be handled here.');
     }
@@ -941,8 +969,7 @@ export async function submitFastSessionUserInputCommand(
     },
   });
 
-  if (resolution === 'cancelled') return { success: true };
-  scheduleResponseTurn(submitted);
+  await scheduleResponseTurn(submitted, resolution);
 
   return { success: true };
 }
