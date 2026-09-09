@@ -44,6 +44,7 @@ import { parseCreatorFilterValue } from '@/lib/task-creator-filter';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 
 import { getFastSessionById } from './fast-sessions';
+import { customAutomationSessionAccess } from './custom-automation-session-access';
 import {
   buildSessionTaskPreviews,
   getSessionPreviewProxyConfig,
@@ -73,39 +74,43 @@ const MIN_TRANSCRIPT_SEARCH_LENGTH = 3;
 const SEARCH_SNIPPET_CONTEXT_CHARS = 60;
 const SEARCH_SNIPPET_LENGTH = 180;
 
-function sessionScope(_auth: SessionAuth) {
-  // Sessions follow the same visibility rules as tasks: every authenticated
-  // user of the deployment can open and interact with any Session by id.
-  return undefined;
+function sessionScope(auth: SessionAuth) {
+  // Ordinary Sessions remain deployment-collaborative by ID.
+  return customAutomationSessionAccess(auth);
 }
 
 // The /sessions listing mirrors the /tasks listing instead: admins see every
 // Session, other users see the Sessions they own, participate in, or spoke in.
 function sessionListScope(auth: SessionAuth) {
   if (auth.isAdmin) return undefined;
-  return or(
-    eq(sessions.ownerUserId, auth.userId),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(sessionParticipants)
-        .where(
-          and(
-            eq(sessionParticipants.sessionId, sessions.id),
-            eq(sessionParticipants.userId, auth.userId),
+  return and(
+    sessionScope(auth),
+    or(
+      eq(sessions.ownerUserId, auth.userId),
+      // The access scope above resolves the human owner of custom runs.
+      eq(sessions.ownerAutomation, 'custom_automation'),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(sessionParticipants)
+          .where(
+            and(
+              eq(sessionParticipants.sessionId, sessions.id),
+              eq(sessionParticipants.userId, auth.userId),
+            ),
           ),
-        ),
-    ),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(fastAgentMessages)
-        .where(
-          and(
-            eq(fastAgentMessages.conversationId, sessions.fastConversationId),
-            sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
+      ),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(fastAgentMessages)
+          .where(
+            and(
+              eq(fastAgentMessages.conversationId, sessions.fastConversationId),
+              sql`${fastAgentMessages.metadata} ->> 'userId' = ${auth.userId}`,
+            ),
           ),
-        ),
+      ),
     ),
   );
 }
@@ -784,6 +789,26 @@ export async function findAccessibleSession(
   return session ?? null;
 }
 
+/** Direct-link reads for authenticated deployment members, not action authorization. */
+export async function findReadableSession(
+  auth: SessionAuth,
+  sessionId: string,
+) {
+  if (!auth.userId) return null;
+  const [session] = await db
+    .select(baseSelection)
+    .from(sessions)
+    .leftJoin(users, eq(users.id, sessions.ownerUserId))
+    .where(
+      or(
+        eq(sessions.id, sessionId),
+        eq(sessions.fastConversationId, sessionId),
+      ),
+    )
+    .limit(1);
+  return session ?? null;
+}
+
 export async function findAccessibleSessionByFastConversationId(
   auth: SessionAuth,
   fastConversationId: string,
@@ -963,9 +988,7 @@ async function getSessionArtifacts(sessionId: string) {
 }
 
 export async function getSessionById(auth: SessionAuth, sessionId: string) {
-  const session =
-    (await findAccessibleSession(auth, sessionId)) ??
-    (await findAccessibleSessionByFastConversationId(auth, sessionId));
+  const session = await findReadableSession(auth, sessionId);
   if (!session) return null;
   // Fetch the task rollups once and feed them into hydration; this endpoint
   // is polled, so the duplicate linked-tasks join was pure waste.
@@ -1006,7 +1029,7 @@ export async function getSessionTimeline(
   sessionId: string,
   cursor?: number | { at: number; seenIdsAtTimestamp: string[] },
 ) {
-  const session = await findAccessibleSession(auth, sessionId);
+  const session = await findReadableSession(auth, sessionId);
   if (!session) return null;
   const legacySince = typeof cursor === 'number' ? cursor : null;
   const after =
@@ -1014,7 +1037,7 @@ export async function getSessionTimeline(
       ? { at: cursor, seenIdsAtTimestamp: [] }
       : (cursor ?? { at: 0, seenIdsAtTimestamp: [] });
   const seenIdsAtTimestamp = new Set(after.seenIdsAtTimestamp);
-  const taskRows = await getSessionTasks(sessionId);
+  const taskRows = await getSessionTasks(session.id);
   const fast = session.fastConversationId
     ? await getFastSessionById(auth, session.fastConversationId)
     : null;
@@ -1134,11 +1157,12 @@ export async function getLatestExternalSessionEvent(
 }
 
 export async function getSessionForTask(auth: SessionAuth, taskId: string) {
+  if (!auth.userId) return null;
   const [row] = await db
     .select({ sessionId: sessions.id, title: sessions.title })
     .from(sessionTasks)
     .innerJoin(sessions, eq(sessions.id, sessionTasks.sessionId))
-    .where(and(eq(sessionTasks.taskId, taskId), sessionScope(auth)))
+    .where(eq(sessionTasks.taskId, taskId))
     .limit(1);
   return row ?? null;
 }

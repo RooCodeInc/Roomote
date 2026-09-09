@@ -8,7 +8,7 @@ import {
   signArtifactId,
   currentEpochSeconds,
 } from '@/lib/server';
-import { findAccessibleSession } from '@/lib/server/sessions';
+import { findReadableSession } from '@/lib/server/sessions';
 
 const MAX_TEXT_PREVIEW_BYTES = 1024 * 1024; // 1MB
 
@@ -68,7 +68,7 @@ export async function getArtifactByPathCommand(
   const { taskId, sessionId, path, version } = input;
   if (
     sessionId &&
-    !(await findAccessibleSession(
+    !(await findReadableSession(
       { userId: auth.userId, isAdmin: auth.isAdmin },
       sessionId,
     ))

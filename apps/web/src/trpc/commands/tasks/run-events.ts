@@ -1,4 +1,6 @@
 import { db, desc, eq, taskRunEvents } from '@roomote/db/server';
+import type { UserAuthSuccess } from '@/types';
+import { requireTaskReadAccess } from '@/lib/server/custom-automation-task-access';
 
 const MAX_RUN_EVENTS = 500;
 
@@ -7,7 +9,11 @@ const MAX_RUN_EVENTS = 500;
  * read side of the worker's diagnostic recorder: sandbox logs do not survive
  * the sandbox, so post-mortems read these instead.
  */
-export async function getTaskRunEventsCommand(input: { taskId: string }) {
+export async function getTaskRunEventsCommand(
+  auth: UserAuthSuccess,
+  input: { taskId: string },
+) {
+  await requireTaskReadAccess(auth, input.taskId);
   const events = await db
     .select({
       id: taskRunEvents.id,

@@ -1,5 +1,9 @@
 import type { UserAuthSuccess } from '@/types';
 
+vi.mock('@/lib/server/custom-automation-task-access', () => ({
+  requireTaskAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
 const { mockGetTaskSuggestableMessages, mockGenerateTrackedNonTaskObject } =
   vi.hoisted(() => ({
     mockGetTaskSuggestableMessages: vi.fn(),

@@ -3,6 +3,7 @@ const {
   mockDbSelect,
   mockEnqueueTaskSleep,
   mockReturning,
+  mockRequeueBrainMemoryEventsForTasks,
   mockSyncTaskStateFromRuns,
   mockTransaction,
 } = vi.hoisted(() => {
@@ -10,6 +11,7 @@ const {
   const mockDbSelect = vi.fn();
   const mockEnqueueTaskSleep = vi.fn();
   const mockReturning = vi.fn();
+  const mockRequeueBrainMemoryEventsForTasks = vi.fn();
   const mockSyncTaskStateFromRuns = vi.fn();
   const mockTransaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
     callback({
@@ -29,6 +31,7 @@ const {
     mockDbSelect,
     mockEnqueueTaskSleep,
     mockReturning,
+    mockRequeueBrainMemoryEventsForTasks,
     mockSyncTaskStateFromRuns,
     mockTransaction,
   };
@@ -43,6 +46,8 @@ vi.mock('@roomote/db/server', async () => {
   return {
     ...actual,
     db: { transaction: mockTransaction, select: mockDbSelect },
+    requeueBrainMemoryEventsForTasks: (...args: unknown[]) =>
+      mockRequeueBrainMemoryEventsForTasks(...args),
     syncTaskStateFromRuns: (...args: unknown[]) =>
       mockSyncTaskStateFromRuns(...args),
   };
@@ -70,6 +75,7 @@ describe('updateTaskPrStatus', () => {
     mockReturning.mockResolvedValue([]);
     mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
     mockEnqueueTaskSleep.mockResolvedValue(true);
+    mockRequeueBrainMemoryEventsForTasks.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -202,6 +208,70 @@ describe('updateTaskPrStatus', () => {
 
     expect(mockSyncTaskStateFromRuns).not.toHaveBeenCalled();
     expect(mockLinkedTasks).not.toHaveBeenCalled();
+  });
+  it('re-ingests the memories of every task whose PR just merged', async () => {
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-2', createdByRoomote: false },
+      { taskId: 'task-1', createdByRoomote: true },
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+    // The originating-task workflow lookup that follows a merge.
+    mockDbSelect.mockReturnValue({
+      from: () => ({ where: () => Promise.resolve([]) }),
+    });
+
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+
+    expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledTimes(1);
+    expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledWith(
+      expect.any(Object),
+      ['task-1', 'task-2'],
+    );
+  });
+
+  it('re-ingests memories when a PR closes unmerged', async () => {
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed');
+
+    expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledWith(
+      expect.any(Object),
+      ['task-1'],
+    );
+  });
+
+  it('does not re-ingest when nothing transitioned or the PR is still open', async () => {
+    mockReturning.mockResolvedValue([]);
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed');
+
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'open');
+
+    expect(mockRequeueBrainMemoryEventsForTasks).not.toHaveBeenCalled();
+  });
+
+  it('keeps the webhook healthy when the memory requeue fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+    mockRequeueBrainMemoryEventsForTasks.mockRejectedValue(
+      new Error('brain db down'),
+    );
+
+    await expect(
+      updateTaskPrStatus('github', 'owner/repo', 42, 'closed'),
+    ).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to requeue memories'),
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
   });
 });
 

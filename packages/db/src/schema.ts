@@ -152,6 +152,22 @@ export const users = pgTable(
   ],
 );
 
+export const instanceSkills = pgTable(
+  'instance_skills',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    content: text('content').notNull(),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('instance_skills_name_unique_idx').on(table.name)],
+);
+
 export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),

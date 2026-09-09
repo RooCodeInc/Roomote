@@ -154,10 +154,9 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'skills',
     label: 'Skills',
     title: 'Skills',
-    description: 'Add agent skills to your environments.',
+    description: 'Shared instructions for all Sessions and coding tasks.',
     href: SETTINGS_PATHS.skills,
     icon: GraduationCap,
-    adminOnly: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.skills),
   },
   {

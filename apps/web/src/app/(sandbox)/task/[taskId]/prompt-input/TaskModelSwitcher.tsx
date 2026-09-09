@@ -176,11 +176,20 @@ export function TaskModelSwitcher({
     model: payloadCodingModel ?? null,
     reasoningEffort: payloadCodingEffort,
   };
+  // Role defaults only load once the popover opens, but the chip renders
+  // before that. Fall back to the launch options (already loaded for display
+  // names), which carry the deployment's coding model and reasoning level,
+  // so the closed chip does not show the built-in constant instead of the
+  // configured level.
   const effectiveCodingModel =
-    codingSelection.model ?? roleDefaults?.defaultModelId ?? null;
+    codingSelection.model ??
+    roleDefaults?.defaultModelId ??
+    launchModels?.defaultModelId ??
+    null;
   const effectiveCodingEffort =
     codingSelection.reasoningEffort ??
     roleDefaults?.roles.coding.reasoningEffort ??
+    launchModels?.defaultReasoningEffort ??
     DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding;
 
   const hasRoleOverrides = useMemo(

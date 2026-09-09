@@ -11,6 +11,9 @@ const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
+  isAdmin: true,
+  catalogQueryOptions: [] as Array<{ enabled?: boolean }>,
+  queriedKeys: [] as unknown[],
   customAutomationsPending: false,
   customAutomationRunPendingId: null as string | null,
   customAutomations: [] as Array<{
@@ -320,7 +323,21 @@ vi.mock('sonner', () => ({
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (queryOptions: { queryKey?: unknown[] }) => {
+    state.queriedKeys.push(queryOptions.queryKey);
     const key1 = queryOptions.queryKey?.[1];
+    if (key1 === 'getCustomAutomationOptions') {
+      return {
+        isPending: state.settingsQuery.isPending,
+        data: {
+          capabilities: state.settingsQuery.data.capabilities,
+          managerSlackChannelId:
+            state.settingsQuery.data.settings.managerSlackChannelId,
+          managerDiscordChannelId:
+            state.settingsQuery.data.settings.managerDiscordChannelId,
+          effectiveTimeZone: 'UTC',
+        },
+      };
+    }
     if (key1 === 'listSlackChannels' || key1 === 'listDiscordChannels') {
       return key1 === 'listSlackChannels'
         ? state.slackChannelsQuery
@@ -430,9 +447,18 @@ vi.mock('@/hooks/slack', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     automations: {
+      getCustomAutomationOptions: {
+        queryOptions: () => ({
+          queryKey: ['automations', 'getCustomAutomationOptions'],
+        }),
+      },
       getSettings: {
         queryOptions: () => ({
           queryKey: ['automations', 'getSettings'],
@@ -440,14 +466,25 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['automations', 'getSettings'],
       },
       listSlackChannels: {
-        queryOptions: () => ({
-          queryKey: ['automations', 'listSlackChannels'],
-        }),
+        queryOptions: (
+          _input: undefined,
+          options: { enabled?: boolean } = {},
+        ) => {
+          state.catalogQueryOptions.push(options);
+          return { queryKey: ['automations', 'listSlackChannels'], ...options };
+        },
       },
       listDiscordChannels: {
-        queryOptions: () => ({
-          queryKey: ['automations', 'listDiscordChannels'],
-        }),
+        queryOptions: (
+          _input: undefined,
+          options: { enabled?: boolean } = {},
+        ) => {
+          state.catalogQueryOptions.push(options);
+          return {
+            queryKey: ['automations', 'listDiscordChannels'],
+            ...options,
+          };
+        },
       },
       listCustomAutomations: {
         queryOptions: () => ({
@@ -531,6 +568,41 @@ import {
   AutomationsSettings,
   getAutomationHistoryHref,
 } from './AutomationsSettings';
+import { CustomAutomationsSection } from './CustomAutomationsSection';
+
+it.each([false, true])(
+  'enables custom-editor channel catalogs only for admins (isAdmin=%s)',
+  (isAdmin) => {
+    state.isAdmin = isAdmin;
+    state.catalogQueryOptions = [];
+    try {
+      render(<CustomAutomationsSection />);
+      expect(state.catalogQueryOptions.length).toBeGreaterThanOrEqual(2);
+      expect(
+        state.catalogQueryOptions.every(
+          (options) => options.enabled === isAdmin,
+        ),
+      ).toBe(true);
+    } finally {
+      state.isAdmin = true;
+    }
+  },
+);
+
+it('opens the standalone custom editor without querying admin settings', () => {
+  state.queriedKeys = [];
+  render(<CustomAutomationsSection />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+  expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+  expect(state.queriedKeys).toContainEqual([
+    'automations',
+    'getCustomAutomationOptions',
+  ]);
+  expect(state.queriedKeys).not.toContainEqual(['automations', 'getSettings']);
+  expect(state.queriedKeys).not.toContainEqual(['miscSettings', 'get']);
+  expect(state.queriedKeys).not.toContainEqual(['comms', 'status']);
+});
 
 async function openSuggesterCard() {
   fireEvent.click(

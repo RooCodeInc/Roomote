@@ -553,13 +553,14 @@ describe('SideNav recent sessions', () => {
     );
   });
 
-  it('keeps settings visible for members and automations admin-only', () => {
+  it('shows settings and automations to members but keeps analytics admin-only', () => {
     state.user.isAdmin = false;
 
     render(<SideNav />);
 
     expect(screen.getByTestId('nav-/settings')).toBeInTheDocument();
-    expect(screen.queryByTestId('nav-/automations')).not.toBeInTheDocument();
+    expect(screen.getByTestId('nav-/automations')).toBeInTheDocument();
+    expect(screen.queryByTestId('nav-/analytics')).not.toBeInTheDocument();
   });
 
   it('disables inaccessible destinations during setup while keeping Settings enabled', () => {

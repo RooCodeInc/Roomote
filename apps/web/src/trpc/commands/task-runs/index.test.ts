@@ -92,6 +92,10 @@ vi.mock('@roomote/slack', () => ({
   SlackNotifier: vi.fn(),
 }));
 
+vi.mock('@roomote/sdk/server', () => ({
+  stopTaskRun: vi.fn(),
+}));
+
 vi.mock('@/lib/server', () => ({
   Env: {
     R_APP_URL: 'https://roomote.test',

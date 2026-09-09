@@ -21,6 +21,7 @@ import { Env } from '@roomote/env';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
+import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 
 import {
   getLatestTaskRunsByTaskIds,
@@ -61,7 +62,13 @@ export async function getTaskSummary(
     const [task] = await db
       .select(TASK_SELECT_COLUMNS)
       .from(tasks)
-      .where(and(eq(tasks.id, taskId), visibleTaskHistoryCondition))
+      .where(
+        and(
+          eq(tasks.id, taskId),
+          visibleTaskHistoryCondition,
+          customAutomationHistoryAccess(c.get('mcpAuth'), 'task'),
+        ),
+      )
       .limit(1);
 
     if (!task) {

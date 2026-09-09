@@ -9,6 +9,7 @@ import * as environments from './environments';
 import * as mcpConnections from './mcp-connections';
 import * as userApiKeys from './user-api-keys';
 import * as llmUsage from './llm-usage';
+import * as instanceSkills from './instance-skills';
 
 const sdk = {
   auth,
@@ -22,6 +23,7 @@ const sdk = {
   mcpConnections,
   userApiKeys,
   llmUsage,
+  instanceSkills,
 };
 
 export { sdk };
@@ -51,3 +53,4 @@ export type {
 } from './task-runs';
 export type { Environment, EnvironmentListItem } from './environments';
 export type { RecordLlmUsageInput } from './llm-usage';
+export type { InstanceSkillDefinition } from './instance-skills';
