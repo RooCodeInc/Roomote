@@ -608,7 +608,7 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
       textWithoutFooter: 'earlier reply with image',
       images: footerImages,
     });
-    vi.mocked(setThreadReplyFooterRecord).mockResolvedValue(undefined);
+    vi.mocked(setThreadReplyFooterRecord).mockResolvedValue(true);
     postMessageMock.mockResolvedValue({ messageId: 'new-reply' });
     vi.mocked(
       createTeamsCommunicationProviderFromRuntimeCredentials,

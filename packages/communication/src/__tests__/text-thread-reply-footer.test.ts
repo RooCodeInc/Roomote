@@ -20,13 +20,18 @@ vi.mock('@roomote/redis', () => ({
       return 'OK';
     },
     eval: async (
-      _script: string,
-      _count: number,
+      script: string,
+      count: number,
       key: string,
-      owner: string,
+      ...args: string[]
     ) => {
+      const owner = args[count - 1];
       if (mocks.store.get(key) !== owner) return 0;
-      mocks.store.delete(key);
+      if (count === 2) {
+        const [pointerKey, , value, ttl] = args;
+        if (ttl !== 'keepTtl' || mocks.store.has(pointerKey!))
+          mocks.store.set(pointerKey!, value!);
+      } else if (script.includes("'del'")) mocks.store.delete(key);
       return 1;
     },
   }),

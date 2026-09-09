@@ -35,11 +35,21 @@ vi.mock('@roomote/redis', async (importOriginal) => {
       get: async (key: string) => mocks.redisState.get(key) ?? null,
       eval: async (
         script: string,
-        _count: number,
+        count: number,
         key: string,
-        owner: string,
+        ownerOrPointerKey: string,
+        owner?: string,
+        value?: string,
+        ttl?: string | number,
       ) => {
-        if (mocks.redisState.get(key) !== owner) return 0;
+        if (count === 2) {
+          if (mocks.redisState.get(key) !== owner) return 0;
+          if (ttl !== 'keepTtl' || mocks.redisState.has(ownerOrPointerKey)) {
+            mocks.redisState.set(ownerOrPointerKey, value!);
+          }
+          return 1;
+        }
+        if (mocks.redisState.get(key) !== ownerOrPointerKey) return 0;
         if (script.includes("'del'")) mocks.redisState.delete(key);
         return 1;
       },

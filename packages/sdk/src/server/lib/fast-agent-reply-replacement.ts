@@ -132,7 +132,7 @@ export function createDiscordFastReplyReplacer(params: {
     // replacement would re-mark the old message as carrier.
     const replaced = await withThreadReplyFooterLock({
       lockKey: `discord:thread_reply_footer_lock:${params.channelId}:${footerStateThreadId}`,
-      fn: async (assertLock) => {
+      fn: async (assertLock, lock) => {
         const footerRecord = await getThreadReplyFooterRecord(
           'discord',
           params.channelId,
@@ -162,6 +162,7 @@ export function createDiscordFastReplyReplacer(params: {
               channelId: params.channelId,
               threadId: footerStateThreadId,
               assertLock,
+              lock,
               record: {
                 ...footerRecord,
                 messageId,
@@ -191,6 +192,7 @@ export function createDiscordFastReplyReplacer(params: {
             channelId: params.channelId,
             threadId: footerStateThreadId,
             assertLock,
+            lock,
             record: {
               ...footerRecord,
               messageId,

@@ -6,6 +6,7 @@ import {
   getThreadReplyFooterRecord,
   setThreadReplyFooterRecord,
   type ThreadReplyFooterRecord,
+  type ThreadReplyFooterLock,
 } from './thread-reply-footer-state';
 import type { CommunicationProvider } from '@roomote/types';
 import {
@@ -26,7 +27,10 @@ export const THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE =
 export async function withThreadReplyFooterLock<T>(params: {
   lockKey: string;
   maxAcquireAttempts?: number;
-  fn: (assertLock: () => Promise<void>) => Promise<T>;
+  fn: (
+    assertLock: () => Promise<void>,
+    lock: ThreadReplyFooterLock,
+  ) => Promise<T>;
 }): Promise<T> {
   const redis = getRedis();
   const maxAcquireAttempts =
@@ -73,7 +77,7 @@ export async function withThreadReplyFooterLock<T>(params: {
       );
       timer.unref();
       try {
-        return await params.fn(assertLock);
+        return await params.fn(assertLock, { key: params.lockKey, ownerId });
       } finally {
         clearInterval(timer);
         await renewal;
@@ -209,7 +213,7 @@ export async function refreshManagedThreadReplyFooter(params: {
   await withThreadReplyFooterLock({
     lockKey: `${params.provider}:thread_reply_footer_lock:${params.channelId}:${params.threadId}`,
     maxAcquireAttempts: 1,
-    fn: async (assertLock) => {
+    fn: async (assertLock, lock) => {
       const record = await getThreadReplyFooterRecord(
         params.provider,
         params.channelId,
@@ -268,6 +272,7 @@ export async function refreshManagedThreadReplyFooter(params: {
         ...params,
         record: { ...record, refresh: { ...record.refresh, footerText } },
         assertLock,
+        lock,
         clearOwnFooter: () => params.edit(record, record.textWithoutFooter),
         keepTtl: true,
       });
@@ -282,26 +287,32 @@ export async function rememberThreadReplyFooterAfterEdit(params: {
   threadId: string;
   record: ThreadReplyFooterRecord;
   assertLock: () => Promise<void>;
+  lock: ThreadReplyFooterLock;
   clearOwnFooter: () => Promise<void>;
   keepTtl?: boolean;
 }): Promise<void> {
+  let ownsLock = true;
   try {
     await params.assertLock();
   } catch {
-    const current = await getThreadReplyFooterRecord(
+    ownsLock = false;
+  }
+  if (
+    ownsLock &&
+    (await setThreadReplyFooterRecord(
       params.provider,
       params.channelId,
       params.threadId,
-    ).catch(() => undefined);
-    if (current !== undefined && current?.messageId !== params.record.messageId)
-      await params.clearOwnFooter().catch(() => {});
+      params.record,
+      { keepTtl: params.keepTtl, lock: params.lock },
+    ))
+  )
     return;
-  }
-  await setThreadReplyFooterRecord(
+  const current = await getThreadReplyFooterRecord(
     params.provider,
     params.channelId,
     params.threadId,
-    params.record,
-    { keepTtl: params.keepTtl },
-  );
+  ).catch(() => undefined);
+  if (current !== undefined && current?.messageId !== params.record.messageId)
+    await params.clearOwnFooter().catch(() => {});
 }

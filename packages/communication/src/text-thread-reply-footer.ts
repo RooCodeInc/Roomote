@@ -149,7 +149,7 @@ export async function replaceTextThreadReplyWithFooter(params: {
   const threadId = params.threadId ?? 'root';
   await withThreadReplyFooterLock({
     lockKey: `${params.provider.provider}:thread_reply_footer_lock:${params.channelId}:${threadId}`,
-    fn: async (assertLock) => {
+    fn: async (assertLock, lock) => {
       const record = await getThreadReplyFooterRecord(
         params.provider.provider,
         params.channelId,
@@ -185,6 +185,7 @@ export async function replaceTextThreadReplyWithFooter(params: {
           threadId,
           record: next,
           assertLock,
+          lock,
           clearOwnFooter: () =>
             editTextThreadFooterMessage(params.provider, next, params.text),
         });

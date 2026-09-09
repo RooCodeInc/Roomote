@@ -10,11 +10,21 @@ vi.mock('@roomote/redis', () => ({
     zadd: async () => 1,
     eval: async (
       script: string,
-      _count: number,
+      count: number,
       key: string,
-      value: string,
+      ownerOrPointerKey: string,
+      owner?: string,
+      value?: string,
+      ttl?: string | number,
     ) => {
-      if (store.get(key) !== value) return 0;
+      if (count === 2) {
+        if (store.get(key) !== owner) return 0;
+        if (ttl !== 'keepTtl' || store.has(ownerOrPointerKey)) {
+          store.set(ownerOrPointerKey, value!);
+        }
+        return 1;
+      }
+      if (store.get(key) !== ownerOrPointerKey) return 0;
       if (script.includes("'del'")) store.delete(key);
       return 1;
     },
@@ -40,50 +50,62 @@ import {
 describe('replacement writes obey footer lease ownership', () => {
   beforeEach(() => store.clear());
   const footerContext = { linkedPrs: [], livePreviewUrl: null };
-  it('Discord does not repoint after an edit finishes under a newer owner', async () => {
-    const original = {
-      messageId: 'old',
-      textWithoutFooter: 'Original',
-      refresh: { footerText: 'old footer', channelId: 'T' },
-    };
-    await setThreadReplyFooterRecord('discord', 'C', 'T', original);
-    const editMessage = vi.fn().mockResolvedValue(undefined);
-    editMessage.mockImplementationOnce(async () => {
-      store.set('discord:thread_reply_footer_lock:C:T', 'competitor');
-      await setThreadReplyFooterRecord('discord', 'C', 'T', {
-        ...original,
-        messageId: 'competitor',
-        textWithoutFooter: 'New body',
+  it.each([false, true])(
+    'Discord replacement respects lease loss=%s',
+    async (loseLease) => {
+      const original = {
+        messageId: 'old',
+        textWithoutFooter: 'Original',
+        refresh: { footerText: 'old footer', channelId: 'T' },
+      };
+      await setThreadReplyFooterRecord('discord', 'C', 'T', original);
+      const editMessage = vi.fn().mockResolvedValue(undefined);
+      editMessage.mockImplementationOnce(async () => {
+        if (!loseLease) return;
+        store.set('discord:thread_reply_footer_lock:C:T', 'competitor');
+        await setThreadReplyFooterRecord('discord', 'C', 'T', {
+          ...original,
+          messageId: 'competitor',
+          textWithoutFooter: 'New body',
+        });
       });
-    });
-    const replace = createDiscordFastReplyReplacer({
-      provider: { editMessage } as unknown as DiscordCommunicationProvider,
-      conversation: {
-        surface: 'discord',
-        workspaceId: 'guild',
-        conversationId: 'C',
-        replyTarget: { channelId: 'C', threadId: 'T' },
-      },
-      channelId: 'C',
-      threadId: 'T',
-      sessionId: 'session',
-      footerContext,
-      postReplacement: vi.fn(),
-    });
-    await replace(
-      { messageId: 'old' },
-      { purpose: 'closeout', message: 'Updated old reply' },
-    );
-    expect(
-      (await getThreadReplyFooterRecord('discord', 'C', 'T'))?.messageId,
-    ).toBe('competitor');
-    expect(editMessage).toHaveBeenLastCalledWith({
-      channelId: 'T',
-      messageId: 'old',
-      text: 'Updated old reply',
-      preserveButtons: true,
-    });
-  });
+      const replace = createDiscordFastReplyReplacer({
+        provider: { editMessage } as unknown as DiscordCommunicationProvider,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild',
+          conversationId: 'C',
+          replyTarget: { channelId: 'C', threadId: 'T' },
+        },
+        channelId: 'C',
+        threadId: 'T',
+        sessionId: 'session',
+        footerContext,
+        postReplacement: vi.fn(),
+      });
+      await replace(
+        { messageId: 'old' },
+        { purpose: 'closeout', message: 'Updated old reply' },
+      );
+      expect(
+        (await getThreadReplyFooterRecord('discord', 'C', 'T'))?.messageId,
+      ).toBe(loseLease ? 'competitor' : 'old');
+      if (loseLease) {
+        expect(editMessage).toHaveBeenLastCalledWith({
+          channelId: 'T',
+          messageId: 'old',
+          text: 'Updated old reply',
+          preserveButtons: true,
+        });
+      } else {
+        expect(editMessage).toHaveBeenCalledTimes(1);
+        expect(
+          (await getThreadReplyFooterRecord('discord', 'C', 'T'))
+            ?.textWithoutFooter,
+        ).toBe('Updated old reply');
+      }
+    },
+  );
   it('Slack removes only its stale replacement footer after a competing relocation', async () => {
     store.set('slack:thread_reply_footer:C:T', 'old');
     const body = { type: 'markdown', text: 'Updated old reply' };

@@ -5,6 +5,8 @@ import type { CommunicationMessageButton } from './provider';
 
 const THREAD_REPLY_FOOTER_TTL_SECONDS = 30 * 24 * 60 * 60;
 
+export type ThreadReplyFooterLock = { key: string; ownerId: string };
+
 export type ThreadReplyFooterImage = {
   url: string;
   altText: string;
@@ -130,33 +132,54 @@ export async function getThreadReplyFooterRecord(
   }
 }
 
+/** Returns false when the supplied lease no longer owns the lock. */
 export async function setThreadReplyFooterRecord(
   provider: CommunicationProvider,
   channelId: string,
   threadId: string,
   record: ThreadReplyFooterRecord,
-  options?: { keepTtl?: boolean },
-): Promise<void> {
+  options?: { keepTtl?: boolean; lock?: ThreadReplyFooterLock },
+): Promise<boolean> {
   const redis = getRedis();
-  if (options?.keepTtl) {
+  if (options?.lock) {
+    const written = await redis.eval(
+      `if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end
+       if ARGV[3] == 'keepTtl' then
+         redis.call('set', KEYS[2], ARGV[2], 'KEEPTTL', 'XX')
+       else
+         redis.call('set', KEYS[2], ARGV[2], 'EX', ARGV[3])
+       end
+       return 1`,
+      2,
+      options.lock.key,
+      getThreadReplyFooterKey(provider, channelId, threadId),
+      options.lock.ownerId,
+      JSON.stringify(record),
+      options.keepTtl ? 'keepTtl' : THREAD_REPLY_FOOTER_TTL_SECONDS,
+    );
+    if (!written) return false;
+    if (options.keepTtl) return true;
+  } else if (options?.keepTtl) {
     await redis.set(
       getThreadReplyFooterKey(provider, channelId, threadId),
       JSON.stringify(record),
       'KEEPTTL',
       'XX',
     );
-    return;
+    return true;
+  } else {
+    await redis.set(
+      getThreadReplyFooterKey(provider, channelId, threadId),
+      JSON.stringify(record),
+      'EX',
+      THREAD_REPLY_FOOTER_TTL_SECONDS,
+    );
   }
-  await redis.set(
-    getThreadReplyFooterKey(provider, channelId, threadId),
-    JSON.stringify(record),
-    'EX',
-    THREAD_REPLY_FOOTER_TTL_SECONDS,
-  );
   if (record.refresh)
     await scheduleThreadFooterRefresh({ provider, channelId, threadId }).catch(
       (error) => {
         console.warn('[threadFooter] Failed to schedule footer refresh', error);
       },
     );
+  return true;
 }

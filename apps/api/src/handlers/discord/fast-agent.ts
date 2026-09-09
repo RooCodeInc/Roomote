@@ -514,7 +514,7 @@ export async function processDiscordFastAgentMessage(
           // and this replacement would re-mark the old message as carrier.
           const replaced = await withThreadReplyFooterLock({
             lockKey: `discord:thread_reply_footer_lock:${footerChannelId}:${footerStateThreadId}`,
-            fn: async (assertLock) => {
+            fn: async (assertLock, lock) => {
               const footerRecord = await getThreadReplyFooterRecord(
                 'discord',
                 footerChannelId,
@@ -544,6 +544,7 @@ export async function processDiscordFastAgentMessage(
                     channelId: footerChannelId,
                     threadId: footerStateThreadId,
                     assertLock,
+                    lock,
                     record: {
                       ...footerRecord,
                       messageId,
@@ -573,6 +574,7 @@ export async function processDiscordFastAgentMessage(
                   channelId: footerChannelId,
                   threadId: footerStateThreadId,
                   assertLock,
+                  lock,
                   record: {
                     ...footerRecord,
                     messageId,

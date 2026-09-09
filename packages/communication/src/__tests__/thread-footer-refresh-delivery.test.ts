@@ -31,11 +31,19 @@ vi.mock('@roomote/redis', () => ({
     },
     eval: async (
       script: string,
-      _count: number,
+      count: number,
       key: string,
-      owner: string,
+      ...args: string[]
     ) => {
+      const owner = args[count - 1];
       if (store.get(key) !== owner) return 0;
+      if (count === 2) {
+        if (failures.recordWrite) throw new Error('Redis write unavailable');
+        const [pointerKey, , value, ttl] = args;
+        if (ttl !== 'keepTtl' || store.has(pointerKey!))
+          store.set(pointerKey!, value!);
+        return 1;
+      }
       if (script.includes("'expire'")) renew();
       if (script.includes("'del'")) store.delete(key);
       return 1;
@@ -47,6 +55,7 @@ import {
   deliverManagedThreadReplyFooter,
   refreshManagedThreadReplyFooter,
   rememberThreadReplyFooterAfterEdit,
+  withThreadReplyFooterLock,
 } from '../thread-reply-footer-delivery';
 import {
   getThreadReplyFooterRecord,
@@ -185,11 +194,50 @@ describe('current footer refresh serialization', () => {
       assertLock: async () => {
         throw new Error('lease lost');
       },
+      lock: {
+        key: 'discord:thread_reply_footer_lock:parent:thread',
+        ownerId: 'stale',
+      },
       clearOwnFooter,
     });
     expect((await read())?.messageId).toBe('competitor');
     expect(clearOwnFooter).toHaveBeenCalledTimes(1);
   });
+
+  it.each([false, true])(
+    'rejects a pointer write when ownership changes after a successful assertion (keepTtl=%s)',
+    async (keepTtl) => {
+      await write();
+      const lockKey = 'discord:thread_reply_footer_lock:parent:thread';
+      const competitor = { ...record, messageId: 'competitor' };
+      const clearOwnFooter = vi.fn().mockResolvedValue(undefined);
+      const successfulAssertion = vi.fn();
+      await withThreadReplyFooterLock({
+        lockKey,
+        fn: async (assertLock, lock) => {
+          await rememberThreadReplyFooterAfterEdit({
+            ...target,
+            record,
+            lock,
+            keepTtl,
+            assertLock: async () => {
+              await assertLock();
+              successfulAssertion();
+              // Expire A's lease after GET succeeds, before A's pointer mutation.
+              store.set(lockKey, 'competitor-owner');
+              await write(competitor);
+            },
+            clearOwnFooter,
+          });
+        },
+      });
+      expect(successfulAssertion).toHaveBeenCalledTimes(1);
+      expect(await read()).toEqual(competitor);
+      expect(store.get(lockKey)).toBe('competitor-owner');
+      expect(clearOwnFooter).toHaveBeenCalledTimes(1);
+      expect(schedule).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it.each([404, 410])(
     'forgets a provider-deleted carrier (%s) while holding its lock',
