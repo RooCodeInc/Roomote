@@ -7,6 +7,8 @@ import { db, eq, taskRuns } from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
 import { canReadTask } from '@/lib/server/custom-automation-task-access';
+import { getTaskRunError } from '@/lib/task-run-errors';
+import type { TaskRunProgress } from '@/types';
 
 export const runtime = 'nodejs';
 
@@ -26,11 +28,29 @@ export async function GET(
   const { id } = await props.params;
   const runId = z.coerce.number().parse(id);
 
-  const findTaskRun = async () => {
+  const findTaskRun = async (): Promise<TaskRunProgress | undefined> => {
     const run = await db.query.taskRuns.findFirst({
+      columns: {
+        id: true,
+        taskId: true,
+        status: true,
+        vendor: true,
+        error: true,
+        errorCode: true,
+        result: true,
+      },
       where: eq(taskRuns.id, runId),
     });
-    return run && (await canReadTask(authResult, run.taskId)) ? run : undefined;
+    if (!run || !(await canReadTask(authResult, run.taskId))) return undefined;
+    // Preserve the legacy result.error fallback without streaming arbitrary JSON.
+    return {
+      id: run.id,
+      taskId: run.taskId,
+      status: run.status,
+      vendor: run.vendor,
+      error: getTaskRunError(run) ?? null,
+      errorCode: run.errorCode,
+    };
   };
 
   const taskRun = await findTaskRun();
