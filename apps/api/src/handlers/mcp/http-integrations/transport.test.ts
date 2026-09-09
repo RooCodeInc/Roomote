@@ -22,6 +22,8 @@ it('uses native HTTPS, injected credentials and guarded connect options without 
   const sockets = new Set<Duplex>();
   let requests = 0;
   let receivedCredential: string | undefined;
+  let receivedContentType: string | undefined;
+  let receivedBodyBytes = 0;
   execFileSync(
     'openssl',
     [
@@ -49,8 +51,14 @@ it('uses native HTTPS, injected credentials and guarded connect options without 
     (req, res) => {
       requests++;
       receivedCredential = req.headers.authorization;
-      res.writeHead(200, { 'content-type': 'application/json' });
-      res.end('{"ok":true}');
+      receivedContentType = req.headers['content-type'];
+      req.on('data', (chunk: Buffer) => {
+        receivedBodyBytes += chunk.length;
+      });
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('{"ok":true}');
+      });
     },
   );
   upstream.on('connection', (socket) => {
@@ -73,7 +81,10 @@ it('uses native HTTPS, injected credentials and guarded connect options without 
           id: 'local',
           description: 'Local TLS transport test',
           origin: `https://127.0.0.1:${port}`,
-          rules: [{ method: 'GET', pathPrefix: '/items' }],
+          rules: [
+            { method: 'GET', pathPrefix: '/items' },
+            { method: 'HEAD', pathPrefix: '/items' },
+          ],
           credential: {
             header: 'Authorization',
             valueEnv: 'HTTP_TLS_TEST_SECRET',
@@ -82,7 +93,13 @@ it('uses native HTTPS, injected credentials and guarded connect options without 
         },
       ],
     };
-    const args = { integrationId: 'local', method: 'GET', path: '/items' };
+    const args = {
+      integrationId: 'local',
+      method: 'GET',
+      path: '/items',
+      body: '',
+      contentType: 'text/plain',
+    };
     await expect(
       integrationRequest(config, 'run:transport', args, 'actor'),
     ).resolves.toMatchObject({ status: 200, body: '{"ok":true}' });
@@ -94,18 +111,31 @@ it('uses native HTTPS, injected credentials and guarded connect options without 
     });
     expect(requests).toBe(1);
     expect(receivedCredential).toBe('Bearer raw-test-secret');
+    expect(receivedContentType).toBeUndefined();
+    expect(receivedBodyBytes).toBe(0);
+    await expect(
+      integrationRequest(
+        config,
+        'run:transport',
+        { ...args, method: 'HEAD', body: null },
+        'actor',
+      ),
+    ).resolves.toMatchObject({ status: 200, body: '' });
+    expect(requests).toBe(2);
+    expect(receivedContentType).toBeUndefined();
+    expect(receivedBodyBytes).toBe(0);
     vi.mocked(createGuardedConnectOptions).mockReturnValue({});
     await expect(
       integrationRequest(config, 'run:transport', args, 'actor'),
     ).rejects.toThrow('Integration request failed');
-    expect(requests).toBe(1);
+    expect(requests).toBe(2);
     vi.mocked(assertEgressUrlAllowed).mockImplementationOnce(() => {
       throw new Error('private address');
     });
     await expect(
       integrationRequest(config, 'run:transport', args, 'actor'),
     ).rejects.toThrow('Integration request failed');
-    expect(requests).toBe(1);
+    expect(requests).toBe(2);
   } finally {
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => upstream.close(() => resolve()));

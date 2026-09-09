@@ -115,14 +115,20 @@ export const integrationRequestSchema = z
       .string()
       .max(maxBody)
       .refine((value) => Buffer.byteLength(value) <= maxBody)
-      .optional(),
+      .nullish()
+      .describe(
+        'Request body for a permitted write. For GET/HEAD omit, use null, or use an empty string; nonempty bodies are rejected.',
+      ),
     contentType: z
       .enum([
         'application/json',
         'text/plain',
         'application/x-www-form-urlencoded',
       ])
-      .optional(),
+      .nullish()
+      .describe(
+        'Optional request content type; omit or use null when unused. Ignored for GET/HEAD.',
+      ),
   })
   .strict();
 
@@ -179,7 +185,8 @@ export async function integrationRequest(
     )
   )
     throw new Error('Integration destination or method is not allowed');
-  if (args.body !== undefined && ['GET', 'HEAD'].includes(args.method))
+  const bodyless = args.method === 'GET' || args.method === 'HEAD';
+  if (bodyless && args.body != null && args.body !== '')
     throw new Error('This method does not accept a body');
   if (active >= 32 || (scopes.get(scope) ?? 0) >= 4)
     throw new Error('Integration request concurrency limit reached');
@@ -212,9 +219,11 @@ export async function integrationRequest(
       method: args.method,
       headers: {
         [integration.credential.header]: credential,
-        ...(args.contentType ? { 'content-type': args.contentType } : {}),
+        ...(!bodyless && args.contentType
+          ? { 'content-type': args.contentType }
+          : {}),
       },
-      body: args.body,
+      ...(!bodyless && args.body != null ? { body: args.body } : {}),
     });
     if (response.status >= 300 && response.status < 400) throw new Error();
     const contentType = response.headers

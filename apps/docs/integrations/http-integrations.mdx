@@ -121,7 +121,10 @@ For example, a request after listing `inventory` is:
 
 For a permitted write, `body` is a string and `contentType` can be
 `application/json`, `text/plain`, or `application/x-www-form-urlencoded`.
-`GET` and `HEAD` do not accept bodies. Responses contain `status`, a `body`
+For `GET` and `HEAD`, omit `body`, pass `null`, or pass an empty string. These
+representations are sent without a body or content-type header; nonempty bodies,
+including whitespace, are rejected. `contentType` may also be omitted or `null`
+and is ignored for these bodyless methods. Responses contain `status`, a `body`
 string, and only the permitted response headers: `content-type`, `retry-after`,
 and `x-request-id`. Non-redirect upstream errors can be returned as responses;
 the agent should check `status` rather than assume a completed call succeeded.

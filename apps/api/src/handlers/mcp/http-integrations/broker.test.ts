@@ -227,6 +227,88 @@ it('permits explicitly authorized mutation but caps UTF-8 request bodies at 1 Mi
   expect(fetch).not.toHaveBeenCalled();
 });
 
+it.each(['GET', 'HEAD'] as const)(
+  'normalizes absent, null and empty %s bodies without forwarding content headers',
+  async (method) => {
+    const bodylessConfig = {
+      integrations: [
+        { ...entry, rules: [{ method, pathPrefix: '/v1/items' }] },
+      ],
+    };
+    for (const representation of [
+      { body: '' },
+      {},
+      { body: undefined },
+      { body: null },
+    ]) {
+      for (const contentType of [undefined, null, 'text/plain']) {
+        vi.mocked(fetch).mockResolvedValueOnce(
+          (method === 'HEAD'
+            ? new Response(null)
+            : Response.json({ ok: true })) as never,
+        );
+        await integrationRequest(
+          bodylessConfig,
+          'run:bodyless',
+          { ...args, method, ...representation, contentType },
+          'actor',
+        );
+        const request = vi.mocked(fetch).mock.lastCall![1]!;
+        expect(request).not.toHaveProperty('body');
+        expect(request.headers).toEqual({
+          Authorization: 'Bearer opaque-placeholder',
+        });
+        expect(request.redirect).toBe('manual');
+        expect(request.dispatcher).toBeDefined();
+      }
+    }
+  },
+);
+
+it.each(['GET', 'HEAD'] as const)(
+  'still rejects every nonempty or nonstring %s body before transport',
+  async (method) => {
+    const bodylessConfig = {
+      integrations: [
+        { ...entry, rules: [{ method, pathPrefix: '/v1/items' }] },
+      ],
+    };
+    for (const body of [' ', '\n', '{}', 'null', 'x', {}, [], 0, false]) {
+      await expect(
+        integrationRequest(
+          bodylessConfig,
+          'run:bodyless',
+          { ...args, method, body },
+          'actor',
+        ),
+      ).rejects.toThrow();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+    expect(Agent).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  { method: 'POST' },
+  { path: '/private' },
+  { headers: { Authorization: 'override' } },
+  { contentType: '' },
+])(
+  'does not let empty-body normalization bypass policy: %j',
+  async (overrides) => {
+    await expect(
+      integrationRequest(
+        config,
+        'run:bodyless',
+        { ...args, body: '', ...overrides },
+        'actor',
+      ),
+    ).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(Agent).not.toHaveBeenCalled();
+  },
+);
+
 it('returns only allowlisted response headers', async () => {
   vi.mocked(fetch).mockResolvedValue(
     Response.json(

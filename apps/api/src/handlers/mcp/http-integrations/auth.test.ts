@@ -228,6 +228,50 @@ function post(
   });
 }
 
+it('publishes optional nullable body fields without defaults and accepts native empty arguments', async () => {
+  const actor = await member();
+  const token = await createAuthToken({ userId: actor.id, timeoutMs: 60_000 });
+  const listing = await (await post(token)).json();
+  const schema = listing.result.tools.find(
+    (tool: { name: string }) => tool.name === 'integration_request',
+  ).inputSchema;
+  expect(schema.required).toEqual(['integrationId', 'method', 'path']);
+  expect(schema.additionalProperties).toBe(false);
+  for (const name of ['body', 'contentType']) {
+    const property = schema.properties[name];
+    const types = [property, ...(property.anyOf ?? [])].flatMap(
+      (item: { type?: string | string[] }) =>
+        Array.isArray(item.type) ? item.type : [item.type],
+    );
+    expect(types).toContain('null');
+    expect(property).not.toHaveProperty('default');
+  }
+  for (const fields of [
+    {},
+    { body: '', contentType: 'text/plain' },
+    { body: null, contentType: null },
+  ]) {
+    const response = await post(token, 'tools/call', {
+      name: 'integration_request',
+      arguments: {
+        integrationId: 'example',
+        method: 'GET',
+        path: '/items',
+        ...fields,
+      },
+    });
+    const payload = await response.json();
+    expect(payload.result.isError).not.toBe(true);
+    expect(vi.mocked(fetch).mock.lastCall![1]).not.toHaveProperty('body');
+    expect(vi.mocked(fetch).mock.lastCall![1]?.headers).toEqual({
+      'X-Test-Broker-Credential': 'test-only-credential-must-never-be-returned',
+    });
+    expect(JSON.stringify(payload)).not.toContain(
+      'test-only-credential-must-never-be-returned',
+    );
+  }
+});
+
 it.each([path, `${path}/`])(
   'rejects missing authentication at %s',
   async (route) => {
