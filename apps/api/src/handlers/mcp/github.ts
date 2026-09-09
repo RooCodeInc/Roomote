@@ -126,33 +126,12 @@ export function createGithubMcp(options?: {
           !repository ||
           !installation ||
           installation.suspendedAt ||
-          repository.installationId !== installation.id ||
           !repository.githubRepoId ||
-          !Number.isSafeInteger(repository.githubRepoId) ||
-          repository.githubRepoId < 1 ||
           (repository.host && repository.host !== 'github.com')
         ) {
           throw new McpProxyError(
             403,
             'GitHub write target must be an active connected repository',
-          );
-        }
-        const permissions = installation.permissions as Record<
-          string,
-          unknown
-        > | null;
-        const requiredPermissions =
-          name === 'add_issue_comment'
-            ? ['issues', 'pull_requests']
-            : ['pull_requests'];
-        if (
-          !requiredPermissions.some(
-            (permission) => permissions?.[permission] === 'write',
-          )
-        ) {
-          throw new McpProxyError(
-            403,
-            'GitHub installation lacks the required issue or pull request write permission',
           );
         }
         const appCredentials = await resolveRuntimeGitHubAppCredentials();

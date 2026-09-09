@@ -761,18 +761,13 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     for (const guidance of [
       '`update_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
-      'Follow their discovered native descriptions, schemas, and arguments without narrowing the contract',
-      'mark a PR ready, request a reviewer, or react to an existing comment',
-      "Retargeting a PR's base is not a branch or file write",
-      'Authorization is repository-scoped',
-      'do not invent a PR-only constraint or require `pullNumber`',
-      'allows `commentId` without it',
+      'Follow their discovered descriptions, schemas, and arguments',
+      'Read the target first, send only the requested fields',
+      'report success only after the tool confirms it',
       'inspect the resulting state before retrying an error',
-      'does not enable merging, PR creation or deletion, branch or file writes',
     ]) {
       expect(prompt).toContain(guidance);
     }
-    expect(prompt).not.toContain('manage reviewers or draft status');
   });
 
   it('treats replies as continuations of the existing conversation', () => {

@@ -54,50 +54,14 @@ same as running tests: local checkout, code edits, command execution, and testin
 are delegated to a task, as are investigations that need a workspace.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
-also supports native GitHub updates directly in Fast: changes to existing pull
-requests, issue or PR comments, review-comment replies, and comment reactions.
-For example, ask "Mark PR #42 in example/repo ready for review", "Request a review
-from octocat on that PR", or "Add a thumbs-up reaction to this existing comment"
-with its GitHub URL. The discovered native tool descriptions and schemas determine
-the supported arguments, rather than a separate restricted field list.
+also supports updates to existing pull requests, issue or PR comments,
+review-comment replies, and reactions using the deployment's GitHub App.
+See that guide for supported actions and access requirements.
 
-Writes require an active Roomote member, an active
-connected repository, and the GitHub App installation's applicable permission;
-no personal GitHub OAuth connection is required. Authorization is scoped to the
-repository, not only to pull requests. Retargeting a PR to an existing base branch
-is supported when exposed by the tool; it does not write branches or files.
-This bounded path does not merge, create or delete PRs, write files or branches,
-edit or delete comments, or administer repositories. A permission denial is not
-bypassed by switching to another route.
-
-An update that combines several actions is not guaranteed to be atomic. If it
-returns an error, Roomote checks what changed before retrying.
-
-### GitLab and Bitbucket MCP evaluation
-
-GitLab and Bitbucket MCP options have been evaluated but are not enabled for
-this direct Fast path. Existing source-control task workflows are unchanged.
-The remaining verification gaps are:
-
-- **GitLab:** [Official MCP authorization](https://docs.gitlab.com/user/model_context_protocol/mcp_server/)
-  requires MCP-specific access that Roomote's existing `api` OAuth scope does not
-  demonstrate. [Tool coverage](https://docs.gitlab.com/user/model_context_protocol/mcp_server_tools/)
-  must be checked against the deployed GitLab version, not assumed from current
-  documentation or development source. The community
-  [GitLab MCP server](https://github.com/zereight/gitlab-mcp) offers bearer-token
-  passthrough, but live reuse and refresh of Roomote credentials, pinned tool
-  schemas, and repository/discussion ownership enforcement remain unverified.
-- **Bitbucket Cloud:** [Atlassian Rovo lists Bitbucket tools](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools),
-  but its [agent-interface authorization scopes](https://support.atlassian.com/atlassian-ai-gateway/docs/configure-authentication-via-api-token/)
-  are not demonstrated interchangeable with Roomote's existing Bitbucket OAuth
-  connection. Exact PR update fields, reply-parent arguments, and close/reopen
-  coverage still need authenticated schema and live verification. Reopening a
-  comment thread does not establish PR reopen support; Data Center support is
-  not implied by Cloud coverage.
-
-No authenticated MCP interoperability or live provider-write test was performed
-for this evaluation. These findings do not enable a new integration or require
-users to create additional credentials.
+[GitLab MCP](https://docs.gitlab.com/user/model_context_protocol/mcp_server/)
+and [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
+are not enabled for this direct Fast path. Their compatibility with Roomote's
+existing credentials has not been verified; existing task workflows are unchanged.
 
 ## The session view
 

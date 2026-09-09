@@ -7,6 +7,7 @@ import {
   repositories,
   repositoryFactory,
   runFactory,
+  sql,
   taskRuns,
   tasks,
   userFactory,
@@ -40,6 +41,14 @@ describe('GitHub MCP bounded writes', () => {
   const appCredentials = { appId: '123', privateKey: 'test-only-key' };
   const owner = `bounded-${crypto.randomUUID()}`;
   const args = { owner, repo: 'example', pullNumber: 42, state: 'closed' };
+  const writeCases = [
+    ['update_pull_request', { pullNumber: 42, state: 'closed' }],
+    ['add_issue_comment', { issue_number: 42, body: 'Comment' }],
+    [
+      'add_reply_to_pull_request_comment',
+      { pullNumber: 42, commentId: 12, body: 'Reply' },
+    ],
+  ] as const;
 
   beforeAll(async () => {
     actor = await userFactory.create({ role: 'member' });
@@ -208,38 +217,6 @@ describe('GitHub MCP bounded writes', () => {
   });
 
   it.each([
-    [
-      'add_issue_comment',
-      { owner, repo: 'example', issue_number: 42, body: 'Comment' },
-    ],
-    [
-      'add_reply_to_pull_request_comment',
-      { owner, repo: 'example', pullNumber: 42, commentId: 12, body: 'Reply' },
-    ],
-  ])('forwards %s through the same scoped proxy', async (name, arguments_) => {
-    expect((await call(name, arguments_)).status).toBe(200);
-    expect(
-      JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
-    ).toEqual(arguments_);
-  });
-
-  it('forwards all native update fields without local field caps', async () => {
-    const arguments_ = {
-      ...args,
-      base: 'release',
-      draft: true,
-      maintainer_can_modify: false,
-      reviewers: ['reviewer'],
-      title: 't'.repeat(257),
-      body: 'b'.repeat(65537),
-    };
-    expect((await call('update_pull_request', arguments_)).status).toBe(200);
-    expect(
-      JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
-    ).toEqual(arguments_);
-  });
-
-  it.each([
     { ...args, owner: '../outside' },
     { ...args, repo: '..' },
     { ...args, repo: 'example/other' },
@@ -253,6 +230,20 @@ describe('GitHub MCP bounded writes', () => {
   });
 
   it.each([
+    ...writeCases.slice(1),
+    [
+      'update_pull_request',
+      {
+        pullNumber: 42,
+        state: 'closed',
+        base: 'release',
+        draft: true,
+        maintainer_can_modify: false,
+        reviewers: ['reviewer'],
+        title: 't'.repeat(257),
+        body: 'b'.repeat(65537),
+      },
+    ],
     ['add_issue_comment', { issue_number: 42, reaction: 'eyes' }],
     ['add_issue_comment', { issue_number: 42, comment_id: 12, reaction: '+1' }],
     ['add_reply_to_pull_request_comment', { commentId: 12, reaction: 'eyes' }],
@@ -269,11 +260,11 @@ describe('GitHub MCP bounded writes', () => {
     ['add_issue_comment', {}],
     ['add_reply_to_pull_request_comment', { commentId: 'invalid' }],
     ['add_reply_to_pull_request_comment', {}],
-  ])(
+  ] as const)(
     'leaves native argument validation to upstream for %s',
     async (name, fields) => {
       const arguments_ = { owner, repo: 'example', ...fields };
-      expect((await call(name as string, arguments_)).status).toBe(200);
+      expect((await call(name, arguments_)).status).toBe(200);
       expect(
         JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
       ).toEqual(arguments_);
@@ -309,6 +300,23 @@ describe('GitHub MCP bounded writes', () => {
   });
 
   it('filters discovery while preserving full native schemas and descriptions for JSON and SSE', async () => {
+    const targetProperties = {
+      owner: { type: 'string' },
+      repo: { type: 'string' },
+    };
+    const reaction = {
+      type: 'string',
+      enum: [
+        '+1',
+        '-1',
+        'laugh',
+        'confused',
+        'heart',
+        'hooray',
+        'rocket',
+        'eyes',
+      ],
+    };
     const tools = [
       { name: 'get_file_contents', inputSchema: { type: 'object' } },
       {
@@ -318,8 +326,7 @@ describe('GitHub MCP bounded writes', () => {
           type: 'object',
           required: ['owner', 'repo', 'pullNumber'],
           properties: {
-            owner: { type: 'string' },
-            repo: { type: 'string' },
+            ...targetProperties,
             pullNumber: { type: 'number' },
             title: { type: 'string' },
             body: { type: 'string' },
@@ -339,24 +346,11 @@ describe('GitHub MCP bounded writes', () => {
           type: 'object',
           required: ['owner', 'repo', 'issue_number'],
           properties: {
-            owner: { type: 'string' },
-            repo: { type: 'string' },
+            ...targetProperties,
             issue_number: { type: 'number' },
             comment_id: { type: 'integer', minimum: 1 },
             body: { type: 'string', minLength: 1 },
-            reaction: {
-              type: 'string',
-              enum: [
-                '+1',
-                '-1',
-                'laugh',
-                'confused',
-                'heart',
-                'hooray',
-                'rocket',
-                'eyes',
-              ],
-            },
+            reaction,
           },
         },
       },
@@ -368,24 +362,11 @@ describe('GitHub MCP bounded writes', () => {
           type: 'object',
           required: ['owner', 'repo', 'commentId'],
           properties: {
-            owner: { type: 'string' },
-            repo: { type: 'string' },
+            ...targetProperties,
             pullNumber: { type: 'number' },
             commentId: { type: 'number', minimum: 1 },
             body: { type: 'string' },
-            reaction: {
-              type: 'string',
-              enum: [
-                '+1',
-                '-1',
-                'laugh',
-                'confused',
-                'heart',
-                'hooray',
-                'rocket',
-                'eyes',
-              ],
-            },
+            reaction,
           },
         },
       },
@@ -408,9 +389,6 @@ describe('GitHub MCP bounded writes', () => {
         method: 'tools/list',
       });
       const visible = (await response.json()).result.tools;
-      expect(visible.map((tool: { name: string }) => tool.name)).toEqual(
-        tools.slice(0, 4).map((tool) => tool.name),
-      );
       expect(visible).toEqual(tools.slice(0, 4));
     }
     expect(
@@ -466,7 +444,7 @@ describe('GitHub MCP bounded writes', () => {
 
   it.each([
     { isActive: false },
-    { githubRepoId: -1 },
+    { githubRepoId: 0 },
     { host: 'other.example' },
   ])('rejects inactive or invalid repository connection %j', async (update) => {
     await db
@@ -478,13 +456,8 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { suspendedAt: new Date() },
-    { appId: 456 },
-    { permissions: {} },
-    { permissions: { pull_requests: 'read', issues: 'write' } },
-  ])(
-    'rejects suspended, wrong-app, or underprivileged installation %j',
+  it.each([{ suspendedAt: new Date() }, { appId: 456 }])(
+    'rejects suspended or wrong-app installation %j',
     async (update) => {
       await db
         .update(githubInstallations)
@@ -496,41 +469,36 @@ describe('GitHub MCP bounded writes', () => {
     },
   );
 
-  it('rejects comments without either issue or PR write permission', async () => {
-    await db
-      .update(githubInstallations)
-      .set({ permissions: { issues: 'read', pull_requests: 'read' } })
-      .where(eq(githubInstallations.id, installation.id));
-    expect(
-      (
-        await call('add_issue_comment', {
-          owner,
-          repo: 'example',
-          issue_number: 42,
-          body: 'Comment',
-        })
-      ).status,
-    ).toBe(403);
-    expect(mocks.mint).not.toHaveBeenCalled();
-  });
-
-  it.each(['issues', 'pull_requests'])(
-    'allows a top-level comment with %s write permission, leaving target permission enforcement to GitHub',
-    async (permission) => {
+  it.each([
+    null,
+    {},
+    { issues: 'read', pull_requests: 'read' },
+    { issues: 'write' },
+    { pull_requests: 'write' },
+  ])(
+    'leaves live write permissions to GitHub despite stored permissions %j',
+    async (permissions) => {
       await db
         .update(githubInstallations)
-        .set({ permissions: { [permission]: 'write' } })
+        .set({
+          permissions: permissions === null ? sql`'null'::jsonb` : permissions,
+        })
         .where(eq(githubInstallations.id, installation.id));
-      expect(
-        (
-          await call('add_issue_comment', {
-            owner,
-            repo: 'example',
-            issue_number: 42,
-            body: 'Comment',
-          })
-        ).status,
-      ).toBe(200);
+      for (const [name, fields] of writeCases) {
+        const arguments_ = { owner, repo: 'example', ...fields };
+        expect((await call(name, arguments_)).status).toBe(200);
+        expect(mocks.mint).toHaveBeenLastCalledWith(
+          {
+            type: 'installationId',
+            installationId: installation.id,
+            repositoryIds: [repository.githubRepoId],
+          },
+          appCredentials,
+        );
+        expect(
+          JSON.parse(mocks.upstream.mock.lastCall![1].body).params.arguments,
+        ).toEqual(arguments_);
+      }
     },
   );
 
@@ -603,22 +571,31 @@ describe('GitHub MCP bounded writes', () => {
     }
   });
 
-  it('preserves upstream permission failures without retrying or escalating credentials', async () => {
-    const error = {
-      jsonrpc: '2.0',
-      id: 7,
-      error: {
-        code: -32000,
-        message: 'Resource not accessible by integration',
-      },
-    };
-    mocks.upstream.mockResolvedValueOnce(Response.json(error, { status: 403 }));
-    const response = await call();
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual(error);
-    expect(mocks.mint).toHaveBeenCalledTimes(1);
-    expect(mocks.upstream).toHaveBeenCalledTimes(1);
-  });
+  it.each(writeCases)(
+    'preserves upstream permission failures for %s without retrying or escalating credentials',
+    async (name, fields) => {
+      await db
+        .update(githubInstallations)
+        .set({ permissions: sql`'null'::jsonb` })
+        .where(eq(githubInstallations.id, installation.id));
+      const error = {
+        jsonrpc: '2.0',
+        id: 7,
+        error: {
+          code: -32000,
+          message: 'Resource not accessible by integration',
+        },
+      };
+      mocks.upstream.mockResolvedValueOnce(
+        Response.json(error, { status: 403 }),
+      );
+      const response = await call(name, { owner, repo: 'example', ...fields });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual(error);
+      expect(mocks.mint).toHaveBeenCalledTimes(1);
+      expect(mocks.upstream).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('audits trusted metadata without logging forwarded argument names or comment text', async () => {
     const log = vi.spyOn(console, 'info').mockImplementation(() => {});
