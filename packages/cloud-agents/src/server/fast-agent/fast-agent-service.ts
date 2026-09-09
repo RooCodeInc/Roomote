@@ -2857,6 +2857,7 @@ export async function answerFastAgentQuestion({
       discoveredIntegrations,
       currentUser,
       therapistModeEnabled,
+      agentBehaviorSettings,
     ] = await Promise.all([
       getAvailableEnvironments(),
       getDeploymentTaskModelOptions().catch((error) => {
@@ -2896,6 +2897,17 @@ export async function answerFastAgentQuestion({
         );
         return false;
       }),
+      db.query.deploymentSettings
+        .findFirst({
+          columns: { globalAgentInstructions: true },
+        })
+        .catch((error) => {
+          degradedContextComponents.add('agent_guidance');
+          console.warn(
+            `[Fast Agent] Shared agent guidance unavailable: ${formatErrorForLog(error)}`,
+          );
+          return undefined;
+        }),
     ]);
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
@@ -3140,6 +3152,7 @@ export async function answerFastAgentQuestion({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       therapistModeEnabled,
+      globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,

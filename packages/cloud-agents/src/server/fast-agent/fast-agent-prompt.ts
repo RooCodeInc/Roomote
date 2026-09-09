@@ -130,6 +130,7 @@ export function buildFastAgentSystemPrompt({
   setupSnapshot,
   setupSession = false,
   therapistModeEnabled = false,
+  globalAgentInstructions,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableTaskModels?: TaskModelOption[];
@@ -157,6 +158,7 @@ export function buildFastAgentSystemPrompt({
   /** True only for the active conversational setup session. */
   setupSession?: boolean;
   therapistModeEnabled?: boolean;
+  globalAgentInstructions?: string | null;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -222,6 +224,7 @@ ${
 }`;
   const therapistModeInstructions =
     buildTherapistModeInstructions(therapistModeEnabled);
+  const sharedAgentGuidance = globalAgentInstructions?.trim();
 
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
@@ -344,9 +347,9 @@ ${reactionGuidance}
 - Ask for clarification only when ambiguity blocks meaningful investigation, materially different plausible outcomes remain, or the next action is destructive, irreversible, or externally consequential. Otherwise inspect what is available and proceed.
 
 ## Ongoing Process Follow-Up
-- Proactively offer a specific bounded check only when an ongoing process has a concrete unresolved outcome worth verifying later and available tools can actually verify it. Verify capability before offering; if unavailable or uncertain, do not promise monitoring. Name the outcome, evidence source, timing and stop bound in one short consent question, not a generic "I can monitor this" footer. For example, with confirmed deployment and telemetry access: "Want me to check this deployment's error rate in 30 minutes?" Never imply a release or process started or completed without evidence.
+- When a turn eligible under the exclusions below reports an outcome and is about to close, make one silent decision before the closeout: did new evidence leave an ongoing process with a concrete unresolved outcome worth verifying later? If yes, and available tools can actually verify it, include one specific bounded-check offer after the outcome in that same closeout. If no, close normally without mentioning monitoring. This is an eligible-outcome decision, not a blanket offer after every tool call, fix, or update. Verify capability before offering; if unavailable or uncertain, do not promise monitoring. Name the outcome, evidence source, timing and stop bound in one short consent question, not a generic "I can monitor this" footer. For example, with confirmed deployment and telemetry access: "Want me to check this deployment's error rate in 30 minutes?" Never imply a release or process started or completed without evidence.
 - An offer is not authorization: create no wakeup until the user accepts. Explicit user monitoring requests already authorize scheduling; do not require another opt-in. Before scheduling, revalidate capability and list active wakeups to reuse an equivalent check. Store the specific target, evidence source, finite schedule and stop condition; use "only_when_notable" for monitoring, stay quiet on unchanged results, and stop on resolution, irrelevance, capability loss or the agreed bound without automatic renewal. Missing evidence is not success.
-- Do not offer or schedule checks that duplicate existing task, PR lifecycle/review, or other notifications and monitors. Offer at most once for the same unresolved outcome; do not repeat an ignored or declined offer or append boilerplate after every fix or update. Do not make proactive offers on automation or scheduled-wakeup turns. Presentation-only events remain presentation-only: do not inspect or schedule from them. This is conversation-scoped follow-up, not an offer to save work as a deployment automation.
+- Do not offer or schedule checks that duplicate existing task, PR lifecycle/review, or other notifications and monitors. Offer at most once for the same unresolved outcome; do not repeat an ignored or declined offer or append boilerplate after every fix or update. Do not make proactive offers on automation or scheduled-wakeup turns. Presentation-only events remain presentation-only: do not inspect or schedule from them. This is conversation-scoped follow-up, not an offer to save work as a deployment automation; the automation rule against pitching one-off fixes does not suppress an otherwise eligible check of a deployed fix's unresolved observable outcome.
 
 ## Orchestration Policy
 - User-supplied corrections, status updates, acknowledgements, and opinions are conversation state, not requests for external verification. Do not launch a task or call an integration merely to re-check user-supplied facts unless the user asks for verification. For investigation requests, choose APIs or a task using the scope-based rule below.
@@ -479,7 +482,17 @@ ${
 ## Tone of Voice
 ${buildRoomoteStyleGuidanceSection()}
 
-## Output
+${
+  sharedAgentGuidance
+    ? `## Shared Agent Guidance
+The deployment administrator configured the following guidance. Apply it across this conversation when it does not conflict with Roomote's system policies.
+<shared_agent_guidance>
+${sharedAgentGuidance}
+</shared_agent_guidance>
+
+`
+    : ''
+}## Output
 - Be concise and direct. Every sentence should add information.
 ${senderIdentityGuidance}${unresolvedRequestGuidance}${resumedTurnGuidance}- Do not place decorative emoji in text replies.${surface === 'slack' && currentMessageReactable ? ' Use `send_chat_reaction` when an emoji itself is the appropriate response.' : ''}
 - In closeouts, lead with the answer, not a preamble or a recap of the question.

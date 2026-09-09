@@ -216,6 +216,228 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
+  // Synthetic upstream contracts exercise transport, not the live Better Stack API.
+  it.each([
+    {
+      name: 'sources',
+      fields: [],
+      properties: {
+        name: { type: 'string' },
+        page: { type: 'integer' },
+        per_page: { type: 'integer' },
+      },
+      args: {},
+    },
+    {
+      name: 'source',
+      fields: ['id'],
+      properties: { id: { type: 'integer' } },
+      args: { id: 42 },
+    },
+    {
+      name: 'query',
+      fields: ['source_id', 'table', 'query'],
+      properties: {
+        source_id: { type: 'number' },
+        table: { type: 'string' },
+        host: { type: 'string' },
+        query: { type: 'string' },
+      },
+      args: {
+        source_id: 42,
+        table: 'observed_logs_7',
+        host: 'cluster.example.test',
+        query: 'SELECT count() FROM observed_logs_7',
+      },
+    },
+  ])(
+    'discovers exact Better Stack $name in integration scope and forwards without defaults',
+    async ({ name, fields, properties, args }) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+        'other-server': { url: 'https://other.example.test/mcp', headers: {} },
+      };
+      const inputSchema = {
+        type: 'object',
+        additionalProperties: false,
+        properties,
+        required: fields,
+      };
+      const upstreamTool = {
+        name,
+        description: `Synthetic ${name} contract`,
+        inputSchema,
+      };
+      mocks.listMcpTools.mockResolvedValue([upstreamTool]);
+      mocks.callMcpTool.mockImplementation(async ({ args: forwarded }) => {
+        z.object(
+          Object.fromEntries(
+            Object.entries(properties).map(([field, { type }]) => {
+              const schema =
+                type === 'integer'
+                  ? z.number().int()
+                  : type === 'number'
+                    ? z.number()
+                    : z.string();
+              return [
+                field,
+                fields.some((required) => required === field)
+                  ? schema
+                  : schema.optional(),
+              ];
+            }),
+          ),
+        )
+          .strict()
+          .parse(forwarded);
+        return { result: [] };
+      });
+      const available = await listFastAgentIntegrations(auditContext);
+      const catalog = available.flatMap((integration) =>
+        integration.tools.map((tool) => ({
+          ...tool,
+          integrationId: integration.id,
+        })),
+      );
+      expect(
+        matchIntegrationTools(catalog, {
+          integrationId: 'betterstack',
+          toolName: name,
+          query: 'source table metadata',
+        }).tools,
+      ).toEqual([{ ...upstreamTool, integrationId: 'betterstack' }]);
+      const request = z
+        .object(CALL_INTEGRATION_TOOL_TOOL.inputSchema)
+        .parse({ integrationId: 'betterstack', toolName: name, args });
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          ...request,
+          args: request.args!,
+        }),
+      ).resolves.toEqual({ result: [] });
+      expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: { Authorization: 'Bearer control-plane-token' },
+          toolName: name,
+          args,
+        }),
+      );
+      if (name === 'query') {
+        const withoutHost = Object.fromEntries(
+          Object.entries(args).filter(([key]) => key !== 'host'),
+        );
+        await expect(
+          callFastAgentIntegration(auditContext, available, {
+            ...request,
+            args: withoutHost,
+          }),
+        ).resolves.toEqual({ result: [] });
+        expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+          expect.objectContaining({ args: withoutHost }),
+        );
+      }
+      for (const missing of fields) {
+        const incomplete = Object.fromEntries(
+          Object.entries(args).filter(([key]) => key !== missing),
+        );
+        await expect(
+          callFastAgentIntegration(auditContext, available, {
+            ...request,
+            args: incomplete,
+          }),
+        ).rejects.toThrow();
+        expect(mocks.callMcpTool).toHaveBeenLastCalledWith(
+          expect.objectContaining({ args: incomplete }),
+        );
+      }
+      expect(mocks.callMcpTool).toHaveBeenCalledTimes(
+        1 + fields.length + (name === 'query' ? 1 : 0),
+      );
+    },
+  );
+
+  it.each(['Unauthorized', 'integration unavailable'])(
+    'fails closed when Better Stack discovery rejects with %s',
+    async (message) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+      };
+      mocks.listMcpTools.mockRejectedValueOnce(new Error(message));
+      const available = await listFastAgentIntegrations(auditContext);
+      expect(available).toEqual([]);
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'betterstack',
+          toolName: 'query',
+          args: {},
+        }),
+      ).rejects.toThrow('not available');
+      expect(mocks.callMcpTool).not.toHaveBeenCalled();
+      expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an undiscovered Better Stack query even when another integration exposes it', async () => {
+    mocks.configuredServers = {
+      betterstack: {
+        url: 'https://api.example.com/api/mcp/betterstack',
+        headers: {},
+      },
+      'other-server': { url: 'https://other.example.test/mcp', headers: {} },
+    };
+    mocks.listMcpTools.mockImplementation(async ({ url }) => [
+      {
+        name: url.includes('betterstack') ? 'sources' : 'query',
+        inputSchema: { type: 'object' },
+      },
+    ]);
+    const available = await listFastAgentIntegrations(auditContext);
+    await expect(
+      callFastAgentIntegration(auditContext, available, {
+        integrationId: 'betterstack',
+        toolName: 'query',
+        args: {},
+      }),
+    ).rejects.toThrow('not available');
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
+  });
+
+  it.each(['Unauthorized', 'tool unavailable'])(
+    'preserves Better Stack call-time rejection: %s',
+    async (message) => {
+      mocks.configuredServers = {
+        betterstack: {
+          url: 'https://api.example.com/api/mcp/betterstack',
+          headers: {},
+        },
+      };
+      mocks.listMcpTools.mockResolvedValue([
+        { name: 'query', inputSchema: { type: 'object' } },
+      ]);
+      const available = await listFastAgentIntegrations(auditContext);
+      mocks.callMcpTool.mockRejectedValueOnce(new Error(message));
+      await expect(
+        callFastAgentIntegration(auditContext, available, {
+          integrationId: 'betterstack',
+          toolName: 'query',
+          args: {},
+        }),
+      ).rejects.toThrow(message);
+      expect(mocks.callMcpTool).toHaveBeenCalledOnce();
+      expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'failed', error: message }),
+      );
+    },
+  );
+
   it('exposes GitHub reads and bounded writes through the existing router MCP', async () => {
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     mocks.listMcpTools.mockResolvedValue([
