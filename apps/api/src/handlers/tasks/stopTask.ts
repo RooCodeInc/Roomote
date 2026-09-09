@@ -74,7 +74,9 @@ export async function stopTask(
     const result = await stopTaskRun({
       run: job,
       authUserId: auth.userId,
-      ...(body.userInitiated ? { cancelledBy: { source: 'api' } } : {}),
+      ...(body.userInitiated !== false
+        ? { cancelledBy: { source: 'api' } }
+        : {}),
     });
 
     if (!result.success) {

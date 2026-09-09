@@ -8,12 +8,12 @@ const { findLatestTaskRun, stopTaskRun } = vi.hoisted(() => ({
 vi.mock('../helpers', () => ({ findLatestTaskRun }));
 vi.mock('../task-stop', () => ({ stopTaskRun }));
 
-function createContext(body: { userInitiated?: boolean }) {
+function createContext(body?: { userInitiated?: boolean }) {
   return {
     req: {
       param: () => 'task-1',
       header: (name: string) =>
-        name === 'content-type' ? 'application/json' : undefined,
+        body && name === 'content-type' ? 'application/json' : undefined,
       json: async () => body,
     },
     get: () => ({ userId: 'user-1' }),
@@ -49,6 +49,17 @@ describe('stopTask', () => {
 
   it('adds user attribution for an explicitly requested stop', async () => {
     const response = await stopTask(createContext({ userInitiated: true }));
+
+    expect(response.status).toBe(200);
+    expect(stopTaskRun).toHaveBeenCalledWith({
+      run: expect.objectContaining({ id: 42 }),
+      authUserId: 'user-1',
+      cancelledBy: { source: 'api' },
+    });
+  });
+
+  it('preserves user attribution for existing payload-free callers', async () => {
+    const response = await stopTask(createContext());
 
     expect(response.status).toBe(200);
     expect(stopTaskRun).toHaveBeenCalledWith({
