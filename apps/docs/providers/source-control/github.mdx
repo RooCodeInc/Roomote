@@ -243,8 +243,9 @@ bounded searches for each connected repository when investigating several.
 Fast can use the native `update_pull_request`, `add_issue_comment`, and
 `add_reply_to_pull_request_comment` tools without starting a coding task.
 Their discovered descriptions and schemas define the supported arguments,
-including reviewer requests, draft status, base retargeting, maintainer edit
-permission, comments, replies, and reactions. These actions use the deployment
+including title and body changes, closing or reopening an existing pull request,
+reviewer requests, draft status, base retargeting, maintainer edit permission,
+comments, replies, and reactions. These actions use the deployment
 GitHub App, require an active Roomote member and an active connected repository,
 and remain subject to the installation's issue or pull request write permission.
 No personal GitHub OAuth connection is required. Ask for the specific change and
@@ -263,7 +264,9 @@ Retargeting a pull request's base to an existing branch does not write a branch
 or change files. Merging, creating or deleting pull requests, writing branches
 or files, editing or deleting comments, and repository administration are
 not available through this bounded Fast path; those requests still require a
-coding task. Other source-control providers are unchanged.
+coding task. [GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
+and [Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-fast)
+have their own supported Fast operations and limits.
 
 Native updates that combine several actions are not guaranteed to be atomic.
 After an error, Roomote inspects the resulting state before retrying so an action

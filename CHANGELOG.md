@@ -2,6 +2,41 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.5.0 (2026-09-09)
+
+Roomote 1.5 brings shared skills, more control over automations and coding tasks, and direct repository work across GitHub, GitLab and Bitbucket Cloud, alongside security and integration fixes.
+
+### Highlights
+
+- Share reusable skills and manage your own custom automations without launching a coding task or requiring administrator access.
+- Explore repositories and perform supported GitHub, GitLab and Bitbucket Cloud updates directly in Fast, with provider-specific permissions and limits.
+- Configure CI triage with natural-language rules, stop individual coding tasks from Session cards, and search large model selectors.
+- Receive security and integration fixes, including reliable GitHub installation routing with explicit single-repository search scopes.
+
+### Minor changes
+
+- Admins can configure CI Failure Triage repository scope, per-repository report destinations and investigation guidance through natural-language Additional rules. Rules are validated when saved; ambiguous or unsupported selections preserve the prior configuration. Explicit repository restrictions are fixed at save time, and unavailable destinations stop delivery instead of silently rerouting it.
+- Create reusable instance-wide skills directly in Sessions or Settings without choosing an environment or starting a coding task. Settings > Skills shows a shared catalog with creator labels and editing controls for creators and admins. Fast loads saved changes immediately, while coding runs refresh their catalog at startup. Existing environment and marketplace skills remain available through environment YAML, outside the shared Settings list.
+- Update existing GitHub pull requests, request reviewers, post comments and review-thread replies, and add reactions directly from Fast without starting a coding task. These actions use the connected GitHub App and its repository permissions; creating or merging pull requests and writing repository files still require a coding task.
+- Explore connected GitLab and Bitbucket Cloud repositories and update existing merge or pull requests directly in Fast using deployment OAuth connections. GitLab supports title, description and close/reopen updates, notes and discussion replies; Bitbucket supports title/description updates, declining pull requests, and comments/replies. Focused repository questions can use configured provider APIs without a workspace, while broad investigations, edits and test execution still delegate to coding tasks. Creating or merging pull requests and writing files are not available through these bounded Fast paths.
+- Members can create and manage their own custom automations, including schedules and report destinations, without administrator access. Management remains creator/admin-only, while signed-in deployment members can follow a Session link to read its timeline and linked task transcripts, logs, and artifacts without gaining action or secret access. Members' Session user filters offer their own identity and custom automations; built-in automations and deployment-wide controls remain admin-only.
+- Stop an individual active coding task directly from its Session card without stopping the parent Session or sibling tasks. The control requires execution access, targets the displayed run and shows cancellation errors inline.
+
+### Patch changes
+
+- Better Stack operational scans resolve collection and cluster routing from current source metadata instead of reusing stale or guessed identifiers that cause queries to fail. Scans remain read-only and stop rather than guess when metadata is unavailable.
+- Avoid unnecessary pull request retries and edits when Roomote assigns a valid Session follow-up link instead of the initial task link.
+- GitHub tools select the matching installation when multiple installations of the configured GitHub App are connected, instead of failing or using an arbitrary installation. Reads require an active connected repository, and searches require exactly one explicit repo:owner/name scope; unscoped and multi-repository searches are no longer accepted, including on single-installation deployments.
+- Refresh task memories when a pull request the task opened merges or closes unmerged, so recall can distinguish shipped work from abandoned approaches. Pull request outcomes are scoped to their source-control host and repository so matching names and numbers on another host cannot change unrelated tasks or memories; legacy links with unknown provenance are skipped.
+- Publish GitHub review-thread replies immediately instead of leaving them in pending drafts. Submitting a review no longer accidentally publishes unrelated draft comments; an existing pending review is submitted only when explicitly selected.
+- Require access to the underlying task before issuing a sandbox run token, preventing members from minting tokens for another owner's restricted automation tasks. Ordinary task collaboration and owner/admin access are preserved; already-issued tokens are not revoked.
+- Search model selectors by model name or ID when more than eight models are available, while preserving provider groups and default selections. Search resets when the selector is reopened.
+- Update dependencies to address security vulnerabilities in web requests, image processing, API parsing, YAML handling, and AI response reads, including critical Next.js fixes, while retaining AVIF image optimization.
+- Keep Slack review cards focused on current findings and action buttons, without redundant resolving questions or superseded-review notices.
+- Connect to Snowflake with encrypted PKCS8 RSA private keys and a passphrase instead of failing after the connection is saved. Passphrase inputs are masked, invalid keys and connection failures return credential-safe errors, and setup guidance covers secure key generation and staged rotation.
+- Task follow-ups can be retried after a definite send rejection, and distinct instructions are no longer incorrectly blocked. Uncertain deliveries remain protected against duplicate sends.
+- Show the configured task model and reasoning defaults in the model chip before its picker is opened, instead of briefly displaying a built-in reasoning level.
+
 ## 1.4.1 (2026-09-08)
 
 Roomote 1.4.1 restores integration lookups that failed with GPT-5.x models.
