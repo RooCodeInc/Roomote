@@ -910,6 +910,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('persists child-selected charts when the parent omits the optional chart argument', async () => {
+    const chart = {
+      title: 'Traffic sources',
+      chart: {
+        type: 'pie' as const,
+        segments: [{ label: 'Search', value: 65 }],
+      },
+    };
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Search accounts for most visits.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultCharts: [chart],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Search accounts for most visits.',
+      charts: [chart],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.contentBlocks).toEqual([
+      { type: 'text', text: 'Search accounts for most visits.' },
+      { type: 'data_visualization', ...chart },
+    ]);
+  });
+
   it('persists child-selected image IDs on a text-only terminal closeout', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {

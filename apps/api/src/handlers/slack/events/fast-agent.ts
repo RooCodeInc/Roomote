@@ -22,6 +22,7 @@ import {
   type SlackNotifier,
 } from '@roomote/slack';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
+import { buildDataVisualizationBlocks } from '@roomote/types';
 import {
   admitFastAgentHumanFollowUp,
   createFastAgentConversationArtifact,
@@ -378,6 +379,7 @@ export async function processFastAgentMessage(params: {
           kickoff,
           imageArtifactIds = [],
           videoArtifactIds = [],
+          charts = [],
         }) => {
           const replyImages = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
@@ -388,6 +390,7 @@ export async function processFastAgentMessage(params: {
             channel: event.channel,
             threadTs: threadId,
             text: message,
+            charts,
             sourceMessageTs: event.ts,
             deliverVideos: videoArtifactIds.length
               ? () =>
@@ -434,7 +437,7 @@ export async function processFastAgentMessage(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: async ({ messageId }, { message }) => {
+        replaceReply: async ({ messageId }, { message, charts }) => {
           // Keep the sticky footer when the edited message is its current
           // carrier; the lookup and edit share the footer lock so a
           // concurrent relocation cannot slip in between them.
@@ -453,6 +456,7 @@ export async function processFastAgentMessage(params: {
                   text: message,
                   blocks: [
                     { type: 'markdown', text: message },
+                    ...buildDataVisualizationBlocks(charts),
                     ...(footerMessageTs === messageId
                       ? [
                           buildSlackThreadReplyFooterBlock({
