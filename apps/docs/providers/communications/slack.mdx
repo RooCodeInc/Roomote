@@ -245,6 +245,12 @@ channels implicitly or inspect repository contents without delegating the work
 to a task. When the request spans every repository, Fast can delegate it to the
 deployment's all-repositories environment.
 
+Agent replies and delegated reports can include up to two native Slack charts.
+Ask Roomote to visualize suitable data as a pie, bar, area, or line chart. Each
+chart keeps a Markdown fallback for notifications and accessibility, and the
+same structured data renders as a chart with an accessible table in the Roomote
+web transcript. No additional Slack scope is required.
+
 ## Local URL changes
 
 Keep the public URL stable. When it changes, update the Slack app's redirect

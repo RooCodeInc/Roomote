@@ -37,6 +37,13 @@ Fast is the default for unpinned requests across the web dashboard and
 supported chat providers. Choose an environment or repository explicitly when
 you already know where the work should run.
 
+When work needs a sandbox but no source code, ask Fast to delegate it to
+**Blank slate**. The delegated task starts with an empty workspace and does not
+clone repositories or require source-control credentials. This is useful for
+artifact generation, integration work, and other tasks that need command
+execution without a repository. Custom automations can also select Blank slate
+as their preferred environment.
+
 Select **New Session** in the navigation to open the same launcher from any
 dashboard page.
 
@@ -168,6 +175,11 @@ Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
 sandboxed in the web view. Chat surfaces receive a concise text preview and a
 link to open the rendered widget when both are available.
+
+Agent replies and delegated reports can also include up to two pie, bar, area,
+or line charts. Roomote renders each chart responsively in the web transcript
+with a keyboard-accessible data table. Slack receives a native chart with its
+Markdown fallback; other chat providers receive the fallback text.
 
 ## Reply to a session
 
