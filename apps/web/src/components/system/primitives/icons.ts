@@ -28,6 +28,7 @@ export {
   ChartColumn,
   ChartColumnIncreasing,
   Check,
+  CheckCheck,
   CheckCircle2,
   CheckIcon,
   ChevronDown,
