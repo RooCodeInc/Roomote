@@ -4097,7 +4097,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
 
     await expect(
-      answerFastAgentQuestion({ ...baseParams, adapter }),
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        schedulingProgressiveDisclosureEnabled: false,
+      }),
     ).resolves.toBe('Subagent review completed.');
     expect(mocks.callIntegration).toHaveBeenCalledTimes(3);
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(

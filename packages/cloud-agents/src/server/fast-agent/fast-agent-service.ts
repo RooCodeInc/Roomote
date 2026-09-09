@@ -1656,7 +1656,8 @@ export async function answerFastAgentQuestion({
   durableAdmission,
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
-  schedulingProgressiveDisclosureEnabled = Env.R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED,
+  schedulingProgressiveDisclosureEnabled = Env.R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED ===
+    true,
 }: {
   question: string;
   images?: string[];
@@ -4755,7 +4756,9 @@ export async function answerFastAgentQuestion({
           availableIntegrations,
           {
             surface: conversation.surface,
-            schedulingProgressiveDisclosureEnabled,
+            ...(schedulingProgressiveDisclosureEnabled
+              ? { schedulingProgressiveDisclosureEnabled: true }
+              : {}),
           },
         );
         const unbindExecutors = new Set<() => void>();
