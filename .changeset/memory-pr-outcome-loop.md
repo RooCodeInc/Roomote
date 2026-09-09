@@ -1,7 +1,5 @@
 ---
-'@roomote/db': patch
-'@roomote/sdk': patch
-'@roomote/bullmq': patch
+'@roomote/web': patch
 ---
 
-Refresh a task's Memory pages when a pull request it opened merges or closes unmerged, so recall can tell work that shipped from work that was abandoned.
+Refresh task memories when a pull request the task opened merges or closes unmerged, so recall can distinguish shipped work from abandoned approaches.
