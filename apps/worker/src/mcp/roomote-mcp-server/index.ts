@@ -1127,7 +1127,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories). Required for "create" and "update".',
+          'Complete environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories). Required for "create" and "update". An update replaces the full definition: start from the current definition and preserve every field that is not intentionally changing.',
         ),
       environmentId: z
         .string()
