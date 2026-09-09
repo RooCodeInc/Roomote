@@ -101,10 +101,10 @@ describe('completeConversationalSetupIfReady', () => {
   it.each([
     [true, true],
     [false, false],
-    [undefined, false],
-    ['true', false],
+    [undefined, true],
+    ['true', true],
   ])(
-    'rechecks the persisted opt-in under the completion lock (%j)',
+    'rechecks the persisted source-control policy under the completion lock (%j)',
     async (flag, expected) => {
       const tx = {
         query: {
@@ -140,7 +140,9 @@ describe('completeConversationalSetupIfReady', () => {
     const tx = {
       query: {
         deploymentSettings: {
-          findFirst: vi.fn().mockResolvedValue({ metadata: {} }),
+          findFirst: vi.fn().mockResolvedValue({
+            metadata: { optional_source_control_enabled: false },
+          }),
         },
       },
     } as unknown as DatabaseOrTransaction;

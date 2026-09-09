@@ -1,8 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 const { state } = vi.hoisted(() => ({
-  state: { optionalSourceControlEnabled: false, repositoryCount: 0 },
+  state: { optionalSourceControlEnabled: true, repositoryCount: 0 },
 }));
 
 vi.mock('next/navigation', () => ({
@@ -50,6 +50,9 @@ vi.mock('./SourceControlConnection', () => ({
   SourceControlConnection: () => null,
 }));
 vi.mock('./SetupSessionActionCard', () => ({
+  SetupSessionActionCardActions: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
   SetupSessionActionCard: ({
     title,
     intro,
@@ -71,25 +74,39 @@ import { SetupSessionSourceControlCard } from './SetupSourceControlCard';
 
 describe('SetupSessionSourceControlCard', () => {
   beforeEach(() => {
-    state.optionalSourceControlEnabled = false;
+    state.optionalSourceControlEnabled = true;
     state.repositoryCount = 0;
   });
 
-  it('keeps the previous connection guidance by default', () => {
+  it('offers to skip source-control setup by default', () => {
     render(<SetupSessionSourceControlCard sessionId="setup-session" />);
+    expect(
+      screen.getByText('Where do you keep your code?'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Connect to your source control provider for me to work on your code. You can also do that later in Settings → Source control.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText('Provider picker')).toBeInTheDocument();
     expect(
-      screen.queryByText(/Source control is optional/),
-    ).not.toBeInTheDocument();
+      screen.getByRole('button', { name: 'Skip for now' }),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the card when source-control setup is skipped', () => {
+    render(<SetupSessionSourceControlCard sessionId="setup-session" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }));
+    expect(screen.queryByText('Provider picker')).not.toBeInTheDocument();
   });
 
   it('offers connection as optional without claiming repository access', () => {
-    state.optionalSourceControlEnabled = true;
     render(<SetupSessionSourceControlCard sessionId="setup-session" />);
     expect(
-      screen.getByText(/Source control is optional for setup/),
+      screen.getByText(
+        'Connect to your source control provider for me to work on your code. You can also do that later in Settings → Source control.',
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Settings > Source control/)).toBeInTheDocument();
     expect(screen.getByText('Provider picker')).toBeInTheDocument();
   });
 

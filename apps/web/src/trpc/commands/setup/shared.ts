@@ -90,9 +90,11 @@ export async function getSetupBaseStatus(
     hasSlack: slackResult.length > 0,
     hasLinear: linearResult.length > 0,
     setupCompletedAt: orgResult[0]?.setupCompletedAt ?? null,
+    // Optional source control is the default for this setup flow. An explicit
+    // false keeps a rollback switch for deployments that need the legacy flow.
     optionalSourceControlEnabled:
       normalizeMetadataRecord(orgResult[0]?.metadata)
-        .optional_source_control_enabled === true,
+        .optional_source_control_enabled !== false,
     setupNewState: normalizeSetupNewState(orgResult[0]?.setupNewState),
   };
 }

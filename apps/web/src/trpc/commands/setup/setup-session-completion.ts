@@ -36,7 +36,7 @@ export async function completeConversationalSetupIfReady(
       });
       if (
         normalizeMetadataRecord(settings?.metadata)
-          .optional_source_control_enabled === true
+          .optional_source_control_enabled !== false
       ) {
         return true;
       }

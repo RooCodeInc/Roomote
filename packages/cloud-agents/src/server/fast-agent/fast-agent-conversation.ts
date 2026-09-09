@@ -210,7 +210,7 @@ export type FastAgentSourceControlContext = {
 
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
-  /** Trusted deployment rollout flag; omitted/false preserves legacy behavior. */
+  /** Trusted deployment rollout flag; explicit false preserves legacy behavior. */
   sourceControlConnectionEnabled?: boolean;
   /** SDK-owned authoritative inventory/permission check, repeated at each operation. */
   getSourceControlReadiness?: (input: {

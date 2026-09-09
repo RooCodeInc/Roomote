@@ -9,7 +9,7 @@ import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 
 describe('Fast structured input tool filtering', () => {
   it.each(['web', 'slack', 'discord', 'teams', 'telegram'] as const)(
-    'requires explicit connection rollout on %s',
+    'advertises connection requests when enabled on %s',
     (surface) => {
       const tool = FAST_AGENT_NATIVE_TOOL_NAMES.requestSourceControlConnection;
       expect(buildFastAgentToolFilter([], { surface })[tool]).toBe(false);
@@ -69,14 +69,12 @@ describe('setup prompt guidance and snapshot injection', () => {
   } as Parameters<typeof buildFastAgentSystemPrompt>[0];
 
   it.each([
-    undefined,
     '{}',
-    '{"optionalSourceControlEnabled":false}',
     '{"optionalSourceControlEnabled":"true"}',
     'null',
     'not json',
   ])(
-    'keeps source control required without an explicit true snapshot: %s',
+    'defaults setup source control to optional without an explicit false snapshot: %s',
     (setupSnapshot) => {
       const prompt = buildFastAgentSystemPrompt({
         ...baseInput,
@@ -84,20 +82,32 @@ describe('setup prompt guidance and snapshot injection', () => {
         setupSnapshot,
       });
       expect(prompt).toContain(
-        'Source control must be connected and repositories synchronized before setup completes',
+        'Source control is optional for setup completion',
       );
       expect(prompt).toContain(
-        'To get started, I need access to your source code.',
+        'You can connect source control whenever you need repository work.',
       );
       expect(prompt).toContain(
         'Inference and sandbox readiness remain prerequisites',
       );
-      expect(prompt).not.toContain(
-        'Source control is optional for setup completion',
-      );
+      expect(prompt).not.toContain('Source control must be connected');
       expect(prompt).not.toContain('request_source_control_connection');
     },
   );
+
+  it('preserves the legacy required setup flow when explicitly disabled', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      ...baseInput,
+      setupSession: true,
+      setupSnapshot: '{"optionalSourceControlEnabled":false}',
+    });
+    expect(prompt).toContain(
+      'Source control must be connected and repositories synchronized before setup completes',
+    );
+    expect(prompt).toContain(
+      'To get started, I need access to your source code.',
+    );
+  });
 
   it('advertises JIT only when the runtime enables it, independently of setup snapshot data', () => {
     for (const surface of [

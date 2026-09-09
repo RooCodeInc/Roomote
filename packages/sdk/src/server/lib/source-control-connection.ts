@@ -92,7 +92,7 @@ const lifetimeMs = 24 * 60 * 60 * 1000;
 // Keep PostgreSQL's microsecond precision across processes and JSON persistence.
 const sourceControlSyncClock = sql<string>`to_char(clock_timestamp() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 
-/** Strict opt-in, serialized with metadata updates inside admission transactions. */
+/** Enabled by default; an explicit false preserves the legacy setup flow. */
 export async function isSourceControlConnectionEnabled(
   executor: DatabaseOrTransaction = db,
 ): Promise<boolean> {
@@ -102,11 +102,11 @@ export async function isSourceControlConnectionEnabled(
     .where(eq(deploymentSettings.id, 'default'))
     .for('share');
   const metadata = settings?.metadata;
-  return Boolean(
+  return !(
     metadata &&
     typeof metadata === 'object' &&
     'optional_source_control_enabled' in metadata &&
-    metadata.optional_source_control_enabled === true,
+    metadata.optional_source_control_enabled === false
   );
 }
 

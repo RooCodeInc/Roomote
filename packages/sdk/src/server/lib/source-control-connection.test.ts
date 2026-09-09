@@ -951,42 +951,40 @@ describe('source-control connection requests (PostgreSQL)', () => {
       }),
     ).toBeNull();
   });
-  it.each([undefined, false, 'true', null])(
-    'defaults off for metadata flag %s, preserving ordinary adapter preflight',
-    async (flag) => {
-      await setFlag(flag);
-      expect(await isSourceControlConnectionEnabled()).toBe(false);
-      const adapter = createSourceControlConnectionAdapter();
-      expect(
-        await adapter.getSourceControlReadiness!({
-          actorUserId: user.id,
-          target: input(),
-        }),
-      ).toEqual({ status: 'ready' });
-      await expect(requestSourceControlConnection(input())).rejects.toThrow(
-        'disabled',
-      );
-      await expect(
-        adapter.requestSourceControlConnection!({
-          ...input(),
-          conversation: {
-            surface: 'web',
-            workspaceId: 'test',
-            conversationId: 'test',
-          },
-          target: input(),
-        }),
-      ).rejects.toThrow('disabled');
-      expect(
-        await db
-          .select()
-          .from(sourceControlConnectionRequests)
-          .where(
-            eq(sourceControlConnectionRequests.conversationId, conversationId),
-          ),
-      ).toHaveLength(0);
-    },
-  );
+  it('remains disabled when explicitly disabled in metadata', async () => {
+    const flag = false;
+    await setFlag(flag);
+    expect(await isSourceControlConnectionEnabled()).toBe(false);
+    const adapter = createSourceControlConnectionAdapter();
+    expect(
+      await adapter.getSourceControlReadiness!({
+        actorUserId: user.id,
+        target: input(),
+      }),
+    ).toEqual({ status: 'ready' });
+    await expect(requestSourceControlConnection(input())).rejects.toThrow(
+      'disabled',
+    );
+    await expect(
+      adapter.requestSourceControlConnection!({
+        ...input(),
+        conversation: {
+          surface: 'web',
+          workspaceId: 'test',
+          conversationId: 'test',
+        },
+        target: input(),
+      }),
+    ).rejects.toThrow('disabled');
+    expect(
+      await db
+        .select()
+        .from(sourceControlConnectionRequests)
+        .where(
+          eq(sourceControlConnectionRequests.conversationId, conversationId),
+        ),
+    ).toHaveLength(0);
+  });
 
   it('cancels pending and admitted work on disable; reenable and late callbacks cannot revive it', async () => {
     await grant();

@@ -163,17 +163,17 @@ export function buildFastAgentSystemPrompt({
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
-  let optionalSourceControlEnabled = false;
+  let optionalSourceControlEnabled = true;
   if (setupSession && setupSnapshot) {
     try {
       const snapshot: unknown = JSON.parse(setupSnapshot);
-      optionalSourceControlEnabled =
-        typeof snapshot === 'object' &&
-        snapshot !== null &&
-        'optionalSourceControlEnabled' in snapshot &&
-        snapshot.optionalSourceControlEnabled === true;
+      if (typeof snapshot === 'object' && snapshot !== null) {
+        optionalSourceControlEnabled =
+          !('optionalSourceControlEnabled' in snapshot) ||
+          snapshot.optionalSourceControlEnabled !== false;
+      }
     } catch {
-      // Missing or older snapshots retain the rollout's required-source-control default.
+      // Missing or older snapshots retain the optional-source-control default.
     }
   }
   const platformEvent = turnSource === 'platform_event';
