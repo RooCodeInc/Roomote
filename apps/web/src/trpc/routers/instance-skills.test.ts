@@ -78,7 +78,12 @@ describe('instanceSkills router with real database authorization', () => {
 
     for (const auth of [memberAuth, otherAuth, adminAuth]) {
       expect(await caller(auth).list()).toEqual(
-        expect.arrayContaining([expect.objectContaining({ name: input.name })]),
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: input.name,
+            createdByName: expect.any(String),
+          }),
+        ]),
       );
       expect(await caller(auth).get({ skillId })).toMatchObject({
         ...input,
