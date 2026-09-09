@@ -6,6 +6,7 @@ import type { Variables } from '../../types';
 import { getAllowedRouterMcpToolNames } from '@roomote/cloud-agents/router-mcp-policy';
 
 import { createGithubMcp } from './github';
+import { createGitlabMcp } from './gitlab';
 import { createLinearMcp } from './linear';
 import { roomoteMcp } from './roomote';
 
@@ -27,6 +28,7 @@ const requireCuratedIntegrations: MiddlewareHandler<{
 };
 
 mcpRouting.route('/roomote', roomoteMcp);
+mcpRouting.route('/gitlab', createGitlabMcp());
 mcpRouting.use('/linear', requireCuratedIntegrations);
 mcpRouting.use('/linear/*', requireCuratedIntegrations);
 mcpRouting.route(

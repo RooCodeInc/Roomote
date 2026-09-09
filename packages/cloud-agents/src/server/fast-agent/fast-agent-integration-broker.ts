@@ -3,9 +3,15 @@ import {
   beginSlackFastIntegrationCall,
   completeSlackFastIntegrationCall,
   db,
+  and,
+  eq,
+  deploymentSecrets,
+  repositories,
   githubInstallations,
   isNull,
 } from '@roomote/db/server';
+import { Env } from '@roomote/env';
+import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
   createMemoryMcpInstructions,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
@@ -242,8 +248,8 @@ export function clearFastAgentIntegrationToolCache(): void {
 
 function integrationProxyUrl(baseUrl: string, integrationId: string): string {
   const relativePath =
-    integrationId === 'github'
-      ? 'api/mcp-routing/github'
+    integrationId === 'github' || integrationId === 'gitlab'
+      ? `api/mcp-routing/${integrationId}`
       : `api/mcp/${encodeURIComponent(integrationId)}`;
   return new URL(relativePath, `${baseUrl}/`).toString();
 }
@@ -325,6 +331,28 @@ async function resolveBrokerAuth(context: BrokerContext) {
   };
 }
 
+async function hasGitLabDiscoveryConnection(): Promise<boolean> {
+  if (!Env.GITLAB_MCP_SERVER_URL || Env.R_CURATED_INTEGRATIONS_DISABLED) {
+    return false;
+  }
+  const host = await resolveGitLabInstanceHost();
+  const [repository, connection] = await Promise.all([
+    db.query.repositories.findFirst({
+      where: and(
+        eq(repositories.sourceControlProvider, 'gitlab'),
+        eq(repositories.isActive, true),
+        eq(repositories.host, host),
+      ),
+      columns: { id: true },
+    }),
+    db.query.deploymentSecrets.findFirst({
+      where: eq(deploymentSecrets.name, 'gitlab_deployment_oauth_connection'),
+      columns: { name: true },
+    }),
+  ]);
+  return Boolean(repository && connection);
+}
+
 /**
  * Actor-resolved remote MCP servers only. Local transports and filesystem
  * tools remain sandbox-only. Tools disabled by the deployment remain
@@ -344,17 +372,23 @@ export async function listFastAgentIntegrations(
   const configuredServersPromise: Promise<
     Record<string, FastAgentMcpServerConfig>
   > = resolveMcpServerConfigs?.() ?? Promise.resolve({});
-  const [configuredServers, githubInstallation] = await Promise.all([
-    configuredServersPromise,
-    isRouterMcpServerEnabled('github')
-      ? db.query.githubInstallations.findFirst({
-          where: isNull(githubInstallations.suspendedAt),
-          columns: { id: true },
-        })
-      : Promise.resolve(undefined),
-  ]);
+  const [configuredServers, githubInstallation, gitlabConnection] =
+    await Promise.all([
+      configuredServersPromise,
+      isRouterMcpServerEnabled('github')
+        ? db.query.githubInstallations.findFirst({
+            where: isNull(githubInstallations.suspendedAt),
+            columns: { id: true },
+          })
+        : Promise.resolve(undefined),
+      hasGitLabDiscoveryConnection(),
+    ]);
 
-  if (Object.keys(configuredServers).length === 0 && !githubInstallation) {
+  if (
+    Object.keys(configuredServers).length === 0 &&
+    !githubInstallation &&
+    !gitlabConnection
+  ) {
     return [];
   }
 
@@ -381,6 +415,21 @@ export async function listFastAgentIntegrations(
         'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
+        headers: { Authorization: `Bearer ${authToken}` },
+        deploymentProxy: true,
+      },
+      disabledTools: new Set<string>(),
+    });
+  }
+
+  if (gitlabConnection && !configuredServers.gitlab) {
+    candidates.push({
+      id: 'gitlab',
+      name: 'GitLab',
+      description:
+        'Read connected GitLab repositories and commit history, inspect merge requests, and make bounded merge request updates and comments. Access is authorized on each request.',
+      endpoint: {
+        url: integrationProxyUrl(apiBaseUrl, 'gitlab'),
         headers: { Authorization: `Bearer ${authToken}` },
         deploymentProxy: true,
       },

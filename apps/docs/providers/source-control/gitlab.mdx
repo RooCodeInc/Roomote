@@ -113,3 +113,110 @@ request when it can fix the failure.
 3. start a small task and confirm Roomote can clone the repository
 4. open or update a merge request and confirm configured review automation runs
 5. trigger a failing default-branch pipeline and confirm CI Failure Triage starts
+
+## Optional GitLab API tools for Fast
+
+To let Fast read code and handle supported merge request requests without
+cloning a repository, operate a trusted
+[zereight/gitlab-mcp](https://github.com/zereight/gitlab-mcp/tree/bd9be9bde20b3254b2d4b59dc203a19a5d52e5d5)
+server alongside Roomote. This is an optional community MCP server, not GitLab's
+official MCP endpoint. Use **v2.1.60**, commit
+`bd9be9bde20b3254b2d4b59dc203a19a5d52e5d5`: build from that commit and pin the
+deployed image by digest. Do not use a floating image tag or `latest`.
+
+Roomote reuses its active deployment OAuth connection with the existing `api`
+grant and refreshes the access token when needed. No second OAuth application,
+user authorization flow, or static upstream GitLab credential is needed.
+[GitLab's official MCP server](https://docs.gitlab.com/user/model_context_protocol/mcp_server/#reuse-a-single-oauth-application)
+uses `mcp`-scoped authorization; it is not a drop-in replacement for Roomote's
+unchanged `api` grant.
+
+### Configure the trusted server
+
+Set these variables on the **upstream MCP server**, replacing the example
+GitLab URL with the same instance configured in Roomote:
+
+```sh
+REMOTE_AUTHORIZATION=true
+STREAMABLE_HTTP=true
+ENABLE_DYNAMIC_API_URL=true
+ENABLE_DYNAMIC_PROJECT_SCOPE=true
+GITLAB_API_URL=https://gitlab.example.com/api/v4
+MCP_ALLOWED_HOSTS=gitlab-mcp.internal:3002
+GITLAB_ALLOW_UNAUTHENTICATED_TOOL_DISCOVERY=false
+GITLAB_TOOLS=search_project_code
+```
+
+The pinned [upstream configuration reference](https://github.com/zereight/gitlab-mcp/blob/bd9be9bde20b3254b2d4b59dc203a19a5d52e5d5/docs/configuration/environment-variables.md)
+defines two different host controls:
+
+- `GITLAB_ALLOWED_HOSTS` allows additional GitLab destination hosts for dynamic
+  API URLs. The host in `GITLAB_API_URL` is already allowed; do not add unrelated
+  destinations. GitLab.com and self-managed instances are supported only when
+  the OAuth connection and active synced repositories match Roomote's configured host.
+- `MCP_ALLOWED_HOSTS` allows the incoming MCP `Host` header, including its port.
+  Match the address Roomote uses to reach the server. Configure `HOST` and `PORT`
+  for your private network; binding to all interfaces is not an access control.
+
+Search is not in the upstream default toolset. `GITLAB_TOOLS=search_project_code`
+adds it, or enable the upstream `search` toolset with `GITLAB_TOOLSETS`.
+Permission modes and tool filters can further reduce availability. For example,
+`GITLAB_PERMISSION_MODE=readonly` hides writes. Tools requiring upstream
+`_confirmed` approval inputs are not exposed by Roomote.
+
+Set this variable on the **Roomote deployment**, then restart the affected
+services so they load it:
+
+```sh
+GITLAB_MCP_SERVER_URL=http://gitlab-mcp.internal:3002/mcp
+```
+
+Use HTTPS outside an isolated trusted network. Keep the upstream private and
+reachable only by Roomote: it receives the deployment's OAuth bearer token and
+must be trusted with that credential and repository data. Do not configure a
+static PAT or enable unauthenticated tool discovery. Dynamic project scope
+narrows a trusted caller's requests; it is not protection against an untrusted
+caller with direct upstream access. Keep tokens out of logs.
+
+### Available operations and limits
+
+Roomote exposes only compatible tools present in the pinned server's catalog:
+
+| Tools | Supported scope |
+| --- | --- |
+| `get_file_contents` | UTF-8 text at a full immutable 40-character commit SHA. Resolve a branch with `get_commit` first. Files must be at most 1 MiB, even for a small window; binary files are rejected. Zero-based `offset` defaults to 0; `limit` is 1-2000 lines, default 2000. Continue with `next_offset` at the same SHA. |
+| `get_repository_tree` | Files and directories, optionally recursive. Always keyset pagination, at most 50 entries per page; pass `next_page_token` as `page_token`. |
+| `search_project_code` | Code search within one connected project, when enabled upstream and supported by your GitLab instance. |
+| `list_commits`, `get_commit` | Read commit history and details, not create commits or write files. |
+| `get_merge_request`, `list_merge_request_diffs`, `get_merge_request_notes`, `mr_discussions` | Read an existing MR, its paginated diffs, notes, and discussions. |
+| `update_merge_request` | Change only title (up to 255 characters), description (up to 32,000 characters), or state with `close` / `reopen`. |
+| `create_merge_request_note` | Add a top-level MR note, up to 32,000 characters. |
+| `create_merge_request_discussion_note` | Reply to an existing discussion on that MR, up to 32,000 characters. |
+
+Paginated tools other than trees accept `page` from 1-1000 and `per_page` from
+1-50. Responses are capped at 1 MiB and requests have a 20-second timeout;
+request smaller pages or file windows if a result exceeds the response limit.
+Every operation requires an active Roomote member or admin, an active connected
+repository on the configured host, and valid deployment OAuth access. MR writes
+also verify the target MR and, for replies, its discussion before sending the write.
+
+This does not expose the full upstream catalog: no file or branch writes, MR
+creation or merging, approvals, thread resolution, note editing/deletion, issue
+tools, CI tools, or arbitrary GraphQL. Fast uses available APIs first for this
+supported scope. Local checkout inspection, edits, commands, and validation
+still need a task. Task authorization and structured code reviews are unchanged.
+
+### Verify safely
+
+1. From a signed-in member or admin Session, ask Roomote to discover available
+   GitLab tools and read a small known file in an active synced repository at a
+   resolved commit SHA. Confirm it uses the API without launching a clone task.
+2. If tools are missing, check the Roomote URL, private network reachability,
+   upstream version and host settings, active same-host OAuth connection and
+   repository sync, and upstream tool filters. Curated integrations must not be
+   disabled on the Roomote deployment. Do not enable anonymous discovery to fix access.
+3. Test writes only with explicit authorization on a designated disposable MR.
+   Specify the exact note, reply, or reversible title/state change, inspect the
+   result in GitLab, and restore any changed fields. Never mutate arbitrary MRs
+   as a connectivity check. Successful discovery or reads do not prove live
+   authorized writes; verify each required operation before relying on it.

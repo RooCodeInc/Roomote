@@ -612,6 +612,24 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('`call_integration_tool`');
   });
 
+  it('prefers available GitLab APIs without bypassing task and structured review delegation', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [],
+    });
+    expect(prompt).toContain(
+      'For GitLab API-only requests, first use the available GitLab integration tools',
+    );
+    expect(prompt).toContain('do not claim GitLab API access is supported');
+    expect(prompt).toContain(
+      'Local checkout inspection, code edits, commands, and validation still require a delegated task',
+    );
+    expect(prompt).toContain(
+      'code reviews still use "review_pull_request" and its structured review pipeline',
+    );
+    expect(prompt).not.toContain('#### GitLab [id: gitlab]');
+  });
+
   it('includes shared memory guidance when a memory MCP is available', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

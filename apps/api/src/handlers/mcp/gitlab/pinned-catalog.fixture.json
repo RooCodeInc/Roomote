@@ -1,0 +1,421 @@
+{
+  "commit": "bd9be9bde20b3254b2d4b59dc203a19a5d52e5d5",
+  "version": "2.1.60",
+  "source": "https://github.com/zereight/gitlab-mcp/blob/bd9be9bde20b3254b2d4b59dc203a19a5d52e5d5/tools/registry.ts",
+  "generation": "npm ci --ignore-scripts; node --import tsx/esm (allTools filtered by name, mapped to {name, inputSchema}; no schema rewriting)",
+  "tools": [
+    {
+      "name": "get_file_contents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or URL-encoded path (optional; falls back to env)"
+          },
+          "file_path": {
+            "type": "string",
+            "description": "Path to the file or directory. Takes precedence over 'path' when both are provided"
+          },
+          "path": { "type": "string", "description": "Alias of file_path" },
+          "ref": {
+            "type": "string",
+            "description": "Branch/tag/commit to get contents from"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_merge_request",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "merge_request_iid": {
+            "type": "string",
+            "description": "The IID of a merge request"
+          },
+          "source_branch": {
+            "type": "string",
+            "description": "Source branch name"
+          },
+          "include_summaries": {
+            "type": "boolean",
+            "description": "If true, include deployment_summary, commit_addition_summary and approval_summary (extra API calls, larger response). Default false to reduce token usage."
+          }
+        },
+        "required": ["project_id"]
+      }
+    },
+    {
+      "name": "list_merge_request_diffs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "merge_request_iid": {
+            "type": "string",
+            "description": "The IID of a merge request"
+          },
+          "source_branch": {
+            "type": "string",
+            "description": "Source branch name"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number for pagination (default: 1)"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Number of items per page (max: 100, default: 20)"
+          },
+          "unidiff": {
+            "type": "boolean",
+            "description": "Present diffs in the unified diff format. Default is false. Introduced in GitLab 16.5."
+          }
+        },
+        "required": ["project_id"]
+      }
+    },
+    {
+      "name": "update_merge_request",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "merge_request_iid": {
+            "type": "string",
+            "description": "The IID of a merge request"
+          },
+          "source_branch": {
+            "type": "string",
+            "description": "Source branch name"
+          },
+          "title": {
+            "type": "string",
+            "description": "The title of the merge request"
+          },
+          "description": {
+            "type": "string",
+            "description": "The description of the merge request"
+          },
+          "target_branch": {
+            "type": "string",
+            "description": "The target branch"
+          },
+          "assignee_ids": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "The ID of the users to assign the MR to"
+          },
+          "reviewer_ids": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "The ID of the users to assign as reviewers of the MR"
+          },
+          "labels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Labels for the MR"
+          },
+          "state_event": {
+            "type": "string",
+            "enum": ["close", "reopen"],
+            "description": "New state (close/reopen) for the MR"
+          },
+          "remove_source_branch": {
+            "type": "boolean",
+            "description": "Flag indicating if the source branch should be removed"
+          },
+          "squash": {
+            "type": "boolean",
+            "description": "Squash commits into a single commit when merging"
+          },
+          "draft": {
+            "type": "boolean",
+            "description": "Work in progress merge request"
+          },
+          "milestone_id": {
+            "type": "string",
+            "description": "Milestone ID to assign. Set to 0 to unassign. Null is treated as omitted."
+          }
+        },
+        "required": ["project_id"]
+      }
+    },
+    {
+      "name": "mr_discussions",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "merge_request_iid": {
+            "type": "string",
+            "description": "The IID of a merge request"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number for pagination (default: 1)"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Number of items per page (max: 100, default: 20)"
+          }
+        },
+        "required": ["project_id", "merge_request_iid"]
+      }
+    },
+    {
+      "name": "create_merge_request_discussion_note",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "merge_request_iid": {
+            "type": "string",
+            "description": "The IID of a merge request"
+          },
+          "discussion_id": {
+            "type": "string",
+            "description": "The ID of a thread"
+          },
+          "body": {
+            "type": "string",
+            "description": "The content of the note or reply"
+          },
+          "created_at": {
+            "type": "string",
+            "description": "Date the note was created at (ISO 8601 format)"
+          }
+        },
+        "required": ["body", "project_id", "merge_request_iid", "discussion_id"]
+      }
+    },
+    {
+      "name": "create_merge_request_note",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "merge_request_iid": {
+            "type": "string",
+            "description": "The IID of a merge request"
+          },
+          "body": {
+            "type": "string",
+            "description": "The content of the note or reply"
+          }
+        },
+        "required": ["body", "project_id", "merge_request_iid"]
+      }
+    },
+    {
+      "name": "get_merge_request_notes",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "merge_request_iid": {
+            "type": "string",
+            "description": "The IID of a merge request"
+          },
+          "sort": {
+            "type": "string",
+            "enum": ["asc", "desc"],
+            "description": "The sort order of the notes"
+          },
+          "order_by": {
+            "type": "string",
+            "enum": ["created_at", "updated_at"],
+            "description": "The field to sort the notes by"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Number of items per page"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number for pagination"
+          }
+        },
+        "required": ["project_id", "merge_request_iid"]
+      }
+    },
+    {
+      "name": "get_repository_tree",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "The ID or URL-encoded path of the project"
+          },
+          "path": {
+            "type": "string",
+            "description": "The path inside the repository"
+          },
+          "ref": {
+            "type": "string",
+            "description": "The name of a repository branch or tag. Defaults to the default branch."
+          },
+          "recursive": {
+            "type": "boolean",
+            "description": "Boolean value to get a recursive tree"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Number of results to show per page"
+          },
+          "page_token": {
+            "type": "string",
+            "description": "Token for keyset pagination. Use the next_page_token value returned in the previous response to retrieve the next page."
+          },
+          "pagination": {
+            "type": "string",
+            "description": "Pagination method. Use 'keyset' for keyset-based pagination (required for repositories with many files). Non-keyset calls keep the legacy array response for backward compatibility; that legacy response shape is deprecated and may be removed in a future major release. Keyset calls return a structured response with items and next_page_token when more pages are available."
+          }
+        },
+        "required": ["project_id"]
+      }
+    },
+    {
+      "name": "list_commits",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "ref_name": {
+            "type": "string",
+            "description": "The name of a repository branch, tag or revision range, or if not given the default branch"
+          },
+          "since": {
+            "type": "string",
+            "description": "Only commits after or on this date are returned in ISO 8601 format YYYY-MM-DDTHH:MM:SSZ"
+          },
+          "until": {
+            "type": "string",
+            "description": "Only commits before or on this date are returned in ISO 8601 format YYYY-MM-DDTHH:MM:SSZ"
+          },
+          "path": { "type": "string", "description": "The file path" },
+          "author": {
+            "type": "string",
+            "description": "Search commits by commit author"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Retrieve every commit from the repository"
+          },
+          "with_stats": {
+            "type": "boolean",
+            "description": "Stats about each commit are added to the response"
+          },
+          "first_parent": {
+            "type": "boolean",
+            "description": "Follow only the first parent commit upon seeing a merge commit"
+          },
+          "order": {
+            "type": "string",
+            "enum": ["default", "topo"],
+            "description": "List commits in order"
+          },
+          "trailers": {
+            "type": "boolean",
+            "description": "Parse and include Git trailers for every commit"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number for pagination (default: 1)"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Number of items per page (max: 100, default: 20)"
+          }
+        },
+        "required": ["project_id"]
+      }
+    },
+    {
+      "name": "get_commit",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "sha": {
+            "type": "string",
+            "description": "The commit hash or name of a repository branch or tag"
+          },
+          "stats": { "type": "boolean", "description": "Include commit stats" }
+        },
+        "required": ["sha", "project_id"]
+      }
+    },
+    {
+      "name": "search_project_code",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "description": "Project ID or complete URL-encoded path to project"
+          },
+          "search": {
+            "type": "string",
+            "description": "Code search query string. On instances with exact code search (Zoekt), the query supports rich inline syntax: \"class foo\" (exact match), foo file:\\.js$ (file pattern), foo lang:ruby (language), sym:foo (symbol search), foo -bar (negation), case:yes (case-sensitive). When using Zoekt inline filters, prefer them over the separate filename/path/extension params which are for basic search."
+          },
+          "filename": {
+            "type": "string",
+            "description": "Filter by filename (supports * wildcard, e.g. '*.ts')"
+          },
+          "path": {
+            "type": "string",
+            "description": "Filter by file path (supports * wildcard, e.g. 'src/utils/*')"
+          },
+          "extension": {
+            "type": "string",
+            "description": "Filter by file extension without dot (e.g. 'py', 'ts')"
+          },
+          "ref": {
+            "type": "string",
+            "description": "Branch or tag to search in (defaults to default branch)"
+          },
+          "page": {
+            "type": "number",
+            "description": "Page number for pagination (default: 1)"
+          },
+          "per_page": {
+            "type": "number",
+            "description": "Number of items per page (max: 100, default: 20)"
+          }
+        },
+        "required": ["search", "project_id"]
+      }
+    }
+  ]
+}
