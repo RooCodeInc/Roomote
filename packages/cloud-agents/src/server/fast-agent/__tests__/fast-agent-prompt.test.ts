@@ -686,6 +686,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'call "ignore_event" without a cancellation closeout',
     );
+    expect(prompt).not.toContain(
+      'when it is already on its final run, finished, canceled',
+    );
   });
 
   it('lists on-demand servers by name with their tool names instead of mounting them', () => {

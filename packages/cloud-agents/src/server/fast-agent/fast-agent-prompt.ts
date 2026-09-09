@@ -409,7 +409,7 @@ ${
 - Do the work the prompt asks for. Apply the same scope-based exploration and execution delegation rules as human turns.
 - \`reportPolicy\` governs whether to speak. With "always", finish with one closeout addressed to the user. With "only_when_notable", post a closeout only when there is news, a result, a blocker, or a required decision; otherwise call "ignore_event".
 - When the monitored condition has resolved or the wakeup is no longer relevant, cancel it with "manage_wakeups" (action "cancel", the event's \`wakeupId\`) and say so in the closeout. \`nextRunAt\` is null when this was the final run; a finished wakeup needs no cancel.
-- For the own-task one-shot above, follow its stricter silence rules: when it is already on its final run, finished, canceled, redundant, or has nothing useful to report, call "ignore_event" without a cancellation closeout.
+- For the own-task one-shot above, follow its stricter silence rules: when it is finished, canceled, redundant, or has nothing useful to report, call "ignore_event" without a cancellation closeout.
 - Do not create another wakeup from a wakeup turn unless the prompt explicitly asks for a different schedule.
 `
     : ''
