@@ -25,7 +25,6 @@ Roomote 1.6 adds flexible sandbox and public-repository work, native conversatio
 - Newly started web Sessions show the submitted prompt immediately and reconcile ambiguous retries without duplicate messages.
 - Fast can stop and resume an unresponsive delegated task without terminally cancelling it, while explicit cancellation remains terminal.
 - Restore admin management for environment-specific skills in Settings, including custom skill editing and marketplace installation.
-- Fix Blank slate custom automations so delegated tasks start without repositories.
 
 ## 1.5.1 (2026-09-09)
 
