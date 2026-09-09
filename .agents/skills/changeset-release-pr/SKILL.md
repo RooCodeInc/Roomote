@@ -13,6 +13,32 @@ consumed pending changeset. Merging it makes CI open the frozen Promote PR to
 `main`. For an urgent patch that cannot wait for that path, use the clearly
 separated direct-to-main hotfix workflow below.
 
+## Authorization for release repairs
+
+An explicit request to fix release conflicts authorizes completing the routine
+repair end to end: inspect current state, preserve the frozen candidate and
+production changes, resolve and validate, deliver through the supported
+reconciliation path, and verify the updated promotion head. Do not stop at a
+diagnosis or review-only PR when the authorized next steps are available, and
+do not ask again for discretionary permission already given. Check for existing
+repair PRs and active workflow runs before creating or dispatching duplicates.
+
+Authorization to repair is not authorization to merge the production Promote PR,
+enable its auto-merge, tag, publish, or deploy. Those actions require separate
+explicit authorization. A replacement release or importing newer develop work
+also requires its own scope decision.
+
+Respect actual branch protections and the trusted workflow's independent-human,
+exact-commit approval and unresolved-review requirements. Reuse an existing
+valid approval for the unchanged resolution SHA; a follow-up request to continue
+does not require another approval. If a tooling defect blocks the authorized
+repair, fix it with focused tests on a separate develop-based PR, outside the
+frozen candidate. Carry that repair through normal integration when authorized
+and permitted; never bypass protections, self-approve, or weaken a gate to ship.
+If GitHub rejects an operation, report the exact enforced blocker and prepared
+fix, rather than inventing an approval requirement or inferring it solely from
+incomplete policy metadata.
+
 ## How releases work here
 
 - Roomote has a **single product version**: the root `package.json` `version`
@@ -368,8 +394,14 @@ must not already be contained in `main`.
    open a **review-only** PR targeting `release/vX.Y.Z`. Clearly mark it
    **Do not merge: CI applies this reviewed tree**. Record the pins, each
    conflict decision, hotfix preservation evidence, and validation. Resolve all
-   review threads and obtain an independent human collaborator's approval at the
-   exact resolution SHA. Do not self-approve or merge this PR.
+   review threads and verify an independent human collaborator's approval at the
+   exact resolution SHA, reusing an existing valid approval. The reviewer must
+   differ from the PR author and have `admin`, `maintain`, or `write` repository
+   permission from `GET /repos/{owner}/{repo}/collaborators/{username}/permission`.
+   Do not use review `author_association` as an authority proxy: an admin may be
+   labeled `CONTRIBUTOR`. Missing or failed permission lookups are not approval;
+   retain the workflow's repeated review and permission checks before pushing.
+   Do not self-approve or merge this PR.
 4. Dispatch **Reconcile Release Candidate** on `develop` with `version` (without
    `v`), `expected_candidate_sha`, `expected_main_sha`, and `resolution_sha`.
    It requires `RELEASE_BOT_TOKEN` so the candidate push can trigger fresh PR CI.
@@ -381,6 +413,9 @@ must not already be contained in `main`.
    **and reviews** using step 11. CI appends reconciliation provenance to the
    existing Promote PR body. If metadata fails after a successful push, report
    that partial result; do not retry with stale pins or claim no change occurred.
+   Revalidate the actual remote head, parents, tree and open PR identity, then
+   repair only the missing metadata within the authorized repair. A failed run
+   after a successful push is not a reason to push or reconcile again.
    The review-only PR remains unmerged; it can be closed separately once its
    outcome is verified and closure is authorized.
 
