@@ -152,6 +152,10 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain(
       'explicitly selected for native Slack delivery',
     );
+    expect(replySource).toContain('charts: z.array(chartInput).max(2)');
+    expect(replySource).toContain(
+      'every series must contain exactly one point for every category',
+    );
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(createArtifactSource).toContain('invoke("create_artifact"');
     expect(createArtifactSource).toContain('maximum 128 KiB');

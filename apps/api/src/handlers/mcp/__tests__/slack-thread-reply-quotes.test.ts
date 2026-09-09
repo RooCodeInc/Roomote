@@ -419,6 +419,52 @@ describe('Slack thread reply quotes', () => {
     );
   });
 
+  it('preserves native charts as top-level automation report blocks', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    getCustomAutomationByIdMock.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Traffic report',
+      scheduleMode: 'daily',
+    });
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+    const chart = {
+      type: 'data_visualization',
+      title: 'Traffic sources',
+      chart: {
+        type: 'pie',
+        segments: [
+          { label: 'Search', value: 65 },
+          { label: 'Direct', value: 35 },
+        ],
+      },
+    };
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: 'Search accounts for most visits.',
+        blocks: [
+          { type: 'markdown', text: 'Search accounts for most visits.' },
+          chart,
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const outbound = postMessageDetailedMock.mock.calls[0]?.[0];
+    expect(outbound.text).toBe('Search accounts for most visits.');
+    expect(
+      outbound.blocks.map((block: { type: string }) => block.type),
+    ).toEqual(['context', 'markdown', 'data_visualization', 'actions']);
+    expect(outbound.blocks).toContainEqual(chart);
+  });
+
   it('selects the Slack installation that owns a late-bound automation channel', async () => {
     taskRunFindFirstMock.mockResolvedValue({
       id: 42,

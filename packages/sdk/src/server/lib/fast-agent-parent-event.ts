@@ -55,6 +55,7 @@ import {
   TaskPayloadKind,
   exitedRunStatuses,
   type FastAgentConversation,
+  type DataVisualizationInput,
   type FastAgentHumanFollowUpEvent,
   type FastAgentScheduledWakeupEvent,
   type FastAgentSourceControlReplyTarget,
@@ -194,6 +195,7 @@ export type FastAgentParentEvent =
       purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
       message: string;
       imageArtifactIds?: string[];
+      charts?: DataVisualizationInput[];
     }
   | {
       type: 'artifact_published';
@@ -2492,6 +2494,9 @@ export async function deliverFastAgentParentEventWithLock(
       ...(params.event.type === 'child_message' &&
       params.event.imageArtifactIds?.length
         ? { defaultImageArtifactIds: params.event.imageArtifactIds }
+        : {}),
+      ...(params.event.type === 'child_message' && params.event.charts?.length
+        ? { defaultCharts: params.event.charts }
         : {}),
       ...(params.event.type === 'pull_request_feedback' &&
       params.event.reviewActionDeliveryId &&

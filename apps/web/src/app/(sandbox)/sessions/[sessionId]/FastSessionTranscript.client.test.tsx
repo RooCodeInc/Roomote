@@ -88,6 +88,12 @@ vi.mock('./SessionWakeups', () => ({
   SessionWakeups: () => null,
 }));
 
+vi.mock('../../task/[taskId]/messages/acp/AcpDataVisualizations', () => ({
+  AcpDataVisualizations: ({ charts }: { charts: Array<{ title: string }> }) => (
+    <div data-testid="session-chart">{charts[0]?.title}</div>
+  ),
+}));
+
 vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
@@ -267,6 +273,41 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('renders charts restored from persisted Session messages', () => {
+    const message = textMessage({
+      id: 'assistant-chart',
+      role: 'assistant',
+      text: 'Search accounts for most visits.',
+      ts: 10,
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...message,
+            contentBlocks: [
+              ...message.contentBlocks,
+              {
+                type: 'data_visualization',
+                title: 'Traffic sources',
+                chart: {
+                  type: 'pie',
+                  segments: [{ label: 'Search', value: 65 }],
+                },
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('session-chart')).toHaveTextContent(
+      'Traffic sources',
+    );
   });
 
   describe('pendingResponseReducer', () => {

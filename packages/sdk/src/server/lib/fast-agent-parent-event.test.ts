@@ -847,7 +847,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
-  it('carries child-selected image IDs into the Fast parent turn by default', async () => {
+  it('carries child-selected images and charts into the Fast parent turn by default', async () => {
     mocks.answerQuestion.mockResolvedValueOnce('Shared the proof.');
 
     await deliverFastAgentParentEvent({
@@ -860,12 +860,30 @@ describe('deliverFastAgentParentEvent', () => {
         purpose: 'closeout',
         message: 'The visual comparison is ready.',
         imageArtifactIds: ['artifact-1'],
+        charts: [
+          {
+            title: 'Traffic sources',
+            chart: {
+              type: 'pie',
+              segments: [{ label: 'Search', value: 65 }],
+            },
+          },
+        ],
       },
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultImageArtifactIds: ['artifact-1'],
+        defaultCharts: [
+          {
+            title: 'Traffic sources',
+            chart: {
+              type: 'pie',
+              segments: [{ label: 'Search', value: 65 }],
+            },
+          },
+        ],
       }),
     );
   });

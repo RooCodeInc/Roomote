@@ -18,6 +18,8 @@ import {
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
+  buildDataVisualizationBlocks,
+  dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
   manageWakeupsInputSchema,
@@ -29,6 +31,7 @@ import {
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
   type IntegrationToolCandidate,
+  type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
 } from '@roomote/types';
@@ -240,6 +243,7 @@ const chatReplyArgsSchema = z.object({
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
   videoArtifactIds: z.array(z.string()).optional(),
+  charts: dataVisualizationInputsSchema.optional(),
   suggestions: z
     .array(
       z.object({
@@ -1577,6 +1581,7 @@ export async function answerFastAgentQuestion({
   platformEventKind = 'delegated_task',
   automationReport = false,
   defaultImageArtifactIds = [],
+  defaultCharts = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
@@ -1618,6 +1623,8 @@ export async function answerFastAgentQuestion({
   /** Child-selected images to carry through when the parent model omits the
    * optional attachment argument while composing the child update. */
   defaultImageArtifactIds?: string[];
+  /** Child-selected charts to preserve when the parent model omits them. */
+  defaultCharts?: DataVisualizationInput[];
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
@@ -2470,7 +2477,10 @@ export async function answerFastAgentQuestion({
         ts: ts ?? nativeMessage?.completedAtMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
         role: 'assistant',
-        contentBlocks: [{ type: 'text', text: reply.message }],
+        contentBlocks: [
+          { type: 'text', text: reply.message },
+          ...buildDataVisualizationBlocks(reply.charts),
+        ],
         metadata: {
           visibleInTranscript,
           purpose: reply.purpose,
@@ -3202,10 +3212,15 @@ export async function answerFastAgentQuestion({
       /** The streamed partial this reply finalizes, if one was shown. */
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
-      const replyWithImages =
-        !reply.imageArtifactIds?.length && defaultImageArtifactIds.length
-          ? { ...reply, imageArtifactIds: defaultImageArtifactIds }
-          : reply;
+      const replyWithImages = {
+        ...reply,
+        ...(!reply.imageArtifactIds?.length && defaultImageArtifactIds.length
+          ? { imageArtifactIds: defaultImageArtifactIds }
+          : {}),
+        ...(!reply.charts?.length && defaultCharts.length
+          ? { charts: defaultCharts }
+          : {}),
+      };
       const replacedRetry = await replaceInferenceRetryReply(
         replyWithImages,
         true,
@@ -3818,6 +3833,7 @@ export async function answerFastAgentQuestion({
               signatureImageArtifactIds,
               requestedVideoArtifactIds,
               args.suggestions ?? [],
+              args.charts ?? defaultCharts,
             ]);
             if (completedChatReplySignatures.has(signature)) {
               replyTextTracker.consumeUnconsumed();
@@ -3848,6 +3864,7 @@ export async function answerFastAgentQuestion({
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
                   : {}),
+                ...(args.charts?.length ? { charts: args.charts } : {}),
               },
               false,
               undefined,
