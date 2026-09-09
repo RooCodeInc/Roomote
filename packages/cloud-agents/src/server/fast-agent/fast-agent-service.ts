@@ -476,6 +476,9 @@ const taskMessageArgsSchema = z.object({
 const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
 });
+const stopTaskArgsSchema = taskIdArgsSchema.extend({
+  userInitiated: z.boolean(),
+});
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
   FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
@@ -4269,7 +4272,7 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.stopTask: {
-            const args = taskIdArgsSchema.parse(call.args);
+            const args = stopTaskArgsSchema.parse(call.args);
             const target = selectActiveTaskId(args.taskId, currentTasks);
             if (!target.taskId) return { success: false, error: target.error };
             const targetTask = currentTasks.get(target.taskId);
@@ -4295,7 +4298,7 @@ export async function answerFastAgentQuestion({
             throwIfTurnCancelled();
             const result = await stopFastAgentTask(
               { userId, apiBaseUrl },
-              target.taskId,
+              { taskId: target.taskId, userInitiated: args.userInitiated },
             );
             return result;
           }

@@ -577,6 +577,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'do not duplicate messages or enter repeated stop/resume loops',
     );
+    expect(prompt).toContain(
+      'set "userInitiated" to false so the task transcript does not attribute the recovery interruption to the user',
+    );
     expect(prompt).toContain('Its "kickoffMessage" should describe the review');
     expect(prompt).toContain(
       'set "reasoningEffort" only to low, medium, high, xhigh, or max',

@@ -8812,10 +8812,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           message: 'I’ll stop it.',
         });
         await expect(
-          invokeTool(nativeToolNames.stopTask, { taskId: 'task-1' }),
+          invokeTool(nativeToolNames.stopTask, {
+            taskId: 'task-1',
+            userInitiated: true,
+          }),
         ).resolves.toEqual({ success: true });
         await expect(
-          invokeTool(nativeToolNames.stopTask, { taskId: 'task-1' }),
+          invokeTool(nativeToolNames.stopTask, {
+            taskId: 'task-1',
+            userInitiated: true,
+          }),
         ).resolves.toEqual({
           success: false,
           error: 'That task was already stopped.',
@@ -8826,7 +8832,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
-    expect(mocks.stopTask).toHaveBeenCalledOnce();
+    expect(mocks.stopTask).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      { taskId: 'task-1', userInitiated: true },
+    );
   });
 
   it('silently ignores optional human reaction input through the existing native tool', async () => {

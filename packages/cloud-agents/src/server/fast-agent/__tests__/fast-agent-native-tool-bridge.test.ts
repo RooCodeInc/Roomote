@@ -946,6 +946,7 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: true,
     });
     expect(namespacedMemberTool).toBe('roomote_manage_tasks');
     expect(Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)).not.toContain(

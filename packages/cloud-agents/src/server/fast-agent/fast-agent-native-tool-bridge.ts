@@ -400,7 +400,10 @@ import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
   description: "Stop an active task delegated by this Fast conversation. This interrupts the current work but preserves the task and sandbox so a later message can resume it.",
-  args: { taskId: z.string().nullable().optional() },
+  args: {
+    taskId: z.string().nullable().optional(),
+    userInitiated: z.boolean().describe("True only when the user explicitly requested this stop; false for autonomous recovery"),
+  },
   execute: (args, context) => invoke("stop_task", args, context),
 }
 `,

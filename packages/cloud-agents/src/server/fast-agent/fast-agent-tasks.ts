@@ -285,12 +285,13 @@ export async function cancelFastAgentTask(
 
 export async function stopFastAgentTask(
   context: FastAgentTaskApiContext,
-  taskId: string,
+  params: { taskId: string; userInitiated: boolean },
 ): Promise<FastAgentTaskToolResult> {
   return callFastAgentTaskApi({
     ...context,
     method: 'POST',
-    path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/stop`,
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/stop`,
+    body: { userInitiated: params.userInitiated },
   });
 }
 
@@ -459,9 +460,15 @@ export function createFastAgentTaskTools(
           taskId: nonEmptyTrimmedStringSchema.describe(
             'The non-empty Roomote task ID',
           ),
+          userInitiated: z
+            .boolean()
+            .describe(
+              'True only when the user explicitly requested this stop; false for autonomous recovery',
+            ),
         })
         .strict(),
-      execute: async ({ taskId }) => stopFastAgentTask(context, taskId),
+      execute: async ({ taskId, userInitiated }) =>
+        stopFastAgentTask(context, { taskId, userInitiated }),
     }),
   };
 }

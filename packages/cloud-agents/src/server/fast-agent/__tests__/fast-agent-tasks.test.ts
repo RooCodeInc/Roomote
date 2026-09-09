@@ -129,13 +129,16 @@ describe('fast-agent task operations', () => {
           apiBaseUrl: 'https://app.example.test/_roomote-api',
           getAuthToken: async () => 'auth-token',
         },
-        'task-42',
+        { taskId: 'task-42', userInitiated: false },
       ),
     ).resolves.toEqual({ success: true });
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://app.example.test/_roomote-api/api/mcp/tasks/task-42/stop',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ userInitiated: false }),
+      }),
     );
   });
 
