@@ -49,6 +49,7 @@ import {
 } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
   buildDataVisualizationBlocks,
   buildPrReviewActionCallbackData,
@@ -544,6 +545,21 @@ function buildFastAutomationLaunchOptions(params: {
   };
 }
 
+function resolveFastAgentChildWorkspace(environmentId: string | null): {
+  repo: string;
+  environmentId?: string;
+} {
+  if (environmentId === NO_REPOSITORIES) {
+    return { repo: NO_REPOSITORIES };
+  }
+
+  if (environmentId && environmentId !== ALL_REPOSITORIES) {
+    return { repo: ALL_REPOSITORIES, environmentId };
+  }
+
+  return { repo: ALL_REPOSITORIES };
+}
+
 function createFastAgentAutomationTaskLauncher(params: {
   userId: string;
   conversation: FastAgentConversation;
@@ -576,16 +592,13 @@ function createFastAgentAutomationTaskLauncher(params: {
     }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        ...resolveFastAgentChildWorkspace(environmentId),
         description: prompt,
         ...payload,
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: params.conversation,
         }),
-        ...(environmentId && environmentId !== ALL_REPOSITORIES
-          ? { environmentId }
-          : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
@@ -1144,7 +1157,7 @@ export function createFastAgentDiscordTaskLauncher(params: {
       return {
         type: TaskPayloadKind.StandardTask,
         payload: {
-          repo: ALL_REPOSITORIES,
+          ...resolveFastAgentChildWorkspace(environmentId),
           description: prompt,
           ...automationPayload,
           communicationProvider: 'discord',
@@ -1172,9 +1185,6 @@ export function createFastAgentDiscordTaskLauncher(params: {
             sessionId: parentSessionId,
             conversation: params.conversation,
           }),
-          ...(environmentId && environmentId !== ALL_REPOSITORIES
-            ? { environmentId }
-            : {}),
           ...(model
             ? { harnessModelOverrides: { 'opencode-server': model } }
             : {}),
@@ -1216,7 +1226,7 @@ export function createFastAgentCommunicationTaskLauncher(params: {
     }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        ...resolveFastAgentChildWorkspace(environmentId),
         description: prompt,
         ...automationPayload,
         communicationProvider: params.conversation.surface,
@@ -1234,9 +1244,6 @@ export function createFastAgentCommunicationTaskLauncher(params: {
           sessionId: parentSessionId,
           conversation: params.conversation,
         }),
-        ...(environmentId && environmentId !== ALL_REPOSITORIES
-          ? { environmentId }
-          : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
