@@ -48,24 +48,49 @@ function fill() {
   fireEvent.change(screen.getByLabelText('API key'), {
     target: { value: credential },
   });
-  fireEvent.click(screen.getByRole('checkbox'));
 }
+it('does not approve while requests are loading', async () => {
+  let finish!: (response: Response) => void;
+  fetchMock.mockReturnValueOnce(
+    new Promise<Response>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const onUse = vi.fn();
+  render(<SessionSecrets sessionId={sessionId} onUse={onUse} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Session secrets' }));
+  expect(screen.queryByLabelText('API key')).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: 'Allow for this Session' }),
+  ).not.toBeInTheDocument();
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(fetchMock.mock.calls[0]![1].method).toBeUndefined();
+  finish(new Response(JSON.stringify({ pending: [pending], secrets: [] })));
+  await screen.findByLabelText('API key');
+  expect(fetchMock).toHaveBeenCalledOnce();
+  expect(onUse).not.toHaveBeenCalled();
+});
 it('prefills a single-key consent flow and automatically sends only a nonsecret continuation', async () => {
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
   const onUse = await open();
-  expect(screen.getByRole('button', { name: 'Save API key' })).toBeDisabled();
-  expect(screen.getByText('https://api.example.com:8443')).toBeInTheDocument();
-  expect(screen.getByText('authorization').closest('details')).toBeNull();
-  expect(screen.getByText('"Bearer "').closest('details')).toBeNull();
-  expect(screen.getByRole('checkbox')).toHaveAccessibleDescription(
-    /https:\/\/api.example.com:8443.*authorization.*"Bearer "/,
-  );
   expect(
-    screen.getByText('Review access details').closest('details'),
-  ).not.toHaveAttribute('open');
-  expect(screen.getByText(/All paths/)).toBeInTheDocument();
-  expect(screen.getByText(/Only you/)).toHaveTextContent(sessionId);
+    screen.getByRole('heading', { name: 'Add your Demo service API key' }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: 'Allow for this Session' }),
+  ).toBeEnabled();
+  expect(
+    screen.getByRole('button', { name: 'Allow for this Session' }),
+  ).toHaveAccessibleDescription('For https://api.example.com:8443');
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(
+      /Review access details|I approve this service|All paths|Only you/,
+    ),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText('authorization')).not.toBeInTheDocument();
+  expect(screen.queryByText('"Bearer "')).not.toBeInTheDocument();
   expect(document.querySelectorAll('input[type="password"]')).toHaveLength(1);
   expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
   const password = screen.getByLabelText('API key');
@@ -76,10 +101,13 @@ it('prefills a single-key consent flow and automatically sends only a nonsecret 
     'sentry-block',
   );
   fill();
+  expect(fetchMock).toHaveBeenCalledOnce();
   fetchMock.mockResolvedValueOnce(
     new Response(JSON.stringify({ secret: metadata }), { status: 201 }),
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Save API key' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Allow for this Session' }),
+  );
   await waitFor(() => expect(onUse).toHaveBeenCalledOnce());
   expect(fetchMock).toHaveBeenLastCalledWith(
     `/api/sessions/${sessionId}/secrets`,
@@ -116,7 +144,102 @@ it.each([401, 403, 500])(
     expect(document.body.textContent).not.toContain(credential);
   },
 );
-it('clears key and consent when selecting a different prepared request', async () => {
+it.each([
+  [
+    'https://api.example.com:443',
+    'https://api.example.com',
+    'authorization',
+    'Bearer ',
+  ],
+  [
+    'https://api.example.com:8443',
+    'https://api.example.com:8443',
+    'authorization',
+    'Basic ',
+  ],
+  [
+    'https://api.example.com',
+    'https://api.example.com',
+    'authorization',
+    'Token ',
+  ],
+  ['https://api.example.com', 'https://api.example.com', 'x-api-key', ''],
+  ['https://api.example.com', 'https://api.example.com', 'api-key', ''],
+  ['https://api.example.com', 'https://api.example.com', 'authorization', ''],
+])(
+  'shows destination %s as %s without disclosing %s prefix %s or approving',
+  async (origin, canonicalOrigin, headerName, headerPrefix) => {
+    const label = '<img src=x onerror=alert(1)>';
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pending: [{ ...pending, origin, headerName, headerPrefix, label }],
+          secrets: [],
+        }),
+      ),
+    );
+    const onUse = await open();
+    expect(
+      screen.getByRole('heading', { name: `Add your ${label} API key` }),
+    ).toBeInTheDocument();
+    expect(document.querySelector('img')).toBeNull();
+    expect(screen.getByText(`For ${canonicalOrigin}`)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    fill();
+    expect(
+      screen.queryByRole('button', { name: /info|How it is used|Review/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Review access details|GET and HEAD|with no prefix/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(headerName)).not.toBeInTheDocument();
+    if (headerPrefix)
+      expect(
+        screen.queryByText(JSON.stringify(headerPrefix)),
+      ).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(onUse).not.toHaveBeenCalled();
+  },
+);
+it('clears the revealed key immediately on save and leaves the next request masked', async () => {
+  fetchMock.mockResolvedValueOnce(
+    new Response(
+      JSON.stringify({
+        pending: [
+          pending,
+          { ...pending, pendingRef: secretRef, label: 'Second' },
+        ],
+        secrets: [],
+      }),
+    ),
+  );
+  const onUse = await open();
+  fill();
+  fireEvent.click(screen.getByRole('button', { name: 'Show value' }));
+  let finish!: (response: Response) => void;
+  fetchMock.mockReturnValueOnce(
+    new Promise<Response>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Allow for this Session' }),
+  );
+  expect(screen.getByLabelText('API key')).toHaveValue('');
+  expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
+  expect(
+    screen.getByRole('button', { name: 'Allow for this Session' }),
+  ).toBeDisabled();
+  finish(new Response(JSON.stringify({ secret: metadata }), { status: 201 }));
+  await waitFor(() => expect(onUse).toHaveBeenCalledOnce());
+  expect(
+    screen.getByRole('heading', { name: 'Add your Second API key' }),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText('API key')).toHaveValue('');
+  expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
+});
+it('clears key and reveal state when selecting a different prepared request', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response(
       JSON.stringify({
@@ -141,8 +264,7 @@ it('clears key and consent when selecting a different prepared request', async (
   });
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
-  expect(screen.getByRole('checkbox')).not.toBeChecked();
-  expect(screen.getByText('https://second.example:443')).toBeInTheDocument();
+  expect(screen.getByText('For https://second.example')).toBeInTheDocument();
 });
 it('clears the key and asks for a new request when the prepared approval has expired', async () => {
   fetchMock.mockResolvedValueOnce(
@@ -155,7 +277,9 @@ it('clears the key and asks for a new request when the prepared approval has exp
   );
   const onUse = await open();
   fill();
-  fireEvent.click(screen.getByRole('button', { name: 'Save API key' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Allow for this Session' }),
+  );
   expect(await screen.findByRole('alert')).toHaveTextContent(
     'This request has expired',
   );
@@ -168,7 +292,9 @@ it('clears key on failed save and close without echoing response content', async
   fill();
   fireEvent.click(screen.getByRole('button', { name: 'Show value' }));
   fetchMock.mockResolvedValueOnce(new Response(credential, { status: 400 }));
-  fireEvent.click(screen.getByRole('button', { name: 'Save API key' }));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Allow for this Session' }),
+  );
   await screen.findByRole('alert');
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
@@ -196,6 +322,8 @@ it('revokes without exposing references and clears any entered key', async () =>
     screen.getByRole('button', { name: 'Manage approved secrets' }),
   );
   expect(screen.queryByLabelText('API key')).not.toBeInTheDocument();
+  expect(screen.getByText('authorization')).toBeInTheDocument();
+  expect(screen.getByText('"Bearer "')).toBeInTheDocument();
   fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
   fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
   await screen.findByText('Demo service (revoked)');
@@ -208,7 +336,6 @@ it('revokes without exposing references and clears any entered key', async () =>
   );
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
-  expect(screen.getByRole('checkbox')).not.toBeChecked();
 });
 it.each(['disabled', 'failed', 'throws'])(
   'keeps saved status with native-tool fallback when notification is %s',
@@ -222,7 +349,9 @@ it.each(['disabled', 'failed', 'throws'])(
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ secret: metadata }), { status: 201 }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Save API key' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Allow for this Session' }),
+    );
     expect(await screen.findByRole('status')).toHaveTextContent(
       'list_session_secrets',
     );

@@ -87,7 +87,6 @@ function SessionSecretsForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [approved, setApproved] = useState(false);
   const [managing, setManaging] = useState(false);
   const [inputVersion, setInputVersion] = useState(0);
   const formRef = useRef<HTMLFormElement>(null);
@@ -97,7 +96,6 @@ function SessionSecretsForm({
     formRef.current?.reset();
     // Also reset the shared secret input's reveal state and retained value.
     setInputVersion((version) => version + 1);
-    setApproved(false);
   }
   useEffect(() => {
     const controller = new AbortController();
@@ -204,7 +202,7 @@ function SessionSecretsForm({
                   className="space-y-3"
                   onSubmit={async (event) => {
                     event.preventDefault();
-                    if (busy || !approved) return;
+                    if (busy) return;
                     if (new Date(selected.expiresAt).getTime() <= Date.now()) {
                       clearForm();
                       setError(
@@ -273,61 +271,15 @@ function SessionSecretsForm({
                   }}
                 >
                   <fieldset disabled={busy} className="space-y-3">
-                    <p className="text-sm font-medium">{selected.label}</p>
+                    <h3 className="break-words text-sm font-medium">
+                      Add your {selected.label} API key
+                    </h3>
                     <p
                       id="session-secret-destination"
-                      className="break-all text-sm"
+                      className="break-all text-sm text-muted-foreground"
                     >
-                      Allow this Session to use your API key with{' '}
-                      <strong>
-                        {new URL(selected.origin).protocol}
-                        {'//'}
-                        {new URL(selected.origin).hostname}:
-                        {new URL(selected.origin).port || '443'}
-                      </strong>{' '}
-                      for GET and HEAD requests.
+                      For {new URL(selected.origin).origin}
                     </p>
-                    <p id="session-secret-injection" className="text-sm">
-                      The key is sent in the <code>{selected.headerName}</code>{' '}
-                      header
-                      {selected.headerPrefix ? (
-                        <>
-                          {' '}
-                          after{' '}
-                          <code>
-                            {JSON.stringify(selected.headerPrefix)}
-                          </code>{' '}
-                          (including the space)
-                        </>
-                      ) : (
-                        ' with no prefix'
-                      )}
-                      .
-                    </p>
-                    <details className="text-sm space-y-2">
-                      <summary className="cursor-pointer font-medium">
-                        Review access details
-                      </summary>
-                      <p>
-                        Expires {new Date(selected.expiresAt).toLocaleString()}.
-                      </p>
-                      <p>
-                        All paths on this exact HTTPS origin and port are
-                        allowed, not just one endpoint. Redirects are not
-                        followed.
-                      </p>
-                      <p className="break-all">
-                        Only you, the signed-in owner, can use this approval in
-                        Session {sessionId}. It cannot be used in another
-                        Session.
-                      </p>
-                      <p>
-                        The service receives your key and can misuse its
-                        privileges or disclose transformed values in responses.
-                        Use a trusted service and a least-privilege key. This is
-                        not a universal secrecy guarantee.
-                      </p>
-                    </details>
                     <div className="space-y-1">
                       <Label htmlFor="session-secret-value">API key</Label>
                       <Input
@@ -341,20 +293,14 @@ function SessionSecretsForm({
                         autoComplete="off"
                         spellCheck={false}
                         className="ph-no-capture ph-mask sentry-mask"
-                        onChange={() => setApproved(false)}
                       />
                     </div>
-                    <label className="flex items-start gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        aria-describedby="session-secret-destination session-secret-injection"
-                        checked={approved}
-                        onChange={(event) => setApproved(event.target.checked)}
-                      />
-                      I approve this service and the access details above.
-                    </label>
-                    <Button type="submit" disabled={!approved || busy}>
-                      Save API key
+                    <Button
+                      type="submit"
+                      disabled={busy}
+                      aria-describedby="session-secret-destination"
+                    >
+                      Allow for this Session
                     </Button>
                   </fieldset>
                 </form>
@@ -402,6 +348,22 @@ function SessionSecretsForm({
                     )
                   </p>
                   <p className="break-all">{secret.origin}</p>
+                  <p>
+                    GET and HEAD requests send your key in the{' '}
+                    <code>{secret.headerName}</code> header
+                    {secret.headerPrefix ? (
+                      <>
+                        {' '}
+                        after <code>
+                          {JSON.stringify(secret.headerPrefix)}
+                        </code>{' '}
+                        (including the space)
+                      </>
+                    ) : (
+                      ' with no prefix'
+                    )}
+                    .
+                  </p>
                   <p>Expires {new Date(secret.expiresAt).toLocaleString()}</p>
                   <Button
                     size="sm"

@@ -261,7 +261,14 @@ describe('FastSessionTranscript', () => {
     fireEvent.change(screen.getByLabelText('API key'), {
       target: { value: 'disposable-test-credential' },
     });
-    fireEvent.click(screen.getByRole('checkbox'));
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /info|How it is used|Review/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Review access details|GET and HEAD/),
+    ).not.toBeInTheDocument();
+    expect(replyMutate).not.toHaveBeenCalled();
     fetchMock.mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -279,7 +286,9 @@ describe('FastSessionTranscript', () => {
         { status: 201 },
       ),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Save API key' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Allow for this Session' }),
+    );
     await screen.findByText(
       'API key saved. The Session has been notified without sharing your key.',
     );
