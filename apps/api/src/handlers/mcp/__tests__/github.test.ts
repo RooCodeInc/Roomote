@@ -38,6 +38,8 @@ describe('GitHub MCP bounded writes', () => {
     ReturnType<typeof githubInstallationFactory.create>
   >;
   let repository: Awaited<ReturnType<typeof repositoryFactory.create>>;
+  let secondInstallation: typeof installation;
+  let secondRepository: typeof repository;
   const appCredentials = { appId: '123', privateKey: 'test-only-key' };
   const owner = `bounded-${crypto.randomUUID()}`;
   const args = { owner, repo: 'example', pullNumber: 42, state: 'closed' };
@@ -61,6 +63,16 @@ describe('GitHub MCP bounded writes', () => {
       installationId: installation.id,
       linkedByUserId: installer.id,
       fullName: `${owner}/example`,
+    });
+    secondInstallation = await githubInstallationFactory.create({
+      installedByUserId: installer.id,
+      appId: 123,
+      permissions: { issues: 'write', pull_requests: 'write' },
+    });
+    secondRepository = await repositoryFactory.create({
+      installationId: secondInstallation.id,
+      linkedByUserId: installer.id,
+      fullName: `${owner}/second`,
     });
   });
 
@@ -97,6 +109,12 @@ describe('GitHub MCP bounded writes', () => {
   });
 
   afterAll(async () => {
+    await db
+      .delete(repositories)
+      .where(eq(repositories.id, secondRepository.id));
+    await db
+      .delete(githubInstallations)
+      .where(eq(githubInstallations.id, secondInstallation.id));
     await db.delete(repositories).where(eq(repositories.id, repository.id));
     await db
       .delete(githubInstallations)
@@ -396,7 +414,14 @@ describe('GitHub MCP bounded writes', () => {
         'X-MCP-Readonly',
       ),
     ).toBe('false');
-    expect(mocks.mint).toHaveBeenCalledWith({ type: 'activeInstallation' });
+    expect(mocks.mint).toHaveBeenCalledWith(
+      {
+        type: 'installationId',
+        installationId: expect.any(String),
+        repositoryIds: [expect.any(Number)],
+      },
+      appCredentials,
+    );
   });
 
   it('preserves an unparseable upstream discovery response', async () => {
@@ -414,9 +439,14 @@ describe('GitHub MCP bounded writes', () => {
     expect(
       (await call('pull_request_read', { ...args, method: 'get' })).status,
     ).toBe(200);
-    expect(mocks.mint).toHaveBeenCalledExactlyOnceWith({
-      type: 'activeInstallation',
-    });
+    expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+      {
+        type: 'installationId',
+        installationId: installation.id,
+        repositoryIds: [repository.githubRepoId],
+      },
+      appCredentials,
+    );
     expect(
       new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
         'X-MCP-Readonly',
@@ -432,6 +462,365 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.mint).not.toHaveBeenCalled();
   });
 
+  it.each(['initialize', 'tools/list'])(
+    'uses a deterministic scoped credential for %s with multiple installations',
+    async (method) => {
+      const expected =
+        installation.id < secondInstallation.id
+          ? { installation, repository }
+          : { installation: secondInstallation, repository: secondRepository };
+      for (let i = 0; i < 2; i++) {
+        mocks.upstream.mockResolvedValueOnce(
+          Response.json({ jsonrpc: '2.0', id: 7, result: { tools: [] } }),
+        );
+        expect((await post({ jsonrpc: '2.0', id: 7, method })).status).toBe(
+          200,
+        );
+      }
+      expect(mocks.mint).toHaveBeenCalledTimes(2);
+      for (const [scope, credentials] of mocks.mint.mock.calls) {
+        expect(scope).toEqual({
+          type: 'installationId',
+          installationId: expected.installation.id,
+          repositoryIds: [expected.repository.githubRepoId],
+        });
+        expect(credentials).toEqual(appCredentials);
+      }
+    },
+  );
+
+  it.each([
+    'get_file_contents',
+    'pull_request_read',
+    'update_pull_request',
+    'add_issue_comment',
+    'add_reply_to_pull_request_comment',
+  ])(
+    'routes %s to the second repository without granting access to the first',
+    async (name) => {
+      const arguments_ =
+        name === 'add_issue_comment'
+          ? { owner, repo: 'second', issue_number: 42, body: 'Comment' }
+          : name === 'add_reply_to_pull_request_comment'
+            ? {
+                owner,
+                repo: 'second',
+                pullNumber: 42,
+                commentId: 12,
+                body: 'Reply',
+              }
+            : { ...args, repo: 'second' };
+      expect((await call(name, arguments_)).status).toBe(200);
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: secondInstallation.id,
+          repositoryIds: [secondRepository.githubRepoId],
+        },
+        appCredentials,
+      );
+    },
+  );
+
+  it.each(['search_code', 'search_pull_requests', 'search_repositories'])(
+    'routes a single-repo %s unchanged',
+    async (name) => {
+      const arguments_ = {
+        query: `repo:${owner}/second`,
+        perPage: 5,
+      };
+      expect((await call(name, arguments_)).status).toBe(200);
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: secondInstallation.id,
+          repositoryIds: [secondRepository.githubRepoId],
+        },
+        appCredentials,
+      );
+      expect(
+        JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
+      ).toEqual(arguments_);
+    },
+  );
+
+  it.each([
+    { owner },
+    { repo: 'second' },
+    { owner: owner.toUpperCase(), repo: 'SECOND' },
+  ])('allows matching optional PR search scope %j', async (scope) => {
+    const arguments_ = { query: `repo:${owner}/second is:open`, ...scope };
+    expect((await call('search_pull_requests', arguments_)).status).toBe(200);
+    expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+      {
+        type: 'installationId',
+        installationId: secondInstallation.id,
+        repositoryIds: [secondRepository.githubRepoId],
+      },
+      appCredentials,
+    );
+    expect(
+      JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
+    ).toEqual(arguments_);
+  });
+
+  it.each([
+    'fix',
+    `org:${owner}`,
+    `repo:${owner}/example repo:${owner}/second`,
+    `repo:${owner}/example OR fix`,
+    `NOT repo:${owner}/example`,
+    `-repo:${owner}/example`,
+    `(repo:${owner}/example)`,
+    `repo:"${owner}/example"`,
+    `"repo:${owner}/example"`,
+    `repo:${owner}/example /fix|other/`,
+    `repo:${owner}/example org:${owner}`,
+    `repo:${owner}/*`,
+    `repo:${owner}/example OR(repo:${owner}/second)`,
+  ])(
+    'rejects ambiguous or unscoped search %s before credentials',
+    async (query) => {
+      for (const name of [
+        'search_code',
+        'search_pull_requests',
+        'search_repositories',
+      ]) {
+        const response = await call(name, { query });
+        expect(response.status).toBe(400);
+        expect((await response.json()).error.message).toContain(
+          'Split searches',
+        );
+      }
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    'example',
+    `example in:name org:${owner}`,
+    `org:${owner}`,
+    `example in:name org:${owner} org:another`,
+    `example in:name org:${owner} OR second`,
+    `example in:description org:${owner}`,
+    `"example" in:name org:${owner}`,
+  ])('rejects unsupported repository search %s', async (query) => {
+    expect((await call('search_repositories', { query })).status).toBe(400);
+    expect(mocks.mint).not.toHaveBeenCalled();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    null,
+    [],
+    'query',
+    {},
+    { query: null },
+    { query: 42 },
+    { query: '' },
+    { query: `repo:${owner}/second`, owner: null },
+    { query: `repo:${owner}/second`, repo: 42 },
+    { query: `repo:${owner}/second`, owner: '../outside' },
+    { query: `repo:${owner}/second`, owner: 'another' },
+    { query: `repo:${owner}/second`, repo: 'example' },
+  ])(
+    'rejects malformed or conflicting search arguments %j without credentials',
+    async (arguments_) => {
+      for (const name of [
+        'search_code',
+        'search_pull_requests',
+        'search_repositories',
+      ])
+        expect((await call(name, arguments_)).status).toBe(400);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { isActive: false },
+    { host: 'enterprise.example' },
+    { githubRepoId: -1 },
+    { sourceControlProvider: 'gitlab' as const },
+  ])(
+    'never falls back to another installation for an invalid read target %j',
+    async (update) => {
+      await db
+        .update(repositories)
+        .set(update)
+        .where(eq(repositories.id, repository.id));
+      for (const [name, arguments_] of [
+        ['get_file_contents', { owner, repo: 'example' }],
+        ['search_code', { query: `repo:${owner}/example fix` }],
+        ['search_repositories', { query: `repo:${owner}/example` }],
+      ] as const)
+        expect((await call(name, arguments_)).status).toBe(403);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([{ suspendedAt: new Date() }, { appId: 456 }])(
+    'excludes ineligible installations from reads and discovery %j',
+    async (update) => {
+      await db
+        .update(githubInstallations)
+        .set(update)
+        .where(eq(githubInstallations.id, installation.id));
+      expect(
+        (await call('get_file_contents', { owner, repo: 'example' })).status,
+      ).toBe(403);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(
+        (await post({ jsonrpc: '2.0', id: 7, method: 'initialize' })).status,
+      ).toBe(200);
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: secondInstallation.id,
+          repositoryIds: [secondRepository.githubRepoId],
+        },
+        appCredentials,
+      );
+    },
+  );
+
+  it('rejects disconnected and unspecified reads without using the discovery credential', async () => {
+    expect(
+      (await call('get_file_contents', { owner, repo: 'disconnected' })).status,
+    ).toBe(403);
+    expect(
+      (
+        await call('search_repositories', {
+          query: `repo:${owner}/disconnected`,
+        })
+      ).status,
+    ).toBe(403);
+    expect((await call('get_file_contents', {})).status).toBe(400);
+    expect(mocks.mint).not.toHaveBeenCalled();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it('skips inactive repositories for discovery and fails when none remain connected', async () => {
+    await db
+      .update(repositories)
+      .set({ isActive: false })
+      .where(eq(repositories.id, repository.id));
+    expect(
+      (await post({ jsonrpc: '2.0', id: 7, method: 'initialize' })).status,
+    ).toBe(200);
+    expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+      {
+        type: 'installationId',
+        installationId: secondInstallation.id,
+        repositoryIds: [secondRepository.githubRepoId],
+      },
+      appCredentials,
+    );
+    await db
+      .update(repositories)
+      .set({ isActive: false })
+      .where(eq(repositories.id, secondRepository.id));
+    try {
+      expect(
+        (await post({ jsonrpc: '2.0', id: 7, method: 'initialize' })).status,
+      ).toBe(404);
+      expect(mocks.mint).toHaveBeenCalledTimes(1);
+    } finally {
+      await db
+        .update(repositories)
+        .set({ isActive: true })
+        .where(eq(repositories.id, secondRepository.id));
+    }
+  });
+
+  it('preserves well-scoped single-installation reads and searches', async () => {
+    await db
+      .update(githubInstallations)
+      .set({ suspendedAt: new Date() })
+      .where(eq(githubInstallations.id, secondInstallation.id));
+    try {
+      for (const [name, arguments_] of [
+        ['get_file_contents', { owner, repo: 'example' }],
+        ['search_code', { query: `repo:${owner}/example fix` }],
+        ['search_pull_requests', { query: `repo:${owner}/example is:open` }],
+        ['search_repositories', { query: `repo:${owner}/example` }],
+      ] as const)
+        expect((await call(name, arguments_)).status).toBe(200);
+      expect(mocks.mint).toHaveBeenCalledTimes(4);
+      for (const [scope] of mocks.mint.mock.calls)
+        expect(scope).toEqual({
+          type: 'installationId',
+          installationId: installation.id,
+          repositoryIds: [repository.githubRepoId],
+        });
+    } finally {
+      await db
+        .update(githubInstallations)
+        .set({ suspendedAt: null })
+        .where(eq(githubInstallations.id, secondInstallation.id));
+    }
+  });
+
+  it('requires active members for read and protocol traffic as well as writes', async () => {
+    await db
+      .update(users)
+      .set({ deletedAt: new Date() })
+      .where(eq(users.id, actor.id));
+    expect(
+      (await call('get_file_contents', { owner, repo: 'example' })).status,
+    ).toBe(403);
+    expect(
+      (await post({ jsonrpc: '2.0', id: 7, method: 'initialize' })).status,
+    ).toBe(403);
+    expect(mocks.mint).not.toHaveBeenCalled();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it('keeps actorless persisted run reads scoped and read-only and rejects missing runs', async () => {
+    const run = await runFactory.create({ actingUserId: null });
+    try {
+      const target = app({
+        tokenType: 'run',
+        version: 1,
+        runId: run.id,
+        userId: null,
+        principal: 'deployment',
+      });
+      expect(
+        (await call('get_file_contents', { owner, repo: 'second' }, target))
+          .status,
+      ).toBe(200);
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: secondInstallation.id,
+          repositoryIds: [secondRepository.githubRepoId],
+        },
+        appCredentials,
+      );
+      expect(
+        new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+          'X-MCP-Readonly',
+        ),
+      ).toBe('true');
+      expect(
+        (await call('update_pull_request', { ...args, repo: 'second' }, target))
+          .status,
+      ).toBe(403);
+      await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+      expect(
+        (await call('get_file_contents', { owner, repo: 'second' }, target))
+          .status,
+      ).toBe(404);
+      expect(mocks.mint).toHaveBeenCalledTimes(1);
+    } finally {
+      await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+      await db.delete(tasks).where(eq(tasks.id, run.taskId));
+    }
+  });
+
   it('does not authorize a same-name repository on another provider', async () => {
     await db
       .update(repositories)
@@ -444,6 +833,7 @@ describe('GitHub MCP bounded writes', () => {
 
   it.each([
     { isActive: false },
+    { githubRepoId: -1 },
     { githubRepoId: 0 },
     { host: 'other.example' },
   ])('rejects inactive or invalid repository connection %j', async (update) => {
