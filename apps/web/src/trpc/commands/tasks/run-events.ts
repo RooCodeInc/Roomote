@@ -1,6 +1,6 @@
 import { db, desc, eq, taskRunEvents } from '@roomote/db/server';
 import type { UserAuthSuccess } from '@/types';
-import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
+import { requireTaskReadAccess } from '@/lib/server/custom-automation-task-access';
 
 const MAX_RUN_EVENTS = 500;
 
@@ -13,7 +13,7 @@ export async function getTaskRunEventsCommand(
   auth: UserAuthSuccess,
   input: { taskId: string },
 ) {
-  await requireTaskAccess(auth, input.taskId);
+  await requireTaskReadAccess(auth, input.taskId);
   const events = await db
     .select({
       id: taskRunEvents.id,

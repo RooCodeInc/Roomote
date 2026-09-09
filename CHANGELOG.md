@@ -2,32 +2,6 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
-## 1.5.0 (2026-09-09)
-
-Roomote 1.5 adds shared reusable skills, member-owned automations, and direct GitHub updates in Fast, with more reliable follow-ups and pull request feedback.
-
-### Highlights
-
-- Save reusable skills from a Session or Settings and share them across the deployment without launching a coding task.
-- Create and manage your own custom automations as a member, with creator-and-admin access to their Sessions and history.
-- Update existing GitHub pull requests, post comments and replies, and add reactions directly from Fast.
-- Keep task follow-ups retryable, review replies published, and task memories aligned with pull request outcomes.
-
-### Minor changes
-
-- Create reusable instance-wide skills directly in Sessions or Settings without choosing an environment or starting a coding task. Settings > Skills shows a shared catalog with creator labels and editing controls for creators and admins. Fast loads saved changes immediately, while coding runs refresh their catalog at startup. Existing environment and marketplace skills remain available through environment YAML, outside the shared Settings list.
-- Update existing GitHub pull requests, request reviewers, post comments and review-thread replies, and add reactions directly from Fast without starting a coding task. These actions use the connected GitHub App and its repository permissions; creating or merging pull requests and writing repository files still require a coding task.
-- Members can create and manage their own custom automations, including schedules and report destinations, without administrator access. Automation Sessions and execution history stay accessible only to the creator and admins. Members' Session user filters offer their own identity and custom automations; built-in automations and deployment-wide controls remain admin-only.
-
-### Patch changes
-
-- Avoid unnecessary pull request retries and edits when Roomote assigns a valid Session follow-up link instead of the initial task link.
-- Refresh task memories when a pull request the task opened merges or closes unmerged, so recall can distinguish shipped work from abandoned approaches.
-- Publish GitHub review-thread replies immediately instead of leaving them in pending drafts. Submitting a review no longer accidentally publishes unrelated draft comments; an existing pending review is submitted only when explicitly selected.
-- Keep Slack review cards focused on current findings and action buttons, without redundant resolving questions or superseded-review notices.
-- Task follow-ups can be retried after a definite send rejection, and distinct instructions are no longer incorrectly blocked. Uncertain deliveries remain protected against duplicate sends.
-- Show the configured task model and reasoning defaults in the model chip before its picker is opened, instead of briefly displaying a built-in reasoning level.
-
 ## 1.4.1 (2026-09-08)
 
 Roomote 1.4.1 restores integration lookups that failed with GPT-5.x models.

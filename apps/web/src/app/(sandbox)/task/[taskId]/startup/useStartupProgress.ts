@@ -9,7 +9,7 @@ import {
   isExitedRunStatus,
   resolveComputeProviderTarget,
 } from '@roomote/types';
-import type { TaskRun } from '@roomote/db';
+import type { TaskRunProgress } from '@/types';
 
 import { getBootStatus, useSandboxLogs } from '@/components/sandbox';
 import { getTaskRunError } from '@/lib/task-run-errors';
@@ -18,7 +18,7 @@ import type { StartupStep } from './StartupMessage';
 
 interface UseStartupProgressOptions {
   runId: number;
-  initialTaskRun?: TaskRun;
+  initialTaskRun?: TaskRunProgress;
   onStatusChange?: (status: RunStatus) => void;
 }
 
@@ -36,7 +36,10 @@ export function useStartupProgress({
     },
   ]);
 
-  const streamedTaskRun = useSSE<TaskRun | undefined>('message', undefined);
+  const streamedTaskRun = useSSE<TaskRunProgress | undefined>(
+    'message',
+    undefined,
+  );
 
   const taskRun = streamedTaskRun ?? initialTaskRun;
   const status = taskRun?.status ?? initialStatus;

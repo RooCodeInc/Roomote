@@ -22,7 +22,10 @@ import {
 import { enqueueTaskSleep } from '@roomote/sdk/server';
 import type { UserAuthSuccess } from '@/types';
 import { getTasksCommand } from '@/trpc/commands/tasks/list';
-import { getTaskByIdCommand } from '@/trpc/commands/tasks/by-id';
+import {
+  getTaskByIdCommand,
+  resolveTaskByIdAccessCommand,
+} from '@/trpc/commands/tasks/by-id';
 import { getTaskMessageEnvelopesCommand } from '@/trpc/commands/tasks/message-envelopes';
 import { getTaskRunEventsCommand } from '@/trpc/commands/tasks/run-events';
 import { updateTaskTitleCommand } from '@/trpc/commands/tasks/update-title';
@@ -42,7 +45,7 @@ import {
   getArtifactsForTask,
   getArtifactVersionsByPath,
 } from './artifacts';
-import { canAccessTask } from './custom-automation-task-access';
+import { canAccessTask, canReadTask } from './custom-automation-task-access';
 
 vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
@@ -138,6 +141,65 @@ describe('custom automation task history access', () => {
       adminAuth: { ...otherAuth, isAdmin: true },
     };
   }
+
+  it('projects direct-link run details without exposing sandbox credentials or arbitrary JSON', async () => {
+    const { task, run, environment, ownerAuth, otherAuth, adminAuth } =
+      await fixture();
+    const payload = {
+      ...run.payload,
+      slackTeamId: 'T123',
+      credentials: 'fake-payload-secret',
+    };
+    await db
+      .update(taskRuns)
+      .set({
+        authBypassValue: 'fake-preview-bypass-secret',
+        authBypassHeaderName: 'x-fake-preview-bypass',
+        result: { error: 'Public failure', credentials: 'fake-result-secret' },
+        payload,
+      })
+      .where(eq(taskRuns.id, run.id));
+
+    for (const auth of [ownerAuth, otherAuth, adminAuth]) {
+      const detail = await getTaskByIdCommand(auth, { taskId: task.id });
+      expect(detail?.taskRun).toEqual({
+        id: run.id,
+        taskId: task.id,
+        status: run.status,
+        taskPhase: run.taskPhase,
+        vendor: run.vendor,
+        error: 'Public failure',
+        errorCode: null,
+        payload: {
+          repo: 'test/repo',
+          environmentId: environment.id,
+          slackTeamId: 'T123',
+        },
+        prRepo: null,
+        prNumber: null,
+        pullRequests: [],
+      });
+      expect(JSON.stringify(detail)).not.toContain('fake-');
+    }
+
+    for (const auth of [ownerAuth, adminAuth]) {
+      expect(
+        await resolveTaskByIdAccessCommand(auth, { taskId: task.id }),
+      ).toMatchObject({
+        kind: 'resolved',
+        task: {
+          taskRun: {
+            authBypassValue: 'fake-preview-bypass-secret',
+            authBypassHeaderName: 'x-fake-preview-bypass',
+            machineId: run.machineId,
+          },
+        },
+      });
+    }
+    expect(
+      await resolveTaskByIdAccessCommand(otherAuth, { taskId: task.id }),
+    ).toEqual({ kind: 'not-found' });
+  });
 
   describe('sleep and preview authorization', () => {
     beforeEach(() => {
@@ -390,24 +452,27 @@ describe('custom automation task history access', () => {
     );
   });
 
-  it('gates guessed detail, messages, events and artifact IDs despite participation', async () => {
+  it('allows authenticated direct-link reads while denying anonymous reads', async () => {
     const { task, artifact, ownerAuth, otherAuth, adminAuth } = await fixture();
-    await expect(
-      getTaskByIdCommand(otherAuth, {
-        taskId: task.id,
-        includeArtifacts: true,
-      }),
-    ).resolves.toBeNull();
     await expect(
       getTaskByIdCommand(ownerAuth, { taskId: 'missing-task' }),
     ).resolves.toBeNull();
+    const anonymous = {
+      userId: null,
+      isAdmin: false,
+    } as unknown as UserAuthSuccess;
+    expect(await canReadTask(anonymous, task.id)).toBe(false);
+    expect(await canReadTask(otherAuth, 'missing-task')).toBe(false);
     await expect(
-      getTaskMessageEnvelopesCommand(otherAuth, { taskId: task.id }),
+      getTaskByIdCommand(anonymous, { taskId: task.id }),
+    ).resolves.toBeNull();
+    await expect(
+      getTaskMessageEnvelopesCommand(anonymous, { taskId: task.id }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(
-      getTaskRunEventsCommand(otherAuth, { taskId: task.id }),
+      getTaskRunEventsCommand(anonymous, { taskId: task.id }),
     ).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    for (const auth of [otherAuth, { userId: null, isAdmin: false }]) {
+    for (const auth of [anonymous]) {
       await expect(
         getArtifactById({ auth, taskId: task.id, artifactId: artifact.id }),
       ).resolves.toBeNull();
@@ -425,7 +490,7 @@ describe('custom automation task history access', () => {
         getArtifactsForTask({ auth, taskId: task.id }),
       ).resolves.toEqual([]);
     }
-    for (const auth of [ownerAuth, adminAuth]) {
+    for (const auth of [ownerAuth, otherAuth, adminAuth]) {
       await expect(
         getTaskByIdCommand(auth, { taskId: task.id, includeArtifacts: true }),
       ).resolves.toMatchObject({
@@ -451,6 +516,9 @@ describe('custom automation task history access', () => {
           path: artifact.path,
         }),
       ).resolves.toHaveLength(1);
+      await expect(
+        getArtifactsForTask({ auth, taskId: task.id }),
+      ).resolves.toHaveLength(1);
     }
   });
 
@@ -467,7 +535,7 @@ describe('custom automation task history access', () => {
       expect(await canAccessTask(ownerAuth, task.id)).toBe(false);
       await expect(
         getTaskByIdCommand(ownerAuth, { taskId: task.id }),
-      ).resolves.toBeNull();
+      ).resolves.toMatchObject({ id: task.id });
       expect(await canAccessTask(adminAuth, task.id)).toBe(true);
     }
   });
