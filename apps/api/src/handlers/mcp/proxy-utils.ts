@@ -367,6 +367,7 @@ interface McpProxyConfig {
   resolveCredentials: (
     auth: McpAuthContext,
     routeParams: Record<string, string>,
+    request: unknown,
   ) => Promise<ResolvedCredentials>;
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
@@ -911,7 +912,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     let credentials: ResolvedCredentials;
 
     try {
-      credentials = await resolveCredentials(auth, c.req.param());
+      credentials = await resolveCredentials(auth, c.req.param(), parsedBody);
     } catch (error) {
       console.warn(
         formatSingleLineLog(`${logPrefix} Failed to resolve credentials`, {
