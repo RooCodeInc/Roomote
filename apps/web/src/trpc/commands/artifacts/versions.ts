@@ -3,7 +3,7 @@ import {
   getArtifactVersionsByPath,
   getArtifactVersionsBySessionPath,
 } from '@/lib/server';
-import { findAccessibleSession } from '@/lib/server/sessions';
+import { findReadableSession } from '@/lib/server/sessions';
 
 export async function getArtifactVersionsCommand(
   auth: UserAuthSuccess,
@@ -19,7 +19,7 @@ export async function getArtifactVersionsCommand(
   const artifactAuth = { userId: auth.userId, isAdmin: auth.isAdmin };
   if (
     input.sessionId &&
-    !(await findAccessibleSession(artifactAuth, input.sessionId))
+    !(await findReadableSession(artifactAuth, input.sessionId))
   ) {
     return [];
   }
