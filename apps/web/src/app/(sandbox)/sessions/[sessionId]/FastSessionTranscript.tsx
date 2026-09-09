@@ -68,6 +68,7 @@ import {
   SessionUserInputCard,
 } from './SessionUserInputCard';
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
+import { SetupIntegrationsCard } from './setup/SetupIntegrationsCard';
 import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
 
 import {
@@ -1311,6 +1312,12 @@ export function FastSessionTranscript({
               <div className="mt-3">
                 {pendingInputRequest.preset === 'setup_starter_tasks' ? (
                   <SetupStarterTasksCard
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                ) : pendingInputRequest.preset === 'setup_integrations' ? (
+                  <SetupIntegrationsCard
+                    key={pendingInputRequest.requestId}
                     sessionId={sessionId}
                     request={pendingInputRequest}
                   />

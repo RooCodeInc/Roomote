@@ -560,7 +560,14 @@ const requestUserInputQuestionSchema = z.object({
     .optional(),
   multiple: z.boolean().optional(),
 });
-const fastAgentInputPresetSchema = z.enum(['setup_starter_tasks']);
+const fastAgentInputPresetSchema = z.enum([
+  'setup_starter_tasks',
+  'setup_integrations',
+]);
+const setupIntegrationAnswersSchema = z.record(
+  z.string(),
+  z.object({ answers: z.array(z.string()) }),
+);
 // Some models fill every optional tool parameter, so a trusted preset may
 // arrive alongside placeholder questions. The preset wins: its questions are
 // server-supplied and model-provided ones are discarded rather than rejected.
@@ -568,16 +575,33 @@ const requestUserInputArgsSchema = z
   .object({
     questions: z.array(requestUserInputQuestionSchema).min(1).max(4).optional(),
     preset: fastAgentInputPresetSchema.optional(),
+    setupIntegrationAnswers: setupIntegrationAnswersSchema.optional(),
   })
+  .refine(
+    (args) =>
+      args.setupIntegrationAnswers === undefined ||
+      args.preset === 'setup_integrations',
+    'setupIntegrationAnswers is only available with setup_integrations.',
+  )
   .transform(
     (
       args,
     ):
-      | { preset: FastAgentInputPreset }
+      | {
+          preset: FastAgentInputPreset;
+          setupIntegrationAnswers?: z.output<
+            typeof setupIntegrationAnswersSchema
+          >;
+        }
       | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
       | null =>
       args.preset
-        ? { preset: args.preset }
+        ? {
+            preset: args.preset,
+            ...(args.setupIntegrationAnswers !== undefined
+              ? { setupIntegrationAnswers: args.setupIntegrationAnswers }
+              : {}),
+          }
         : args.questions
           ? { questions: args.questions }
           : null,
@@ -4494,9 +4518,12 @@ export async function answerFastAgentQuestion({
             const questions =
               'questions' in args
                 ? args.questions
-                : await adapter.resolveUserInputPreset!(
-                    args.preset as FastAgentInputPreset,
-                  );
+                : args.setupIntegrationAnswers !== undefined
+                  ? await adapter.resolveUserInputPreset!(
+                      args.preset,
+                      args.setupIntegrationAnswers,
+                    )
+                  : await adapter.resolveUserInputPreset!(args.preset);
             for (const question of questions) {
               if (question.options && question.isSecret) {
                 return {

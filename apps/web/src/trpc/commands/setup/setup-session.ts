@@ -22,6 +22,15 @@ import {
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
   RunStatus,
+  SETUP_INTEGRATION_CATEGORIES,
+  SETUP_INTEGRATIONS,
+  SETUP_INTEGRATIONS_QUESTION_ID,
+  SETUP_INTEGRATIONS_CONTINUE_OPTION,
+  getSetupIntegrationQuestionId,
+  isSetupIntegrationDiscoveryQuestionId,
+  matchSetupIntegrationAnswers,
+  parseAcpRequestUserInputPayload,
+  parseAcpRequestUserInputResponsePayload,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type AutomationRecommendationBatch,
@@ -89,6 +98,14 @@ async function assertSetupStarterWorkReady(
   const setupSession = normalizeSetupNewSetupSession(
     status.setupNewState.setupSession,
   );
+  if (
+    setupSession?.integrationDiscoveryCompletedAt === null &&
+    !setupSession.starterTaskSelection
+  ) {
+    throw new Error(
+      'Finish or skip the optional tool discovery before choosing first work. No connections are required.',
+    );
+  }
   if (options.requireStarterSelection && !setupSession?.starterTaskSelection) {
     throw new Error('Choose your first work before starting a task.');
   }
@@ -191,6 +208,9 @@ function buildSetupEventTurnId(input: {
 function buildSetupSnapshot(input: {
   status: Awaited<ReturnType<typeof getSetupNewStatusCommand>>;
   hasSuccessfulStarterLaunch: boolean;
+  integrationDiscovery: Awaited<
+    ReturnType<typeof readSetupIntegrationDiscovery>
+  >;
 }): string {
   const state = normalizeSetupNewState(input.status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
@@ -200,6 +220,7 @@ function buildSetupSnapshot(input: {
   );
 
   return JSON.stringify({
+    integrationDiscovery: input.integrationDiscovery,
     rail: deriveSetupRailMilestones(input.status),
     sourceControl: {
       selectedProvider: state.sourceControlProvider,
@@ -232,6 +253,7 @@ async function resolveSetupSnapshot(auth: UserAuthSuccess): Promise<string> {
   );
   return buildSetupSnapshot({
     status,
+    integrationDiscovery: await readSetupIntegrationDiscovery(auth),
     hasSuccessfulStarterLaunch: setupSession?.starterTaskSelection
       ? await hasSuccessfulSetupSessionTaskLaunch(
           auth,
@@ -239,6 +261,109 @@ async function resolveSetupSnapshot(auth: UserAuthSuccess): Promise<string> {
         )
       : false,
   });
+}
+
+async function readSetupIntegrationDiscovery(
+  auth: UserAuthSuccess,
+  suppliedAnswers: AcpRequestUserInputAnswers = {},
+) {
+  const state = await readSetupNewState();
+  const setupSession = normalizeSetupNewSetupSession(state.setupSession);
+  const conversation = await findSetupSessionConversation(auth);
+  const messages = conversation
+    ? await db
+        .select({
+          eventType: fastAgentMessages.eventType,
+          payload: fastAgentMessages.payload,
+        })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(
+              fastAgentMessages.conversationId,
+              conversation.fastConversationId,
+            ),
+            sql`${fastAgentMessages.eventType} IN (${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput}, ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse})`,
+          ),
+        )
+        .orderBy(fastAgentMessages.ts, fastAgentMessages.id)
+    : [];
+  const requests = new Map<string, AcpRequestUserInputPayload>();
+  const answers: AcpRequestUserInputAnswers = { ...suppliedAnswers };
+  let finalMatches: string[] = [];
+  let skipped = false;
+  for (const message of messages) {
+    if (message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+      const request = parseAcpRequestUserInputPayload(message.payload);
+      if (request) {
+        requests.set(request.requestId, request);
+        if (request.preset === 'setup_integrations') {
+          finalMatches = request.questions.flatMap(
+            (question) =>
+              question.options?.flatMap((option) =>
+                option.id ? [option.id] : [],
+              ) ?? [],
+          );
+        }
+      }
+    }
+  }
+  // Resolve by request ID rather than assuming distinct or monotonic timestamps.
+  for (const message of messages) {
+    if (
+      message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
+    ) {
+      const response = parseAcpRequestUserInputResponsePayload(message.payload);
+      const request = response ? requests.get(response.requestId) : undefined;
+      if (!response || !request || request.preset) continue;
+      if (response.resolution === 'cancelled') {
+        if (
+          request.questions.some((question) =>
+            isSetupIntegrationDiscoveryQuestionId(question.id),
+          )
+        )
+          skipped = true;
+        continue;
+      }
+      for (const category of SETUP_INTEGRATION_CATEGORIES) {
+        const questionId = getSetupIntegrationQuestionId(category.id);
+        if (request.questions.some((question) => question.id === questionId)) {
+          const answer = response.answers[questionId];
+          if (!answer) continue;
+          if (
+            answer.answers.some((value) =>
+              ['skip', 'skip for now'].includes(value.trim().toLowerCase()),
+            )
+          )
+            skipped = true;
+          // Persisted user answers take precedence over model-extracted prose preferences.
+          answers[questionId] = answer;
+        }
+      }
+    }
+  }
+  const matches = matchSetupIntegrationAnswers(answers);
+  const completed =
+    setupSession?.integrationDiscoveryCompletedAt !== null ||
+    Boolean(setupSession?.starterTaskSelection);
+  return {
+    completed,
+    skipped,
+    ...matches,
+    matchedIntegrationIds: SETUP_INTEGRATIONS.filter(
+      (integration) =>
+        finalMatches.includes(integration.id) ||
+        matches.matchedIntegrationIds.includes(integration.id),
+    ).map((integration) => integration.id),
+    hasInputRequest: requests.size > 0,
+    categories: SETUP_INTEGRATION_CATEGORIES.map((category) => ({
+      ...category,
+      questionId: getSetupIntegrationQuestionId(category.id),
+      integrations: SETUP_INTEGRATIONS.filter((integration) =>
+        (category.integrationIds as readonly string[]).includes(integration.id),
+      ),
+    })),
+  };
 }
 
 async function hasSuccessfulSetupSessionTaskLaunch(
@@ -303,7 +428,38 @@ async function buildSetupSessionAdapterExtensions(
   auth: UserAuthSuccess,
 ): Promise<Partial<FastAgentTurnAdapter>> {
   return {
-    resolveUserInputPreset: async (preset) => {
+    resolveUserInputPreset: async (preset, setupIntegrationAnswers) => {
+      assertAdmin(auth);
+      if (!(await findSetupSessionConversation(auth)))
+        throw new Error('This request does not belong to the setup Session.');
+      if (preset === 'setup_integrations') {
+        const discovery = await readSetupIntegrationDiscovery(
+          auth,
+          setupIntegrationAnswers,
+        );
+        if (discovery.completed)
+          throw new Error('Optional tool discovery is already complete.');
+        return [
+          {
+            id: SETUP_INTEGRATIONS_QUESTION_ID,
+            header: 'Your tools',
+            question:
+              'Connect any useful tools, or continue without connections.',
+            isOther: false,
+            isSecret: false,
+            options: [
+              ...SETUP_INTEGRATIONS.filter((integration) =>
+                discovery.matchedIntegrationIds.includes(integration.id),
+              ).map((integration) => ({
+                id: integration.id,
+                label: integration.name,
+                description: `Connect ${integration.name} in Settings.`,
+              })),
+              SETUP_INTEGRATIONS_CONTINUE_OPTION,
+            ],
+          },
+        ];
+      }
       if (preset !== 'setup_starter_tasks') {
         throw new Error('Unsupported setup input preset.');
       }
@@ -355,12 +511,24 @@ async function buildSetupPlatformEventTurn(
   prepared?: {
     conversation: SetupSessionConversation;
     setupSnapshot: string;
+    integrationDiscovery: Awaited<
+      ReturnType<typeof readSetupIntegrationDiscovery>
+    >;
   },
 ): Promise<Parameters<typeof scheduleWebFastAgentTurn>[0] | null> {
   assertAdmin(auth);
   const conversation =
     prepared?.conversation ?? (await findSetupSessionConversation(auth));
   if (!conversation) return null;
+
+  const integrationDiscovery =
+    prepared?.integrationDiscovery ??
+    (await readSetupIntegrationDiscovery(auth));
+  if (
+    !integrationDiscovery.completed &&
+    (input.kind !== 'session_creation' || integrationDiscovery.hasInputRequest)
+  )
+    return null;
 
   const currentMessageId = buildSetupEventTurnId({
     sessionId: conversation.sessionId,
@@ -430,9 +598,11 @@ export async function reconcileSetupPlatformEvents(
         setupSession.starterTaskSelection.selectedAt,
       )
     : false;
+  const integrationDiscovery = await readSetupIntegrationDiscovery(auth);
   const setupSnapshot = buildSetupSnapshot({
     status,
     hasSuccessfulStarterLaunch,
+    integrationDiscovery,
   });
 
   const connected = status.sourceControlSetup.providers.filter(
@@ -620,6 +790,7 @@ export async function reconcileSetupPlatformEvents(
     const turn = await buildSetupPlatformEventTurn(auth, event, {
       conversation,
       setupSnapshot,
+      integrationDiscovery,
     });
     if (turn) scheduleWebFastAgentTurn(turn);
   }
@@ -802,10 +973,18 @@ async function persistSetupPresetResponse(input: {
 }): Promise<void> {
   assertAdmin(input.auth);
   const preset = input.request.payload.preset;
-  if (preset !== 'setup_starter_tasks') {
+  if (preset !== 'setup_starter_tasks' && preset !== 'setup_integrations') {
     throw new Error('The setup starter-task preset is missing.');
   }
-  await assertSetupStarterWorkReady(input.auth);
+  if (preset === 'setup_starter_tasks')
+    await assertSetupStarterWorkReady(input.auth);
+  else if (
+    input.answers[SETUP_INTEGRATIONS_QUESTION_ID]?.answers.length !== 1 ||
+    input.answers[SETUP_INTEGRATIONS_QUESTION_ID]?.answers[0] !==
+      SETUP_INTEGRATIONS_CONTINUE_OPTION.label
+  ) {
+    throw new Error('Continue with or without connecting tools.');
+  }
 
   await db.transaction(async (tx) => {
     await tx.execute(
@@ -860,7 +1039,7 @@ async function persistSetupPresetResponse(input: {
         }) ?? [],
       ),
     ];
-    if (taskIds.length === 0) {
+    if (preset === 'setup_starter_tasks' && taskIds.length === 0) {
       throw new Error('Select at least one starter task.');
     }
     const selectedAt = new Date();
@@ -868,11 +1047,15 @@ async function persistSetupPresetResponse(input: {
       ...state,
       setupSession: {
         ...setupSession,
-        starterTaskSelection: {
-          requestId: input.request.payload.requestId,
-          taskIds,
-          selectedAt: selectedAt.toISOString(),
-        },
+        ...(preset === 'setup_integrations'
+          ? { integrationDiscoveryCompletedAt: selectedAt.toISOString() }
+          : {
+              starterTaskSelection: {
+                requestId: input.request.payload.requestId,
+                taskIds,
+                selectedAt: selectedAt.toISOString(),
+              },
+            }),
       },
     };
     const now = new Date();
@@ -914,29 +1097,30 @@ async function persistSetupPresetResponse(input: {
       },
       source: 'web',
     });
-    await tx
-      .insert(fastAgentMessages)
-      .values({
-        conversationId: input.fastConversationId,
-        ...buildSetupReceiptMessage({
-          sessionId: setupSession.sessionId,
-          workflowVersion: setupSession.workflowVersion,
-          userId: input.auth.userId,
-          kind: 'starter_selection',
-          fingerprint: input.request.payload.requestId,
-          text: formatStarterSelectionReceipt(
-            taskIds.map(
-              (taskId) =>
-                SETUP_STARTER_TASKS.find((task) => task.id === taskId)!.title,
+    if (preset === 'setup_starter_tasks')
+      await tx
+        .insert(fastAgentMessages)
+        .values({
+          conversationId: input.fastConversationId,
+          ...buildSetupReceiptMessage({
+            sessionId: setupSession.sessionId,
+            workflowVersion: setupSession.workflowVersion,
+            userId: input.auth.userId,
+            kind: 'starter_selection',
+            fingerprint: input.request.payload.requestId,
+            text: formatStarterSelectionReceipt(
+              taskIds.map(
+                (taskId) =>
+                  SETUP_STARTER_TASKS.find((task) => task.id === taskId)!.title,
+              ),
             ),
-          ),
-          payload: { taskIds },
-          ts: now.getTime(),
-        }),
-      })
-      .onConflictDoNothing({
-        target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
-      });
+            payload: { taskIds },
+            ts: now.getTime(),
+          }),
+        })
+        .onConflictDoNothing({
+          target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+        });
   });
 }
 
@@ -967,4 +1151,24 @@ export async function submitSetupSessionUserInputCommand(
       return result;
     },
   });
+}
+
+/** Attach setup capabilities to ordinary replies as well as structured input turns. */
+export async function resolveSetupSessionTurnContext(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  const conversation = await findSetupSessionConversation(auth);
+  if (
+    !conversation ||
+    (conversation.sessionId !== sessionId &&
+      conversation.fastConversationId !== sessionId)
+  )
+    return null;
+  assertAdmin(auth);
+  return {
+    adapterExtensions: await buildSetupSessionAdapterExtensions(auth),
+    setupSnapshot: await resolveSetupSnapshot(auth),
+    setupSession: true as const,
+  };
 }

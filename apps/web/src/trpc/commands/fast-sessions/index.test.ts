@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   dbSelect: vi.fn(),
   dbInnerJoin: vi.fn(),
   dbSelectLimit: vi.fn(),
+  resolveSetupContext: vi.fn().mockResolvedValue(null),
+  submitSetupInput: vi.fn(),
+  upsertMessage: vi.fn(),
   sql: vi.fn(),
 }));
 
@@ -35,6 +38,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   FastAgentDurableRetryScheduledError: class FastAgentDurableRetryScheduledError extends Error {},
   getOrCreateFastAgentSession: mocks.getOrCreateSession,
   resolveApiBaseUrl: vi.fn(),
+  upsertFastAgentMessage: mocks.upsertMessage,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -82,6 +86,11 @@ vi.mock('./pinned-launch', () => ({
   startPinnedFastSessionLaunch: mocks.startPinnedLaunch,
 }));
 
+vi.mock('../setup/setup-session', () => ({
+  resolveSetupSessionTurnContext: mocks.resolveSetupContext,
+  submitSetupSessionUserInputCommand: mocks.submitSetupInput,
+}));
+
 import {
   getFastSessionTasksCommand,
   handleFastSessionPrReviewActionCommand,
@@ -90,6 +99,7 @@ import {
   startFastSessionCommand,
   startSetupFastSessionCommand,
   updateFastSessionModelSelectionCommand,
+  submitFastSessionUserInputCommand,
 } from './index';
 
 describe('getFastSessionTasksCommand', () => {
@@ -137,6 +147,282 @@ describe('getFastSessionTasksCommand', () => {
           '/api/artifacts/artifact-video/raw?sig=signature-artifact-video-7200&ts=7200',
       }),
     ]);
+  });
+});
+
+describe('setup context on ordinary Fast session input', () => {
+  afterEach(() => {
+    mocks.resolveSetupContext.mockReset().mockResolvedValue(null);
+  });
+  const resolvePreset = vi.fn();
+  const initialSnapshot = JSON.stringify({
+    integrationDiscovery: { completed: false, answeredCategoryIds: [] },
+  });
+  const freshSnapshot = JSON.stringify({
+    integrationDiscovery: {
+      completed: false,
+      answeredCategoryIds: ['documents'],
+      matchedIntegrationIds: ['granola'],
+    },
+  });
+  const setupContext = {
+    setupSession: true,
+    adapterExtensions: { resolveUserInputPreset: resolvePreset },
+    setupSnapshot: initialSnapshot,
+  };
+  const question = {
+    id: 'setup-tools-documents',
+    header: 'Documents',
+    question: 'Where do you keep documents?',
+    isOther: true,
+    isSecret: false,
+  };
+  const request = {
+    eventId: 'request-event',
+    turnId: 'request-turn',
+    payload: {
+      requestId: 'request-1',
+      sessionId: 'session-1',
+      turnId: 'request-turn',
+      callId: 'request-call',
+      status: 'pending',
+      questions: [question],
+    },
+  };
+  const input = {
+    sessionId: 'session-1',
+    requestId: 'request-1',
+    answers: { 'setup-tools-documents': { answers: ['Granola'] } },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.resolveSetupContext.mockReset().mockResolvedValue(null);
+    mocks.upsertMessage.mockReset().mockResolvedValue(undefined);
+    mocks.findAccessibleSession.mockResolvedValue(session);
+    mocks.acquireTurnLock.mockResolvedValue(
+      Object.assign(vi.fn().mockResolvedValue(undefined), {
+        signal: new AbortController().signal,
+      }),
+    );
+    mocks.answerQuestion.mockResolvedValue('Ready');
+    mocks.buildReplyDelivery.mockResolvedValue({
+      conversation: {
+        surface: 'web',
+        workspaceId: 'user-1',
+        conversationId: 'session-1',
+      },
+      adapter: { launchTask: mocks.launchTask, postReply: vi.fn() },
+    });
+    mocks.retireReviewActions.mockResolvedValue([]);
+    mocks.updateOfferStatus.mockResolvedValue(undefined);
+    mocks.dbSelect.mockReturnValue({
+      from: () => ({
+        where: () => ({
+          limit: mocks.dbSelectLimit,
+          orderBy: () => ({ limit: mocks.dbSelectLimit }),
+        }),
+      }),
+    });
+    mocks.dbSelectLimit.mockReset().mockResolvedValue([]);
+    mocks.submitSetupInput.mockResolvedValue({ success: true });
+  });
+
+  async function runScheduled() {
+    expect(mocks.after).toHaveBeenCalledOnce();
+    await mocks.after.mock.calls[0]![0]();
+    return mocks.answerQuestion.mock.calls[0]![0];
+  }
+
+  it('attaches setup adapters and snapshot to ordinary prose replies', async () => {
+    mocks.resolveSetupContext.mockResolvedValue(setupContext);
+    await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: 'We use Granola. Skip the other questions.',
+    });
+    const turn = await runScheduled();
+    expect(turn).toMatchObject({
+      setupSession: true,
+      setupSnapshot: initialSnapshot,
+      adapter: { resolveUserInputPreset: resolvePreset },
+    });
+    expect(mocks.resolveSetupContext).toHaveBeenCalledWith(auth, session.id);
+  });
+
+  it('leaves ordinary non-setup replies unchanged', async () => {
+    await replyToFastSessionCommand(auth, {
+      sessionId: session.id,
+      text: 'Review this change.',
+    });
+    const turn = await runScheduled();
+    expect(turn.setupSession).toBeUndefined();
+    expect(turn.setupSnapshot).toBeUndefined();
+    expect(turn.adapter.resolveUserInputPreset).toBeUndefined();
+  });
+
+  it('refreshes setup snapshots after category response persistence, overriding stale caller context', async () => {
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([request])
+      .mockResolvedValueOnce([]);
+    mocks.resolveSetupContext
+      .mockResolvedValueOnce(setupContext)
+      .mockImplementation(async () => {
+        expect(mocks.upsertMessage).toHaveBeenCalledOnce();
+        return { ...setupContext, setupSnapshot: freshSnapshot };
+      });
+    await submitFastSessionUserInputCommand(auth, input, {
+      setupSession: true,
+      setupSnapshot: initialSnapshot,
+    });
+    const turn = await runScheduled();
+    expect(turn).toMatchObject({
+      setupSession: true,
+      setupSnapshot: freshSnapshot,
+      adapter: { resolveUserInputPreset: resolvePreset },
+    });
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          payload: expect.objectContaining({
+            answers: input.answers,
+            resolution: 'submitted',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it.each(['documents', 'communication'])(
+    'resumes cancelled %s discovery questions as an early skip without marking discovery complete',
+    async (category) => {
+      mocks.dbSelectLimit
+        .mockResolvedValueOnce([
+          {
+            ...request,
+            payload: {
+              ...request.payload,
+              questions: [{ ...question, id: `setup-tools-${category}` }],
+            },
+          },
+        ])
+        .mockResolvedValueOnce([]);
+      const skippedSnapshot = JSON.stringify({
+        integrationDiscovery: { completed: false, skipped: true },
+      });
+      mocks.resolveSetupContext
+        .mockResolvedValueOnce(setupContext)
+        .mockImplementation(async () => {
+          expect(mocks.upsertMessage).toHaveBeenCalledOnce();
+          return { ...setupContext, setupSnapshot: skippedSnapshot };
+        });
+      await submitFastSessionUserInputCommand(auth, {
+        ...input,
+        answers: {},
+        resolution: 'cancelled',
+      });
+      const turn = await runScheduled();
+      expect(turn).toMatchObject({
+        setupSession: true,
+        setupSnapshot: skippedSnapshot,
+      });
+      expect(turn.question).toContain('"resolution":"cancelled"');
+    },
+  );
+
+  it('keeps generic non-setup submissions and cancellation behavior unchanged', async () => {
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([request])
+      .mockResolvedValueOnce([]);
+    await submitFastSessionUserInputCommand(auth, input);
+    const turn = await runScheduled();
+    expect(turn.setupSession).toBe(false);
+    expect(turn.setupSnapshot).toBeUndefined();
+    expect(turn.adapter.resolveUserInputPreset).toBeUndefined();
+    expect(turn.question).toBe(
+      `<structured_input_response>${JSON.stringify({ requestId: input.requestId, answers: input.answers })}</structured_input_response>`,
+    );
+    mocks.after.mockClear();
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([request])
+      .mockResolvedValueOnce([]);
+    await submitFastSessionUserInputCommand(auth, {
+      ...input,
+      answers: {},
+      resolution: 'cancelled',
+    });
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it('replays a saved setup category response with a fresh snapshot without persisting twice', async () => {
+    const saved = {
+      eventId: 'response-event',
+      payload: {
+        requestId: 'request-1',
+        sessionId: 'session-1',
+        turnId: 'request-turn',
+        callId: 'request-call',
+        answers: input.answers,
+        resolution: 'submitted',
+      },
+    };
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([request])
+      .mockResolvedValueOnce([saved]);
+    mocks.resolveSetupContext.mockResolvedValue({
+      ...setupContext,
+      setupSnapshot: freshSnapshot,
+    });
+    await submitFastSessionUserInputCommand(auth, input);
+    expect(mocks.upsertMessage).not.toHaveBeenCalled();
+    expect(await runScheduled()).toMatchObject({
+      setupSession: true,
+      setupSnapshot: freshSnapshot,
+    });
+  });
+
+  it('routes final presets through setup-specific persistence, not ordinary response writes', async () => {
+    mocks.resolveSetupContext.mockResolvedValue(setupContext);
+    const final = {
+      ...request,
+      payload: {
+        ...request.payload,
+        preset: 'setup_integrations',
+        questions: [
+          {
+            ...question,
+            id: 'setup-integrations',
+            isOther: false,
+            options: [
+              {
+                id: 'continue',
+                label: 'Continue',
+                description: 'Continue without connections',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([final])
+      .mockResolvedValueOnce([]);
+    const finalInput = {
+      ...input,
+      answers: { 'setup-integrations': { answers: ['Continue'] } },
+    };
+    await submitFastSessionUserInputCommand(auth, finalInput);
+    expect(mocks.submitSetupInput).toHaveBeenCalledWith(auth, finalInput);
+    expect(mocks.upsertMessage).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it('checks setup admin ownership before an ordinary response is persisted', async () => {
+    mocks.resolveSetupContext.mockRejectedValue(new Error('Unauthorized'));
+    await expect(
+      submitFastSessionUserInputCommand(auth, input),
+    ).rejects.toThrow('Unauthorized');
+    expect(mocks.upsertMessage).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 });
 
