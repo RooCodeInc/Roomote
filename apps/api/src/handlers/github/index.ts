@@ -57,6 +57,7 @@ import { handleInstallationRepositoriesChange } from './handleInstallationReposi
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
+import { toHostFromUrl } from '../utils';
 import {
   enrichGitHubMergeAnnouncerEvent,
   normalizeGitHubPush,
@@ -69,8 +70,11 @@ function syncPrStatus(
   repo: string,
   prNumber: number,
   status: PullRequestStatus,
+  prUrl: string,
 ): Promise<void> {
-  return updateTaskPrStatus('github', repo, prNumber, status).catch((error) =>
+  return updateTaskPrStatus('github', repo, prNumber, status, {
+    host: toHostFromUrl(prUrl),
+  }).catch((error) =>
     console.warn(
       `[syncPrStatus] Failed to update PR status for ${repo}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
@@ -349,6 +353,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           payload.pull_request.draft ? 'draft' : 'open',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -388,6 +393,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           payload.pull_request.draft ? 'draft' : 'open',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -478,6 +484,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           'open',
+          payload.pull_request.html_url,
         );
         await queueTrackedPullRequestMergeabilityCheck(payload);
         syncPullRequestFact({
@@ -517,6 +524,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           'draft',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -654,6 +662,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           status,
+          { host: toHostFromUrl(payload.pull_request.html_url) },
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
