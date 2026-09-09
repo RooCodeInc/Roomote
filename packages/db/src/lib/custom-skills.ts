@@ -66,11 +66,17 @@ export async function listCustomSkills(actorUserId: string) {
   return db.transaction(async (tx) => {
     const actor = await requireMember(tx, actorUserId);
     const skills = await tx
-      .select()
+      .select({
+        skill: instanceSkills,
+        createdByName: users.name,
+        createdByEmail: users.email,
+      })
       .from(instanceSkills)
+      .leftJoin(users, eq(users.id, instanceSkills.createdByUserId))
       .orderBy(asc(instanceSkills.name));
-    return skills.map((skill) => ({
+    return skills.map(({ skill, createdByName, createdByEmail }) => ({
       ...skill,
+      createdByName: createdByName || createdByEmail || null,
       canManage: actor.role === 'admin' || skill.createdByUserId === actor.id,
     }));
   });
