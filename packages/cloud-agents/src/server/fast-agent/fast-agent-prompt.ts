@@ -1,6 +1,7 @@
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   PRODUCT_NAME,
   type TaskModelOption,
 } from '@roomote/types';
@@ -26,11 +27,13 @@ function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
 ): string {
   const allRepositories = `- All repositories [id: ${ALL_REPOSITORIES}]: Run against all active repositories.`;
+  const blankSlate = `- Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox without repositories.`;
   if (availableEnvironments.length === 0) {
-    return `${allRepositories}\n- No configured environments were found for this deployment.`;
+    return `${blankSlate}\n${allRepositories}\n- No configured environments were found for this deployment.`;
   }
 
   return [
+    blankSlate,
     allRepositories,
     ...availableEnvironments.map((environment) => {
       const repos = environment.repositories?.length
@@ -429,7 +432,7 @@ ${
 - Do not use the reaction tool because a platform event has no incoming chat message to react to. If the event warrants a response, post a text reply; otherwise stay silent according to the ignore rules above.
 ${
   platformEventKind === 'automation'
-    ? `- Execute the automation prompt now as you would a teammate's request, applying the same scope-based exploration and execution delegation rules. When the event carries \`preferredEnvironmentId\`, launch delegated tasks in that environment (\`${ALL_REPOSITORIES}\` means every active repository) unless the prompt names a different one; without it, route normally. The configured model is a delegated-task default, not the Fast inference model.
+    ? `- Execute the automation prompt now as you would a teammate's request, applying the same scope-based exploration and execution delegation rules. When the event carries \`preferredEnvironmentId\`, launch delegated tasks in that target (\`${ALL_REPOSITORIES}\` means every active repository; \`${NO_REPOSITORIES}\` means a Blank slate sandbox without repositories) unless the prompt names a different one; without it, route normally. A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution: call \`launch_task\` with that exact ID instead of completing the automation as Fast-only work. The configured model is a delegated-task default, not the Fast inference model.
 `
     : ''
 }${
@@ -440,7 +443,7 @@ ${
       }${
         platformEventKind === 'automation' || automationReport
           ? `- When the automation asks for launchable suggested tasks and this is a Slack, Discord, Teams, or Telegram report, put each concrete follow-up in the closeout's \`suggestions\` array. Keep the report summary in \`message\`; do not render suggestion cards or launch instructions as inline prose because the delivery layer adds them.
-- Each suggestion may independently set \`environmentId\` to an exact environment ID listed under All Environments, \`${ALL_REPOSITORIES}\` for all repositories, or \`${FAST_EXECUTION}\` for Fast mode. This target is independent of the automation's own execution environment. Omit \`environmentId\` only when normal workspace routing should choose at launch time; never invent an ID.
+- Each suggestion may independently set \`environmentId\` to an exact environment ID listed under All Environments, \`${ALL_REPOSITORIES}\` for all repositories, \`${NO_REPOSITORIES}\` for a Blank slate sandbox without repositories, or \`${FAST_EXECUTION}\` for Fast mode. This target is independent of the automation's own execution environment. Omit \`environmentId\` only when normal workspace routing should choose at launch time; never invent an ID.
 - If launchable suggestions are unavailable on the current surface, keep follow-ups as ordinary report text and do not promise reaction-triggered launching.
 `
           : ''

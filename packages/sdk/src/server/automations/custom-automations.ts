@@ -18,6 +18,7 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
   isCommunicationAutomationTarget,
@@ -544,14 +545,16 @@ async function launchCustomAutomationRow(
   // deleted environment simply drops the hint.
   const preferredEnvironmentId = automation.allRepositories
     ? ALL_REPOSITORIES
-    : automation.environmentId
-      ? ((
-          await db.query.environments.findFirst({
-            columns: { id: true },
-            where: eq(environments.id, automation.environmentId),
-          })
-        )?.id ?? null)
-      : null;
+    : automation.noRepositories
+      ? NO_REPOSITORIES
+      : automation.environmentId
+        ? ((
+            await db.query.environments.findFirst({
+              columns: { id: true },
+              where: eq(environments.id, automation.environmentId),
+            })
+          )?.id ?? null)
+        : null;
 
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {

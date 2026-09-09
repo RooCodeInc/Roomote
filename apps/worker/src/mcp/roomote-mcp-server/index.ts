@@ -7,6 +7,7 @@ import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-o
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   CHAT_CHANNELS_TOOL,
@@ -557,7 +558,7 @@ const manageTasksToolDescription =
   ' ' +
   `When the user provides an existing ${PRODUCT_NAME} task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation. ` +
   'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
-  'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
+  'Use action "list_environments" to list launch targets (named environments, Blank slate, and the org-wide target). ' +
   'Use action "search_tasks" only to search direct tasks by query or status. ' +
   `Use action "get_summary" with taskId to inspect a specific task's latest status, failure details, and uploaded image artifact IDs and viewer links. Use those stable IDs to attach a delegated task's images to a later reply. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
@@ -777,10 +778,11 @@ roomoteMcpServer.registerTool(
         }
         if (
           environmentId !== ALL_REPOSITORIES &&
+          environmentId !== NO_REPOSITORIES &&
           !ENVIRONMENT_ID_PATTERN.test(environmentId)
         ) {
           return errorResult(
-            `environmentId must be a UUID returned by "list_environments" or "${ALL_REPOSITORIES}".`,
+            `environmentId must be a value returned by "list_environments", a UUID, "${NO_REPOSITORIES}", or "${ALL_REPOSITORIES}".`,
           );
         }
 

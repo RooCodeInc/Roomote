@@ -1,4 +1,4 @@
-import { ALL_REPOSITORIES, RunStatus } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES, RunStatus } from '@roomote/types';
 
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
@@ -329,6 +329,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain("as you would a teammate's request");
     expect(eventPrompt).toContain('`preferredEnvironmentId`');
     expect(eventPrompt).toContain('unless the prompt names a different one');
+    expect(eventPrompt).toContain(
+      `A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution`,
+    );
   });
 
   it('offers suggestions on an automation task-settled report only', () => {
@@ -389,6 +392,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Roomote/example-app [id: repo-1]');
     expect(prompt).toContain(
       `All repositories [id: ${ALL_REPOSITORIES}]: Run against all active repositories.`,
+    );
+    expect(prompt).toContain(
+      `Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox without repositories.`,
     );
     expect(prompt).toContain('conversational orchestrator');
     const turnStartupIndex = prompt.indexOf(

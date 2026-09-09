@@ -1,6 +1,10 @@
 import { tool, type ToolSet } from 'ai';
 import { createAuthToken } from '@roomote/auth';
-import { ALL_REPOSITORIES, type ReasoningEffort } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  type ReasoningEffort,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import { resolveApiBaseUrl } from '../shared-utils';
@@ -114,7 +118,7 @@ async function parseFastAgentTaskApiResponse(
   };
 }
 
-function withAllRepositoriesLaunchTarget(
+function withSyntheticLaunchTargets(
   result: FastAgentTaskToolResult,
 ): FastAgentTaskToolResult {
   const environments = (result as ListEnvironmentsResponse).environments;
@@ -126,6 +130,12 @@ function withAllRepositoriesLaunchTarget(
     ...result,
     environments: [
       {
+        id: NO_REPOSITORIES,
+        name: 'Blank slate',
+        description: 'Start a sandbox without repositories.',
+        repositories: [],
+      },
+      {
         id: ALL_REPOSITORIES,
         name: 'All repositories',
         description:
@@ -133,7 +143,9 @@ function withAllRepositoriesLaunchTarget(
         repositories: [],
       },
       ...environments.filter(
-        (environment) => environment.id !== ALL_REPOSITORIES,
+        (environment) =>
+          environment.id !== NO_REPOSITORIES &&
+          environment.id !== ALL_REPOSITORIES,
       ),
     ],
   };
@@ -313,7 +325,7 @@ export function createFastAgentTaskTools(
       description: 'List environments available for launching Roomote tasks.',
       inputSchema: z.object({}).strict(),
       execute: async () =>
-        withAllRepositoriesLaunchTarget(
+        withSyntheticLaunchTargets(
           await callFastAgentTaskApi({
             ...context,
             method: 'GET',
@@ -332,7 +344,7 @@ export function createFastAgentTaskTools(
           environmentId: nonEmptyTrimmedStringSchema
             .optional()
             .describe(
-              'Optional non-empty environment ID. Omit it or pass "__all_repositories__" to use the deployment-wide default target',
+              `Optional launch target ID. Pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" or omit it for all repositories, or pass an exact environment ID`,
             ),
           type: fastAgentTaskTypeSchema
             .optional()
@@ -351,8 +363,13 @@ export function createFastAgentTaskTools(
           path: FAST_AGENT_TASKS_API_PATH,
           body: {
             prompt,
-            repo: ALL_REPOSITORIES,
-            ...(environmentId && environmentId !== ALL_REPOSITORIES
+            repo:
+              environmentId === NO_REPOSITORIES
+                ? NO_REPOSITORIES
+                : ALL_REPOSITORIES,
+            ...(environmentId &&
+            environmentId !== ALL_REPOSITORIES &&
+            environmentId !== NO_REPOSITORIES
               ? { environmentId }
               : {}),
             ...(type ? { type } : {}),

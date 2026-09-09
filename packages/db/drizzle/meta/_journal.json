@@ -554,6 +554,13 @@
       "when": 1788884814843,
       "tag": "0078_hesitant_punisher",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1788983310654,
+      "tag": "0079_tan_amazoness",
+      "breakpoints": true
     }
   ]
 }

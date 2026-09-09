@@ -1,3 +1,5 @@
+import { mkdir } from 'node:fs/promises';
+
 import pLimit from 'p-limit';
 
 import { sdk } from '@roomote/sdk/client';
@@ -54,8 +56,8 @@ async function discoverWorkspaceRepoLocalSkills({
 
 /**
  * Prepare workspace for a task run.
- * Supports single-repository, scoped multi-repository, all-repositories, and
- * environment workspaces.
+ * Supports empty, single-repository, scoped multi-repository, all-repositories,
+ * and environment workspaces.
  *
  * @param preserveGitState - If true, skip git fetch/reset/clean/checkout operations.
  *   Used for resume scenarios where we want to preserve the snapshot's git state.
@@ -95,6 +97,16 @@ export async function initializeRepositories(
     envVars,
     logger,
   );
+
+  if (workspace.type === 'no_repositories') {
+    await mkdir(workspaceRoot, { recursive: true });
+    return {
+      workspacePath: workspaceRoot,
+      repoPaths: {},
+      repoLocalSkills: [],
+      usesSharedWorkspaceRoot: true,
+    };
+  }
 
   await timedStep(logger, 'initializeRepositories: configure git', () =>
     workspaceManager.configure({ gitAuthorName, gitAuthorEmail }),

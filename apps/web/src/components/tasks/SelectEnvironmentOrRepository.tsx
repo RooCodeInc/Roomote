@@ -13,7 +13,11 @@ import {
   VectorSquare,
 } from '@/components/system';
 
-import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  FAST_EXECUTION,
+  NO_REPOSITORIES,
+} from '@roomote/types';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -150,9 +154,8 @@ export const SelectEnvironmentOrRepository = ({
       return;
     }
 
-    // Keep intentional non-Auto allowAuto selections (e.g. a repository).
-    // When homepage is still on Auto, keep going so a sole environment can
-    // become the default — including when it appears after setup.
+    // Keep intentional selections. A legacy Auto value remains eligible for
+    // the sole-environment default without being exposed as a picker option.
     if (allowAuto && repository && repository !== AUTO_WORKSPACE_VALUE) {
       setHasAppliedDefaultWorkspace(true);
       return;
@@ -236,7 +239,6 @@ export const SelectEnvironmentOrRepository = ({
       setValue('branch', '');
       setWorkspace({ workspace: { type: 'auto' } });
       onInvalidWorkspaceReset?.();
-      // Allow the sole remaining environment (if any) to become the default.
       setHasAppliedDefaultWorkspace(false);
       return;
     }
@@ -244,6 +246,7 @@ export const SelectEnvironmentOrRepository = ({
     if (
       !repository ||
       repository === ALL_REPOSITORIES ||
+      repository === NO_REPOSITORIES ||
       repository === FAST_EXECUTION
     ) {
       return;
@@ -296,9 +299,16 @@ export const SelectEnvironmentOrRepository = ({
       };
     }
 
+    if (repository === NO_REPOSITORIES) {
+      return {
+        label: 'Blank slate',
+        icon: SquareDashed,
+      };
+    }
+
     if (repository === AUTO_WORKSPACE_VALUE) {
       return {
-        label: 'Auto',
+        label: 'Select a workspace',
         icon: SquareDashed,
       };
     }
@@ -347,16 +357,18 @@ export const SelectEnvironmentOrRepository = ({
         setValue('environmentId', undefined);
         setValue('repository', repository);
 
-        if (repository === AUTO_WORKSPACE_VALUE) {
-          setValue('branch', '');
-          setWorkspace({ workspace: { type: 'auto' } });
-          return;
-        }
-
         if (repository === FAST_EXECUTION) {
           // A Fast chat has no repository workspace; it is not persisted as a
           // default workspace choice.
           setValue('branch', '');
+          return;
+        }
+
+        if (repository === NO_REPOSITORIES) {
+          setValue('branch', '');
+          setWorkspace({
+            workspace: { type: 'repository', value: repository },
+          });
           return;
         }
 
@@ -377,8 +389,6 @@ export const SelectEnvironmentOrRepository = ({
     isLoading ||
     (typeof environments.data === 'undefined' &&
       typeof repositories.data === 'undefined');
-  const hasRepositoryWorkspaceOptions = allowAuto || allRepositories.length > 0;
-
   return (
     <FormField
       control={control}
@@ -506,9 +516,7 @@ export const SelectEnvironmentOrRepository = ({
               </>
             )}
 
-            {sortedEnvironments.length > 0 && hasRepositoryWorkspaceOptions && (
-              <DropdownMenuSeparator />
-            )}
+            {sortedEnvironments.length > 0 && <DropdownMenuSeparator />}
 
             {allRepositories.length > 0 && (
               <DropdownMenuItem
@@ -523,25 +531,26 @@ export const SelectEnvironmentOrRepository = ({
               </DropdownMenuItem>
             )}
 
-            {allowAuto && allRepositories.length > 0 && (
-              <DropdownMenuSeparator />
-            )}
+            {allRepositories.length > 0 && <DropdownMenuSeparator />}
 
-            {allowAuto && (
-              <DropdownMenuItem
-                onSelect={() =>
-                  handleValueChange(`${REPO_PREFIX}${AUTO_WORKSPACE_VALUE}`)
-                }
-              >
-                <div className="flex items-center gap-2">
-                  <SquareDashed
-                    className="size-3.5 shrink-0"
-                    strokeWidth={1.5}
-                  />
-                  <span>Auto</span>
+            <DropdownMenuItem
+              onSelect={() =>
+                handleValueChange(`${REPO_PREFIX}${NO_REPOSITORIES}`)
+              }
+            >
+              <div className="flex items-start gap-2">
+                <SquareDashed
+                  className="mt-0.5 size-3.5 shrink-0"
+                  strokeWidth={1.5}
+                />
+                <div>
+                  <div>Blank slate</div>
+                  <div className="text-xs text-muted-foreground">
+                    Start a sandbox without repositories.
+                  </div>
                 </div>
-              </DropdownMenuItem>
-            )}
+              </div>
+            </DropdownMenuItem>
 
             {allowFast && (
               <DropdownMenuItem

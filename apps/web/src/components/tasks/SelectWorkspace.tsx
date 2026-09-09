@@ -4,7 +4,11 @@ import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useFormContext } from 'react-hook-form';
 
-import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  FAST_EXECUTION,
+  NO_REPOSITORIES,
+} from '@roomote/types';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -55,6 +59,7 @@ export const SelectWorkspace = ({
     !environmentId &&
     repository &&
     repository !== ALL_REPOSITORIES &&
+    repository !== NO_REPOSITORIES &&
     repository !== AUTO_WORKSPACE_VALUE &&
     repository !== FAST_EXECUTION;
   const canSelectEnvironmentBranch =

@@ -118,7 +118,7 @@ import {
   recordCustomAutomationRunOutcome,
   tryClaimCustomAutomationLaunch,
 } from '@roomote/db/server';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 import { findUserDirectMessageDestination } from '../../lib/user-direct-message';
 
 import {
@@ -139,6 +139,7 @@ const automation = {
   scheduleMode: 'daily',
   environmentId: '22222222-2222-2222-2222-222222222222',
   allRepositories: false,
+  noRepositories: false,
   executionMode: 'sandbox_task',
   target: {
     provider: 'slack',
@@ -398,6 +399,28 @@ describe('customAutomationsJob', () => {
       expect.objectContaining({
         event: expect.objectContaining({
           preferredEnvironmentId: ALL_REPOSITORIES,
+        }),
+      }),
+    );
+  });
+
+  it('preserves the Blank slate target without looking up or inheriting an environment', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        environmentId: null,
+        allRepositories: false,
+        noRepositories: true,
+      } as never,
+    ]);
+
+    await customAutomationsJob();
+
+    expect(db.query.environments.findFirst).not.toHaveBeenCalled();
+    expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          preferredEnvironmentId: NO_REPOSITORIES,
         }),
       }),
     );

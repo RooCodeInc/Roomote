@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useForm, FormProvider } from 'react-hook-form';
 import { toast } from 'sonner';
 
-import { PRODUCT_NAME } from '@roomote/types';
+import { NO_REPOSITORIES, PRODUCT_NAME } from '@roomote/types';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -59,9 +59,11 @@ export function PreviewEnvironment({
   const [selectedModelId, setSelectedModelId] = useState<string>();
   const launchTaskModels = useLaunchTaskModels();
   const selectedEnvironmentId = form.watch('environmentId');
-  const submitDisabledReason = selectedEnvironmentId
-    ? undefined
-    : 'Select an environment before starting a task.';
+  const selectedRepository = form.watch('repository');
+  const submitDisabledReason =
+    selectedEnvironmentId || selectedRepository === NO_REPOSITORIES
+      ? undefined
+      : 'Select an environment before starting a task.';
   const launchHint = submitDisabledReason ? (
     <p className="text-sm text-muted-foreground">
       <Link

@@ -1,10 +1,16 @@
 import { useEffect } from 'react';
 import { FormProvider, useForm, useFormContext } from 'react-hook-form';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 
 import type { CreateTaskFormValues } from '@/types';
 
-import { FAST_EXECUTION } from '@roomote/types';
+import { FAST_EXECUTION, NO_REPOSITORIES } from '@roomote/types';
 
 import { AUTO_WORKSPACE_VALUE } from './constants';
 import { SelectEnvironmentOrRepository } from './SelectEnvironmentOrRepository';
@@ -59,11 +65,17 @@ vi.mock('@/components/system', async () => {
     DropdownMenuItem: ({
       children,
       className,
+      onSelect,
     }: {
       children: React.ReactNode;
       className?: string;
+      onSelect?: () => void;
     }) => (
-      <div data-slot="dropdown-menu-item" className={className}>
+      <div
+        data-slot="dropdown-menu-item"
+        className={className}
+        onClick={onSelect}
+      >
         {children}
       </div>
     ),
@@ -565,7 +577,7 @@ describe('SelectEnvironmentOrRepository', () => {
     expect(setWorkspace).not.toHaveBeenCalled();
   });
 
-  it('renders Auto in its own section below All Repositories', async () => {
+  it('renders Blank slate below All Repositories without exposing Auto', async () => {
     mockedUseAuthorizedUser.mockReturnValue({
       isAdmin: true,
     } as ReturnType<typeof useAuthorizedUser>);
@@ -598,8 +610,45 @@ describe('SelectEnvironmentOrRepository', () => {
     expect(menuSequence.slice(-3)).toEqual([
       'All Repositories',
       '__separator__',
-      'Auto',
+      'Blank slateStart a sandbox without repositories.',
     ]);
+    expect(screen.queryByText('Auto')).not.toBeInTheDocument();
+  });
+
+  it('selects Blank slate explicitly even when no repositories are configured', async () => {
+    mockedUseRepositories.mockReturnValue({
+      data: [],
+      isPending: false,
+      isSuccess: true,
+    } as unknown as ReturnType<typeof useRepositories>);
+    mockedUseEnvironments.mockReturnValue({
+      data: [],
+      isPending: false,
+      isSuccess: true,
+    } as unknown as ReturnType<typeof useEnvironments>);
+    let latestValues: WorkspaceSelectionValues | undefined;
+
+    render(
+      <SelectEnvironmentOrRepositoryHarness
+        defaultValues={{ repository: '' }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Blank slate'));
+
+    await waitFor(() => {
+      expect(latestValues).toMatchObject({
+        repository: NO_REPOSITORIES,
+        environmentId: undefined,
+        branch: '',
+      });
+    });
+    expect(setWorkspace).toHaveBeenCalledWith({
+      workspace: { type: 'repository', value: NO_REPOSITORIES },
+    });
   });
 
   it('offers the New GitHub repository item to admins when wired up', async () => {

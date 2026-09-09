@@ -1,3 +1,5 @@
+import { stat } from 'node:fs/promises';
+
 import { TaskPayloadKind, type ServiceInfo } from '@roomote/types';
 
 import { ExecutionError } from '../../../command-executor';
@@ -138,6 +140,33 @@ describe('initializeRepositories', () => {
         'initializeRepositories: prepare acme/web (done in ',
       ),
     );
+  });
+
+  it('creates a shared Blank slate workspace without listing or preparing repositories', async () => {
+    const configureSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'configure')
+      .mockResolvedValue(undefined);
+    const prepareRepositorySpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: { type: 'no_repositories' },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+    });
+
+    expect(result).toMatchObject({
+      workspacePath: expect.any(String),
+      repoPaths: {},
+      repoLocalSkills: [],
+      usesSharedWorkspaceRoot: true,
+    });
+    expect((await stat(result.workspacePath)).isDirectory()).toBe(true);
+    expect(configureSpy).not.toHaveBeenCalled();
+    expect(mockListRepositories).not.toHaveBeenCalled();
+    expect(prepareRepositorySpy).not.toHaveBeenCalled();
   });
 
   it('resolves repository providers from the map before the scalar fallback', async () => {

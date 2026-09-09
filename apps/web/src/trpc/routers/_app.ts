@@ -10,6 +10,7 @@ import {
   SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   computeProviders,
   environmentConfigSchema,
@@ -861,6 +862,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
@@ -902,6 +904,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z

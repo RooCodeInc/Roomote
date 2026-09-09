@@ -1,7 +1,7 @@
 import { FormProvider, useForm } from 'react-hook-form';
 import { render, screen } from '@testing-library/react';
 
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -140,7 +140,7 @@ describe('SelectWorkspace', () => {
     );
   });
 
-  it('does not show a branch selector for all repositories or auto', () => {
+  it('does not show a branch selector for aggregate, Blank slate, or legacy Auto workspaces', () => {
     const { unmount } = render(
       <SelectWorkspaceHarness
         defaultValues={{
@@ -153,6 +153,18 @@ describe('SelectWorkspace', () => {
     expect(screen.queryByTestId('branch-selector')).not.toBeInTheDocument();
 
     unmount();
+
+    const blankSlate = render(
+      <SelectWorkspaceHarness
+        defaultValues={{
+          repository: NO_REPOSITORIES,
+          environmentId: undefined,
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId('branch-selector')).not.toBeInTheDocument();
+    blankSlate.unmount();
 
     render(
       <SelectWorkspaceHarness
