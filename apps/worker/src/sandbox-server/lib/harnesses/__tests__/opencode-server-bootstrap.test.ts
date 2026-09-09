@@ -86,9 +86,18 @@ describe('opencode-server bootstrap', () => {
             url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
           });
           expect(instructions).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
-          expect(
-            fs.existsSync(path.join(configDir, 'on-demand-mcp-servers.json')),
-          ).toBe(false);
+          const catalog = JSON.parse(
+            fs.readFileSync(
+              path.join(configDir, 'on-demand-mcp-servers.json'),
+              'utf8',
+            ),
+          );
+          expect(catalog.servers).toContainEqual(
+            expect.objectContaining({ name: 'github' }),
+          );
+          expect(catalog.servers).not.toContainEqual(
+            expect.objectContaining({ name: '_roomote_http_integrations' }),
+          );
         }
       } finally {
         if (originalTrpcUrl === undefined) delete process.env.TRPC_URL;
