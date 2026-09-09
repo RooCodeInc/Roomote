@@ -188,12 +188,13 @@ If you add Organization projects permission to an existing app, an organization
 owner must approve the updated permission before Roomote can manage project
 items.
 
-## Public GitHub reads in Fast
+## Public GitHub reads
 
 Active Roomote members can inspect public `github.com` source, issues, and pull
 requests in Fast without connecting GitHub or linking a personal GitHub account.
-No coding task or clone is needed for these bounded reads when the built-in
-GitHub tools are enabled:
+The same bounded reads are available in coding tasks, including automated tasks
+without a human driver. No clone is needed. GitHub is available through on-demand
+tool discovery in coding tasks without an installation:
 
 - `get_file_contents` reads an exact file or directory path
 - `issue_read` reads issue details, comments, sub-issues, and labels
@@ -213,8 +214,9 @@ not treat partial results as exhaustive. GitHub's anonymous rate limits apply.
 
 Private reads and writes still require an eligible connection. Connected
 repository access keeps its existing authorization; Roomote does not retry an
-authorization denial anonymously. Other source-control providers and coding-run
-tokens are unchanged.
+authorization denial anonymously. The coding-task GitHub MCP remains read-only;
+writes use the existing authorized coding-task source-control workflow. Other
+source-control providers are unchanged.
 
 ## Multiple installations and searches
 

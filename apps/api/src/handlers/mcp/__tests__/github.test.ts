@@ -1,4 +1,7 @@
 import { Hono } from 'hono';
+import { generateKeyPairSync } from 'node:crypto';
+import { createRunToken } from '@roomote/auth';
+import { configureAuthClientEnv } from '@roomote/auth/client';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
@@ -25,7 +28,8 @@ const mocks = vi.hoisted(() => ({
   upstream: vi.fn(),
   publicFetch: vi.fn(),
 }));
-vi.mock('@roomote/auth', () => ({
+vi.mock('@roomote/auth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/auth')>()),
   createGitHubToken: mocks.mint,
   resolveRuntimeGitHubAppCredentials: mocks.credentials,
   tryResolveRuntimeGitHubAppCredentials: mocks.tryCredentials,
@@ -37,6 +41,7 @@ vi.mock('../../long-lived-fetch', () => ({
 import { createGithubMcp } from '../github';
 import { createMcpProxy } from '../proxy-utils';
 import { githubPublicTools } from '../github-public-tools';
+import { tokenAuthMiddleware } from '../../../middleware/tokenAuthMiddleware';
 
 describe('GitHub MCP bounded writes', () => {
   let actor: Awaited<ReturnType<typeof userFactory.create>>;
@@ -60,6 +65,16 @@ describe('GitHub MCP bounded writes', () => {
   ] as const;
 
   beforeAll(async () => {
+    const keys = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    configureAuthClientEnv({
+      jobAuthPrivateKey: keys.privateKey,
+      jobAuthPublicKey: keys.publicKey,
+      nodeEnv: 'test',
+    });
     actor = await userFactory.create({ role: 'member' });
     installer = await userFactory.create();
     installation = await githubInstallationFactory.create({
@@ -128,6 +143,7 @@ describe('GitHub MCP bounded writes', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   afterAll(async () => {
+    configureAuthClientEnv(null);
     await db
       .delete(repositories)
       .where(eq(repositories.id, secondRepository.id));
@@ -1129,6 +1145,7 @@ describe('GitHub MCP bounded writes', () => {
         new Error('No GitHub App configured'),
       );
       mocks.tryCredentials.mockResolvedValue(null);
+      const run = await runFactory.create({ actingUserId: actor.id });
       try {
         const initialized = await post({
           jsonrpc: '2.0',
@@ -1184,13 +1201,21 @@ describe('GitHub MCP bounded writes', () => {
         expect((await restricted.json()).result.tools).toEqual([
           githubPublicTools.find((tool) => tool.name === 'issue_read'),
         ]);
-        const localApp = app();
+        const localApp = new Hono<{ Variables: Variables }>();
+        localApp.use('*', tokenAuthMiddleware());
+        localApp.route('/github', createGithubMcp());
+        const token = await createRunToken({
+          runId: run.id,
+          userId: actor.id,
+          timeoutMs: 60_000,
+        });
         const client = new Client({ name: 'public-github-test', version: '1' });
         try {
           await client.connect(
             new StreamableHTTPClientTransport(
               new URL('http://localhost/github'),
               {
+                requestInit: { headers: { authorization: `Bearer ${token}` } },
                 fetch: async (input, init) =>
                   localApp.request(new Request(input, init)),
               },
@@ -1215,6 +1240,8 @@ describe('GitHub MCP bounded writes', () => {
         expect(mocks.upstream).not.toHaveBeenCalled();
         expect(mocks.publicFetch).toHaveBeenCalledTimes(2);
       } finally {
+        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+        await db.delete(tasks).where(eq(tasks.id, run.taskId));
         if (connectionState === 'uninstalled') {
           await db.transaction(async (tx) => {
             await tx
@@ -1754,30 +1781,135 @@ describe('GitHub MCP bounded writes', () => {
   });
 
   it.each([true, false])(
-    'denies public reads for real run tokens (human actor: %s)',
+    'supports public reads and discovery with signed run tokens but denies private reads and writes (human actor: %s)',
     async (human) => {
       const run = await runFactory.create({
         actingUserId: human ? actor.id : null,
       });
       try {
-        const target = app({
-          tokenType: 'run',
-          version: 1,
+        const token = await createRunToken({
           runId: run.id,
           userId: human ? actor.id : null,
-          principal: human ? 'user' : 'deployment',
+          timeoutMs: 60_000,
         });
+        const target = new Hono<{ Variables: Variables }>();
+        target.use('*', tokenAuthMiddleware());
+        target.route('/github', createGithubMcp());
+        const request = (method: string, params?: unknown) =>
+          target.request('/github', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 7, method, params }),
+          });
+        mocks.tryCredentials.mockResolvedValue(null);
+        expect((await request('initialize')).status).toBe(200);
         expect(
-          (
-            await call(
-              'issue_read',
-              { ...publicTarget, method: 'get', issue_number: 1 },
-              target,
-            )
-          ).status,
-        ).toBe(403);
-        expect(mocks.publicFetch).not.toHaveBeenCalled();
+          (await (await request('tools/list')).json()).result.tools,
+        ).toEqual(githubPublicTools);
+        mocks.publicFetch
+          .mockResolvedValueOnce(publicMetadata())
+          .mockResolvedValueOnce(Response.json({ number: 1 }));
+        const read = () =>
+          request('tools/call', {
+            name: 'issue_read',
+            arguments: { ...publicTarget, method: 'get', issue_number: 1 },
+          });
+        expect((await read()).status).toBe(200);
+        expect(mocks.publicFetch).toHaveBeenCalledTimes(2);
+        for (const [, init] of mocks.publicFetch.mock.calls) {
+          expect(new Headers(init.headers).has('authorization')).toBe(false);
+        }
+        mocks.tryCredentials.mockResolvedValue(appCredentials);
+        mocks.publicFetch
+          .mockResolvedValueOnce(publicMetadata())
+          .mockResolvedValueOnce(Response.json({ number: 1 }));
+        expect((await read()).status).toBe(200);
+        mocks.publicFetch
+          .mockReset()
+          .mockResolvedValue(
+            Response.json({ message: 'Not Found' }, { status: 404 }),
+          );
+        expect((await read()).status).toBe(404);
+        expect(mocks.publicFetch).toHaveBeenCalledTimes(1);
+        mocks.publicFetch.mockResolvedValueOnce(
+          Response.json({
+            private: true,
+            full_name: 'public-owner/public-repository',
+          }),
+        );
+        expect((await read()).status).toBe(403);
+        mocks.publicFetch.mockClear();
+        for (const [name, fields] of writeCases) {
+          expect(
+            (
+              await request('tools/call', {
+                name,
+                arguments: { ...publicTarget, ...fields },
+              })
+            ).status,
+          ).toBe(403);
+        }
         expect(mocks.mint).not.toHaveBeenCalled();
+        expect(mocks.publicFetch).not.toHaveBeenCalled();
+
+        // A connected private target must stay on scoped installation auth,
+        // including after an upstream denial or a credential-minting failure.
+        mocks.tryCredentials.mockResolvedValue(appCredentials);
+        await db
+          .update(repositories)
+          .set({ private: true })
+          .where(eq(repositories.id, repository.id));
+        mocks.upstream.mockResolvedValue(
+          Response.json({ error: 'denied' }, { status: 403 }),
+        );
+        const connectedRead = () =>
+          request('tools/call', {
+            name: 'issue_read',
+            arguments: {
+              owner,
+              repo: 'example',
+              method: 'get',
+              issue_number: 1,
+            },
+          });
+        expect((await connectedRead()).status).toBe(403);
+        expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+          {
+            type: 'installationId',
+            installationId: installation.id,
+            repositoryIds: [repository.githubRepoId],
+          },
+          appCredentials,
+        );
+        expect(
+          new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
+            'X-MCP-Readonly',
+          ),
+        ).toBe('true');
+        mocks.mint.mockRejectedValueOnce(new Error('installation denied'));
+        expect((await connectedRead()).status).toBe(500);
+        expect(mocks.upstream).toHaveBeenCalledTimes(1);
+        expect(mocks.publicFetch).not.toHaveBeenCalled();
+
+        if (human) {
+          await db
+            .update(users)
+            .set({ deletedAt: new Date() })
+            .where(eq(users.id, actor.id));
+          expect((await read()).status).toBe(401);
+          await db
+            .update(users)
+            .set({ deletedAt: null })
+            .where(eq(users.id, actor.id));
+          expect(mocks.publicFetch).not.toHaveBeenCalled();
+        }
+        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+        expect((await read()).status).toBe(404);
+        expect((await request('tools/list')).status).toBe(404);
+        expect(mocks.publicFetch).not.toHaveBeenCalled();
       } finally {
         await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
         await db.delete(tasks).where(eq(tasks.id, run.taskId));
@@ -1911,7 +2043,7 @@ describe('GitHub MCP bounded writes', () => {
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it('preserves throwing configuration semantics for writes and run-token reads', async () => {
+  it('preserves configuration lookup failures for writes and run-token reads', async () => {
     mocks.credentials.mockRejectedValue(
       new Error('GitHub App credentials are not configured.'),
     );
@@ -1924,6 +2056,10 @@ describe('GitHub MCP bounded writes', () => {
     expect(write.status).toBe(500);
     expect((await write.json()).error.message).toContain(
       'GitHub App credentials are not configured.',
+    );
+    expect(mocks.tryCredentials).not.toHaveBeenCalled();
+    mocks.tryCredentials.mockRejectedValue(
+      new Error('Deployment lookup failed'),
     );
     const run = await runFactory.create({ actingUserId: actor.id });
     try {
@@ -1941,9 +2077,9 @@ describe('GitHub MCP bounded writes', () => {
       );
       expect(response.status).toBe(500);
       expect((await response.json()).error.message).toContain(
-        'GitHub App credentials are not configured.',
+        'Deployment lookup failed',
       );
-      expect(mocks.tryCredentials).not.toHaveBeenCalled();
+      expect(mocks.tryCredentials).toHaveBeenCalledTimes(1);
       expect(mocks.publicFetch).not.toHaveBeenCalled();
       expect(mocks.mint).not.toHaveBeenCalled();
     } finally {

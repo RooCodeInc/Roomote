@@ -16,6 +16,11 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
+import {
+  callOnDemandIntegrationTool,
+  findOnDemandIntegrationTools,
+  loadOnDemandMcpCatalog,
+} from '../mcp/roomote-mcp-server/on-demand-integrations';
 
 describe('createIntegrationMcpInstructions', () => {
   it.each(['gbrain', 'supermemory'])(
@@ -985,7 +990,7 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(config.agent.architect?.tools).toBeUndefined();
   });
 
-  it('keeps remote integrations off the mounted config and reachable on demand', () => {
+  it('keeps remote integrations off the mounted config and reachable on demand', async () => {
     const homeDir = createHomeDir();
     const runtimeEnv = {
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
@@ -1002,6 +1007,14 @@ describe('generateOpenCodeConfig provider support', () => {
           command: 'node',
           args: ['roomote-mcp-server.js'],
           environment: { ROOMOTE_CLOUD_TOKEN: 'cloud-token' },
+        },
+        {
+          type: 'remote',
+          name: 'github',
+          url: 'https://api.example.com/api/mcp-routing/github',
+          headers: {
+            Authorization: 'Bearer {env:ROOMOTE_MCP_PYLON_BEARER_TOKEN}',
+          },
         },
         {
           type: 'remote',
@@ -1049,6 +1062,12 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(JSON.parse(readFileSync(catalogPath, 'utf8'))).toEqual({
       servers: [
         {
+          name: 'github',
+          displayName: 'github',
+          url: 'https://api.example.com/api/mcp-routing/github',
+          headers: { Authorization: 'Bearer run-token' },
+        },
+        {
           name: 'pylon',
           displayName: 'Pylon',
           description: expect.any(String),
@@ -1060,6 +1079,47 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(statSync(catalogPath).mode & 0o777).toBe(0o600);
     expect(result.configContent).not.toContain('run-token');
 
+    const catalog = loadOnDemandMcpCatalog({
+      ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH: catalogPath,
+    });
+    const list = vi.fn(async (_server: { name: string }) => [
+      { name: 'issue_read', inputSchema: { type: 'object' } },
+    ]);
+    const found = await findOnDemandIntegrationTools(
+      catalog,
+      { integrationId: 'github' },
+      list,
+    );
+    expect(found.isError).not.toBe(true);
+    expect(list).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        name: 'github',
+        url: 'https://api.example.com/api/mcp-routing/github',
+        headers: { Authorization: 'Bearer run-token' },
+      }),
+    );
+    const call = vi.fn(async () => ({
+      content: [{ type: 'text' as const, text: 'public issue' }],
+    }));
+    const args = {
+      owner: 'public-owner',
+      repo: 'public-repo',
+      method: 'get',
+      issue_number: 1,
+    };
+    expect(
+      await callOnDemandIntegrationTool(
+        catalog,
+        { integrationId: 'github', toolName: 'issue_read', args },
+        call,
+      ),
+    ).toEqual({ content: [{ type: 'text', text: 'public issue' }] });
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      list.mock.calls[0]![0],
+      'issue_read',
+      args,
+    );
+
     const integrationInstructions = readFileSync(
       config.instructions.find((entry) => entry.includes('integration'))!,
       'utf8',
@@ -1068,6 +1128,13 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(integrationInstructions).toContain('- Pylon [id: pylon]');
     expect(integrationInstructions).toContain('roomote_find_integration_tools');
     expect(integrationInstructions).toContain('roomote_call_integration_tool');
+    expect(integrationInstructions).toContain('- github [id: github]');
+    expect(integrationInstructions).toContain(
+      'without a GitHub connection, just as in Fast',
+    );
+    expect(integrationInstructions).toContain(
+      'This task MCP path is read-only',
+    );
   });
 
   it('mounts every server when no Roomote member server can proxy on-demand calls', () => {

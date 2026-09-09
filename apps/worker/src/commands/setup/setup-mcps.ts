@@ -513,6 +513,22 @@ export function resolveBuiltInMcpServers(
     }
   }
 
+  // GitHub is a built-in source-control surface, not a curated connection.
+  // The proxy supports public reads even without an installation, and keeps
+  // run-token calls read-only. Credentials remain on the API server.
+  const apiUrl = resolveApiBaseUrl(taskEnv);
+  const cloudToken = taskEnv?.ROOMOTE_CLOUD_TOKEN;
+  if (apiUrl && cloudToken) {
+    resolvedMcps.github = {
+      type: 'streamable-http',
+      url: `${apiUrl}/api/mcp-routing/github`,
+      headers: withPreviewProxyBypassHeader(
+        withTaskRunTokenAuthHeader(undefined, cloudToken),
+        taskEnv,
+      ),
+    };
+  }
+
   const substitutionLookup = buildMcpSubstitutionLookup(
     taskEnv,
     operatorEnvVars,

@@ -808,6 +808,11 @@ export function createIntegrationMcpInstructions(
 ): string | undefined {
   let hasPrimaryMemory = false;
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
+    if (mcpServer.name === 'github') {
+      return [
+        '# GitHub reads\n\nDiscover GitHub tools through roomote_find_integration_tools with integrationId github. Public github.com files, directories, issues, and pull requests can be read without a GitHub connection, just as in Fast. Use get_file_contents for exact source paths, issue_read, pull_request_read, list_pull_requests, or search_pull_requests with exactly one positive repo:owner/name qualifier. Anonymous code search, repository search, Actions, and review threads (get_review_comments) are unsupported. Anonymous reads are bounded to one page, a 15-second deadline, and 2 MiB total response size; disclose incomplete results. Connected private reads retain deployment GitHub App authorization. Never retry an authenticated denial anonymously. This task MCP path is read-only, including for human-driven tasks; use the existing authorized coding-task source-control workflow for writes.',
+      ];
+    }
     if (isMemoryMcpServer(mcpServer.name)) {
       const primary = !hasPrimaryMemory;
       hasPrimaryMemory = true;

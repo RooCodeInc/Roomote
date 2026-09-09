@@ -294,13 +294,12 @@ export function createGithubMcp(options?: {
         : undefined;
       const fullName = target ? `${target.owner}/${target.repo}` : undefined;
       // Missing config or a missing configured-App connection permits anonymous
-      // member reads. Lookup errors and authenticated failures never downgrade.
-      const connected =
-        auth.tokenType === 'auth'
-          ? await tryResolveRuntimeGitHubAppCredentials().then((credentials) =>
-              credentials ? findRepository(credentials, fullName) : null,
-            )
-          : await resolveRepository(fullName);
+      // reads for members and validated task runs. Lookup errors and
+      // authenticated failures never downgrade.
+      const credentials = await tryResolveRuntimeGitHubAppCredentials();
+      const connected = credentials
+        ? await findRepository(credentials, fullName)
+        : null;
       if (!connected) {
         return {
           authHeader: null,
