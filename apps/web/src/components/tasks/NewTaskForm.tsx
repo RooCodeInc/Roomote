@@ -31,6 +31,14 @@ type SubmissionSnapshot = {
   attachmentTexts?: string[];
 };
 
+type FastSessionSubmission = {
+  text: string;
+  images?: string[];
+  attachmentTexts?: string[];
+  model?: string | null;
+  reasoningEffort?: ReasoningEffort | null;
+};
+
 type NewTaskFormProps = {
   animate?: boolean;
   onTaskStarted?: () => void;
@@ -68,24 +76,24 @@ export function NewTaskForm({
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   const startFastSessionMutation = useStartFastSession();
-  const fastConversationIdRef = useRef<string | null>(null);
+  const fastConversationRetryRef = useRef<{
+    conversationId: string;
+    payloadKey: string;
+  } | null>(null);
 
   const startFastSession = useCallback(
-    async (payload: {
-      text: string;
-      images?: string[];
-      attachmentTexts?: string[];
-      model?: string | null;
-      reasoningEffort?: ReasoningEffort | null;
-    }): Promise<void> => {
+    async (payload: FastSessionSubmission): Promise<void> => {
       // A second submit while the first is in flight would mint a second
       // session and orphan one of them.
       if (startFastSessionMutation.isPending) {
         return;
       }
+      const payloadKey = JSON.stringify(payload);
       const conversationId =
-        fastConversationIdRef.current ?? crypto.randomUUID();
-      fastConversationIdRef.current = conversationId;
+        fastConversationRetryRef.current?.payloadKey === payloadKey
+          ? fastConversationRetryRef.current.conversationId
+          : crypto.randomUUID();
+      fastConversationRetryRef.current = { conversationId, payloadKey };
       try {
         const { sessionId, fastConversationId } =
           await startFastSessionMutation.mutateAsync({
@@ -97,7 +105,7 @@ export function NewTaskForm({
           text: payload.text,
           images: payload.images,
         });
-        fastConversationIdRef.current = null;
+        fastConversationRetryRef.current = null;
         onTaskStarted?.();
         router.push(`/sessions/${sessionId}`);
       } catch (error) {

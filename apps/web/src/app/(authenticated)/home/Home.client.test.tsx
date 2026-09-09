@@ -22,6 +22,7 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
 let currentEnvironmentsPending = false;
 let capturedSubmitWithMetaKey: boolean | undefined;
 let capturedDefaultReasoningEffort: string | null | undefined;
+let submittedPromptText = 'Test prompt';
 
 const {
   mockPush,
@@ -164,8 +165,8 @@ vi.mock('@/components/tasks', async () => {
             if (submitDisabledReason) {
               return;
             }
-            onPromptTextChange?.('Test prompt');
-            const result = onSubmit({ text: 'Test prompt', files: [] });
+            onPromptTextChange?.(submittedPromptText);
+            const result = onSubmit({ text: submittedPromptText, files: [] });
 
             if (result instanceof Promise) {
               void result.catch(() => {});
@@ -238,6 +239,7 @@ describe('Home', () => {
     currentEnvironmentsPending = false;
     capturedSubmitWithMetaKey = undefined;
     capturedDefaultReasoningEffort = undefined;
+    submittedPromptText = 'Test prompt';
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -574,6 +576,29 @@ describe('Home', () => {
 
     expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).toBe(
       mockStartFastSession.mock.calls[1]?.[0].conversationId,
+    );
+  });
+
+  it('uses a new conversation identity when an ambiguous retry changes', async () => {
+    mockStartFastSession
+      .mockRejectedValueOnce(new Error('Connection lost'))
+      .mockResolvedValueOnce({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        fastConversationId: '22222222-2222-4222-8222-222222222222',
+      });
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    submittedPromptText = 'Corrected prompt';
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+    await waitFor(() => expect(mockStartFastSession).toHaveBeenCalledTimes(2));
+
+    expect(mockStartFastSession.mock.calls[0]?.[0].conversationId).not.toBe(
+      mockStartFastSession.mock.calls[1]?.[0].conversationId,
+    );
+    expect(mockStartFastSession.mock.calls[1]?.[0].text).toBe(
+      'Corrected prompt',
     );
   });
 
