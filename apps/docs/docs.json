@@ -57,6 +57,7 @@
           "tasks",
           "goal-mode",
           "fast-sessions",
+          "session-secrets",
           "memory",
           "file-attachments"
         ]

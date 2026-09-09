@@ -557,6 +557,49 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Prepare a Session credential approval using only nonsecret metadata from the service documentation. Choose the HTTPS origin and authentication header/prefix, then share the returned secure Session link so the human can enter the key privately. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  args: {
+    label: z.string().trim().min(1).max(80),
+    origin: z.string().min(1).max(2048),
+    headerName: z.enum(["authorization", "x-api-key", "api-key"]),
+    headerPrefix: z.enum(["", "Bearer ", "Basic ", "Token "]),
+    ttlHours: z.number().int().min(1).max(720).optional().default(24),
+  },
+  execute: (args, context) => invoke("prepare_session_secret", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets]: String.raw`
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "List this Session's pending credential approvals and secret metadata, including ready references, without exposing credentials. Use this to discover status and references yourself; never ask the human to copy an opaque reference.",
+  args: {},
+  execute: (args, context) => invoke("list_session_secrets", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Make a bounded GET or HEAD request using an existing Session secret reference without exposing the credential. Discover ready references and metadata with list_session_secrets; never invent a reference or ask for credentials in chat. Use an origin-relative path, not a full URL or custom headers. For an authorized request in a web Session, call directly without an opening acknowledgement or another confirmation. Report the actual result.",
+  args: {
+    secretRef: z.string().uuid(),
+    method: z.enum(["GET", "HEAD"]),
+    path: z.string().min(1).max(2048),
+    accept: z.enum(["application/json", "text/plain"]).optional(),
+  },
+  execute: (args, context) => invoke("request_with_session_secret", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"

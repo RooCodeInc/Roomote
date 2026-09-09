@@ -54,6 +54,7 @@ export * from './lib/tracked-suggestion-cards';
 export * from './lib/task-start-parallel-counts';
 export * from './lib/tasks';
 export * from './lib/sessions';
+export * from './lib/session-secrets';
 export * from './lib/task-goals';
 export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';

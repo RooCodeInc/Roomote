@@ -3845,6 +3845,81 @@ export const sessions = pgTable(
   ],
 );
 
+/** Owner-bound credentials are additive and leave N-1 readers/writers untouched. */
+export const sessionSecrets = pgTable(
+  'session_secrets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    origin: text('origin').notNull(),
+    headerName: text('header_name')
+      .notNull()
+      .$type<'authorization' | 'x-api-key' | 'api-key'>(),
+    headerPrefix: text('header_prefix')
+      .notNull()
+      .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    value: encryptedText('value'),
+    expiresAt: timestamp('expires_at').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_secrets_session_owner_idx').on(
+      table.sessionId,
+      table.ownerUserId,
+    ),
+  ],
+);
+
+export const sessionSecretApprovals = pgTable(
+  'session_secret_approvals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    label: text('label').notNull(),
+    origin: text('origin').notNull(),
+    headerName: text('header_name')
+      .notNull()
+      .$type<'authorization' | 'x-api-key' | 'api-key'>(),
+    headerPrefix: text('header_prefix')
+      .notNull()
+      .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    expiresAt: timestamp('expires_at').notNull(),
+    consumedAt: timestamp('consumed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_secret_approvals_session_owner_idx').on(
+      table.sessionId,
+      table.ownerUserId,
+    ),
+  ],
+);
+
+// No payload, URL query/path, headers, or error detail belongs in this audit.
+export const sessionSecretAudit = pgTable('session_secret_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  actorUserId: text('actor_user_id'),
+  secretRef: uuid('secret_ref'),
+  method: text('method').$type<'GET' | 'HEAD'>(),
+  destination: text('destination'),
+  outcome: text('outcome')
+    .notNull()
+    .$type<'started' | 'succeeded' | 'denied' | 'failed'>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
 /** Additive task linkage retained independently for N-1 rollback safety. */
 export const sessionTasks = pgTable(
   'session_tasks',

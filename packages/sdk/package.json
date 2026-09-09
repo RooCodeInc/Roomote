@@ -60,6 +60,10 @@
       "import": "./src/server/lib/safe-fetch.ts",
       "require": "./src/server/lib/safe-fetch.ts"
     },
+    "./server/session-secrets": {
+      "import": "./src/server/lib/session-secrets.ts",
+      "require": "./src/server/lib/session-secrets.ts"
+    },
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",
       "require": "./src/server/lib/notion-api.ts"

@@ -1691,11 +1691,16 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
-  it('rejects unauthenticated and inactive-session calls', async () => {
+  it.each([
+    FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+    FAST_AGENT_NATIVE_TOOL_NAMES.prepareSessionSecret,
+    FAST_AGENT_NATIVE_TOOL_NAMES.listSessionSecrets,
+    FAST_AGENT_NATIVE_TOOL_NAMES.requestWithSessionSecret,
+  ])('rejects unauthenticated and inactive-session %s calls', async (tool) => {
     const runtime = await getFastAgentNativeToolRuntime('native-auth', []);
     const body = JSON.stringify({
       sessionID: 'missing-session',
-      tool: FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      tool,
       args: { reason: 'duplicate' },
     });
 
@@ -1718,5 +1723,14 @@ describe('Fast native OpenCode tool bridge', () => {
       body,
     });
     expect(inactive.status).toBe(409);
+    const contextless = await fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ tool, args: {} }),
+    });
+    expect(contextless.status).toBe(400);
   });
 });

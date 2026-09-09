@@ -98,3 +98,4 @@ export * from './user-display-name';
 export * from './user-role';
 export * from './worker-runtime-version';
 export * from './workspace-routing';
+export * from './session-secrets';

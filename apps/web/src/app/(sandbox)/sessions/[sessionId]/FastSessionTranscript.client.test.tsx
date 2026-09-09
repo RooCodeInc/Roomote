@@ -218,6 +218,83 @@ afterEach(() => {
 });
 
 describe('FastSessionTranscript', () => {
+  it('automatically continues through the normal Session reply flow after secure save without credentials', async () => {
+    const secretRef = '6a1f8f1e-0000-4000-8000-000000000007';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          secrets: [],
+          pending: [
+            {
+              pendingRef: secretRef,
+              label: 'Demo',
+              origin: 'https://api.example.com',
+              headerName: 'authorization',
+              headerPrefix: 'Bearer ',
+              expiresAt: new Date(Date.now() + 3600000).toISOString(),
+              revokedAt: null,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation"
+        secretSessionId="canonical-session"
+        initialMessages={[]}
+        canReply
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Session secrets' }));
+    await screen.findByLabelText('API key');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/sessions/canonical-session/secrets',
+      expect.objectContaining({
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
+    );
+    expect(replyMutate).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('API key'), {
+      target: { value: 'disposable-test-credential' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          secret: {
+            secretRef,
+            label: 'Demo',
+            origin: 'https://api.example.com',
+            headerName: 'authorization',
+            headerPrefix: 'Bearer ',
+            expiresAt: new Date(Date.now() + 3600000).toISOString(),
+            createdAt: new Date().toISOString(),
+            revokedAt: null,
+          },
+        }),
+        { status: 201 },
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Save API key' }));
+    await screen.findByText(
+      'API key saved. The Session has been notified without sharing your key.',
+    );
+    expect(replyMutate).toHaveBeenCalledWith({
+      sessionId: 'fast-conversation',
+      text: expect.stringContaining('Check list_session_secrets'),
+      model: null,
+      reasoningEffort: null,
+    });
+    expect(replyMutate.mock.calls[0]![0].text).not.toContain(secretRef);
+    expect(replyMutate.mock.calls[0]![0].text).not.toContain(
+      'disposable-test-credential',
+    );
+  });
+
   const textMessage = ({
     id,
     role,

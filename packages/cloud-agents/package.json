@@ -76,6 +76,7 @@
     "@roomote/gitea": "workspace:^",
     "@roomote/gitlab": "workspace:^",
     "@roomote/redis": "workspace:^",
+    "@roomote/sdk": "workspace:^",
     "@roomote/telemetry": "workspace:^",
     "@roomote/types": "workspace:^",
     "ai": "^6.0.116",
