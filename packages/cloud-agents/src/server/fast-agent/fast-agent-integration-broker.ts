@@ -332,7 +332,7 @@ async function resolveBrokerAuth(context: BrokerContext) {
 }
 
 async function hasGitLabDiscoveryConnection(): Promise<boolean> {
-  if (!Env.GITLAB_MCP_SERVER_URL || Env.R_CURATED_INTEGRATIONS_DISABLED) {
+  if (Env.R_CURATED_INTEGRATIONS_DISABLED) {
     return false;
   }
   const host = await resolveGitLabInstanceHost();
@@ -381,7 +381,7 @@ export async function listFastAgentIntegrations(
             columns: { id: true },
           })
         : Promise.resolve(undefined),
-      hasGitLabDiscoveryConnection(),
+      hasGitLabDiscoveryConnection().catch(() => false),
     ]);
 
   if (

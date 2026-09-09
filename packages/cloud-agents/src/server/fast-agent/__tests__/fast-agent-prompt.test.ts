@@ -612,15 +612,17 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('`call_integration_tool`');
   });
 
-  it('prefers available GitLab APIs without bypassing task and structured review delegation', () => {
+  it('prefers discovered provider APIs without bypassing task and structured review delegation', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       availableIntegrations: [],
     });
     expect(prompt).toContain(
-      'For GitLab API-only requests, first use the available GitLab integration tools',
+      'For bounded repository reads and requested supported writes, discover and use the available source-control provider API tools before launching workspace work',
     );
-    expect(prompt).toContain('do not claim GitLab API access is supported');
+    expect(prompt).toContain('do not assume providers share capabilities');
+    expect(prompt).toContain('do not claim its API access is available');
+    expect(prompt).not.toContain('For GitLab API-only requests');
     expect(prompt).toContain(
       'Local checkout inspection, code edits, commands, and validation still require a delegated task',
     );
@@ -826,7 +828,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'these bounded actions do not require a coding task',
     );
     expect(prompt).toContain(
-      'Other repository writes still require a coding task',
+      'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
     );
     expect(prompt).toContain(
       "A permission denial is not a reason to bypass the integration's authorization",

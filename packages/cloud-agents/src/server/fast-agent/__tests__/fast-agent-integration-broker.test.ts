@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   findGitlabConnection: vi.fn(),
   resolveGitLabInstanceHost: vi.fn(),
   env: {
-    GITLAB_MCP_SERVER_URL: undefined as string | undefined,
     R_CURATED_INTEGRATIONS_DISABLED: false,
   },
 }));
@@ -100,7 +99,6 @@ describe('fast-agent integration broker', () => {
     mocks.configuredServers = {};
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
-    mocks.env.GITLAB_MCP_SERVER_URL = undefined;
     mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
     mocks.resolveGitLabInstanceHost.mockResolvedValue(
       'gitlab.example.com:8443',
@@ -233,8 +231,7 @@ describe('fast-agent integration broker', () => {
     });
   });
 
-  it('discovers GitLab without secrets and refreshes broker auth at call time', async () => {
-    mocks.env.GITLAB_MCP_SERVER_URL = 'https://gitlab-mcp.example.com';
+  it('discovers GitLab from the existing connection without reading secrets and refreshes broker auth at call time', async () => {
     mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
     mocks.findGitlabConnection.mockResolvedValue({
       name: 'gitlab_deployment_oauth_connection',
@@ -273,31 +270,104 @@ describe('fast-agent integration broker', () => {
     );
   });
 
-  it.each([
-    'no upstream',
-    'disabled',
-    'no repository',
-    'no connection',
-    'discovery denied',
-  ])('does not advertise GitLab with %s', async (reason) => {
-    mocks.env.GITLAB_MCP_SERVER_URL =
-      reason === 'no upstream' ? undefined : 'https://gitlab-mcp.example.com';
-    mocks.env.R_CURATED_INTEGRATIONS_DISABLED = reason === 'disabled';
-    mocks.findGitlabRepository.mockResolvedValue(
-      reason === 'no repository' ? undefined : { id: 'repo-1' },
+  it.each(['disabled', 'no repository', 'no connection', 'discovery denied'])(
+    'does not advertise GitLab with %s',
+    async (reason) => {
+      mocks.env.R_CURATED_INTEGRATIONS_DISABLED = reason === 'disabled';
+      mocks.findGitlabRepository.mockResolvedValue(
+        reason === 'no repository' ? undefined : { id: 'repo-1' },
+      );
+      mocks.findGitlabConnection.mockResolvedValue(
+        reason === 'no connection'
+          ? undefined
+          : { name: 'gitlab_deployment_oauth_connection' },
+      );
+      if (reason === 'discovery denied')
+        mocks.listMcpTools.mockRejectedValueOnce(new Error('Unauthorized'));
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+      if (reason !== 'discovery denied')
+        expect(mocks.listMcpTools).not.toHaveBeenCalled();
+      if (reason === 'disabled')
+        expect(mocks.findGitlabConnection).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['disabled', 'no repository', 'no connection'])(
+    'does not retain a GitLab catalog after %s',
+    async (reason) => {
+      mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
+      mocks.findGitlabConnection.mockResolvedValue({
+        name: 'gitlab_deployment_oauth_connection',
+      });
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([
+        expect.objectContaining({ id: 'gitlab' }),
+      ]);
+      mocks.env.R_CURATED_INTEGRATIONS_DISABLED = reason === 'disabled';
+      if (reason === 'no repository')
+        mocks.findGitlabRepository.mockResolvedValue(undefined);
+      if (reason === 'no connection')
+        mocks.findGitlabConnection.mockResolvedValue(undefined);
+      expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+      expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['configuration', 'repository database', 'connection database'])(
+    'keeps Roomote and GitHub available when GitLab %s fails',
+    async (reason) => {
+      mocks.configuredServers = {
+        roomote: { url: 'https://api.example.com/mcp', headers: {} },
+      };
+      mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+      if (reason === 'configuration') {
+        mocks.resolveGitLabInstanceHost.mockImplementationOnce(() => {
+          throw new Error('Invalid GitLab configuration');
+        });
+      } else {
+        const lookup =
+          reason === 'repository database'
+            ? mocks.findGitlabRepository
+            : mocks.findGitlabConnection;
+        lookup.mockRejectedValueOnce(new Error('Database unavailable'));
+      }
+      const integrations = await listFastAgentIntegrations(auditContext);
+      expect(integrations.map(({ id }) => id)).toEqual(['roomote', 'github']);
+      expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('reuses GitLab schemas but preserves call-time actor revocation with fresh auth', async () => {
+    mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
+    mocks.findGitlabConnection.mockResolvedValue({
+      name: 'gitlab_deployment_oauth_connection',
+    });
+    await listFastAgentIntegrations(auditContext);
+    const integrations = await listFastAgentIntegrations(auditContext);
+    expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+
+    mocks.createAuthToken.mockResolvedValueOnce('fresh-revoked-actor-token');
+    mocks.callMcpTool.mockRejectedValueOnce(
+      new Error('Active member required'),
     );
-    mocks.findGitlabConnection.mockResolvedValue(
-      reason === 'no connection'
-        ? undefined
-        : { name: 'gitlab_deployment_oauth_connection' },
+    await expect(
+      callFastAgentIntegration(auditContext, integrations, {
+        integrationId: 'gitlab',
+        toolName: 'search',
+        args: {},
+      }),
+    ).rejects.toThrow('Active member required');
+    expect(mocks.callMcpTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: 'https://api.example.com/api/mcp-routing/gitlab',
+        headers: { Authorization: 'Bearer fresh-revoked-actor-token' },
+      }),
     );
-    if (reason === 'discovery denied')
-      mocks.listMcpTools.mockRejectedValueOnce(new Error('Unauthorized'));
-    expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
-    if (reason !== 'discovery denied')
-      expect(mocks.listMcpTools).not.toHaveBeenCalled();
-    if (reason === 'disabled' || reason === 'no upstream')
-      expect(mocks.findGitlabConnection).not.toHaveBeenCalled();
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        error: 'Active member required',
+      }),
+    );
   });
 
   it.each([

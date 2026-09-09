@@ -203,6 +203,8 @@ export async function createGitLabMergeRequestNote({
   token,
   apiBaseUrl,
   fetchImpl,
+  bounded,
+  signal,
 }: {
   projectId: string | number;
   mergeRequestIid: number;
@@ -210,6 +212,8 @@ export async function createGitLabMergeRequestNote({
   token?: string;
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
+  bounded?: boolean;
+  signal?: AbortSignal;
 }): Promise<{ id: number }> {
   const gitLabToken = token ?? (await resolveGitLabToken());
 
@@ -222,6 +226,8 @@ export async function createGitLabMergeRequestNote({
   const { data } = await requestGitLabJson({
     apiBaseUrl,
     fetchImpl,
+    bounded,
+    signal,
     method: 'POST',
     path: `/projects/${encodeURIComponent(String(projectId))}/merge_requests/${mergeRequestIid}/notes`,
     params: {},
@@ -351,6 +357,7 @@ export async function requestGitLab(
     body,
     accept = 'application/json',
     signal,
+    bounded = false,
   }: {
     apiBaseUrl?: string;
     fetchImpl?: typeof fetch;
@@ -361,31 +368,101 @@ export async function requestGitLab(
     body?: Record<string, unknown>;
     accept?: string;
     signal?: AbortSignal;
+    /** Opt-in interactive read/write limits; existing background callers are unchanged. */
+    bounded?: boolean;
   },
   expectedStatuses: number[],
 ): Promise<Response> {
   const resolvedApiBaseUrl =
     apiBaseUrl ?? buildGitLabApiBaseUrl(await resolveGitLabBaseUrl());
-  const response = await fetchImpl(
-    buildGitLabApiUrl(resolvedApiBaseUrl, path, params ?? {}),
-    {
-      method,
-      headers: {
-        Accept: accept,
-        ...(isGitLabOAuthAccessToken(token)
-          ? { Authorization: `Bearer ${token}` }
-          : { 'PRIVATE-TOKEN': token }),
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-      signal,
+  const url = buildGitLabApiUrl(resolvedApiBaseUrl, path, params ?? {});
+  if (bounded) {
+    const base = new URL(resolvedApiBaseUrl);
+    const target = new URL(url);
+    if (
+      !['https:', 'http:'].includes(base.protocol) ||
+      base.username ||
+      base.password ||
+      base.search ||
+      base.hash ||
+      !path.startsWith('/') ||
+      path.startsWith('//') ||
+      /[\\?#\x00-\x20\x7f]/.test(path) ||
+      path.split('/').some((part) => {
+        const decoded = decodeURIComponent(part);
+        return (
+          decoded
+            .split('/')
+            .some((segment) => segment === '.' || segment === '..') ||
+          /[\\\x00-\x1f\x7f]/.test(decoded)
+        );
+      }) ||
+      target.origin !== base.origin ||
+      !target.pathname.startsWith(`${base.pathname.replace(/\/$/, '')}/`)
+    )
+      throw new Error('Invalid GitLab API path.');
+    signal = AbortSignal.any([
+      AbortSignal.timeout(20_000),
+      ...(signal ? [signal] : []),
+    ]);
+    signal.throwIfAborted();
+  }
+  const response = await fetchImpl(url, {
+    method,
+    headers: {
+      Accept: accept,
+      ...(isGitLabOAuthAccessToken(token)
+        ? { Authorization: `Bearer ${token}` }
+        : { 'PRIVATE-TOKEN': token }),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
-  );
+    ...(body ? { body: JSON.stringify(body) } : {}),
+    signal,
+    ...(bounded ? { redirect: 'error' as const } : {}),
+  });
 
   if (!expectedStatuses.includes(response.status)) {
+    if (bounded) await response.body?.cancel();
     throw new GitLabApiError(response.status, response.statusText);
   }
 
+  if (bounded) {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Missing GitLab response.');
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    const abort = () => {
+      void reader.cancel().catch(() => {});
+    };
+    signal!.addEventListener('abort', abort, { once: true });
+    try {
+      signal!.throwIfAborted();
+      if (Number(response.headers.get('content-length')) > 1_048_576)
+        throw new Error('GitLab response exceeds 1 MiB.');
+      for (;;) {
+        const { done, value } = await reader.read();
+        signal!.throwIfAborted();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > 1_048_576)
+          throw new Error('GitLab response exceeds 1 MiB.');
+        chunks.push(value);
+      }
+    } finally {
+      signal!.removeEventListener('abort', abort);
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    const content = new TextDecoder('utf-8', {
+      fatal: true,
+      ignoreBOM: true,
+    }).decode(Buffer.concat(chunks));
+    if (content.includes(token)) throw new Error('Unsafe GitLab response.');
+    return new Response(content, {
+      status: response.status,
+      headers: response.headers,
+    });
+  }
   return response;
 }
 
@@ -398,6 +475,7 @@ export async function requestGitLabJson<T>({
   token,
   body,
   signal,
+  bounded,
   schema,
 }: {
   apiBaseUrl?: string;
@@ -408,6 +486,7 @@ export async function requestGitLabJson<T>({
   token: string;
   body?: Record<string, unknown>;
   signal?: AbortSignal;
+  bounded?: boolean;
   schema: z.ZodType<T>;
 }): Promise<{ data: T; response: Response }> {
   const response = await requestGitLab(
@@ -420,6 +499,7 @@ export async function requestGitLabJson<T>({
       token,
       body,
       signal,
+      bounded,
     },
     [200, 201],
   );
@@ -1401,12 +1481,16 @@ export async function getGitLabMergeRequest({
   token,
   apiBaseUrl,
   fetchImpl,
+  bounded,
+  signal,
 }: {
   projectId: string | number;
   mergeRequestIid: number;
   token?: string;
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
+  bounded?: boolean;
+  signal?: AbortSignal;
 }): Promise<GitLabMergeRequestDetails> {
   const gitLabToken = token ?? (await resolveGitLabToken());
 
@@ -1417,6 +1501,8 @@ export async function getGitLabMergeRequest({
   const { data } = await requestGitLabJson({
     apiBaseUrl,
     fetchImpl,
+    bounded,
+    signal,
     path: `/projects/${encodeURIComponent(String(projectId))}/merge_requests/${mergeRequestIid}`,
     params: {},
     token: gitLabToken,
