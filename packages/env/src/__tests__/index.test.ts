@@ -248,6 +248,23 @@ describe('Env', () => {
     expect(areCuratedIntegrationsDisabled('0')).toBe(false);
   });
 
+  it('keeps scheduling progressive disclosure opt-in', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    delete runtimeEnv.R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED;
+
+    expect(
+      createRoomoteEnv(runtimeEnv)
+        .R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED,
+    ).toBe(false);
+    expect(
+      createRoomoteEnv({
+        ...runtimeEnv,
+        R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED: 'true',
+      }).R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED,
+    ).toBe(true);
+  });
+
   it('accepts valid Ping instance IDs and rejects invalid ones', () => {
     const runtimeEnv = { ...process.env };
     delete runtimeEnv.SKIP_ENV_VALIDATION;

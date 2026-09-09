@@ -21,6 +21,21 @@ describe('Fast structured input tool filtering', () => {
     expect(generic['linear_*']).toBe(true);
   });
 
+  it('defers only scheduling schemas when the pilot is enabled', () => {
+    const baseline = buildFastAgentToolFilter(['roomote']);
+    const pilot = buildFastAgentToolFilter(['roomote'], {
+      schedulingProgressiveDisclosureEnabled: true,
+    });
+
+    expect(baseline[FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]).toBe(true);
+    expect(baseline.roomote_manage_custom_automations).toBeUndefined();
+    expect(pilot[FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]).toBe(false);
+    expect(pilot.roomote_manage_custom_automations).toBe(false);
+    expect(pilot['roomote_*']).toBe(true);
+    expect(pilot[FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]).toBe(true);
+    expect(pilot[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(true);
+  });
+
   it('limits structured input to web Sessions', () => {
     expect(
       buildFastAgentToolFilter([], { surface: 'slack' })[
