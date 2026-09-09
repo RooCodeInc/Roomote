@@ -164,6 +164,8 @@ export const ACP_REQUEST_USER_INPUT_METHOD =
 export const ACP_REQUEST_USER_INPUT_REQUEST_ID_PREFIX = 'rui' as const;
 
 export interface AcpRequestUserInputQuestionOption {
+  /** Canonical option identity supplied by trusted server presets. */
+  id?: string;
   label: string;
   description: string;
 }
@@ -233,7 +235,7 @@ export interface AcpRequestUserInputRequestParams {
 export interface AcpRequestUserInputPayload extends AcpRequestUserInputRequestParams {
   requestId: string;
   status: 'pending';
-  preset?: 'setup_starter_tasks';
+  preset?: 'setup_starter_tasks' | 'setup_integrations';
 }
 
 export interface AcpRequestUserInputResponsePayload {
@@ -307,7 +309,8 @@ function parseAcpRequestUserInputQuestionOption(
     return null;
   }
 
-  return { label, description };
+  const id = asStringOrNull(record?.id);
+  return { label, description, ...(id ? { id } : {}) };
 }
 
 export function parseAcpRequestUserInputQuestion(
@@ -405,7 +408,10 @@ export function parseAcpRequestUserInputPayload(
   const requestId = asStringOrNull(payload?.requestId);
   const request = parseAcpRequestUserInputRequestParams(payload);
   const preset =
-    payload?.preset === 'setup_starter_tasks' ? payload.preset : undefined;
+    payload?.preset === 'setup_starter_tasks' ||
+    payload?.preset === 'setup_integrations'
+      ? payload.preset
+      : undefined;
 
   if (!requestId || !request) {
     return null;

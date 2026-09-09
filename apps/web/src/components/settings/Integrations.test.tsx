@@ -94,6 +94,7 @@ const state = vi.hoisted(() => ({
     },
   },
   linearRedirectPath: '',
+  pathname: '/settings/integrations',
   searchParams: '',
 }));
 
@@ -150,7 +151,7 @@ function cloneMcpToolsData() {
 }
 
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/settings/integrations',
+  usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.searchParams),
 }));
 
@@ -515,6 +516,7 @@ describe('Integrations settings', () => {
       linearOrganizationName: 'Roomote',
     };
     state.linearRedirectPath = '';
+    state.pathname = '/settings/integrations';
     state.asanaConnection = null;
     state.notionConnection = null;
     state.ripplingConnection = null;
@@ -549,6 +551,60 @@ describe('Integrations settings', () => {
 
     expect(state.linearRedirectPath).toBe(
       '/settings/integrations?service=linear',
+    );
+  });
+
+  it('renders only requested integrations in passed order without custom servers or groups', () => {
+    render(<Integrations integrationIds={['notion', 'sentry', 'linear']} />);
+    expect(
+      screen.getAllByRole('heading').map((heading) => heading.textContent),
+    ).toEqual(['Integrations', 'Notion', 'Sentry', 'Linear']);
+    expect(screen.queryByText('Add custom server')).not.toBeInTheDocument();
+  });
+
+  it('does not leak custom servers when filtered integrations are disabled', () => {
+    state.integrationsEnabled = false;
+    render(<Integrations integrationIds={['notion']} />);
+    expect(
+      screen.getByText('Integrations disabled by deployment operator'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Add custom server')).not.toBeInTheDocument();
+  });
+
+  it('preserves the embedded pathname for Linear and MCP OAuth', () => {
+    state.pathname = '/sessions/setup-session';
+    state.linearInstallation = null;
+    render(<Integrations integrationIds={['linear', 'pylon']} />);
+    expect(state.linearRedirectPath).toBe('/sessions/setup-session');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Connect and enable Pylon' }),
+    );
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'pylon', redirectTo: '/sessions/setup-session' },
+      expect.any(Object),
+    );
+  });
+
+  it('keeps filtered deployment configuration read-only for non-admins', () => {
+    state.isAdmin = false;
+    render(<Integrations integrationIds={['notion']} />);
+    expect(screen.getByRole('heading', { name: 'Notion' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Configure Notion' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('clears an embedded secret on cancellation without saving', () => {
+    render(<Integrations integrationIds={['notion']} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+    fireEvent.change(screen.getByLabelText('Internal integration secret'), {
+      target: { value: 'test-secret' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+    expect(screen.getByLabelText('Internal integration secret')).toHaveValue(
+      '',
     );
   });
 

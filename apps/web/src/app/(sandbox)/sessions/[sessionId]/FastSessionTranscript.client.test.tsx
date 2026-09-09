@@ -169,6 +169,9 @@ vi.mock('./SessionUserInputCard', async (importOriginal) => ({
 vi.mock('./setup/SetupStarterTasksCard', () => ({
   SetupStarterTasksCard: () => <div>Setup starter tasks</div>,
 }));
+vi.mock('./setup/SetupIntegrationsCard', () => ({
+  SetupIntegrationsCard: () => <div>Optional integration setup</div>,
+}));
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -436,60 +439,76 @@ describe('FastSessionTranscript', () => {
     });
   });
 
-  it('removes a structured-input card when its response control event arrives', () => {
-    const requestId = 'rui:setup-starters';
-    const request = {
-      ...textMessage({
-        id: 'starter-request',
-        role: 'assistant',
-        text: 'Choose starter tasks',
-        ts: 1,
-      }),
-      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
-      payload: {
-        requestId,
-        status: 'pending',
-        sessionId: 'session-1',
-        turnId: 'turn-1',
-        callId: 'call-1',
-        preset: 'setup_starter_tasks',
-        questions: [
-          {
-            id: 'starters',
-            question: 'What should I work on first?',
-            multiple: true,
-            isOther: false,
-            isSecret: false,
-            options: [{ label: 'Speed up CI', description: 'Improve CI.' }],
-          },
-        ],
-      },
-    };
-    const response = {
-      ...textMessage({
-        id: 'starter-response',
-        role: 'user',
-        text: 'Structured response',
-        ts: 2,
-      }),
-      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
-      payload: {
-        requestId,
-        answers: { starters: { answers: ['Speed up CI'] } },
-        resolution: 'submitted',
-      },
-    };
+  it.each(['setup_starter_tasks', 'setup_integrations'])(
+    'renders and removes the %s card when its response control event arrives',
+    (preset) => {
+      const requestId = 'rui:setup-starters';
+      const request = {
+        ...textMessage({
+          id: 'starter-request',
+          role: 'assistant',
+          text: 'Choose starter tasks',
+          ts: 1,
+        }),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        payload: {
+          requestId,
+          status: 'pending',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          preset,
+          questions: [
+            {
+              id: 'starters',
+              question: 'What should I work on first?',
+              multiple: true,
+              isOther: false,
+              isSecret: false,
+              options: [{ label: 'Speed up CI', description: 'Improve CI.' }],
+            },
+          ],
+        },
+      };
+      const response = {
+        ...textMessage({
+          id: 'starter-response',
+          role: 'user',
+          text: 'Structured response',
+          ts: 2,
+        }),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+        payload: {
+          requestId,
+          answers: { starters: { answers: ['Speed up CI'] } },
+          resolution: 'submitted',
+        },
+      };
 
-    render(
-      <FastSessionTranscript
-        sessionId="session-1"
-        initialMessages={[request, response]}
-      />,
-    );
+      const { unmount } = render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[request]}
+        />,
+      );
+      const cardLabel =
+        preset === 'setup_integrations'
+          ? 'Optional integration setup'
+          : 'Setup starter tasks';
+      expect(screen.getByText(cardLabel)).toBeInTheDocument();
+      unmount();
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[request, response]}
+        />,
+      );
 
-    expect(screen.queryByText('Structured input request')).toBeNull();
-    expect(screen.queryByText('Structured response')).toBeNull();
-  });
+      expect(screen.queryByText('Structured input request')).toBeNull();
+      expect(screen.queryByText('Structured response')).toBeNull();
+      expect(screen.queryByText(cardLabel)).toBeNull();
+    },
+  );
 
   it.each([
     [1, '1 task running'],
