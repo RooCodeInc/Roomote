@@ -64,6 +64,7 @@ type SelectedAnalyticsSegment = {
   bucketLabel: string;
   seriesKey: string;
   seriesLabel: string;
+  metric: AnalyticsMetric;
 };
 
 const GENERIC_ANALYTICS_OBJECTS: AnalyticsShellItemId[] = [
@@ -166,7 +167,7 @@ export function Analytics({
       ? {
           object,
           viewBy,
-          metric,
+          metric: selectedSegment.metric,
           filters,
           timePeriod,
           granularity,
@@ -443,7 +444,7 @@ export function Analytics({
 
       <AnalyticsDetailsDialog
         object={object}
-        metric={metric}
+        metric={selectedSegment?.metric ?? metric}
         open={selectedSegment !== null}
         bucketLabel={selectedSegment?.bucketLabel ?? ''}
         seriesLabel={selectedSegment?.seriesLabel ?? ''}

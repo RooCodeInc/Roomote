@@ -368,17 +368,32 @@ describe('AnalyticsStackedBarChart', () => {
       }),
     ]);
 
+    const costBarClick = mockRechartsState.barProps[0]?.onClick as (
+      data: unknown,
+    ) => void;
+    costBarClick({
+      payload: { bucketKey: '2026-03-27', label: 'Mar 27' },
+    });
+    expect(onSelectSegment).toHaveBeenLastCalledWith({
+      bucketKey: '2026-03-27',
+      bucketLabel: 'Mar 27',
+      seriesKey: 'openai',
+      seriesLabel: 'OpenAI',
+      metric: 'cost',
+    });
+
     const tokenBarClick = mockRechartsState.barProps[1]?.onClick as (
       data: unknown,
     ) => void;
     tokenBarClick({
       payload: { bucketKey: '2026-03-27', label: 'Mar 27' },
     });
-    expect(onSelectSegment).toHaveBeenCalledWith({
+    expect(onSelectSegment).toHaveBeenLastCalledWith({
       bucketKey: '2026-03-27',
       bucketLabel: 'Mar 27',
       seriesKey: 'openai',
       seriesLabel: 'OpenAI',
+      metric: 'tokens',
     });
   });
 

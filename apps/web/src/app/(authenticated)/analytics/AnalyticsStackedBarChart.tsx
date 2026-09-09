@@ -364,6 +364,7 @@ type AnalyticsStackedBarChartProps = {
     bucketLabel: string;
     seriesKey: string;
     seriesLabel: string;
+    metric: AnalyticsMetric;
   }) => void;
 };
 
@@ -555,6 +556,7 @@ export function AnalyticsStackedBarChart({
                     bucketLabel,
                     seriesKey: series.key,
                     seriesLabel: series.label,
+                    metric,
                   });
                 }}
                 radius={[0, 0, 0, 0]}
@@ -595,6 +597,7 @@ export function AnalyticsStackedBarChart({
                         bucketLabel,
                         seriesKey: series.key,
                         seriesLabel: series.label,
+                        metric: 'tokens',
                       });
                     }}
                     radius={[0, 0, 0, 0]}

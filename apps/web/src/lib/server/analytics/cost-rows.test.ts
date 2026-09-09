@@ -24,6 +24,8 @@ import {
 import { buildChartData } from './chart';
 import { buildCostChartAnalytics } from './cost-summary';
 import { applyDimensionFilters, buildFilterOptions } from './dimensions';
+import { getAnalyticsDetails } from './index';
+import { getBucketStart } from './time-buckets';
 import type { AnalyticsRow } from './types';
 
 describe('getCostAnalyticsRows', () => {
@@ -156,6 +158,27 @@ describe('getCostAnalyticsRows', () => {
         averageTokensPerTask: 0,
       }),
     ]);
+
+    const details = await getAnalyticsDetails(
+      {} as UserAuthSuccess,
+      {
+        object: 'costs',
+        viewBy: 'provider',
+        metric: 'tokens',
+        timePeriod: 'all',
+        granularity: 'day',
+        bucketKey: getBucketStart(
+          new Date('2026-07-15T12:00:00.000Z'),
+          'day',
+        ).toISOString(),
+        seriesKey: 'zero-cost-provider',
+      },
+      new Date('2026-07-16T16:00:00.000Z'),
+    );
+    expect(details).toMatchObject({
+      total: 175,
+      rows: [{ values: { cost: '0.00', tokens: '175' } }],
+    });
   });
 
   it('uses the run environment fallback and attributes PRs by distinct task', async () => {
