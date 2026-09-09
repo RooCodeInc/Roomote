@@ -1,0 +1,164 @@
+---
+title: HTTP Integrations
+description: Let agents call approved HTTP APIs while Roomote keeps credentials server-side.
+icon: arrow-right-left
+---
+
+HTTP integrations let Fast sessions and sandbox agents call an API without
+receiving its credential. The agent chooses a configured integration, method,
+path, and request body. Roomote checks the current actor's access, attaches the
+server-side credential, and sends the HTTPS request.
+
+This works through the same Roomote API for every sandbox provider, including
+Roomote Cloud, Modal, Docker, E2B, Daytona, Azure, Blaxel, and Box. It requires no
+provider-specific networking configuration or proxy service. Existing connected
+integration tools remain available and should be used first.
+
+<Warning>
+  This is credential mediation, not network isolation. Agents are instructed to
+  use the integration tools, but normal sandbox networking remains available.
+  It does not remove credentials you independently put in an environment,
+  repository, or custom MCP configuration.
+</Warning>
+
+## Configure the deployment
+
+This feature is opt-in and configured by the deployment operator, not through
+the curated integration connection dialogs.
+
+1. Create a JSON manifest on the API server and mount it read-only. Use narrow
+   paths and least-privilege upstream credentials.
+2. Set `R_HTTP_INTEGRATIONS_ENABLED=true` on the Roomote control-plane services
+   that run the API, resolve task configuration, or execute Fast sessions
+   (including web and background workers). Set
+   `R_HTTP_INTEGRATIONS_CONFIG_PATH` to the manifest's absolute path on the API
+   server only.
+3. Supply each referenced credential environment variable to the API process
+   only, using your deployment's secret management. Do not add it to task
+   environment variables or sandbox images.
+4. Restart the affected services and start a new session or refresh the task's
+   integration configuration. An enabled API refuses to register the feature
+   if its manifest is missing or invalid.
+
+Example manifest, using a placeholder domain and Roomote user ID:
+
+```json
+[
+  {
+    "id": "inventory",
+    "description": "Read inventory items",
+    "origin": "https://api.example.com",
+    "rules": [
+      { "method": "GET", "pathPrefix": "/v1/items" }
+    ],
+    "credential": {
+      "header": "Authorization",
+      "valueEnv": "R_HTTP_INTEGRATION_INVENTORY_TOKEN",
+      "prefix": "Bearer "
+    },
+    "allowedUserIds": ["replace-with-roomote-user-id"]
+  }
+]
+```
+
+The manifest names the environment variable; it must not contain the actual
+credential. `prefix` is optional. For an API-key header, use its header name and
+omit `prefix` unless the upstream API requires one.
+
+## Access and request rules
+
+- `allowedUserIds` restricts both discovery and calls to those Roomote user IDs.
+  If omitted, the integration is shared with **all active human members** of the
+  deployment. An empty list is invalid; remove the entry to disable it.
+- Fast uses its acting user's authentication. Sandbox requests use their
+  run-scoped token and the task's current server-recorded actor, not the token's
+  original user. Actorless service-principal runs and external Roomote MCP OAuth
+  clients cannot use this endpoint.
+- `origin` must be an HTTPS origin, without a path, query, fragment, or userinfo.
+  Private, loopback, metadata, and other unsafe addresses are rejected, including
+  unsafe DNS answers at connection time. There is no private-network exception.
+- Each rule pairs a method with a path prefix. `/v1/items` permits `/v1/items`
+  and `/v1/items/123`, but not `/v1/items-other`. A `/` prefix permits every path
+  on that origin, so avoid it unless that scope is intentional.
+- Available methods are `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, and `DELETE`.
+  Mutating methods must be explicitly allowed. A method label is not proof that
+  an upstream operation is read-only; check the API's semantics.
+- Query parameters are allowed in the request path and are not independently
+  restricted by the manifest. Do not expose endpoints that use a query or body
+  parameter to select arbitrary destinations, execute arbitrary operations, or
+  expand the configured authority.
+- Agents cannot supply arbitrary headers, override authentication, choose an
+  unregistered origin, or follow an upstream redirect. Redirect responses are
+  rejected, including same-origin redirects.
+
+These deployment-managed credentials are separate from existing user-linked
+OAuth connections. This feature does not import their tokens, refresh OAuth
+tokens, or replace the inference gateway. Use an existing integration for those
+connection flows.
+
+## Use an integration
+
+Ask Roomote to list the available HTTP integrations. The `http-integrations`
+server exposes `list_integrations` and `integration_request` to both Fast and
+sandbox agents. Listings contain permitted origins and rules, never credential
+values or environment-variable references.
+
+For example, a request after listing `inventory` is:
+
+```json
+{
+  "integrationId": "inventory",
+  "method": "GET",
+  "path": "/v1/items?limit=10"
+}
+```
+
+For a permitted write, `body` is a string and `contentType` can be
+`application/json`, `text/plain`, or `application/x-www-form-urlencoded`.
+`GET` and `HEAD` do not accept bodies. Responses contain `status`, a `body`
+string, and only the permitted response headers: `content-type`, `retry-after`,
+and `x-request-id`. Non-redirect upstream errors can be returned as responses;
+the agent should check `status` rather than assume a completed call succeeded.
+
+## Limits and credential safety
+
+Requests have a 30-second timeout, a 1 MiB UTF-8 request-body limit, and a 2 MiB
+outer MCP request-envelope limit. Responses are buffered up to 2 MiB and must be
+UTF-8 text or JSON, except for empty `HEAD` or `204` responses. Binary downloads,
+streaming APIs, WebSockets, cookies, custom request headers, and multi-header
+authentication are not supported.
+
+Concurrency is limited to four requests per run or user and 32 total per API
+process. This is not a deployment-wide quota or upstream spending limit.
+
+Roomote rejects responses containing the literal credential or full injected
+authorization value in their body or returned headers. This is **not general
+data-loss prevention**: encoded, transformed, split, or unrelated secrets may
+still appear in responses. Never authorize credential-echo, diagnostic,
+token-management, arbitrary proxy, or similar endpoints. Use an upstream
+credential whose own permissions match the intended integration scope.
+
+The manifest is loaded at API startup. Restart the API after changing rules,
+access lists, or entries. Credential values are read from the API process
+environment per request; updating deployment environment variables normally
+requires restarting or recreating that process. Apply configuration and secret
+changes to every API replica.
+
+To disable the feature, set `R_HTTP_INTEGRATIONS_ENABLED=false` on the same
+control-plane services and restart them. New requests then have no broker
+endpoint, and refreshed agent configurations remove its tools. This does not
+cancel an already-running request.
+
+## Verify and troubleshoot
+
+Use a staging API and a narrowly scoped test credential first. Verify that an
+allowed actor can list and call an approved path, a different actor cannot see
+or call a restricted integration, and a disallowed method or path is refused.
+Confirm that the upstream receives authentication without printing its value.
+
+If a call is rejected, check the manifest ID, current actor, method, path,
+credential environment-variable presence, upstream content type, and response
+size. Missing credentials, TLS or DNS failures, blocked destinations, redirects,
+timeouts, and unsafe responses fail closed with a generic error. Error messages
+deliberately omit credentials and outgoing query details. There is no fallback
+that gives the agent credentials or bypasses request authorization.

@@ -1,4 +1,5 @@
-vi.mock('@roomote/sdk/client', () => ({
+vi.mock('@roomote/sdk/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/sdk/client')>()),
   __esModule: true,
   sdk: {
     mcpConnections: {
@@ -43,6 +44,67 @@ describe('resolveBuiltInMcpServers', () => {
   it('exports BUILT_IN_MCPS with the expected servers', () => {
     expect(Object.keys(BUILT_IN_MCPS).sort()).toEqual(expectedBuiltInMcpNames);
   });
+
+  it.each([
+    '/api/mcp/http-integrations',
+    'https://web.test/api/mcp/http-integrations',
+  ])(
+    'authenticates HTTP integrations %s with only the normal run bearer',
+    (url) => {
+      process.env.TRPC_URL = 'https://api.test/_roomote-api';
+      const servers = resolveBuiltInMcpServers(
+        {
+          ROOMOTE_CLOUD_TOKEN: 'run-token',
+          SERVICE_API_KEY: 'upstream-secret',
+          R_HTTP_INTEGRATIONS_CONFIG: 'server-only-config',
+          HTTP_PROXY: 'http://upstream.test',
+        },
+        { userMcpServers: { 'http-integrations': { url, headers: {} } } },
+      );
+      expect(servers['http-integrations']).toEqual({
+        type: 'streamable-http',
+        url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
+        headers: { Authorization: 'Bearer run-token' },
+      });
+      expect(JSON.stringify(servers)).not.toContain('upstream-secret');
+      expect(JSON.stringify(servers)).not.toContain('server-only-config');
+      expect(JSON.stringify(servers)).not.toContain('http://upstream.test');
+      expect(JSON.stringify(servers)).not.toContain('HTTP_PROXY');
+    },
+  );
+
+  it('omits HTTP integrations without server presence even with a launcher flag', () => {
+    process.env.R_HTTP_INTEGRATIONS_ENABLED = 'true';
+    expect(resolveBuiltInMcpServers()).not.toHaveProperty('http-integrations');
+  });
+
+  it.each<{ taskEnv: Record<string, string>; url: string }>([
+    {
+      taskEnv: { R_APP_URL: 'https://api.test' },
+      url: '/api/mcp/http-integrations',
+    },
+    {
+      taskEnv: { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+      url: '/api/mcp/http-integrations',
+    },
+    {
+      taskEnv: {
+        R_APP_URL: 'https://api.test',
+        ROOMOTE_CLOUD_TOKEN: 'run-token',
+      },
+      url: 'https://upstream.test/mcp',
+    },
+  ])(
+    'omits HTTP integrations without valid API routing and auth: %j',
+    ({ taskEnv, url }) => {
+      delete process.env.TRPC_URL;
+      expect(
+        resolveBuiltInMcpServers(taskEnv, {
+          userMcpServers: { 'http-integrations': { url, headers: {} } },
+        }),
+      ).not.toHaveProperty('http-integrations');
+    },
+  );
 
   it('merges custom environment MCP servers', () => {
     const parsed = {

@@ -1,5 +1,9 @@
 import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
 import {
+  HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_INSTRUCTIONS,
+} from '../../http-integrations';
+import {
   beginSlackFastIntegrationCall,
   completeSlackFastIntegrationCall,
   db,
@@ -251,6 +255,14 @@ function integrationProxyUrl(baseUrl: string, integrationId: string): string {
 function describeMcpServer(
   id: string,
 ): Pick<FastAgentIntegration, 'name' | 'description' | 'instructions'> {
+  if (id === HTTP_INTEGRATIONS_MCP_ID) {
+    return {
+      name: 'HTTP integrations',
+      description:
+        'API-mediated HTTP requests to operator-configured integrations.',
+      instructions: HTTP_INTEGRATIONS_INSTRUCTIONS,
+    };
+  }
   if (id === ROOMOTE_MCP_ID) {
     return {
       name: 'Roomote',

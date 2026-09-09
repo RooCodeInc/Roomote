@@ -53,6 +53,10 @@ import {
   router,
 } from '../trpc';
 import { resolveActorScopedUserContext } from '../lib/auth';
+import {
+  HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_PATH,
+} from '../../http-integrations';
 
 const INTEGRATION_PROXY_MCP_IDS = new Set(
   MCP_INTEGRATIONS.map((integration) => integration.id),
@@ -132,6 +136,15 @@ async function resolveMcpServerConfigs(options: {
   if (options.includeRoomoteMemberTools && !servers[ROOMOTE_MCP_ID]) {
     servers[ROOMOTE_MCP_ID] = {
       url: `${options.requestOrigin ?? ''}${ROOMOTE_MCP_PATH}`,
+      headers: {},
+    };
+  }
+
+  // Reserved infrastructure descriptor, independent of Settings connections.
+  delete servers[HTTP_INTEGRATIONS_MCP_ID];
+  if (Env.R_HTTP_INTEGRATIONS_ENABLED) {
+    servers[HTTP_INTEGRATIONS_MCP_ID] = {
+      url: `${options.requestOrigin ?? ''}${HTTP_INTEGRATIONS_MCP_PATH}`,
       headers: {},
     };
   }

@@ -149,6 +149,7 @@
         "pages": [
           "integrations/index",
           "integrations/custom-mcp-servers",
+          "integrations/http-integrations",
           "integrations/roomote-mcp",
           "integrations/asana",
           "integrations/better-stack",

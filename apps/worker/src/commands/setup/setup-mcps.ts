@@ -1,6 +1,11 @@
 import * as path from 'node:path';
 
 import {
+  HTTP_INTEGRATIONS_MCP_ID,
+  HTTP_INTEGRATIONS_MCP_PATH,
+} from '@roomote/sdk/client';
+
+import {
   BRAIN_MCP_ID,
   BRAIN_PROXY_PATH,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
@@ -171,7 +176,13 @@ function resolveConfigValues(
 }
 
 function buildIntegrationProxyMap(): Map<string, IntegrationProxyConfig> {
-  const integrationConfigs: IntegrationProxyConfig[] = [];
+  const integrationConfigs: IntegrationProxyConfig[] = [
+    {
+      id: HTTP_INTEGRATIONS_MCP_ID,
+      name: 'HTTP integrations',
+      proxyPath: HTTP_INTEGRATIONS_MCP_PATH,
+    },
+  ];
 
   // Credential-only integrations have no MCP server and are never delivered
   // to sandboxes, so they get no proxy-path entry.

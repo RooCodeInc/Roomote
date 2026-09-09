@@ -2,7 +2,8 @@ const { mockGetMcpServerConfigs } = vi.hoisted(() => ({
   mockGetMcpServerConfigs: vi.fn(),
 }));
 
-vi.mock('@roomote/sdk/client', () => ({
+vi.mock('@roomote/sdk/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/sdk/client')>()),
   sdk: {
     mcpConnections: {
       getMcpServerConfigs: mockGetMcpServerConfigs,
@@ -11,11 +12,62 @@ vi.mock('@roomote/sdk/client', () => ({
 }));
 
 import { createActorScopedMcpRefresher } from '../actor-scoped-mcp-refresh';
+import {
+  resolveBuiltInMcpServers,
+  type IntegrationMcpOptions,
+} from '../../commands/setup/setup-mcps';
 
 describe('createActorScopedMcpRefresher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetMcpServerConfigs.mockResolvedValue({ servers: {} });
+  });
+
+  it('refreshes and removes HTTP integrations using the provider-neutral resolver and current run token', async () => {
+    const integrations: IntegrationMcpOptions = {};
+    const requestReconnect = vi.fn().mockResolvedValue(undefined);
+    const refresh = createActorScopedMcpRefresher({
+      taskRun: { id: 42, actingUserId: 'owner-user' },
+      integrations,
+      requestReconnect,
+      logger: {
+        runId: 42,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+    mockGetMcpServerConfigs.mockResolvedValueOnce({
+      servers: {
+        'http-integrations': { url: '/api/mcp/http-integrations', headers: {} },
+      },
+    });
+    expect(await refresh('actor-user')).toMatchObject({
+      didChange: true,
+      didReconnect: true,
+    });
+    const taskEnv = {
+      R_APP_URL: 'https://api.test',
+      ROOMOTE_CLOUD_TOKEN: 'current-run-token',
+    };
+    expect(
+      resolveBuiltInMcpServers(taskEnv, integrations)['http-integrations'],
+    ).toMatchObject({
+      type: 'streamable-http',
+      headers: { Authorization: 'Bearer current-run-token' },
+    });
+    mockGetMcpServerConfigs.mockResolvedValueOnce({ servers: {} });
+    expect(await refresh('actor-user')).toMatchObject({
+      didChange: true,
+      didReconnect: true,
+    });
+    expect(integrations.userMcpServers).toBeUndefined();
+    expect(resolveBuiltInMcpServers(taskEnv, integrations)).not.toHaveProperty(
+      'http-integrations',
+    );
+    expect(requestReconnect).toHaveBeenCalledTimes(2);
   });
 
   it('requests a reconnect when the actor-scoped MCP config changes', async () => {

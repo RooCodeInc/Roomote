@@ -16,8 +16,30 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
+import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
 
 describe('createIntegrationMcpInstructions', () => {
+  it('includes shared HTTP integrations guidance only when its remote server is present', () => {
+    expect(
+      createIntegrationMcpInstructions([
+        {
+          type: 'remote',
+          name: 'http-integrations',
+          url: 'https://api.test/api/mcp/http-integrations',
+        },
+      ]),
+    ).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
+    expect(createIntegrationMcpInstructions(undefined)).toBeUndefined();
+    expect(
+      createIntegrationMcpInstructions([
+        {
+          type: 'local',
+          name: 'http-integrations',
+          command: 'unrelated-server',
+        },
+      ]),
+    ).toBeUndefined();
+  });
   it.each(['gbrain', 'supermemory'])(
     'injects shared memory lifecycle guidance for %s',
     (name) => {
@@ -114,6 +136,79 @@ describe('generateOpenCodeConfig provider support', () => {
     tempDirs.push(homeDir);
     return homeDir;
   }
+
+  it.each([
+    'openai/gpt-5',
+    'anthropic/claude-sonnet-4',
+    'openrouter/openai/gpt-5',
+  ])(
+    'mounts HTTP integrations and removes stale guidance and catalogs on refresh for %s',
+    (model) => {
+      const homeDir = createHomeDir();
+      const roomote = {
+        type: 'local' as const,
+        name: 'roomote',
+        command: 'node',
+      };
+      const result = generateOpenCodeConfig({
+        homeDir,
+        runtimeEnv: { R_MODEL: model },
+        mcpServers: [
+          roomote,
+          {
+            type: 'remote',
+            name: 'http-integrations',
+            url: 'https://api.test/api/mcp/http-integrations',
+            headers: {
+              Authorization:
+                'Bearer {env:ROOMOTE_DIRECT_MCP_BEARER_TOKEN_HTTP_INTEGRATIONS}',
+            },
+          },
+          {
+            type: 'remote',
+            name: 'pylon',
+            url: 'https://api.test/api/mcp/pylon',
+          },
+        ],
+      });
+      const config = JSON.parse(result.configContent);
+      expect(config.mcp['http-integrations']).toMatchObject({
+        type: 'remote',
+        url: 'https://api.test/api/mcp/http-integrations',
+      });
+      expect(config.mcp).not.toHaveProperty('pylon');
+      const instructionsPath = join(
+        result.openCodeConfigDir,
+        'roomote-opencode-integration-instructions.md',
+      );
+      expect(readFileSync(instructionsPath, 'utf8')).toContain(
+        HTTP_INTEGRATIONS_INSTRUCTIONS,
+      );
+      const catalogPath = join(
+        result.openCodeConfigDir,
+        'on-demand-mcp-servers.json',
+      );
+      expect(
+        JSON.parse(readFileSync(catalogPath, 'utf8')).servers.map(
+          (server: { name: string }) => server.name,
+        ),
+      ).toEqual(['pylon']);
+
+      const refreshed = generateOpenCodeConfig({
+        homeDir,
+        runtimeEnv: { R_MODEL: model },
+        mcpServers: [roomote],
+      });
+      expect(JSON.parse(refreshed.configContent).mcp).not.toHaveProperty(
+        'http-integrations',
+      );
+      expect(existsSync(instructionsPath)).toBe(false);
+      expect(existsSync(catalogPath)).toBe(false);
+      expect(refreshed.configContent).not.toContain(
+        'ROOMOTE_ON_DEMAND_MCP_CATALOG_PATH',
+      );
+    },
+  );
 
   it('limits standard task subagent depth to two', () => {
     const result = generateOpenCodeConfig({
