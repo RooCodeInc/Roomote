@@ -367,6 +367,8 @@ as per-task auth tokens or workspace paths.
 | `R_ALLOWED_EMAILS`             | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email.  |
 | `R_ELEVENLABS_API_KEY`         | Optional          | ElevenLabs API key for narrated feature-demo videos. The key stays on the control plane; sandboxes reach text-to-speech only through an authenticated Roomote endpoint. A key scoped to text-to-speech only is sufficient and recommended. |
 | `R_ELEVENLABS_VOICE_ID`        | Optional          | ElevenLabs voice ID used for feature-demo narration. Required alongside the API key for narration to be available.                                                       |
+| `R_FAST_BROWSER_PROVIDER`      | Optional          | Enables the Fast `browse` tool, which gives every Session a private browser without a sandbox. Set to `browseruse` to use Browser Use cloud browsers (requires `R_BROWSER_USE_API_KEY`). Unset disables the tool.                          |
+| `R_BROWSER_USE_API_KEY`        | Optional          | Browser Use API key for the Fast `browse` tool. The key stays on the control plane; the model only sees the browser command output.                                                                                                       |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory

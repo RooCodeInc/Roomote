@@ -99,7 +99,10 @@ import {
   type FastAgentReplyImage,
 } from './fast-agent-session-images';
 import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
-import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
+import {
+  buildFastAgentArtifactCreator,
+  buildFastAgentMediaArtifactCreator,
+} from './artifacts/fast-agent-artifact-creator';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
@@ -2508,6 +2511,9 @@ export async function deliverFastAgentParentEventWithLock(
         : {}),
       adapter: {
         createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
+        createMediaArtifact: buildFastAgentMediaArtifactCreator(
+          params.parent.sessionId,
+        ),
         ...parentTurn.adapter,
         launchTask: parentTurn.adapter.launchTask,
         ...(wakeupGuard

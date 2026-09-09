@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto';
 
 import { type FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
-import { buildFastAgentArtifactCreator } from '@roomote/sdk/server';
+import {
+  buildFastAgentArtifactCreator,
+  buildFastAgentMediaArtifactCreator,
+} from '@roomote/sdk/server';
 import {
   and,
   db,
@@ -378,6 +381,9 @@ async function buildSetupPlatformEventTurn(
       },
       adapter: {
         createArtifact: buildFastAgentArtifactCreator(
+          conversation.fastConversationId,
+        ),
+        createMediaArtifact: buildFastAgentMediaArtifactCreator(
           conversation.fastConversationId,
         ),
         launchTask: (

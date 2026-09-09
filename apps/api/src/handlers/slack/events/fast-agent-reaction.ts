@@ -14,6 +14,7 @@ import {
 } from '@roomote/communication';
 import {
   buildFastAgentArtifactCreator,
+  buildFastAgentMediaArtifactCreator,
   findFastAgentSessionForProviderMessage,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
@@ -164,6 +165,7 @@ async function processFastAgentReaction(params: {
             }
           : {}),
         createArtifact: buildFastAgentArtifactCreator(session.id),
+        createMediaArtifact: buildFastAgentMediaArtifactCreator(session.id),
         activity: createFastAgentSlackSessionActivity({
           slack: context.slack,
           workspaceId: context.teamId,

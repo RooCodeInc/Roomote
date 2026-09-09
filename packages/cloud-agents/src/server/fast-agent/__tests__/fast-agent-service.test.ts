@@ -74,6 +74,7 @@ const mocks = vi.hoisted(() => ({
 const nativeToolNames = vi.hoisted(
   () =>
     ({
+      browse: 'browse',
       callIntegrationTool: 'call_integration_tool',
       cancelTask: 'cancel_task',
       createArtifact: 'create_artifact',
@@ -179,6 +180,7 @@ vi.mock('../../non-task-provider-usage', () => ({
   FAST_AGENT_SESSION_PERMISSIONS: fastAgentSessionPermissions,
   FAST_AGENT_SESSION_TOOL_FILTER: fastAgentSessionToolFilter,
   NON_TASK_INFERENCE_SURFACES: {
+    fastAgentBrowserScreenshot: 'fast_agent_browser_screenshot',
     fastAgentImageInspection: 'fast_agent_image_inspection',
     fastAgentQuestionAnswering: 'fast_agent',
   },
@@ -4091,7 +4093,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'github' }),
         expect.objectContaining({ id: 'roomote' }),
       ]),
-      { surface: 'slack' },
+      { surface: 'slack', browserEnabled: false },
     );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.any(Object),

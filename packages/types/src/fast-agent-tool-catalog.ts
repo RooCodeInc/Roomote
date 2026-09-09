@@ -5,6 +5,7 @@ import { ACP_TOOL_KINDS, type KnownAcpToolKind } from './acp';
  * contract so runtime policy and transcript fixtures describe the same set.
  */
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
+  browse: 'browse',
   callIntegrationTool: 'call_integration_tool',
   cancelTask: 'cancel_task',
   createArtifact: 'create_artifact',
@@ -31,6 +32,7 @@ export type FastAgentNativeToolName =
   (typeof FAST_AGENT_NATIVE_TOOL_NAMES)[keyof typeof FAST_AGENT_NATIVE_TOOL_NAMES];
 
 export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
+  { name: FAST_AGENT_NATIVE_TOOL_NAMES.browse, kind: ACP_TOOL_KINDS.tool },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
     kind: ACP_TOOL_KINDS.mcp,

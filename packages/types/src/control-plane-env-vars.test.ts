@@ -35,6 +35,16 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
     }
   });
 
+  it('reserves Fast browser provider settings for the control plane', () => {
+    for (const name of [
+      'R_FAST_BROWSER_PROVIDER',
+      'R_BROWSER_USE_API_KEY',
+      'R_AGENT_BROWSER_PATH',
+    ]) {
+      expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(true);
+    }
+  });
+
   it('includes non-secret provider identifiers for defense-in-depth', () => {
     for (const name of [
       'R_GITHUB_APP_ID',

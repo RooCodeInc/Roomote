@@ -88,6 +88,80 @@ const imageArtifact: TaskArtifact = {
   thumbnailUrl: '/api/artifacts/art-1/raw?sig=fresh&ts=1',
 };
 
+describe('resolveVisualProofMediaForToolMessage (browse native tool)', () => {
+  const browseCapture = {
+    success: true,
+    command: 'screenshot',
+    artifactId: 'art-1',
+    artifactType: 'visual-proof',
+    viewUrl: 'https://example.com/sessions/s1?artifact=browser%2Fshot.png&v=2',
+    rawUrl: 'https://example.com/api/artifacts/art-1/raw?sig=x&ts=1',
+  };
+
+  it('previews a screenshot saved by the Fast browse tool', () => {
+    const msg = buildResultMessage({
+      kind: 'tool',
+      title: 'browse',
+      isMcp: false,
+      isRoomoteNativeTool: true,
+      mcpServerName: null,
+      mcpToolName: null,
+      toolName: 'browse',
+      output: JSON.stringify(browseCapture),
+    });
+
+    expect(resolveVisualProofMediaForToolMessage(msg, null)).toEqual([
+      {
+        kind: 'image',
+        src: browseCapture.rawUrl,
+        viewUrl: browseCapture.viewUrl,
+        artifactId: 'art-1',
+      },
+    ]);
+  });
+
+  it('plays a recording saved by the Fast browse tool inline', () => {
+    const msg = buildResultMessage({
+      kind: 'tool',
+      title: 'browse',
+      isMcp: false,
+      isRoomoteNativeTool: true,
+      mcpServerName: null,
+      mcpToolName: null,
+      toolName: 'browse',
+      output: JSON.stringify({
+        ...browseCapture,
+        command: 'record stop',
+        contentType: 'video/webm',
+      }),
+    });
+
+    expect(resolveVisualProofMediaForToolMessage(msg, null)).toEqual([
+      {
+        kind: 'video',
+        src: browseCapture.rawUrl,
+        viewUrl: browseCapture.viewUrl,
+        artifactId: 'art-1',
+      },
+    ]);
+  });
+
+  it('ignores a browse-shaped result that is not a trusted native tool', () => {
+    const msg = buildResultMessage({
+      kind: 'tool',
+      title: 'browse',
+      isMcp: false,
+      isRoomoteNativeTool: false,
+      mcpServerName: null,
+      mcpToolName: null,
+      toolName: 'browse',
+      output: JSON.stringify(browseCapture),
+    });
+
+    expect(resolveVisualProofMediaForToolMessage(msg, null)).toEqual([]);
+  });
+});
+
 describe('resolveVisualProofMediaForToolMessage (manage_artifacts result)', () => {
   it('extracts a successful visual-proof upload and prefers the session thumbnail', () => {
     const msg = buildResultMessage({

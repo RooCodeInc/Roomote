@@ -1,6 +1,13 @@
 import { basename } from 'node:path';
 
-import { and, db, inArray, taskArtifacts, taskRuns } from '@roomote/db/server';
+import {
+  and,
+  db,
+  inArray,
+  sessions,
+  taskArtifacts,
+  taskRuns,
+} from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
 
 import { fastAgentConversationRepository } from '@roomote/cloud-agents/server';
@@ -28,6 +35,7 @@ export async function resolveFastAgentSessionImages(params: {
     columns: {
       id: true,
       taskId: true,
+      sessionId: true,
       runId: true,
       path: true,
       contentType: true,
@@ -38,10 +46,21 @@ export async function resolveFastAgentSessionImages(params: {
     artifact.runId === null ? [] : [artifact.runId],
   );
   const sessionRunTaskById = new Map<number, string>();
+  const lookupIds = await fastAgentConversationRepository.getLookupIds(
+    params.sessionId,
+  );
+  // Session-owned artifacts (the `browse` tool's captures) are owned by the
+  // unified `sessions` row, not the Fast conversation id, so map every
+  // lookup id to its Session before comparing.
+  const ownedSessionIds = new Set<string>(
+    (
+      await db.query.sessions.findMany({
+        where: inArray(sessions.fastConversationId, lookupIds),
+        columns: { id: true },
+      })
+    ).map((session) => session.id),
+  );
   if (runIds.length > 0) {
-    const lookupIds = await fastAgentConversationRepository.getLookupIds(
-      params.sessionId,
-    );
     const sessionRuns = await db.query.taskRuns.findMany({
       where: and(
         inArray(taskRuns.id, runIds),
@@ -58,11 +77,18 @@ export async function resolveFastAgentSessionImages(params: {
   const ts = currentEpochSeconds();
   return artifactIds.map((id) => {
     const artifact = byId.get(id);
+    const ownedByRun =
+      artifact?.runId !== null &&
+      artifact?.runId !== undefined &&
+      artifact.taskId === sessionRunTaskById.get(artifact.runId);
+    const ownedBySession =
+      artifact?.sessionId !== null &&
+      artifact?.sessionId !== undefined &&
+      ownedSessionIds.has(artifact.sessionId);
     if (
       !artifact ||
       !artifact.uploaded ||
-      artifact.runId === null ||
-      artifact.taskId !== sessionRunTaskById.get(artifact.runId) ||
+      !(ownedByRun || ownedBySession) ||
       !artifact.contentType.startsWith('image/')
     ) {
       throw new Error(`Invalid Fast parent image artifact: ${id}`);

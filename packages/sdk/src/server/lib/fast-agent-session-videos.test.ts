@@ -40,7 +40,9 @@ vi.mock('./fast-agent-video-conversion', () => ({
 import {
   db,
   eq,
+  fastAgentConversations,
   runFactory,
+  sessionFactory,
   slackInstallationFactory,
   slackInstallations,
   taskArtifacts,
@@ -224,6 +226,81 @@ it('resolves legacy Session lookup IDs and deduplicates selection', async () => 
   expect(result[0]?.viewUrl).toContain(
     `/task/${video.taskId}/artifacts/proof/demo.mp4?v=1`,
   );
+});
+
+it('resolves and streams Session-owned recordings from the Fast browse tool', async () => {
+  const [conversation] = await db
+    .insert(fastAgentConversations)
+    .values({
+      userId: (await userFactory.create()).id,
+      surface: 'slack',
+      workspaceId: teamId,
+      conversationId: randomUUID(),
+      currentReplyChannelId: params.channelId,
+      currentReplyThreadId: params.threadTs,
+    })
+    .returning();
+  const ownerSession = await sessionFactory.create({
+    fastConversationId: conversation!.id,
+  });
+  mocks.lookupIds.mockResolvedValue([sessionId, aliasId, conversation!.id]);
+  const [video] = await db
+    .insert(taskArtifacts)
+    .values({
+      sessionId: ownerSession.id,
+      path: 'browser/recording-1.webm',
+      version: 1,
+      artifactType: 'visual-proof',
+      contentType: 'video/webm',
+      size: original.length,
+      uploaded: true,
+    })
+    .returning();
+  const resolved = await resolveFastAgentSessionVideos({
+    ...params,
+    artifactIds: [video!.id],
+  });
+  expect(resolved[0]).toMatchObject({
+    id: video!.id,
+    owner: { sessionId: ownerSession.id },
+    filename: 'recording-1.webm',
+  });
+  expect(resolved[0]?.viewUrl).toContain(
+    `/sessions/${ownerSession.id}?artifact=browser%2Frecording-1.webm&v=1`,
+  );
+  expect(
+    await deliverFastAgentSessionVideos({
+      ...params,
+      artifactIds: [video!.id],
+    }),
+  ).toBe('');
+  expect(mocks.send).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        Key: `sessions/${ownerSession.id}/artifacts/${video!.id}/v1/browser/recording-1.webm`,
+      }),
+    }),
+    { abortSignal: expect.any(AbortSignal) },
+  );
+});
+
+it('rejects a Session-owned artifact from another Session', async () => {
+  const foreignSession = await sessionFactory.create();
+  const [video] = await db
+    .insert(taskArtifacts)
+    .values({
+      sessionId: foreignSession.id,
+      path: 'browser/recording-1.webm',
+      version: 1,
+      artifactType: 'visual-proof',
+      contentType: 'video/webm',
+      size: original.length,
+      uploaded: true,
+    })
+    .returning();
+  await expect(
+    deliverFastAgentSessionVideos({ ...params, artifactIds: [video!.id] }),
+  ).rejects.toThrow('Invalid Fast parent video artifact');
 });
 
 it('retrieves owned bytes and uses the documented Slack external upload sequence in the exact thread', async () => {

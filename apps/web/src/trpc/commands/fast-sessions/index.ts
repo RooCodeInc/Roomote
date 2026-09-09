@@ -17,8 +17,10 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   buildFastAgentArtifactCreator,
+  buildFastAgentMediaArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
+  createFastAgentSessionMediaArtifact,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
@@ -454,6 +456,11 @@ export async function startFastSessionCommand(
               ...artifact,
             });
           },
+          createMediaArtifact: (artifact) =>
+            createFastAgentSessionMediaArtifact({
+              sessionId: unifiedSession.id,
+              ...artifact,
+            }),
           launchTask,
           postReply: async () => {},
         },
@@ -550,6 +557,7 @@ export async function startSetupFastSessionCommand(
         conversation,
         adapter: {
           createArtifact: buildFastAgentArtifactCreator(session.id),
+          createMediaArtifact: buildFastAgentMediaArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
           }),
@@ -852,6 +860,7 @@ export async function submitFastSessionUserInputCommand(
         conversation,
         adapter: {
           createArtifact: buildFastAgentArtifactCreator(session.id),
+          createMediaArtifact: buildFastAgentMediaArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
           }),

@@ -68,7 +68,10 @@ import {
   buildSourceControlFastDelivery,
   buildSourceControlReplyQuote,
 } from './source-control-fast-delivery';
-import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
+import {
+  buildFastAgentArtifactCreator,
+  buildFastAgentMediaArtifactCreator,
+} from './artifacts/fast-agent-artifact-creator';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
@@ -138,7 +141,12 @@ export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
-    'activity' | 'createArtifact' | 'launchTask' | 'postReply' | 'replaceReply'
+    | 'activity'
+    | 'createArtifact'
+    | 'createMediaArtifact'
+    | 'launchTask'
+    | 'postReply'
+    | 'replaceReply'
   >;
 };
 
@@ -216,6 +224,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   }
   const conversation = session.conversation;
   const createArtifact = buildFastAgentArtifactCreator(session.id);
+  const createMediaArtifact = buildFastAgentMediaArtifactCreator(session.id);
 
   if (conversation.surface === 'web' || conversation.surface === 'automation') {
     // No side channel to post into: the canonical transcript the service
@@ -225,6 +234,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         launchTask: createFastAgentWebTaskLauncher({
           userId: params.userId,
         }),
@@ -271,6 +281,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         ...(senderSubject
           ? {
               createReplyStream: () =>
@@ -406,6 +417,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
     const adapter: FastAgentTurnAdapter = {
       activity,
       createArtifact,
+      createMediaArtifact,
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
         userId: params.userId,
@@ -499,6 +511,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
@@ -548,6 +561,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         launchTask: createFastAgentLinearTaskLauncher({
           userId: params.userId,
           conversation,
@@ -575,6 +589,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       conversation,
       adapter: {
         createArtifact,
+        createMediaArtifact,
         ...buildSourceControlFastAdapter({
           conversation,
           delivery,
@@ -611,6 +626,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       adapter: {
         activity,
         createArtifact,
+        createMediaArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
@@ -822,6 +838,9 @@ async function runFastAgentSurfaceReply(
             }
           : {}),
         createArtifact: buildFastAgentArtifactCreator(params.sessionId),
+        createMediaArtifact: buildFastAgentMediaArtifactCreator(
+          params.sessionId,
+        ),
         ...delivery.adapter,
       },
     }).catch((error: unknown) => {

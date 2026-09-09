@@ -291,6 +291,7 @@ describe('Fast native OpenCode tool bridge', () => {
       expect(FAST_AGENT_NATIVE_TOOL_FILTER[rawFilesystemTool]).not.toBe(true);
     }
     for (const parentOnlyTool of [
+      FAST_AGENT_NATIVE_TOOL_NAMES.browse,
       FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
       FAST_AGENT_NATIVE_TOOL_NAMES.launchTask,
