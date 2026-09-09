@@ -12,6 +12,7 @@ import {
   type TaskArtifactType,
   validateTaskArtifactPath,
 } from '@roomote/types';
+import { canReadTask } from './custom-automation-task-access';
 
 function withTypedArtifactType<T extends { artifactType: string }>(
   artifact: T,
@@ -39,12 +40,13 @@ type ArtifactAuth = {
 export async function getArtifactById({
   taskId,
   artifactId,
-  auth: _auth,
+  auth,
 }: {
   taskId: string;
   artifactId: string;
   auth: ArtifactAuth;
 }) {
+  if (!auth.userId) return null;
   const result = await db
     .select()
     .from(taskArtifacts)
@@ -71,13 +73,14 @@ export async function getArtifactByPath({
   taskId,
   path,
   version,
-  auth: _auth,
+  auth,
 }: {
   taskId: string;
   path: string;
   version?: number;
   auth: ArtifactAuth;
 }) {
+  if (!(await canReadTask(auth, taskId))) return null;
   const artifact = await getTaskArtifactByPath({ taskId, path, version });
   return artifact ? withTypedArtifactType(artifact) : null;
 }
@@ -131,12 +134,13 @@ export async function getArtifactVersionsBySessionPath({
 export async function getArtifactVersionsByPath({
   taskId,
   path,
-  auth: _auth,
+  auth,
 }: {
   taskId: string;
   path: string;
   auth: ArtifactAuth;
 }) {
+  if (!auth.userId) return [];
   const result = await db
     .select({
       id: taskArtifacts.id,
@@ -163,13 +167,14 @@ export async function getArtifactVersionsByPath({
  */
 export async function getArtifactsForTask({
   taskId,
-  auth: _auth,
+  auth,
   uploadedOnly = true,
 }: {
   taskId: string;
   auth: ArtifactAuth;
   uploadedOnly?: boolean;
 }) {
+  if (!auth.userId) return [];
   const artifactConditions = [eq(taskArtifacts.taskId, taskId)];
 
   if (uploadedOnly) {

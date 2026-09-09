@@ -2037,6 +2037,78 @@ Done.`,
     }
   });
 
+  it.each([
+    { prAttribution: undefined, delegated: true },
+    { prAttribution: 'Current User', delegated: true },
+    { prAttribution: undefined, delegated: false },
+    { prAttribution: 'Current User', delegated: false },
+  ])(
+    'uses the current canonical URL on update ($prAttribution, delegated=$delegated)',
+    async ({ prAttribution, delegated }) => {
+      const oldUrl = 'https://example.com/sessions/older-session';
+      const existing = {
+        number: 11,
+        node_id: 'node-11',
+        html_url: 'https://github.com/acme/web/pull/11',
+        title: 'Old title',
+        draft: false,
+        base: { ref: 'develop' },
+        body: attributionBody(
+          'Opened on behalf of @original.',
+          `[View the task](${oldUrl})`,
+        ),
+      };
+      const octokit = makeOctokit({ list: [existing], updated: existing });
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 555,
+        externalRepoId: null,
+        fullName: 'acme/web',
+        htmlUrl: 'https://github.com/acme/web',
+        private: false,
+      });
+      mockResolveRunCommitAuthor.mockResolvedValue({
+        kind: 'user',
+        displayName: 'Current User',
+        publicDisplayName: '@current',
+        prAssigneeLogin: null,
+      });
+      mockTaskParticipantRows.mockResolvedValue([
+        { userId: 'user-123', name: 'Current User' },
+      ]);
+      mockGetSessionForTask.mockResolvedValue({
+        id: 'current-session',
+        visibility: 'visible',
+        fastConversationId: 'current-conversation',
+      });
+      mockGetPrBodyAttributionLine.mockImplementation(
+        ({ attribution, taskUrl }) =>
+          attributionBody(
+            `Opened on behalf of ${attribution.displayName}.`,
+            `[View the task](${taskUrl})`,
+          ),
+      );
+
+      await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/web',
+          ...(delegated ? { fastAgentSessionId: 'current-conversation' } : {}),
+        }),
+        input: {
+          ...baseInput,
+          ...(prAttribution ? { prAttribution } : {}),
+          body: `${attributionBody('Opened on behalf of Caller.', '[View the task](https://example.com/task/task-123)')}\n\n${existing.body}\n\n## Changes\n\nKeep this body.`,
+        },
+      });
+
+      const expectedUrl = `https://example.com/${delegated ? 'sessions/current-session' : 'task/task-123'}?utm_source=github-comment&utm_medium=link&utm_campaign=standard`;
+      expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: `${attributionBody(`Opened on behalf of ${prAttribution ? '@current' : '@original'}.`, `[View the task](${expectedUrl})`)}\n\n## Changes\n\nKeep this body.`,
+        }),
+      );
+    },
+  );
+
   it('prepends canonical attribution without changing non-opener body content', async () => {
     const octokit = makeOctokit({
       list: [],

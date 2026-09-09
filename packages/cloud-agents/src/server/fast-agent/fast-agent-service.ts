@@ -119,6 +119,7 @@ import {
 } from './fast-agent-reply-stream';
 import { createFastAgentSurfaceReplyStreamer } from './fast-agent-surface-reply-stream';
 import { RemoteFastAgentSettingsSkillSource } from './fast-agent-settings-skill-source';
+import { RemoteFastAgentInstanceSkillSource } from './fast-agent-instance-skill-source';
 import { buildFastAgentExplicitSkillInvocationContext } from './fast-agent-skill-invocation';
 import {
   findFastAgentUnresolvedRequest,
@@ -161,6 +162,7 @@ import {
   launchFastAgentPrReview,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
+import { FastAgentTaskMessageGuard } from './fast-agent-task-message-guard';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
@@ -2046,6 +2048,7 @@ export async function answerFastAgentQuestion({
   const completedChatReactionSignatures = new Set<string>();
   const completedChatReplySignatures = new Set<string>();
   const completedTaskActions = new Set<string>();
+  const taskMessageGuard = new FastAgentTaskMessageGuard();
   const stopHumanSteerPolling = () => {
     nativeSteer = undefined;
   };
@@ -2420,6 +2423,7 @@ export async function answerFastAgentQuestion({
       completedChatReactionSignatures.clear();
       completedChatReplySignatures.clear();
       completedTaskActions.clear();
+      taskMessageGuard.clear();
       turnVisibleMessages.push(...batchMessages);
       await markFastAgentHumanFollowUpsDelivered(
         batch.map(({ row }) => row.id),
@@ -2905,18 +2909,11 @@ export async function answerFastAgentQuestion({
     // A resumed run continues the same turn. Load what the earlier attempt
     // already did before anything is written: the model is told about it,
     // and this run numbers its canonical events after the attempt's rows so
-    // it extends the transcript instead of overwriting them. Best effort:
-    // without it the model starts the turn over, the pre-resume behavior.
+    // it extends the transcript instead of overwriting them. Do not resume
+    // without this history: an earlier task message may already be accepted.
     const previousAttempt =
       resumedAfterInterruption || resumedAfterInferenceRetry
-        ? await loadFastAgentTurnAttemptSummary(session.id, turnId).catch(
-            (error) => {
-              console.warn(
-                `[Fast Agent] Failed to load the previous attempt for a resumed turn: ${formatErrorForLog(error)}`,
-              );
-              return null;
-            },
-          )
+        ? await loadFastAgentTurnAttemptSummary(session.id, turnId)
         : null;
     if (previousAttempt) {
       nextAssistantOrdinal = previousAttempt.next.assistantOrdinal;
@@ -3084,6 +3081,9 @@ export async function answerFastAgentQuestion({
     const currentTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
+    taskMessageGuard.restore(previousAttempt?.events ?? [], [
+      ...currentTasks.keys(),
+    ]);
     const currentMessageSender = platformEvent
       ? undefined
       : {
@@ -3133,7 +3133,6 @@ export async function answerFastAgentQuestion({
       automationReport,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
-      isCurrentUserAdmin: currentUser.isAdmin,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
@@ -4181,17 +4180,24 @@ export async function answerFastAgentQuestion({
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {
-            const args = taskMessageArgsSchema.parse(call.args);
-            const target = selectActiveTaskId(args.taskId, currentTasks);
-            if (!target.taskId) return { success: false, error: target.error };
-            const signature = `send_task_message:${target.taskId}`;
-            if (completedTaskActions.has(signature)) {
+            const parsed = taskMessageArgsSchema.safeParse(call.args);
+            if (!parsed.success) {
               return {
                 success: false,
-                error: 'A message was already sent to that task this turn.',
+                error: parsed.error.message,
+                delivery: 'not_accepted',
               };
             }
-            completedTaskActions.add(signature);
+            const args = parsed.data;
+            const target = selectActiveTaskId(args.taskId, currentTasks);
+            if (!target.taskId) {
+              return {
+                success: false,
+                error: target.error,
+                delivery: 'not_accepted',
+              };
+            }
+            const taskId = target.taskId;
             throwIfTurnCancelled();
             const message = args.includeAttachments
               ? appendAttachmentTextsToPromptText({
@@ -4199,17 +4205,18 @@ export async function answerFastAgentQuestion({
                   attachmentTexts,
                 })
               : args.message;
-            const result = await sendFastAgentTaskMessage(
-              { userId, apiBaseUrl },
-              {
-                taskId: target.taskId,
-                message,
-                ...(args.includeAttachments && images.length > 0
-                  ? { images }
-                  : {}),
-              },
+            return await taskMessageGuard.send(taskId, args, () =>
+              sendFastAgentTaskMessage(
+                { userId, apiBaseUrl },
+                {
+                  taskId,
+                  message,
+                  ...(args.includeAttachments && images.length > 0
+                    ? { images }
+                    : {}),
+                },
+              ),
             );
-            return { ...result, taskId: target.taskId };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask: {
@@ -4559,6 +4566,7 @@ export async function answerFastAgentQuestion({
               (environment) => environment.id,
             ),
           }),
+          new RemoteFastAgentInstanceSkillSource(userId),
         );
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,

@@ -3,6 +3,7 @@ import {
   db,
   deploymentSettings,
   eq,
+  inArray,
   slackAuthTokens,
   slackInstallationFactory,
   slackInstallations,
@@ -10,6 +11,7 @@ import {
   userFactory,
   type SlackInstallation,
 } from '@roomote/db/server';
+import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 
 const { ensureChannel, education, decodeState, fetchMock } = vi.hoisted(() => ({
@@ -72,7 +74,10 @@ describe('Slack user authentication manager provisioning', () => {
     vi.resetAllMocks();
     vi.stubGlobal('fetch', fetchMock);
     await db.delete(deploymentSettings);
-    await db.delete(automations);
+    // Internal automation rows are referenced by other suites' task fixtures.
+    await db
+      .delete(automations)
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
     await db.delete(slackAuthTokens);
     await db.delete(slackUserMappings);
     await db.delete(slackInstallations);
@@ -145,7 +150,11 @@ describe('Slack user authentication manager provisioning', () => {
     expect(await channels()).toMatchObject([
       { slackInstallationId: installation.id, channelId: 'CMANAGERS' },
     ]);
-    expect(await db.query.automations.findMany()).toEqual([automation]);
+    expect(
+      await db.query.automations.findMany({
+        where: inArray(automations.key, USER_FACING_AUTOMATION_KEYS),
+      }),
+    ).toEqual([automation]);
   });
 
   it('provisions after pending auth and retries unchanged mappings after a failure', async () => {

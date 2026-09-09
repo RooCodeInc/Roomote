@@ -54,50 +54,20 @@ same as running tests: local checkout, code edits, command execution, and testin
 are delegated to a task, as are investigations that need a workspace.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
-also supports native GitHub updates directly in Fast: changes to existing pull
-requests, issue or PR comments, review-comment replies, and comment reactions.
-For example, ask "Mark PR #42 in example/repo ready for review", "Request a review
-from octocat on that PR", or "Add a thumbs-up reaction to this existing comment"
-with its GitHub URL. The discovered native tool descriptions and schemas determine
-the supported arguments, rather than a separate restricted field list.
+also supports updates to existing pull requests, issue or PR comments,
+review-comment replies, and reactions using the deployment's GitHub App.
+See that guide for supported actions and access requirements.
 
-Writes require an active Roomote member, an active
-connected repository, and the GitHub App installation's applicable permission;
-no personal GitHub OAuth connection is required. Authorization is scoped to the
-repository, not only to pull requests. Retargeting a PR to an existing base branch
-is supported when exposed by the tool; it does not write branches or files.
-This bounded path does not merge, create or delete PRs, write files or branches,
-edit or delete comments, or administer repositories. A permission denial is not
-bypassed by switching to another route.
+[GitLab API tools](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
+reuse the existing deployment OAuth connection for bounded repository reads,
+merge request title, description and close/reopen updates, notes, and discussion
+replies. No additional MCP server or installation is needed. Tools require an
+active member, an active connected repository on the configured GitLab host, and
+valid deployment OAuth access; curated integrations must be enabled.
 
-An update that combines several actions is not guaranteed to be atomic. If it
-returns an error, Roomote checks what changed before retrying.
-
-### GitLab and Bitbucket MCP evaluation
-
-GitLab and Bitbucket MCP options have been evaluated but are not enabled for
-this direct Fast path. Existing source-control task workflows are unchanged.
-The remaining verification gaps are:
-
-- **GitLab:** [Official MCP authorization](https://docs.gitlab.com/user/model_context_protocol/mcp_server/)
-  requires MCP-specific access that Roomote's existing `api` OAuth scope does not
-  demonstrate. [Tool coverage](https://docs.gitlab.com/user/model_context_protocol/mcp_server_tools/)
-  must be checked against the deployed GitLab version, not assumed from current
-  documentation or development source. The community
-  [GitLab MCP server](https://github.com/zereight/gitlab-mcp) offers bearer-token
-  passthrough, but live reuse and refresh of Roomote credentials, pinned tool
-  schemas, and repository/discussion ownership enforcement remain unverified.
-- **Bitbucket Cloud:** [Atlassian Rovo lists Bitbucket tools](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools),
-  but its [agent-interface authorization scopes](https://support.atlassian.com/atlassian-ai-gateway/docs/configure-authentication-via-api-token/)
-  are not demonstrated interchangeable with Roomote's existing Bitbucket OAuth
-  connection. Exact PR update fields, reply-parent arguments, and close/reopen
-  coverage still need authenticated schema and live verification. Reopening a
-  comment thread does not establish PR reopen support; Data Center support is
-  not implied by Cloud coverage.
-
-No authenticated MCP interoperability or live provider-write test was performed
-for this evaluation. These findings do not enable a new integration or require
-users to create additional credentials.
+The official [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
+is not enabled for this direct Fast path. Its compatibility with Roomote's
+existing credentials has not been verified; existing task workflows are unchanged.
 
 ## The session view
 
@@ -271,12 +241,15 @@ later.
 
 ## Session and execution access
 
-Any signed-in deployment user with a Session link can view its timeline and
-contribute to the conversation, matching task access. The Sessions list remains
-focused: administrators see every Session, while other users see Sessions they
-own, participate in, or have spoken in. Replies are attributed to the teammate
-who sent them.
+Any signed-in deployment member with a Session link can view its timeline,
+including custom automation Sessions and their linked task transcripts, logs,
+and artifacts. A Session link does not provide anonymous or public access.
 
-Full execution details keep the existing task permissions, so joining a shared
-channel does not grant access to logs, terminals, diffs, previews, or private
-artifacts.
+Viewing is separate from acting. Custom automation management remains restricted
+to its creator and administrators. Existing permissions still apply to replies,
+edits, deletion, execution, terminals, previews, and secrets; a link does not
+grant those permissions. Replies are attributed to the teammate who sent them.
+
+The Sessions list and filter options remain scoped to the member's existing
+visibility permissions. Direct-link viewing does not make other members' custom
+automations discoverable in those lists.

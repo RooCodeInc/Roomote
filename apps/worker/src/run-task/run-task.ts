@@ -35,7 +35,7 @@ import {
   stripLeadingSlackProductMention,
   wrapSlackMessage,
 } from '@roomote/cloud-agents';
-import { sdk } from '@roomote/sdk/client';
+import { instanceSkills, sdk } from '@roomote/sdk/client';
 import {
   prependLinearMessages,
   type LinearSessionMessage,
@@ -923,11 +923,21 @@ export const runTask = async ({
       }
     }
 
+    const runtimeInstanceSkills = await instanceSkills
+      .listForRuntime()
+      .catch(() => {
+        // Do not expose upstream diagnostics or run with stale snapshot skills.
+        throw new Error(
+          'Failed to fetch instance skills; task startup stopped.',
+        );
+      });
+
     const skillsActivated = activateSkillsFolder({
       homeDir,
       sourceHomeDir: workerHomeDir,
       skillsFolderName: selectedSkillsFolder,
       manualSkills: environmentConfig?.manualSkills,
+      instanceSkills: runtimeInstanceSkills,
       repoLocalSkills,
       excludeSkillNames: zeroIntegrationEnabled ? undefined : ['zero'],
     });

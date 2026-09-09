@@ -113,3 +113,88 @@ request when it can fix the failure.
 3. start a small task and confirm Roomote can clone the repository
 4. open or update a merge request and confirm configured review automation runs
 5. trigger a failing default-branch pipeline and confirm CI Failure Triage starts
+
+## Native GitLab API tools for Fast
+
+Fast can read code and handle supported merge request requests directly through
+GitLab's API without cloning a repository. These tools are built into Roomote:
+no extra MCP server, package installation, or server URL is required.
+
+Roomote reuses its active deployment OAuth connection with the existing `api`
+grant and refreshes the access token when needed. No second OAuth application,
+user authorization flow, or static GitLab credential is needed.
+[GitLab's official MCP server](https://docs.gitlab.com/user/model_context_protocol/mcp_server/#reuse-a-single-oauth-application)
+uses `mcp`-scoped authorization; it is not a drop-in replacement for Roomote's
+unchanged `api` grant.
+
+A community MCP server is not required for these operations. Hosting one would
+add responsibility for deployment, version pinning and upgrades, network and
+TLS configuration, authentication, credential protection, tool permissions,
+monitoring, and incident response. It would also introduce another service
+trusted with GitLab credentials and repository data. The native tools avoid
+that additional operational burden while using the connection configured above.
+
+### Available operations and limits
+
+All tools require `project_id`: a positive integer project ID (number or decimal
+string without leading zeros), or a `group/project` path, including subgroups.
+MR tools also require `merge_request_iid` as a positive decimal string without
+leading zeros, within JavaScript's safe integer range. Unknown inputs are
+rejected. Inputs listed as optional below may be omitted.
+
+| Tools | Inputs and supported scope |
+| --- | --- |
+| `get_file_contents` | Required `file_path` and `ref`, a full immutable 40-character hexadecimal commit SHA. Resolve a branch with `get_commit` first. UTF-8 text only; files over 1 MiB and binary files are rejected, even for a small window. Optional integer `offset` is zero-based, minimum 0, default 0; optional integer `limit` is 1-2000 lines, default 2000. Continue with `next_offset` at the same SHA; `null` means the end. |
+| `get_repository_tree` | Optional `path`, nonempty `ref`, boolean `recursive`, `per_page`, and `page_token`. Always keyset pagination; optional `pagination` accepts only `keyset`. Returns `items` and `next_page_token`; pass the token as `page_token` to continue, stopping at `null`. |
+| `search_project_code` | Required nonempty `search`; optional nonempty `ref`, `page`, and `per_page`. Searches code in one connected project only. Requires GitLab instance and connection support for blob search; no unscoped fallback. |
+| `list_commits` | Optional nonempty `ref_name`, `path`, `page`, and `per_page`. Reads commit history. |
+| `get_commit` | Required `sha`, a commit identifier or branch name subject to the path rules below. Reads commit details. |
+| `get_merge_request` | Reads an existing MR; no inputs beyond `project_id` and `merge_request_iid`. |
+| `list_merge_request_diffs`, `get_merge_request_notes`, `mr_discussions` | Read an MR's diffs, notes, or discussions. Optional `page` and `per_page`. |
+| `update_merge_request` | Optional nonempty `title`, `description` (may be empty), and `state_event` (`close` or `reopen`). At least one must be supplied; no other fields can be changed. |
+| `create_merge_request_note` | Required nonempty `body`. Adds a top-level MR note. |
+| `create_merge_request_discussion_note` | Required nonempty `body` and `discussion_id` containing only letters, digits, underscores, or hyphens. Replies to an existing discussion on that MR. |
+
+Paths (`file_path`, `path`, and `sha`) must be nonempty and cannot contain
+backslashes, control characters, empty slash-separated segments, or `.` / `..`
+segments. Project paths use letters, digits, underscores, dots, and hyphens in
+each segment. Decimal string project IDs must fit JavaScript's safe integer
+range. Tree page tokens are nonempty and contain only letters, digits,
+underscores, `+`, `/`, `=`, or `-`.
+
+Paginated tools accept integer `per_page` from 1-100, default 20. Tools other
+than trees accept integer `page` of at least 1, default 1, with no additional
+page-number cap. They return `items` and `next_page`; `null` means no next page.
+
+The complete incoming request is limited to 64 KiB. GitLab responses and the
+complete tool result are each capped at 1 MiB. Operations have a 20-second
+abort deadline; OAuth refresh requests have a 10-second timeout. Request smaller
+pages or file windows if a result exceeds the response limit. There are no
+separate native character caps for titles, descriptions, or note bodies;
+the request-size limit and GitLab's own validation still apply.
+
+Every operation requires an active Roomote member or admin, an active connected
+repository on the configured host, and valid deployment OAuth access. MR writes
+also verify the target MR and, for replies, its discussion before sending the write.
+
+These native tools do not expose file or branch writes, MR
+creation or merging, approvals, thread resolution, note editing/deletion, issue
+tools, CI tools, or arbitrary GraphQL. Fast uses available APIs first for this
+supported scope. Local checkout inspection, edits, commands, and validation
+still need a task. Task authorization and structured code reviews are unchanged.
+
+### Verify safely
+
+1. From a signed-in member or admin Session, ask Roomote to discover available
+   GitLab tools and read a small known file in an active synced repository at a
+   resolved commit SHA. Confirm it uses the API without launching a clone task.
+2. If tools are missing, check that you are an active Roomote member or admin,
+   the deployment's GitLab OAuth connection is active with the `api` scope,
+   and repository sync includes an active repository on the configured GitLab
+   host. Reauthorize if required. Curated integrations must not be disabled on
+   the Roomote deployment. No external MCP server needs to be installed or repaired.
+3. Test writes only with explicit authorization on a designated disposable MR.
+   Specify the exact note, reply, or reversible title/state change, inspect the
+   result in GitLab, and restore any changed fields. Never mutate arbitrary MRs
+   as a connectivity check. Successful discovery or reads do not prove live
+   authorized writes; verify each required operation before relying on it.

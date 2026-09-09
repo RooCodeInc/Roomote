@@ -234,24 +234,6 @@ export function createGithubMcp(options?: {
         // helpers. Do not mistake a stored installation owner for a per-user ACL.
         const { repository, installation, appCredentials } =
           await resolveRepository(`${args.owner}/${args.repo}`);
-        const permissions = installation.permissions as Record<
-          string,
-          unknown
-        > | null;
-        const requiredPermissions =
-          name === 'add_issue_comment'
-            ? ['issues', 'pull_requests']
-            : ['pull_requests'];
-        if (
-          !requiredPermissions.some(
-            (permission) => permissions?.[permission] === 'write',
-          )
-        ) {
-          throw new McpProxyError(
-            403,
-            'GitHub installation lacks the required issue or pull request write permission',
-          );
-        }
         const token = await createGitHubToken(
           {
             type: 'installationId',

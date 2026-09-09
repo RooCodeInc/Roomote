@@ -14,6 +14,7 @@ import * as environments from '../environments';
 import * as mcpConnections from '../mcp-connections';
 import * as userApiKeys from '../user-api-keys';
 import * as llmUsage from '../llm-usage';
+import * as instanceSkills from '../instance-skills';
 import type { AppRouter, AppRouterInput, AppRouterOutput } from '../types';
 
 export type { AppRouter, AppRouterInput, AppRouterOutput };
@@ -29,6 +30,8 @@ export type {
   DequeuedResumeTaskRun,
 } from '../task-runs';
 export type { Environment, EnvironmentListItem } from '../environments';
+export type { InstanceSkillDefinition } from '../instance-skills';
+export { instanceSkills };
 export {
   detectPullRequestsFromToolResultEnvelope,
   parsePRFromOutput,
@@ -52,6 +55,7 @@ export const sdk = {
   mcpConnections,
   userApiKeys,
   llmUsage,
+  instanceSkills,
 };
 
 export interface CreateClientOptions {

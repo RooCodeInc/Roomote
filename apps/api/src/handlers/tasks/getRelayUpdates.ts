@@ -30,6 +30,7 @@ import {
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
+import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 import { logHandlerError } from '../utils';
 import {
   getLatestTaskRunsByTaskIds,
@@ -283,11 +284,17 @@ function buildResponse(params: {
   };
 }
 
-async function getTaskState(taskId: string) {
+async function getTaskState(taskId: string, auth: McpAuth) {
   const [task] = await db
     .select({ id: tasks.id, state: tasks.state, goalStatus: tasks.goalStatus })
     .from(tasks)
-    .where(and(eq(tasks.id, taskId), visibleTaskHistoryCondition))
+    .where(
+      and(
+        eq(tasks.id, taskId),
+        visibleTaskHistoryCondition,
+        customAutomationHistoryAccess(auth, 'task'),
+      ),
+    )
     .limit(1);
   if (!task) return null;
   const latestRuns = await getLatestTaskRunsByTaskIds([task.id]);
@@ -317,7 +324,7 @@ export async function getTaskRelayUpdates(
   if (!cursor) return c.json({ error: 'cursor is invalid for this task' }, 400);
 
   try {
-    const taskState = await getTaskState(taskId);
+    const taskState = await getTaskState(taskId, c.get('mcpAuth'));
     if (!taskState) return c.json({ error: 'Task not found' }, 404);
     const conditions: SQL[] = [
       eq(taskMessages.taskId, taskId),

@@ -13,6 +13,7 @@ import {
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  CREATE_CUSTOM_SKILL_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
@@ -90,6 +91,7 @@ import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
+import { handleCreateCustomSkill } from './custom-skills.js';
 import { handleManageGoal } from './goal.js';
 import {
   handleGetSessionMessages,
@@ -141,6 +143,23 @@ roomoteMcpServer.registerTool(
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
     }
     return handleManageCustomAutomations(params, config);
+  },
+);
+
+roomoteMcpServer.registerTool(
+  CREATE_CUSTOM_SKILL_TOOL.name,
+  {
+    title: CREATE_CUSTOM_SKILL_TOOL.title,
+    description: CREATE_CUSTOM_SKILL_TOOL.description,
+    inputSchema: z.object(CREATE_CUSTOM_SKILL_TOOL.inputSchema).strict(),
+    annotations: CREATE_CUSTOM_SKILL_TOOL.annotations,
+  },
+  async (params): Promise<ToolResult> => {
+    const config = getRoomoteConfig();
+    if (!config) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+    return handleCreateCustomSkill(params, config);
   },
 );
 
@@ -928,7 +947,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Required for dismiss_pull_request_review: the review id from list_pull_request_comments.',
+          'Required for dismiss_pull_request_review. Optional for submit_pull_request_review on GitHub: a positive numeric review id explicitly selects an existing pending review to publish, including its draft comments. Omit to create a new review; existing drafts are never selected automatically. Other providers do not support submission by reviewId.',
         ),
       resolved: z
         .boolean()

@@ -117,25 +117,21 @@ function AuthorizedCommandPalette() {
         label: 'Sessions',
         href: '/sessions',
       },
+      {
+        icon: Zap,
+        label: 'Automations',
+        href: SETTINGS_PATHS.automations,
+        keywords: ['recurring', 'scheduled', 'prompts'],
+      },
       { icon: Settings, label: 'Settings', href: '/settings' },
       { icon: HelpCircle, label: 'Help', action: 'contact-support' },
     ];
     if (user?.isAdmin) {
-      items.splice(
-        2,
-        0,
-        {
-          icon: Zap,
-          label: 'Automations',
-          href: SETTINGS_PATHS.automations,
-          keywords: ['recurring', 'scheduled', 'prompts'],
-        },
-        {
-          icon: ChartColumnIncreasing,
-          label: 'Analytics',
-          href: '/analytics',
-        },
-      );
+      items.splice(3, 0, {
+        icon: ChartColumnIncreasing,
+        label: 'Analytics',
+        href: '/analytics',
+      });
     }
     return items;
   }, [user?.isAdmin]);
