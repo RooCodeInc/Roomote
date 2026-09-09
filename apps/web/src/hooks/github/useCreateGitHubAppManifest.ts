@@ -17,6 +17,7 @@ type Variables =
   | {
       redirect: string | null;
       organization?: string | null;
+      connectionRequestId?: string;
     }
   | null;
 
@@ -45,6 +46,9 @@ export const useCreateGitHubAppManifest = (
         state: {
           mode: 'github-app-manifest',
           ...(redirect ? { redirect } : {}),
+          ...(typeof variables === 'object' && variables?.connectionRequestId
+            ? { connectionRequestId: variables.connectionRequestId }
+            : {}),
         },
         ...(organization ? { organization } : {}),
       });

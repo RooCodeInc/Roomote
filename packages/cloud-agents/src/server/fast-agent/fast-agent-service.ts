@@ -199,6 +199,11 @@ import {
   isFastAgentStorageFullError,
   wrapFastAgentStorageFullError,
 } from './fast-agent-storage-diagnostics';
+import {
+  getFastSourceControlToolTarget,
+  preflightFastSourceControl,
+  sourceControlConnectionArgsSchema,
+} from './fast-agent-source-control';
 
 const LEGACY_SLACK_REACTION_TOOL = 'add_reaction_to_slack_message';
 
@@ -1658,6 +1663,18 @@ export async function answerFastAgentQuestion({
     userId,
   });
   const platformEvent = turnSource === 'platform_event';
+  const sourceControlConnectionEnabled =
+    adapter.sourceControlConnectionEnabled === true &&
+    Boolean(
+      adapter.getSourceControlReadiness &&
+      adapter.requestSourceControlConnection,
+    ) &&
+    ['web', 'slack', 'discord', 'teams', 'telegram'].includes(
+      conversation.surface,
+    );
+  if (platformEvent && adapter.forceFreshSourceControlDiscovery) {
+    platformEventKind = 'connection_ready';
+  }
   const humanInput = input ?? ({ type: 'message' } as const);
   const reactionInput =
     !platformEvent && humanInput.type === FAST_AGENT_REACTION_INPUT_TYPE;
@@ -1674,6 +1691,7 @@ export async function answerFastAgentQuestion({
   /** Last model OpenCode resolved for this turn, for the failure closeout. */
   let lastResolvedInferenceModel: string | undefined;
   let currentInstructionVersion = 0;
+  let sourceControlIntentTurnId = turnId;
   const assistantInstructionVersions = new Map<string, number>();
   const closedInstructionVersions = new Set<number>();
   // Set once a native steer injects a follow-up its surface did not mark as
@@ -2324,6 +2342,17 @@ export async function answerFastAgentQuestion({
 
       if (signal?.aborted) return;
       for (const { row, followUp, followUpTurnId } of batch) {
+        if (
+          followUp.turnSource !== 'platform_event' &&
+          followUp.input?.type !== 'reaction'
+        ) {
+          await adapter.supersedeSourceControlConnectionRequests?.({
+            actorUserId: followUp.userId,
+            conversationId: canonicalConversationId!,
+            conversation,
+            turnId: followUpTurnId,
+          });
+        }
         await persistCanonicalMessage({
           eventId: `${followUpTurnId}:user`,
           turnId: followUpTurnId,
@@ -2400,6 +2429,15 @@ export async function answerFastAgentQuestion({
       // steer that names them. A rejected steer stays pending and reserves
       // fresh IDs on its next attempt instead of stacking duplicates.
       commitTurnImages(batchInput.held);
+      const latestHumanIntent = [...batch]
+        .reverse()
+        .find(
+          ({ followUp }) =>
+            followUp.turnSource !== 'platform_event' &&
+            followUp.input?.type !== 'reaction',
+        );
+      if (latestHumanIntent)
+        sourceControlIntentTurnId = latestHumanIntent.followUpTurnId;
       if (signal?.aborted) return;
       console.info(
         `[Fast Agent] Native steer accepted. conversationId="${canonicalConversationId}" followUpCount=${batch.length}`,
@@ -2864,7 +2902,11 @@ export async function answerFastAgentQuestion({
       }),
       getOrCreateFastAgentSession({ userId, conversation }),
       listFastAgentIntegrations(
-        { userId, apiBaseUrl },
+        {
+          userId,
+          apiBaseUrl,
+          forceFreshDiscovery: adapter.forceFreshSourceControlDiscovery,
+        },
         adapter.resolveMcpServerConfigs,
       ).catch((error) => {
         degradedContextComponents.add('integration_catalog');
@@ -2902,6 +2944,14 @@ export async function answerFastAgentQuestion({
       currentMessageReactable,
     });
     canonicalConversationId = session.id;
+    if (substantiveHumanInput) {
+      await adapter.supersedeSourceControlConnectionRequests?.({
+        actorUserId: userId,
+        conversationId: session.id,
+        conversation,
+        turnId,
+      });
+    }
     // A resumed run continues the same turn. Load what the earlier attempt
     // already did before anything is written: the model is told about it,
     // and this run numbers its canonical events after the attempt's rows so
@@ -3140,6 +3190,7 @@ export async function answerFastAgentQuestion({
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
+      sourceControlConnectionEnabled,
       therapistModeEnabled,
     });
     diagnostics.recordPromptContext({
@@ -3430,6 +3481,7 @@ export async function answerFastAgentQuestion({
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply,
       FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
       FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent,
+      FAST_AGENT_NATIVE_TOOL_NAMES.requestSourceControlConnection,
       // Scheduling or cancelling a wakeup is instant and its own confirmation
       // follows in the closeout; an acknowledgement first would only add a
       // second message.
@@ -3480,6 +3532,20 @@ export async function answerFastAgentQuestion({
             error:
               'This platform event may only be presented to the user with a closeout.',
           };
+        }
+
+        const sourceControlTarget = getFastSourceControlToolTarget(call);
+        if (sourceControlTarget) {
+          const denial = await preflightFastSourceControl(
+            adapter,
+            userId,
+            sourceControlTarget,
+            {
+              integrationId: call.integrationId,
+              toolName: call.toolName,
+            },
+          );
+          if (denial) return denial;
         }
 
         const chatLookupProvider =
@@ -3975,6 +4041,13 @@ export async function answerFastAgentQuestion({
             }
             try {
               await adapter.assertTaskLaunch?.();
+              // The backend resolves repository-free environments as ready;
+              // cached environment mappings are not an authorization decision.
+              const denial = await preflightFastSourceControl(adapter, userId, {
+                capability: 'repository',
+                environmentId: args.environmentId ?? ALL_REPOSITORIES,
+              });
+              if (denial) return denial;
             } catch (error) {
               return toolFailure(error);
             }
@@ -4107,6 +4180,11 @@ export async function answerFastAgentQuestion({
                   'Name the repository (owner/name) and pull request number to review.',
               };
             }
+            const denial = await preflightFastSourceControl(adapter, userId, {
+              capability: 'repository',
+              repositoryFullName: repository,
+            });
+            if (denial) return denial;
             if (
               args.model &&
               !taskModelOptions.models.some((model) => model.id === args.model)
@@ -4301,6 +4379,89 @@ export async function answerFastAgentQuestion({
               success: true,
               saved: true,
               note: 'Saved. The memory becomes searchable after the next ingestion pass.',
+            };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.requestSourceControlConnection: {
+            const { target } = sourceControlConnectionArgsSchema.parse(
+              call.args,
+            );
+            if (
+              !sourceControlConnectionEnabled ||
+              !adapter.requestSourceControlConnection
+            ) {
+              return {
+                success: false,
+                error:
+                  'Source-control connection requests are unavailable in this Session.',
+              };
+            }
+            const denial = await preflightFastSourceControl(
+              adapter,
+              userId,
+              target,
+            );
+            if (!denial) return { success: true, status: 'ready' };
+            if (
+              [
+                'target_required',
+                'forbidden',
+                'discovery_unavailable',
+              ].includes(denial.readiness.status)
+            )
+              return denial;
+            throwIfTurnCancelled();
+            const result = await adapter
+              .requestSourceControlConnection({
+                actorUserId: userId,
+                conversationId: session.id,
+                conversation,
+                turnId: sourceControlIntentTurnId,
+                target,
+              })
+              .catch(() => null);
+            if (!result)
+              return {
+                success: false,
+                error:
+                  'The source-control connection request could not be created. Check access and try again.',
+              };
+            if (result.status === 'ready')
+              return { success: true, status: 'ready' };
+            if (!URL.canParse(result.connectionUrl, Env.R_APP_URL)) {
+              return {
+                success: false,
+                error: 'The source-control connection link is unavailable.',
+              };
+            }
+            const url = new URL(result.connectionUrl, Env.R_APP_URL);
+            if (
+              url.origin !== new URL(Env.R_APP_URL).origin ||
+              url.username ||
+              url.password ||
+              url.hash ||
+              !/^\/sessions\/[a-zA-Z0-9-]+$/.test(url.pathname) ||
+              !/^[a-zA-Z0-9-]+$/.test(result.requestId) ||
+              url.searchParams.get('connectionRequest') !== result.requestId ||
+              [...url.searchParams].length !== 1
+            ) {
+              return {
+                success: false,
+                error: 'The source-control connection link is unavailable.',
+              };
+            }
+            await postReply({
+              purpose: 'clarification',
+              message: `This work needs source-control access. [Connect or check access](${url.toString()}). Authorization happens securely in Roomote, not in chat.`,
+            });
+            visibleUpdatePosted = true;
+            closedInstructionVersions.add(instructionVersion);
+            return {
+              success: true,
+              status: 'pending',
+              requestId: result.requestId,
+              connectionUrl: url.toString(),
+              closed: true,
             };
           }
 
@@ -4563,7 +4724,7 @@ export async function answerFastAgentQuestion({
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
-          { surface: conversation.surface },
+          { surface: conversation.surface, sourceControlConnectionEnabled },
         );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();

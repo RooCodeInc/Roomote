@@ -1,4 +1,10 @@
 const mocks = vi.hoisted(() => ({
+  connectionAdapter: {
+    getSourceControlReadiness: vi.fn(),
+    requestSourceControlConnection: vi.fn(),
+    supersedeSourceControlConnectionRequests: vi.fn(),
+  },
+  connectionEnabled: vi.fn(async () => false),
   acquireLock: vi.fn(),
   acquireRootBindingLock: vi.fn(),
   hasSession: vi.fn(),
@@ -66,6 +72,8 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  createSourceControlConnectionAdapter: vi.fn(() => mocks.connectionAdapter),
+  isSourceControlConnectionEnabled: mocks.connectionEnabled,
   findSlackConversationSubjectByUserId: vi.fn(async () => null),
   admitFastAgentHumanFollowUp: mocks.admitHumanFollowUp,
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
@@ -148,6 +156,41 @@ describe('processFastAgentMessage', () => {
       },
     );
   });
+
+  it.each([[true], [false]])(
+    'attaches trusted connection rollout %s and callbacks for the Slack actor',
+    async (enabled) => {
+      mocks.connectionEnabled.mockResolvedValueOnce(enabled);
+      await processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'C123',
+          user: 'U123',
+          text: 'Connect repository',
+          ts: '100.001',
+          thread_ts: '100.000',
+        } as never,
+        slack: {
+          addReaction: vi.fn(),
+          removeReaction: vi.fn(),
+          fetchThreadMessages: vi.fn(async () => []),
+        } as never,
+        userId: 'origin-member',
+        teamId: 'T123',
+        isExistingConversation: true,
+      });
+      expect(mocks.connectionEnabled).toHaveBeenCalledWith();
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'origin-member',
+          adapter: expect.objectContaining({
+            ...mocks.connectionAdapter,
+            sourceControlConnectionEnabled: enabled,
+          }),
+        }),
+      );
+    },
+  );
 
   it.each([
     ['Roomote can you hear me?', 'Roomote can you hear me?'],

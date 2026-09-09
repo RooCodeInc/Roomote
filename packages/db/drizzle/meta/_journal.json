@@ -547,6 +547,27 @@
       "when": 1788560388583,
       "tag": "0077_normal_lionheart",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1788880971340,
+      "tag": "0078_wealthy_giant_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1788884166656,
+      "tag": "0079_bitter_betty_brant",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1788886489954,
+      "tag": "0080_dark_la_nuit",
+      "breakpoints": true
     }
   ]
 }

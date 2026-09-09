@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 
 const globalDbStateTests = [
+  'src/server/lib/source-control-connection.test.ts',
   'src/server/lib/task-runs/__tests__/platform-issue-alert-delivery.test.ts',
 ];
 
@@ -24,7 +25,7 @@ export default defineConfig({
         test: {
           name: 'sdk-global-db-state',
           include: globalDbStateTests,
-          // These tests delete shared installations and use unscoped lookups.
+          // These tests mutate deployment settings or shared installations.
           // Run them after parallel suites that seed their own installations.
           sequence: { groupOrder: 1 },
           fileParallelism: false,

@@ -12,6 +12,20 @@ const mockSyncInstallMutate = vi.fn();
 const mockFinishInstallMutate = vi.fn();
 const mockFinishAppManifestMutate = vi.fn();
 const mockFinishAuthenticationMutate = vi.fn();
+const mockConnectionCallback = vi.fn();
+
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    sourceControl: {
+      githubConnectionCallback: {
+        mutationOptions: (options: object) => options,
+      },
+    },
+  }),
+}));
+vi.mock('@tanstack/react-query', () => ({
+  useMutation: () => ({ mutate: mockConnectionCallback }),
+}));
 
 let searchParams = new URLSearchParams();
 let userState:
@@ -59,6 +73,21 @@ vi.mock('@/hooks/github', () => ({
 }));
 
 describe('GitHub callback page', () => {
+  it('routes bound Session callbacks through server verification, not the ordinary sync action', async () => {
+    searchParams = new URLSearchParams({
+      installation_id: '123',
+      state: encodeRecord({ connectionState: 'sc.signed.state' }),
+    });
+    render(<Page />);
+    await waitFor(() =>
+      expect(mockConnectionCallback).toHaveBeenCalledWith({
+        state: 'sc.signed.state',
+        action: 'install',
+        installationId: 123,
+      }),
+    );
+    expect(mockSyncInstallMutate).not.toHaveBeenCalled();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     searchParams = new URLSearchParams();

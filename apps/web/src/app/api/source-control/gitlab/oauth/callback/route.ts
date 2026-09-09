@@ -1,4 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
+import { isConnectionState } from '@/lib/server/source-control-connection-state';
+import { connectionOAuthCallback } from '@/lib/server/source-control-connection-callback';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import {
@@ -24,6 +26,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
   const publicAppUrl = webEnv.R_PUBLIC_URL ?? webEnv.R_APP_URL;
+  if (isConnectionState(request.nextUrl.searchParams.get('state')))
+    return connectionOAuthCallback(request, 'gitlab', publicAppUrl);
   const { setupOpen } = await getSetupBootstrapState();
   const returnTarget = resolveSourceControlOAuthReturnTarget({
     requestedTarget: request.cookies.get(

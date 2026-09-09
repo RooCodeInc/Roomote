@@ -1,0 +1,1 @@
+ALTER TABLE "source_control_connection_requests" ADD COLUMN "sync_attempt" jsonb;

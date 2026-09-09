@@ -28,6 +28,8 @@ import {
 } from '@roomote/communication';
 import {
   admitFastAgentHumanFollowUp,
+  createSourceControlConnectionAdapter,
+  isSourceControlConnectionEnabled,
   createFastAgentConversationArtifact,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
@@ -390,6 +392,9 @@ export async function processDiscordFastAgentMessage(
             entry.user !== input.sender.id,
         ),
       adapter: {
+        ...createSourceControlConnectionAdapter(),
+        sourceControlConnectionEnabled:
+          await isSourceControlConnectionEnabled(),
         createArtifact: (artifact) =>
           createFastAgentConversationArtifact({
             fastConversationId: session.id,

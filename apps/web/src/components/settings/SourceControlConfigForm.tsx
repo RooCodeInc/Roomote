@@ -91,12 +91,14 @@ export function SourceControlConfigForm({
   onSaved,
   saveSuccessMessage,
   showSetupInstructions = false,
+  connectionRequestId,
 }: {
   provider: SetupSourceControlStatus['preselectedProvider'];
   configStatus: SetupSourceControlStatus | undefined;
   onSaved?: () => void;
   saveSuccessMessage?: string;
   showSetupInstructions?: boolean;
+  connectionRequestId?: string;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -136,6 +138,16 @@ export function SourceControlConfigForm({
   );
   const adoLinkedAccount = useAdoLinkedAccount();
   const authenticateAdoAccount = useAuthenticateAdoAccount();
+  const startAdoConnection = useMutation(
+    trpc.sourceControl.startAdoConnection.mutationOptions({
+      onSuccess: ({ state }) =>
+        authenticateAdoAccount.mutate(
+          `/api/source-control/ado/connection-return?state=${encodeURIComponent(state)}`,
+        ),
+      onError: () =>
+        toast.error('This connection request is no longer available.'),
+    }),
+  );
 
   const isAdo = provider === 'ado';
   const fieldsForAuthMode = (fields: readonly SourceControlField[]) =>
@@ -439,12 +451,15 @@ export function SourceControlConfigForm({
             variant="outline"
             className="mt-2"
             onClick={() =>
-              authenticateAdoAccount.mutate(
-                `${window.location.pathname}${window.location.search}`,
-              )
+              connectionRequestId
+                ? startAdoConnection.mutate({ requestId: connectionRequestId })
+                : authenticateAdoAccount.mutate(
+                    `${window.location.pathname}${window.location.search}`,
+                  )
             }
             disabled={
               authenticateAdoAccount.isPending ||
+              startAdoConnection.isPending ||
               adoLinkedAccount.data?.configured !== true
             }
           >

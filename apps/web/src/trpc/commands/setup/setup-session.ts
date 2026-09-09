@@ -33,6 +33,10 @@ import { SETUP_STARTER_TASKS } from '@/lib/setup-starter-tasks';
 import { recordSetupFunnelMilestones } from '@/lib/server/setup-funnel-telemetry';
 import { assertAdmin } from './shared';
 import { completeConversationalSetupIfReady } from './setup-session-completion';
+import {
+  assertSetupStarterWorkReady,
+  hasSynchronizedSourceControl,
+} from './setup-starter-readiness';
 import { getSetupNewStatusCommand } from '../setup-new';
 import {
   buildSetupReceiptMessage,
@@ -66,36 +70,6 @@ type SetupSessionConversation = {
   workspaceId: string;
   workflowVersion: number;
 };
-
-function hasSynchronizedSourceControl(
-  status: Awaited<ReturnType<typeof getSetupNewStatusCommand>>,
-): boolean {
-  return status.sourceControlSetup.providers.some(
-    (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
-  );
-}
-
-async function assertSetupStarterWorkReady(
-  auth: UserAuthSuccess,
-  options: { requireStarterSelection?: boolean; requireCompute?: boolean } = {},
-): Promise<void> {
-  const status = await getSetupNewStatusCommand(auth);
-  if (!hasSynchronizedSourceControl(status)) {
-    throw new Error(
-      'Connect source control and sync at least one repository before choosing or starting work.',
-    );
-  }
-
-  const setupSession = normalizeSetupNewSetupSession(
-    status.setupNewState.setupSession,
-  );
-  if (options.requireStarterSelection && !setupSession?.starterTaskSelection) {
-    throw new Error('Choose your first work before starting a task.');
-  }
-  if (options.requireCompute && !status.computeSetup.setupSatisfied) {
-    throw new Error('Set up a sandbox before starting work.');
-  }
-}
 
 async function readSetupNewState() {
   const [settings] = await db
@@ -201,6 +175,7 @@ function buildSetupSnapshot(input: {
 
   return JSON.stringify({
     rail: deriveSetupRailMilestones(input.status),
+    optionalSourceControlEnabled: input.status.optionalSourceControlEnabled,
     sourceControl: {
       selectedProvider: state.sourceControlProvider,
       connectedProviders: input.status.sourceControlSetup.providers
@@ -291,11 +266,19 @@ function deriveSetupRailMilestones(
       : provisioning?.status === 'building'
         ? ('preparing' as const)
         : ('pending' as const),
-    source: sourceConnected ? ('ready' as const) : ('pending' as const),
+    source: sourceConnected
+      ? ('ready' as const)
+      : status.optionalSourceControlEnabled
+        ? ('optional' as const)
+        : ('pending' as const),
     firstWork: setupSession?.starterTaskSelection
       ? ('ready' as const)
-      : ('pending' as const),
-    open: !sourceConnected,
+      : status.optionalSourceControlEnabled
+        ? ('optional' as const)
+        : ('pending' as const),
+    open: status.optionalSourceControlEnabled
+      ? !status.modelSetup.setupSatisfied || !computeReady
+      : !sourceConnected,
   };
 }
 
@@ -307,7 +290,7 @@ async function buildSetupSessionAdapterExtensions(
       if (preset !== 'setup_starter_tasks') {
         throw new Error('Unsupported setup input preset.');
       }
-      await assertSetupStarterWorkReady(auth);
+      assertSetupStarterWorkReady(await getSetupNewStatusCommand(auth));
       return [
         {
           id: 'setup-starter-tasks',
@@ -323,8 +306,8 @@ async function buildSetupSessionAdapterExtensions(
         },
       ];
     },
-    assertTaskLaunch: () =>
-      assertSetupStarterWorkReady(auth, {
+    assertTaskLaunch: async () =>
+      assertSetupStarterWorkReady(await getSetupNewStatusCommand(auth), {
         requireStarterSelection: true,
         requireCompute: true,
       }),
@@ -805,7 +788,7 @@ async function persistSetupPresetResponse(input: {
   if (preset !== 'setup_starter_tasks') {
     throw new Error('The setup starter-task preset is missing.');
   }
-  await assertSetupStarterWorkReady(input.auth);
+  assertSetupStarterWorkReady(await getSetupNewStatusCommand(input.auth));
 
   await db.transaction(async (tx) => {
     await tx.execute(

@@ -21,6 +21,7 @@ import {
   recordSessionWakeupOutcome,
   sql,
   taskRuns,
+  type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -144,17 +145,48 @@ export async function enqueueFastAgentParentEvent(params: {
   event: FastAgentParentEvent;
   retryTaskStartRunId?: number;
 }): Promise<{ eventKey: string; queued: true }> {
+  if (params.event.type === 'connection_ready')
+    throw new Error(
+      'Connection events require transactional request admission.',
+    );
   const eventKey = buildFastAgentParentEventKey(params);
-  await db
-    .insert(fastAgentParentEvents)
-    .values({
-      conversationId: params.parent.sessionId,
-      eventKey,
-      parent: params.parent,
-      event: params.event,
-      retryTaskStartRunId: params.retryTaskStartRunId,
-    })
-    .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+  const persist = (executor: DatabaseOrTransaction) =>
+    executor
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: params.parent.sessionId,
+        eventKey,
+        parent: params.parent,
+        event: params.event,
+        retryTaskStartRunId: params.retryTaskStartRunId,
+      })
+      .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+  if (
+    params.event.type === 'human_follow_up' &&
+    !params.event.input &&
+    params.event.turnSource !== 'platform_event'
+  ) {
+    const userId = params.event.userId;
+    await db.transaction(async (tx) => {
+      const inserted = await persist(tx).returning({
+        id: fastAgentParentEvents.id,
+      });
+      if (inserted.length) {
+        const { supersedeSourceControlConnectionRequests } =
+          await import('./source-control-connection');
+        await supersedeSourceControlConnectionRequests(
+          {
+            conversationId: params.parent.sessionId,
+            actorUserId: userId,
+            turnId: `incoming:${eventKey}`,
+          },
+          tx,
+        );
+      }
+    });
+  } else {
+    await persist(db);
+  }
 
   wakeFastAgentParentEvent({
     conversationId: params.parent.sessionId,
@@ -162,6 +194,35 @@ export async function enqueueFastAgentParentEvent(params: {
   });
 
   return { eventKey, queued: true };
+}
+
+/** Caller owns the request transition transaction and wakes only after commit. */
+export async function admitSourceControlConnectionReadyEvent(
+  tx: DatabaseOrTransaction,
+  params: { parent: FastAgentParent; requestId: string },
+): Promise<{ eventKey: string }> {
+  const { isSourceControlConnectionEnabled } =
+    await import('./source-control-connection');
+  if (!(await isSourceControlConnectionEnabled(tx)))
+    throw new Error('Source-control connection requests are disabled.');
+  const event: FastAgentParentEvent = {
+    type: 'connection_ready',
+    requestId: params.requestId,
+  };
+  const eventKey = buildFastAgentParentEventKey({
+    parent: params.parent,
+    event,
+  });
+  await tx
+    .insert(fastAgentParentEvents)
+    .values({
+      conversationId: params.parent.sessionId,
+      eventKey,
+      parent: params.parent,
+      event,
+    })
+    .onConflictDoNothing({ target: fastAgentParentEvents.eventKey });
+  return { eventKey };
 }
 
 /** Serialize PR-open admission with terminal run updates on the same row. */
@@ -272,11 +333,29 @@ async function isStillPending(id: string): Promise<boolean> {
   return Boolean(row) && !row!.deliveredAt && !row!.discardedAt;
 }
 
-async function markDelivered(id: string) {
-  await db
-    .update(fastAgentParentEvents)
-    .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
-    .where(eq(fastAgentParentEvents.id, id));
+async function markDelivered(row: typeof fastAgentParentEvents.$inferSelect) {
+  const mark = (executor: DatabaseOrTransaction) =>
+    executor
+      .update(fastAgentParentEvents)
+      .set({ deliveredAt: new Date(), lastError: null, updatedAt: new Date() })
+      .where(eq(fastAgentParentEvents.id, row.id));
+  if (
+    row.event.type !== 'connection_ready' ||
+    typeof row.event.requestId !== 'string'
+  ) {
+    await mark(db);
+    return;
+  }
+  const requestId = row.event.requestId;
+  await db.transaction(async (tx) => {
+    const { settleSourceControlConnectionRequest } =
+      await import('./source-control-connection');
+    await settleSourceControlConnectionRequest(
+      { requestId, conversationId: row.conversationId },
+      tx,
+    );
+    await mark(tx);
+  });
 }
 
 async function markDiscarded(id: string, error: unknown) {
@@ -391,7 +470,10 @@ export async function drainFastAgentParentEvents(
           conversationId: request.conversationId,
           eventKey: row.eventKey,
         };
-        if (row.admission === 'inline') {
+        if (
+          row.admission === 'inline' ||
+          row.event.type === 'connection_ready'
+        ) {
           // Bind the row to the lock the way the inline surfaces do, so a
           // process shutdown that aborts this turn before it reaches its own
           // abort handling (still in setup, no inference yet) can release
@@ -401,7 +483,7 @@ export async function drainFastAgentParentEvents(
           turnLock.durableResume = () =>
             wakeFastAgentParentEventNow(wakeRequest);
         }
-        await deliverFastAgentParentEventWithLock(
+        const delivery = await deliverFastAgentParentEventWithLock(
           {
             parent: row.parent,
             event: row.event,
@@ -409,11 +491,14 @@ export async function drainFastAgentParentEvents(
             // An inline-admitted row only reaches the queue after its owner
             // was interrupted or parked it for a scheduled retry, so this
             // delivery is a resumption of the same turn.
-            ...(row.admission === 'inline'
+            ...(row.admission === 'inline' ||
+            row.event.type === 'connection_ready'
               ? {
                   ...(row.retryAt
                     ? { resumedAfterInferenceRetry: true }
-                    : { resumedAfterInterruption: true }),
+                    : row.admission === 'inline' || row.attempts > 0
+                      ? { resumedAfterInterruption: true }
+                      : {}),
                   // The resumed run owns the same row and is told what the
                   // earlier attempt already did, so it continues rather than
                   // repeating actions. The consumed retry count keeps the
@@ -433,6 +518,18 @@ export async function drainFastAgentParentEvents(
           },
           turnLock,
         );
+        if (row.event.type === 'connection_ready' && delivery === 'skipped') {
+          await markDiscarded(
+            row.id,
+            'Connection request is no longer eligible.',
+          );
+          continue;
+        }
+        if (
+          row.event.type === 'connection_ready' &&
+          (await isStillPending(row.id))
+        )
+          return;
         if (row.admission === 'inline') {
           // The resumed run settles its own row (delivered, or withdrawn
           // from replay before a terminal action), so nothing is written
@@ -450,7 +547,7 @@ export async function drainFastAgentParentEvents(
         }
         await finalizeAutomationLaunch(row.event, 'succeeded');
         await finalizeScheduledWakeup(row.event, 'succeeded');
-        await markDelivered(row.id);
+        await markDelivered(row);
       } catch (error) {
         if (findFastAgentDurableRetryScheduledError(error)) {
           // The resumed run parked itself for a scheduled retry: the row
@@ -466,10 +563,19 @@ export async function drainFastAgentParentEvents(
         if (deliveryError?.replyPosted) {
           await finalizeAutomationLaunch(row.event, 'succeeded');
           await finalizeScheduledWakeup(row.event, 'succeeded');
-          await markDelivered(row.id);
+          await markDelivered(row);
           continue;
         }
         if (deliveryError?.permanent) {
+          if (row.event.type === 'connection_ready') {
+            const { settleSourceControlConnectionRequest } =
+              await import('./source-control-connection');
+            await settleSourceControlConnectionRequest({
+              requestId: row.event.requestId,
+              conversationId: row.conversationId,
+              status: 'superseded',
+            });
+          }
           await finalizeAutomationLaunch(row.event, 'failed', deliveryError);
           await finalizeScheduledWakeup(row.event, 'failed', deliveryError);
           await markDiscarded(row.id, deliveryError);
@@ -498,6 +604,9 @@ export async function drainFastAgentParentEvents(
 
 /** Recreate BullMQ wakeups for durable rows after restarts or Redis outages. */
 export async function recoverPendingFastAgentParentEvents(): Promise<number> {
+  const { enforceSourceControlConnectionRollout } =
+    await import('./source-control-connection');
+  await enforceSourceControlConnectionRollout();
   const rows = await db
     .select({
       conversationId: fastAgentParentEvents.conversationId,

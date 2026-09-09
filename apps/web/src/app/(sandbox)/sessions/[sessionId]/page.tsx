@@ -1,6 +1,6 @@
 import { cache } from 'react';
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
@@ -30,6 +30,7 @@ import {
   type SessionInfo,
 } from './SessionWorkspace';
 import { SessionReadTracker } from './SessionReadTracker';
+import { SessionConnectionRequest } from './SessionConnectionRequest';
 import { SetupAutomationRecommendationsCard } from './setup/SetupAutomationRecommendationsCard';
 import { SetupSandboxCard } from './setup/SetupSandboxCard';
 import { SetupSessionSourceControlCard } from './setup/SetupSourceControlCard';
@@ -38,46 +39,57 @@ import {
   SESSION_HEADER_TITLE_CLASS_NAME,
 } from './session-header-layout';
 
-const getSessionPageData = cache(async (sessionId: string) => {
-  const authorizedUser = await authorize();
-  if (!authorizedUser.success) {
-    notFound();
-  }
-  // Both lookup columns are uuid; a garbage route param would otherwise throw
-  // 22P02 in Postgres instead of 404ing.
-  if (!z.string().uuid().safeParse(sessionId).success) {
-    notFound();
-  }
+const getSessionPageData = cache(
+  async (sessionId: string, connectionRequest?: string) => {
+    const authorizedUser = await authorize();
+    if (!authorizedUser.success) {
+      const target = `/sessions/${encodeURIComponent(sessionId)}${connectionRequest ? `?connectionRequest=${encodeURIComponent(connectionRequest)}` : ''}`;
+      redirect(`/sign-in?${new URLSearchParams({ redirect_url: target })}`);
+    }
+    // Both lookup columns are uuid; a garbage route param would otherwise throw
+    // 22P02 in Postgres instead of 404ing.
+    if (!z.string().uuid().safeParse(sessionId).success) {
+      notFound();
+    }
 
-  // Old links may carry a fast-conversation id whose session row hasn't been
-  // backfilled yet; getSessionByIdCommand falls back by fastConversationId,
-  // and the fast lookup below covers a conversation with no session row.
-  const unifiedSession = await getSessionByIdCommand(authorizedUser, sessionId);
-  const session = unifiedSession?.fastConversationId
-    ? await getFastSessionById(
-        authorizedUser,
-        unifiedSession.fastConversationId,
-      )
-    : unifiedSession
-      ? null
-      : await getFastSessionById(authorizedUser, sessionId);
+    // Old links may carry a fast-conversation id whose session row hasn't been
+    // backfilled yet; getSessionByIdCommand falls back by fastConversationId,
+    // and the fast lookup below covers a conversation with no session row.
+    const unifiedSession = await getSessionByIdCommand(
+      authorizedUser,
+      sessionId,
+    );
+    const session = unifiedSession?.fastConversationId
+      ? await getFastSessionById(
+          authorizedUser,
+          unifiedSession.fastConversationId,
+        )
+      : unifiedSession
+        ? null
+        : await getFastSessionById(authorizedUser, sessionId);
 
-  if (!unifiedSession && !session) {
-    notFound();
-  }
+    if (!unifiedSession && !session) {
+      notFound();
+    }
 
-  return { authorizedUser, unifiedSession, session };
-});
+    return { authorizedUser, unifiedSession, session };
+  },
+);
 
 type SessionDetailPageProps = {
   params: Promise<{ sessionId: string }>;
+  searchParams?: Promise<{ connectionRequest?: string }>;
 };
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: SessionDetailPageProps): Promise<Metadata> {
   const { sessionId } = await params;
-  const { unifiedSession, session } = await getSessionPageData(sessionId);
+  const { unifiedSession, session } = await getSessionPageData(
+    sessionId,
+    (await searchParams)?.connectionRequest,
+  );
   const initialUserMessage = session?.messages.find(
     (message) => message.role === 'user',
   );
@@ -93,10 +105,13 @@ export async function generateMetadata({
 
 export default async function SessionDetailPage({
   params,
+  searchParams,
 }: SessionDetailPageProps) {
   const { sessionId } = await params;
-  const { authorizedUser, unifiedSession, session } =
-    await getSessionPageData(sessionId);
+  const { authorizedUser, unifiedSession, session } = await getSessionPageData(
+    sessionId,
+    (await searchParams)?.connectionRequest,
+  );
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
   const modelEnv: Record<string, string> =
@@ -180,9 +195,12 @@ export default async function SessionDetailPage({
                   headerActions={
                     <SessionViewers sessionId={unifiedSession.id} />
                   }
-                  {...(isSetupSession
-                    ? { timelineExtras: setupTimelineExtras }
-                    : {})}
+                  timelineExtras={
+                    <>
+                      <SessionConnectionRequest sessionId={unifiedSession.id} />
+                      {setupTimelineExtras}
+                    </>
+                  }
                 />
               </div>
             </div>
@@ -262,6 +280,7 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
+          timelineExtras={<SessionConnectionRequest sessionId={session.id} />}
           {...(session.userId
             ? {
                 owner: {

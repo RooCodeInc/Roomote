@@ -5,6 +5,11 @@ const mocks = vi.hoisted(() => ({
   insertOnConflict: vi.fn(),
   insertReturning: vi.fn(),
   findFirst: vi.fn(),
+  supersedeConnection: vi.fn(),
+}));
+
+vi.mock('./source-control-connection', () => ({
+  supersedeSourceControlConnectionRequests: mocks.supersedeConnection,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -92,6 +97,14 @@ describe('persistFastAgentInlineHumanTurn', () => {
       persistFastAgentInlineHumanTurn({ parent, event }),
     ).resolves.toEqual({ id: 'row-1', eventKey: 'stable-event-key' });
     expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    expect(mocks.supersedeConnection).toHaveBeenCalledWith(
+      {
+        conversationId: parent.sessionId,
+        actorUserId: event.userId,
+        turnId: 'incoming:stable-event-key',
+      },
+      expect.anything(),
+    );
     // The supersede sweep runs once the row is known to be pending.
     expect(mocks.updateWhere).toHaveBeenCalledOnce();
   });

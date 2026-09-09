@@ -19,6 +19,8 @@ import {
   buildFastAgentArtifactCreator,
   buildFastAgentSurfaceReplyDelivery,
   createFastAgentSessionArtifact,
+  createSourceControlConnectionAdapter,
+  isSourceControlConnectionEnabled,
   persistFastAgentInlineHumanTurn,
   resolveUserMcpServerConfigs,
   wakeFastAgentParentEventAt,
@@ -323,6 +325,9 @@ async function runWebFastAgentTurn({
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       adapter: {
+        ...createSourceControlConnectionAdapter(),
+        sourceControlConnectionEnabled:
+          await isSourceControlConnectionEnabled(),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId,

@@ -89,6 +89,12 @@ vi.mock('@/hooks/linked-accounts', () => ({
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     sourceControl: {
+      startAdoConnection: {
+        mutationOptions: (options: object) => ({
+          ...options,
+          mutationKey: ['startAdoConnection'],
+        }),
+      },
       saveConfig: {
         mutationOptions: (options: object) => ({
           ...options,

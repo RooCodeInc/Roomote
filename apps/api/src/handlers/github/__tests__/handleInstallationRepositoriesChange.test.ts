@@ -1,4 +1,12 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+const { reconcile, syncStartedAt } = vi.hoisted(() => ({
+  reconcile: vi.fn(async () => ({ ready: 0 })),
+  syncStartedAt: vi.fn(async () => '2026-09-08T12:00:00.123456Z'),
+}));
+vi.mock('@roomote/sdk/server', () => ({
+  reconcileSourceControlConnectionRequests: reconcile,
+  getSourceControlSyncStartedAt: syncStartedAt,
+}));
 
 const { mockFindFirst, mockSyncGitHubInstallation } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
@@ -32,7 +40,10 @@ describe('handleInstallationRepositoriesChange', () => {
     mockSyncGitHubInstallation.mockResolvedValue({
       success: true,
       githubInstallation: {},
-      repositories: [{ id: 'repo-1' }, { id: 'repo-2' }],
+      repositories: [
+        { id: 'repo-1', fullName: 'org/one' },
+        { id: 'repo-2', fullName: 'org/two' },
+      ],
     });
   });
 
@@ -47,6 +58,19 @@ describe('handleInstallationRepositoriesChange', () => {
     });
     expect(response.status).toBe('ok');
     expect(response.metadata).toEqual({ repositoryCount: 2 });
+    expect(syncStartedAt).toHaveBeenCalledWith('github');
+    expect(syncStartedAt.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSyncGitHubInstallation.mock.invocationCallOrder[0]!,
+    );
+    expect(reconcile).toHaveBeenCalledWith(
+      { provider: 'github' },
+      {
+        successfulSync: {
+          startedAt: '2026-09-08T12:00:00.123456Z',
+          repositoryFullNames: ['org/one', 'org/two'],
+        },
+      },
+    );
   });
 
   it('short-circuits when the payload has no installation id', async () => {
@@ -80,5 +104,6 @@ describe('handleInstallationRepositoriesChange', () => {
 
     expect(response.status).toBe('error');
     expect(response.message).toContain('boom');
+    expect(reconcile).not.toHaveBeenCalled();
   });
 });

@@ -29,7 +29,12 @@ export function useRedirectToSignIn(enabled: boolean): string {
   const router = useRouter();
   const signInUrl = useSignInRedirectUrl();
   const setupBootstrapOpen = useSetupBootstrapOpen();
-  const redirectTarget = setupBootstrapOpen ? '/setup' : signInUrl;
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const connectionReturn =
+    pathname?.startsWith('/sessions/') && searchParams.has('connectionRequest');
+  const redirectTarget =
+    setupBootstrapOpen && !connectionReturn ? '/setup' : signInUrl;
 
   useEffect(() => {
     if (!enabled) {

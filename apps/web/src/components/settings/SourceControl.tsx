@@ -145,6 +145,7 @@ type TokenProviderState = {
 export function getProviderConfigOAuthAuthorizePath(
   provider: SourceControlTokenBackedProvider,
   redirectTo?: string,
+  connectionRequestId?: string,
 ): string | null {
   if (
     provider !== 'gitlab' &&
@@ -155,9 +156,11 @@ export function getProviderConfigOAuthAuthorizePath(
   }
 
   const path = `/api/source-control/${provider}/oauth/authorize`;
-  return redirectTo
-    ? `${path}?redirectTo=${encodeURIComponent(redirectTo)}`
-    : path;
+  const params = new URLSearchParams();
+  if (redirectTo) params.set('redirectTo', redirectTo);
+  if (connectionRequestId)
+    params.set('connectionRequestId', connectionRequestId);
+  return params.size ? `${path}?${params}` : path;
 }
 
 export function completeProviderConfigSave({
@@ -165,15 +168,18 @@ export function completeProviderConfigSave({
   navigate,
   sync,
   redirectTo,
+  connectionRequestId,
 }: {
   provider: SourceControlTokenBackedProvider;
   navigate: (path: string) => void;
   sync: () => void;
   redirectTo?: string;
+  connectionRequestId?: string;
 }): void {
   const authorizePath = getProviderConfigOAuthAuthorizePath(
     provider,
     redirectTo,
+    connectionRequestId,
   );
 
   if (authorizePath) {
@@ -183,7 +189,15 @@ export function completeProviderConfigSave({
   }
 }
 
-export function SourceControl() {
+export function SourceControl({
+  connectionRequestId,
+  connectionReturnTarget,
+  provider: selectedProvider,
+}: {
+  connectionRequestId?: string;
+  connectionReturnTarget?: string;
+  provider?: SourceControlProvider;
+} = {}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { isAdmin } = useAuthorizedUser();
@@ -258,7 +272,8 @@ export function SourceControl() {
   const adoIsPending = adoRepositories.isPending;
   const adoIsConnected = (adoRepositories.data?.length ?? 0) > 0;
   const search = searchParams.toString();
-  const redirectTarget = search ? `${pathname}?${search}` : pathname;
+  const redirectTarget =
+    connectionReturnTarget ?? (search ? `${pathname}?${search}` : pathname);
   const failedProvider = sourceControlTokenBackedProviders.find(
     (provider) => searchParams.get(provider) === 'error',
   );
@@ -344,6 +359,7 @@ export function SourceControl() {
                   {
                     redirect: redirectTarget,
                     callbackBackground: 'background',
+                    connectionRequestId,
                   },
                   {
                     onSuccess: (result) => {
@@ -422,7 +438,10 @@ export function SourceControl() {
         />
       ) : null,
       githubSetup: isAdmin ? (
-        <GitHubAppSettingsSetup redirectTarget={redirectTarget} />
+        <GitHubAppSettingsSetup
+          redirectTarget={redirectTarget}
+          connectionRequestId={connectionRequestId}
+        />
       ) : null,
     },
     ...sourceControlTokenBackedProviders.map((provider) =>
@@ -433,6 +452,7 @@ export function SourceControl() {
         configForm: (
           <SourceControlConfigForm
             provider={provider}
+            connectionRequestId={connectionRequestId}
             configStatus={sourceControlConfigStatus.data}
             showSetupInstructions={!tokenProviderState[provider].isConfigured}
             saveSuccessMessage={`${sourceControlProviderDescriptors[provider].label} credentials saved.`}
@@ -442,6 +462,7 @@ export function SourceControl() {
                 navigate: (path) => window.location.assign(path),
                 sync: tokenProviderState[provider].sync.mutate,
                 redirectTo: redirectTarget,
+                connectionRequestId,
               })
             }
           />
@@ -460,17 +481,23 @@ export function SourceControl() {
           </AlertDescription>
         </Alert>
       ) : null}
-      <Section icon={GitMerge} title="Source Control Settings">
-        <div className="space-y-6">
-          {isAdmin ? <SourceControlAdminSettings /> : null}
-        </div>
-      </Section>
-      {providerBlocks.map((providerBlock) => (
-        <SourceControlProviderBlock
-          key={providerBlock.provider}
-          {...providerBlock}
-        />
-      ))}
+      {!connectionRequestId ? (
+        <Section icon={GitMerge} title="Source Control Settings">
+          <div className="space-y-6">
+            {isAdmin ? <SourceControlAdminSettings /> : null}
+          </div>
+        </Section>
+      ) : null}
+      {providerBlocks
+        .filter(
+          (block) => !selectedProvider || block.provider === selectedProvider,
+        )
+        .map((providerBlock) => (
+          <SourceControlProviderBlock
+            key={providerBlock.provider}
+            {...providerBlock}
+          />
+        ))}
     </div>
   );
 }
@@ -878,8 +905,10 @@ function SourceControlProviderBlock({
 
 function GitHubAppSettingsSetup({
   redirectTarget,
+  connectionRequestId,
 }: {
   redirectTarget: string;
+  connectionRequestId?: string;
 }) {
   const [githubOrganization, setGithubOrganization] = useState('');
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
@@ -979,6 +1008,7 @@ function GitHubAppSettingsSetup({
             createGitHubAppManifest.mutate({
               redirect: redirectTarget,
               organization: githubOrganization.trim() || null,
+              connectionRequestId,
             })
           }
           disabled={createGitHubAppManifest.isPending || manifestForm !== null}

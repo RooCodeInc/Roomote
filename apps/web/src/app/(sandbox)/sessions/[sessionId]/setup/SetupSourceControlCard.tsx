@@ -42,10 +42,12 @@ function SetupSessionSourceControlCardBody({
   sourceControlSetup,
   explicitlySelectedProvider,
   sessionId,
+  optionalSourceControlEnabled,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   explicitlySelectedProvider: SourceControlProvider | null;
   sessionId: string;
+  optionalSourceControlEnabled: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -109,7 +111,11 @@ function SetupSessionSourceControlCardBody({
     <SetupSessionActionCard
       title={cardTitle}
       icon={<GitBranch />}
-      intro={cardIntro}
+      intro={
+        optionalSourceControlEnabled
+          ? `${cardIntro} Source control is optional for setup. You can connect it later in Settings > Source control when you need repository work.`
+          : cardIntro
+      }
     >
       {oauthError ? (
         <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -192,6 +198,9 @@ export function SetupSessionSourceControlCard({
       sourceControlSetup={sourceControlSetup}
       explicitlySelectedProvider={explicitlySelectedProvider}
       sessionId={sessionId}
+      optionalSourceControlEnabled={
+        statusQuery.data?.optionalSourceControlEnabled === true
+      }
     />
   );
 }

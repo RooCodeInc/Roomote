@@ -34,6 +34,7 @@ vi.mock('@roomote/auth', () => ({
 
 vi.mock('@roomote/github', () => ({
   getAppOctokit: vi.fn(),
+  syncGitHubInstallations: vi.fn(async () => []),
   resolvePendingGitHubInstallations: mockResolvePendingGitHubInstallations,
 }));
 
@@ -699,3 +700,12 @@ describe('startAuthenticateGitHubAccountCommand', () => {
     });
   });
 });
+vi.mock('@/lib/server/source-control-connection-attempt', () => ({
+  beginConnectionAttempt: vi.fn(async () => 'sc.test.state'),
+}));
+vi.mock('@roomote/sdk/server', () => ({
+  reconcileSourceControlConnectionRequests: vi.fn(async () => ({ ready: 0 })),
+  getSourceControlSyncStartedAt: vi.fn(
+    async () => '2026-09-08T12:00:00.123456Z',
+  ),
+}));

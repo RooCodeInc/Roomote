@@ -16,6 +16,7 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { normalizeMetadataRecord } from '@roomote/feature-flags';
 export { getSetupBootstrapState } from '@/lib/server/setup-bootstrap-state';
 
 type SetupBaseStatus = {
@@ -24,6 +25,7 @@ type SetupBaseStatus = {
   hasSlack: boolean;
   hasLinear: boolean;
   setupCompletedAt: Date | null;
+  optionalSourceControlEnabled: boolean;
   setupNewState: ReturnType<typeof createEmptySetupNewState>;
 };
 
@@ -76,6 +78,7 @@ export async function getSetupBaseStatus(
       .select({
         setupCompletedAt: deploymentSettings.setupCompletedAt,
         setupNewState: deploymentSettings.setupNewState,
+        metadata: deploymentSettings.metadata,
       })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, 'default'))
@@ -87,6 +90,9 @@ export async function getSetupBaseStatus(
     hasSlack: slackResult.length > 0,
     hasLinear: linearResult.length > 0,
     setupCompletedAt: orgResult[0]?.setupCompletedAt ?? null,
+    optionalSourceControlEnabled:
+      normalizeMetadataRecord(orgResult[0]?.metadata)
+        .optional_source_control_enabled === true,
     setupNewState: normalizeSetupNewState(orgResult[0]?.setupNewState),
   };
 }

@@ -1,5 +1,9 @@
 import { db, eq, githubInstallations } from '@roomote/db/server';
 import * as GitHub from '@roomote/github';
+import {
+  getSourceControlSyncStartedAt,
+  reconcileSourceControlConnectionRequests,
+} from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 
@@ -33,6 +37,7 @@ export async function handleInstallationRepositoriesChange(
     return { status: 'ok', message: 'unknown_installation' };
   }
 
+  const startedAt = await getSourceControlSyncStartedAt('github');
   const result = await GitHub.syncGitHubInstallation({
     userId: installation.installedByUserId,
     installationId,
@@ -45,6 +50,17 @@ export async function handleInstallationRepositoriesChange(
     };
   }
 
+  await reconcileSourceControlConnectionRequests(
+    { provider: 'github' },
+    {
+      successfulSync: {
+        startedAt,
+        repositoryFullNames: result.repositories.map(
+          (repository) => repository.fullName,
+        ),
+      },
+    },
+  );
   return {
     status: 'ok',
     message: `Resynced installation ${installationId}`,
