@@ -866,8 +866,18 @@ describe('buildFastAgentSystemPrompt', () => {
       );
       const explorationGuidance = prompt
         .split('- Repository code exploration')[1]!
-        .split('- For requested GitHub updates')[0]!;
+        .split('- For GitHub,')[0]!;
       expect(explorationGuidance).not.toMatch(/GitHub|GitLab|Bitbucket/);
+      for (const guidance of [
+        'an eligible deployment GitHub App installation with an active connected repository is required',
+        'without connecting the public target or linking a personal GitHub account',
+        'including source, code search, issues, and pull requests',
+        'exactly one positive `repo:owner/name` qualifier',
+        'Respect upstream pagination and search-index limits and disclose incomplete results',
+        'Private reads and all writes still require an eligible connection to the target repository',
+        'never retry an authorization denial anonymously or through a task',
+      ])
+        expect(prompt).toContain(guidance);
       expect(prompt).toContain(
         'Use only the methods and arguments exposed by the discovered schemas',
       );

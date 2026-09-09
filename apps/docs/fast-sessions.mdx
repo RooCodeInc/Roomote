@@ -50,7 +50,7 @@ integrations for focused repository exploration. Reading files and directories,
 searching code, or inspecting commits, pull/merge request diffs, and reported CI
 results does not require a
 coding task, local clone, or workspace provisioning. Available reads depend on
-the connected integration's tools and permissions. Reading CI results is not the
+the integration's tools and permissions. Reading CI results is not the
 same as running tests: local checkout, code edits, command execution, and testing
 are delegated to a task, as are investigations that need a workspace.
 
@@ -68,6 +68,15 @@ limitations when results are partial, truncated, or limited to a search index.
 An empty search is not proof that code is absent. Source inspection is not a
 test run or reproduction, and an access denial is not bypassed through a task.
 Requests for a code review still use the structured Review Code pipeline.
+
+With an eligible deployment GitHub App installation and an active connected
+repository, active Roomote members can use the existing GitHub tools to read
+public `github.com` repositories, including source and code search. Public
+repositories do not themselves need to be connected, and no personal GitHub
+account linkage is required. See
+[public GitHub reads](/providers/source-control/github#public-github-reads)
+for access requirements. Private reads and writes still require the target to
+be connected; access denials are not retried anonymously.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
 also supports updates to existing pull requests, issue or PR comments,
