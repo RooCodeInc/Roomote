@@ -34,7 +34,7 @@ describe('DelegatedTaskCard', () => {
       isPending: false,
       refetch: refetchMock,
       data: {
-        task: { title: 'Fix checkout' },
+        task: { title: 'Fix checkout', workflow: 'standard' },
         taskRun: {
           id: 42,
           status: RunStatus.Running,
@@ -63,7 +63,7 @@ describe('DelegatedTaskCard', () => {
       document.querySelector('[data-task-robot-icon]'),
     ).toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole('button', { name: 'View coding task: Fix checkout' }),
+      screen.getByRole('button', { name: 'View coding agent: Fix checkout' }),
     );
     expect(onOpen).toHaveBeenCalledWith('child-1');
 
@@ -91,6 +91,57 @@ describe('DelegatedTaskCard', () => {
       { taskId: 'child-1' },
       expect.any(Object),
     );
+  });
+
+  it('labels persisted PR review workflows as code review agents', () => {
+    useQueryMock.mockReturnValue({
+      isPending: false,
+      refetch: refetchMock,
+      data: {
+        task: { title: 'Check the latest changes', workflow: 'pr_review' },
+        taskRun: { id: 42, status: RunStatus.Running },
+      },
+    });
+
+    render(
+      <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Code review agent')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'View code review agent: Check the latest changes',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Stop code review agent' }),
+    ).toBeEnabled();
+  });
+
+  it('does not classify linked PRs or review-like titles as review tasks', () => {
+    useQueryMock.mockReturnValue({
+      isPending: false,
+      refetch: refetchMock,
+      data: {
+        task: {
+          title: 'Review PR #9112: Support host-backed tests',
+          workflow: 'standard',
+          taskRun: {
+            pullRequests: [
+              { repository: 'RooCodeInc/Roomote', prNumber: 9112 },
+            ],
+          },
+        },
+        taskRun: { id: 42, status: RunStatus.Completed },
+      },
+    });
+
+    render(
+      <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Coding agent')).toBeInTheDocument();
+    expect(screen.queryByText('Code review agent')).not.toBeInTheDocument();
   });
 
   it('updates when the child transitions to a terminal state', () => {
@@ -129,7 +180,7 @@ describe('DelegatedTaskCard', () => {
 
     expect(screen.getByLabelText('Error')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Stop coding task' }),
+      screen.queryByRole('button', { name: 'Stop coding agent' }),
     ).not.toBeInTheDocument();
   });
 
@@ -141,7 +192,7 @@ describe('DelegatedTaskCard', () => {
         <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={onOpen} />
       </div>,
     );
-    const stop = screen.getByRole('button', { name: 'Stop coding task' });
+    const stop = screen.getByRole('button', { name: 'Stop coding agent' });
     expect(stop.parentElement?.closest('button')).toBeNull();
     fireEvent.click(stop);
     expect(mutateMock).toHaveBeenCalledWith({ taskId: 'child-1', runId: 42 });
@@ -171,7 +222,7 @@ describe('DelegatedTaskCard', () => {
     render(
       <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={onOpen} />,
     );
-    const stop = screen.getByRole('button', { name: 'Stop coding task' });
+    const stop = screen.getByRole('button', { name: 'Stop coding agent' });
     expect(stop).toBeDisabled();
     expect(stop).toHaveAttribute('aria-busy', 'true');
     fireEvent.click(stop);
@@ -188,7 +239,7 @@ describe('DelegatedTaskCard', () => {
     render(
       <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Stop coding task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop coding agent' }));
     expect(refetchMock).toHaveBeenCalledOnce();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -207,7 +258,9 @@ describe('DelegatedTaskCard', () => {
       render(
         <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={onOpen} />,
       );
-      fireEvent.click(screen.getByRole('button', { name: 'Stop coding task' }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Stop coding agent' }),
+      );
       expect(screen.getByRole('alert')).toHaveTextContent('Cannot stop task');
       expect(refetchMock).not.toHaveBeenCalled();
       expect(onOpen).not.toHaveBeenCalled();
@@ -222,7 +275,7 @@ describe('DelegatedTaskCard', () => {
         <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
       );
       expect(
-        screen.getByRole('button', { name: 'Stop coding task' }),
+        screen.getByRole('button', { name: 'Stop coding agent' }),
       ).toBeEnabled();
     },
   );
@@ -237,7 +290,7 @@ describe('DelegatedTaskCard', () => {
         <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
       );
       expect(
-        screen.queryByRole('button', { name: 'Stop coding task' }),
+        screen.queryByRole('button', { name: 'Stop coding agent' }),
       ).not.toBeInTheDocument();
     },
   );
