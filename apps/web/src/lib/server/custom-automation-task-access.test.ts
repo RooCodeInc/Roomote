@@ -325,9 +325,10 @@ describe('custom automation task history access', () => {
         },
       ])
       .returning();
+    // Settings suites delete user-facing automation rows in the shared test DB.
     await db
       .insert(automations)
-      .values({ key: 'sentry_triage' })
+      .values({ key: 'snapshot_refresh' })
       .onConflictDoNothing();
     for (const initiatorUserId of [ownerAuth.userId, otherAuth.userId]) {
       await taskFactory.create({
@@ -353,7 +354,7 @@ describe('custom automation task history access', () => {
     await taskFactory.create({
       repositoryName,
       initiatorKind: 'automation',
-      initiatorAutomation: 'sentry_triage',
+      initiatorAutomation: 'snapshot_refresh',
     });
     await taskFactory.create({
       repositoryName,
@@ -384,7 +385,7 @@ describe('custom automation task history access', () => {
         `automation:custom_automation:${automation.id}`,
         `automation:custom_automation:${otherAutomation!.id}`,
         `automation:custom_automation:${creatorlessAutomation!.id}`,
-        'automation:sentry_triage',
+        'automation:snapshot_refresh',
       ]),
     );
   });
