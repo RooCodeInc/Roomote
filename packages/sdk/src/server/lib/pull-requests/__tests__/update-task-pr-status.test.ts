@@ -15,6 +15,15 @@ const {
   const mockSyncTaskStateFromRuns = vi.fn();
   const mockTransaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
     callback({
+      query: {
+        taskPullRequests: {
+          findMany: vi
+            .fn()
+            .mockResolvedValue([
+              { id: 'association', host: 'github.com', repositoryId: null },
+            ]),
+        },
+      },
       select: () => ({
         from: () => ({ where: mockLinkedTasks }),
       }),
@@ -102,7 +111,9 @@ describe('updateTaskPrStatus', () => {
         }),
       });
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+    });
 
     await vi.waitFor(() => {
       expect(mockEnqueueTaskSleep).toHaveBeenCalledWith({
@@ -133,7 +144,9 @@ describe('updateTaskPrStatus', () => {
     mockEnqueueTaskSleep.mockReturnValue(new Promise(() => {}));
 
     await expect(
-      updateTaskPrStatus('github', 'owner/repo', 42, 'merged'),
+      updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+        host: 'github.com',
+      }),
     ).resolves.toBeUndefined();
     await vi.waitFor(() => {
       expect(mockEnqueueTaskSleep).toHaveBeenCalled();
@@ -161,7 +174,9 @@ describe('updateTaskPrStatus', () => {
     mockEnqueueTaskSleep.mockRejectedValue(new Error('queue unavailable'));
 
     await expect(
-      updateTaskPrStatus('gitlab', 'owner/repo', 42, 'merged'),
+      updateTaskPrStatus('gitlab', 'owner/repo', 42, 'merged', {
+        host: 'github.com',
+      }),
     ).resolves.toBeUndefined();
     await vi.waitFor(() => {
       expect(errorSpy).toHaveBeenCalledWith(
@@ -179,7 +194,9 @@ describe('updateTaskPrStatus', () => {
       { taskId: 'task-1' },
     ]);
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+    });
 
     const tx = expect.any(Object);
     expect(mockSyncTaskStateFromRuns).toHaveBeenCalledTimes(2);
@@ -191,7 +208,9 @@ describe('updateTaskPrStatus', () => {
     mockLinkedTasks.mockResolvedValue([{ taskId: 'task-1' }]);
     mockReturning.mockResolvedValue([]);
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+    });
 
     expect(mockSyncTaskStateFromRuns).toHaveBeenCalledWith(
       expect.any(Object),
@@ -204,7 +223,9 @@ describe('updateTaskPrStatus', () => {
       { taskId: 'task-1', createdByRoomote: false },
     ]);
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+      host: 'github.com',
+    });
 
     expect(mockSyncTaskStateFromRuns).not.toHaveBeenCalled();
     expect(mockLinkedTasks).not.toHaveBeenCalled();
@@ -220,7 +241,9 @@ describe('updateTaskPrStatus', () => {
       from: () => ({ where: () => Promise.resolve([]) }),
     });
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+    });
 
     expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledTimes(1);
     expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledWith(
@@ -234,7 +257,9 @@ describe('updateTaskPrStatus', () => {
       { taskId: 'task-1', createdByRoomote: false },
     ]);
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+      host: 'github.com',
+    });
 
     expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledWith(
       expect.any(Object),
@@ -244,12 +269,16 @@ describe('updateTaskPrStatus', () => {
 
   it('does not re-ingest when nothing transitioned or the PR is still open', async () => {
     mockReturning.mockResolvedValue([]);
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+      host: 'github.com',
+    });
 
     mockReturning.mockResolvedValue([
       { taskId: 'task-1', createdByRoomote: false },
     ]);
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'open');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'open', {
+      host: 'github.com',
+    });
 
     expect(mockRequeueBrainMemoryEventsForTasks).not.toHaveBeenCalled();
   });
@@ -264,7 +293,9 @@ describe('updateTaskPrStatus', () => {
     );
 
     await expect(
-      updateTaskPrStatus('github', 'owner/repo', 42, 'closed'),
+      updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+        host: 'github.com',
+      }),
     ).resolves.toBeUndefined();
 
     expect(errorSpy).toHaveBeenCalledWith(
