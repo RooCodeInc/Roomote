@@ -68,7 +68,7 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
-    attachCanonicalPrReviewActionMessage: (...args: unknown[]) =>
+    attachCanonicalPrReviewActionMessageWithRetirement: (...args: unknown[]) =>
       mockAttachCanonical(...args),
     claimCanonicalPrReviewAction: vi.fn().mockResolvedValue(null),
     retireCanonicalPrReviewActionsForDestination: (...args: unknown[]) =>
@@ -119,7 +119,10 @@ describe('PR review action state', () => {
     mockFindPreference.mockResolvedValue(null);
     mockRetireCanonical.mockResolvedValue([]);
     mockRetireCanonicalForPullRequest.mockResolvedValue([]);
-    mockAttachCanonical.mockResolvedValue(false);
+    mockAttachCanonical.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
     mockGetCommunicationProviderAdapter.mockResolvedValue(null);
   });
 
@@ -270,7 +273,7 @@ describe('PR review action state', () => {
     expect(mockEval.mock.calls[0]?.[0]).toContain('prior.retired = true');
   });
 
-  it('returns and de-indexes the prior offer for the same PR context', async () => {
+  it('returns and de-indexes a prior Slack offer for another PR in the same thread', async () => {
     mockGet.mockResolvedValue(
       JSON.stringify({
         nonce: 'nonce-new',
@@ -278,8 +281,8 @@ describe('PR review action state', () => {
         slackTeamId: 'T1',
         channelId: 'C1',
         threadId: '111.222',
-        repository: 'owner/repo',
-        prNumber: 42,
+        repository: 'other/repository',
+        prNumber: 99,
       }),
     );
     mockEval.mockResolvedValue([
@@ -315,7 +318,13 @@ describe('PR review action state', () => {
       'pr-review-action:thread:slack:T1:C1:111.222',
     );
     expect(mockEval.mock.calls[0]?.[0]).toContain(
-      'prior.prNumber == pending.prNumber',
+      "if pending.provider == 'slack' then",
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      "return prior.provider == 'slack' and sameSlackTeam",
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      'prior.repository == pending.repository',
     );
   });
 
@@ -353,11 +362,12 @@ describe('PR review action state', () => {
     });
   });
 
-  it('retires legacy offers after a canonical attachment succeeds', async () => {
+  it('returns canonical and legacy Slack offers from other PRs in the same thread', async () => {
     const context = {
       nonce: '00000000-0000-4000-8000-000000000001',
       canonicalDeliveryId: '00000000-0000-4000-8000-000000000001',
-      provider: 'discord' as const,
+      provider: 'slack' as const,
+      slackTeamId: 'T1',
       taskId: 'task-1',
       repository: 'owner/repo',
       prNumber: 42,
@@ -370,9 +380,23 @@ describe('PR review action state', () => {
       ...context,
       nonce: 'legacy-nonce',
       canonicalDeliveryId: undefined,
+      repository: 'legacy/repository',
+      prNumber: 7,
       messageId: 'legacy-message',
     };
-    mockAttachCanonical.mockResolvedValue(true);
+    mockAttachCanonical.mockResolvedValue({
+      attached: true,
+      superseded: [
+        {
+          deliveryId: '00000000-0000-4000-8000-000000000002',
+          provider: 'slack',
+          slackTeamId: 'T1',
+          channelId: 'channel-1',
+          threadId: 'thread-1',
+          messageId: 'canonical-old-message',
+        },
+      ],
+    });
     mockEval.mockResolvedValue([JSON.stringify(legacy)]);
 
     await expect(
@@ -383,14 +407,17 @@ describe('PR review action state', () => {
       ),
     ).resolves.toEqual({
       attached: true,
-      superseded: [expect.objectContaining({ nonce: 'legacy-nonce' })],
+      superseded: [
+        expect.objectContaining({ messageId: 'canonical-old-message' }),
+        expect.objectContaining({ nonce: 'legacy-nonce' }),
+      ],
     });
 
     expect(mockEval.mock.calls[0]?.[0]).toContain(
-      'pending.repository == context.repository',
+      "if context.provider == 'slack' then",
     );
     expect(mockEval.mock.calls[0]?.[2]).toBe(
-      'pr-review-action:thread:discord:channel-1:thread-1',
+      'pr-review-action:thread:slack:T1:channel-1:thread-1',
     );
   });
 

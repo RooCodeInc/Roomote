@@ -1341,27 +1341,59 @@ export async function getCanonicalPrReviewAction(deliveryId: string): Promise<{
 
 /**
  * Marks the posted canonical action as awaiting the user and retires every
- * older awaiting offer in the same destination conversation, mirroring the
- * legacy Redis path's claim-older-offers-on-attach semantics. Only the newest
- * offer in a conversation stays actionable; earlier ones would otherwise
- * accumulate as a stack of pending cards. Attach and retirement run in one
- * transaction serialized per destination (claims are only serialized per
- * repository/PR, so concurrent attaches into the same conversation would
- * otherwise dismiss each other), and retired offers' cached transcript
- * payloads are dismissed so already-rendered session cards deactivate.
+ * older awaiting offer in the same Slack thread or logical destination,
+ * mirroring the legacy Redis path's claim-older-offers-on-attach semantics.
+ * Only the newest offer in a conversation stays actionable; earlier ones
+ * would otherwise accumulate as a stack of pending cards. Attach and
+ * retirement run in one transaction serialized per retirement scope (claims
+ * are only serialized per repository/PR, so concurrent attaches into the same
+ * conversation would otherwise dismiss each other), and retired offers'
+ * cached transcript payloads are dismissed so already-rendered session cards
+ * deactivate.
  */
 export async function attachCanonicalPrReviewActionMessage(
   deliveryId: string,
   messageId: string,
   leaseToken: string,
 ): Promise<boolean> {
+  return (
+    await attachCanonicalPrReviewActionMessageWithRetirement(
+      deliveryId,
+      messageId,
+      leaseToken,
+    )
+  ).attached;
+}
+
+export async function attachCanonicalPrReviewActionMessageWithRetirement(
+  deliveryId: string,
+  messageId: string,
+  leaseToken: string,
+): Promise<{
+  attached: boolean;
+  superseded: Array<{
+    deliveryId: string;
+    provider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
+    slackTeamId: string | null;
+    channelId: string | null;
+    threadId: string | null;
+    messageId: string | null;
+  }>;
+}> {
   return db.transaction(async (tx) => {
     const delivery = await tx.query.prReviewNotificationDeliveries.findFirst({
       where: eq(prReviewNotificationDeliveries.id, deliveryId),
-      columns: { destinationKind: true, destinationKey: true },
+      columns: {
+        destinationKind: true,
+        destinationKey: true,
+        routeProvider: true,
+        routeWorkspaceId: true,
+        routeChannelId: true,
+        routeThreadId: true,
+      },
     });
     if (!delivery) {
-      return false;
+      return { attached: false, superseded: [] };
     }
 
     const destination =
@@ -1371,9 +1403,25 @@ export async function attachCanonicalPrReviewActionMessage(
             key: delivery.destinationKey,
           }
         : null;
-    if (destination) {
+    const slackThread =
+      delivery.routeProvider === 'slack' &&
+      delivery.routeWorkspaceId &&
+      delivery.routeChannelId &&
+      delivery.routeThreadId
+        ? {
+            workspaceId: delivery.routeWorkspaceId,
+            channelId: delivery.routeChannelId,
+            threadId: delivery.routeThreadId,
+          }
+        : null;
+    const retirementLock = slackThread
+      ? `pr-review-slack-thread:${slackThread.workspaceId}:${slackThread.channelId}:${slackThread.threadId}`
+      : destination
+        ? `pr-review-destination:${destination.kind}:${destination.key}`
+        : null;
+    if (retirementLock) {
       await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`pr-review-destination:${destination.kind}:${destination.key}`}, 0))`,
+        sql`select pg_advisory_xact_lock(hashtextextended(${retirementLock}, 0))`,
       );
     }
 
@@ -1395,11 +1443,60 @@ export async function attachCanonicalPrReviewActionMessage(
       )
       .returning({ id: prReviewNotificationDeliveries.id });
     if (rows.length !== 1) {
-      return false;
+      return { attached: false, superseded: [] };
     }
 
-    if (!destination) {
-      return true;
+    const retirementScope = slackThread
+      ? and(
+          eq(prReviewNotificationDeliveries.routeProvider, 'slack'),
+          eq(
+            prReviewNotificationDeliveries.routeWorkspaceId,
+            slackThread.workspaceId,
+          ),
+          eq(
+            prReviewNotificationDeliveries.routeChannelId,
+            slackThread.channelId,
+          ),
+          eq(
+            prReviewNotificationDeliveries.routeThreadId,
+            slackThread.threadId,
+          ),
+        )
+      : destination
+        ? and(
+            eq(
+              prReviewNotificationDeliveries.destinationKind,
+              destination.kind,
+            ),
+            eq(prReviewNotificationDeliveries.destinationKey, destination.key),
+          )
+        : null;
+    if (!retirementScope) {
+      return { attached: true, superseded: [] };
+    }
+
+    let retainedDeliveryId = deliveryId;
+    if (slackThread) {
+      const awaiting = await tx
+        .select({
+          deliveryId: prReviewNotificationDeliveries.id,
+          messageId: prReviewNotificationDeliveries.providerMessageId,
+        })
+        .from(prReviewNotificationDeliveries)
+        .where(
+          and(
+            eq(prReviewNotificationDeliveries.status, 'awaiting_user_action'),
+            retirementScope,
+          ),
+        );
+      retainedDeliveryId = awaiting.reduce(
+        (newest, candidate) =>
+          candidate.messageId &&
+          (!newest.messageId || candidate.messageId > newest.messageId)
+            ? candidate
+            : newest,
+        awaiting[0]!,
+      ).deliveryId;
     }
 
     const retired = await tx
@@ -1413,12 +1510,18 @@ export async function attachCanonicalPrReviewActionMessage(
       .where(
         and(
           eq(prReviewNotificationDeliveries.status, 'awaiting_user_action'),
-          eq(prReviewNotificationDeliveries.destinationKind, destination.kind),
-          eq(prReviewNotificationDeliveries.destinationKey, destination.key),
-          ne(prReviewNotificationDeliveries.id, deliveryId),
+          retirementScope,
+          ne(prReviewNotificationDeliveries.id, retainedDeliveryId),
         ),
       )
-      .returning({ id: prReviewNotificationDeliveries.id });
+      .returning({
+        deliveryId: prReviewNotificationDeliveries.id,
+        provider: prReviewNotificationDeliveries.routeProvider,
+        slackTeamId: prReviewNotificationDeliveries.routeWorkspaceId,
+        channelId: prReviewNotificationDeliveries.routeChannelId,
+        threadId: prReviewNotificationDeliveries.routeThreadId,
+        messageId: prReviewNotificationDeliveries.providerMessageId,
+      });
 
     if (retired.length > 0) {
       // Session cards render from the cached message payload, so retiring
@@ -1432,12 +1535,12 @@ export async function attachCanonicalPrReviewActionMessage(
         .where(
           inArray(
             sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
-            retired.map(({ id }) => id),
+            retired.map(({ deliveryId }) => deliveryId),
           ),
         );
     }
 
-    return true;
+    return { attached: true, superseded: retired };
   });
 }
 

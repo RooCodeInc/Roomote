@@ -1,6 +1,6 @@
 import {
   and,
-  attachCanonicalPrReviewActionMessage,
+  attachCanonicalPrReviewActionMessageWithRetirement as attachCanonicalPrReviewActionMessage,
   claimCanonicalPrReviewAction,
   completeCanonicalPrReviewActionDispatch,
   db,
@@ -127,9 +127,12 @@ local nonces = redis.call('smembers', KEYS[2])
 local function sameContext(prior)
   local sameSlackTeam = (prior.slackTeamId == pending.slackTeamId)
     or (not prior.slackTeamId and not pending.slackTeamId)
-  return prior.repository == pending.repository
+  if pending.provider == 'slack' then
+    return prior.provider == 'slack' and sameSlackTeam
+  end
+  return prior.provider == pending.provider
+    and prior.repository == pending.repository
     and prior.prNumber == pending.prNumber
-    and sameSlackTeam
 end
 for _, nonce in ipairs(nonces) do
   if nonce ~= pending.nonce then
@@ -206,9 +209,15 @@ for _, nonce in ipairs(nonces) do
     local pending = cjson.decode(val)
     local sameSlackTeam = (pending.slackTeamId == context.slackTeamId)
       or (not pending.slackTeamId and not context.slackTeamId)
-    if pending.repository == context.repository
-      and pending.prNumber == context.prNumber
-      and sameSlackTeam then
+    local sameContext = false
+    if context.provider == 'slack' then
+      sameContext = pending.provider == 'slack' and sameSlackTeam
+    else
+      sameContext = pending.provider == context.provider
+        and pending.repository == context.repository
+        and pending.prNumber == context.prNumber
+    end
+    if sameContext then
       redis.call('srem', KEYS[1], nonce)
       if pending.messageId then
         redis.call('del', actionKey)
@@ -265,8 +274,8 @@ export async function setPendingPrReviewAction(
 /**
  * Records the posted notification message id on an already-stored pending
  * offer so retirement can edit the message later. This also atomically claims
- * every older offer for the same PR conversation. No-op when the new offer was
- * already claimed.
+ * every older offer for the same Slack thread or provider-specific PR
+ * conversation. No-op when the new offer was already claimed.
  */
 export async function attachPendingPrReviewActionMessage(
   nonce: string,
@@ -287,21 +296,39 @@ export async function attachPendingPrReviewActionMessageWithRetirement(
   options: { leaseToken?: string; context?: PendingPrReviewAction } = {},
 ): Promise<{
   attached: boolean;
-  superseded: PendingPrReviewAction[];
+  superseded: RetirablePrReviewActionMessage[];
 }> {
-  if (
-    isUuid(nonce) &&
-    options.leaseToken &&
-    (await attachCanonicalPrReviewActionMessage(
+  if (isUuid(nonce) && options.leaseToken) {
+    const canonicalResult = await attachCanonicalPrReviewActionMessage(
       nonce,
       messageId,
       options.leaseToken,
-    ))
-  ) {
-    const superseded = options.context
+    );
+    if (!canonicalResult.attached) {
+      return { attached: false, superseded: [] };
+    }
+    const canonicalSuperseded = canonicalResult.superseded.flatMap((action) =>
+      action.provider && action.provider !== 'teams' && action.channelId
+        ? [
+            {
+              provider: action.provider,
+              ...(action.provider === 'slack' && action.slackTeamId
+                ? { slackTeamId: action.slackTeamId }
+                : {}),
+              channelId: action.channelId,
+              threadId: action.threadId,
+              messageId: action.messageId,
+            } satisfies RetirablePrReviewActionMessage,
+          ]
+        : [],
+    );
+    const legacySuperseded = options.context
       ? await retireLegacyPrReviewActionsForContext(options.context)
       : [];
-    return { attached: true, superseded };
+    return {
+      attached: true,
+      superseded: [...canonicalSuperseded, ...legacySuperseded],
+    };
   }
 
   const redis = getRedis();
