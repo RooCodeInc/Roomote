@@ -249,6 +249,8 @@ vi.mock('./source-control-fast-delivery', async (importOriginal) => ({
   buildSourceControlFastDelivery: mocks.buildSourceControlFastDelivery,
 }));
 
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
+
 import {
   deliverFastAgentParentEvent,
   deliverFastAgentParentEventWithLock,
@@ -976,6 +978,66 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.createDiscordProvider).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      name: 'Blank slate',
+      environmentId: NO_REPOSITORIES,
+      expectedWorkspace: { repo: NO_REPOSITORIES },
+    },
+    {
+      name: 'a normal environment',
+      environmentId: 'environment-1',
+      expectedWorkspace: {
+        repo: ALL_REPOSITORIES,
+        environmentId: 'environment-1',
+      },
+    },
+  ])(
+    'maps $name when an automation delegates a task',
+    async ({ environmentId, expectedWorkspace }) => {
+      const automationParent = {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'automation' as const,
+          workspaceId: 'automation-1',
+          conversationId: 'occurrence-1',
+        },
+      };
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { launchTask: (input: unknown) => unknown };
+        }) =>
+          adapter.launchTask({
+            prompt: 'Inspect the workspace.',
+            environmentId,
+            model: null,
+            parentSessionId: parent.sessionId,
+            postKickoff: vi.fn().mockResolvedValue(undefined),
+          }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: automationParent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger: 'schedule',
+        },
+      });
+
+      const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
+      expect(task.payload).toMatchObject(expectedWorkspace);
+      if (environmentId === NO_REPOSITORIES) {
+        expect(task.payload).not.toHaveProperty('environmentId');
+      }
+    },
+  );
 
   it('updates the Slack root for a channel-backed automation turn', async () => {
     const chart = {
