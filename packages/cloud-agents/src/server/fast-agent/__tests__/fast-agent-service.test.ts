@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   runSession: vi.fn(),
   listIntegrations: vi.fn(),
   callIntegration: vi.fn(),
+  handleManageWakeups: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
   stopTask: vi.fn(),
@@ -86,6 +87,7 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       inspectImages: 'inspect_images',
       launchTask: 'launch_task',
+      manageWakeups: 'manage_wakeups',
       reviewPullRequest: 'review_pull_request',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
@@ -246,6 +248,11 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
 vi.mock('../fast-agent-integration-broker', () => ({
   listFastAgentIntegrations: mocks.listIntegrations,
   callFastAgentIntegration: mocks.callIntegration,
+}));
+
+vi.mock('../../session-wakeups', () => ({
+  handleManageWakeupsToolCall: mocks.handleManageWakeups,
+  normalizeManageWakeupsArgs: (args: Record<string, unknown>) => args,
 }));
 
 vi.mock('../fast-agent-context-telemetry', () => ({
@@ -426,6 +433,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.nativeExecutor = undefined;
     mocks.mcpExecutor = undefined;
     mocks.mcpCapabilityAvailable = false;
+    mocks.handleManageWakeups.mockResolvedValue({
+      success: true,
+      wakeup: { id: 'wakeup-1', status: 'cancelled' },
+    });
     mocks.getUnifiedSession.mockResolvedValue(null);
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
@@ -4682,7 +4693,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
 
     await expect(
-      answerFastAgentQuestion({ ...baseParams, adapter }),
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        schedulingProgressiveDisclosureEnabled: false,
+      }),
     ).resolves.toBe('Subagent review completed.');
     expect(mocks.callIntegration).toHaveBeenCalledTimes(3);
     expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
@@ -7263,6 +7278,111 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(
       toolCallTitles.filter((title) => title === 'search_code'),
     ).toHaveLength(1);
+  });
+
+  it('discovers and calls deferred scheduling without making skills an authorization gate', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment access',
+        tools: [{ name: 'manage_custom_automations' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ automations: [] });
+    const toolResults: unknown[] = [];
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResults.push(
+          await invokeTool(nativeToolNames.findIntegrationTools, {
+            query: 'scheduling',
+          }),
+        );
+        // An explicit cancellation remains immediate; loading the returned
+        // skill is guidance, not an execution prerequisite.
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'scheduling',
+            toolName: 'manage_wakeups',
+            args: { action: 'cancel', wakeupId: 'wakeup-1' },
+          }),
+        );
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'scheduling',
+            toolName: 'roomote_manage_custom_automations',
+            args: { action: 'list' },
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Checking the saved automations.',
+        });
+        toolResults.push(
+          await invokeTool(nativeToolNames.callIntegrationTool, {
+            integrationId: 'scheduling',
+            toolName: 'roomote_manage_custom_automations',
+            args: { action: 'list' },
+          }),
+        );
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The reminder is cancelled.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks(),
+      schedulingProgressiveDisclosureEnabled: true,
+    });
+
+    expect(toolResults[0]).toMatchObject({
+      success: true,
+      skill: {
+        id: 'packaged:scheduling',
+        loadWith: 'load_skill',
+      },
+      tools: [
+        {
+          integrationId: 'scheduling',
+          name: 'manage_wakeups',
+          source: 'native',
+          inputSchema: expect.objectContaining({ type: 'object' }),
+        },
+        {
+          integrationId: 'scheduling',
+          name: 'roomote_manage_custom_automations',
+          source: 'native',
+          inputSchema: expect.objectContaining({ type: 'object' }),
+        },
+      ],
+    });
+    expect(toolResults[1]).toMatchObject({ success: true });
+    expect(toolResults[2]).toEqual({
+      success: false,
+      error: expect.stringContaining('acknowledgement'),
+    });
+    expect(toolResults[3]).toEqual({
+      success: true,
+      result: { automations: [] },
+    });
+    expect(mocks.handleManageWakeups).toHaveBeenCalledWith(
+      { conversationId: 'conversation-1', userId: 'user-1' },
+      { action: 'cancel', wakeupId: 'wakeup-1' },
+    );
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'conversation-1' }),
+      expect.any(Array),
+      {
+        integrationId: 'roomote',
+        toolName: 'manage_custom_automations',
+        args: { action: 'list' },
+      },
+    );
   });
 
   it.each(['github', 'gbrain'])(
