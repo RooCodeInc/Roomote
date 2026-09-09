@@ -161,6 +161,7 @@ import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
   sendFastAgentTaskMessage,
+  stopFastAgentTask,
 } from './fast-agent-tasks';
 import { FastAgentTaskMessageGuard } from './fast-agent-task-message-guard';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -4264,6 +4265,38 @@ export async function answerFastAgentQuestion({
             if (result.success) {
               currentTasks.delete(target.taskId);
             }
+            return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.stopTask: {
+            const args = taskIdArgsSchema.parse(call.args);
+            const target = selectActiveTaskId(args.taskId, currentTasks);
+            if (!target.taskId) return { success: false, error: target.error };
+            const targetTask = currentTasks.get(target.taskId);
+            if (
+              targetTask?.status !== undefined &&
+              !(activeRunStatuses as readonly RunStatus[]).includes(
+                targetTask.status,
+              )
+            ) {
+              return {
+                success: false,
+                error: `Task ${target.taskId} is not active in this conversation.`,
+              };
+            }
+            const signature = `stop_task:${target.taskId}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error: 'That task was already stopped.',
+              };
+            }
+            completedTaskActions.add(signature);
+            throwIfTurnCancelled();
+            const result = await stopFastAgentTask(
+              { userId, apiBaseUrl },
+              target.taskId,
+            );
             return result;
           }
 

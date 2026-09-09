@@ -546,7 +546,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Communicate first on a human-authored turn; platform events remain exempt',
     );
     expect(prompt).toContain(
-      'Keep using "launch_task", "send_task_message", or "cancel_task" for task changes',
+      'Keep using "launch_task", "send_task_message", "stop_task", or "cancel_task" for task changes',
     );
     expect(prompt).toContain(
       'Slack channel history defaults to the previous 24 hours',
@@ -561,6 +561,21 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
+    );
+    expect(prompt).toContain(
+      'A successful call means the task accepted the instruction, not that it has responded or completed it',
+    );
+    expect(prompt).toContain(
+      'same resumable soft stop as the running-task UI Stop control',
+    );
+    expect(prompt).toContain(
+      'Cancellation ends the current run and is distinct from the resumable Stop action',
+    );
+    expect(prompt).toContain(
+      'An accepted or response-pending delivery, silence alone, and a normal long-running command are not evidence of a stall',
+    );
+    expect(prompt).toContain(
+      'do not duplicate messages or enter repeated stop/resume loops',
     );
     expect(prompt).toContain('Its "kickoffMessage" should describe the review');
     expect(prompt).toContain(

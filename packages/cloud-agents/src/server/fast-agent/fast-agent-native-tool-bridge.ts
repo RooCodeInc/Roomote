@@ -388,9 +388,20 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Cancel an active task delegated by this Fast conversation.",
+  description: "Cancel an active task delegated by this Fast conversation and end its current run.",
   args: { taskId: z.string().nullable().optional() },
   execute: (args, context) => invoke("cancel_task", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Stop an active task delegated by this Fast conversation. This interrupts the current work but preserves the task and sandbox so a later message can resume it.",
+  args: { taskId: z.string().nullable().optional() },
+  execute: (args, context) => invoke("stop_task", args, context),
 }
 `,
 

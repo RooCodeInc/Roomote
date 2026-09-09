@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
+  stopTask: vi.fn(),
   launchPrReview: vi.fn(),
   getUserIdentity: vi.fn(),
   getTherapistMode: vi.fn(),
@@ -93,6 +94,7 @@ const nativeToolNames = vi.hoisted(
       showWidget: 'show_widget',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',
+      stopTask: 'stop_task',
     }) as const,
 );
 
@@ -240,6 +242,7 @@ vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
   launchFastAgentPrReview: mocks.launchPrReview,
+  stopFastAgentTask: mocks.stopTask,
 }));
 
 vi.mock('../fast-agent-user-identity', () => ({
@@ -509,6 +512,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
+    mocks.stopTask.mockResolvedValue({ success: true });
     mocks.launchPrReview.mockResolvedValue({
       success: true,
       taskId: 'review-task',
@@ -8777,7 +8781,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'ack',
-            message: 'I’ll stop it.',
+            message: 'I’ll cancel it.',
           });
           await expect(
             invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
@@ -8795,6 +8799,35 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.cancelTask).toHaveBeenCalledOnce();
     },
   );
+
+  it('soft-stops an associated task without removing the association', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll stop it.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.stopTask, { taskId: 'task-1' }),
+        ).resolves.toEqual({ success: true });
+        await expect(
+          invokeTool(nativeToolNames.stopTask, { taskId: 'task-1' }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'That task was already stopped.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.stopTask).toHaveBeenCalledOnce();
+  });
 
   it('silently ignores optional human reaction input through the existing native tool', async () => {
     mocks.generateText.mockImplementation(

@@ -23,6 +23,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   showWidget: 'show_widget',
   spillGrep: 'spill_grep',
   spillRead: 'spill_read',
+  stopTask: 'stop_task',
   requestUserInput: 'request_user_input',
   reviewPullRequest: 'review_pull_request',
 } as const;
@@ -89,6 +90,7 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep, kind: ACP_TOOL_KINDS.search },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
+  { name: FAST_AGENT_NATIVE_TOOL_NAMES.stopTask, kind: ACP_TOOL_KINDS.task },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
     kind: ACP_TOOL_KINDS.communication,
