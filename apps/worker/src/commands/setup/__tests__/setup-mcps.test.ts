@@ -14,6 +14,34 @@ const { BUILT_IN_MCPS, resolveBuiltInMcpServers } =
   await import('../setup-mcps');
 
 describe('resolveBuiltInMcpServers', () => {
+  it('strips raw operator provenance from the public schema', async () => {
+    const { environmentMcpServerConfigSchema } = await import('@roomote/types');
+    for (const config of [
+      { url: 'https://operator.test/mcp' },
+      { command: 'operator-mcp' },
+    ]) {
+      expect(
+        environmentMcpServerConfigSchema.parse({
+          ...config,
+          roomoteManaged: 'http-integrations-broker',
+        }),
+      ).not.toHaveProperty('roomoteManaged');
+    }
+  });
+
+  it.each(['/api/mcp/custom/server-1', 'https://operator.test/mcp'])(
+    'does not let a custom user MCP self-mark: %s',
+    (url) => {
+      process.env.TRPC_URL = 'https://api.test';
+      const custom = { url, roomoteManaged: 'http-integrations-broker' };
+      const servers = resolveBuiltInMcpServers(
+        { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+        { userMcpServers: { custom } },
+      );
+      expect(servers.custom).toHaveProperty('type', 'streamable-http');
+      expect(servers.custom).not.toHaveProperty('roomoteManaged');
+    },
+  );
   const originalEnv = { ...process.env };
   const expectedBuiltInMcpNames = ['roomote'];
 
@@ -66,6 +94,7 @@ describe('resolveBuiltInMcpServers', () => {
       expect(servers._roomote_http_integrations).toEqual({
         type: 'streamable-http',
         url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
+        roomoteManaged: 'http-integrations-broker',
         headers: { Authorization: 'Bearer run-token' },
       });
       expect(JSON.stringify(servers)).not.toContain('upstream-secret');
@@ -90,6 +119,7 @@ describe('resolveBuiltInMcpServers', () => {
       const operator = {
         _roomote_http_integrations: {
           url: 'https://operator.test/mcp',
+          roomoteManaged: 'http-integrations-broker',
           headers: { Authorization: 'Bearer ${OPERATOR_KEY}' },
         },
       };
@@ -145,6 +175,7 @@ describe('resolveBuiltInMcpServers', () => {
       const operator = {
         _roomote_http_integrations: {
           command: 'operator-mcp',
+          roomoteManaged: 'http-integrations-broker',
           args: ['--stdio'],
           env: { API_KEY: '${OPERATOR_KEY}' },
         },

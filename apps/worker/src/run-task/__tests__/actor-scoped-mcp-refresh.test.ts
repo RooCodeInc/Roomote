@@ -58,8 +58,10 @@ describe('createActorScopedMcpRefresher', () => {
     expect(
       resolveBuiltInMcpServers(taskEnv, integrations)
         ._roomote_http_integrations,
-    ).toMatchObject({
+    ).toEqual({
       type: 'streamable-http',
+      roomoteManaged: 'http-integrations-broker',
+      url: expect.stringMatching(/\/api\/mcp\/http-integrations$/),
       headers: { Authorization: 'Bearer current-run-token' },
     });
     mockGetMcpServerConfigs.mockResolvedValueOnce({ servers: {} });

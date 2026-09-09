@@ -20,24 +20,30 @@ import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
 
 describe('createIntegrationMcpInstructions', () => {
   it.each([
-    ['https://operator.test/mcp', false],
-    ['not a URL', false],
-    ['https://api.test/api/mcp/http-integrations/', false],
-    ['https://api.test/api/mcp/http-integrations?query=1', true],
-    ['https://api.test/_roomote-api/api/mcp/http-integrations', true],
-  ] as const)(
-    'classifies broker guidance by the canonical pathname: %s',
-    (url, broker) => {
-      const instructions = createIntegrationMcpInstructions([
-        { type: 'remote', name: '_roomote_http_integrations', url },
-      ]);
-      if (broker) {
-        expect(instructions).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
-      } else {
-        expect(instructions).toBeUndefined();
-      }
-    },
-  );
+    'https://operator.test/mcp',
+    'not a URL',
+    'https://api.test/api/mcp/http-integrations/',
+    'https://api.test/api/mcp/http-integrations?query=1',
+    'https://api.test/_roomote-api/api/mcp/http-integrations',
+    'https://operator.example/custom/api/mcp/http-integrations',
+  ] as const)('does not infer broker provenance from the URL: %s', (url) => {
+    const instructions = createIntegrationMcpInstructions([
+      { type: 'remote', name: '_roomote_http_integrations', url },
+    ]);
+    expect(instructions).toBeUndefined();
+  });
+  it('uses runtime provenance rather than a name or URL convention', () => {
+    expect(
+      createIntegrationMcpInstructions([
+        {
+          type: 'remote',
+          name: 'runtime-broker',
+          url: 'https://api.test/prefixed/broker',
+          roomoteManaged: 'http-integrations-broker',
+        },
+      ]),
+    ).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
+  });
   it('includes shared HTTP integrations guidance only when its remote server is present', () => {
     expect(
       createIntegrationMcpInstructions([
@@ -45,6 +51,7 @@ describe('createIntegrationMcpInstructions', () => {
           type: 'remote',
           name: '_roomote_http_integrations',
           url: 'https://api.test/api/mcp/http-integrations',
+          roomoteManaged: 'http-integrations-broker',
         },
       ]),
     ).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
@@ -187,6 +194,7 @@ describe('generateOpenCodeConfig provider support', () => {
             type: 'remote',
             name: '_roomote_http_integrations',
             url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
+            roomoteManaged: 'http-integrations-broker',
             headers: {
               Authorization:
                 'Bearer {env:ROOMOTE_DIRECT_MCP_BEARER_TOKEN_HTTP_INTEGRATIONS}',
@@ -200,6 +208,7 @@ describe('generateOpenCodeConfig provider support', () => {
         ],
       });
       const config = JSON.parse(result.configContent);
+      expect(result.configContent).not.toContain('roomoteManaged');
       expect(config.mcp._roomote_http_integrations).toMatchObject({
         type: 'remote',
         url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
@@ -253,6 +262,8 @@ describe('generateOpenCodeConfig provider support', () => {
     'https://operator.test/mcp',
     'not a URL',
     'https://api.test/api/mcp/http-integrations/',
+    'https://api.test/api/mcp/http-integrations',
+    'https://operator.example/custom/api/mcp/http-integrations',
   ])('keeps a same-name non-broker remote server on demand: %s', (url) => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

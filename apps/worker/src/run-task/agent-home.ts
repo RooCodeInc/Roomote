@@ -2,11 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
-import {
-  HTTP_INTEGRATIONS_INSTRUCTIONS,
-  HTTP_INTEGRATIONS_MCP_ID,
-  HTTP_INTEGRATIONS_MCP_PATH,
-} from '@roomote/sdk/client';
+import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
+import { HTTP_INTEGRATIONS_BROKER } from '../mcp-provenance';
 
 import {
   createRoomoteAdvisorAgentPrompt,
@@ -672,6 +669,7 @@ interface GenerateOpenCodeConfigResult {
 
 export interface OpenCodeRemoteMcpServerConfig {
   type: 'remote';
+  roomoteManaged?: typeof HTTP_INTEGRATIONS_BROKER;
   name: string;
   url: string;
   headers?: Record<string, string>;
@@ -690,17 +688,10 @@ export type OpenCodeConfigMcpServer =
   | OpenCodeLocalMcpServerConfig;
 
 function isHttpIntegrationsBroker(mcpServer: OpenCodeConfigMcpServer): boolean {
-  if (
-    mcpServer.type !== 'remote' ||
-    mcpServer.name !== HTTP_INTEGRATIONS_MCP_ID
-  ) {
-    return false;
-  }
-  try {
-    return new URL(mcpServer.url).pathname.endsWith(HTTP_INTEGRATIONS_MCP_PATH);
-  } catch {
-    return false;
-  }
+  return (
+    mcpServer.type === 'remote' &&
+    mcpServer.roomoteManaged === HTTP_INTEGRATIONS_BROKER
+  );
 }
 
 /**

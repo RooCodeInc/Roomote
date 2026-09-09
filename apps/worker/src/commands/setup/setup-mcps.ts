@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { HTTP_INTEGRATIONS_BROKER } from '../../mcp-provenance';
 
 import {
   HTTP_INTEGRATIONS_MCP_ID,
@@ -50,6 +51,7 @@ export const BUILT_IN_MCPS: Record<string, McpServerConfig> = {
 
 interface McpStreamableHttpConfig {
   type: 'streamable-http';
+  roomoteManaged?: typeof HTTP_INTEGRATIONS_BROKER;
   url: string;
   headers?: Record<string, string>;
 }
@@ -491,6 +493,9 @@ export function resolveBuiltInMcpServers(
         resolvedMcps[name] = {
           type: 'streamable-http',
           url: `${apiUrl}${integrationProxy.proxyPath}`,
+          ...(name === HTTP_INTEGRATIONS_MCP_ID
+            ? { roomoteManaged: HTTP_INTEGRATIONS_BROKER }
+            : {}),
           headers: withPreviewProxyBypassHeader(
             withTaskRunTokenAuthHeader(config.headers, cloudToken),
             taskEnv,
