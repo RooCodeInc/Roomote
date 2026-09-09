@@ -7,6 +7,7 @@ import {
 
 export type SetupReceiptKind =
   | 'source_connection'
+  | 'source_control_skipped'
   | 'compute_readiness'
   | 'starter_selection'
   | 'recommendation_application';

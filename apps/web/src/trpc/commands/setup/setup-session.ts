@@ -654,6 +654,18 @@ export async function persistSetupRecommendationApplicationReceipt(
   });
 }
 
+export async function skipSetupSourceControlCommand(
+  auth: UserAuthSuccess,
+): Promise<{ success: true }> {
+  assertAdmin(auth);
+  await persistSetupSessionReceipt(auth, {
+    kind: 'source_control_skipped',
+    fingerprint: 'initial-options',
+    text: 'No problem — you can still get started without connecting source control. I can research a question, create a useful document or plan, or set up a recurring check when a service is connected.',
+  });
+  return { success: true };
+}
+
 export async function findDeploymentSetupSessionId(): Promise<string | null> {
   return (
     normalizeSetupNewSetupSession((await readSetupNewState()).setupSession)

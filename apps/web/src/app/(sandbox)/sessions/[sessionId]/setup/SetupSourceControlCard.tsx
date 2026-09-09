@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type {
@@ -54,6 +54,7 @@ function SetupSessionSourceControlCardBody({
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [stage, setStage] = useState<SourceControlCardStage>(() =>
     getInitialSourceControlCardStage(
@@ -64,6 +65,12 @@ function SetupSessionSourceControlCardBody({
   );
   const [configOpen, setConfigOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const skipSourceControl = useMutation(
+    trpc.setup.skipSourceControl.mutationOptions({
+      onSuccess: () => router.refresh(),
+      onError: (error) => toast.error(error.message),
+    }),
+  );
   const [activeProvider, setActiveProvider] =
     useState<SourceControlProvider | null>(null);
   const saveSourceControlProviderChoice = useMutation(
@@ -139,7 +146,10 @@ function SetupSessionSourceControlCardBody({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setDismissed(true)}
+                onClick={() => {
+                  setDismissed(true);
+                  skipSourceControl.mutate();
+                }}
               >
                 Skip for now
                 <ArrowRight />

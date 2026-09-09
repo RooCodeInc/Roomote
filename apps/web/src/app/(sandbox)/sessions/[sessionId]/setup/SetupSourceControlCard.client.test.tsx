@@ -6,6 +6,7 @@ const { state } = vi.hoisted(() => ({
 }));
 
 vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock('@/trpc/client', () => ({
@@ -13,6 +14,9 @@ vi.mock('@/trpc/client', () => ({
     setupNew: {
       status: { queryOptions: () => ({}), queryKey: () => ['setup-status'] },
       saveSourceControlProviderChoice: { mutationOptions: () => ({}) },
+    },
+    setup: {
+      skipSourceControl: { mutationOptions: () => ({}) },
     },
   }),
 }));
