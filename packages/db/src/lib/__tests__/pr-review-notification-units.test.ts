@@ -32,6 +32,7 @@ import {
   upsertPrReviewAutoPreference,
   userFactory,
   withCanonicalPrReviewAutoDispatchFence,
+  withCanonicalPrReviewSlackThreadActionFence,
 } from '../../server';
 import { RunStatus } from '@roomote/types';
 
@@ -1329,6 +1330,142 @@ describe('canonical PR review notification ownership', () => {
       repository: newest.repository,
       prNumber: 42,
     });
+  });
+
+  it('rolls back a canonical Slack attachment when shared-store arbitration fails', async () => {
+    const delivery = await setUpSlackTaskDelivery({
+      workspaceId: 'T-rollback',
+      channelId: 'C-rollback',
+      threadId: '111.333',
+      prNumber: 45,
+    });
+
+    await expect(
+      attachCanonicalPrReviewActionMessageWithRetirement(
+        delivery.claim.deliveryId,
+        '100.000001',
+        delivery.claim.leaseToken,
+        {
+          arbitrateSlackThread: async () => {
+            throw new Error('Redis unavailable');
+          },
+        },
+      ),
+    ).rejects.toThrow('Redis unavailable');
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, delivery.claim.deliveryId),
+        columns: {
+          status: true,
+          leaseToken: true,
+          providerMessageId: true,
+        },
+      }),
+    ).resolves.toEqual({
+      status: 'prompt_posting',
+      leaseToken: delivery.claim.leaseToken,
+      providerMessageId: null,
+    });
+  });
+
+  it('retires canonical Slack controls when a newer legacy message wins the shared fence', async () => {
+    const canonical = await setUpSlackTaskDelivery({
+      workspaceId: 'T-shared-fence',
+      channelId: 'C-shared-fence',
+      threadId: '222.333',
+      prNumber: 46,
+    });
+    await attachCanonicalPrReviewActionMessage(
+      canonical.claim.deliveryId,
+      '100.000001',
+      canonical.claim.leaseToken,
+    );
+
+    await expect(
+      withCanonicalPrReviewSlackThreadActionFence(
+        {
+          slackTeamId: 'T-shared-fence',
+          channelId: 'C-shared-fence',
+          threadId: '222.333',
+        },
+        async (newestCanonicalMessageId) => ({
+          newestMessageId: '100.000002',
+          result: newestCanonicalMessageId,
+        }),
+      ),
+    ).resolves.toEqual({
+      result: '100.000001',
+      superseded: [
+        expect.objectContaining({
+          deliveryId: canonical.claim.deliveryId,
+          messageId: '100.000001',
+        }),
+      ],
+    });
+    await expect(deliveryStatusOf(canonical.claim.deliveryId)).resolves.toBe(
+      'dismissed',
+    );
+  });
+
+  it('retires a newly attached canonical action when arbitration finds a newer legacy message', async () => {
+    const canonical = await setUpSlackTaskDelivery({
+      workspaceId: 'T-canonical-loses',
+      channelId: 'C-canonical-loses',
+      threadId: '333.444',
+      prNumber: 47,
+    });
+
+    await expect(
+      attachCanonicalPrReviewActionMessageWithRetirement(
+        canonical.claim.deliveryId,
+        '100.000001',
+        canonical.claim.leaseToken,
+        { arbitrateSlackThread: async () => '100.000002' },
+      ),
+    ).resolves.toEqual({
+      attached: true,
+      superseded: [
+        expect.objectContaining({
+          deliveryId: canonical.claim.deliveryId,
+          messageId: '100.000001',
+        }),
+      ],
+    });
+    await expect(deliveryStatusOf(canonical.claim.deliveryId)).resolves.toBe(
+      'dismissed',
+    );
+  });
+
+  it('does not retire canonical actions when a legacy attachment was already claimed', async () => {
+    const canonical = await setUpSlackTaskDelivery({
+      workspaceId: 'T-claimed-legacy',
+      channelId: 'C-claimed-legacy',
+      threadId: '444.555',
+      prNumber: 48,
+    });
+    await attachCanonicalPrReviewActionMessage(
+      canonical.claim.deliveryId,
+      '100.000001',
+      canonical.claim.leaseToken,
+    );
+
+    await expect(
+      withCanonicalPrReviewSlackThreadActionFence(
+        {
+          slackTeamId: 'T-claimed-legacy',
+          channelId: 'C-claimed-legacy',
+          threadId: '444.555',
+        },
+        async (newestCanonicalMessageId) => ({
+          newestMessageId: newestCanonicalMessageId!,
+          retireCanonical: false,
+          result: 'not-attached',
+        }),
+      ),
+    ).resolves.toEqual({ result: 'not-attached', superseded: [] });
+    await expect(deliveryStatusOf(canonical.claim.deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
   });
 
   it('retires only awaiting offers from older PR heads after a new commit', async () => {

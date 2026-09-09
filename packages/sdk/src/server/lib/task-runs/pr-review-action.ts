@@ -10,6 +10,7 @@ import {
   retireCanonicalPrReviewActionsForPullRequest,
   slackInstallations,
   upsertPrReviewAutoPreference,
+  withCanonicalPrReviewSlackThreadActionFence,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -56,7 +57,7 @@ function isUuid(value: string): boolean {
  */
 export interface PendingPrReviewAction {
   nonce: string;
-  /** Monotonic creation order used when concurrent offers finish out of order. */
+  /** Monotonic creation order used by non-Slack attachment arbitration. */
   createdOrder?: number;
   provider: PrReviewActionProvider;
   /** Slack workspace identity. Absent only on legacy pending records. */
@@ -114,13 +115,14 @@ return val
 // click claimed after the notification was posted.
 const ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA = `
 local val = redis.call('get', KEYS[1])
-if not val then return {0} end
+if not val then return {0, ''} end
 local pending = cjson.decode(val)
 pending.messageId = ARGV[1]
 if pending.retired then
   redis.call('del', KEYS[1])
   redis.call('srem', KEYS[2], pending.nonce)
-  return {1, cjson.encode(pending)}
+  local winner = ARGV[3] ~= '' and ARGV[3] or pending.messageId
+  return {1, winner, cjson.encode(pending)}
 end
 redis.call('set', KEYS[1], cjson.encode(pending), 'KEEPTTL')
 local nonces = redis.call('smembers', KEYS[2])
@@ -134,6 +136,44 @@ local function sameContext(prior)
     and prior.repository == pending.repository
     and prior.prNumber == pending.prNumber
 end
+local claimed = {}
+if pending.provider == 'slack' then
+  local winner = pending.messageId
+  if ARGV[3] ~= '' and ARGV[3] > winner then winner = ARGV[3] end
+  for _, nonce in ipairs(nonces) do
+    if nonce ~= pending.nonce then
+      local previous = redis.call('get', ARGV[2] .. nonce)
+      if previous then
+        local prior = cjson.decode(previous)
+        if sameContext(prior) and prior.messageId and prior.messageId > winner then
+          winner = prior.messageId
+        end
+      end
+    end
+  end
+  for _, nonce in ipairs(nonces) do
+    if nonce ~= pending.nonce then
+      local previousKey = ARGV[2] .. nonce
+      local previous = redis.call('get', previousKey)
+      if previous then
+        local prior = cjson.decode(previous)
+        if sameContext(prior) and prior.messageId and prior.messageId < winner then
+          redis.call('srem', KEYS[2], nonce)
+          redis.call('del', previousKey)
+          table.insert(claimed, previous)
+        end
+      end
+    end
+  end
+  if pending.messageId < winner then
+    redis.call('del', KEYS[1])
+    redis.call('srem', KEYS[2], pending.nonce)
+    table.insert(claimed, cjson.encode(pending))
+  end
+  table.insert(claimed, 1, winner)
+  table.insert(claimed, 1, 1)
+  return claimed
+end
 for _, nonce in ipairs(nonces) do
   if nonce ~= pending.nonce then
     local previous = redis.call('get', ARGV[2] .. nonce)
@@ -145,12 +185,11 @@ for _, nonce in ipairs(nonces) do
         and priorCreatedOrder > pendingCreatedOrder then
         redis.call('del', KEYS[1])
         redis.call('srem', KEYS[2], pending.nonce)
-        return {1, cjson.encode(pending)}
+        return {1, pending.messageId, cjson.encode(pending)}
       end
     end
   end
 end
-local claimed = {}
 for _, nonce in ipairs(nonces) do
   if nonce ~= pending.nonce then
     local previousKey = ARGV[2] .. nonce
@@ -170,6 +209,7 @@ for _, nonce in ipairs(nonces) do
     end
   end
 end
+table.insert(claimed, 1, pending.messageId)
 table.insert(claimed, 1, 1)
 return claimed
 `;
@@ -229,6 +269,42 @@ for _, nonce in ipairs(nonces) do
     end
   end
 end
+return retired
+`;
+
+const ARBITRATE_LEGACY_SLACK_PR_REVIEW_ACTIONS_LUA = `
+local context = cjson.decode(ARGV[2])
+local winner = ARGV[3]
+local nonces = redis.call('smembers', KEYS[1])
+for _, nonce in ipairs(nonces) do
+  local val = redis.call('get', ARGV[1] .. nonce)
+  if val then
+    local pending = cjson.decode(val)
+    local sameSlackTeam = (pending.slackTeamId == context.slackTeamId)
+      or (not pending.slackTeamId and not context.slackTeamId)
+    if pending.provider == 'slack' and sameSlackTeam
+      and pending.messageId and pending.messageId > winner then
+      winner = pending.messageId
+    end
+  end
+end
+local retired = {}
+for _, nonce in ipairs(nonces) do
+  local actionKey = ARGV[1] .. nonce
+  local val = redis.call('get', actionKey)
+  if val then
+    local pending = cjson.decode(val)
+    local sameSlackTeam = (pending.slackTeamId == context.slackTeamId)
+      or (not pending.slackTeamId and not context.slackTeamId)
+    if pending.provider == 'slack' and sameSlackTeam
+      and pending.messageId and pending.messageId < winner then
+      redis.call('srem', KEYS[1], nonce)
+      redis.call('del', actionKey)
+      table.insert(retired, val)
+    end
+  end
+end
+table.insert(retired, 1, winner)
 return retired
 `;
 
@@ -299,35 +375,60 @@ export async function attachPendingPrReviewActionMessageWithRetirement(
   superseded: RetirablePrReviewActionMessage[];
 }> {
   if (isUuid(nonce) && options.leaseToken) {
-    const canonicalResult = await attachCanonicalPrReviewActionMessage(
-      nonce,
-      messageId,
-      options.leaseToken,
-    );
+    const slackContext =
+      options.context?.provider === 'slack' &&
+      options.context.slackTeamId &&
+      options.context.threadId
+        ? {
+            ...options.context,
+            provider: 'slack' as const,
+            slackTeamId: options.context.slackTeamId,
+            threadId: options.context.threadId,
+          }
+        : null;
+    let legacySuperseded: PendingPrReviewAction[] = [];
+    let canonicalResult: Awaited<
+      ReturnType<typeof attachCanonicalPrReviewActionMessage>
+    >;
+    try {
+      canonicalResult = await attachCanonicalPrReviewActionMessage(
+        nonce,
+        messageId,
+        options.leaseToken,
+        slackContext
+          ? {
+              arbitrateSlackThread: async (newestCanonicalMessageId) => {
+                const result = await arbitrateLegacySlackPrReviewActions(
+                  slackContext,
+                  newestCanonicalMessageId,
+                );
+                legacySuperseded = result.superseded;
+                return result.newestMessageId;
+              },
+            }
+          : {},
+      );
+    } catch (error) {
+      await retirePrReviewActionMessagesBestEffort(legacySuperseded);
+      throw error;
+    }
     if (!canonicalResult.attached) {
       return { attached: false, superseded: [] };
     }
-    const canonicalSuperseded = canonicalResult.superseded.flatMap((action) =>
-      action.provider && action.provider !== 'teams' && action.channelId
-        ? [
-            {
-              provider: action.provider,
-              ...(action.provider === 'slack' && action.slackTeamId
-                ? { slackTeamId: action.slackTeamId }
-                : {}),
-              channelId: action.channelId,
-              threadId: action.threadId,
-              messageId: action.messageId,
-            } satisfies RetirablePrReviewActionMessage,
-          ]
-        : [],
+    const canonicalSuperseded = toRetirableCanonicalMessages(
+      canonicalResult.superseded,
     );
-    const legacySuperseded = options.context
-      ? await retireLegacyPrReviewActionsForContext(options.context)
-      : [];
+    const nonSlackLegacySuperseded =
+      options.context && !slackContext
+        ? await retireLegacyPrReviewActionsForContext(options.context)
+        : [];
     return {
       attached: true,
-      superseded: [...canonicalSuperseded, ...legacySuperseded],
+      superseded: [
+        ...canonicalSuperseded,
+        ...legacySuperseded,
+        ...nonSlackLegacySuperseded,
+      ],
     };
   }
 
@@ -342,17 +443,130 @@ export async function attachPendingPrReviewActionMessageWithRetirement(
     return { attached: false, superseded: [] };
   }
 
-  const rawClaims = await redis.eval(
-    ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA,
-    2,
-    getPrReviewActionKey(nonce),
-    getPrReviewActionThreadKey(pending),
-    messageId,
-    PR_REVIEW_ACTION_PREFIX,
-  );
+  const attachRedis = async (newestCanonicalMessageId: string | null) => {
+    const rawClaims = await redis.eval(
+      ATTACH_PR_REVIEW_ACTION_MESSAGE_LUA,
+      2,
+      getPrReviewActionKey(nonce),
+      getPrReviewActionThreadKey(pending),
+      messageId,
+      PR_REVIEW_ACTION_PREFIX,
+      newestCanonicalMessageId ?? '',
+    );
+    return parseRedisPrReviewActionRetirement(rawClaims);
+  };
 
-  const values = Array.isArray(rawClaims) ? rawClaims : [];
-  const attached = values[0] === 1;
+  if (pending.provider === 'slack' && pending.slackTeamId && pending.threadId) {
+    let redisSuperseded: PendingPrReviewAction[] = [];
+    let fenced: {
+      result: Awaited<ReturnType<typeof attachRedis>>;
+      superseded: Parameters<typeof toRetirableCanonicalMessages>[0];
+    };
+    try {
+      fenced = await withCanonicalPrReviewSlackThreadActionFence(
+        {
+          slackTeamId: pending.slackTeamId,
+          channelId: pending.channelId,
+          threadId: pending.threadId,
+        },
+        async (newestCanonicalMessageId) => {
+          const result = await attachRedis(newestCanonicalMessageId);
+          redisSuperseded = result.superseded;
+          return {
+            newestMessageId:
+              result.newestMessageId ?? newestCanonicalMessageId ?? messageId,
+            retireCanonical: result.attached,
+            result,
+          };
+        },
+      );
+    } catch (error) {
+      await retirePrReviewActionMessagesBestEffort(redisSuperseded);
+      throw error;
+    }
+    return {
+      attached: fenced.result.attached,
+      superseded: [
+        ...toRetirableCanonicalMessages(fenced.superseded),
+        ...fenced.result.superseded,
+      ],
+    };
+  }
+
+  const result = await attachRedis(null);
+  return { attached: result.attached, superseded: result.superseded };
+}
+
+function parseRedisPrReviewActionRetirement(rawResult: unknown): {
+  attached: boolean;
+  newestMessageId: string | null;
+  superseded: PendingPrReviewAction[];
+} {
+  const values = Array.isArray(rawResult) ? rawResult : [];
+  const superseded: PendingPrReviewAction[] = [];
+  for (const raw of values.slice(2)) {
+    if (typeof raw !== 'string') continue;
+    try {
+      superseded.push(JSON.parse(raw) as PendingPrReviewAction);
+    } catch {
+      // Malformed record; skip.
+    }
+  }
+  return {
+    attached: values[0] === 1,
+    newestMessageId:
+      typeof values[1] === 'string' && values[1] ? values[1] : null,
+    superseded,
+  };
+}
+
+function toRetirableCanonicalMessages(
+  actions: Array<{
+    provider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
+    slackTeamId: string | null;
+    channelId: string | null;
+    threadId: string | null;
+    messageId: string | null;
+  }>,
+): RetirablePrReviewActionMessage[] {
+  return actions.flatMap((action) =>
+    action.provider && action.provider !== 'teams' && action.channelId
+      ? [
+          {
+            provider: action.provider,
+            ...(action.provider === 'slack' && action.slackTeamId
+              ? { slackTeamId: action.slackTeamId }
+              : {}),
+            channelId: action.channelId,
+            threadId: action.threadId,
+            messageId: action.messageId,
+          } satisfies RetirablePrReviewActionMessage,
+        ]
+      : [],
+  );
+}
+
+async function arbitrateLegacySlackPrReviewActions(
+  context: PendingPrReviewAction & {
+    provider: 'slack';
+    slackTeamId: string;
+    threadId: string;
+  },
+  newestCanonicalMessageId: string,
+): Promise<{
+  newestMessageId: string;
+  superseded: PendingPrReviewAction[];
+}> {
+  const redis = getRedis();
+  const rawResult = await redis.eval(
+    ARBITRATE_LEGACY_SLACK_PR_REVIEW_ACTIONS_LUA,
+    1,
+    getPrReviewActionThreadKey(context),
+    PR_REVIEW_ACTION_PREFIX,
+    JSON.stringify(context),
+    newestCanonicalMessageId,
+  );
+  const values = Array.isArray(rawResult) ? rawResult : [];
   const superseded: PendingPrReviewAction[] = [];
   for (const raw of values.slice(1)) {
     if (typeof raw !== 'string') continue;
@@ -362,7 +576,13 @@ export async function attachPendingPrReviewActionMessageWithRetirement(
       // Malformed record; skip.
     }
   }
-  return { attached, superseded };
+  return {
+    newestMessageId:
+      typeof values[0] === 'string' && values[0]
+        ? values[0]
+        : newestCanonicalMessageId,
+    superseded,
+  };
 }
 
 async function retireLegacyPrReviewActionsForContext(

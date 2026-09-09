@@ -1369,6 +1369,11 @@ export async function attachCanonicalPrReviewActionMessageWithRetirement(
   deliveryId: string,
   messageId: string,
   leaseToken: string,
+  options: {
+    arbitrateSlackThread?: (
+      newestCanonicalMessageId: string,
+    ) => Promise<string>;
+  } = {},
 ): Promise<{
   attached: boolean;
   superseded: Array<{
@@ -1475,7 +1480,6 @@ export async function attachCanonicalPrReviewActionMessageWithRetirement(
       return { attached: true, superseded: [] };
     }
 
-    let retainedDeliveryId = deliveryId;
     if (slackThread) {
       const awaiting = await tx
         .select({
@@ -1489,14 +1493,23 @@ export async function attachCanonicalPrReviewActionMessageWithRetirement(
             retirementScope,
           ),
         );
-      retainedDeliveryId = awaiting.reduce(
+      const newestCanonical = awaiting.reduce(
         (newest, candidate) =>
           candidate.messageId &&
           (!newest.messageId || candidate.messageId > newest.messageId)
             ? candidate
             : newest,
         awaiting[0]!,
-      ).deliveryId;
+      );
+      const retainedMessageId = options.arbitrateSlackThread
+        ? await options.arbitrateSlackThread(newestCanonical.messageId!)
+        : newestCanonical.messageId!;
+      const superseded = await retireCanonicalPrReviewSlackActionsExcept(
+        tx,
+        retirementScope,
+        retainedMessageId,
+      );
+      return { attached: true, superseded };
     }
 
     const retired = await tx
@@ -1511,7 +1524,7 @@ export async function attachCanonicalPrReviewActionMessageWithRetirement(
         and(
           eq(prReviewNotificationDeliveries.status, 'awaiting_user_action'),
           retirementScope,
-          ne(prReviewNotificationDeliveries.id, retainedDeliveryId),
+          ne(prReviewNotificationDeliveries.id, deliveryId),
         ),
       )
       .returning({
@@ -1542,6 +1555,112 @@ export async function attachCanonicalPrReviewActionMessageWithRetirement(
 
     return { attached: true, superseded: retired };
   });
+}
+
+/** Serializes a legacy Slack attachment with canonical thread retirement. */
+export async function withCanonicalPrReviewSlackThreadActionFence<T>(
+  input: {
+    slackTeamId: string;
+    channelId: string;
+    threadId: string;
+  },
+  arbitrate: (newestCanonicalMessageId: string | null) => Promise<{
+    newestMessageId: string;
+    result: T;
+    retireCanonical?: boolean;
+  }>,
+): Promise<{ result: T; superseded: CanonicalPrReviewActionMessage[] }> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`pr-review-slack-thread:${input.slackTeamId}:${input.channelId}:${input.threadId}`}, 0))`,
+    );
+    const retirementScope = and(
+      eq(prReviewNotificationDeliveries.routeProvider, 'slack'),
+      eq(prReviewNotificationDeliveries.routeWorkspaceId, input.slackTeamId),
+      eq(prReviewNotificationDeliveries.routeChannelId, input.channelId),
+      eq(prReviewNotificationDeliveries.routeThreadId, input.threadId),
+    );
+    const awaiting = await tx
+      .select({ messageId: prReviewNotificationDeliveries.providerMessageId })
+      .from(prReviewNotificationDeliveries)
+      .where(
+        and(
+          eq(prReviewNotificationDeliveries.status, 'awaiting_user_action'),
+          retirementScope,
+        ),
+      );
+    const newestCanonicalMessageId = awaiting.reduce<string | null>(
+      (newest, { messageId: candidate }) =>
+        candidate && (!newest || candidate > newest) ? candidate : newest,
+      null,
+    );
+    const arbitration = await arbitrate(newestCanonicalMessageId);
+    const superseded =
+      arbitration.retireCanonical === false
+        ? []
+        : await retireCanonicalPrReviewSlackActionsExcept(
+            tx,
+            retirementScope,
+            arbitration.newestMessageId,
+          );
+    return { result: arbitration.result, superseded };
+  });
+}
+
+type CanonicalPrReviewActionMessage = {
+  deliveryId: string;
+  provider: 'slack' | 'teams' | 'telegram' | 'discord' | null;
+  slackTeamId: string | null;
+  channelId: string | null;
+  threadId: string | null;
+  messageId: string | null;
+};
+
+async function retireCanonicalPrReviewSlackActionsExcept(
+  tx: DatabaseOrTransaction,
+  retirementScope: ReturnType<typeof and>,
+  retainedMessageId: string,
+): Promise<CanonicalPrReviewActionMessage[]> {
+  const retired = await tx
+    .update(prReviewNotificationDeliveries)
+    .set({
+      status: 'dismissed',
+      actionClaimedAt: new Date(),
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(prReviewNotificationDeliveries.status, 'awaiting_user_action'),
+        retirementScope,
+        ne(prReviewNotificationDeliveries.providerMessageId, retainedMessageId),
+      ),
+    )
+    .returning({
+      deliveryId: prReviewNotificationDeliveries.id,
+      provider: prReviewNotificationDeliveries.routeProvider,
+      slackTeamId: prReviewNotificationDeliveries.routeWorkspaceId,
+      channelId: prReviewNotificationDeliveries.routeChannelId,
+      threadId: prReviewNotificationDeliveries.routeThreadId,
+      messageId: prReviewNotificationDeliveries.providerMessageId,
+    });
+
+  if (retired.length > 0) {
+    await tx
+      .update(fastAgentMessages)
+      .set({
+        payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb('dismissed'::text), true)`,
+        updatedAt: sql`now()`,
+      })
+      .where(
+        inArray(
+          sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+          retired.map(({ deliveryId: id }) => id),
+        ),
+      );
+  }
+
+  return retired;
 }
 
 export async function claimCanonicalPrReviewAction(input: {
