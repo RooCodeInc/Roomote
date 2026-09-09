@@ -1067,6 +1067,11 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
+    expect(
+      screen.queryByText('Would you like me to resolve these issues?'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeInTheDocument();
+    expect(reviewActionMutate).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Resolve these issues' }),
     );

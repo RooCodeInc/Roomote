@@ -1,0 +1,52 @@
+name: Reconcile Release Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Unshipped product version (without v)
+        required: true
+        type: string
+      expected_candidate_sha:
+        description: Frozen candidate commit (full 40-character SHA)
+        required: true
+        type: string
+      expected_main_sha:
+        description: Reviewed production base (full 40-character SHA)
+        required: true
+        type: string
+      resolution_sha:
+        description: Approved reconcile/vVERSION merge commit (full 40-character SHA)
+        required: true
+        type: string
+
+concurrency:
+  group: release-develop
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  reconcile:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout trusted reconciliation tooling
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # GITHUB_TOKEN pushes suppress downstream PR workflows.
+          token: ${{ secrets.RELEASE_BOT_TOKEN }}
+          fetch-depth: 0
+          ref: develop
+
+      - name: Reconcile pinned candidate
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          EXPECTED_CANDIDATE_SHA: ${{ inputs.expected_candidate_sha }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          RESOLUTION_SHA: ${{ inputs.resolution_sha }}
+        run: node scripts/release/reconcile-candidate.mjs

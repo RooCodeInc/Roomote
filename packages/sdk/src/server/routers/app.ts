@@ -13,6 +13,7 @@ import { mcpConnectionsRouter } from './mcp-connections';
 import { userApiKeysRouter } from './user-api-keys';
 import { llmUsageRouter } from './llm-usage';
 import { statuspageRouter } from './statuspage';
+import { instanceSkillsRouter } from './instance-skills';
 
 export const appRouter = router({
   auth: authRouter,
@@ -26,6 +27,7 @@ export const appRouter = router({
   userApiKeys: userApiKeysRouter,
   llmUsage: llmUsageRouter,
   statuspage: statuspageRouter,
+  instanceSkills: instanceSkillsRouter,
 });
 
 export type AppRouter = typeof appRouter;

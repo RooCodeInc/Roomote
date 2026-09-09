@@ -5,6 +5,10 @@ import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { getTaskMessages } from '../getTaskMessages';
 
+vi.mock('../../custom-automation-history-access', () => ({
+  customAutomationHistoryAccess: vi.fn(() => undefined),
+}));
+
 const {
   andMock,
   ascMock,
@@ -90,6 +94,7 @@ vi.mock('@roomote/db/server', () => ({
   tasks: {
     id: 'tasks.id',
   },
+  fastAgentConversations: { id: 'fastAgentConversations.id' },
 }));
 
 function createApp(authContext?: AuthTokenContext) {
@@ -134,6 +139,7 @@ describe('getTaskMessages', () => {
     });
     selectWhereMock.mockReturnValue({
       orderBy: selectOrderByMock,
+      limit: taskSelectLimitMock,
     });
     selectOrderByMock.mockResolvedValue([
       {
@@ -268,22 +274,27 @@ describe('getTaskMessages', () => {
     mockGetFastSessionMessagesForUser.mockResolvedValueOnce([
       {
         id: 'fast-message-1',
-        taskId: 'fast-session-1',
+        taskId: '00000000-0000-4000-8000-000000000001',
         text: 'Fast response',
       },
     ]);
 
     const response = await createApp(authContext).request(
-      'http://localhost/tasks/fast-session-1/messages',
+      'http://localhost/tasks/00000000-0000-4000-8000-000000000001/messages',
     );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       returned: 1,
-      messages: [{ taskId: 'fast-session-1', text: 'Fast response' }],
+      messages: [
+        {
+          taskId: '00000000-0000-4000-8000-000000000001',
+          text: 'Fast response',
+        },
+      ],
     });
     expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
-      sessionId: 'fast-session-1',
+      sessionId: '00000000-0000-4000-8000-000000000001',
       userId: 'user-1',
       limit: undefined,
       order: 'asc',
@@ -295,12 +306,12 @@ describe('getTaskMessages', () => {
     mockGetFastSessionMessagesForUser.mockResolvedValueOnce([]);
 
     const response = await createApp(authContext).request(
-      'http://localhost/tasks/fast-session-1/messages?order=desc',
+      'http://localhost/tasks/00000000-0000-4000-8000-000000000001/messages?order=desc',
     );
 
     expect(response.status).toBe(200);
     expect(mockGetFastSessionMessagesForUser).toHaveBeenCalledWith({
-      sessionId: 'fast-session-1',
+      sessionId: '00000000-0000-4000-8000-000000000001',
       userId: 'user-1',
       limit: undefined,
       order: 'desc',

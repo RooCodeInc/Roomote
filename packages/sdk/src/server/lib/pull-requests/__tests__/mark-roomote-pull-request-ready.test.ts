@@ -161,15 +161,32 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
     mockGetSetting.mockReset().mockResolvedValue(true);
     mockGetPrAction.mockReset().mockResolvedValue('draft');
     mockSupportsDraftTransition.mockReset().mockReturnValue(true);
-    mockResolveRepositoryRow.mockReset().mockResolvedValue({
-      id: 'repo-id',
-      sourceControlProvider: 'github',
-      host: 'github.com',
-      installationId: '123',
-      externalRepoId: 'project-id',
-      fullName: 'owner/repo',
-      htmlUrl: 'https://github.com/owner/repo',
-    });
+    mockResolveRepositoryRow
+      .mockReset()
+      .mockImplementation(
+        async ({
+          provider,
+        }: {
+          provider: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
+        }) => {
+          const host = {
+            github: 'github.com',
+            gitlab: 'gitlab.example',
+            gitea: 'gitea.example',
+            ado: 'dev.azure.com',
+            bitbucket: 'bitbucket.org',
+          }[provider];
+          return {
+            id: 'repo-id',
+            sourceControlProvider: provider,
+            host,
+            installationId: '123',
+            externalRepoId: 'project-id',
+            fullName: 'owner/repo',
+            htmlUrl: `https://${host}/owner/repo`,
+          };
+        },
+      );
     mockResolveGitLabProviderContext.mockReset().mockResolvedValue({
       apiBaseUrl: 'https://gitlab.example/api/v4',
       projectId: 'project-id',
@@ -249,6 +266,7 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       'owner/repo',
       42,
       'open',
+      { host: 'github.com', repositoryId: 'repo-id' },
     );
     expect(mockReleaseLifecycleLock).toHaveBeenCalledOnce();
   });
@@ -372,6 +390,7 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       'owner/repo',
       42,
       'open',
+      { host: 'github.com', repositoryId: 'repo-id' },
     );
   });
 
@@ -388,6 +407,7 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       'owner/repo',
       42,
       'open',
+      { host: 'github.com', repositoryId: 'repo-id' },
     );
   });
 
@@ -425,6 +445,7 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       'owner/repo',
       42,
       'open',
+      { host: 'gitlab.example', repositoryId: 'repo-id' },
     );
   });
 
@@ -460,6 +481,7 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       'owner/repo',
       42,
       'open',
+      { host: 'gitea.example', repositoryId: 'repo-id' },
     );
   });
 
@@ -532,6 +554,7 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       'owner/repo',
       42,
       'open',
+      { host: 'bitbucket.org', repositoryId: 'repo-id' },
     );
   });
 
@@ -561,6 +584,7 @@ describe('markRoomotePullRequestReadyAfterCleanReview', () => {
       'owner/repo',
       42,
       'open',
+      { host: 'dev.azure.com', repositoryId: 'repo-id' },
     );
   });
 

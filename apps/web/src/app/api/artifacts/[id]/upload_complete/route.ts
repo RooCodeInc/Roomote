@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { db, taskArtifacts, eq } from '@roomote/db/server';
+import { and, db, taskArtifacts, eq } from '@roomote/db/server';
 
-import { authorizeRunToken, getArtifactById } from '@/lib/server';
+import { authorizeRunToken } from '@/lib/server';
+import { canAccessTask } from '@/lib/server/custom-automation-task-access';
 
 export const runtime = 'nodejs';
 
@@ -35,14 +36,17 @@ export async function POST(
     );
   }
 
+  // Upload completion requires write access, not the artifact helper's read access.
+  if (!(await canAccessTask(authResult, taskId))) {
+    return NextResponse.json(
+      { error: 'Artifact not found or access denied' },
+      { status: 404 },
+    );
+  }
+
   // Verify artifact exists and user has access
-  const artifact = await getArtifactById({
-    taskId,
-    artifactId: id,
-    auth: {
-      userId: authResult.userId,
-      isAdmin: authResult.isAdmin,
-    },
+  const artifact = await db.query.taskArtifacts.findFirst({
+    where: and(eq(taskArtifacts.taskId, taskId), eq(taskArtifacts.id, id)),
   });
 
   if (!artifact) {

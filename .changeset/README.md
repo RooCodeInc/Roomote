@@ -41,10 +41,19 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
    explicitly dispatch the Release workflow for that version. The refresh is
    fast-forward-only and refuses shipped, closed, divergent, newer-version, or
    pending-changeset states.
+   Production-base conflicts use the separately authorized **Reconcile Release
+   Candidate** workflow with pinned candidate/main commits and an independently
+   approved resolution on an ordinary branch. Never push a release branch
+   manually. See the [release skill](../.agents/skills/changeset-release-pr/SKILL.md#reconcile-a-frozen-candidate-with-production).
 4. Merge the Promote PR with a **merge commit** (not squash) into `main` to tag
    `vX.Y.Z`. GHCR builds the matching images, and the GitHub Release is created
    only after those images exist so `releases/latest` never points at a missing
    image set. The `release/vX.Y.Z` branch can be deleted after the merge.
+
+Monitor CI **and reviews on the Promote PR's current head**, not only the
+release-preparation PR. Refreshes and reconciliations require fresh validation;
+unresolved findings or missing required approvals remain blockers even with
+green CI. Monitoring does not authorize promotion or publication.
 
 If a maintainer explicitly replaces an unshipped candidate with a later
 version, run `pnpm run version -- --supersede <patch|minor|major>`. This retains

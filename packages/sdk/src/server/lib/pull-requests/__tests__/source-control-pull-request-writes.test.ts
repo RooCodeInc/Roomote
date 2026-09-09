@@ -508,6 +508,259 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     });
   });
 
+  describe('GitHub published replies and explicit pending reviews', () => {
+    const input = {
+      repositoryFullName: 'acme/backend',
+      prNumber: 55,
+      sourceControlProvider: 'github' as const,
+    };
+    const taskRun = makeTaskRun({
+      repo: 'acme/backend',
+      sourceControlProvider: 'github',
+    });
+    const rootThread = {
+      __typename: 'PullRequestReviewThread',
+      pullRequest: {
+        number: 55,
+        repository: { nameWithOwner: 'ACME/Backend' },
+      },
+      comments: { nodes: [{ databaseId: 123 }] },
+    };
+    const graphql = vi.fn();
+    const createReplyForReviewComment = vi.fn();
+    const createReview = vi.fn();
+    const submitReview = vi.fn();
+
+    beforeEach(() => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 'installation-1',
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://github.com/acme/backend',
+      });
+      mockCreateGitHubToken.mockResolvedValue('github-token');
+      graphql.mockReset().mockResolvedValue({ node: rootThread });
+      createReplyForReviewComment.mockReset().mockResolvedValue({
+        data: {
+          id: 124,
+          html_url: 'https://github.com/acme/backend/pull/55#discussion_r124',
+        },
+      });
+      createReview.mockReset().mockResolvedValue({ data: { id: 901 } });
+      submitReview.mockReset().mockResolvedValue({
+        data: {
+          id: 900,
+          html_url:
+            'https://github.com/acme/backend/pull/55#pullrequestreview-900',
+        },
+      });
+      mockGetOctokit.mockReturnValue({
+        graphql,
+        rest: {
+          pulls: { createReplyForReviewComment, createReview, submitReview },
+        },
+      });
+    });
+
+    it('reads and validates the thread then publishes a REST reply without touching reviews', async () => {
+      const result = await writeSourceControlPullRequestForTaskRun({
+        taskRun,
+        input: {
+          ...input,
+          action: 'reply_to_pull_request_comment',
+          threadId: 'PRRT_1',
+          body: 'Fixed.',
+        },
+      });
+      expect(graphql).toHaveBeenCalledExactlyOnceWith(
+        expect.stringMatching(/^query /),
+        { threadId: 'PRRT_1' },
+      );
+      expect(createReplyForReviewComment).toHaveBeenCalledExactlyOnceWith({
+        owner: 'acme',
+        repo: 'backend',
+        pull_number: 55,
+        comment_id: 123,
+        body: 'Fixed.',
+      });
+      expect(result).toMatchObject({
+        applied: true,
+        threadId: 'PRRT_1',
+        commentId: '124',
+        url: 'https://github.com/acme/backend/pull/55#discussion_r124',
+      });
+      expect(createReview).not.toHaveBeenCalled();
+      expect(submitReview).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      null,
+      { __typename: 'Issue' },
+      { ...rootThread, pullRequest: { ...rootThread.pullRequest, number: 56 } },
+      {
+        ...rootThread,
+        pullRequest: {
+          number: 55,
+          repository: { nameWithOwner: 'other/backend' },
+        },
+      },
+      { ...rootThread, comments: { nodes: [] } },
+      { ...rootThread, comments: { nodes: [{ databaseId: null }] } },
+    ])(
+      'rejects missing, mismatched or unrepliable threads without a write (%j)',
+      async (node) => {
+        graphql.mockResolvedValue({ node });
+        await expect(
+          writeSourceControlPullRequestForTaskRun({
+            taskRun,
+            input: {
+              ...input,
+              action: 'reply_to_pull_request_comment',
+              threadId: 'PRRT_1',
+              body: 'Fixed.',
+            },
+          }),
+        ).rejects.toThrow(/GitHub review thread/);
+        expect(createReplyForReviewComment).not.toHaveBeenCalled();
+        expect(createReview).not.toHaveBeenCalled();
+        expect(submitReview).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['approve', 'request_changes', 'comment'] as const)(
+      'submits only the explicit pending review for %s',
+      async (reviewEvent) => {
+        const parsed = sourceControlPullRequestWriteInputSchema.parse({
+          ...input,
+          action: 'submit_pull_request_review',
+          reviewId: ' 900 ',
+          reviewEvent,
+          body: 'Reviewed.',
+        });
+        const result = await writeSourceControlPullRequestForTaskRun({
+          taskRun,
+          input: parsed,
+        });
+        expect(submitReview).toHaveBeenCalledExactlyOnceWith({
+          owner: 'acme',
+          repo: 'backend',
+          pull_number: 55,
+          review_id: 900,
+          event: reviewEvent.toUpperCase(),
+          body: 'Reviewed.',
+        });
+        expect(createReview).not.toHaveBeenCalled();
+        expect(graphql).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+          applied: true,
+          commentId: '900',
+          url: 'https://github.com/acme/backend/pull/55#pullrequestreview-900',
+        });
+      },
+    );
+
+    it.each(['abc', '0', '-1', '1.5', '1e3', '9007199254740993'])(
+      'rejects invalid explicit reviewId %s',
+      async (reviewId) => {
+        await expect(
+          writeSourceControlPullRequestForTaskRun({
+            taskRun,
+            input: {
+              ...input,
+              action: 'submit_pull_request_review',
+              reviewId,
+              reviewEvent: 'comment',
+            },
+          }),
+        ).rejects.toMatchObject({ httpStatus: 400 });
+        expect(createReview).not.toHaveBeenCalled();
+        expect(submitReview).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([undefined, '  '])(
+      'creates a new review without selecting drafts when reviewId is %j',
+      async (reviewId) => {
+        await writeSourceControlPullRequestForTaskRun({
+          taskRun,
+          input: {
+            ...input,
+            action: 'submit_pull_request_review',
+            reviewId,
+            reviewEvent: 'comment',
+            body: 'Reviewed.',
+          },
+        });
+        expect(createReview).toHaveBeenCalledExactlyOnceWith({
+          owner: 'acme',
+          repo: 'backend',
+          pull_number: 55,
+          event: 'COMMENT',
+          body: 'Reviewed.',
+        });
+        expect(submitReview).not.toHaveBeenCalled();
+        expect(graphql).not.toHaveBeenCalled();
+      },
+    );
+
+    it('preserves submission failures without falling back to a new review', async () => {
+      submitReview.mockRejectedValue(
+        Object.assign(new Error('Review is not pending'), { status: 422 }),
+      );
+      await expect(
+        writeSourceControlPullRequestForTaskRun({
+          taskRun,
+          input: {
+            ...input,
+            action: 'submit_pull_request_review',
+            reviewId: '900',
+            reviewEvent: 'comment',
+          },
+        }),
+      ).rejects.toMatchObject({ httpStatus: 422 });
+      expect(createReview).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(['gitlab', 'gitea', 'bitbucket', 'ado'] as const)(
+    'does not silently replace explicit review submission on %s',
+    async (provider) => {
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://example.com/acme/backend',
+      });
+      const fetchImpl = vi.fn();
+      const result = await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: provider,
+        }),
+        input: {
+          action: 'submit_pull_request_review',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          reviewId: '900',
+          reviewEvent: 'approve',
+          body: 'Reviewed.',
+          sourceControlProvider: provider,
+        },
+        fetchImpl,
+      });
+      expect(result).toMatchObject({
+        applied: false,
+        warnings: [
+          expect.stringContaining(
+            'does not support submitting an existing review by reviewId',
+          ),
+        ],
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(mockGetOctokit).not.toHaveBeenCalled();
+    },
+  );
+
   it('submits a GitHub approval review through the installation token', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: 'installation-1',

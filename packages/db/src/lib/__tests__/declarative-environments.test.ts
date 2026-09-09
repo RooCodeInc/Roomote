@@ -558,6 +558,36 @@ describe('declarative environments', () => {
       ),
     );
     const docs = commands.at(-1);
+    const indexOf = (name: string) =>
+      commands.findIndex((command) => command.name === name);
+    const webIndex = indexOf('Start Next.js web dev server');
+    expect(commands[webIndex]?.run).toContain('@roomote/web dev:preview');
+    for (const prerequisite of [
+      'Apply development database migrations',
+      'Seed demo data',
+      'Start Redis',
+      'Start API server',
+    ]) {
+      expect(indexOf(prerequisite)).toBeGreaterThan(-1);
+      expect(indexOf(prerequisite)).toBeLessThan(webIndex);
+    }
+    for (const deferred of [
+      'Create test database',
+      'Write test environment file',
+      'Apply test database schema',
+      'Build local worker release',
+    ]) {
+      expect(indexOf(deferred)).toBeGreaterThan(webIndex);
+    }
+    expect(indexOf('Create test database')).toBeLessThan(
+      indexOf('Apply test database schema'),
+    );
+    expect(indexOf('Write test environment file')).toBeLessThan(
+      indexOf('Apply test database schema'),
+    );
+    expect(indexOf('Build local worker release')).toBeLessThan(
+      indexOf('Start controller'),
+    );
     expect(docs?.name).toBe('Start Mintlify docs preview');
     expect(docs?.continue_on_error).toBe(true);
     expect(docs?.detached).toBe(true);

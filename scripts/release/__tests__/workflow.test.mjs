@@ -7,6 +7,84 @@ import YAML from 'yaml';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
 
+test('reconciliation is manual, serialized, and executes only trusted tooling', () => {
+  const workflow = YAML.parse(
+    readFileSync(
+      join(repoRoot, '.github/workflows/release-reconcile.yml'),
+      'utf8',
+    ),
+  );
+  assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
+    'version',
+    'expected_candidate_sha',
+    'expected_main_sha',
+    'resolution_sha',
+  ]);
+  for (const input of Object.values(workflow.on.workflow_dispatch.inputs)) {
+    assert.equal(input.required, true);
+    assert.equal(input.type, 'string');
+  }
+  assert.deepEqual(workflow.concurrency, {
+    group: 'release-develop',
+    'cancel-in-progress': false,
+  });
+  assert.deepEqual(workflow.permissions, {});
+  assert.deepEqual(Object.keys(workflow.jobs), ['reconcile']);
+  const job = workflow.jobs.reconcile;
+  assert.equal(
+    job.if,
+    "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop'",
+  );
+  assert.deepEqual(job.permissions, {
+    contents: 'write',
+    'pull-requests': 'write',
+  });
+  assert.equal(job.steps.length, 2);
+  assert.equal(job.steps[0].with.ref, 'develop');
+  assert.equal(job.steps[0].with['fetch-depth'], 0);
+  assert.equal(job.steps[0].with.token, '${{ secrets.RELEASE_BOT_TOKEN }}');
+  assert.equal(
+    job.steps[1].run,
+    'node scripts/release/reconcile-candidate.mjs',
+  );
+  assert.equal(job.steps[1].env.GH_TOKEN, job.steps[0].with.token);
+  assert.equal(job.steps[1].env.RESOLUTION_SHA, '${{ inputs.resolution_sha }}');
+});
+
+test('release procedure monitors promotion CI and reviews after every head change', () => {
+  const skill = readFileSync(
+    join(repoRoot, '.agents/skills/changeset-release-pr/SKILL.md'),
+    'utf8',
+  );
+  const workflow = YAML.parse(
+    readFileSync(join(repoRoot, '.github/workflows/release.yml'), 'utf8'),
+  );
+  const script = workflow.jobs.promote.steps.find((step) => step.run)?.run;
+  assert.match(
+    skill,
+    /Monitor the promotion candidate, not just release preparation/,
+  );
+  assert.match(skill, /reviewDecision,statusCheckRollup/);
+  assert.match(skill, /CHANGES_REQUESTED/);
+  assert.match(skill, /all review threads, including their `isResolved` state/);
+  assert.match(skill, /refresh or\s+reconciliation invalidates the old checks/);
+  assert.match(skill, /discard that mixed\s+snapshot/);
+  assert.match(skill, /at most 30 minutes/);
+  assert.match(skill, /Do not wait\s+indefinitely for a human review/);
+  assert.match(skill, /green status, or approval never\s+authorizes merging/);
+  assert.match(skill, /Do not merge: CI applies this reviewed tree/);
+  assert.match(
+    skill,
+    /Ordinary\s+Release refresh deliberately refuses that state/,
+  );
+  assert.match(script, /Monitor CI and reviews on this PR's current head/);
+  assert.match(
+    script,
+    /After a refresh or CI reconciliation, re-check the new head/,
+  );
+});
+
 test('release preparation delegates duplicated broad checks to PR CI', () => {
   const ciWorkflow = YAML.parse(
     readFileSync(join(repoRoot, '.github/workflows/CI.yml'), 'utf8'),

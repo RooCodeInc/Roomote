@@ -106,6 +106,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
+  instanceSkills: { listForRuntime: vi.fn().mockResolvedValue([]) },
   sdk: {
     taskRuns: {
       done: taskRunsDoneMock,

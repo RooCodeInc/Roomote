@@ -142,13 +142,14 @@ describe('NavbarDrawer', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('hides automations from non-admins', () => {
+  it('shows automations to members', () => {
     state.user.isAdmin = false;
 
     render(<NavbarDrawer />);
 
-    expect(
-      screen.queryByRole('link', { name: /automations/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /automations/i })).toHaveAttribute(
+      'href',
+      '/automations',
+    );
   });
 });

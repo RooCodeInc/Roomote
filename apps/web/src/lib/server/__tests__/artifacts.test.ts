@@ -3,6 +3,7 @@ import {
   sessionFactory,
   taskArtifacts,
   taskFactory,
+  userFactory,
 } from '@roomote/db/server';
 
 import {
@@ -17,7 +18,7 @@ describe.each(['task', 'session'] as const)(
   (scope) => {
     let ownerId: string;
     const path = 'reports/result.pdf';
-    const auth = { userId: null, isAdmin: false };
+    const auth = { userId: '', isAdmin: false };
 
     function lookup(artifactPath = path, version?: number) {
       return scope === 'task'
@@ -36,6 +37,7 @@ describe.each(['task', 'session'] as const)(
     }
 
     beforeEach(async () => {
+      auth.userId = (await userFactory.create()).id;
       ownerId =
         scope === 'task'
           ? (await taskFactory.create()).id

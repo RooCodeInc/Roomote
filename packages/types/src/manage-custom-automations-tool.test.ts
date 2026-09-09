@@ -22,7 +22,19 @@ describe('manage custom automations tool contract', () => {
       'manage_custom_automations',
     );
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
-      'Admin-only management of deployment custom automations.',
+      'Members can create and manage their own custom automations',
+    );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      'admins can manage all custom automations, including those without a creator',
+    );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      'The server enforces ownership',
+    );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      'Built-in automations and deployment settings remain admin-only',
+    );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).not.toContain(
+      'Admin-only management of deployment custom automations',
     );
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
       "inspect one automation's configured prompt by exact ID",

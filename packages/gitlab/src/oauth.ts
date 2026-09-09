@@ -208,6 +208,7 @@ export async function exchangeGitLabOAuthCode(input: {
     tokenEndpoint(input.baseUrl),
     {
       method: 'POST',
+      redirect: 'error',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -247,7 +248,13 @@ export async function exchangeGitLabOAuthCode(input: {
   try {
     const userResponse = await (input.fetchImpl ?? fetch)(
       new URL('api/v4/user', `${input.baseUrl.replace(/\/$/, '')}/`),
-      { headers: { Authorization: `Bearer ${connection.accessToken}` } },
+      {
+        headers: { Authorization: `Bearer ${connection.accessToken}` },
+        redirect: 'error',
+        signal: AbortSignal.timeout(
+          input.requestTimeoutMs ?? GITLAB_OAUTH_REQUEST_TIMEOUT_MS,
+        ),
+      },
     );
     if (userResponse.ok) {
       const user = (await userResponse.json()) as {
@@ -273,6 +280,7 @@ async function refreshGitLabOAuthConnection(
     tokenEndpoint(connection.baseUrl),
     {
       method: 'POST',
+      redirect: 'error',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/x-www-form-urlencoded',

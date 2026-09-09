@@ -1,11 +1,22 @@
 import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import {
+  getBitbucketOAuthConnection,
+  resolveBitbucketInstanceHost,
+} from '@roomote/bitbucket';
+import {
+  and,
   beginSlackFastIntegrationCall,
   completeSlackFastIntegrationCall,
   db,
+  deploymentSecrets,
+  eq,
   githubInstallations,
   isNull,
+  repositories,
+  users,
 } from '@roomote/db/server';
+import { resolveGitLabInstanceHost } from '@roomote/gitlab';
 import {
   createMemoryMcpInstructions,
   MCP_INTEGRATION_PROXY_PATH_PREFIX,
@@ -242,8 +253,8 @@ export function clearFastAgentIntegrationToolCache(): void {
 
 function integrationProxyUrl(baseUrl: string, integrationId: string): string {
   const relativePath =
-    integrationId === 'github'
-      ? 'api/mcp-routing/github'
+    integrationId === 'github' || integrationId === 'gitlab'
+      ? `api/mcp-routing/${integrationId}`
       : `api/mcp/${encodeURIComponent(integrationId)}`;
   return new URL(relativePath, `${baseUrl}/`).toString();
 }
@@ -255,7 +266,7 @@ function describeMcpServer(
     return {
       name: 'Roomote',
       description:
-        'Manage this Roomote deployment, including custom automations and other deployment capabilities.',
+        'Manage this Roomote deployment, including custom skills, custom automations, and other deployment capabilities.',
     };
   }
   if (isMemoryMcpServer(id)) {
@@ -325,6 +336,57 @@ async function resolveBrokerAuth(context: BrokerContext) {
   };
 }
 
+async function hasGitLabDiscoveryConnection(): Promise<boolean> {
+  if (Env.R_CURATED_INTEGRATIONS_DISABLED) {
+    return false;
+  }
+  const host = await resolveGitLabInstanceHost();
+  const [repository, connection] = await Promise.all([
+    db.query.repositories.findFirst({
+      where: and(
+        eq(repositories.sourceControlProvider, 'gitlab'),
+        eq(repositories.isActive, true),
+        eq(repositories.host, host),
+      ),
+      columns: { id: true },
+    }),
+    db.query.deploymentSecrets.findFirst({
+      where: eq(deploymentSecrets.name, 'gitlab_deployment_oauth_connection'),
+      columns: { name: true },
+    }),
+  ]);
+  return Boolean(repository && connection);
+}
+
+async function isBitbucketAvailable(userId: string): Promise<boolean> {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED))
+    return false;
+  const connection = await getBitbucketOAuthConnection();
+  if (connection?.status !== 'active') return false;
+  const host = await resolveBitbucketInstanceHost();
+  if (host !== 'bitbucket.org' && host !== 'www.bitbucket.org') return false;
+
+  const [member, repository] = await Promise.all([
+    db.query.users.findFirst({
+      where: and(eq(users.id, userId), isNull(users.deletedAt)),
+      columns: { role: true },
+    }),
+    db.query.repositories.findFirst({
+      where: and(
+        eq(repositories.sourceControlProvider, 'bitbucket'),
+        eq(repositories.host, host),
+        eq(repositories.isActive, true),
+      ),
+      columns: { externalRepoId: true },
+    }),
+  ]);
+  return !!(
+    member &&
+    ['admin', 'member'].includes(member.role) &&
+    repository?.externalRepoId
+  );
+}
+
 /**
  * Actor-resolved remote MCP servers only. Local transports and filesystem
  * tools remain sandbox-only. Tools disabled by the deployment remain
@@ -344,7 +406,12 @@ export async function listFastAgentIntegrations(
   const configuredServersPromise: Promise<
     Record<string, FastAgentMcpServerConfig>
   > = resolveMcpServerConfigs?.() ?? Promise.resolve({});
-  const [configuredServers, githubInstallation] = await Promise.all([
+  const [
+    configuredServers,
+    githubInstallation,
+    gitlabConnection,
+    bitbucketAvailable,
+  ] = await Promise.all([
     configuredServersPromise,
     isRouterMcpServerEnabled('github')
       ? db.query.githubInstallations.findFirst({
@@ -352,9 +419,16 @@ export async function listFastAgentIntegrations(
           columns: { id: true },
         })
       : Promise.resolve(undefined),
+    hasGitLabDiscoveryConnection().catch(() => false),
+    isBitbucketAvailable(context.userId),
   ]);
 
-  if (Object.keys(configuredServers).length === 0 && !githubInstallation) {
+  if (
+    Object.keys(configuredServers).length === 0 &&
+    !githubInstallation &&
+    !gitlabConnection &&
+    !bitbucketAvailable
+  ) {
     return [];
   }
 
@@ -378,9 +452,39 @@ export async function listFastAgentIntegrations(
       id: 'github',
       name: 'GitHub',
       description:
-        'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
+        'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App. In active connected repositories, use native update_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, and comment reactions. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
+        headers: { Authorization: `Bearer ${authToken}` },
+        deploymentProxy: true,
+      },
+      disabledTools: new Set<string>(),
+    });
+  }
+
+  if (gitlabConnection && !configuredServers.gitlab) {
+    candidates.push({
+      id: 'gitlab',
+      name: 'GitLab',
+      description:
+        'Read connected GitLab repositories and commit history, inspect merge requests, and make bounded merge request updates and comments. Access is authorized on each request.',
+      endpoint: {
+        url: integrationProxyUrl(apiBaseUrl, 'gitlab'),
+        headers: { Authorization: `Bearer ${authToken}` },
+        deploymentProxy: true,
+      },
+      disabledTools: new Set<string>(),
+    });
+  }
+
+  if (bitbucketAvailable && !configuredServers.bitbucket) {
+    candidates.push({
+      id: 'bitbucket',
+      name: 'Bitbucket',
+      description:
+        'Read bounded files, directories, code search, commits, and pull requests from active connected Bitbucket Cloud repositories; update PR titles/descriptions, decline PRs, and add comments or replies.',
+      endpoint: {
+        url: integrationProxyUrl(apiBaseUrl, 'bitbucket'),
         headers: { Authorization: `Bearer ${authToken}` },
         deploymentProxy: true,
       },
