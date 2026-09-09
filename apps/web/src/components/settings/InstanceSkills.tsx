@@ -9,14 +9,16 @@ import type { z } from 'zod';
 import { toast } from 'sonner';
 import { useTRPC } from '@/trpc/client';
 import {
+  BasicTooltip,
   Button,
+  Card,
+  CardContent,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  EmptyState,
   ErrorState,
   Form,
   FormControl,
@@ -32,7 +34,11 @@ import {
 } from '@/components/system';
 
 type SkillDefinition = z.infer<typeof createCustomSkillInputSchema>;
-type Skill = SkillDefinition & { id: string; canManage: boolean };
+type Skill = SkillDefinition & {
+  id: string;
+  canManage: boolean;
+  createdByName?: string | null;
+};
 
 function SkillEditor({
   skill,
@@ -216,40 +222,94 @@ export function InstanceSkills({
   return (
     <>
       {list.isPending ? (
-        <div className="space-y-2">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-16 w-full" />
-        </div>
+        <Card variant="snug" data-testid="shared-skills-skeleton">
+          <CardContent>
+            <div className="divide-y divide-background">
+              {Array.from({ length: 2 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
+                >
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-3 w-full max-w-lg" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : list.isError ? (
         <ErrorState
           title="Failed to load skills"
           description={list.error.message}
         />
       ) : list.data.length === 0 ? (
-        <EmptyState
-          title="No shared skills yet"
-          description="Add a skill to share reusable instructions with your team."
-        />
+        <p className="text-sm text-muted-foreground">
+          No shared skills yet. Add a skill to share reusable instructions with
+          your team.
+        </p>
       ) : (
-        <ul className="divide-y" aria-label="Shared skills">
-          {list.data.map((skill) => (
-            <li key={skill.id} className="py-3">
-              <button
-                type="button"
-                className="block w-full min-w-0 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => setViewing(skill)}
-                aria-label={`View ${skill.name}`}
-              >
-                <span className="block break-words font-medium hover:underline">
-                  {skill.name}
-                </span>
-                <span className="line-clamp-2 break-words text-sm text-muted-foreground">
-                  {skill.description}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <Card variant="snug">
+          <CardContent>
+            <ul
+              className="divide-y divide-background"
+              aria-label="Shared skills"
+            >
+              {list.data.map((skill) => (
+                <li
+                  key={skill.id}
+                  className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0"
+                >
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 space-y-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => setViewing(skill)}
+                    aria-label={`View ${skill.name}`}
+                  >
+                    <span className="block break-words text-sm font-semibold hover:underline">
+                      {skill.name}
+                    </span>
+                    <span className="line-clamp-2 break-words text-sm text-muted-foreground">
+                      {skill.description}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      Created by {skill.createdByName ?? 'Unknown'}
+                    </span>
+                  </button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    {skill.canManage ? (
+                      <>
+                        <BasicTooltip content="Edit">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            aria-label={`Edit ${skill.name}`}
+                            onClick={() => setEditor({ skill })}
+                          >
+                            <Pencil />
+                          </Button>
+                        </BasicTooltip>
+                        <BasicTooltip content="Delete">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            aria-label={`Delete ${skill.name}`}
+                            onClick={() => setDeleting(skill)}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </BasicTooltip>
+                      </>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       )}
       {editor ? (
         <SkillEditor skill={editor.skill} onClose={() => setEditor(null)} />
@@ -270,29 +330,6 @@ export function InstanceSkills({
             {viewing?.content}
           </pre>
           <DialogFooter>
-            {viewing?.canManage ? (
-              <>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setDeleting(viewing);
-                    setViewing(null);
-                  }}
-                  aria-label={`Delete ${viewing.name}`}
-                >
-                  <Trash2 /> Delete
-                </Button>
-                <Button
-                  onClick={() => {
-                    setEditor({ skill: viewing });
-                    setViewing(null);
-                  }}
-                  aria-label={`Edit ${viewing.name}`}
-                >
-                  <Pencil /> Edit
-                </Button>
-              </>
-            ) : null}
             <Button variant="outline" onClick={() => setViewing(null)}>
               Close
             </Button>

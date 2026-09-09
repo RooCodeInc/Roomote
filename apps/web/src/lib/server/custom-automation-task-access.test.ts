@@ -305,6 +305,91 @@ describe('custom automation task history access', () => {
     expect(await canAccessTask(otherAuth, task.id)).toBe(true);
   });
 
+  it('limits member creator options to self and owned custom automations without changing admin options', async () => {
+    const { task, automation, ownerAuth, otherAuth, adminAuth } =
+      await fixture();
+    const repositoryName = `filter-options/${task.id}`;
+    await db.update(tasks).set({ repositoryName }).where(eq(tasks.id, task.id));
+    const [otherAutomation, creatorlessAutomation] = await db
+      .insert(customAutomations)
+      .values([
+        {
+          name: 'Other automation',
+          prompt: 'Report',
+          createdByUserId: otherAuth.userId,
+        },
+        {
+          name: 'Creatorless automation',
+          prompt: 'Report',
+          createdByUserId: null,
+        },
+      ])
+      .returning();
+    // Settings suites delete user-facing automation rows in the shared test DB.
+    await db
+      .insert(automations)
+      .values({ key: 'snapshot_refresh' })
+      .onConflictDoNothing();
+    for (const initiatorUserId of [ownerAuth.userId, otherAuth.userId]) {
+      await taskFactory.create({
+        repositoryName,
+        initiatorKind: 'user',
+        initiatorUserId,
+      });
+    }
+    for (const record of [otherAutomation!, creatorlessAutomation!]) {
+      const automationTask = await taskFactory.create({
+        repositoryName,
+        initiatorKind: 'automation',
+        initiatorAutomation: 'custom_automation',
+        actorExternalId: record.id,
+        actorDisplayName: record.name,
+      });
+      // Run-as identity must not substitute for creator ownership.
+      await runFactory.create({
+        taskId: automationTask.id,
+        actingUserId: ownerAuth.userId,
+      });
+    }
+    await taskFactory.create({
+      repositoryName,
+      initiatorKind: 'automation',
+      initiatorAutomation: 'snapshot_refresh',
+    });
+    await taskFactory.create({
+      repositoryName,
+      initiatorKind: 'user',
+      initiatorUserId: null,
+      surface: 'slack',
+      actorExternalId: 'external-member',
+      actorDisplayName: 'External member',
+    });
+    const input = { repositoryName };
+    const memberValues = (
+      await getUsersOnlyForFilterCommand(ownerAuth, input)
+    ).map((option) => option.value);
+    expect(memberValues.sort()).toEqual(
+      [
+        ownerAuth.userId,
+        `automation:custom_automation:${automation.id}`,
+      ].sort(),
+    );
+    const adminValues = (
+      await getUsersOnlyForFilterCommand(adminAuth, input)
+    ).map((option) => option.value);
+    expect(adminValues).toHaveLength(7);
+    expect(adminValues).toEqual(
+      expect.arrayContaining([
+        ownerAuth.userId,
+        otherAuth.userId,
+        `automation:custom_automation:${automation.id}`,
+        `automation:custom_automation:${otherAutomation!.id}`,
+        `automation:custom_automation:${creatorlessAutomation!.id}`,
+        'automation:snapshot_refresh',
+      ]),
+    );
+  });
+
   it('gates guessed detail, messages, events and artifact IDs despite participation', async () => {
     const { task, artifact, ownerAuth, otherAuth, adminAuth } = await fixture();
     await expect(
