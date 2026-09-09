@@ -4,11 +4,98 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { REFUSED_ENV_REFERENCE_PLACEHOLDER } from '@roomote/types';
+import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
+import { resolveBuiltInMcpServers } from '../../../../commands/setup/setup-mcps';
 
 import { DEFAULT_OPENCODE_CLI_VERSION } from '../../../../commands/setup/shared-runtime-packages';
 import { writeOpenCodePluginSeedFixture } from '../opencode-server/seed-opencode-plugin-deps';
 
 describe('opencode-server bootstrap', () => {
+  it.each([
+    [undefined, false],
+    ['https://operator.example/custom/api/mcp/http-integrations', false],
+    ['https://api.test/_roomote-api/api/mcp/http-integrations', false],
+    ['https://operator.example/custom/api/mcp/http-integrations', true],
+    ['https://api.test/_roomote-api/api/mcp/http-integrations', true],
+  ] as const)(
+    'preserves broker provenance through real setup and bootstrap: %s (spoof: %s)',
+    async (operatorUrl, spoof) => {
+      const { prepareOpenCodeCommandEnv } =
+        await import('../opencode-server/bootstrap');
+      const homeDir = createTempHome();
+      const originalTrpcUrl = process.env.TRPC_URL;
+      process.env.TRPC_URL = 'https://api.test/_roomote-api';
+      try {
+        const operator = operatorUrl
+          ? {
+              _roomote_http_integrations: {
+                url: operatorUrl,
+                ...(spoof
+                  ? { roomoteManaged: 'http-integrations-broker' }
+                  : {}),
+              },
+            }
+          : undefined;
+        const servers = resolveBuiltInMcpServers(
+          { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+          {
+            userMcpServers: {
+              _roomote_http_integrations: { url: '/api/mcp/http-integrations' },
+            },
+          },
+          operator,
+        );
+        const { commandEnv } = await prepareOpenCodeCommandEnv({
+          runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
+          workspacePath: homeDir,
+          mcpServers: servers,
+          logger: createLogger(),
+        });
+        const config = JSON.parse(commandEnv.OPENCODE_CONFIG_CONTENT!);
+        expect(commandEnv.OPENCODE_CONFIG_CONTENT).not.toContain(
+          'roomoteManaged',
+        );
+        const configDir = path.join(homeDir, '.config', 'opencode');
+        const instructions = fs.readFileSync(
+          path.join(configDir, 'roomote-opencode-integration-instructions.md'),
+          'utf8',
+        );
+        if (operatorUrl) {
+          expect(servers._roomote_http_integrations).not.toHaveProperty(
+            'roomoteManaged',
+          );
+          expect(config.mcp).not.toHaveProperty('_roomote_http_integrations');
+          expect(instructions).not.toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
+          const catalog = fs.readFileSync(
+            path.join(configDir, 'on-demand-mcp-servers.json'),
+            'utf8',
+          );
+          expect(JSON.parse(catalog).servers).toContainEqual({
+            name: '_roomote_http_integrations',
+            displayName: '_roomote_http_integrations',
+            url: operatorUrl,
+          });
+          expect(catalog).not.toContain('roomoteManaged');
+        } else {
+          expect(servers._roomote_http_integrations).toHaveProperty(
+            'roomoteManaged',
+            'http-integrations-broker',
+          );
+          expect(config.mcp._roomote_http_integrations).toMatchObject({
+            type: 'remote',
+            url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
+          });
+          expect(instructions).toContain(HTTP_INTEGRATIONS_INSTRUCTIONS);
+          expect(
+            fs.existsSync(path.join(configDir, 'on-demand-mcp-servers.json')),
+          ).toBe(false);
+        }
+      } finally {
+        if (originalTrpcUrl === undefined) delete process.env.TRPC_URL;
+        else process.env.TRPC_URL = originalTrpcUrl;
+      }
+    },
+  );
   const tempDirs: string[] = [];
   // Pinned literal contract: the Slack-posting tools excluded from every
   // generated subagent config and the built-in general agent (see

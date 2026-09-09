@@ -27,6 +27,7 @@ const sdk = {
 };
 
 export { sdk };
+export * from './http-integrations';
 export {
   detectPullRequestsFromToolResultEnvelope,
   parsePRFromOutput,

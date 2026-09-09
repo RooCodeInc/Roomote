@@ -695,6 +695,31 @@ repositories:
   });
 
   describe('mcpServers', () => {
+    it.each([
+      {
+        url: 'https://mcp.example.com',
+        headers: { Authorization: '${MCP_TOKEN}' },
+      },
+      {
+        command: 'npx',
+        args: ['operator-mcp'],
+        env: { TOKEN: '${MCP_TOKEN}' },
+      },
+    ])(
+      'preserves existing environment servers named _roomote_http_integrations: %j',
+      (config) => {
+        const result = environmentConfigSchema.parse({
+          name: 'Env',
+          repositories: [{ repository: 'owner/repo' }],
+          mcpServers: { _roomote_http_integrations: config },
+        });
+
+        expect(result.mcpServers).toEqual({
+          _roomote_http_integrations: config,
+        });
+      },
+    );
+
     it('should accept streamable-http and stdio MCP server configs', () => {
       const result = environmentConfigSchema.safeParse({
         name: 'Env',

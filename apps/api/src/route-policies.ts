@@ -314,7 +314,8 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   },
 
   // Worker/agent MCP surface. `mcpAuthMiddleware` and the per-integration
-  // resolvers apply finer-grained token-type checks per endpoint.
+  // resolvers apply finer-grained token-type checks per endpoint, including
+  // the opt-in /api/mcp/http-integrations broker (active member/run actor required).
   {
     name: 'mcp',
     match: { type: 'prefix', path: '/api/mcp' },

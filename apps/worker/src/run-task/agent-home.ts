@@ -2,6 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 
+import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
+import { HTTP_INTEGRATIONS_BROKER } from '../mcp-provenance';
+
 import {
   createRoomoteAdvisorAgentPrompt,
   createRoomoteJudgeAgentPrompt,
@@ -666,6 +669,7 @@ interface GenerateOpenCodeConfigResult {
 
 export interface OpenCodeRemoteMcpServerConfig {
   type: 'remote';
+  roomoteManaged?: typeof HTTP_INTEGRATIONS_BROKER;
   name: string;
   url: string;
   headers?: Record<string, string>;
@@ -683,6 +687,13 @@ export type OpenCodeConfigMcpServer =
   | OpenCodeRemoteMcpServerConfig
   | OpenCodeLocalMcpServerConfig;
 
+function isHttpIntegrationsBroker(mcpServer: OpenCodeConfigMcpServer): boolean {
+  return (
+    mcpServer.type === 'remote' &&
+    mcpServer.roomoteManaged === HTTP_INTEGRATIONS_BROKER
+  );
+}
+
 /**
  * Composes agent-facing usage guidance for attached built-in MCP integrations.
  * Integration catalog entries can declare `instructions` describing when the
@@ -692,8 +703,8 @@ export type OpenCodeConfigMcpServer =
  */
 /**
  * Remote deployment MCP servers other than the Roomote member server and
- * memory servers are not mounted into OpenCode when the Roomote member server
- * is present to reach them. Mounting puts every tool schema into every model
+ * memory servers and HTTP integrations are not mounted into OpenCode when the
+ * Roomote member server is present to reach them. Mounting puts every tool schema into every model
  * request (on a deployment with eight servers, roughly 50k tokens per request);
  * on-demand servers are listed for the agent and reached through the member
  * server's find_integration_tools and call_integration_tool instead. Local
@@ -717,6 +728,7 @@ function splitOnDemandMcpServers(
     (mcpServer): mcpServer is OpenCodeRemoteMcpServerConfig =>
       mcpServer.type === 'remote' &&
       mcpServer.name !== ROOMOTE_MCP_SERVER_NAME &&
+      !isHttpIntegrationsBroker(mcpServer) &&
       !isMemoryMcpServer(mcpServer.name),
   );
   const onDemandNames = new Set(onDemand.map((mcpServer) => mcpServer.name));
@@ -746,13 +758,14 @@ function writeOnDemandMcpCatalog(
   onDemand: OpenCodeRemoteMcpServerConfig[],
   runtimeEnv: Record<string, string | undefined>,
 ): string | undefined {
-  if (onDemand.length === 0) {
-    return undefined;
-  }
   const catalogPath = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_ON_DEMAND_MCP_CATALOG_FILE_NAME,
   );
+  if (onDemand.length === 0) {
+    fs.rmSync(catalogPath, { force: true });
+    return undefined;
+  }
   const servers = onDemand.map((mcpServer) => {
     const integration = getMcpIntegration(mcpServer.name);
     return {
@@ -808,6 +821,10 @@ export function createIntegrationMcpInstructions(
 ): string | undefined {
   let hasPrimaryMemory = false;
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
+    if (isHttpIntegrationsBroker(mcpServer)) {
+      return [HTTP_INTEGRATIONS_INSTRUCTIONS];
+    }
+
     if (isMemoryMcpServer(mcpServer.name)) {
       const primary = !hasPrimaryMemory;
       hasPrimaryMemory = true;
@@ -2053,17 +2070,19 @@ export function generateOpenCodeConfig({
       .filter((content): content is string => Boolean(content))
       .join('\n') || undefined;
 
+  const integrationInstructionsPath = path.join(
+    openCodeConfigDir,
+    ROOMOTE_OPENCODE_INTEGRATION_INSTRUCTIONS_FILE_NAME,
+  );
   if (integrationInstructionsContent) {
-    const integrationInstructionsPath = path.join(
-      openCodeConfigDir,
-      ROOMOTE_OPENCODE_INTEGRATION_INSTRUCTIONS_FILE_NAME,
-    );
     fs.writeFileSync(
       integrationInstructionsPath,
       integrationInstructionsContent,
       'utf8',
     );
     instructions.push(integrationInstructionsPath);
+  } else {
+    fs.rmSync(integrationInstructionsPath, { force: true });
   }
 
   const mcpConfig = createOpenCodeMcpConfig(
