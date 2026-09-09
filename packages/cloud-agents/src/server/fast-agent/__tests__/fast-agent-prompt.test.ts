@@ -1283,6 +1283,12 @@ describe('buildFastAgentSystemPrompt', () => {
       'The reacted-to message is context, not the current message surface',
     );
     expect(prompt).toContain(
+      'render as Slack native Block Kit data visualization blocks',
+    );
+    expect(prompt).toContain(
+      'Do not describe them as web-only, claim that Slack lacks native chart blocks',
+    );
+    expect(prompt).toContain(
       'Do not call `send_chat_reaction` or `retry_task_start`',
     );
     expect(prompt).not.toContain('`send_chat_reaction` with purpose `ack`');

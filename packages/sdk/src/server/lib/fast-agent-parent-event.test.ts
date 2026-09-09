@@ -811,6 +811,59 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
 
+  it('delivers charts from queued Slack human follow-ups as native blocks', async () => {
+    const chart = {
+      title: 'Weekly signups',
+      chart: {
+        type: 'line' as const,
+        series: [
+          {
+            name: 'Signups',
+            data: [
+              { label: 'Week 1', value: 12 },
+              { label: 'Week 2', value: 18 },
+            ],
+          },
+        ],
+        axis_config: { categories: ['Week 1', 'Week 2'] },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'Signups increased.',
+        charts: [chart],
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'human_follow_up',
+        eventId: '100.004',
+        currentMessageId: '100.004',
+        userId: 'u1',
+        question: 'Show the chart in Slack.',
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '100.001',
+        text: 'Signups increased.',
+        blocks: [
+          { type: 'markdown', text: 'Signups increased.' },
+          { type: 'data_visualization', ...chart },
+          expect.objectContaining({
+            type: 'context',
+            block_id: 'roomote_thread_reply_footer',
+          }),
+        ],
+      }),
+    );
+  });
+
   it('keeps child lifecycle text private until the Fast parent composes a reply', async () => {
     const childEvent = {
       type: 'child_message' as const,
@@ -925,6 +978,27 @@ describe('deliverFastAgentParentEvent', () => {
   });
 
   it('updates the Slack root for a channel-backed automation turn', async () => {
+    const chart = {
+      title: 'Weekly findings',
+      chart: {
+        type: 'bar' as const,
+        series: [
+          {
+            name: 'Findings',
+            data: [{ label: 'This week', value: 4 }],
+          },
+        ],
+        axis_config: { categories: ['This week'] },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'The report is ready.',
+        charts: [chart],
+      }),
+    );
+
     await deliverFastAgentParentEvent({
       parent,
       event: {
@@ -942,7 +1016,7 @@ describe('deliverFastAgentParentEvent', () => {
       channel: 'C123',
       ts: '100.001',
       message: {
-        text: 'The proof is ready.',
+        text: 'The report is ready.',
         blocks: [
           expect.objectContaining({
             type: 'context',
@@ -950,7 +1024,8 @@ describe('deliverFastAgentParentEvent', () => {
               expect.objectContaining({ text: 'Weekly scan' }),
             ]),
           }),
-          { type: 'markdown', text: 'The proof is ready.' },
+          { type: 'markdown', text: 'The report is ready.' },
+          { type: 'data_visualization', ...chart },
           expect.objectContaining({
             type: 'actions',
             elements: [

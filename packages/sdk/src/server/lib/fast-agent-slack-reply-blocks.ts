@@ -1,6 +1,7 @@
 import {
   buildDataVisualizationBlocks,
   type DataVisualizationInput,
+  type SlackBlock,
 } from '@roomote/types';
 
 import { ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID } from '@roomote/slack';
@@ -12,7 +13,7 @@ export function buildFastAgentSlackReplyBodyBlocks(params: {
   quote?: string | null;
   charts?: DataVisualizationInput[];
   images?: Array<{ url: string; altText: string }>;
-}): unknown[] {
+}): SlackBlock[] {
   const leadingBlocks = [
     ...(params.quote
       ? [
