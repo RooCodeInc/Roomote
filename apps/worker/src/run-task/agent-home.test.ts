@@ -24,7 +24,7 @@ describe('createIntegrationMcpInstructions', () => {
       createIntegrationMcpInstructions([
         {
           type: 'remote',
-          name: 'http-integrations',
+          name: '_roomote_http_integrations',
           url: 'https://api.test/api/mcp/http-integrations',
         },
       ]),
@@ -33,8 +33,17 @@ describe('createIntegrationMcpInstructions', () => {
     expect(
       createIntegrationMcpInstructions([
         {
-          type: 'local',
+          type: 'remote',
           name: 'http-integrations',
+          url: 'https://api.test/api/mcp/custom/server-1',
+        },
+      ]),
+    ).toBeUndefined();
+    expect(
+      createIntegrationMcpInstructions([
+        {
+          type: 'local',
+          name: '_roomote_http_integrations',
           command: 'unrelated-server',
         },
       ]),
@@ -157,7 +166,7 @@ describe('generateOpenCodeConfig provider support', () => {
           roomote,
           {
             type: 'remote',
-            name: 'http-integrations',
+            name: '_roomote_http_integrations',
             url: 'https://api.test/api/mcp/http-integrations',
             headers: {
               Authorization:
@@ -172,7 +181,7 @@ describe('generateOpenCodeConfig provider support', () => {
         ],
       });
       const config = JSON.parse(result.configContent);
-      expect(config.mcp['http-integrations']).toMatchObject({
+      expect(config.mcp._roomote_http_integrations).toMatchObject({
         type: 'remote',
         url: 'https://api.test/api/mcp/http-integrations',
       });
@@ -200,7 +209,7 @@ describe('generateOpenCodeConfig provider support', () => {
         mcpServers: [roomote],
       });
       expect(JSON.parse(refreshed.configContent).mcp).not.toHaveProperty(
-        'http-integrations',
+        '_roomote_http_integrations',
       );
       expect(existsSync(instructionsPath)).toBe(false);
       expect(existsSync(catalogPath)).toBe(false);

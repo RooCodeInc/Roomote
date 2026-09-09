@@ -41,7 +41,10 @@ describe('createActorScopedMcpRefresher', () => {
     });
     mockGetMcpServerConfigs.mockResolvedValueOnce({
       servers: {
-        'http-integrations': { url: '/api/mcp/http-integrations', headers: {} },
+        _roomote_http_integrations: {
+          url: '/api/mcp/http-integrations',
+          headers: {},
+        },
       },
     });
     expect(await refresh('actor-user')).toMatchObject({
@@ -53,7 +56,8 @@ describe('createActorScopedMcpRefresher', () => {
       ROOMOTE_CLOUD_TOKEN: 'current-run-token',
     };
     expect(
-      resolveBuiltInMcpServers(taskEnv, integrations)['http-integrations'],
+      resolveBuiltInMcpServers(taskEnv, integrations)
+        ._roomote_http_integrations,
     ).toMatchObject({
       type: 'streamable-http',
       headers: { Authorization: 'Bearer current-run-token' },
@@ -65,7 +69,7 @@ describe('createActorScopedMcpRefresher', () => {
     });
     expect(integrations.userMcpServers).toBeUndefined();
     expect(resolveBuiltInMcpServers(taskEnv, integrations)).not.toHaveProperty(
-      'http-integrations',
+      '_roomote_http_integrations',
     );
     expect(requestReconnect).toHaveBeenCalledTimes(2);
   });

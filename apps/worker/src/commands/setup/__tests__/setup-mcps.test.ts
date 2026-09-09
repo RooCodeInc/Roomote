@@ -59,9 +59,11 @@ describe('resolveBuiltInMcpServers', () => {
           R_HTTP_INTEGRATIONS_CONFIG: 'server-only-config',
           HTTP_PROXY: 'http://upstream.test',
         },
-        { userMcpServers: { 'http-integrations': { url, headers: {} } } },
+        {
+          userMcpServers: { _roomote_http_integrations: { url, headers: {} } },
+        },
       );
-      expect(servers['http-integrations']).toEqual({
+      expect(servers._roomote_http_integrations).toEqual({
         type: 'streamable-http',
         url: 'https://api.test/_roomote-api/api/mcp/http-integrations',
         headers: { Authorization: 'Bearer run-token' },
@@ -75,7 +77,9 @@ describe('resolveBuiltInMcpServers', () => {
 
   it('omits HTTP integrations without server presence even with a launcher flag', () => {
     process.env.R_HTTP_INTEGRATIONS_ENABLED = 'true';
-    expect(resolveBuiltInMcpServers()).not.toHaveProperty('http-integrations');
+    expect(resolveBuiltInMcpServers()).not.toHaveProperty(
+      '_roomote_http_integrations',
+    );
   });
 
   it.each<{ taskEnv: Record<string, string>; url: string }>([
@@ -100,11 +104,36 @@ describe('resolveBuiltInMcpServers', () => {
       delete process.env.TRPC_URL;
       expect(
         resolveBuiltInMcpServers(taskEnv, {
-          userMcpServers: { 'http-integrations': { url, headers: {} } },
+          userMcpServers: { _roomote_http_integrations: { url, headers: {} } },
         }),
-      ).not.toHaveProperty('http-integrations');
+      ).not.toHaveProperty('_roomote_http_integrations');
     },
   );
+
+  it('routes a persisted http-integrations custom server through its custom proxy', () => {
+    process.env.TRPC_URL = 'https://api.test/_roomote-api';
+    const servers = resolveBuiltInMcpServers(
+      { ROOMOTE_CLOUD_TOKEN: 'run-token' },
+      {
+        userMcpServers: {
+          'http-integrations': {
+            url: '/api/mcp/custom/server-1',
+            headers: { 'X-MCP-Client': 'Roomote' },
+          },
+        },
+      },
+    );
+
+    expect(servers['http-integrations']).toEqual({
+      type: 'streamable-http',
+      url: 'https://api.test/_roomote-api/api/mcp/custom/server-1',
+      headers: {
+        'X-MCP-Client': 'Roomote',
+        Authorization: 'Bearer run-token',
+      },
+    });
+    expect(servers).not.toHaveProperty('_roomote_http_integrations');
+  });
 
   it('merges custom environment MCP servers', () => {
     const parsed = {

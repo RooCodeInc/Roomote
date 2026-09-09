@@ -260,7 +260,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     expect(await caller.getMcpServerConfigs()).toEqual({ servers: {} });
     mockEnv.R_HTTP_INTEGRATIONS_ENABLED = true;
     const expected = {
-      'http-integrations': {
+      _roomote_http_integrations: {
         url: 'https://api.example.com/api/mcp/http-integrations',
         headers: {},
       },
@@ -1041,6 +1041,7 @@ describe('custom MCP server delivery', () => {
     mockFindConnectionFirst.mockResolvedValue(undefined);
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
     mockEnv.R_CUSTOM_MCP_DISABLED = false;
+    mockEnv.R_HTTP_INTEGRATIONS_ENABLED = false;
   });
 
   const remoteRow = {
@@ -1051,6 +1052,43 @@ describe('custom MCP server delivery', () => {
     stdio: null,
     enabled: true,
   };
+
+  it.each([false, true])(
+    'preserves persisted http-integrations custom delivery with broker enabled=%s',
+    async (enabled) => {
+      mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
+      mockEnv.R_HTTP_INTEGRATIONS_ENABLED = enabled;
+      mockFindCustomServers.mockResolvedValue([
+        { ...remoteRow, name: 'http-integrations' },
+      ]);
+      const expected = {
+        'http-integrations': {
+          url: 'https://api.example.com/api/mcp/custom/server-uuid-1',
+          headers: { 'X-MCP-Client': 'Roomote' },
+        },
+        ...(enabled
+          ? {
+              _roomote_http_integrations: {
+                url: 'https://api.example.com/api/mcp/http-integrations',
+                headers: {},
+              },
+            }
+          : {}),
+      };
+
+      expect(
+        await createJobCaller(
+          'https://api.example.com/trpc',
+        ).getMcpServerConfigs(),
+      ).toEqual({ servers: expected });
+      expect(
+        await resolveUserMcpServerConfigs({
+          userId: 'user-1',
+          apiBaseUrl: 'https://api.example.com',
+        }),
+      ).toEqual(expected);
+    },
+  );
 
   it('delivers custom proxy entries even when curated integrations are disabled', async () => {
     mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;

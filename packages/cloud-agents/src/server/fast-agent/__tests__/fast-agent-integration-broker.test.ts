@@ -94,7 +94,7 @@ describe('fast-agent integration broker', () => {
 
   it('discovers only HTTP integration infrastructure and schemas, audits the fresh actor, and refreshes availability', async () => {
     mocks.configuredServers = {
-      'http-integrations': {
+      _roomote_http_integrations: {
         url: 'https://api.example.com/api/mcp/http-integrations',
         headers: {},
       },
@@ -105,7 +105,7 @@ describe('fast-agent integration broker', () => {
     ]);
     const available = await listFastAgentIntegrations(auditContext);
     expect(available[0]).toMatchObject({
-      id: 'http-integrations',
+      id: '_roomote_http_integrations',
       name: 'HTTP integrations',
     });
     expect(available).toHaveLength(1);
@@ -168,7 +168,7 @@ describe('fast-agent integration broker', () => {
         { ...auditContext, userId: 'current-actor' },
         available,
         {
-          integrationId: 'http-integrations',
+          integrationId: '_roomote_http_integrations',
           toolName: 'integration_request',
           args,
         },
@@ -177,7 +177,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'current-actor',
-        integrationId: 'http-integrations',
+        integrationId: '_roomote_http_integrations',
         arguments: args,
       }),
     );
@@ -199,11 +199,38 @@ describe('fast-agent integration broker', () => {
     expect(refreshed).toEqual([]);
     await expect(
       callFastAgentIntegration(auditContext, refreshed, {
-        integrationId: 'http-integrations',
+        integrationId: '_roomote_http_integrations',
         toolName: 'list_integrations',
         args: {},
       }),
     ).rejects.toThrow('not available');
+  });
+
+  it('keeps a custom http-integrations server distinct from broker guidance', async () => {
+    mocks.configuredServers = {
+      'http-integrations': {
+        url: 'https://api.example.com/api/mcp/custom/server-1',
+        headers: { 'X-MCP-Client': 'Roomote' },
+      },
+    };
+
+    const available = await listFastAgentIntegrations(auditContext);
+
+    expect(available).toEqual([
+      expect.objectContaining({
+        id: 'http-integrations',
+        name: 'http-integrations',
+        instructions: undefined,
+        endpoint: {
+          url: 'https://api.example.com/api/mcp/custom/server-1',
+          headers: {
+            'X-MCP-Client': 'Roomote',
+            Authorization: 'Bearer control-plane-token',
+          },
+          deploymentProxy: true,
+        },
+      }),
+    ]);
   });
 
   it('discovers and forwards required Sentry organization scope without injecting a default', async () => {

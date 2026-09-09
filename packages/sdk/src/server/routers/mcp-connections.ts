@@ -141,7 +141,6 @@ async function resolveMcpServerConfigs(options: {
   }
 
   // Reserved infrastructure descriptor, independent of Settings connections.
-  delete servers[HTTP_INTEGRATIONS_MCP_ID];
   if (Env.R_HTTP_INTEGRATIONS_ENABLED) {
     servers[HTTP_INTEGRATIONS_MCP_ID] = {
       url: `${options.requestOrigin ?? ''}${HTTP_INTEGRATIONS_MCP_PATH}`,
