@@ -474,7 +474,7 @@ branch (GitHub Actions workflow runs, GitLab Pipelines, Azure DevOps
 builds, Bitbucket Pipelines, and Gitea Actions). When a failure persists (it is not already fixed by a newer run and is
 not a one-off flake), Roomote starts a fix task that reproduces the failing
 job inside the repository's configured environment, finds the root cause, opens
-a PR with the fix, and posts one summary to the Manager Channel when it
+a PR with the fix, and posts one summary to the configured destination when it
 finishes. Only repositories that belong to a configured Roomote environment are
 triaged. For GitLab, ensure Pipeline Hooks are enabled on the webhook Roomote
 receives. For Azure DevOps, Roomote ensures the project-scoped
@@ -483,6 +483,30 @@ receives. For Azure DevOps, Roomote ensures the project-scoped
 For Gitea, repository webhook resync includes the `workflow_run` event so
 Actions completions reach Roomote; host matching uses the deployment
 `GITEA_BASE_URL`.
+
+In **Settings > Automations > CI Failure Triage**, choose the standard report
+destination and optionally describe **Additional rules** in natural language:
+
+> Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.
+
+Roomote checks rules against accessible repositories and connected destinations
+when you save. Include the source-control provider or host, or the communication
+workspace, when names could be ambiguous. Unclear, contradictory, unavailable,
+or unsupported rules cannot be saved. An inference provider must be available
+to interpret new rules. A failed save leaves the previous configuration intact.
+
+Repository restrictions apply to webhook failures and **Run now**. Explicit
+restrictions select the matching repositories at save time; save revised rules
+to include newly added repositories. Destination-only rules do not limit scope:
+other repositories continue using the standard destination. Investigation and
+report-writing guidance can also be included. Workflow, job, branch, and time
+conditions are not supported in additional rules. Clear the rules to restore
+all-repository triage using the standard destination.
+
+Repositories still need an active connection and a configured environment.
+**Run now** starts at most one eligible investigation per click, using that
+repository's configured destination. CI Failure Triage is webhook-driven; scheduled
+checks do not scan repositories.
 
 Follow the [CI failure auto-fix recipe](/cookbook/ci-failure-auto-fix) for a
 copyable noise-control configuration.

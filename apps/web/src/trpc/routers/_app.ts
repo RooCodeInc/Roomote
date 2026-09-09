@@ -797,6 +797,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        ciFailureTriageAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         ciFailureTriageDiscordChannel: z
           .string()
           .trim()
