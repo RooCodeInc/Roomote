@@ -38,6 +38,11 @@ describe('triage-better-stack skill', () => {
     );
     expect(skillContent).toContain('stop SQL rather than guessing');
     expect(skillContent).not.toContain('mcp__betterstack__');
+    expect(skillContent).toContain('exact names returned by current discovery');
+    expect(skillContent).toContain('not assumed vendor names');
+    for (const name of ['sources', 'source', 'query', 'query_help']) {
+      expect(skillContent).not.toContain(`\`${name}\``);
+    }
   });
 
   it('routes ClickHouse queries from current source metadata instead of guessed identifiers', () => {
