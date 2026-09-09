@@ -12,10 +12,7 @@ import {
   type TaskArtifactType,
   validateTaskArtifactPath,
 } from '@roomote/types';
-import {
-  canAccessTask,
-  customAutomationTaskAccess,
-} from './custom-automation-task-access';
+import { canReadTask } from './custom-automation-task-access';
 
 function withTypedArtifactType<T extends { artifactType: string }>(
   artifact: T,
@@ -49,16 +46,13 @@ export async function getArtifactById({
   artifactId: string;
   auth: ArtifactAuth;
 }) {
+  if (!auth.userId) return null;
   const result = await db
     .select()
     .from(taskArtifacts)
     .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
     .where(
-      and(
-        eq(taskArtifacts.id, artifactId),
-        eq(taskArtifacts.taskId, taskId),
-        customAutomationTaskAccess(auth),
-      ),
+      and(eq(taskArtifacts.id, artifactId), eq(taskArtifacts.taskId, taskId)),
     )
     .limit(1);
 
@@ -86,7 +80,7 @@ export async function getArtifactByPath({
   version?: number;
   auth: ArtifactAuth;
 }) {
-  if (!(await canAccessTask(auth, taskId))) return null;
+  if (!(await canReadTask(auth, taskId))) return null;
   const artifact = await getTaskArtifactByPath({ taskId, path, version });
   return artifact ? withTypedArtifactType(artifact) : null;
 }
@@ -146,6 +140,7 @@ export async function getArtifactVersionsByPath({
   path: string;
   auth: ArtifactAuth;
 }) {
+  if (!auth.userId) return [];
   const result = await db
     .select({
       id: taskArtifacts.id,
@@ -160,7 +155,6 @@ export async function getArtifactVersionsByPath({
         eq(taskArtifacts.taskId, taskId),
         eq(taskArtifacts.path, path),
         eq(taskArtifacts.uploaded, true),
-        customAutomationTaskAccess(auth),
       ),
     )
     .orderBy(desc(taskArtifacts.version));
@@ -180,6 +174,7 @@ export async function getArtifactsForTask({
   auth: ArtifactAuth;
   uploadedOnly?: boolean;
 }) {
+  if (!auth.userId) return [];
   const artifactConditions = [eq(taskArtifacts.taskId, taskId)];
 
   if (uploadedOnly) {
@@ -198,7 +193,7 @@ export async function getArtifactsForTask({
     })
     .from(taskArtifacts)
     .innerJoin(tasks, eq(taskArtifacts.taskId, tasks.id))
-    .where(and(...artifactConditions, customAutomationTaskAccess(auth)));
+    .where(and(...artifactConditions));
 
   return result.map((artifact) => withTypedArtifactType(artifact));
 }

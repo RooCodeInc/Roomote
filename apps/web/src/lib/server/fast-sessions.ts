@@ -337,10 +337,26 @@ function fastSessionScope(auth: FastSessionAuth) {
   return customAutomationFastSessionAccess(auth);
 }
 
-/** Light session lookup with the same visibility scope as the list/detail. */
+/** Action lookup: custom automation ownership remains required. */
 export async function findAccessibleFastSession(
   auth: FastSessionAuth,
   sessionId: string,
+) {
+  return findFastSession(sessionId, fastSessionScope(auth));
+}
+
+/** Direct-link reads for authenticated deployment members, not action authorization. */
+export async function findReadableFastSession(
+  auth: FastSessionAuth,
+  sessionId: string,
+) {
+  if (!auth.userId) return null;
+  return findFastSession(sessionId);
+}
+
+async function findFastSession(
+  sessionId: string,
+  accessCondition?: ReturnType<typeof fastSessionScope>,
 ) {
   const [session] = await db
     .select({
@@ -365,7 +381,7 @@ export async function findAccessibleFastSession(
           eq(fastAgentConversations.id, sessionId),
           eq(sessions.id, sessionId),
         ),
-        fastSessionScope(auth),
+        accessCondition,
       ),
     )
     .limit(1);
@@ -393,7 +409,7 @@ export async function getFastSessionTasks(
   auth: FastSessionAuth,
   sessionId: string,
 ): Promise<FastSessionTaskSummary[] | null> {
-  const session = await findAccessibleFastSession(auth, sessionId);
+  const session = await findReadableFastSession(auth, sessionId);
   if (!session) return null;
 
   const [conversation] = await db
@@ -764,13 +780,12 @@ export async function getFastSessionById(
   auth: FastSessionAuth,
   sessionId: string,
 ) {
+  if (!auth.userId) return null;
   const [session] = await db
     .select(fastSessionSelection)
     .from(fastAgentConversations)
     .leftJoin(users, eq(fastAgentConversations.userId, users.id))
-    .where(
-      and(eq(fastAgentConversations.id, sessionId), fastSessionScope(auth)),
-    )
+    .where(eq(fastAgentConversations.id, sessionId))
     .limit(1);
 
   if (!session) {

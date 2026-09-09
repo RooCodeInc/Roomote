@@ -23,7 +23,7 @@ describe.each([
   ['logs', getLogs],
   ['stream', getStream],
 ] as const)('%s task access', (_name, get) => {
-  it('checks live automation ownership before starting a stream and retains collaborative tasks', async () => {
+  it('allows authenticated direct-link reads across automation owners and retains collaborative tasks', async () => {
     const owner = await userFactory.create();
     const other = await userFactory.create();
     await db
@@ -47,7 +47,7 @@ describe.each([
     const request = new NextRequest('http://localhost/api/task-runs/1/stream');
     const params = { params: Promise.resolve({ id: String(run.id) }) };
     for (const [userId, isAdmin, status] of [
-      [other.id, false, 404],
+      [other.id, false, 200],
       [owner.id, false, 200],
       [other.id, true, 200],
     ] as const) {
@@ -64,7 +64,7 @@ describe.each([
       userId: owner.id,
       isAdmin: false,
     });
-    expect((await get(request, params)).status).toBe(404);
+    expect((await get(request, params)).status).toBe(200);
     const ordinary = await taskFactory.create({ initiatorUserId: other.id });
     const ordinaryRun = await runFactory.create({ taskId: ordinary.id });
     expect(
@@ -74,5 +74,16 @@ describe.each([
         })
       ).status,
     ).toBe(200);
+  });
+
+  it('rejects anonymous requests before starting a stream', async () => {
+    createResponse.mockClear();
+    authorizeUserToken.mockResolvedValue({ success: false });
+    const response = await get(
+      new NextRequest('http://localhost/api/task-runs/1/stream'),
+      { params: Promise.resolve({ id: '1' }) },
+    );
+    expect(response.status).toBe(401);
+    expect(createResponse).not.toHaveBeenCalled();
   });
 });

@@ -13,6 +13,7 @@ import {
 import type { Variables } from '../../types';
 
 import { asanaMcp } from './asana';
+import { bitbucketMcp } from './bitbucket';
 import { communicationMcp } from './communication';
 import { environmentsRouter } from '../environments';
 import { customAutomationsRouter } from '../custom-automations';
@@ -77,6 +78,9 @@ mcp.route('/custom/:serverId', createCustomMcpProxy());
 mcp.route('/gbrain', createGbrainMcpProxy({ allowAuthTokens: true }));
 
 mcp.route('/asana', asanaMcp);
+mcp.use('/bitbucket', requireCuratedIntegrations);
+mcp.use('/bitbucket/*', requireCuratedIntegrations);
+mcp.route('/bitbucket', bitbucketMcp);
 mcp.route('/granola', granolaMcp);
 mcp.route('/grafana', grafanaMcp);
 mcp.route('/linear', createLinearMcp({ allowAuthTokens: true }));

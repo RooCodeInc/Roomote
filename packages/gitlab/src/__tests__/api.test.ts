@@ -93,7 +93,209 @@ import {
   type GitLabProject,
   listGitLabProjects,
   normalizeGitLabBaseUrl,
+  requestGitLab,
+  getGitLabMergeRequest,
 } from '../api';
+
+describe('bounded requestGitLab transport', () => {
+  const options = {
+    apiBaseUrl: 'https://gitlab.example/gitlab/api/v4',
+    path: '/projects/42/repository/commits/feature%2Fbranch',
+    token: 'bounded-oauth-token',
+    bounded: true,
+  };
+
+  beforeEach(() => {
+    mockIsGitLabOAuthAccessToken.mockReturnValue(true);
+  });
+  afterEach(() => {
+    mockIsGitLabOAuthAccessToken.mockReturnValue(false);
+  });
+
+  it('preserves configured API prefixes, encoded segments and query values using the existing auth selection', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ id: 'sha' }));
+    const response = await requestGitLab(
+      {
+        ...options,
+        fetchImpl,
+        params: { path: 'src/file name.ts', ref: 'a&scope=projects' },
+      },
+      [200],
+    );
+    expect(await response.json()).toEqual({ id: 'sha' });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(String(url)).toBe(
+      'https://gitlab.example/gitlab/api/v4/projects/42/repository/commits/feature%2Fbranch?path=src%2Ffile+name.ts&ref=a%26scope%3Dprojects',
+    );
+    expect(init).toMatchObject({
+      redirect: 'error',
+      signal: expect.any(AbortSignal),
+      headers: { Authorization: 'Bearer bounded-oauth-token' },
+    });
+    expect(new Headers(init?.headers).has('PRIVATE-TOKEN')).toBe(false);
+  });
+
+  it.each([
+    'https://evil.invalid/user',
+    '//evil.invalid/user',
+    '../user',
+    '/projects/42/../../user',
+    '/projects/42/%2e%2e/user',
+    '/projects/42/%2e%2e%2fuser',
+    '/projects/42/..\\user',
+    '/projects/42?scope=all',
+    '/projects/42#user',
+    '/projects/42/\0',
+    '/projects/42/%00',
+  ])(
+    'rejects unsafe API paths before credential dispatch: %s',
+    async (path) => {
+      const fetchImpl = vi.fn<typeof fetch>();
+      await expect(
+        requestGitLab({ ...options, path, fetchImpl }, [200]),
+      ).rejects.toThrow();
+      expect(fetchImpl).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    'https://user:password@gitlab.example/api/v4',
+    'https://gitlab.example/api/v4?url=evil',
+    'ftp://gitlab.example/api/v4',
+  ])('rejects unsafe configured bases: %s', async (apiBaseUrl) => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(
+      requestGitLab({ ...options, apiBaseUrl, fetchImpl }, [200]),
+    ).rejects.toThrow();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([301, 302, 307, 308, 401, 500])(
+    'never follows redirect/error response %s and cancels its body',
+    async (status) => {
+      const cancel = vi.fn();
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+        new Response(new ReadableStream({ cancel }), {
+          status,
+          headers: { location: 'https://evil.invalid/credentials' },
+        }),
+      );
+      await expect(
+        requestGitLab({ ...options, fetchImpl }, [200]),
+      ).rejects.toMatchObject({ status });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(fetchImpl.mock.calls[0]?.[1]?.redirect).toBe('error');
+      expect(cancel).toHaveBeenCalled();
+    },
+  );
+
+  it('bounds chunked response bytes and cancels before buffering an unlimited body', async () => {
+    let pulled = 0;
+    const cancel = vi.fn();
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulled++;
+            controller.enqueue(new Uint8Array(65_536));
+          },
+          cancel,
+        }),
+      ),
+    );
+    await expect(
+      requestGitLab({ ...options, fetchImpl }, [200]),
+    ).rejects.toThrow('1 MiB');
+    expect(pulled).toBeLessThan(20);
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('rejects declared oversize before reading', async () => {
+    const cancel = vi.fn();
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(new ReadableStream({ cancel }), {
+        headers: { 'content-length': '1048577' },
+      }),
+    );
+    await expect(
+      requestGitLab({ ...options, fetchImpl }, [200]),
+    ).rejects.toThrow('1 MiB');
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('preserves BOM and rejects invalid UTF-8 and raw credential reflection', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('\ufefftext'))
+      .mockResolvedValueOnce(new Response(new Uint8Array([0xff])))
+      .mockResolvedValueOnce(new Response(options.token));
+    const response = await requestGitLab({ ...options, fetchImpl }, [200]);
+    expect(
+      new TextDecoder('utf-8', { ignoreBOM: true }).decode(
+        await response.arrayBuffer(),
+      ),
+    ).toBe('\ufefftext');
+    await expect(
+      requestGitLab({ ...options, fetchImpl }, [200]),
+    ).rejects.toThrow();
+    await expect(
+      requestGitLab({ ...options, fetchImpl }, [200]),
+    ).rejects.toThrow('Unsafe');
+  });
+
+  it('honors pre-aborted calls without dispatch and cancels a stalled body on abort', async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(
+      requestGitLab({ ...options, fetchImpl, signal: aborted.signal }, [200]),
+    ).rejects.toThrow();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    const controller = new AbortController();
+    const cancel = vi.fn();
+    fetchImpl.mockResolvedValue(new Response(new ReadableStream({ cancel })));
+    const pending = requestGitLab(
+      { ...options, fetchImpl, signal: controller.signal },
+      [200],
+    );
+    const rejection = expect(pending).rejects.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    await rejection;
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('passes bounded transport options through existing MR and note methods', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({ iid: 7, title: 'MR', project_id: 42 }),
+      )
+      .mockResolvedValueOnce(Response.json({ id: 90 }, { status: 201 }));
+    const shared = {
+      ...options,
+      projectId: '42',
+      mergeRequestIid: 7,
+      fetchImpl,
+    };
+    expect(await getGitLabMergeRequest(shared)).toMatchObject({
+      project_id: 42,
+    });
+    expect(
+      await createGitLabMergeRequestNote({ ...shared, body: 'hello' }),
+    ).toEqual({ id: 90 });
+    expect(fetchImpl.mock.calls.map((call) => call[1]?.redirect)).toEqual([
+      'error',
+      'error',
+    ]);
+    expect(JSON.parse(String(fetchImpl.mock.calls[1]?.[1]?.body))).toEqual({
+      body: 'hello',
+    });
+  });
+});
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {

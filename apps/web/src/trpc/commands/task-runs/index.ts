@@ -16,6 +16,7 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
+import { stopTaskRun } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
@@ -98,32 +99,48 @@ export async function cancelTaskRunCommand(
     const taskFilter = eq(taskRuns.taskId, input.taskId);
 
     const job =
-      // Snapshot resumes reuse taskId, so a stale runId can still point at
-      // an older non-terminal row. Always prefer the newest active run for the
-      // task over the supplied ID.
-      (await db.query.taskRuns.findFirst({
-        where: and(
-          taskFilter,
-          inArray(taskRuns.status, [...activeRunStatuses]),
-        ),
-        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
-      })) ??
-      (input.runId !== undefined
+      input.runId !== undefined
         ? await db.query.taskRuns.findFirst({
             where: and(eq(taskRuns.id, input.runId), taskFilter),
-            orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
           })
-        : null) ??
-      (await db.query.taskRuns.findFirst({
-        where: taskFilter,
-        orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
-      }));
+        : ((await db.query.taskRuns.findFirst({
+            where: and(
+              taskFilter,
+              inArray(taskRuns.status, [...activeRunStatuses]),
+            ),
+            orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
+          })) ??
+          (await db.query.taskRuns.findFirst({
+            where: taskFilter,
+            orderBy: [desc(taskRuns.createdAt), desc(taskRuns.id)],
+          })));
 
     if (!job) {
       return { success: false, error: 'Task run not found' };
     }
 
     if (!isExitedRunStatus(job.status)) {
+      if (input.runId !== undefined) {
+        const result = await stopTaskRun({
+          run: job,
+          authUserId: auth.userId,
+          terminate: true,
+          allowDirectCancelWithoutSandbox: true,
+          cancelledBy: { name: auth.name ?? undefined, source: 'web' },
+        });
+        if (!result.success) {
+          return { success: false, error: result.error };
+        }
+        if (result.mode === 'direct_cancel') {
+          void settleSlackLiveTaskCardForRun({
+            taskId: job.taskId,
+            payload: job.payload,
+            status: RunStatus.Canceled,
+          });
+        }
+        return { success: true };
+      }
+
       const endedAt = new Date();
 
       const canceledRun = await db.transaction(async (tx) => {

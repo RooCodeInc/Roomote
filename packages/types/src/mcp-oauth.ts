@@ -95,8 +95,9 @@ export interface McpConnectionOAuthConfig {
 /**
  * Organization-scoped Snowflake connection config stored in mcpConnections.authConfig.
  *
- * Secrets are expected to be encrypted before persistence. The current backend
- * accepts both encrypted and plaintext secret values so a later admin flow can
+ * Snowflake connections authenticate with a key pair only. Secrets are
+ * expected to be encrypted before persistence. The current backend accepts
+ * both encrypted and plaintext secret values so a later admin flow can
  * migrate the write path without breaking existing rows.
  */
 export interface McpConnectionSnowflakeConfig {
@@ -107,7 +108,6 @@ export interface McpConnectionSnowflakeConfig {
   warehouse?: string;
   database?: string;
   schema?: string;
-  encryptedPassword?: string;
   encryptedPrivateKey?: string;
   encryptedPrivateKeyPassphrase?: string;
   allowedStatementTypes?: string[];

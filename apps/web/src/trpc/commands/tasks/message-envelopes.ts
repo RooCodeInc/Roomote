@@ -1,6 +1,6 @@
 import { getTaskMessageEnvelopes } from '@/lib/server';
 import type { UserAuthSuccess } from '@/types';
-import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
+import { requireTaskReadAccess } from '@/lib/server/custom-automation-task-access';
 
 export async function getTaskMessageEnvelopesCommand(
   auth: UserAuthSuccess,
@@ -8,7 +8,7 @@ export async function getTaskMessageEnvelopesCommand(
     taskId: string;
   },
 ) {
-  await requireTaskAccess(auth, input.taskId);
+  await requireTaskReadAccess(auth, input.taskId);
   return getTaskMessageEnvelopes({
     taskId: input.taskId,
   });

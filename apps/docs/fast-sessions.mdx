@@ -58,9 +58,15 @@ also supports updates to existing pull requests, issue or PR comments,
 review-comment replies, and reactions using the deployment's GitHub App.
 See that guide for supported actions and access requirements.
 
-[GitLab MCP](https://docs.gitlab.com/user/model_context_protocol/mcp_server/)
-and [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
-are not enabled for this direct Fast path. Their compatibility with Roomote's
+[GitLab API tools](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
+reuse the existing deployment OAuth connection for bounded repository reads,
+merge request title, description and close/reopen updates, notes, and discussion
+replies. No additional MCP server or installation is needed. Tools require an
+active member, an active connected repository on the configured GitLab host, and
+valid deployment OAuth access; curated integrations must be enabled.
+
+The official [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
+is not enabled for this direct Fast path. Its compatibility with Roomote's
 existing credentials has not been verified; existing task workflows are unchanged.
 
 ## The session view
@@ -235,12 +241,15 @@ later.
 
 ## Session and execution access
 
-Any signed-in deployment user with a Session link can view its timeline and
-contribute to the conversation, matching task access. The Sessions list remains
-focused: administrators see every Session, while other users see Sessions they
-own, participate in, or have spoken in. Replies are attributed to the teammate
-who sent them.
+Any signed-in deployment member with a Session link can view its timeline,
+including custom automation Sessions and their linked task transcripts, logs,
+and artifacts. A Session link does not provide anonymous or public access.
 
-Full execution details keep the existing task permissions, so joining a shared
-channel does not grant access to logs, terminals, diffs, previews, or private
-artifacts.
+Viewing is separate from acting. Custom automation management remains restricted
+to its creator and administrators. Existing permissions still apply to replies,
+edits, deletion, execution, terminals, previews, and secrets; a link does not
+grant those permissions. Replies are attributed to the teammate who sent them.
+
+The Sessions list and filter options remain scoped to the member's existing
+visibility permissions. Direct-link viewing does not make other members' custom
+automations discoverable in those lists.
