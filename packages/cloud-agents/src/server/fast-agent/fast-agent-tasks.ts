@@ -191,7 +191,7 @@ export async function sendFastAgentTaskMessage(
   context: FastAgentTaskApiContext,
   params: { taskId: string; message: string; images?: string[] },
 ): Promise<FastAgentTaskToolResult> {
-  return callFastAgentTaskApi({
+  const result = await callFastAgentTaskApi({
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
@@ -201,6 +201,14 @@ export async function sendFastAgentTaskMessage(
       senderMode: 'fast_agent',
     },
   });
+
+  return result.success === true
+    ? {
+        ...result,
+        delivery: result.delivery ?? 'accepted',
+        responsePending: true,
+      }
+    : result;
 }
 
 export async function sendFastAgentTaskMessageOnce(
@@ -272,6 +280,18 @@ export async function cancelFastAgentTask(
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/cancel`,
+  });
+}
+
+export async function stopFastAgentTask(
+  context: FastAgentTaskApiContext,
+  params: { taskId: string; userInitiated: boolean },
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/stop`,
+    body: { userInitiated: params.userInitiated },
   });
 }
 
@@ -422,7 +442,7 @@ export function createFastAgentTaskTools(
         sendFastAgentTaskMessage(context, { taskId, message }),
     }),
     cancel_task: tool({
-      description: 'Cancel a running Roomote task.',
+      description: 'Cancel a running Roomote task and end its current run.',
       inputSchema: z
         .object({
           taskId: nonEmptyTrimmedStringSchema.describe(
@@ -431,6 +451,24 @@ export function createFastAgentTaskTools(
         })
         .strict(),
       execute: async ({ taskId }) => cancelFastAgentTask(context, taskId),
+    }),
+    stop_task: tool({
+      description:
+        'Stop a running Roomote task while preserving its resumable sandbox.',
+      inputSchema: z
+        .object({
+          taskId: nonEmptyTrimmedStringSchema.describe(
+            'The non-empty Roomote task ID',
+          ),
+          userInitiated: z
+            .boolean()
+            .describe(
+              'True only when the user explicitly requested this stop; false for autonomous recovery',
+            ),
+        })
+        .strict(),
+      execute: async ({ taskId, userInitiated }) =>
+        stopFastAgentTask(context, { taskId, userInitiated }),
     }),
   };
 }
