@@ -814,24 +814,12 @@ describe('buildFastAgentSystemPrompt', () => {
           : { turnSource: 'platform_event' as const, platformEventKind: turn }),
       });
 
-      for (const tool of [
-        'get_file_contents',
-        'search_code',
-        'list_branches',
-        'get_commit',
-        'list_commits',
-        'get_pull_request',
-        'pull_request_read',
-        'list_pull_requests',
-        'search_pull_requests',
-        'issue_read',
-        'get_issue',
-        'actions_get',
-        'actions_list',
-        'get_job_logs',
-      ]) {
-        expect(prompt).toContain(`\`${tool}\``);
-      }
+      expect(prompt).toContain(
+        'Repository code exploration does not inherently require a coding task or local clone',
+      );
+      expect(prompt).toContain(
+        'files, directories, code search, commits, and pull/merge request diffs when supported, including GitHub, GitLab, and Bitbucket',
+      );
       expect(prompt).toContain(
         'Use only the methods and arguments exposed by the discovered schemas',
       );
@@ -847,9 +835,33 @@ describe('buildFastAgentSystemPrompt', () => {
         'when local checkout, local edits, execution, or testing is required',
       );
       expect(prompt).toContain('available API tools do not suffice');
+      expect(prompt).toContain(
+        'pin follow-up reads to an immutable commit ref when the provider tools support it',
+      );
+      expect(prompt).toContain('Do not invent a shared revision parameter');
+      expect(prompt).toContain(
+        'search may cover only an indexed/default branch',
+      );
+      expect(prompt).toContain(
+        'disclose that limitation rather than silently combining revisions',
+      );
+      expect(prompt).toContain(
+        'a partial or empty search is not proof of absence',
+      );
+      expect(prompt).toContain('source-inspected, not tested or reproduced');
+      expect(prompt).toContain(
+        'Local worktree state, generated files, dependency installation, builds, and reproduction require delegated execution when needed',
+      );
+      expect(prompt).toContain(
+        "A permission denial is not a reason to bypass the integration's authorization through another route",
+      );
+      expect(prompt).toContain(
+        'Use "review_pull_request" when the user asks for a code review of a pull request',
+      );
       expect(prompt).toContain('including documents grounded in API reads');
       for (const obsoleteRule of [
         'read_repository',
+        'inspect_repository',
         'rename_pull_request',
         'close_pull_request',
         'legacy installation-wide GitHub proxy',

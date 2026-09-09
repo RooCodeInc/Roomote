@@ -45,13 +45,22 @@ conversation to execution to review without changing identity.
 
 ## Source-control work without a workspace
 
-Fast uses existing integration APIs for bounded repository inspection when the
-available tools can answer the question. Reading files, searching a repository,
-or inspecting commits, pull requests, and reported CI results does not require
-cloning a repository or provisioning a workspace. Available reads depend on the
-connected integration's tools and permissions. Reading CI results is not the
+Fast uses existing integration APIs for bounded repository exploration when the
+available tools can answer the question, including GitHub, GitLab, and Bitbucket
+where configured. Reading files and directories, searching code, or inspecting
+commits, pull/merge request diffs, and reported CI results does not require a
+coding task, local clone, or workspace provisioning. Available reads depend on
+the connected integration's tools and permissions. Reading CI results is not the
 same as running tests: local checkout, code edits, command execution, and testing
 are delegated to a task, as are investigations that need a workspace.
+
+For example, ask "Where is request authentication handled on the develop
+branch?" or "Summarize the changes in this pull request." Roomote uses immutable
+commit references for consistent follow-up reads where supported and identifies
+limitations when results are partial, truncated, or limited to a search index.
+An empty search is not proof that code is absent. Source inspection is not a
+test run or reproduction, and an access denial is not bypassed through a task.
+Requests for a code review still use the structured Review Code pipeline.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
 also supports updates to existing pull requests, issue or PR comments,
@@ -65,9 +74,11 @@ replies. No additional MCP server or installation is needed. Tools require an
 active member, an active connected repository on the configured GitLab host, and
 valid deployment OAuth access; curated integrations must be enabled.
 
-The official [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
-is not enabled for this direct Fast path. Its compatibility with Roomote's
-existing credentials has not been verified; existing task workflows are unchanged.
+[Bitbucket Cloud API tools](/providers/source-control/bitbucket#api-first-work-in-fast)
+reuse the existing deployment OAuth connection for files, directories, code
+search, commits, pull requests, diffs, and comments, plus supported PR updates
+and replies. No additional MCP server is needed. See that guide for access
+requirements, pagination limits, and the code-search deprecation.
 
 ## The session view
 
