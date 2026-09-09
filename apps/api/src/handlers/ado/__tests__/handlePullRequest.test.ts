@@ -271,8 +271,55 @@ describe('handleAdoPullRequest', () => {
       'acme/Platform/backend',
       42,
       'draft',
+      { host: 'dev.azure.com' },
     );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'https://Ado.Example:8443/acme/Platform/_git/backend/pullrequest/42',
+      'ado.example:8443',
+    ],
+    [undefined, 'dev.azure.com'],
+    ['not-a-url', null],
+  ] as const)('scopes status updates using PR URL %s', async (href, host) => {
+    await handleAdoPullRequest(
+      makePayload('git.pullrequest.updated', {
+        status: 'completed',
+        _links: { web: { href } },
+      }),
+      { updatedNotificationType: 'StatusUpdateNotification' },
+    );
+
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'ado',
+      'acme/Platform/backend',
+      42,
+      'merged',
+      { host },
+    );
+  });
+
+  it('does not infer an instance when all webhook URL provenance is missing', async () => {
+    const payload = makePayload('git.pullrequest.updated', {
+      status: 'completed',
+      _links: undefined,
+    });
+    payload.resourceContainers = undefined;
+    payload.resource.repository.webUrl = undefined;
+    payload.resource.repository.remoteUrl = undefined;
+    payload.resource.repository.url = undefined;
+    await handleAdoPullRequest(payload, {
+      updatedNotificationType: 'StatusUpdateNotification',
+    });
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'ado',
+      'unknown/Platform/backend',
+      42,
+      'merged',
+      { host: null },
+    );
   });
 
   it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
@@ -491,6 +538,7 @@ describe('handleAdoPullRequest', () => {
       'acme/Platform/backend',
       42,
       'merged',
+      { host: 'dev.azure.com' },
     );
     expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetBranch: 'main' }),
@@ -554,6 +602,7 @@ describe('handleAdoPullRequest', () => {
       'acme/Platform/backend',
       42,
       'closed',
+      { host: 'dev.azure.com' },
     );
     expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
       {
