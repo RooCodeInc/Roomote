@@ -1546,20 +1546,7 @@ const boundedRepositoryIdentitySchema = z.object({
   uuid: z.string().min(1),
   full_name: z.string().min(1),
 });
-const boundedCommentSchema = z
-  .object({
-    id: z.number().int().positive(),
-    user: z
-      .object({
-        uuid: z.string().optional(),
-        account_id: z.string().optional(),
-      })
-      .passthrough()
-      .optional(),
-    content: z.object({ raw: z.string().optional() }).passthrough().optional(),
-    parent: z.object({ id: z.number().int().positive() }).nullable().optional(),
-  })
-  .passthrough();
+const boundedCommentSchema = bitbucketCommentSchema.passthrough();
 const boundedCommitSchema = z
   .object({ hash: z.string(), repository: boundedRepositoryIdentitySchema })
   .passthrough();
@@ -1576,9 +1563,6 @@ const boundedSearchMatchSchema = z
   })
   .passthrough();
 
-export type BitbucketCodeSearchMatch = z.infer<typeof boundedSearchMatchSchema>;
-export type BitbucketBoundedComment = z.infer<typeof boundedCommentSchema>;
-export type BitbucketBoundedCommit = z.infer<typeof boundedCommitSchema>;
 export type BitbucketBoundedPage<T> = { values: T[]; hasMore: boolean };
 export type BitbucketRepositoryClientOptions = {
   repositoryFullName: string;
@@ -1597,7 +1581,6 @@ export function createBitbucketRepositoryClient(
   const segment = (value: string) => {
     if (
       !value ||
-      value.length > 255 ||
       !/^[a-zA-Z0-9._-]+$/.test(value) ||
       value === '.' ||
       value === '..'
@@ -1609,27 +1592,20 @@ export function createBitbucketRepositoryClient(
   const root = `/repositories/${segment(workspace)}/${segment(repo)}`;
   const id = (value: number) =>
     z.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(value);
-  const revision = (value: string) => {
-    if (
-      !value ||
-      value.length > 255 ||
-      /[%\\?#:\x00-\x20\x7f]/.test(value) ||
-      value.split('/').some((part) => !part || part === '.' || part === '..')
-    ) {
-      throw new Error('Invalid Bitbucket revision.');
-    }
-    return encodeURIComponent(value);
-  };
   const sourcePath = (value: string) => {
     if (
-      value.length > 2048 ||
-      /[%\\?#:\x00-\x1f\x7f]/.test(value) ||
+      /[%\\\x00-\x1f\x7f]/.test(value) ||
       (value &&
         value.split('/').some((part) => !part || part === '.' || part === '..'))
     ) {
       throw new Error('Invalid Bitbucket source path.');
     }
     return value.split('/').map(encodeURIComponent).join('/');
+  };
+  const revision = (value: string) => {
+    if (!value) throw new Error('Bitbucket revision is required.');
+    sourcePath(value);
+    return encodeURIComponent(value);
   };
   const request = async <T>(
     path: string,
@@ -1647,7 +1623,7 @@ export function createBitbucketRepositoryClient(
       method,
       body,
       text,
-      token: z.string().min(1).parse(options.token),
+      token: options.token,
       authScheme: 'bearer',
       fetchImpl: options.fetchImpl,
       bounded: true,
@@ -1668,7 +1644,7 @@ export function createBitbucketRepositoryClient(
       }),
       {
         ...params,
-        page: z.number().int().min(1).max(100).parse(pageNumber),
+        page: id(pageNumber),
         pagelen: 50,
       },
     );
@@ -1697,7 +1673,6 @@ export function createBitbucketRepositoryClient(
     searchCode: (terms: string, pageNumber = 1) => {
       if (
         !terms.trim() ||
-        terms.length > 256 ||
         !/^[a-zA-Z0-9_ .-]+$/.test(terms) ||
         /\b(?:AND|OR|NOT)\b/i.test(terms)
       ) {
@@ -1713,13 +1688,7 @@ export function createBitbucketRepositoryClient(
     listCommits: (ref: string, pageNumber = 1) =>
       page(`${root}/commits/${revision(ref)}`, boundedCommitSchema, pageNumber),
     getCommit: (hash: string) =>
-      request(
-        `${root}/commit/${z
-          .string()
-          .regex(/^[a-fA-F0-9]{7,40}$/)
-          .parse(hash)}`,
-        boundedCommitSchema,
-      ),
+      request(`${root}/commit/${revision(hash)}`, boundedCommitSchema),
     getPullRequest: (number: number) =>
       request(prPath(number), bitbucketPullRequestDetailsSchema),
     getPullRequestDiff: (number: number) =>
@@ -1734,26 +1703,11 @@ export function createBitbucketRepositoryClient(
     updatePullRequest: (
       number: number,
       changes: { title?: string; description?: string },
-    ) => {
-      const body = z
-        .object({
-          title: z.string().min(1).max(255).optional(),
-          description: z.string().max(65_536).optional(),
-        })
-        .strict()
-        .refine(
-          (value) =>
-            value.title !== undefined || value.description !== undefined,
-        )
-        .parse(changes);
-      return request(
-        prPath(number),
-        bitbucketPullRequestDetailsSchema,
-        {},
-        'PUT',
-        body,
-      );
-    },
+    ) =>
+      request(prPath(number), bitbucketPullRequestDetailsSchema, {}, 'PUT', {
+        title: changes.title,
+        description: changes.description,
+      }),
     declinePullRequest: (number: number) =>
       request(
         `${prPath(number)}/decline`,
@@ -1767,7 +1721,7 @@ export function createBitbucketRepositoryClient(
       parentCommentId?: number,
     ) =>
       request(`${prPath(number)}/comments`, boundedCommentSchema, {}, 'POST', {
-        content: { raw: z.string().min(1).max(65_536).parse(body) },
+        content: { raw: body },
         ...(parentCommentId === undefined
           ? {}
           : { parent: { id: id(parentCommentId) } }),

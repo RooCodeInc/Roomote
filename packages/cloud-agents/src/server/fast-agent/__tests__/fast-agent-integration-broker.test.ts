@@ -13,6 +13,12 @@ const mocks = vi.hoisted(() => ({
   resolveBitbucketInstanceHost: vi.fn(),
   findMember: vi.fn(),
   findRepository: vi.fn(),
+  curatedDisabled: false,
+}));
+
+vi.mock('@roomote/env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/env')>()),
+  areCuratedIntegrationsDisabled: () => mocks.curatedDisabled,
 }));
 
 vi.mock('@roomote/bitbucket', () => ({
@@ -98,6 +104,7 @@ describe('fast-agent integration broker', () => {
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
     mocks.getBitbucketOAuthConnection.mockResolvedValue(null);
+    mocks.curatedDisabled = false;
     mocks.resolveBitbucketInstanceHost.mockResolvedValue('bitbucket.org');
     mocks.findMember.mockResolvedValue({ role: 'member' });
     mocks.findRepository.mockResolvedValue({ externalRepoId: 'repo-uuid' });
@@ -236,6 +243,15 @@ describe('fast-agent integration broker', () => {
       expect(mocks.findMember).not.toHaveBeenCalled();
     },
   );
+
+  it('hides cached Bitbucket tools when curated integrations are disabled', async () => {
+    mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
+    expect(await listFastAgentIntegrations(auditContext)).toHaveLength(1);
+    mocks.curatedDisabled = true;
+    expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
+    expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+    expect(mocks.getBitbucketOAuthConnection).toHaveBeenCalledOnce();
+  });
 
   it.each([undefined, { externalRepoId: null }, { externalRepoId: '' }])(
     'omits Bitbucket without an active connected Cloud repository: %j',

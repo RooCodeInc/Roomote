@@ -1,4 +1,5 @@
 import { createAuthToken, ROOMOTE_MCP_PATH } from '@roomote/auth';
+import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
 import {
   getBitbucketOAuthConnection,
   resolveBitbucketInstanceHost,
@@ -334,6 +335,8 @@ async function resolveBrokerAuth(context: BrokerContext) {
 }
 
 async function isBitbucketAvailable(userId: string): Promise<boolean> {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED))
+    return false;
   const connection = await getBitbucketOAuthConnection();
   if (connection?.status !== 'active') return false;
   const host = await resolveBitbucketInstanceHost();

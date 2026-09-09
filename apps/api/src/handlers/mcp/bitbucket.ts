@@ -14,14 +14,11 @@ import {
 import type { Variables } from '../../types';
 import { McpProxyError, toMcpToolResult } from './proxy-utils';
 
-const repository = z
-  .string()
-  .max(511)
-  .regex(/^[\w.-]+\/[\w.-]+$/);
+const repository = z.string().regex(/^[\w.-]+\/[\w.-]+$/);
 const number = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const page = z.number().int().min(1).max(100).optional();
-const ref = z.string().min(1).max(255);
-const path = z.string().max(2048);
+const page = number.optional();
+const ref = z.string().min(1);
+const path = z.string();
 const base = { repositoryFullName: repository };
 const pr = { ...base, pullRequestNumber: number };
 
@@ -125,7 +122,7 @@ function createServer(auth: Variables['authContext']) {
           const checkRepository = (value: unknown) =>
             assertRepository(value, connected);
           checkRepository(await client.getRepository());
-          if ('pullRequestNumber' in input) {
+          if ('pullRequestNumber' in input && name !== 'get_pull_request') {
             const requestedNumber = number.parse(input.pullRequestNumber);
             const details = await client.getPullRequest(requestedNumber);
             if (details.id !== requestedNumber)
@@ -169,7 +166,7 @@ function createServer(auth: Variables['authContext']) {
   register(
     'search_code',
     'Search plain code terms within this repository only. Bitbucket code search is deprecated November 1, 2026; no fallback to unscoped search.',
-    { ...base, terms: z.string().min(1).max(256), page },
+    { ...base, terms: z.string().min(1), page },
     true,
     async (input, client, check) => {
       const result = await client.searchCode(input.terms, input.page);
@@ -190,8 +187,8 @@ function createServer(auth: Variables['authContext']) {
   );
   register(
     'get_commit',
-    'Read commit details by hash.',
-    { ...base, hash: z.string().regex(/^[a-fA-F0-9]{7,40}$/) },
+    'Read commit details by hash or revision.',
+    { ...base, hash: ref },
     true,
     async (input, client, check) => {
       const result = await client.getCommit(input.hash);
@@ -232,8 +229,8 @@ function createServer(auth: Variables['authContext']) {
     'Update only title and/or description by number. Cannot reopen or merge.',
     {
       ...pr,
-      title: z.string().min(1).max(255).optional(),
-      description: z.string().max(65_536).optional(),
+      title: z.string().optional(),
+      description: z.string().optional(),
     },
     false,
     async (input, client, check) => {
@@ -261,7 +258,7 @@ function createServer(auth: Variables['authContext']) {
     'Add a pull request comment or reply to a comment in this pull request.',
     {
       ...pr,
-      body: z.string().min(1).max(65_536),
+      body: z.string(),
       parentCommentId: number.optional(),
     },
     false,

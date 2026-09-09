@@ -426,6 +426,36 @@ describe('Bitbucket MCP call authorization', () => {
       expect(client.createPullRequestComment).not.toHaveBeenCalled();
     },
   );
+
+  it.each(['get_pull_request', 'search_code', 'list_commits', 'get_commit'])(
+    'rejects foreign repository data from %s',
+    async (name) => {
+      const repository = { ...identity, uuid: randomUUID() };
+      client.getPullRequest.mockResolvedValue({
+        id: 7,
+        destination: { repository },
+      });
+      client.searchCode.mockResolvedValue({
+        values: [{ file: { commit: { repository } } }],
+      });
+      client.listCommits.mockResolvedValue({ values: [{ repository }] });
+      client.getCommit.mockResolvedValue({ repository });
+      const args =
+        name === 'get_pull_request'
+          ? { pullRequestNumber: 7 }
+          : name === 'search_code'
+            ? { terms: 'term' }
+            : name === 'list_commits'
+              ? { ref: 'main' }
+              : { hash: 'abcdef1' };
+      const { body } = await request(name, args);
+      expect(body.result).toMatchObject({
+        isError: true,
+        content: [{ text: 'Bitbucket repository ownership mismatch' }],
+      });
+      expect(body.result.structuredContent).toBeUndefined();
+    },
+  );
 });
 
 describe('Bitbucket MCP bounded operations', () => {
@@ -445,6 +475,7 @@ describe('Bitbucket MCP bounded operations', () => {
     ['search_code', 'searchCode', { terms: 'hello', page: 2 }, ['hello', 2]],
     ['list_commits', 'listCommits', { ref: 'main', page: 2 }, ['main', 2]],
     ['get_commit', 'getCommit', { hash: 'abcdef0' }, ['abcdef0']],
+    ['get_commit', 'getCommit', { hash: 'feature/branch' }, ['feature/branch']],
     ['get_pull_request', 'getPullRequest', { pullRequestNumber: 7 }, [7]],
     [
       'get_pull_request_diff',
@@ -506,10 +537,53 @@ describe('Bitbucket MCP bounded operations', () => {
       expect(body.result.structuredContent).toEqual({ result });
       expect(client[method]).toHaveBeenLastCalledWith(...expected);
       expect(client.getRepository).toHaveBeenCalledTimes(1);
-      if ('pullRequestNumber' in args)
+      if ('pullRequestNumber' in args) {
         expect(client.getPullRequest).toHaveBeenCalledWith(7);
+        expect(client.getPullRequest).toHaveBeenCalledTimes(1);
+      }
       if (name === 'add_pull_request_comment' && !('parentCommentId' in args))
         expect(client.getPullRequestComment).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      'update_pull_request',
+      { pullRequestNumber: 7, title: '', description: 'x'.repeat(65_537) },
+      'updatePullRequest',
+    ],
+    [
+      'update_pull_request',
+      { pullRequestNumber: 7, title: 'x'.repeat(256) },
+      'updatePullRequest',
+    ],
+    ['update_pull_request', { pullRequestNumber: 7 }, 'updatePullRequest'],
+    [
+      'add_pull_request_comment',
+      { pullRequestNumber: 7, body: '' },
+      'createPullRequestComment',
+    ],
+    [
+      'add_pull_request_comment',
+      { pullRequestNumber: 7, body: 'x'.repeat(65_537) },
+      'createPullRequestComment',
+    ],
+    [
+      'list_pull_request_comments',
+      { pullRequestNumber: 7, page: 101 },
+      'listPullRequestComments',
+    ],
+    ['get_file', { ref: 'x'.repeat(256), path: 'x'.repeat(2049) }, 'getFile'],
+    ['search_code', { terms: 'x'.repeat(257) }, 'searchCode'],
+  ] as const)(
+    'accepts provider-owned field constraints for %s',
+    async (name, args, method) => {
+      client[method].mockResolvedValue(
+        method === 'searchCode' ? { values: [] } : pullRequest(),
+      );
+      const { body } = await request(name, args);
+      expect(body.result.isError).not.toBe(true);
+      expect(client[method]).toHaveBeenCalledOnce();
     },
   );
 

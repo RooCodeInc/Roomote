@@ -98,19 +98,18 @@ describe('bounded Bitbucket repository client', () => {
     'https://evil/a',
     '%252e%252e/x',
     'a\\b',
-    'a?x',
-    'a#x',
   ])('rejects unsafe file path %s before HTTP', (path) => {
     const { client, fetchImpl } = setup();
     expect(() => client.getFile('main', path)).toThrow();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it.each(['..', '../main', 'https://evil', '%2e%2e', 'main?x', 'a\\b'])(
+  it.each(['..', '../main', 'https://evil', '%2e%2e', 'a\\b'])(
     'rejects unsafe revision %s',
     (ref) => {
       const { client, fetchImpl } = setup();
       expect(() => client.getFile(ref, 'file.ts')).toThrow();
+      expect(() => client.getCommit(ref)).toThrow();
       expect(fetchImpl).not.toHaveBeenCalled();
     },
   );
@@ -132,6 +131,20 @@ describe('bounded Bitbucket repository client', () => {
       hasMore: true,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('encodes punctuation and accepts long paths and revisions without changing URL scope', async () => {
+    const { client, fetchImpl } = setup(() => new Response('contents'));
+    const ref = `feature/${'a'.repeat(256)}?x#y:z`;
+    const path = `${'dir/'.repeat(512)}file?x#y:z.txt`;
+    await client.getFile(ref, path);
+    const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
+    expect(url.origin).toBe('https://api.bitbucket.org');
+    expect(url.pathname).toBe(
+      `/2.0/repositories/acme/repo/src/${encodeURIComponent(ref)}/${path.split('/').map(encodeURIComponent).join('/')}`,
+    );
+    expect(url.search).toBe('');
+    expect(url.hash).toBe('');
   });
 
   it.each([
@@ -177,10 +190,14 @@ describe('bounded Bitbucket repository client', () => {
     const { client, fetchImpl } = setup(() =>
       json({ values: Array.from({ length: 51 }, () => ({ id: 1 })) }),
     );
-    await expect(client.listPullRequestComments(3, 101)).rejects.toThrow();
     await expect(client.listCommits('main', 0)).rejects.toThrow();
     expect(fetchImpl).not.toHaveBeenCalled();
     await expect(client.listPullRequestComments(3)).rejects.toThrow();
+    fetchImpl.mockResolvedValueOnce(json({ values: [] }));
+    await client.listPullRequestComments(3, 101);
+    expect(
+      new URL(String(fetchImpl.mock.lastCall?.[0])).searchParams.get('page'),
+    ).toBe('101');
   });
 
   it.each([301, 302, 307, 308, 401, 403, 404, 429, 500])(
@@ -257,14 +274,11 @@ describe('bounded Bitbucket repository client', () => {
 
   it('allows only title/description updates and native decline', async () => {
     const { client, fetchImpl } = setup();
-    expect(() =>
-      client.updatePullRequest(3, { title: 'x', state: 'MERGED' } as {
-        title: string;
-      }),
-    ).toThrow();
-    expect(() => client.updatePullRequest(3, {})).toThrow();
-    expect(fetchImpl).not.toHaveBeenCalled();
-    await client.updatePullRequest(3, { title: 'New', description: '' });
+    await client.updatePullRequest(3, {
+      title: 'New',
+      description: '',
+      state: 'MERGED',
+    } as { title: string });
     expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
       method: 'PUT',
       body: JSON.stringify({ title: 'New', description: '' }),
@@ -274,6 +288,28 @@ describe('bounded Bitbucket repository client', () => {
       /pullrequests\/3\/decline$/,
     );
     expect(fetchImpl.mock.calls[1]?.[1]?.method).toBe('POST');
+  });
+
+  it('passes provider-owned text constraints through unchanged', async () => {
+    const { client, fetchImpl } = setup();
+    const description = 'x'.repeat(65_537);
+    await client.updatePullRequest(3, { title: '', description });
+    expect(JSON.parse(String(fetchImpl.mock.lastCall?.[1]?.body))).toEqual({
+      title: '',
+      description,
+    });
+    fetchImpl.mockResolvedValueOnce(json({ id: 10 }));
+    await client.createPullRequestComment(3, description);
+    expect(JSON.parse(String(fetchImpl.mock.lastCall?.[1]?.body))).toEqual({
+      content: { raw: description },
+    });
+    fetchImpl.mockResolvedValueOnce(
+      json({ hash: 'abcdef1', repository: identity }),
+    );
+    await client.getCommit('feature/branch');
+    expect(String(fetchImpl.mock.lastCall?.[0])).toBe(
+      'https://api.bitbucket.org/2.0/repositories/acme/repo/commit/feature%2Fbranch',
+    );
   });
 
   it('creates comments and native parent-id replies without inline capabilities', async () => {
@@ -288,6 +324,9 @@ describe('bounded Bitbucket repository client', () => {
       parent: { id: 9 },
     });
     expect(() => client.createPullRequestComment(3, 'Reply', -1)).toThrow();
-    expect(() => client.createPullRequestComment(3, '')).toThrow();
+    await client.createPullRequestComment(3, '');
+    expect(JSON.parse(String(fetchImpl.mock.lastCall?.[1]?.body))).toEqual({
+      content: { raw: '' },
+    });
   });
 });

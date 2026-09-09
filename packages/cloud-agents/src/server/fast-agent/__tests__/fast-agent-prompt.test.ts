@@ -80,23 +80,8 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Do not clone a repository or use "launch_task" for these operations',
     );
-    const reads = prompt.split('- Bitbucket reads:')[1]!.split('\n')[0]!;
-    for (const tool of [
-      'get_file',
-      'list_directory',
-      'search_code',
-      'list_commits',
-      'get_commit',
-      'get_pull_request',
-      'get_pull_request_diff',
-      'list_pull_request_comments',
-    ]) {
-      expect(reads).toContain(`\`${tool}\``);
-    }
-    expect(reads).toContain('`repositoryFullName` and `hash`');
-    expect(reads).toContain('`repositoryFullName` and `pullRequestNumber`');
-    expect(reads).toContain(
-      'Commit history and commit details are reads, not commit creation or writes',
+    expect(prompt).toContain(
+      'Follow discovered schemas rather than guessing arguments',
     );
     expect(prompt).toContain(
       'Use direct API tools when sufficient; delegate work that requires a local workspace, execution, code changes, or testing',
@@ -105,36 +90,23 @@ describe('buildFastAgentSystemPrompt', () => {
 
   it('bounds Bitbucket search and distinguishes supported writes from unsupported actions', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
-    expect(prompt).toContain('page numbers are 1-100');
-    expect(prompt).toContain('file/diff reads cap at 1 MiB');
+    expect(prompt).toContain('Reads cap responses at 1 MiB');
     expect(prompt).toContain('never claim a single page is exhaustive');
     expect(prompt).toContain('Code search is deprecated November 1, 2026');
+    expect(prompt).toContain('not query operators or repository filters');
     expect(prompt).toContain(
-      'not query operators, AND/OR/NOT, or caller-supplied repo filters',
-    );
-    expect(prompt).toContain('The server fixes the repository scope');
-    expect(prompt).toContain('Fail closed on unavailable search');
-    expect(prompt).toContain(
-      'never broaden to workspace-wide search or silently clone/launch',
+      'without broadening the search or bypassing API permissions through a task',
     );
     const writes = prompt
       .split('- Bitbucket writes require')[1]!
       .split('\n')[0]!;
-    expect(writes).toContain('`update_pull_request`');
-    expect(writes).toContain('at least one of `title` or `description` only');
-    expect(writes).toContain('`decline_pull_request`');
-    expect(writes).toContain('`add_pull_request_comment`');
     expect(writes).toContain(
-      '`parentCommentId` for a reply to a comment in that same PR',
+      'update PR titles/descriptions, decline PRs, or add comments and replies to a comment in the same PR',
     );
-    expect(writes).toContain('not the PR description update');
+    expect(writes).toContain('Reading does not authorize writes');
     expect(writes).toContain(
-      'do not infer write permission from a read request',
+      'Reopening/merging PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
     );
-    expect(prompt).toContain(
-      'does not support reopening or merging PRs, file writes, commit creation, PR creation, review administration',
-    );
-    expect(prompt).toContain('or Bitbucket Server/Data Center');
     expect(prompt).toContain(
       'An actual code-review request still uses "review_pull_request"',
     );
