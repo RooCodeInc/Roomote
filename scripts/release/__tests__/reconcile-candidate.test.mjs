@@ -111,6 +111,8 @@ function fixture(t, { clean = false, pending = false, resolved = {} } = {}) {
         },
       ],
     ],
+    permission: { permission: 'write' },
+    permissionError: false,
     threadPages: [
       { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
     ],
@@ -142,6 +144,12 @@ function fixture(t, { clean = false, pending = false, resolved = {} } = {}) {
           },
         },
       };
+    } else if (
+      endpoint === `repos/${repository}/collaborators/reviewer/permission`
+    ) {
+      if (state.permissionError)
+        return { status: 1, stdout: '', stderr: 'permission lookup failed' };
+      value = state.permission;
     } else if (endpoint.includes('/reviews?')) {
       assert.ok(args.includes('--paginate') && args.includes('--slurp'));
       value = state.reviews;
@@ -412,7 +420,10 @@ for (const variant of [
     if (variant === 'stale') approval.commit_id = f.expected_candidate_sha;
     if (variant === 'self') approval.user.login = 'AUTHOR';
     if (variant === 'bot') approval.user.type = 'Bot';
-    if (variant === 'outsider') approval.author_association = 'NONE';
+    if (variant === 'outsider') {
+      approval.author_association = 'NONE';
+      f.state.permission = { permission: 'read' };
+    }
     if (variant === 'dismissed') approval.state = 'DISMISSED';
     if (variant === 'no approvals') f.state.reviews = [[]];
     if (variant.includes('changes')) {
@@ -432,6 +443,51 @@ for (const variant of [
     rejectsWithoutPush(f, /approval|CHANGES_REQUESTED/);
   });
 }
+
+for (const permission of ['admin', 'maintain', 'write']) {
+  test(`accepts exact-SHA human ${permission} approval regardless of association`, (t) => {
+    const f = fixture(t);
+    f.state.reviews[0][0].author_association = 'CONTRIBUTOR';
+    f.state.permission = { permission };
+    assert.ok(f.execute().head);
+    assert.equal(
+      f.state.calls.filter((call) =>
+        call.some((arg) => arg.endsWith('/permission')),
+      ).length,
+      2,
+    );
+  });
+}
+
+for (const permission of ['read', 'triage', 'none', 'unknown', undefined]) {
+  test(`rejects ${permission} repository permission despite MEMBER association`, (t) => {
+    const f = fixture(t);
+    f.state.permission = { permission };
+    rejectsWithoutPush(f, /Independent approval/);
+  });
+}
+
+test('fails closed on permission lookup failure', (t) => {
+  const f = fixture(t);
+  f.state.permissionError = true;
+  rejectsWithoutPush(f, /permission lookup failed/);
+});
+
+test('fails closed on missing permission response', (t) => {
+  const f = fixture(t);
+  f.state.permission = null;
+  rejectsWithoutPush(f, /Independent approval/);
+});
+
+test('rechecks repository permission immediately before pushing', (t) => {
+  const f = fixture(t);
+  let requests = 0;
+  f.state.before = (bin, args) => {
+    if (bin === 'gh' && args[1]?.endsWith('/permission') && ++requests === 2)
+      f.state.permission = { permission: 'read' };
+  };
+  rejectsWithoutPush(f, /Independent approval/);
+});
 
 test('accepts approval superseding changes requested across review pages', (t) => {
   const f = fixture(t);
