@@ -92,6 +92,8 @@ import {
   matchIntegrationTools,
 } from '@roomote/types';
 import { z } from 'zod';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { startMcpToolTestServer } from '../../__tests__/mcp-tool-client-fixture';
 
 const auditContext = {
   userId: 'user-1',
@@ -1505,6 +1507,95 @@ describe('fast-agent integration broker', () => {
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
     });
   });
+
+  it.each([
+    'allowed',
+    'denied POST',
+    'revoked permission',
+    'protocol failure',
+    'transport failure',
+  ])(
+    'audits a real MCP %s call without a false succeeded record',
+    async (scenario) => {
+      const { callMcpTool, McpToolCallError } = await vi.importActual<
+        typeof import('../../mcp-tool-client')
+      >('../../mcp-tool-client');
+      mocks.callMcpTool.mockImplementation(callMcpTool);
+      const call = vi.fn(() => {
+        if (scenario === 'protocol failure') {
+          throw new McpError(ErrorCode.InvalidParams, 'Invalid tool arguments');
+        }
+        return scenario === 'allowed'
+          ? { content: [], structuredContent: { ok: true } }
+          : {
+              isError: true,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `${scenario}: synthetic-secret`,
+                },
+              ],
+            };
+      });
+      const endpoint = await startMcpToolTestServer(call, {
+        httpFailure: scenario === 'transport failure',
+      });
+      try {
+        const result = callFastAgentIntegration(
+          auditContext,
+          [
+            {
+              id: '_roomote_http_integrations',
+              name: 'HTTP integrations',
+              description: 'HTTP',
+              tools: [{ name: 'integration_request' }],
+              endpoint: { url: endpoint.url, headers: {} },
+            },
+          ],
+          {
+            integrationId: '_roomote_http_integrations',
+            toolName: 'integration_request',
+            args: { method: scenario === 'denied POST' ? 'POST' : 'GET' },
+          },
+        );
+        if (scenario === 'allowed') {
+          await expect(result).resolves.toEqual({ ok: true });
+        } else if (
+          scenario === 'denied POST' ||
+          scenario === 'revoked permission'
+        ) {
+          await expect(result).rejects.toBeInstanceOf(McpToolCallError);
+        } else {
+          await expect(result).rejects.toThrow(
+            scenario === 'protocol failure' ? 'Invalid tool arguments' : '503',
+          );
+        }
+        expect(mocks.beginIntegrationCall).toHaveBeenCalledOnce();
+        expect(mocks.completeIntegrationCall).toHaveBeenCalledExactlyOnceWith({
+          id: 'audit-1',
+          status: scenario === 'allowed' ? 'succeeded' : 'failed',
+          ...(scenario === 'allowed'
+            ? { resultPreview: '{"ok":true}' }
+            : {
+                error:
+                  scenario === 'denied POST' ||
+                  scenario === 'revoked permission'
+                    ? 'McpToolCallError | MCP tool reported an error (isError: true).'
+                    : expect.any(String),
+              }),
+          startedAt: new Date('2026-08-16T00:00:00.000Z'),
+        });
+        expect(
+          JSON.stringify(mocks.completeIntegrationCall.mock.calls),
+        ).not.toContain('synthetic-secret');
+        if (scenario !== 'transport failure')
+          expect(call).toHaveBeenCalledOnce();
+      } finally {
+        mocks.callMcpTool.mockReset();
+        await endpoint.close();
+      }
+    },
+  );
 
   it('times out a hung integration call and records the failure', async () => {
     vi.useFakeTimers();

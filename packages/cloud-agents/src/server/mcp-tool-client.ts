@@ -7,9 +7,18 @@
  */
 
 type McpToolResult = {
+  isError?: boolean;
   structuredContent?: unknown;
   content?: Array<{ type?: string; text?: string }>;
 };
+
+export class McpToolCallError extends Error {
+  constructor() {
+    // Upstream tool content can contain credentials; do not copy it into logs.
+    super('MCP tool reported an error (isError: true).');
+    this.name = 'McpToolCallError';
+  }
+}
 
 async function createCancellableMcpClient(options: {
   url: string;
@@ -114,8 +123,8 @@ export function extractMcpToolResultPayload(result: unknown): unknown | null {
  * Call a single tool on a streamable-http MCP server.
  *
  * Returns the extracted tool payload, or `null` when the server does not
- * expose the requested tool. Transport and protocol errors are thrown so the
- * caller can decide whether to fail open.
+ * expose the requested tool. Tool-result, transport, and protocol errors are
+ * thrown so the caller can decide whether to fail open.
  */
 export async function callMcpTool(options: {
   url: string;
@@ -151,6 +160,13 @@ export async function callMcpTool(options: {
       toolCallId: options.toolCallId ?? `mcp-tool-call:${options.toolName}`,
       messages: [],
     });
+    if (
+      result &&
+      typeof result === 'object' &&
+      (result as McpToolResult).isError === true
+    ) {
+      throw new McpToolCallError();
+    }
     return extractMcpToolResultPayload(result);
   } finally {
     await client.close().catch(() => undefined);
