@@ -51,6 +51,28 @@ dashboard page.
 You do not need to choose a separate conversation mode. The Session grows from
 conversation to execution to review without changing identity.
 
+## Source-control work without a workspace
+
+Fast uses existing integration APIs for bounded repository inspection when the
+available tools can answer the question. Reading files, searching a repository,
+or inspecting commits, pull requests, and reported CI results does not require
+cloning a repository or provisioning a workspace. Available reads depend on the
+connected integration's tools and permissions. Reading CI results is not the
+same as running tests: local checkout, code edits, command execution, and testing
+are delegated to a task, as are investigations that need a workspace.
+
+The existing [GitHub integration](/providers/source-control/github#daily-github-management)
+also supports updates to existing pull requests, issue or PR comments,
+review-comment replies, and reactions using the deployment's GitHub App.
+See that guide for supported actions and access requirements.
+
+The official [GitLab MCP](https://docs.gitlab.com/user/model_context_protocol/mcp_server/)
+and [Bitbucket Cloud MCP](https://support.atlassian.com/atlassian-ai-gateway/docs/supported-tools/#Bitbucket-Cloud-tools)
+are not enabled for this direct Fast path. Their compatibility with Roomote's
+existing credentials has not been verified; existing task workflows are unchanged.
+GitLab's optional operator-run route is described in
+[GitLab API tools](/providers/source-control/gitlab#optional-gitlab-api-tools-for-fast).
+
 ## The session view
 
 A Session header shows the other people currently viewing that Session. Your

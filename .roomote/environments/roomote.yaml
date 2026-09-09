@@ -54,16 +54,36 @@ repositories:
         run: psql -h localhost -U postgres -c "CREATE DATABASE roomote_development" || true
         timeout: 600
         continue_on_error: false
-      - name: Create test database
-        run: psql -h localhost -U postgres -c "CREATE DATABASE roomote_test" || true
-        timeout: 600
-        continue_on_error: false
       - name: Apply development database migrations
         run: pnpm --filter @roomote/db db:migrate
         timeout: 600
         continue_on_error: false
       - name: Seed demo data
         run: pnpm --filter @roomote/db db:seed:demo
+        timeout: 600
+        continue_on_error: false
+      - name: Start Redis
+        run: mkdir -p /tmp/redis-data && redis-server --port 16379 --dir /tmp/redis-data --appendonly no
+        timeout: 600
+        continue_on_error: true
+        detached: true
+        logfile: /tmp/roomote-redis.log
+      - name: Start API server
+        run: PORT=13001 R_APP_ENV=development pnpm --filter @roomote/api dev
+        timeout: 600
+        continue_on_error: true
+        detached: true
+        logfile: /tmp/roomote-api.log
+      - name: Start Next.js web dev server
+        # Warm the authenticated landing page while the remaining setup runs.
+        run: PORT=3000 R_APP_ENV=development WEB_DEV_LOGIN_ENABLED=true pnpm --filter @roomote/web dev:preview
+        timeout: 600
+        continue_on_error: false
+        detached: true
+        logfile: /tmp/roomote-web.log
+      # Tests still wait for setup completion; they do not gate the web preview.
+      - name: Create test database
+        run: psql -h localhost -U postgres -c "CREATE DATABASE roomote_test" || true
         timeout: 600
         continue_on_error: false
       - name: Write test environment file
@@ -74,28 +94,11 @@ repositories:
         run: pnpm --filter @roomote/db db:push:test
         timeout: 600
         continue_on_error: false
-      - name: Start Redis
-        run: mkdir -p /tmp/redis-data && redis-server --port 16379 --dir /tmp/redis-data --appendonly no
-        timeout: 600
-        continue_on_error: true
-        detached: true
-        logfile: /tmp/roomote-redis.log
+      # The controller must not start before its local worker archive exists.
       - name: Build local worker release
         run: pnpm --filter @roomote/dev build-worker-release
         timeout: 600
         continue_on_error: true
-      - name: Start API server
-        run: PORT=13001 R_APP_ENV=development pnpm --filter @roomote/api dev
-        timeout: 600
-        continue_on_error: true
-        detached: true
-        logfile: /tmp/roomote-api.log
-      - name: Start Next.js web dev server
-        run: PORT=3000 R_APP_ENV=development WEB_DEV_LOGIN_ENABLED=true pnpm --filter @roomote/web dev
-        timeout: 600
-        continue_on_error: false
-        detached: true
-        logfile: /tmp/roomote-web.log
       - name: Start BullMQ worker
         run: PORT=13002 R_APP_ENV=development pnpm --filter @roomote/bullmq dev
         timeout: 600

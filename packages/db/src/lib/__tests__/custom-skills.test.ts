@@ -111,6 +111,7 @@ it('lets members create instance skills and exposes full records with actor-spec
     });
     expect(await listCustomSkills(actor)).toContainEqual({
       ...stored,
+      createdByName: expect.any(String),
       canManage,
     });
   }

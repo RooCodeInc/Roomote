@@ -17,6 +17,7 @@ const { state, createMock, updateMock, deleteMock } = vi.hoisted(() => ({
         description: 'My instructions',
         content: '# My skill body',
         canManage: true,
+        createdByName: 'Me',
       },
       {
         id: '00000000-0000-4000-8000-000000000002',
@@ -24,6 +25,7 @@ const { state, createMock, updateMock, deleteMock } = vi.hoisted(() => ({
         description: 'Another member created this',
         content: '# Shared skill body',
         canManage: false,
+        createdByName: 'Teammate',
       },
     ],
     isAdmin: false,
@@ -154,46 +156,35 @@ it('makes Skills navigation and creation available to members without environmen
 it('lets members view every body but only manage skills authorized by the server', async () => {
   renderSkills();
   await screen.findByText('my-skill');
+  const list = screen.getByRole('list', { name: 'Shared skills' });
+  expect(within(list).getByText('Created by Me')).toBeInTheDocument();
+  expect(within(list).getByText('Created by Teammate')).toBeInTheDocument();
   expect(
-    within(screen.getByRole('list', { name: 'Shared skills' })).getAllByRole(
-      'button',
-    ),
-  ).toHaveLength(2);
+    within(list).getByRole('button', { name: 'Edit my-skill' }),
+  ).toBeInTheDocument();
   expect(
-    screen.queryByRole('button', { name: /^Edit |^Delete / }),
+    within(list).getByRole('button', { name: 'Delete my-skill' }),
+  ).toBeInTheDocument();
+  expect(
+    within(list).queryByRole('button', { name: 'Edit shared-skill' }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(list).queryByRole('button', { name: 'Delete shared-skill' }),
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByText('my-skill'));
   const ownedDialog = screen.getByRole('dialog');
   expect(within(ownedDialog).getByText('# My skill body')).toBeInTheDocument();
-  expect(
-    within(ownedDialog).getByRole('button', { name: 'Edit my-skill' }),
-  ).toBeInTheDocument();
-  expect(
-    within(ownedDialog).getByRole('button', { name: 'Delete my-skill' }),
-  ).toBeInTheDocument();
   fireEvent.click(
     within(ownedDialog).getAllByRole('button', { name: 'Close' })[0]!,
   );
   fireEvent.click(screen.getByText('shared-skill'));
   expect(
-    screen.queryByRole('button', { name: 'Edit shared-skill' }),
-  ).not.toBeInTheDocument();
-  expect(
-    screen.queryByRole('button', { name: 'Delete shared-skill' }),
-  ).not.toBeInTheDocument();
-  expect(
     within(screen.getByRole('dialog')).getByText('# Shared skill body'),
   ).toBeInTheDocument();
-  expect(
-    within(screen.getByRole('dialog')).queryByRole('button', {
-      name: /^Edit|^Delete/,
-    }),
-  ).not.toBeInTheDocument();
 });
 
 it('shows document-size validation instead of silently refusing to save', async () => {
   renderSkills();
-  fireEvent.click(await screen.findByRole('button', { name: 'View my-skill' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Edit my-skill' }));
   const dialog = screen.getByRole('dialog');
   fireEvent.change(within(dialog).getByLabelText('Content'), {
@@ -209,7 +200,6 @@ it('shows document-size validation instead of silently refusing to save', async 
 
 it('updates a creator skill and invalidates the catalog', async () => {
   const { invalidate } = renderSkills();
-  fireEvent.click(await screen.findByRole('button', { name: 'View my-skill' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Edit my-skill' }));
   const dialog = screen.getByRole('dialog');
   expect(within(dialog).getByLabelText('Content')).toHaveValue(
@@ -231,7 +221,6 @@ it('updates a creator skill and invalidates the catalog', async () => {
 
 it('requires confirmation before deleting and refreshes the catalog', async () => {
   const { invalidate } = renderSkills();
-  fireEvent.click(await screen.findByRole('button', { name: 'View my-skill' }));
   fireEvent.click(
     await screen.findByRole('button', { name: 'Delete my-skill' }),
   );
@@ -240,7 +229,6 @@ it('requires confirmation before deleting and refreshes the catalog', async () =
     within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }),
   );
   expect(deleteMock).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'View my-skill' }));
   fireEvent.click(screen.getByRole('button', { name: 'Delete my-skill' }));
   fireEvent.click(
     within(screen.getByRole('dialog')).getByRole('button', {

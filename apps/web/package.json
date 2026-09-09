@@ -16,6 +16,7 @@
     "docs:assets": "node ./scripts/sync-docs-assets.mjs",
     "dev:prepare": "rimraf .next && pnpm docs:assets && pnpm automation:icons",
     "dev": "pnpm docs:assets && pnpm automation:icons && dotenvx run -f ../../.env.local -- next dev --turbopack",
+    "dev:preview": "pnpm docs:assets && pnpm automation:icons && dotenvx run -f ../../.env.local -- node ./scripts/dev-preview.mjs",
     "build": "pnpm docs:assets && pnpm automation:icons && NODE_OPTIONS='--max-old-space-size=4096' node ./scripts/run-with-app-env.mjs --default-env production -- next build",
     "build:debug": "pnpm docs:assets && NODE_OPTIONS='--max-old-space-size=4096' node ./scripts/run-with-app-env.mjs --default-env production -- next build --experimental-debug-memory-usage",
     "start": "node ./scripts/run-with-app-env.mjs --default-env production -- next start",

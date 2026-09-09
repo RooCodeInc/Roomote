@@ -190,12 +190,18 @@ describe('fast-agent integration broker', () => {
     expect(mocks.callMcpTool).toHaveBeenCalledTimes(2);
   });
 
-  it('exposes the deployment GitHub App through its read-only router MCP', async () => {
+  it('exposes GitHub reads and bounded writes through the existing router MCP', async () => {
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
     mocks.listMcpTools.mockResolvedValue([
       { name: 'actions_get', inputSchema: { type: 'object' } },
       { name: 'actions_list', inputSchema: { type: 'object' } },
       { name: 'get_job_logs', inputSchema: { type: 'object' } },
+      { name: 'update_pull_request', inputSchema: { type: 'object' } },
+      { name: 'add_issue_comment', inputSchema: { type: 'object' } },
+      {
+        name: 'add_reply_to_pull_request_comment',
+        inputSchema: { type: 'object' },
+      },
     ]);
 
     const integrations = await listFastAgentIntegrations({
@@ -210,7 +216,16 @@ describe('fast-agent integration broker', () => {
       'actions_get',
       'actions_list',
       'get_job_logs',
+      'update_pull_request',
+      'add_issue_comment',
+      'add_reply_to_pull_request_comment',
     ]);
+    expect(integrations[0]?.description).toContain(
+      'including reviewer requests, draft status, and comment reactions',
+    );
+    expect(integrations[0]?.description).toContain(
+      'Follow the discovered native tool descriptions and schemas',
+    );
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },
@@ -284,6 +299,63 @@ describe('fast-agent integration broker', () => {
     if (reason === 'disabled' || reason === 'no upstream')
       expect(mocks.findGitlabConnection).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      name: 'update_pull_request',
+      args: {
+        owner: 'example',
+        repo: 'repo',
+        pullNumber: 42,
+        reviewers: ['octocat'],
+        base: 'develop',
+        draft: false,
+        maintainer_can_modify: true,
+      },
+    },
+    {
+      name: 'add_issue_comment',
+      args: {
+        owner: 'example',
+        repo: 'repo',
+        issue_number: 42,
+        comment_id: 123,
+        reaction: '+1',
+      },
+    },
+    {
+      name: 'add_reply_to_pull_request_comment',
+      args: { owner: 'example', repo: 'repo', commentId: 456, reaction: '+1' },
+    },
+  ])(
+    'preserves discovered $name descriptions, schemas, and arguments',
+    async ({ name, args }) => {
+      mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
+      const nativeTool = {
+        name,
+        description: `Native ${name} description`,
+        inputSchema: {
+          type: 'object',
+          properties: Object.fromEntries(
+            Object.keys(args).map((key) => [key, { description: key }]),
+          ),
+          required: ['owner', 'repo'],
+        },
+      };
+      mocks.listMcpTools.mockResolvedValue([nativeTool]);
+      mocks.callMcpTool.mockResolvedValue({ success: true });
+      const integrations = await listFastAgentIntegrations(auditContext);
+      expect(integrations[0]?.tools).toEqual([nativeTool]);
+      await callFastAgentIntegration(auditContext, integrations, {
+        integrationId: 'github',
+        toolName: name,
+        args,
+      });
+      expect(mocks.callMcpTool).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: name, args }),
+      );
+    },
+  );
 
   it('exposes the read-only Brain proxy when the Brain is configured', async () => {
     mocks.configuredServers = {

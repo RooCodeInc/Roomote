@@ -12,8 +12,8 @@ export function SkillsSettingsPage() {
       pageId="skills"
       showHeaderActionOnMobile
       headerAction={
-        <Button onClick={() => setIsCreating(true)}>
-          <Plus />
+        <Button size="sm" onClick={() => setIsCreating(true)}>
+          <Plus className="size-4" />
           Add Skill
         </Button>
       }
