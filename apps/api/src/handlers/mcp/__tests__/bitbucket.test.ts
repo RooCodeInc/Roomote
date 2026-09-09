@@ -460,6 +460,26 @@ describe('Bitbucket MCP call authorization', () => {
 
 describe('Bitbucket MCP bounded operations', () => {
   it.each([
+    '',
+    'main',
+    'feature/branch',
+    'v1.0.0',
+    'HEAD~1',
+    'abcdefg',
+    'a'.repeat(41),
+    'abcdef1\n',
+  ])(
+    'rejects non-SHA1 get_commit input %j before provider access',
+    async (hash) => {
+      const { body } = await request('get_commit', { hash });
+      expect(body.result.isError).toBe(true);
+      expect(resolveToken).not.toHaveBeenCalled();
+      expect(createClient).not.toHaveBeenCalled();
+      expect(client.getCommit).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
     [
       'get_file',
       'getFile',
@@ -475,7 +495,21 @@ describe('Bitbucket MCP bounded operations', () => {
     ['search_code', 'searchCode', { terms: 'hello', page: 2 }, ['hello', 2]],
     ['list_commits', 'listCommits', { ref: 'main', page: 2 }, ['main', 2]],
     ['get_commit', 'getCommit', { hash: 'abcdef0' }, ['abcdef0']],
-    ['get_commit', 'getCommit', { hash: 'feature/branch' }, ['feature/branch']],
+    ['get_commit', 'getCommit', { hash: 'a' }, ['a']],
+    ['get_commit', 'getCommit', { hash: '6a2c16e4a152' }, ['6a2c16e4a152']],
+    [
+      'get_commit',
+      'getCommit',
+      { hash: 'ABCDEF01'.repeat(5) },
+      ['ABCDEF01'.repeat(5)],
+    ],
+    [
+      'list_commits',
+      'listCommits',
+      { ref: 'feature/branch' },
+      ['feature/branch', undefined],
+    ],
+    ['list_commits', 'listCommits', { ref: 'v1.0.0' }, ['v1.0.0', undefined]],
     ['get_pull_request', 'getPullRequest', { pullRequestNumber: 7 }, [7]],
     [
       'get_pull_request_diff',

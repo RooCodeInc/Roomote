@@ -1542,6 +1542,11 @@ export async function updateBitbucketPullRequestComment({
   });
 }
 
+export const bitbucketCommitHashSchema = z
+  .string()
+  .regex(/^[a-fA-F0-9]{1,40}$/)
+  .describe('Commit SHA1, full or abbreviated; not a branch or tag name.');
+
 const boundedRepositoryIdentitySchema = z.object({
   uuid: z.string().min(1),
   full_name: z.string().min(1),
@@ -1688,7 +1693,10 @@ export function createBitbucketRepositoryClient(
     listCommits: (ref: string, pageNumber = 1) =>
       page(`${root}/commits/${revision(ref)}`, boundedCommitSchema, pageNumber),
     getCommit: (hash: string) =>
-      request(`${root}/commit/${revision(hash)}`, boundedCommitSchema),
+      request(
+        `${root}/commit/${bitbucketCommitHashSchema.parse(hash)}`,
+        boundedCommitSchema,
+      ),
     getPullRequest: (number: number) =>
       request(prPath(number), bitbucketPullRequestDetailsSchema),
     getPullRequestDiff: (number: number) =>

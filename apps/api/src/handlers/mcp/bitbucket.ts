@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { and, db, eq, isNull, repositories, users } from '@roomote/db/server';
 import {
+  bitbucketCommitHashSchema,
   createBitbucketRepositoryClient,
   getBitbucketOAuthConnection,
   resolveBitbucketInstanceHost,
@@ -187,8 +188,8 @@ function createServer(auth: Variables['authContext']) {
   );
   register(
     'get_commit',
-    'Read commit details by hash or revision.',
-    { ...base, hash: ref },
+    'Read commit details by full or abbreviated SHA1, not a branch or tag name.',
+    { ...base, hash: bitbucketCommitHashSchema },
     true,
     async (input, client, check) => {
       const result = await client.getCommit(input.hash);

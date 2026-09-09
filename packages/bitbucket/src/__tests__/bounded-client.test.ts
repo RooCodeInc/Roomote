@@ -17,6 +17,35 @@ const setup = (response: () => Response = () => json(pr)) => {
 };
 
 describe('bounded Bitbucket repository client', () => {
+  it.each([
+    '',
+    'main',
+    'feature/branch',
+    'v1.0.0',
+    'HEAD~1',
+    'abcdefg',
+    'a'.repeat(41),
+    'abcdef1\n',
+  ])('rejects non-SHA1 commit input %j before HTTP', (hash) => {
+    const { client, fetchImpl } = setup();
+    expect(() => client.getCommit(hash)).toThrow();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each(['a', 'abcdef1', '6a2c16e4a152', 'ABCDEF01'.repeat(5)])(
+    'reads full or abbreviated SHA1 %s',
+    async (hash) => {
+      const { client, fetchImpl } = setup(() =>
+        json({ hash, repository: identity }),
+      );
+      await client.getCommit(hash);
+      expect(fetchImpl).toHaveBeenCalledWith(
+        `https://api.bitbucket.org/2.0/repositories/acme/repo/commit/${hash}`,
+        expect.anything(),
+      );
+    },
+  );
+
   it('follows exactly one validated same-repository PR diff redirect', async () => {
     const target =
       'https://api.bitbucket.org/2.0/repositories/acme/repo/diff/abcdef1..abcdef2?from_pullrequest_id=3&topic=true';
@@ -303,12 +332,10 @@ describe('bounded Bitbucket repository client', () => {
     expect(JSON.parse(String(fetchImpl.mock.lastCall?.[1]?.body))).toEqual({
       content: { raw: description },
     });
-    fetchImpl.mockResolvedValueOnce(
-      json({ hash: 'abcdef1', repository: identity }),
-    );
-    await client.getCommit('feature/branch');
+    fetchImpl.mockResolvedValueOnce(json({ values: [] }));
+    await client.listCommits('feature/branch');
     expect(String(fetchImpl.mock.lastCall?.[0])).toBe(
-      'https://api.bitbucket.org/2.0/repositories/acme/repo/commit/feature%2Fbranch',
+      'https://api.bitbucket.org/2.0/repositories/acme/repo/commits/feature%2Fbranch?page=1&pagelen=50',
     );
   });
 

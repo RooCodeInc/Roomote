@@ -70,7 +70,8 @@ without a repository clone or coding task:
 | --- | --- |
 | Read files and directories at a ref | `get_file`, `list_directory` |
 | Search code in one connected repository | `search_code` |
-| Read commit history or a commit by hash/revision | `list_commits`, `get_commit` |
+| Read commit history at a ref | `list_commits` |
+| Read a commit by SHA1 | `get_commit` |
 | Read a PR, its diff, or its comments | `get_pull_request`, `get_pull_request_diff`, `list_pull_request_comments` |
 | Change a PR title and/or description | `update_pull_request` |
 | Decline a PR | `decline_pull_request` |
@@ -78,8 +79,10 @@ without a repository clone or coding task:
 
 Every tool requires `repositoryFullName` as `workspace/repo`. PR operations also
 require `pullRequestNumber`. File and directory reads require `ref`; file reads
-also require `path`. Commit history requires `ref`, while a single commit requires
-`hash` (a commit hash or revision). Reading commits does not create commits.
+also require `path`. Commit history requires `ref` (a commit SHA1 or ref name),
+while a single commit requires `hash` (a full or abbreviated hexadecimal SHA1,
+not a branch or tag name). Prefer the full SHA1; Bitbucket resolves abbreviated
+hashes and may reject ambiguous prefixes. Reading commits does not create commits.
 
 Title/description updates accept only those fields, not state changes. Comments
 use `body`; a reply additionally uses `parentCommentId` belonging to the same PR.
