@@ -2,6 +2,23 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.5.1 (2026-09-09)
+
+Roomote 1.5.1 makes Fast guidance and follow-up behavior more reliable, clarifies delegated review work, and restores Better Stack tool discovery.
+
+### Highlights
+
+- Apply deployment-wide Agent Guidance to every Fast turn and offer bounded monitoring when an eligible outcome remains unresolved.
+- Distinguish code review agents from ordinary coding agents in Session task cards.
+- Restore exact-name integration tool discovery for Better Stack operational triage.
+
+### Patch changes
+
+- Session task cards now label pull request review work as a Code review agent and use matching task descriptions, making review work easier to distinguish from ordinary coding tasks on desktop and mobile.
+- Fast Sessions now apply deployment-wide Agent Guidance and reload saved guidance for each new turn, matching the behavior promised in Settings while leaving already-running coding tasks unchanged.
+- Fast now evaluates bounded monitoring at eligible closeouts, offering a specific follow-up when an unresolved outcome can be checked while preserving consent, evidence, deduplication, and finite monitoring bounds.
+- On-demand integration tools can be found reliably by exact name again, restoring capability discovery for Better Stack operational triage without weakening integration scope or authorization checks.
+
 ## 1.5.0 (2026-09-09)
 
 Roomote 1.5 brings shared skills, more control over automations and coding tasks, and direct repository work across GitHub, GitLab and Bitbucket Cloud, alongside security and integration fixes.
