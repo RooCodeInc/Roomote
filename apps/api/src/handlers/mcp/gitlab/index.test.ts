@@ -12,14 +12,19 @@ import { ToolSchema, type Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { Variables } from '../../../types';
 import { compatible, createGitlabMcp, schemas } from './index';
 import fixture from './pinned-catalog.fixture.json';
+import { mcpRouting } from '../routing';
 
 const mocks = vi.hoisted(() => ({
   env: {
     GITLAB_MCP_SERVER_URL: 'https://mcp.example/mcp' as string | undefined,
+    R_CURATED_INTEGRATIONS_DISABLED: false,
   },
   token: vi.fn(),
   connection: vi.fn(),
 }));
+vi.mock('../github', () => ({ createGithubMcp: () => new Hono() }));
+vi.mock('../linear', () => ({ createLinearMcp: () => new Hono() }));
+vi.mock('../roomote', () => ({ roomoteMcp: new Hono() }));
 vi.mock('@roomote/env', async (original) => ({
   ...(await original<object>()),
   Env: mocks.env,
@@ -108,6 +113,7 @@ beforeEach(async () => {
   fileResponse = () => new Response('first\nsecond\nthird\n');
   traffic = [];
   mocks.env.GITLAB_MCP_SERVER_URL = 'https://mcp.example/mcp';
+  mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
   mocks.token.mockReset().mockResolvedValue('refreshed-oauth-token');
   mocks.connection.mockReset().mockResolvedValue({
     baseUrl: 'https://gitlab.example',
@@ -157,6 +163,54 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   await db.delete(repositories).where(eq(repositories.id, repositoryId));
   await db.delete(users).where(eq(users.id, userId));
+});
+
+describe.each(['/gitlab', '/gitlab/'])('mounted routing %s', (path) => {
+  it.each(['tools/list', 'tools/call'])(
+    'blocks direct %s before credentials or upstream when curated integrations are disabled',
+    async (method) => {
+      const mounted = new Hono<{ Variables: Variables }>();
+      mounted.use('*', async (c, next) => {
+        c.set('authContext', { tokenType: 'auth', userId, version: 1 });
+        await next();
+      });
+      mounted.route('/api/mcp-routing', mcpRouting);
+      const send = (requestPath = path) =>
+        mounted.request(`/api/mcp-routing${requestPath}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method,
+            params:
+              method === 'tools/list'
+                ? {}
+                : {
+                    name: 'create_merge_request_note',
+                    arguments: {
+                      project_id: fullName,
+                      merge_request_iid: '7',
+                      body: 'hello',
+                    },
+                  },
+          }),
+        });
+
+      mocks.env.R_CURATED_INTEGRATIONS_DISABLED = true;
+      expect((await send()).status).toBe(404);
+      expect(mocks.connection).not.toHaveBeenCalled();
+      expect(mocks.token).not.toHaveBeenCalled();
+      expect(traffic).toEqual([]);
+
+      mocks.env.R_CURATED_INTEGRATIONS_DISABLED = false;
+      // Hono's strict routing only mounts the handler at the bare path.
+      expect((await send('/gitlab')).status).toBe(200);
+      expect(mocks.connection).toHaveBeenCalledOnce();
+      expect(mocks.token).toHaveBeenCalledOnce();
+      expect(traffic.some((item) => item.rpc?.method === method)).toBe(true);
+    },
+  );
 });
 
 it('advertises only compatible pinned schemas with strict bounded inputs', async () => {

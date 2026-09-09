@@ -28,6 +28,8 @@ const requireCuratedIntegrations: MiddlewareHandler<{
 };
 
 mcpRouting.route('/roomote', roomoteMcp);
+mcpRouting.use('/gitlab', requireCuratedIntegrations);
+mcpRouting.use('/gitlab/*', requireCuratedIntegrations);
 mcpRouting.route('/gitlab', createGitlabMcp());
 mcpRouting.use('/linear', requireCuratedIntegrations);
 mcpRouting.use('/linear/*', requireCuratedIntegrations);
