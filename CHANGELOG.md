@@ -2,6 +2,35 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.5.0 (2026-09-09)
+
+Roomote 1.5 adds shared reusable skills, member-owned automations, and direct GitHub updates in Fast, with security updates and more reliable integrations and pull request feedback.
+
+### Highlights
+
+- Save reusable skills from a Session or Settings and share them across the deployment without launching a coding task.
+- Manage your own custom automations as a member and share Session links for signed-in read access without granting management permissions.
+- Update existing GitHub pull requests, post comments and replies, and add reactions directly from Fast.
+- Receive security dependency updates and more reliable Snowflake connections, Better Stack scans, and task follow-ups.
+
+### Minor changes
+
+- Create reusable instance-wide skills directly in Sessions or Settings without choosing an environment or starting a coding task. Settings > Skills shows a shared catalog with creator labels and editing controls for creators and admins. Fast loads saved changes immediately, while coding runs refresh their catalog at startup. Existing environment and marketplace skills remain available through environment YAML, outside the shared Settings list.
+- Update existing GitHub pull requests, request reviewers, post comments and review-thread replies, and add reactions directly from Fast without starting a coding task. These actions use the connected GitHub App and its repository permissions; creating or merging pull requests and writing repository files still require a coding task.
+- Members can create and manage their own custom automations, including schedules and report destinations, without administrator access. Management remains creator/admin-only, while signed-in deployment members can follow a Session link to read its timeline and linked task transcripts, logs, and artifacts without gaining action or secret access. Members' Session user filters offer their own identity and custom automations; built-in automations and deployment-wide controls remain admin-only.
+
+### Patch changes
+
+- Better Stack operational scans resolve collection and cluster routing from current source metadata instead of reusing stale or guessed identifiers that cause queries to fail. Scans remain read-only and stop rather than guess when metadata is unavailable.
+- Avoid unnecessary pull request retries and edits when Roomote assigns a valid Session follow-up link instead of the initial task link.
+- Refresh task memories when a pull request the task opened merges or closes unmerged, so recall can distinguish shipped work from abandoned approaches.
+- Publish GitHub review-thread replies immediately instead of leaving them in pending drafts. Submitting a review no longer accidentally publishes unrelated draft comments; an existing pending review is submitted only when explicitly selected.
+- Update dependencies to address security vulnerabilities in web requests, image processing, API parsing, YAML handling, and AI response reads, including critical Next.js fixes, while retaining AVIF image optimization.
+- Keep Slack review cards focused on current findings and action buttons, without redundant resolving questions or superseded-review notices.
+- Connect to Snowflake with encrypted PKCS8 RSA private keys and a passphrase instead of failing after the connection is saved. Passphrase inputs are masked, invalid keys and connection failures return credential-safe errors, and setup guidance covers secure key generation and staged rotation.
+- Task follow-ups can be retried after a definite send rejection, and distinct instructions are no longer incorrectly blocked. Uncertain deliveries remain protected against duplicate sends.
+- Show the configured task model and reasoning defaults in the model chip before its picker is opened, instead of briefly displaying a built-in reasoning level.
+
 ## 1.4.1 (2026-09-08)
 
 Roomote 1.4.1 restores integration lookups that failed with GPT-5.x models.
