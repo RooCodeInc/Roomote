@@ -1,5 +1,3 @@
-import { stat } from 'node:fs/promises';
-
 import { TaskPayloadKind, type ServiceInfo } from '@roomote/types';
 
 import { ExecutionError } from '../../../command-executor';
@@ -163,7 +161,6 @@ describe('initializeRepositories', () => {
       repoLocalSkills: [],
       usesSharedWorkspaceRoot: true,
     });
-    expect((await stat(result.workspacePath)).isDirectory()).toBe(true);
     expect(configureSpy).not.toHaveBeenCalled();
     expect(mockListRepositories).not.toHaveBeenCalled();
     expect(prepareRepositorySpy).not.toHaveBeenCalled();

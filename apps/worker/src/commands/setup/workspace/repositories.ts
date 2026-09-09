@@ -1,5 +1,3 @@
-import { mkdir } from 'node:fs/promises';
-
 import pLimit from 'p-limit';
 
 import { sdk } from '@roomote/sdk/client';
@@ -99,7 +97,6 @@ export async function initializeRepositories(
   );
 
   if (workspace.type === 'no_repositories') {
-    await mkdir(workspaceRoot, { recursive: true });
     return {
       workspacePath: workspaceRoot,
       repoPaths: {},
