@@ -25,6 +25,7 @@ export {
 export {
   cancelSessionWakeupForConversation,
   createSessionWakeup,
+  ensureOwnTaskFollowThroughWakeup,
   getSessionWakeupForConversation,
   handleManageWakeupsToolCall,
   listSessionWakeupsForConversation,

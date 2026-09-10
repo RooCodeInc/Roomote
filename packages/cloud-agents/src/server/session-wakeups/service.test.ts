@@ -10,6 +10,7 @@ import {
 
 import { enqueueSessionWakeupFireBestEffort } from './queue';
 import {
+  ensureOwnTaskFollowThroughWakeup,
   handleManageWakeupsToolCall,
   type SessionWakeupActor,
 } from './service';
@@ -159,27 +160,35 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
     expect(enqueueSessionWakeupFireBestEffort).not.toHaveBeenCalled();
   });
 
-  it('persists and manages internal wakeups without changing scheduling', async () => {
-    const created = await handleManageWakeupsToolCall(actor, {
+  it('reserves internal wakeups for server-owned task follow-through', async () => {
+    const visible = await handleManageWakeupsToolCall(actor, {
       ...createInput,
       internal: true,
-    });
-    expect(created).toMatchObject({
+    } as typeof createInput);
+    expect(visible).toMatchObject({
       success: true,
-      wakeup: { internal: true, status: 'active' },
-    });
-    const wakeupId = (created.wakeup as { id: string }).id;
-    expect(enqueueSessionWakeupFireBestEffort).toHaveBeenCalledExactlyOnceWith({
-      wakeupId,
-      runAt: now.getTime() + 30_000,
+      wakeup: { internal: false, status: 'active' },
     });
 
-    await expect(
-      handleManageWakeupsToolCall(actor, { action: 'list' }),
-    ).resolves.toMatchObject({
-      count: 1,
-      wakeups: [{ id: wakeupId, internal: true }],
+    const created = await ensureOwnTaskFollowThroughWakeup(actor);
+    expect(created.wakeup).toMatchObject({
+      name: 'Follow through on session tasks',
+      internal: true,
+      status: 'active',
     });
+    const wakeupId = created.wakeup.id;
+    expect(enqueueSessionWakeupFireBestEffort).toHaveBeenNthCalledWith(2, {
+      wakeupId: expect.any(String),
+      runAt: now.getTime() + 10 * 60_000,
+    });
+
+    const listed = await handleManageWakeupsToolCall(actor, { action: 'list' });
+    expect(listed.count).toBe(2);
+    expect(listed.wakeups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: wakeupId, internal: true }),
+      ]),
+    );
     await expect(
       handleManageWakeupsToolCall(actor, { action: 'get', wakeupId }),
     ).resolves.toMatchObject({ wakeup: { id: wakeupId, internal: true } });

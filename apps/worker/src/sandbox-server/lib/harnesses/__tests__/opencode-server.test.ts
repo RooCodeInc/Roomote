@@ -3257,8 +3257,11 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('terminates an OpenCode retry loop after its structured attempt budget without a message', async () => {
-    const { client, harness } = createHarness();
+  it('hands an exhausted OpenCode connection reset retry to bounded Roomote recovery', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness(undefined, {
+      providerErrorBaseDelayMs: 1_000,
+    });
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
@@ -3294,7 +3297,6 @@ describe('OpenCodeServerHarness', () => {
         }),
       ).toBe(true);
 
-      // The decision uses the structured attempt count, not the provider prose.
       await client.emit({
         type: 'session.status',
         properties: {
@@ -3302,6 +3304,7 @@ describe('OpenCodeServerHarness', () => {
           status: {
             type: 'retry',
             attempt: 3,
+            message: 'Connection reset by server',
             next: Date.now() + 2_000,
           },
         },
@@ -3315,20 +3318,40 @@ describe('OpenCodeServerHarness', () => {
         taskEvents.some(
           (event) => event.eventName === TaskEventName.TaskAborted,
         ),
-      ).toBe(true);
-      expect(harness.getQueuedMessages()).toEqual([]);
+      ).toBe(false);
+      expect(
+        harness.getQueuedMessages().map((message) => message.text),
+      ).toEqual(['Queued follow-up.']);
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
       expect(
         persistedEnvelopes.some(
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
             String(envelope.payload.text ?? '').includes(
-              'Provider retry limit exceeded.',
-            ),
+              'Connection reset by server',
+            ) &&
+            String(envelope.payload.text ?? '').includes('Retrying in 1s') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'provider_error',
         ),
       ).toBe(true);
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: { name: 'MessageAbortedError', data: { message: 'Aborted' } },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
     } finally {
       harness.dispose();
+      vi.useRealTimers();
     }
   });
 

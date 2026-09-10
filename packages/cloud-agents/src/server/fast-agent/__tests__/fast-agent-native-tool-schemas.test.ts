@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import {
   CALL_INTEGRATION_TOOL_TOOL,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  MANAGE_WAKEUPS_TOOL,
 } from '@roomote/types';
 import { z } from 'zod';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -427,6 +428,41 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(
       z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse(forwarded.args),
     ).toEqual(request);
+  });
+
+  it('keeps internal wakeup visibility out of model-controlled arguments', async () => {
+    const wakeupsTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
+    )!;
+    const request = {
+      action: 'create',
+      name: 'Follow through on session tasks',
+      prompt: 'Check the tasks in this conversation.',
+      schedule: 'in 10m',
+      reportPolicy: 'only_when_notable',
+      internal: true,
+    };
+    const parsed = zod.z
+      .object(wakeupsTool.args as Record<string, never>)
+      .parse(request);
+    const execute = wakeupsTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    const forwarded = await execute(parsed, {});
+
+    expect(parsed).not.toHaveProperty('internal');
+    expect(wakeupsTool.args).not.toHaveProperty('internal');
+    expect(forwarded.name).toBe(FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups);
+    expect(
+      z.object(MANAGE_WAKEUPS_TOOL.inputSchema).parse(forwarded.args),
+    ).toEqual({
+      action: 'create',
+      name: request.name,
+      prompt: request.prompt,
+      schedule: request.schedule,
+      reportPolicy: request.reportPolicy,
+    });
   });
 
   // Synthetic arguments verify the generic bridge, not live upstream schemas.

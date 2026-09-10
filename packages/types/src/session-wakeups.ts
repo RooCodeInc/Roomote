@@ -156,12 +156,6 @@ export const manageWakeupsFieldSchemas = {
     .describe(
       '[create] "always" replies to the user on every run (default for one-shots). "only_when_notable" stays silent unless there is news or the condition resolved (default for repeating schedules). Omit to use the default.',
     ),
-  internal: z
-    .boolean()
-    .optional()
-    .describe(
-      '[create] Set true only when system instructions explicitly require an internal wakeup. Omit otherwise.',
-    ),
 } satisfies z.ZodRawShape;
 
 export const manageWakeupsInputSchema = z.object(manageWakeupsFieldSchemas);
