@@ -133,7 +133,12 @@ export function SessionWakeupList({
 }: SessionWakeupListProps) {
   const [localNow, setLocalNow] = useState(() => Date.now());
   const active = wakeups
-    .filter((wakeup) => wakeup.status === 'active' && wakeup.nextRunAt !== null)
+    .filter(
+      (wakeup) =>
+        !wakeup.internal &&
+        wakeup.status === 'active' &&
+        wakeup.nextRunAt !== null,
+    )
     .toSorted((a, b) => Date.parse(a.nextRunAt!) - Date.parse(b.nextRunAt!));
   const hasWakeups = active.length > 0;
   useEffect(() => {

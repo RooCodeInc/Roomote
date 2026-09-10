@@ -3409,6 +3409,7 @@ export const sessionWakeups = pgTable(
     reportPolicy: text('report_policy')
       .notNull()
       .$type<SessionWakeupReportPolicy>(),
+    internal: boolean('internal').notNull().default(false),
     status: text('status')
       .notNull()
       .default('active')

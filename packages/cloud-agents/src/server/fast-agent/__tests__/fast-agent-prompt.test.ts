@@ -749,6 +749,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('schedule "every 10m x12"');
     expect(prompt).toContain('reportPolicy "only_when_notable"');
+    expect(prompt).toContain('and internal true');
     expect(prompt).toContain(
       'not external-process monitoring, so do not ask for monitoring consent',
     );

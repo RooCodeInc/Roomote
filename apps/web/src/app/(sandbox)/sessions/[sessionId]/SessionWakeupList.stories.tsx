@@ -40,6 +40,7 @@ function WakeupComposer({
       },
       scheduleDescription: 'Once',
       reportPolicy: 'always',
+      internal: false,
       status: 'active',
       runCount: 0,
       maxRuns: null,
