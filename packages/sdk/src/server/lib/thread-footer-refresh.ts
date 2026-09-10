@@ -164,6 +164,15 @@ export async function refreshTaskRunThreadFooter(runId: number): Promise<void> {
   }
 }
 
+/** Wake a task run's carrier without coupling lifecycle writes to provider I/O. */
+export function notifyTaskRunThreadFooterRefresh(runId: number): void {
+  void refreshTaskRunThreadFooter(runId).catch((error) => {
+    console.warn(
+      `[threadFooterRefresh] Failed to refresh the communication footer for task run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+}
+
 /**
  * One bounded pass over due destinations. No history scans or provider calls
  * from workers. Only one pass runs at a time: a slow pass makes the next tick

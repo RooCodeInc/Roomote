@@ -1,18 +1,16 @@
 import {
   buildThreadReplyFooterText,
   formatMarkdownLink,
-  getThreadReplyFooterRecord,
   resolveThreadReplyFooterContext,
-  setThreadReplyFooterRecord,
   type ThreadReplyFooterRecord,
 } from '@roomote/communication';
+import { deliverManagedThreadReplyFooter as deliverSharedThreadReplyFooter } from '@roomote/communication/thread-reply-footer-delivery';
 import { Env } from '@roomote/env';
 
 import {
   buildThreadReplyImages,
   errorResponseForThreadReplyImageError,
   type ThreadReplyImage,
-  withThreadReplyFooterLock,
 } from './chat-reply-helpers';
 
 export type CommunicationReplyTaskRun = {
@@ -164,77 +162,9 @@ export async function deliverManagedThreadReplyFooter<
     previousFooterRecord: ThreadReplyFooterRecord,
   ) => Promise<void>;
 }): Promise<TReply> {
-  return withThreadReplyFooterLock({
-    lockKey: params.lockKey,
-    fn: async (assertLock, lock) => {
-      let previousFooterRecord: ThreadReplyFooterRecord | null = null;
-      try {
-        previousFooterRecord = await getThreadReplyFooterRecord(
-          params.provider,
-          params.channelId,
-          params.footerStateThreadId,
-        );
-      } catch (error) {
-        console.error(
-          `[${params.logContext}] Failed to read previous ${params.providerLabel} footer record for task run ${params.runId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-
-      await assertLock();
-      const posted = await params.postReplyWithFooter();
-
-      try {
-        await assertLock();
-        const written = await setThreadReplyFooterRecord(
-          params.provider,
-          params.channelId,
-          params.footerStateThreadId,
-          {
-            messageId: posted.messageId,
-            textWithoutFooter: posted.textWithoutFooter,
-            ...(posted.refresh ? { refresh: posted.refresh } : {}),
-            ...(posted.images && posted.images.length > 0
-              ? { images: posted.images }
-              : {}),
-          },
-          { lock },
-        );
-        if (!written) throw new Error('Thread reply footer lock lease lost');
-      } catch (error) {
-        console.error(
-          `[${params.logContext}] Failed to persist latest ${params.providerLabel} footer record ${posted.messageId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        const current = await getThreadReplyFooterRecord(
-          params.provider,
-          params.channelId,
-          params.footerStateThreadId,
-        ).catch(() => undefined);
-        if (current !== undefined && current?.messageId !== posted.messageId) {
-          await params.clearPreviousFooter(posted).catch(() => {});
-        }
-        return posted;
-      }
-
-      if (
-        previousFooterRecord &&
-        previousFooterRecord.messageId !== posted.messageId
-      ) {
-        try {
-          await assertLock();
-          await params.clearPreviousFooter(previousFooterRecord);
-        } catch (error) {
-          console.error(
-            `[${params.logContext}] Failed to clear prior ${params.providerLabel} footer message ${previousFooterRecord.messageId}`,
-            error,
-          );
-        }
-      }
-
-      return posted;
-    },
+  const { runId, ...delivery } = params;
+  return deliverSharedThreadReplyFooter({
+    ...delivery,
+    logRef: `task run ${runId}`,
   });
 }

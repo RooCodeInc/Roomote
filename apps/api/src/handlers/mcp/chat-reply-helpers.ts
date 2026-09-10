@@ -1,9 +1,6 @@
 import { basename } from 'node:path';
 
-export {
-  withThreadReplyFooterLock,
-  THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE,
-} from '@roomote/communication/thread-reply-footer-delivery';
+export { THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE } from '@roomote/communication/thread-reply-footer-delivery';
 
 import { Env, getArtifactSigningKey } from '@roomote/env';
 import { db, inArray, taskArtifacts } from '@roomote/db/server';

@@ -27,6 +27,7 @@
     "./telegram-provider": "./src/telegram-provider.ts",
     "./telegram-update": "./src/telegram-update.ts",
     "./thread-reply-footer-state": "./src/thread-reply-footer-state.ts",
+    "./thread-footer-carrier-lifecycle": "./src/thread-footer-carrier-lifecycle.ts",
     "./thread-reply-footer-delivery": "./src/thread-reply-footer-delivery.ts",
     "./thread-footer-refresh": "./src/thread-footer-refresh.ts"
   },
