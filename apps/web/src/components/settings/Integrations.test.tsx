@@ -50,6 +50,7 @@ const state = vi.hoisted(() => ({
   },
   voiceConnection: null as null | {
     authStatus?: string | null;
+    source?: 'environment' | 'connection';
   },
   grafanaConnection: null as null | {
     authStatus?: string | null;
@@ -517,6 +518,7 @@ describe('Integrations settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
+    state.voiceConnection = null;
     state.deploymentEnablements = [];
     state.integrationsEnabled = true;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
@@ -2216,5 +2218,38 @@ describe('Integrations settings', () => {
       { apiKey: 'sk-voice-123' },
       expect.anything(),
     );
+  });
+
+  it('shows Voice as connected when the environment provides the key', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+    };
+
+    render(<Integrations />);
+
+    const connectedSection = (
+      await screen.findByRole('heading', { name: 'Connected' })
+    ).closest('section');
+    expect(
+      within(connectedSection as HTMLElement).getByRole('heading', {
+        level: 3,
+        name: 'Voice',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Configured by the R_VOICE_OPENAI_API_KEY environment variable.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disconnect Voice' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Configure Voice' }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -158,6 +158,8 @@ type AdminConfiguredIntegrationItemOptions = {
   integration: McpIntegrationDefinition;
   connection?: { authStatus?: string | null };
   orgEnabled: boolean;
+  /** Note under the description, e.g. that the environment provides the credential. */
+  status?: string;
   highlightedIntegrationId: string;
   savePending: boolean;
   disconnectPending: boolean;
@@ -524,6 +526,7 @@ function buildAdminConfiguredIntegrationItem({
   openDialog,
   openToolDialog,
   disconnectIntegration,
+  status,
 }: AdminConfiguredIntegrationItemOptions): IntegrationItem {
   const enabled = orgEnabled || connection?.authStatus === 'authenticated';
   const isPending =
@@ -543,7 +546,7 @@ function buildAdminConfiguredIntegrationItem({
         : `Configure ${integration.name}`
       : undefined,
     isPending,
-    status: undefined,
+    status,
     headerAction:
       canConfigure && connection != null
         ? {
@@ -1646,9 +1649,11 @@ export function Integrations() {
   );
   const isVoiceConnected =
     voiceConnectionSummary?.authStatus === 'authenticated';
-  const voiceConnection = useVoiceConnection(
-    isAdmin && (isVoiceConnected || isVoiceDialogOpen),
-  );
+  // Always read for admins: it also reports a key provided by the environment,
+  // which has no connection row but should show the card as connected.
+  const voiceConnection = useVoiceConnection(isAdmin);
+  const voiceConfiguredByEnvironment =
+    voiceConnection.data?.source === 'environment';
   const elevenLabsConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
       (entry) => entry.mcpId === 'elevenlabs',
@@ -2103,14 +2108,23 @@ export function Integrations() {
             return buildAdminConfiguredIntegrationItem({
               integration,
               connection: userConnectionMap.get(integration.id),
-              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              orgEnabled:
+                voiceConfiguredByEnvironment ||
+                (orgEnablementMap.get(integration.id) ?? false),
               highlightedIntegrationId,
               savePending: saveVoiceConnection.isPending,
               disconnectPending: disconnectMcp.isPending,
               disconnectingMcpId: disconnectMcp.variables?.mcpId,
               dialogOpen: isVoiceDialogOpen,
               connectionPending: voiceConnection.isPending,
-              canConfigure: isAdmin,
+              // An environment-provided key has nothing to edit or disconnect here.
+              canConfigure: isAdmin && !voiceConfiguredByEnvironment,
+              ...(voiceConfiguredByEnvironment
+                ? {
+                    status:
+                      'Configured by the R_VOICE_OPENAI_API_KEY environment variable.',
+                  }
+                : {}),
               // Credential-only: no agent tools to manage.
               canManageTools: false,
               openDialog: () => setIsVoiceDialogOpen(true),
@@ -2364,6 +2378,7 @@ export function Integrations() {
     granolaConnection.isPending,
     elevenLabsConnection.isPending,
     voiceConnection.isPending,
+    voiceConfiguredByEnvironment,
     linearInstallation.data,
     linearInstallation.isPending,
     linearOauthSetup.isPending,

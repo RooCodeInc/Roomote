@@ -1,12 +1,13 @@
 import {
+  and,
   db,
-  mcpConnections,
   deploymentMcpEnablements,
   eq,
   inArray,
-  and,
   isNull,
+  mcpConnections,
   or,
+  resolveModelProviderEnvValue,
 } from '@roomote/db/server';
 import {
   filterMcpToolDefinitions,
@@ -891,8 +892,23 @@ export async function getElevenLabsConnectionCommand(auth: UserAuthSuccess) {
   };
 }
 
-export async function getVoiceConnectionCommand(auth: UserAuthSuccess) {
+/**
+ * Where the deployment's voice key comes from. An `R_VOICE_OPENAI_API_KEY`
+ * environment variable wins over the Settings-managed connection, so the
+ * card shows as connected without anything to configure or disconnect.
+ */
+export async function getVoiceConnectionCommand(
+  auth: UserAuthSuccess,
+): Promise<{
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  source: 'environment' | 'connection';
+} | null> {
   assertAdmin(auth);
+
+  const envKey = await resolveModelProviderEnvValue(['R_VOICE_OPENAI_API_KEY']);
+  if (envKey?.trim()) {
+    return { authStatus: 'authenticated', source: 'environment' };
+  }
 
   const connection = await db.query.mcpConnections.findFirst({
     where: and(
@@ -911,6 +927,7 @@ export async function getVoiceConnectionCommand(auth: UserAuthSuccess) {
 
   return {
     authStatus: connection.authStatus,
+    source: 'connection',
   };
 }
 
