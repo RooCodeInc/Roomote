@@ -437,6 +437,59 @@ describe('source-control current footer refresh', () => {
     warning.mockRestore();
   });
 
+  it('a refresh that loses its lease to a rewrite of the same comment restores the newer content', async () => {
+    const old = adapter('123');
+    await old.postReply({ message: 'Old body' });
+    mocks.context.mockResolvedValue({ runningTasks: { count: 1 } });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.update.mockImplementationOnce(async () => {
+      // The refresh's lease expires mid-edit; a resumed turn rewrites this
+      // same comment and records the newer body.
+      mocks.store.delete(
+        `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
+      );
+      await old.replaceReply!({ messageId: '123' }, { message: 'Replaced' });
+    });
+    expect(await refreshSourceControlThreadFooter(target)).toBe('active');
+    expect(await record()).toMatchObject({
+      messageId: '123',
+      body: 'Replaced',
+    });
+    expect(mocks.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        comment_id: 123,
+        body: 'Replaced\n\n1 running; preview=none',
+      }),
+    );
+    warning.mockRestore();
+  });
+
+  it('a reply that loses its lease to a rewrite of the same comment restores the newer content', async () => {
+    const first = adapter('123');
+    await first.postReply({ message: 'Original' });
+    mocks.context.mockResolvedValue({ runningTasks: { count: 1 } });
+    mocks.update.mockImplementationOnce(async () => {
+      mocks.store.delete(
+        `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
+      );
+      await adapter('123').replaceReply!(
+        { messageId: '123' },
+        { message: 'Updated B' },
+      );
+    });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await first.replaceReply!({ messageId: '123' }, { message: 'Updated A' });
+    expect(await record()).toMatchObject({
+      messageId: '123',
+      body: 'Updated B',
+    });
+    expect(mocks.update).toHaveBeenLastCalledWith({
+      messageId: '123',
+      body: 'Updated B\n\n1 running; preview=none',
+    });
+    warning.mockRestore();
+  });
+
   it('does not fail an accepted reply or refresh an old body when pointer persistence fails', async () => {
     await adapter('123').postReply({ message: 'Old body' });
     mocks.failRemember = true;

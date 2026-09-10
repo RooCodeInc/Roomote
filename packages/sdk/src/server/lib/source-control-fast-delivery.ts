@@ -888,6 +888,35 @@ function isCommentGoneError(error: unknown): boolean {
 }
 
 /**
+ * After a fenced pointer write loses its lease, put the carrier back the way
+ * its current owner recorded it. The competitor may have relocated the footer
+ * to another comment (then this comment keeps only its body) or rewritten
+ * this same comment with newer content (then that content comes back).
+ */
+async function restoreCompetingCarrier(params: {
+  channelId: string;
+  threadId: string;
+  mine: { messageId: string; body: string; footerText: string };
+  update: (body: string) => Promise<void>;
+}): Promise<void> {
+  const current = await getSourceControlFooterRecord(
+    params.channelId,
+    params.threadId,
+  ).catch(() => undefined);
+  if (current === undefined) return;
+  if (!current || current.messageId !== params.mine.messageId) {
+    await params.update(params.mine.body).catch(() => {});
+  } else if (
+    current.body !== params.mine.body ||
+    current.footerText !== params.mine.footerText
+  ) {
+    await params
+      .update(`${current.body}\n\n${current.footerText}`)
+      .catch(() => {});
+  }
+}
+
+/**
  * The reply surface a Session uses in a discussion: replies post as comments
  * with the Session footer, and tasks launch against the discussion's target.
  *
@@ -1044,14 +1073,14 @@ export function buildSourceControlFastAdapter(params: {
       } catch {
         /* The current pointer may belong to another delivery. */
       }
-      const latest = await getSourceControlFooterRecord(
-        target.channelId,
-        target.threadId,
-      ).catch(() => undefined);
-      if (latest !== undefined && latest?.messageId !== comment.messageId) {
-        const update = comment.update ?? editorFor(comment.messageId).update;
-        await update?.(body).catch(() => {});
-      }
+      const update = comment.update ?? editorFor(comment.messageId).update;
+      if (update)
+        await restoreCompetingCarrier({
+          channelId: target.channelId,
+          threadId: target.threadId,
+          mine: { messageId: comment.messageId, body, footerText },
+          update,
+        });
       console.warn(
         `[Fast Agent] Failed to remember the current comment footer: ${formatErrorForLog(error)}`,
       );
@@ -1290,16 +1319,17 @@ export async function refreshSourceControlThreadFooter(target: {
         { keepTtl: true, lock },
       );
       if (!written) {
-        const current = await getSourceControlFooterRecord(
-          target.channelId,
-          target.threadId,
-        ).catch(() => undefined);
-        if (current !== undefined && current?.messageId !== latest.messageId)
-          await delivery.updateCommentById!({
-            discussion,
-            messageId: latest.messageId,
-            body: latest.body,
-          }).catch(() => {});
+        await restoreCompetingCarrier({
+          channelId: target.channelId,
+          threadId: target.threadId,
+          mine: { messageId: latest.messageId, body: latest.body, footerText },
+          update: (body) =>
+            delivery.updateCommentById!({
+              discussion,
+              messageId: latest.messageId,
+              body,
+            }),
+        });
         return 'active';
       }
       if (settled) {
