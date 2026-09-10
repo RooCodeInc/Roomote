@@ -40,10 +40,13 @@ CREATE TABLE "agentmail_inbound_turns" (
 	"sender_user_id" text NOT NULL,
 	"body_text" text DEFAULT '' NOT NULL,
 	"state" text DEFAULT 'pending' NOT NULL,
+	"attempts" integer DEFAULT 0 NOT NULL,
+	"last_error" text,
+	"retry_at" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"consumed_at" timestamp,
 	CONSTRAINT "agentmail_inbound_turns_webhook_event_unique" UNIQUE("webhook_event_id"),
-	CONSTRAINT "agentmail_inbound_turns_state_check" CHECK ("agentmail_inbound_turns"."state" in ('pending', 'consumed'))
+	CONSTRAINT "agentmail_inbound_turns_state_check" CHECK ("agentmail_inbound_turns"."state" in ('pending', 'consumed', 'failed'))
 );
 --> statement-breakpoint
 CREATE TABLE "agentmail_suppressions" (
@@ -98,6 +101,7 @@ CREATE INDEX "agentmail_conversation_participants_user_idx" ON "agentmail_conver
 CREATE INDEX "agentmail_conversations_thread_idx" ON "agentmail_conversations" USING btree ("inbox_id","provider_thread_id");--> statement-breakpoint
 CREATE INDEX "agentmail_conversations_owner_idx" ON "agentmail_conversations" USING btree ("owner_user_id");--> statement-breakpoint
 CREATE INDEX "agentmail_inbound_turns_drain_idx" ON "agentmail_inbound_turns" USING btree ("conversation_id","state","provider_timestamp","provider_message_id");--> statement-breakpoint
+CREATE INDEX "agentmail_inbound_turns_pending_idx" ON "agentmail_inbound_turns" USING btree ("created_at") WHERE "agentmail_inbound_turns"."state" = 'pending';--> statement-breakpoint
 CREATE INDEX "agentmail_user_mappings_user_id_idx" ON "agentmail_user_mappings" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "agentmail_webhook_events_state_idx" ON "agentmail_webhook_events" USING btree ("state","received_at");--> statement-breakpoint
 ALTER TABLE "fast_agent_provider_messages" ADD CONSTRAINT "fast_agent_provider_messages_provider_v3_check" CHECK ("fast_agent_provider_messages"."provider" in ('discord', 'slack', 'teams', 'telegram', 'agentmail'));--> statement-breakpoint

@@ -34,6 +34,10 @@ import {
   asc,
   db,
   eq,
+  isNull,
+  lt,
+  lte,
+  or,
   resolveAgentMailRuntimeCredentials,
   setTrustedRunActingUserOnSuccess,
   sql,
@@ -46,7 +50,10 @@ import {
 } from '@roomote/types';
 
 import { buildAgentMailEmailLinkUrl } from './email-link-tokens';
-import { suppressAgentMailAddress } from './outbound';
+import {
+  isAgentMailAddressSuppressed,
+  suppressAgentMailAddress,
+} from './outbound';
 import {
   advanceAgentMailInboundAnchor,
   normalizeEmailAddress,
@@ -61,8 +68,19 @@ export const AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME = 'agentmail-webhook-events';
 
 const LOG_PREFIX = '[agentmail]';
 const STRANGER_REFUSAL_TTL_SECONDS = 30 * 24 * 60 * 60;
+// Beyond the per-thread claim: one refusal per unknown sender per day (the
+// link in it covers every thread they wrote to), and a global daily ceiling so
+// a spam wave of fresh threads cannot burn the deployment's send quota.
+const STRANGER_REFUSAL_SENDER_TTL_SECONDS = 24 * 60 * 60;
+const STRANGER_REFUSAL_DAILY_CAP = 25;
 const FAILED_EVENT_ATTEMPT_CAP = 10;
+const FAILED_TURN_ATTEMPT_CAP = 5;
 const RECOVERY_SWEEP_BATCH_SIZE = 500;
+const RECOVERY_STALE_AFTER_MS = 60_000;
+// A parked turn resumes through the parent-event queue at its retry time;
+// the drain wakes slightly after so the queue's resumption usually wins the
+// lock and the drain only has to notice the settled row.
+const PARKED_TURN_DRAIN_GRACE_MS = 2_000;
 
 export type AgentMailWebhookEventJob =
   | { kind: 'process'; deliveryId: string }
@@ -108,7 +126,11 @@ async function addProcessJob(deliveryId: string) {
   );
 }
 
-async function addDrainJob(conversationId: string, dedupeSuffix: string) {
+async function addDrainJob(
+  conversationId: string,
+  dedupeSuffix: string,
+  options: { delayMs?: number } = {},
+) {
   // Each admitted turn gets its own wakeup: a drain job id shared per
   // conversation could be silently dropped while a previous drain is still
   // active, stranding the new turn until the sweeper.
@@ -117,8 +139,25 @@ async function addDrainJob(conversationId: string, dedupeSuffix: string) {
     { kind: 'drain', conversationId },
     {
       jobId: `drain-${sanitizeJobIdPart(conversationId)}-${sanitizeJobIdPart(dedupeSuffix)}`,
+      ...(options.delayMs && options.delayMs > 0
+        ? { delay: options.delayMs }
+        : {}),
     },
   );
+}
+
+/**
+ * Wake the drain once a parked turn's retry time has passed. The job id is
+ * keyed on the retry time, so repeated sweeps of the same parked turn share
+ * one wakeup instead of minting a new delayed job each minute.
+ */
+async function scheduleDrainAfterRetry(conversationId: string, retryAt: Date) {
+  await addDrainJob(conversationId, `retry-${retryAt.getTime()}`, {
+    delayMs: Math.max(
+      0,
+      retryAt.getTime() + PARKED_TURN_DRAIN_GRACE_MS - Date.now(),
+    ),
+  });
 }
 
 type RecordAgentMailWebhookEventResult =
@@ -257,9 +296,15 @@ function collectRecipientAddresses(
   );
 }
 
+function strangerRefusalDailyKey(now = new Date()): string {
+  return `agentmail:stranger_refusal:daily:${now.toISOString().slice(0, 10)}`;
+}
+
 /**
- * One refusal per unknown address per provider thread, and never for
- * auto-generated mail, so a stranger's email cannot start a reply loop.
+ * One refusal per unknown address per provider thread, at most one per
+ * unknown address per day, under a global daily ceiling, and never for
+ * auto-generated mail or a suppressed address, so a stranger's email cannot
+ * start a reply loop, drain the send quota, or reach someone who complained.
  */
 async function maybeSendStrangerRefusal(input: {
   client: AgentMailApiClient;
@@ -267,6 +312,10 @@ async function maybeSendStrangerRefusal(input: {
   message: AgentMailMessage;
   senderAddress: string;
 }): Promise<void> {
+  if (await isAgentMailAddressSuppressed(input.senderAddress)) {
+    return;
+  }
+
   const redis = getRedis();
   const key = `agentmail:stranger_refusal:${input.inboxId}:${input.message.thread_id}:${input.senderAddress}`;
   const claimed = await redis.set(
@@ -277,6 +326,33 @@ async function maybeSendStrangerRefusal(input: {
     'NX',
   );
   if (claimed !== 'OK') {
+    return;
+  }
+
+  const senderKey = `agentmail:stranger_refusal:sender:${input.senderAddress}`;
+  const senderClaimed = await redis.set(
+    senderKey,
+    '1',
+    'EX',
+    STRANGER_REFUSAL_SENDER_TTL_SECONDS,
+    'NX',
+  );
+  if (senderClaimed !== 'OK') {
+    return;
+  }
+
+  const dailyKey = strangerRefusalDailyKey();
+  const dailyCount = await redis.incr(dailyKey);
+  if (dailyCount === 1) {
+    await redis.expire(dailyKey, 2 * STRANGER_REFUSAL_SENDER_TTL_SECONDS);
+  }
+  if (dailyCount > STRANGER_REFUSAL_DAILY_CAP) {
+    // Release the per-sender claim so the sender still gets a refusal (and
+    // the link in it) tomorrow, once the ceiling resets.
+    await redis.del(senderKey).catch(() => undefined);
+    console.warn(
+      `${LOG_PREFIX} Stranger refusal daily cap (${STRANGER_REFUSAL_DAILY_CAP}) reached; not replying to ${input.senderAddress} on thread ${input.message.thread_id}`,
+    );
     return;
   }
 
@@ -310,7 +386,7 @@ async function maybeSendStrangerRefusal(input: {
       error.status >= 400 &&
       error.status < 500;
     if (definitelyNotSent) {
-      await redis.del(key).catch(() => undefined);
+      await redis.del(key, senderKey).catch(() => undefined);
     }
     console.warn(
       `${LOG_PREFIX} Failed to send stranger refusal for thread ${input.message.thread_id} (claim ${definitelyNotSent ? 'released' : 'kept'}): ${error instanceof Error ? error.message : String(error)}`,
@@ -357,8 +433,8 @@ async function processDeliveryFailureEvent(
 }
 
 /**
- * Process one recorded delivery: resolve sender and conversation, advance the
- * inbound anchor, and admit the message as a durable inbound turn. Marking
+ * Process one recorded delivery: resolve sender and conversation, and admit
+ * the message as a durable inbound turn. Marking
  * the event `processed` happens only after the turn insert commits (or after
  * a terminal no-turn outcome such as a stranger refusal); a crash before that
  * leaves the row for retry, never a lost email. Idempotent on the event row.
@@ -466,13 +542,11 @@ export async function processAgentMailWebhookEvent(
     });
 
     const providerTimestamp = parseProviderTimestamp(message);
-    await advanceAgentMailInboundAnchor({
-      conversationId: conversation.id,
-      messageId: message.message_id,
-      providerTimestamp,
-      senderEmail: senderAddress,
-      senderUserId,
-    });
+
+    // The reply anchor is NOT advanced here. Replies resolve their route from
+    // the conversation row at send time, so the anchor must describe the
+    // turn being answered, not the latest email to arrive; the drain advances
+    // it right before it delivers each turn, in provider order.
 
     // Admission: inserting this row IS the durable handoff. The webhook
     // event may be marked processed only after this commits. The turn row
@@ -503,9 +577,12 @@ export async function processAgentMailWebhookEvent(
 type DrainableTurn = {
   turnId: string;
   providerMessageId: string;
+  providerTimestamp: Date;
   senderUserId: string;
   senderEmail: string;
   bodyText: string;
+  attempts: number;
+  retryAt: Date | null;
 };
 
 async function getNextPendingTurn(
@@ -526,17 +603,81 @@ async function getNextPendingTurn(
   return {
     turnId: turn.id,
     providerMessageId: turn.providerMessageId,
+    providerTimestamp: turn.providerTimestamp,
     senderUserId: turn.senderUserId,
     senderEmail: turn.senderEmail,
     bodyText: turn.bodyText,
+    attempts: turn.attempts,
+    retryAt: turn.retryAt,
   };
 }
 
 async function markTurnConsumed(turnId: string) {
   await db
     .update(agentmailInboundTurns)
-    .set({ state: 'consumed', consumedAt: new Date() })
+    .set({ state: 'consumed', consumedAt: new Date(), retryAt: null })
     .where(eq(agentmailInboundTurns.id, turnId));
+}
+
+async function markTurnParked(turnId: string, retryAt: Date) {
+  await db
+    .update(agentmailInboundTurns)
+    .set({ retryAt })
+    .where(eq(agentmailInboundTurns.id, turnId));
+}
+
+/**
+ * Count a delivery failure against the turn. Past the cap the turn becomes a
+ * dead letter (`failed`) so the conversation's later emails are no longer
+ * stuck behind it, and the sender is told once, best effort.
+ */
+async function recordTurnFailure(
+  turn: DrainableTurn,
+  conversation: AgentMailConversationRow,
+  error: unknown,
+): Promise<'retry' | 'dead_letter'> {
+  const attempts = turn.attempts + 1;
+  const deadLetter = attempts >= FAILED_TURN_ATTEMPT_CAP;
+  const lastError = error instanceof Error ? error.message : String(error);
+  await db
+    .update(agentmailInboundTurns)
+    .set({
+      attempts,
+      lastError,
+      retryAt: null,
+      ...(deadLetter ? { state: 'failed' as const } : {}),
+    })
+    .where(eq(agentmailInboundTurns.id, turn.turnId));
+  if (!deadLetter) {
+    return 'retry';
+  }
+
+  console.error(
+    `${LOG_PREFIX} Giving up on inbound turn ${turn.turnId} (message ${turn.providerMessageId}) after ${attempts} attempts: ${lastError}`,
+  );
+  await notifyTurnDeadLetter(turn, conversation).catch((notifyError) => {
+    console.warn(
+      `${LOG_PREFIX} Could not notify ${turn.senderEmail} that message ${turn.providerMessageId} failed: ${notifyError instanceof Error ? notifyError.message : String(notifyError)}`,
+    );
+  });
+  return 'dead_letter';
+}
+
+async function notifyTurnDeadLetter(
+  turn: DrainableTurn,
+  conversation: AgentMailConversationRow,
+): Promise<void> {
+  const credentials = await resolveAgentMailRuntimeCredentials();
+  if (!credentials.apiKey) return;
+  const client = new AgentMailApiClient({ apiKey: credentials.apiKey });
+  const text =
+    'Roomote could not process this email after several attempts. Please try again later, or reach the Roomote administrator for your deployment if it keeps failing.';
+  await client.replyToMessage(
+    conversation.inboxId,
+    turn.providerMessageId,
+    { text, html: `<div><p>${escapeAgentMailHtml(text)}</p></div>` },
+    { idempotencyKey: `agentmail:turn-failed:${turn.providerMessageId}` },
+  );
 }
 
 async function tryClaimPendingInputAnswer(input: {
@@ -596,13 +737,38 @@ function buildTurnQuestionText(
   return subject ? `Subject: ${subject}\n\n${turn.bodyText}` : turn.bodyText;
 }
 
+type TurnDeliveryOutcome =
+  | { outcome: 'delivered' }
+  | { outcome: 'parked'; retryAt: Date };
+
+class AgentMailDeliveryUnavailableError extends Error {
+  constructor(conversationId: string) {
+    super(
+      `AgentMail conversation ${conversationId} has no delivery route (credentials missing?); leaving its turns pending.`,
+    );
+    this.name = 'AgentMailDeliveryUnavailableError';
+  }
+}
+
 async function deliverTurn(
   turn: DrainableTurn,
   conversation: AgentMailConversationRow,
   turnLock: FastAgentTurnLockHandle,
-) {
+): Promise<TurnDeliveryOutcome> {
+  // The reply route (in-reply-to, recipient) is read from the conversation
+  // row when the reply is sent, so it is advanced here, for the turn about
+  // to be answered, rather than when the email arrived: a later email from
+  // a cc'd participant must not redirect the answer to this one.
+  await advanceAgentMailInboundAnchor({
+    conversationId: conversation.id,
+    messageId: turn.providerMessageId,
+    providerTimestamp: turn.providerTimestamp,
+    senderEmail: turn.senderEmail,
+    senderUserId: turn.senderUserId,
+  });
+
   if (!turn.bodyText && !conversation.subject?.trim()) {
-    return;
+    return { outcome: 'delivered' };
   }
 
   const activeRun = await findActiveCommunicationTaskRun({
@@ -619,7 +785,7 @@ async function deliverTurn(
       activeRunId: activeRun.id,
     });
     if (claimed) {
-      return;
+      return { outcome: 'delivered' };
     }
 
     // Follow-up to the active delegated run through the provider-generic
@@ -640,7 +806,7 @@ async function deliverTurn(
       activeRun.id,
       turn.providerMessageId,
     ).catch(() => undefined);
-    return;
+    return { outcome: 'delivered' };
   }
 
   const fastConversation = buildAgentMailFastConversation(conversation);
@@ -649,7 +815,7 @@ async function deliverTurn(
     conversation: fastConversation,
   });
 
-  const continued = await continueFastAgentSurfaceReplyWithLock(
+  const result = await continueFastAgentSurfaceReplyWithLock(
     {
       sessionId: session.id,
       userId: turn.senderUserId,
@@ -659,10 +825,20 @@ async function deliverTurn(
     },
     turnLock,
   );
-  if (!continued) {
-    console.warn(
-      `${LOG_PREFIX} Fast session ${session.id} could not resolve a delivery route for conversation ${conversation.id}`,
-    );
+  switch (result.outcome) {
+    case 'delivered':
+      return { outcome: 'delivered' };
+    case 'settled':
+      // The queue already resumed and delivered (or retired) this turn after
+      // an interruption; the inbound row is consumed without a second run.
+      console.info(
+        `${LOG_PREFIX} Inbound turn for message ${turn.providerMessageId} already settled durably; not re-running it`,
+      );
+      return { outcome: 'delivered' };
+    case 'parked':
+      return { outcome: 'parked', retryAt: result.retryAt };
+    case 'unroutable':
+      throw new AgentMailDeliveryUnavailableError(conversation.id);
   }
 }
 
@@ -683,6 +859,16 @@ export async function drainAgentMailInboundTurns(
   const first = await getNextPendingTurn(conversationId);
   if (!first) return;
 
+  // No credentials, no delivery route: leave every turn pending (the sweep
+  // re-arms the drain) rather than consuming emails nothing can answer.
+  const credentials = await resolveAgentMailRuntimeCredentials();
+  if (!credentials.apiKey) {
+    console.warn(
+      `${LOG_PREFIX} AgentMail credentials are not configured; leaving conversation ${conversationId} pending`,
+    );
+    return;
+  }
+
   const conversation = await db.query.agentmailConversations.findFirst({
     where: eq(agentmailConversations.id, conversationId),
   });
@@ -701,10 +887,39 @@ export async function drainAgentMailInboundTurns(
   try {
     let turn: DrainableTurn | null = first;
     while (turn) {
-      await deliverTurn(turn, conversation, turnLock);
+      if (turn.retryAt && turn.retryAt.getTime() > Date.now()) {
+        // Parked for a durable inference retry: hold the conversation, in
+        // order, until it is due. Running the next email now would
+        // supersede the parked turn and silently drop this one.
+        await scheduleDrainAfterRetry(conversationId, turn.retryAt);
+        return;
+      }
+
+      let delivery: TurnDeliveryOutcome;
+      try {
+        delivery = await deliverTurn(turn, conversation, turnLock);
+      } catch (error) {
+        if (error instanceof AgentMailDeliveryUnavailableError) {
+          console.warn(`${LOG_PREFIX} ${error.message}`);
+          return;
+        }
+        const disposition = await recordTurnFailure(turn, conversation, error);
+        if (disposition === 'dead_letter') {
+          turn = await getNextPendingTurn(conversationId);
+          continue;
+        }
+        throw error;
+      }
+
+      if (delivery.outcome === 'parked') {
+        await markTurnParked(turn.turnId, delivery.retryAt);
+        await scheduleDrainAfterRetry(conversationId, delivery.retryAt);
+        return;
+      }
       // Consumed only after delivery: a crash mid-turn leaves the row
       // pending and the sweeper re-triggers the drain. Delivery is
-      // idempotent (queueCommunicationMessageOnce; Fast turns re-run).
+      // idempotent (queueCommunicationMessageOnce; a Fast turn whose durable
+      // row already settled is skipped, not re-run).
       await markTurnConsumed(turn.turnId);
       turn = await getNextPendingTurn(conversationId);
     }
@@ -719,11 +934,18 @@ export async function drainAgentMailInboundTurns(
  * (`queued`/`processing`), events whose processing failed transiently
  * (`failed`, until the attempt cap — only then is a row a true dead letter),
  * and conversations with pending turns whose drain wakeup was lost. Runs on
- * BullMQ startup and on a schedule. Staleness compares database time against
- * database time (`now() - interval`), never a Node-side ISO string, so a
- * non-UTC database timezone cannot skew the window.
+ * BullMQ startup and on a schedule. Staleness is measured against a
+ * Node-side cutoff, like every other timestamp comparison in the codebase:
+ * these columns are written from Node, so comparing them with the database's
+ * `now()` would drift by the session time zone offset. Disabled channels do
+ * nothing here: the gated processors leave rows untouched, so re-dispatching
+ * them would only churn the queue every minute.
  */
 export async function recoverPendingAgentMailWork(): Promise<number> {
+  if (!isEmailChannelEnabled()) {
+    return 0;
+  }
+  const staleBefore = new Date(Date.now() - RECOVERY_STALE_AFTER_MS);
   const staleEvents = await db
     .select({ deliveryId: agentmailWebhookEvents.deliveryId })
     .from(agentmailWebhookEvents)
@@ -734,7 +956,7 @@ export async function recoverPendingAgentMailWork(): Promise<number> {
           or (${agentmailWebhookEvents.state} = 'failed'
               and ${agentmailWebhookEvents.attempts} < ${FAILED_EVENT_ATTEMPT_CAP})
         )`,
-        sql`${agentmailWebhookEvents.updatedAt} < now() - interval '60 seconds'`,
+        lt(agentmailWebhookEvents.updatedAt, staleBefore),
       ),
     )
     .orderBy(asc(agentmailWebhookEvents.receivedAt))
@@ -750,7 +972,12 @@ export async function recoverPendingAgentMailWork(): Promise<number> {
     .where(
       and(
         eq(agentmailInboundTurns.state, 'pending'),
-        sql`${agentmailInboundTurns.createdAt} < now() - interval '60 seconds'`,
+        lt(agentmailInboundTurns.createdAt, staleBefore),
+        // A parked turn already has its own wakeup at its retry time.
+        or(
+          isNull(agentmailInboundTurns.retryAt),
+          lte(agentmailInboundTurns.retryAt, new Date()),
+        ),
       ),
     )
     .limit(RECOVERY_SWEEP_BATCH_SIZE);

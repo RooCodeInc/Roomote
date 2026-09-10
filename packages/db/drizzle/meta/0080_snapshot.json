@@ -1,5 +1,5 @@
 {
-  "id": "a7a1a78d-a8e4-48be-b209-260fe2190ac6",
+  "id": "c526729f-61bf-4c6f-a9b8-1cfcc7032a8a",
   "prevId": "a0b28d54-e9c7-4dda-be12-dee5eb3c30a9",
   "version": "7",
   "dialect": "postgresql",
@@ -340,6 +340,25 @@
           "notNull": true,
           "default": "'pending'"
         },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "retry_at": {
+          "name": "retry_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -387,6 +406,22 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "agentmail_inbound_turns_pending_idx": {
+          "name": "agentmail_inbound_turns_pending_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"agentmail_inbound_turns\".\"state\" = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -430,7 +465,7 @@
       "checkConstraints": {
         "agentmail_inbound_turns_state_check": {
           "name": "agentmail_inbound_turns_state_check",
-          "value": "\"agentmail_inbound_turns\".\"state\" in ('pending', 'consumed')"
+          "value": "\"agentmail_inbound_turns\".\"state\" in ('pending', 'consumed', 'failed')"
         }
       },
       "isRLSEnabled": false

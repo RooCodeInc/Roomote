@@ -3074,10 +3074,19 @@ export const agentmailInboundTurns = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     bodyText: text('body_text').notNull().default(''),
+    // `failed` is a dead letter: delivery threw `attempts` times in a row,
+    // so the drain skips the turn instead of blocking the conversation
+    // behind it forever.
     state: text('state')
       .notNull()
       .default('pending')
-      .$type<'pending' | 'consumed'>(),
+      .$type<'pending' | 'consumed' | 'failed'>(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    // Set when the turn parked itself for a durable inference retry: the
+    // drain holds the conversation (in order) until this passes instead of
+    // running the next email over the parked one.
+    retryAt: timestamp('retry_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     consumedAt: timestamp('consumed_at'),
   },
@@ -3091,9 +3100,14 @@ export const agentmailInboundTurns = pgTable(
       table.providerTimestamp,
       table.providerMessageId,
     ),
+    // The recovery sweep scans for stale pending turns; keep that scan off
+    // the ever-growing consumed history.
+    index('agentmail_inbound_turns_pending_idx')
+      .on(table.createdAt)
+      .where(sql`${table.state} = 'pending'`),
     check(
       'agentmail_inbound_turns_state_check',
-      sql`${table.state} in ('pending', 'consumed')`,
+      sql`${table.state} in ('pending', 'consumed', 'failed')`,
     ),
   ],
 );

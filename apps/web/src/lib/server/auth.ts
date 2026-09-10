@@ -1072,14 +1072,16 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       modelName: 'authVerifications',
     },
     // Sign-up is gated by the invite/access checks in the database hooks
-    // below. Password sign-in for existing accounts is always available,
-    // except that once the email channel is enabled the deployment has an
-    // email sender for the first time, so account emails become verifiable
-    // and verification is required: Roomote only ever initiates email to an
-    // address it has verified, and this is where that guarantee starts.
+    // below. Password sign-in for existing accounts is always available:
+    // the email channel never gates sign-in on verification, because the
+    // deployment may have the channel flag on before its sender is
+    // configured (or an address may be suppressed after a bounce), and a
+    // verification gate would lock those accounts out with no way back in.
+    // Roomote only ever initiates email to an address it has verified, but
+    // that guarantee lives at the sending side (`emailVerified` or an
+    // explicitly linked address), not at sign-in.
     emailAndPassword: {
       enabled: true,
-      requireEmailVerification: emailChannelEnabled,
       resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, url }) => {
@@ -1107,19 +1109,20 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
     },
     ...(emailChannelEnabled
       ? {
+          // Verification is offered, never required: a new password sign-up
+          // gets a verification email so its address can be recognized on
+          // the email channel, and signs in right away regardless. Accounts
+          // from before the channel was enabled connect their address through
+          // the email-link flow instead (the refusal email carries the link).
           emailVerification: {
             sendOnSignUp: true,
-            // An unverified account that signs in gets a fresh verification
-            // email instead of a dead-end 403 — this is how accounts created
-            // before the channel was enabled get verified.
-            sendOnSignIn: true,
             autoSignInAfterVerification: true,
             sendVerificationEmail: async ({ user, url }) => {
               const result = await sendAgentMailSystemEmail({
                 to: user.email,
                 subject: 'Verify your email for Roomote',
                 text: [
-                  'Confirm this address to finish setting up your Roomote account.',
+                  'Confirm this address so Roomote recognizes it on the email channel.',
                   '',
                   `[Verify your email](${url})`,
                   '',
@@ -1128,8 +1131,10 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
                 logContext: 'auth.sendVerificationEmail',
               });
               if (!result.sent) {
-                throw new Error(
-                  `Could not send the verification email (${result.reason}).`,
+                // Best effort: an unsent verification email (sender not yet
+                // configured, address suppressed) must never fail sign-up.
+                console.warn(
+                  `[auth] Could not send the verification email to ${user.email} (${result.reason}).`,
                 );
               }
             },

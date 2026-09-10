@@ -238,8 +238,10 @@ export {
 } from './lib/session-wakeups';
 export {
   admitFastAgentHumanFollowUp,
+  admitFastAgentInlineHumanTurn,
   persistFastAgentInlineHumanTurn,
   type FastAgentDurableTurn,
+  type FastAgentInlineHumanTurnAdmission,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
 export {

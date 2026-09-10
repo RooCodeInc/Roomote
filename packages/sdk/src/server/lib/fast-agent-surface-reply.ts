@@ -56,7 +56,7 @@ import {
 } from './fast-agent-reply-replacement';
 import {
   admitFastAgentHumanFollowUp,
-  persistFastAgentInlineHumanTurn,
+  admitFastAgentInlineHumanTurn,
 } from './fast-agent-human-follow-up';
 import {
   wakeFastAgentParentEventAt,
@@ -795,6 +795,18 @@ async function runFastAgentSurfaceReply(
 }
 
 /**
+ * How a lock-owned surface turn ended. `settled` means the same message had
+ * already run to completion (or was retired) under its durable row, so the
+ * turn was skipped; `parked` means it deferred itself for a durable inference
+ * retry at `retryAt` and the parent-event queue will resume it.
+ */
+export type FastAgentSurfaceReplyWithLockOutcome =
+  | { outcome: 'delivered' }
+  | { outcome: 'settled' }
+  | { outcome: 'parked'; retryAt: Date }
+  | { outcome: 'unroutable' };
+
+/**
  * Run one surface turn while the CALLER owns the Fast turn lock. Durable
  * queue drainers (AgentMail inbound turns) hold the lock across a whole
  * ordered drain, so the per-turn acquire in `runFastAgentSurfaceReply` would
@@ -803,14 +815,14 @@ async function runFastAgentSurfaceReply(
 export async function continueFastAgentSurfaceReplyWithLock(
   params: FastAgentSurfaceReplyParams,
   turnLock: FastAgentTurnLockHandle,
-): Promise<boolean> {
+): Promise<FastAgentSurfaceReplyWithLockOutcome> {
   const delivery = await buildFastAgentSurfaceReplyDelivery(params);
   if (!delivery) {
-    return false;
+    return { outcome: 'unroutable' };
   }
 
   try {
-    await runFastAgentSurfaceReplyWithLock(
+    return await runFastAgentSurfaceReplyWithLock(
       { ...params, delivery, admission: null },
       turnLock,
     );
@@ -820,7 +832,6 @@ export async function continueFastAgentSurfaceReplyWithLock(
     delete turnLock.durableRowId;
     delete turnLock.durableResume;
   }
-  return true;
 }
 
 async function runFastAgentSurfaceReplyWithLock(
@@ -829,7 +840,7 @@ async function runFastAgentSurfaceReplyWithLock(
     admission: FastAgentSurfaceHumanFollowUpAdmission;
   },
   release: FastAgentTurnLockHandle,
-): Promise<void> {
+): Promise<FastAgentSurfaceReplyWithLockOutcome> {
   const { admission, delivery } = params;
 
   const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
@@ -842,10 +853,15 @@ async function runFastAgentSurfaceReplyWithLock(
       : params.activeTasks;
     // Durable admission: persisted under this owner's claim before the turn
     // runs. A reaction rides the same row with its input recorded, so the
-    // queue resumes it as a reaction turn rather than a typed message.
-    const durableTurn =
-      (admission?.kind === 'turn' ? admission.durable : null) ??
-      (await persistFastAgentInlineHumanTurn({
+    // queue resumes it as a reaction turn rather than a typed message. A
+    // message whose row already settled (the queue resumed and delivered an
+    // interrupted attempt, or its replay was revoked) is never run again.
+    if (admission?.kind === 'turn' && admission.settled) {
+      return { outcome: 'settled' };
+    }
+    let durableTurn = admission?.kind === 'turn' ? admission.durable : null;
+    if (!durableTurn) {
+      const inlineAdmission = await admitFastAgentInlineHumanTurn({
         parent: {
           sessionId: params.sessionId,
           conversation: delivery.conversation,
@@ -856,16 +872,23 @@ async function runFastAgentSurfaceReplyWithLock(
           `[Fast Agent] Failed to persist surface turn admission: ${error instanceof Error ? error.message : String(error)}`,
         );
         return null;
-      }));
-    if (durableTurn) {
-      release.durableRowId = durableTurn.id;
+      });
+      if (inlineAdmission?.status === 'settled') {
+        return { outcome: 'settled' };
+      }
+      durableTurn = inlineAdmission?.turn ?? null;
+    }
+    const admittedTurn = durableTurn;
+    if (admittedTurn) {
+      const { id: durableRowId, eventKey } = admittedTurn;
+      release.durableRowId = durableRowId;
       release.durableResume = () =>
         wakeFastAgentParentEventNow({
           conversationId: params.sessionId,
-          eventKey: durableTurn.eventKey,
+          eventKey,
         });
     }
-    await answerFastAgentQuestion({
+    return answerFastAgentQuestion({
       question: params.question,
       images: params.images,
       ...(params.agentContext
@@ -876,10 +899,12 @@ async function runFastAgentSurfaceReplyWithLock(
       conversation: delivery.conversation,
       currentMessageId: params.currentMessageId,
       signal: release.signal,
-      ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
+      ...(admittedTurn
+        ? { durableAdmission: { eventId: admittedTurn.id } }
+        : {}),
       // A redelivered message whose earlier inline attempt never settled
       // resumes that attempt instead of repeating its recorded actions.
-      ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
+      ...(admittedTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       senderDisplayName: params.senderDisplayName ?? undefined,
       ...(activeTasks ? { activeTasks } : {}),
       ...(params.externalInput
@@ -898,18 +923,18 @@ async function runFastAgentSurfaceReplyWithLock(
             apiBaseUrl,
             includeRoomoteMemberTools: true,
           }),
-        ...(durableTurn
+        ...(admittedTurn
           ? {
               requestDurableResume: () =>
                 wakeFastAgentParentEventNow({
                   conversationId: params.sessionId,
-                  eventKey: durableTurn.eventKey,
+                  eventKey: admittedTurn.eventKey,
                 }),
               requestDurableRetry: (retryAt: Date) =>
                 wakeFastAgentParentEventAt(
                   {
                     conversationId: params.sessionId,
-                    eventKey: durableTurn.eventKey,
+                    eventKey: admittedTurn.eventKey,
                   },
                   retryAt,
                 ),
@@ -918,17 +943,20 @@ async function runFastAgentSurfaceReplyWithLock(
         createArtifact: buildFastAgentArtifactCreator(params.sessionId),
         ...delivery.adapter,
       },
-    }).catch((error: unknown) => {
-      // Not a failure: the turn parked itself for a durable retry and the
-      // queue re-runs it at the scheduled time, so the reply is on its way.
-      if (error instanceof FastAgentDurableRetryScheduledError) {
-        console.info(
-          `[Fast Agent] Surface reply turn parked for a durable retry: ${error.message}`,
-        );
-        return;
-      }
-      throw error;
-    });
+    }).then(
+      (): FastAgentSurfaceReplyWithLockOutcome => ({ outcome: 'delivered' }),
+      (error: unknown): FastAgentSurfaceReplyWithLockOutcome => {
+        // Not a failure: the turn parked itself for a durable retry and the
+        // queue re-runs it at the scheduled time, so the reply is on its way.
+        if (error instanceof FastAgentDurableRetryScheduledError) {
+          console.info(
+            `[Fast Agent] Surface reply turn parked for a durable retry: ${error.message}`,
+          );
+          return { outcome: 'parked', retryAt: error.retryAt };
+        }
+        throw error;
+      },
+    );
   }
 }
 

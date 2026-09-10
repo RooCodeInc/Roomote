@@ -23,8 +23,9 @@ and Roomote never sends email. On Roomote Cloud this is enabled per
 deployment by the Roomote team.
 
 Enabling the channel gives the deployment an email sender for the first
-time, so it also turns on account email verification (see
-[Account email verification](#account-email-verification) below).
+time, so new password sign-ups also receive a verification email (see
+[Account email verification](#account-email-verification) below). Sign-in
+is never blocked on verification.
 
 ## Connect an AgentMail inbox
 
@@ -112,13 +113,19 @@ routes back into the same conversation.
 
 ## Account email verification
 
-Roomote only initiates email to an address it has verified. With the email
-channel enabled, that guarantee starts at the account:
+Roomote only initiates email to an address it has verified, or to an
+address explicitly linked through the email-link flow. With the email
+channel enabled:
 
-- New email-and-password sign-ups receive a verification email and must
-  confirm the address before signing in.
-- Existing accounts that never verified (sign-ups from before the channel
-  was enabled) receive a verification email the next time they sign in.
+- New email-and-password sign-ups receive a verification email. Confirming
+  it lets Roomote recognize the address on the email channel; signing in
+  does not wait for it, and a verification email that cannot be sent (the
+  AgentMail key is not configured yet, or the address is suppressed) never
+  blocks the account.
+- Existing password accounts that never verified (sign-ups from before the
+  channel was enabled) connect their address the first time they email
+  Roomote: the refusal email carries a link that ties the address to their
+  account.
 - Sign-ins through Slack, Microsoft, GitHub, and the other OAuth providers
   are unaffected; those providers assert a verified email.
 - Password reset links are emailed to the user as well as shown to the
