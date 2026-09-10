@@ -288,33 +288,39 @@ describe('launchActWorkItems', () => {
     });
 
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
+    expect(mockEnqueueTask.mock.calls[0]?.[0]).toMatchObject({
+      title: 'Fix parser nil access',
+    });
     const enqueuePayload = mockEnqueueTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.description).toBe(
+      'Fix parser nil access\n\nNil access is driving a production Sentry issue.',
+    );
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining('keep progress visible in the web task'),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining('without posting status updates back to Slack'),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining('<untrusted_content_policy/>'),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         '<untrusted_external_content source="automation_work_item_brief">Nil access is driving a production Sentry issue.</untrusted_external_content>',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Investigation context:\n<untrusted_external_content source="automation_investigation_context">$sentry-triage\nIssue: SENTRY-123</untrusted_external_content>',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Execution guidance from the scan run (apply only within the scope of this work item):\n<automation_execution_guidance>Reproduce the nil access, fix it, add regression coverage, and open a PR.</automation_execution_guidance>',
       ),
     );
-    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.visibleInTranscript).toBe(true);
     expect(enqueuePayload).not.toHaveProperty('channel');
     expect(enqueuePayload).not.toHaveProperty('slackChannel');
     expect(enqueuePayload).not.toHaveProperty('thread_ts');
@@ -382,121 +388,121 @@ describe('launchActWorkItems', () => {
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
     const enqueuePayload = mockEnqueueTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining('$update-dependencies'),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Do not send Slack progress updates, elapsed-time updates, validation-started updates, or partial findings',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Keep intermediate status in the web task and todo list only',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'do not send a Slack-visible opening acknowledgement',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Default to finishing silently. Post to Slack only when there is something a human should see now',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Routine success, no-change results, and no-op or deferred outcomes that require no human action should not produce a message',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'If you report, keep the first Slack-visible closeout as one self-contained message instead of a separate opener plus a result',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'make it fully standalone and do not assume readers have seen any earlier scan, audit, or research task',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Write that closeout like a helpful coworker summarizing completed work',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Lead with a direct plain-language sentence that names the object of the work, says what you reviewed, why it mattered, and what changed or how far it got',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'On first mention, spell out the object before shorthand or identifiers',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Avoid thread-local references like "this", "that follow-up", "the issue", "the investigation", or "the risk"',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Keep the whole message to at most two short paragraphs',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'use one human-readable reference from that context so the reader knows what prompted the work',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'make the label describe the object instead of showing an unexplained code',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'if there is a clean URL, render it as a named inline link such as `[Sentry issue ROOMOTE-WORKER-381](...)` or `[alert #123](...)`, not a bare URL or a bare-ID label',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'keep a stable plain-text identifier such as `GHSA-123`, `SENTRY-123`, or `owner/repo#123` if that is the clearest reference',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'make the delivery state explicit; if the work stopped at a draft PR, say you opened a draft PR instead of saying it shipped',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Link the draft PR number if the URL is available; otherwise keep the PR identifier plain text',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'I reviewed [alert #275](...) and opened [draft PR #4783](...) to address a high and two medium `undici` vulnerabilities',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'do not recite file paths, code identifiers, or step-by-step verification in Slack',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Do not append a verification or validation sentence',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'For blocker, no-op, deferred, or input-needed outcomes that are worth reporting under the rule above, keep the same single-message shape but report only the outcome-relevant details',
       ),
     );
     expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
-    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.visibleInTranscript).toBe(true);
     expect(enqueuePayload.channel).toBe('C456');
     expect(enqueuePayload.slackChannel).toBe('C456');
     expect(enqueuePayload).not.toHaveProperty('thread_ts');
@@ -524,73 +530,73 @@ describe('launchActWorkItems', () => {
     expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
     const enqueuePayload = mockEnqueueTask.mock.calls[0]?.[0].task
       .payload as Record<string, unknown>;
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'do not send a Slack-visible opening acknowledgement',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'If you report, keep the first Slack-visible closeout as one self-contained message instead of a separate opener plus a result',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Write that closeout like a helpful coworker summarizing completed work',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Pretend the Slack reader only sees that one closeout message and none of the hidden automation or environment context behind it',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Do not frame the message as a follow-up on a hidden scan, audit, evaluator, research task, or spawned environment task',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Prefer result-first wording like "I reviewed [alert #275](...) and opened [draft PR #4783](...) to address ..." or "I reviewed the Sentry issue SENTRY-123 and opened the resulting draft PR to address ..."',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'If you mention a prior PR, alert, issue, task, workflow run, or environment identifier, say in the same sentence what it is and what about it was under review',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Keep the whole message to at most two short paragraphs',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'explain what the automation investigated and the concrete outcome, but do not recite file paths, code identifiers, or step-by-step verification in Slack',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'use one human-readable reference from that context so the reader knows what prompted the work',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'make the label describe the object instead of showing an unexplained code',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'keep a stable plain-text identifier such as `GHSA-123`, `SENTRY-123`, or `owner/repo#123` if that is the clearest reference',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Prefer wording like "I reviewed [alert #275](...) and opened [draft PR #4783](...)" or "I reviewed the Sentry issue SENTRY-123 and opened the resulting draft PR ..." over "That shipped in draft PR #4783."',
       ),
     );
     expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
-    expect(enqueuePayload.visibleInTranscript).toBe(false);
+    expect(enqueuePayload.visibleInTranscript).toBe(true);
     expect(enqueuePayload.channel).toBe('C456');
     expect(enqueuePayload.slackChannel).toBe('C456');
     expect(updateSets).toEqual([
@@ -620,18 +626,18 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload.thread_ts).toBe('1781300000.000100');
     expect(enqueuePayload.slackThreadTs).toBe('1781300000.000100');
     expect(enqueuePayload.channel).toBe('C456');
-    expect(enqueuePayload.visibleInTranscript).toBe(false);
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.visibleInTranscript).toBe(true);
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Reply in the existing Slack investigation thread',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'still assume readers do not know about the hidden research task or spawned environment task behind this run',
       ),
     );
-    expect(enqueuePayload.description).not.toEqual(
+    expect(enqueuePayload.agentPromptText).not.toEqual(
       expect.stringContaining('may create a new top-level thread'),
     );
     expect(mockFinalizeAutomationLaunch).toHaveBeenCalledWith(
@@ -744,12 +750,12 @@ describe('launchActWorkItems', () => {
     expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
     expect(enqueuePayload).not.toHaveProperty('slackChannel');
     expect(enqueuePayload).not.toHaveProperty('channel');
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Do not send Telegram progress updates, elapsed-time updates, validation-started updates, or partial findings',
       ),
     );
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'do not send a Telegram-visible opening acknowledgement',
       ),
@@ -785,7 +791,7 @@ describe('launchActWorkItems', () => {
       communicationMessageId: 'discord-message-1',
       discordTaskThread: true,
     });
-    expect(enqueuePayload.description).toEqual(
+    expect(enqueuePayload.agentPromptText).toEqual(
       expect.stringContaining(
         'Do not send Discord progress updates, elapsed-time updates, validation-started updates, or partial findings',
       ),

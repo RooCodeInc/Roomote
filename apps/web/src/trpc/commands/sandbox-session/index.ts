@@ -40,6 +40,7 @@ import {
   taskMessages,
   taskRuns,
   tasks,
+  workItems,
   touchTaskActivity,
 } from '@roomote/db/server';
 import { httpBatchLink, TRPCClientError } from '@trpc/client';
@@ -922,31 +923,49 @@ export async function getSandboxSessionByTaskIdCommand(
 
   const shouldCheckHarnessMessages =
     !isExitedRunStatus(taskRun.status) && !isBootingRunStatus(taskRun.status);
+  const shouldResolveLegacyAutomationWorkItem =
+    task.initiatorKind === 'automation' &&
+    (!('agentPromptText' in taskRun.payload) ||
+      typeof taskRun.payload.agentPromptText !== 'string' ||
+      !taskRun.payload.agentPromptText.trim());
 
   // Check whether the task ever produced messages. Used to distinguish boot
   // failures (no messages) from runtime failures (has conversation history).
-  const [bootFailureMessage, firstHarnessMessage] = await Promise.all([
-    shouldCheckBootFailureMessages
-      ? db.query.taskMessages.findFirst({
-          where: eq(taskMessages.runId, taskRun.id),
-          columns: { id: true },
-        })
-      : Promise.resolve(null),
-    shouldCheckHarnessMessages
-      ? db.query.taskMessages.findFirst({
-          where: and(
-            eq(taskMessages.runId, taskRun.id),
-            isNotNull(taskMessages.role),
-            not(eq(taskMessages.role, 'user')),
-          ),
-          columns: { id: true },
-        })
-      : Promise.resolve(null),
-  ]);
+  const [bootFailureMessage, firstHarnessMessage, legacyAutomationWorkItem] =
+    await Promise.all([
+      shouldCheckBootFailureMessages
+        ? db.query.taskMessages.findFirst({
+            where: eq(taskMessages.runId, taskRun.id),
+            columns: { id: true },
+          })
+        : Promise.resolve(null),
+      shouldCheckHarnessMessages
+        ? db.query.taskMessages.findFirst({
+            where: and(
+              eq(taskMessages.runId, taskRun.id),
+              isNotNull(taskMessages.role),
+              not(eq(taskMessages.role, 'user')),
+            ),
+            columns: { id: true },
+          })
+        : Promise.resolve(null),
+      shouldResolveLegacyAutomationWorkItem
+        ? db.query.workItems.findFirst({
+            where: and(
+              eq(workItems.kind, 'auto_fix'),
+              eq(workItems.launchedTaskId, input.taskId),
+            ),
+            columns: { title: true, brief: true },
+          })
+        : Promise.resolve(null),
+    ]);
 
   const hasMessages = !!bootFailureMessage;
   const hasHarnessMessages = !!firstHarnessMessage;
-  const payloadPrompt = getTaskRunVisiblePrompt(taskRun);
+  const payloadPrompt = getTaskRunVisiblePrompt(
+    taskRun,
+    legacyAutomationWorkItem,
+  );
   // Fall back to durable task-level prompt when the run payload has no visible
   // prompt, so failure UIs can still show the original request.
   const prompt: {
