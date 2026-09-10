@@ -2914,7 +2914,10 @@ export async function answerFastAgentQuestion({
       }),
       db.query.deploymentSettings
         .findFirst({
-          columns: { globalAgentInstructions: true },
+          columns: {
+            globalAgentInstructions: true,
+            workspaceRoutingSettings: true,
+          },
         })
         .catch((error) => {
           degradedContextComponents.add('agent_guidance');
@@ -3168,6 +3171,8 @@ export async function answerFastAgentQuestion({
       setupSession,
       therapistModeEnabled,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
+      workspaceRoutingRules:
+        agentBehaviorSettings?.workspaceRoutingSettings?.rules,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,

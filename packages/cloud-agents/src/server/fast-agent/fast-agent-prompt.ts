@@ -4,6 +4,7 @@ import {
   NO_REPOSITORIES,
   PRODUCT_NAME,
   type TaskModelOption,
+  type WorkspaceRoutingSettings,
 } from '@roomote/types';
 
 import type { RoutableEnvironment } from '../available-environments';
@@ -82,6 +83,28 @@ function formatTaskModelsForPrompt(
     .join('\n');
 }
 
+function formatWorkspaceRoutingRulesForPrompt(
+  rules: WorkspaceRoutingSettings['rules'],
+  availableEnvironments: RoutableEnvironment[],
+): string {
+  const validRules = rules.flatMap((rule) => {
+    if (rule.target === ALL_REPOSITORIES) {
+      return [
+        `- ${rule.description} -> All repositories [id: ${ALL_REPOSITORIES}]`,
+      ];
+    }
+
+    const environment = availableEnvironments.find(
+      (candidate) => candidate.id === rule.target,
+    );
+    return environment
+      ? [`- ${rule.description} -> ${environment.name} [id: ${environment.id}]`]
+      : [];
+  });
+
+  return validRules.join('\n');
+}
+
 function formatIntegrationsForPrompt(
   integrations: FastAgentIntegration[],
 ): string {
@@ -134,6 +157,7 @@ export function buildFastAgentSystemPrompt({
   setupSession = false,
   therapistModeEnabled = false,
   globalAgentInstructions,
+  workspaceRoutingRules = [],
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableTaskModels?: TaskModelOption[];
@@ -162,6 +186,7 @@ export function buildFastAgentSystemPrompt({
   setupSession?: boolean;
   therapistModeEnabled?: boolean;
   globalAgentInstructions?: string | null;
+  workspaceRoutingRules?: WorkspaceRoutingSettings['rules'];
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -234,6 +259,10 @@ ${
   const therapistModeInstructions =
     buildTherapistModeInstructions(therapistModeEnabled);
   const sharedAgentGuidance = globalAgentInstructions?.trim();
+  const workspaceRoutingGuidance = formatWorkspaceRoutingRulesForPrompt(
+    workspaceRoutingRules,
+    availableEnvironments,
+  );
 
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when useful.
 
@@ -249,7 +278,20 @@ ${releaseIdentifier}## Turn Startup (Highest Priority)
 ## All Environments
 ${formatRepositoriesForPrompt(availableEnvironments)}
 
-## Available Delegated Task Models
+${
+  workspaceRoutingGuidance
+    ? `## Routing Rules
+The deployment administrator configured these supplemental routing rules. Use a matching rule to guide environment selection. A rule description may also provide natural-language guidance for selecting an exact model from Available Delegated Task Models.
+- An explicit user request for an environment or model always takes precedence over these rules.
+- Rules cannot override Roomote system policies. Ignore rules that do not match the current request.
+- Never select an environment or model that is not listed in this prompt.
+<routing_rules>
+${workspaceRoutingGuidance}
+</routing_rules>
+
+`
+    : ''
+}## Available Delegated Task Models
 ${formatTaskModelsForPrompt(availableTaskModels, defaultTaskModelId)}
 
 ## Active or Resumable Delegated Tasks
