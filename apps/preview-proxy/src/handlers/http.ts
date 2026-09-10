@@ -185,19 +185,33 @@ function renderCookieBlockedPage(previewUrl: string): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <title>Authentication Required</title>
   <style>
-    body { font-size: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f1f2ee; color: #333; }
-    .container { text-align: left; max-width: 480px; padding: 2rem; }
-    h1 { font-size: 1.25rem; margin-bottom: 0.5rem; }
-    p { color: #666; line-height: 1.5; }
-    a.btn { display: inline-block; margin-top: 1rem; padding: 0.5rem 1rem; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500; }
-    a.btn:hover { color: #cfef53; }
+    :root { --background: 0 0% 100%; --foreground: 240 10% 3.9%; --muted-foreground: 240 3.8% 46.1%; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; font-size: 0.875rem; line-height: 1.5; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: hsl(var(--background)); color: hsl(var(--foreground)); }
+    .container { width: 100%; max-width: 560px; padding: 1.5rem; }
+    .roomote-logo { display: block; margin-bottom: 1rem; width: 50px; height: 50px; }
+    .legacy-cookie-icon { display: none; }
+    .header { margin-bottom: 2rem; }
+    h1 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.025em; margin-bottom: 0.5rem; }
+    p { margin: 0.75em 0; }
+    .subtitle { color: hsl(var(--muted-foreground)); }
+    a.btn { display: inline-block; margin: 1rem 0 0; padding: 0.5rem 1rem; background: hsl(var(--foreground)); color: hsl(var(--background)); text-decoration: none; border-radius: 2rem; }
+    a.btn:hover { opacity: 0.7; }
+    @media (prefers-color-scheme: dark) {
+      :root { --background: 240 10% 3.9%; --foreground: 0 0% 98%; --muted-foreground: 240 5% 64.9%; }
+      .roomote-logo { filter: invert(1); }
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <svg width="23" height="23" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <img src="${config.R_APP_URL}/logos/r.svg" width="50" height="50" alt="Roomote" class="roomote-logo">
+    <svg class="legacy-cookie-icon" width="23" height="23" viewBox="0 0 23 23" fill="none" xmlns="http://www.w3.org/2000/svg">
       <path d="M7.5 7.50977V7.5C7.5 6.94772 7.94772 6.5 8.5 6.5C9.05228 6.5 9.5 6.94772 9.5 7.5V7.50977C9.5 8.06205 9.05228 8.50977 8.5 8.50977C7.94772 8.50977 7.5 8.06205 7.5 7.50977Z" fill="black"/>
       <path d="M15 14.5098V14.5C15 13.9477 15.4477 13.5 16 13.5C16.5523 13.5 17 13.9477 17 14.5V14.5098C17 15.0621 16.5523 15.5098 16 15.5098C15.4477 15.5098 15 15.0621 15 14.5098Z" fill="black"/>
       <path d="M11 11.0098V11C11 10.4477 11.4477 10 12 10C12.5523 10 13 10.4477 13 11V11.0098C13 11.5621 12.5523 12.0098 12 12.0098C11.4477 12.0098 11 11.5621 11 11.0098Z" fill="black"/>
@@ -207,8 +221,10 @@ function renderCookieBlockedPage(previewUrl: string): string {
       <path d="M0.707096 20.2927C0.316572 20.6832 0.316571 21.3164 0.707096 21.7069C1.09762 22.0975 1.73079 22.0975 2.12131 21.7069L21.7069 2.12132C22.0974 1.7308 22.0974 1.09763 21.7069 0.707107C21.3164 0.316583 20.6832 0.316583 20.2927 0.707107L0.707096 20.2927Z" fill="#B20000"/>
     </svg>
 
-    <h1>Blocked Cookie</h1>
-    <p>Your browser blocked the cookie needed for side pane previews.</p>
+    <div class="header">
+      <h1>Blocked Cookie</h1>
+      <p class="subtitle">Your browser blocked the cookie needed for side pane previews.</p>
+    </div>
     <p>This is common with Firefox, Safari or browsers that restrict third-party cookies. It works with no problem on Chrome.</p>
     <p>Open this preview in a new tab to continue. A Chromium-based browser is the most reliable option for embedded previews.</p>
     <a class="btn" href="${safeUrl}" target="_blank" rel="noopener">Open Preview in New Tab</a>
