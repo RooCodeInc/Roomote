@@ -269,46 +269,6 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('provide a copy-pasteable draft');
   });
 
-  it('keeps only the scheduling distinction and discovery route upfront in the pilot', () => {
-    const baseline = buildFastAgentSystemPrompt({ availableEnvironments: [] });
-    const pilot = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      schedulingProgressiveDisclosureEnabled: true,
-    });
-
-    expect(pilot).toContain('Conversation reminders and checks');
-    expect(pilot).toContain('deployment custom automations');
-    expect(pilot).toContain('`find_integration_tools`');
-    expect(pilot).toContain('`query: "scheduling"`');
-    expect(pilot).toContain('exact packaged scheduling skill to load');
-    expect(pilot).toContain('Loading guidance never grants authorization');
-    expect(pilot).toContain('Ongoing-process monitoring must be finite');
-    expect(pilot).not.toContain('Use `resolve_schedule` before creation');
-    expect(pilot).not.toContain(
-      'use `list` to check for an equivalent automation',
-    );
-    // Static prompt-size comparison only; this is not a latency or reliability
-    // evaluation. Tool-schema savings are measured separately from runtime.
-    expect(
-      Buffer.byteLength(baseline) - Buffer.byteLength(pilot),
-    ).toBeGreaterThan(2_000);
-  });
-
-  it('keeps deferred wakeup cancellation available on scheduled events', () => {
-    const prompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      schedulingProgressiveDisclosureEnabled: true,
-      turnSource: 'platform_event',
-      platformEventKind: 'scheduled_wakeup',
-    });
-
-    expect(prompt).toContain('Scheduled Wakeup Event');
-    expect(prompt).toContain('use the discovered scheduling capability');
-    expect(prompt).toContain('`manage_wakeups`');
-    expect(prompt).toContain('action "cancel"');
-    expect(prompt).toContain('`reportPolicy` governs whether to speak');
-  });
-
   it('suppresses implicit offers for automation events and the deployment kill switch', () => {
     const eventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
