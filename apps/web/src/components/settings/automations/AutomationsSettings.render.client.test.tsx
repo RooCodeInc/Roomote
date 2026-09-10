@@ -1113,6 +1113,17 @@ describe('AutomationsSettings', () => {
     expect(
       state.customAutomations.map((automation) => automation.name),
     ).toEqual(['Zulu custom automation', 'Aardvark custom automation']);
+
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'Run first alphabetically' } },
+    );
+    const customRow = screen
+      .getByText('Aardvark custom automation')
+      .closest('[role="row"]');
+    expect(customRow?.nextElementSibling).toBe(
+      screen.getByText('No built-in automations match your search.'),
+    );
   });
 
   it('uses the left switch as the built-in configuration entry point', async () => {

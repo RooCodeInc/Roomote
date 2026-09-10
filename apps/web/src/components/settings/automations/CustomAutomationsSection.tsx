@@ -374,11 +374,15 @@ function sortAutomationRows(
   const builtInRows = wrappedChildren.some(getAutomationRowName)
     ? wrappedChildren
     : directChildren;
-  const sortedRows = [...customRows, ...builtInRows].toSorted((left, right) =>
-    (getAutomationRowName(left) ?? '').localeCompare(
-      getAutomationRowName(right) ?? '',
-    ),
-  );
+  const rows = [...customRows, ...builtInRows];
+  const sortedRows = [
+    ...rows
+      .filter((row) => getAutomationRowName(row) !== null)
+      .toSorted((left, right) =>
+        getAutomationRowName(left)!.localeCompare(getAutomationRowName(right)!),
+      ),
+    ...rows.filter((row) => getAutomationRowName(row) === null),
+  ];
 
   return builtInRows === wrappedChildren && wrapper
     ? cloneElement(wrapper, undefined, sortedRows)
