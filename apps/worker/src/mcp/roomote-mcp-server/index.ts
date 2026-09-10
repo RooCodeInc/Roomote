@@ -862,7 +862,7 @@ roomoteMcpServer.registerTool(
       'Provider-neutral issue and pull request/merge request operations for the current task. ' +
       'Use "get_issue", "list_issue_comments", and "create_issue_comment" for plain issues. ' +
       'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
-      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
+      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. The metadata refresh preserves its current draft or ready state; later human changes and opt-in clean-review promotion are separate transitions. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
       '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
