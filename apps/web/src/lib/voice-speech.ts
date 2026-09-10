@@ -47,6 +47,20 @@ export function toSpeakableText(markdown: string): string {
 }
 
 /**
+ * Drop the non-speech annotations GPT-Live puts in transcripts, such as
+ * "[chuckle]" or "[tongue click]". They describe sound, not words, and have
+ * no place in the Session. Tags split across streaming deltas are handled by
+ * callers applying this to the accumulated text.
+ */
+export function stripVoiceAnnotations(text: string): string {
+  return text
+    .replace(/\[[a-z][a-z\s'-]{0,40}\]/gi, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/^[ \t]+|[ \t]+$/gm, '')
+    .trim();
+}
+
+/**
  * Split speakable text into sentences so a reply can be read while it is
  * still streaming. Line breaks and sentence-ending punctuation followed by
  * whitespace both end a sentence; the trailing fragment is returned as-is so

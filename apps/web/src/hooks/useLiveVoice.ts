@@ -5,7 +5,11 @@ import { toast } from 'sonner';
 
 import { useTRPCClient } from '@/trpc/client';
 import { playVoiceCue } from '@/lib/voice-cues';
-import { chunkSpeakableText, toSpeakableText } from '@/lib/voice-speech';
+import {
+  chunkSpeakableText,
+  stripVoiceAnnotations,
+  toSpeakableText,
+} from '@/lib/voice-speech';
 
 const DELEGATION_TRANSCRIPT_SETTLE_MS = 250;
 /**
@@ -170,7 +174,9 @@ export function useLiveVoice({
   // conversation ended mid-cleanup drops its in-flight request like any
   // other pending delegation.
   const deliverUtterance = useCallback(
-    (utterance: string, delegationId: string | null) => {
+    (rawUtterance: string, delegationId: string | null) => {
+      const utterance = stripVoiceAnnotations(rawUtterance);
+      if (!utterance) return;
       const generation = startGenerationRef.current;
       setDeliveringUtterances((count) => count + 1);
       deliveryChainRef.current = deliveryChainRef.current
@@ -206,7 +212,7 @@ export function useLiveVoice({
       window.clearTimeout(outputSettleTimerRef.current);
       outputSettleTimerRef.current = null;
     }
-    const spoken = outputTranscriptRef.current.trim();
+    const spoken = stripVoiceAnnotations(outputTranscriptRef.current);
     outputTranscriptRef.current = '';
     if (spoken) onSpokenTurnRef.current?.(spoken);
   }, []);
@@ -243,11 +249,11 @@ export function useLiveVoice({
     clearSilenceTimer();
     silenceTimerRef.current = window.setTimeout(() => {
       silenceTimerRef.current = null;
-      const utterance = inputTranscriptRef.current.trim();
-      if (!utterance || pendingDelegationsRef.current.length > 0) return;
+      const utterance = stripVoiceAnnotations(inputTranscriptRef.current);
+      if (pendingDelegationsRef.current.length > 0) return;
       inputTranscriptRef.current = '';
       lastSilenceFlushAtRef.current = Date.now();
-      onHeardTurnRef.current?.(utterance);
+      if (utterance) onHeardTurnRef.current?.(utterance);
     }, UTTERANCE_SILENCE_FLUSH_MS);
   }, [clearSilenceTimer]);
 
@@ -266,7 +272,9 @@ export function useLiveVoice({
             // The person is talking again: whatever GPT-Live said is done.
             if (outputTranscriptRef.current) flushSpokenTurn();
             inputTranscriptRef.current += event.delta;
-            onHeardTurnDeltaRef.current?.(inputTranscriptRef.current);
+            onHeardTurnDeltaRef.current?.(
+              stripVoiceAnnotations(inputTranscriptRef.current),
+            );
             setStatus('listening');
             if (pendingDelegationsRef.current.length > 0) {
               scheduleDelegationFlush();
@@ -279,7 +287,9 @@ export function useLiveVoice({
           setStatus('speaking');
           if (event.delta) {
             outputTranscriptRef.current += event.delta;
-            onSpokenTurnDeltaRef.current?.(outputTranscriptRef.current);
+            onSpokenTurnDeltaRef.current?.(
+              stripVoiceAnnotations(outputTranscriptRef.current),
+            );
           }
           if (speakingTimerRef.current !== null) {
             window.clearTimeout(speakingTimerRef.current);

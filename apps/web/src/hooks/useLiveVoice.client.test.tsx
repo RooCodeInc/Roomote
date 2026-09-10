@@ -398,13 +398,62 @@ describe('useLiveVoice', () => {
       });
     });
     expect(onSpokenTurnDelta.mock.calls.map(([text]) => text)).toEqual([
-      'Roo-Code has ',
+      'Roo-Code has',
       'Roo-Code has about 452,000 lines.',
     ]);
     expect(onHeardTurnDelta.mock.calls.map(([text]) => text)).toEqual([
-      'Wow, ',
+      'Wow,',
       'Wow, that is a lot',
     ]);
+  });
+
+  it('drops sound annotations from what the person said', async () => {
+    const onUtterance = vi.fn();
+    const onHeardTurn = vi.fn();
+    const onHeardTurnDelta = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance, onHeardTurn, onHeardTurnDelta }),
+    );
+
+    await act(async () => result.current.start());
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        delegation: { id: 'item_1', target: 'client' },
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: '[chuck',
+        start_ms: 0,
+        end_ms: 100,
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'le] Can you sing your updates',
+        start_ms: 100,
+        end_ms: 900,
+      });
+      vi.advanceTimersByTime(250);
+    });
+    await act(async () => {});
+    expect(onHeardTurnDelta).toHaveBeenLastCalledWith(
+      'Can you sing your updates',
+    );
+    expect(cleanTranscriptMutate).toHaveBeenCalledWith({
+      text: 'Can you sing your updates',
+    });
+
+    // Annotation-only speech is not a turn at all.
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: '[cough]',
+        start_ms: 2_000,
+        end_ms: 2_200,
+      });
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(onHeardTurn).not.toHaveBeenCalled();
   });
 
   it('flushes the spoken turn when the person starts talking again', async () => {

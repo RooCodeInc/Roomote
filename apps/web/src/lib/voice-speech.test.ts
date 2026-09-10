@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chunkSpeakableText,
   splitSpeakableSentences,
+  stripVoiceAnnotations,
   toSpeakableText,
 } from './voice-speech';
 
@@ -94,5 +95,27 @@ describe('splitSpeakableSentences', () => {
 
   it('returns nothing for empty text', () => {
     expect(splitSpeakableSentences('   ')).toEqual([]);
+  });
+});
+
+describe('stripVoiceAnnotations', () => {
+  it('drops bracketed sound annotations and tidies the spacing', () => {
+    expect(
+      stripVoiceAnnotations('[chuckle] Can you can you sing your updates'),
+    ).toBe('Can you can you sing your updates');
+    expect(stripVoiceAnnotations('[tongue click] Aww GPT. No [sigh]')).toBe(
+      'Aww GPT. No',
+    );
+    expect(stripVoiceAnnotations('Okay [laughs] sure')).toBe('Okay sure');
+  });
+
+  it('keeps bracketed text that is not an annotation', () => {
+    expect(stripVoiceAnnotations('Look at [PR #42] and [v1.2.3]')).toBe(
+      'Look at [PR #42] and [v1.2.3]',
+    );
+  });
+
+  it('returns nothing for annotation-only speech', () => {
+    expect(stripVoiceAnnotations('[cough]')).toBe('');
   });
 });
