@@ -20,6 +20,7 @@ import {
   SquarePen,
   Target,
   Terminal,
+  Timer,
   TriangleAlert,
   VectorSquare,
   Video,
@@ -50,6 +51,7 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'environment') return VectorSquare;
   if (key === 'alert') return TriangleAlert;
   if (key === 'messages') return MessagesSquare;
+  if (key === 'stopwatch') return Timer;
   return Wrench;
 }
 

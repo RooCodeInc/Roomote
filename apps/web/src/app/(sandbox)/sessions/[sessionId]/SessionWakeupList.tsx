@@ -3,13 +3,32 @@
 import { useEffect, useEffectEvent, useState } from 'react';
 import type { SessionWakeupSummary } from '@roomote/types';
 
-import {
-  BasicTooltip,
-  Button,
-  Loader2,
-  Timer,
-  Trash2,
-} from '@/components/system';
+import { BasicTooltip, Button, Loader2, Trash2 } from '@/components/system';
+
+function WakeupStopwatch() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="lucide size-3.5 shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 2h6" />
+      <path d="M12 2v3" />
+      <circle cx="12" cy="13" r="8" />
+      <g
+        className="motion-safe:animate-[spin_5s_linear_infinite]"
+        style={{ transformOrigin: '12px 13px' }}
+      >
+        <path d="M12 13V9" />
+        <circle cx="12" cy="13" r="0.5" fill="currentColor" stroke="none" />
+      </g>
+    </svg>
+  );
+}
 
 export function formatWakeupCountdown(remainingMs: number): string {
   if (remainingMs <= 0) return 'Due soon';
@@ -60,8 +79,8 @@ function WakeupRow({
 
   return (
     <li>
-      <div className="flex min-w-0 items-center gap-1.5 px-4 text-xs text-muted-foreground">
-        <Timer aria-hidden="true" className="size-3.5 shrink-0" />
+      <div className="flex min-w-0 items-center gap-1.5 px-4 py-1 text-xs text-muted-foreground">
+        <WakeupStopwatch />
         <span className="min-w-0 truncate" title={wakeup.name}>
           {wakeup.name}{' '}
         </span>

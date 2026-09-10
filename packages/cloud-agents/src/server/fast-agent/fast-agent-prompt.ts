@@ -197,7 +197,7 @@ export function buildFastAgentSystemPrompt({
                           : 'a stored automation conversation';
   const reactionGuidance =
     surface === 'slack' && currentMessageReactable
-      ? '- Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer. It does not satisfy the turn-start acknowledgement required before continuing work. Put the Slack emoji name without colons in `name`. Reserve "eyes" for actively looking, use "thumbsup" for acknowledgement or agreement, and "white_check_mark" for completion.'
+      ? '- Use `send_chat_reaction` only for an optional meaningful reaction or an emoji-only terminal answer. It does not satisfy the turn-start acknowledgement required before continuing work. Put the Slack emoji name without colons in `name`. Use "thumbsup" for acknowledgement or agreement and "white_check_mark" for completion; do not use "eyes" as an automatic processing or working-status acknowledgement.'
       : reactionInput
         ? '- The inbound reaction is not itself a reactable message surface. Use `send_chat_reply` when it warrants a response, or `ignore_event` only under the reaction-input rule below.'
         : '- Emoji reactions are unavailable on this surface. Use `send_chat_reply` for every response.';

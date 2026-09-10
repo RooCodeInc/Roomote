@@ -2,7 +2,15 @@
 
 import Link from 'next/link';
 import type { ComponentType } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -67,8 +75,9 @@ import {
   SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS,
 } from './ScheduleOnlyAutomationContent';
 import { CustomAutomationsSection } from './CustomAutomationsSection';
+import { AutomationListRow, type AutomationListFilter } from './AutomationList';
 import { AutomationDestinationPicker } from './AutomationDestinationPicker';
-import { CiFailureTriageAdditionalRules } from './CiFailureTriageAdditionalRules';
+import { AutomationAdditionalRules } from './CiFailureTriageAdditionalRules';
 import {
   buildAutomationDiscordDestinationOptions,
   buildManagerSlackChannelOptions,
@@ -92,7 +101,6 @@ import {
   Button,
   Card,
   CardHeader,
-  CardTitle,
   ChartColumnIncreasing,
   Check,
   Dialog,
@@ -107,9 +115,6 @@ import {
   Label,
   Lightbulb,
   Play,
-  Plus,
-  RotateCcwClock,
-  Search,
   Select,
   SelectContent,
   SelectItem,
@@ -126,13 +131,17 @@ import {
   Textarea,
   TriangleAlert,
   Users,
-  X,
 } from '@/components/system';
 
 type FieldErrors = Partial<
   Record<
     | 'general'
     | 'ciFailureTriageAdditionalRules'
+    | 'suggesterAdditionalRules'
+    | 'announcerAdditionalRules'
+    | 'securityAuditorAdditionalRules'
+    | 'codeQualityAuditorAdditionalRules'
+    | 'mergeAnnouncerAdditionalRules'
     | 'reviewerEnvironmentIds'
     | 'reviewerCollaborators'
     | 'reviewerExcludedAuthors'
@@ -246,16 +255,6 @@ type AutomationDefinition = {
 };
 
 type AutomationCategory = 'source-code' | 'communication' | 'operations';
-
-const AUTOMATION_CATEGORY_OPTIONS: Array<{
-  value: AutomationCategory | 'all';
-  label: string;
-}> = [
-  { value: 'all', label: 'All' },
-  { value: 'source-code', label: 'Source code' },
-  { value: 'communication', label: 'Communication' },
-  { value: 'operations', label: 'Operations' },
-];
 
 /**
  * Where an automation's next run will report, as resolved server-side through
@@ -590,6 +589,10 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
   },
 };
 
+const AutomationSummaryContext = createContext<
+  Partial<Record<AutomationId, string>>
+>({});
+
 const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
   ...Object.fromEntries(
     Object.keys(AUTOMATION_DEFINITIONS).map((automationId) => [
@@ -656,34 +659,6 @@ const AUTOMATION_RUN_KEYS_BY_ID: Partial<
     ]),
   ),
 };
-
-const AUTOMATION_HISTORY_KEYS_BY_ID: Partial<
-  Record<AutomationId, BackgroundAutomationKey>
-> = {
-  callRoomoteViaEmoji: 'call_roomote_via_emoji',
-  channelAutoStart: 'slack_channel_auto_start',
-  reviewer: 'review_code',
-  platformIssueAlerts: 'platform_issue_alerts',
-  ...AUTOMATION_RUN_KEYS_BY_ID,
-};
-
-export function getAutomationHistoryHref(
-  automationId: AutomationId,
-): string | null {
-  // Provider usage alerts are delivered directly to a communication channel;
-  // their runner does not create Roomote tasks to inspect.
-  if (
-    automationId === 'providerUsageLimit' ||
-    automationId === 'mergeAnnouncer'
-  ) {
-    return null;
-  }
-
-  const automationKey = AUTOMATION_HISTORY_KEYS_BY_ID[automationId];
-  return automationKey
-    ? `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`
-    : null;
-}
 
 type ScheduleOnlyAutomationFrequencyState = Pick<
   FormState,
@@ -820,11 +795,13 @@ function mapSettingsToFormState(
     suggesterTelegramChatId: string | null;
     suggesterTeamsChannelId: string | null;
     suggesterInstructions: string | null;
+    suggesterAdditionalRules?: string;
     announcerFrequency: AnnouncerFrequency;
     announcerSlackChannelId: string | null;
     announcerSlackChannelName?: string | null;
     announcerDiscordChannelId: string | null;
     announcerInstructions: string | null;
+    announcerAdditionalRules?: string;
     platformIssueAlertsEnabled: boolean;
     platformIssueSlackChannelId: string | null;
     platformIssueSlackChannelName?: string | null;
@@ -832,9 +809,11 @@ function mapSettingsToFormState(
     securityAuditorSlackChannelId: string | null;
     securityAuditorSlackChannelName?: string | null;
     securityAuditorDiscordChannelId: string | null;
+    securityAuditorAdditionalRules?: string;
     codeQualityAuditorSlackChannelId: string | null;
     codeQualityAuditorSlackChannelName?: string | null;
     codeQualityAuditorDiscordChannelId: string | null;
+    codeQualityAuditorAdditionalRules?: string;
     ciFailureTriageSlackChannelId: string | null;
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
@@ -842,6 +821,7 @@ function mapSettingsToFormState(
     mergeAnnouncerTargetProvider: CommunicationProvider | null;
     mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
     mergeAnnouncerTargetChannelId: string | null;
+    mergeAnnouncerAdditionalRules?: string;
   } & ScheduleOnlyAutomationFrequencyState & {
       issueFixerInstructions: string | null;
     },
@@ -948,6 +928,7 @@ function mapSettingsToFormState(
     suggesterUseTelegram: Boolean(settings.suggesterTelegramChatId),
     suggesterUseTeams: Boolean(settings.suggesterTeamsChannelId),
     suggesterInstructions: settings.suggesterInstructions ?? '',
+    suggesterAdditionalRules: settings.suggesterAdditionalRules ?? '',
     announcerFrequency: settings.announcerFrequency,
     announcerSlackChannel:
       settings.announcerSlackChannelName ??
@@ -955,6 +936,7 @@ function mapSettingsToFormState(
       '',
     announcerDiscordChannel: settings.announcerDiscordChannelId ?? '',
     announcerInstructions: settings.announcerInstructions ?? '',
+    announcerAdditionalRules: settings.announcerAdditionalRules ?? '',
     platformIssueAlertsEnabled: settings.platformIssueAlertsEnabled,
     platformIssueSlackChannel:
       settings.platformIssueSlackChannelName ??
@@ -967,12 +949,16 @@ function mapSettingsToFormState(
       '',
     securityAuditorDiscordChannel:
       settings.securityAuditorDiscordChannelId ?? '',
+    securityAuditorAdditionalRules:
+      settings.securityAuditorAdditionalRules ?? '',
     codeQualityAuditorSlackChannel:
       settings.codeQualityAuditorSlackChannelName ??
       settings.codeQualityAuditorSlackChannelId ??
       '',
     codeQualityAuditorDiscordChannel:
       settings.codeQualityAuditorDiscordChannelId ?? '',
+    codeQualityAuditorAdditionalRules:
+      settings.codeQualityAuditorAdditionalRules ?? '',
     ciFailureTriageSlackChannel:
       settings.ciFailureTriageSlackChannelName ??
       settings.ciFailureTriageSlackChannelId ??
@@ -984,6 +970,7 @@ function mapSettingsToFormState(
       settings.mergeAnnouncerTargetProvider ?? 'none',
     mergeAnnouncerTargetMode: settings.mergeAnnouncerTargetMode ?? 'channel',
     mergeAnnouncerTargetChannelId: settings.mergeAnnouncerTargetChannelId ?? '',
+    mergeAnnouncerAdditionalRules: settings.mergeAnnouncerAdditionalRules ?? '',
   };
 }
 
@@ -1424,76 +1411,66 @@ function AutomationCard({
   const actionLabel = iconEnabled
     ? `Configure ${automation.label}`
     : `Set up ${automation.label}`;
-  const historyHref = getAutomationHistoryHref(automation.id);
+  const summaries = useContext(AutomationSummaryContext);
 
-  if (!iconEnabled && !isAvailableMatch) {
+  if (!isAvailableMatch) {
     return null;
   }
 
   return (
     <div
       id={automation.id}
-      className={cn('scroll-mt-24', iconEnabled ? 'order-[-20]' : 'order-0')}
+      className="scroll-mt-24"
       aria-disabled={disabled || undefined}
     >
-      <Card
-        className={cn(
-          'h-full gap-3 px-5 py-4 md:px-6 md:py-6',
-          disabled && 'opacity-50',
-        )}
-      >
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="mt-0.5 flex w-[34px] shrink-0 items-start justify-center">
-                <div className="rounded-xl border border-border/70 bg-muted/30 p-2">
-                  <Icon className="size-5" />
-                </div>
-              </div>
-              <div className="min-w-0 space-y-1">
-                <CardTitle className="text-base">{automation.label}</CardTitle>
-                {automation.commsBadge || automation.scmBadge ? (
-                  <p className="text-sm text-foreground">
-                    {[automation.commsBadge, automation.scmBadge]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
-                ) : null}
-                <p className="text-sm text-muted-foreground">
-                  {automation.description}
-                </p>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              {historyHref && iconEnabled && !disabled ? (
-                <BasicTooltip content="View previous runs">
-                  <Button asChild size="icon" variant="ghost">
-                    <Link
-                      href={historyHref}
-                      aria-label={`View previous runs for ${automation.label}`}
-                    >
-                      <RotateCcwClock />
-                    </Link>
-                  </Button>
-                </BasicTooltip>
-              ) : null}
-              {runAction && iconEnabled && !disabled ? runAction : null}
-              <BasicTooltip content={actionLabel}>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  aria-label={actionLabel}
-                  disabled={disabled}
-                  onClick={() => onOpenChange(true)}
-                >
-                  {iconEnabled ? <Settings2 /> : <Plus />}
-                </Button>
-              </BasicTooltip>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
+      <AutomationListRow
+        icon={Icon}
+        name={automation.label}
+        description={automation.description}
+        summary={
+          <>
+            <span>
+              {summaries[automation.id] ?? (iconEnabled ? 'Enabled' : 'Off')}
+            </span>
+            {automation.commsBadge || automation.scmBadge ? (
+              <span>
+                ·{' '}
+                {[automation.commsBadge, automation.scmBadge]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            ) : null}
+          </>
+        }
+        enabledControl={
+          <BasicTooltip content={actionLabel}>
+            <Switch
+              checked={iconEnabled}
+              disabled={disabled}
+              className="border-border data-[state=unchecked]:bg-muted"
+              aria-label={`${actionLabel} enabled state`}
+              onCheckedChange={() => onOpenChange(true)}
+            />
+          </BasicTooltip>
+        }
+        actions={
+          <>
+            {runAction && iconEnabled && !disabled ? runAction : null}
+            <BasicTooltip content={actionLabel}>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={actionLabel}
+                disabled={disabled}
+                onClick={() => onOpenChange(true)}
+              >
+                <Settings2 />
+              </Button>
+            </BasicTooltip>
+          </>
+        }
+      />
 
       <Dialog
         open={open}
@@ -1622,7 +1599,11 @@ function ScheduledAutomationCard<TFrequency extends string>({
   );
 }
 
-export function AutomationsSettings() {
+export function AutomationsSettings({
+  toolbarLeading,
+}: {
+  toolbarLeading?: React.ReactNode;
+} = {}) {
   const showAutomationDebugRuns = false;
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -1644,10 +1625,9 @@ export function AutomationsSettings() {
   const [openAutomationIds, setOpenAutomationIds] = useState<Set<AutomationId>>(
     () => new Set(),
   );
-  const [availableCategory, setAvailableCategory] = useState<
-    AutomationCategory | 'all'
-  >('all');
-  const [availableSearch, setAvailableSearch] = useState('');
+  const [automationFilter, setAutomationFilter] =
+    useState<AutomationListFilter>('all');
+  const [automationSearch, setAutomationSearch] = useState('');
   const formStateRef = useRef<FormState | null>(null);
   const savedStateRef = useRef<FormState | null>(null);
   const didApplyInitialHashRef = useRef(false);
@@ -2523,28 +2503,108 @@ export function AutomationsSettings() {
     announcer: announcerIsEnabled,
     platformIssueAlerts: isPlatformIssueAlertsEnabled(formState),
   } satisfies Record<AutomationId, boolean>;
-  const normalizedAvailableSearch = availableSearch.trim().toLowerCase();
-  const availableAutomationMatches = new Set(
+
+  const resolvedDestinationLabel = (
+    automationKey: keyof NonNullable<
+      typeof settingsQuery.data
+    >['resolvedDestinations'],
+  ): string => {
+    const destination = settingsQuery.data?.resolvedDestinations[automationKey];
+    if (!destination) return 'No report destination';
+
+    return `${getCommunicationProviderDisplayName(destination.provider)} ${destination.displayName ?? destination.channelId}`;
+  };
+  const scheduledSummary = (
+    frequency: keyof typeof TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS | undefined,
+    destination?: string,
+  ): string => {
+    const schedule = frequency
+      ? TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS[frequency]
+      : 'Off';
+    return destination ? `${schedule} → ${destination}` : schedule;
+  };
+  const scheduleOnlySummaries = Object.fromEntries(
+    SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => {
+      const definition = SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id];
+      const frequency = formState?.[automation.frequencyField];
+      const trigger =
+        definition.control.kind === 'toggle'
+          ? automation.id === 'issueFixer'
+            ? 'Issue opened or reopened'
+            : automation.id === 'mergeAnnouncer'
+              ? 'Default-branch push'
+              : 'CI failure event'
+          : frequency && frequency !== 'off'
+            ? TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS[frequency]
+            : 'Off';
+      return [
+        automation.id,
+        `${definition.control.kind === 'toggle' && frequency === 'off' ? 'Off · ' : ''}${trigger} → ${
+          automation.id === 'issueFixer'
+            ? 'source control issue'
+            : resolvedDestinationLabel(automation.automationKey)
+        }`,
+      ];
+    }),
+  ) as Record<ScheduleOnlyBackgroundAutomationId, string>;
+  const automationSummaries = {
+    callRoomoteViaEmoji: 'Emoji reaction → source thread',
+    channelAutoStart: `${formState?.channelAutoStartChannels.length ?? 0} configured channel${formState?.channelAutoStartChannels.length === 1 ? '' : 's'} → Sessions`,
+    managerChannel: managerChannelConfigured
+      ? `Shared output → ${managerSlackChannelId ? `Slack ${formState?.managerSlackChannel || managerSlackChannelId}` : `Discord ${formState?.managerDiscordChannel || managerDiscordChannelId}`}`
+      : 'No shared output destination',
+    managerStats: scheduledSummary(
+      formState?.managerStatsFrequency,
+      resolvedDestinationLabel('manager_stats'),
+    ),
+    providerUsageLimit: scheduledSummary(
+      formState?.providerUsageLimitFrequency,
+      resolvedDestinationLabel('provider_usage_limit'),
+    ),
+    sentryTriage: scheduledSummary(
+      formState?.sentryTriageFrequency,
+      resolvedDestinationLabel('sentry_triage'),
+    ),
+    dependabotTriage: scheduledSummary(
+      formState?.dependabotTriageFrequency,
+      resolvedDestinationLabel('dependabot_triage'),
+    ),
+    codeqlTriage: scheduledSummary(
+      formState?.codeqlTriageFrequency,
+      resolvedDestinationLabel('codeql_triage'),
+    ),
+    ...scheduleOnlySummaries,
+    reviewer: 'Pull request events and manual runs → source control',
+    conflictResolver: scheduledSummary(formState?.conflictResolverFrequency),
+    suggester: scheduledSummary(
+      formState?.suggesterFrequency,
+      resolvedDestinationLabel('suggester'),
+    ),
+    announcer: scheduledSummary(
+      formState?.announcerFrequency,
+      resolvedDestinationLabel('announcer'),
+    ),
+    platformIssueAlerts: `Configuration errors → ${resolvedDestinationLabel('platform_issue_alerts')}`,
+  } satisfies Record<AutomationId, string>;
+
+  const normalizedAutomationSearch = automationSearch.trim().toLowerCase();
+  const visibleBuiltInAutomations = new Set(
     Object.values(AUTOMATION_DEFINITIONS)
       .filter(
         (automation) =>
-          !iconEnabled[automation.id] &&
-          (availableCategory === 'all' ||
-            automation.category === availableCategory) &&
-          (!normalizedAvailableSearch ||
-            [
-              automation.label,
-              automation.description,
-              ...(automation.searchTerms ?? []),
-            ]
-              .join(' ')
-              .toLowerCase()
-              .includes(normalizedAvailableSearch)),
+          !normalizedAutomationSearch ||
+          [
+            automation.label,
+            automation.description,
+            automationSummaries[automation.id],
+            ...(automation.searchTerms ?? []),
+          ]
+            .join(' ')
+            .toLowerCase()
+            .includes(normalizedAutomationSearch),
       )
       .map((automation) => automation.id),
   );
-  const hasAvailableFilters =
-    availableCategory !== 'all' || Boolean(normalizedAvailableSearch);
 
   const isAutomationSaving = (automationId: AutomationId) =>
     updateMutation.isPending && savingAutomation === automationId;
@@ -2630,86 +2690,24 @@ export function AutomationsSettings() {
         </Alert>
       ) : null}
 
-      <CustomAutomationsSection />
-
-      {settingsQuery.isPending || !formState ? (
-        <LoadingSkeleton />
-      ) : (
-        <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <h2 className="order-[-30] col-span-full text-sm font-semibold text-foreground">
-              Enabled
-            </h2>
-            {Object.values(iconEnabled).some(Boolean) ? null : (
-              <p className="order-[-20] col-span-full text-sm text-muted-foreground">
-                No built-in automations enabled yet.
-              </p>
-            )}
-            <div className="order-[-10] col-span-full flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <h2 className="text-sm font-semibold text-foreground">
-                Available
-              </h2>
-              <div className="flex flex-wrap items-center gap-2">
-                <Select
-                  value={availableCategory}
-                  onValueChange={(value) =>
-                    setAvailableCategory(value as AutomationCategory | 'all')
-                  }
-                >
-                  <SelectTrigger
-                    size="sm"
-                    aria-label="Filter available automations by category"
-                    className="w-40"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AUTOMATION_CATEGORY_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={availableSearch}
-                    onChange={(event) =>
-                      setAvailableSearch(event.currentTarget.value)
-                    }
-                    placeholder="Search"
-                    aria-label="Search available automations"
-                    className="h-8 w-36 pl-8 text-sm"
-                  />
-                </div>
-                {hasAvailableFilters ? (
-                  <BasicTooltip content="Clear filters">
-                    <Button
-                      type="button"
-                      size="icon"
-                      className="size-8"
-                      variant="ghost"
-                      aria-label="Clear automation filters"
-                      onClick={() => {
-                        setAvailableCategory('all');
-                        setAvailableSearch('');
-                      }}
-                    >
-                      <X />
-                    </Button>
-                  </BasicTooltip>
-                ) : null}
-              </div>
-            </div>
-            {availableAutomationMatches.size === 0 ? (
-              <p className="order-0 col-span-full text-sm text-muted-foreground">
-                No available automations match these filters.
-              </p>
-            ) : null}
+      <CustomAutomationsSection
+        filter={automationFilter}
+        search={automationSearch}
+        onFilterChange={setAutomationFilter}
+        onSearchChange={setAutomationSearch}
+        toolbarLeading={toolbarLeading}
+      >
+        {settingsQuery.isPending || !formState ? (
+          <LoadingSkeleton />
+        ) : visibleBuiltInAutomations.size === 0 ? (
+          <p className="px-4 py-6 text-sm text-muted-foreground">
+            No built-in automations match your search.
+          </p>
+        ) : (
+          <AutomationSummaryContext.Provider value={automationSummaries}>
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.callRoomoteViaEmoji}
-              isAvailableMatch={availableAutomationMatches.has(
+              isAvailableMatch={visibleBuiltInAutomations.has(
                 'callRoomoteViaEmoji',
               )}
               isOpen={openAutomationIds.has('callRoomoteViaEmoji')}
@@ -2818,7 +2816,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.reviewer}
-              isAvailableMatch={availableAutomationMatches.has('reviewer')}
+              isAvailableMatch={visibleBuiltInAutomations.has('reviewer')}
               isOpen={openAutomationIds.has('reviewer')}
               onOpenChange={(open) => setAutomationOpen('reviewer', open)}
               iconEnabled={iconEnabled.reviewer}
@@ -2991,7 +2989,7 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
-                  isAvailableMatch={availableAutomationMatches.has(
+                  isAvailableMatch={visibleBuiltInAutomations.has(
                     automation.id,
                   )}
                   isOpen={openAutomationIds.has(automation.id)}
@@ -3070,7 +3068,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.conflictResolver}
-              isAvailableMatch={availableAutomationMatches.has(
+              isAvailableMatch={visibleBuiltInAutomations.has(
                 'conflictResolver',
               )}
               isOpen={openAutomationIds.has('conflictResolver')}
@@ -3280,7 +3278,7 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
-                  isAvailableMatch={availableAutomationMatches.has(
+                  isAvailableMatch={visibleBuiltInAutomations.has(
                     automation.id,
                   )}
                   isOpen={openAutomationIds.has(automation.id)}
@@ -3353,47 +3351,69 @@ export function AutomationsSettings() {
                     }
                   >
                     {automation.id === 'mergeAnnouncer' ? (
-                      <AutomationDestinationPicker
-                        id="merge-announcer-destination"
-                        label="Post announcements to"
-                        value={{
-                          provider: formState.mergeAnnouncerTargetProvider,
-                          mode: formState.mergeAnnouncerTargetMode,
-                          channelId: formState.mergeAnnouncerTargetChannelId,
-                        }}
-                        availableProviders={communicationProviders.filter(
-                          (provider) =>
-                            settingsQuery.data?.capabilities[
-                              `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
-                            ] === true,
-                        )}
-                        slackOptions={buildSlackDestinationOptions(
-                          formState.mergeAnnouncerTargetProvider === 'slack'
-                            ? formState.mergeAnnouncerTargetChannelId
-                            : null,
-                        )}
-                        discordOptions={mergeAnnouncerDiscordOptions}
-                        defaultSlackChannelId={managerSlackChannelId ?? ''}
-                        defaultDiscordChannelId={managerDiscordChannelId ?? ''}
-                        noneLabel="Default"
-                        noneDescription="Uses the Manager Channel or primary conversation fallback."
-                        onChange={(destination) =>
+                      <AutomationAdditionalRules
+                        automationKey="merge_announcer"
+                        value={formState.mergeAnnouncerAdditionalRules ?? ''}
+                        onChange={(value) =>
                           setFormState((previous) =>
                             previous
                               ? {
                                   ...previous,
-                                  mergeAnnouncerTargetProvider:
-                                    destination.provider,
-                                  mergeAnnouncerTargetMode: destination.mode,
-                                  mergeAnnouncerTargetChannelId:
-                                    destination.channelId,
+                                  mergeAnnouncerAdditionalRules: value,
                                 }
                               : previous,
                           )
                         }
+                        error={fieldErrors.mergeAnnouncerAdditionalRules}
+                        globalDestination={
+                          <AutomationDestinationPicker
+                            id="merge-announcer-destination"
+                            label="Post announcements to"
+                            value={{
+                              provider: formState.mergeAnnouncerTargetProvider,
+                              mode: formState.mergeAnnouncerTargetMode,
+                              channelId:
+                                formState.mergeAnnouncerTargetChannelId,
+                            }}
+                            availableProviders={communicationProviders.filter(
+                              (provider) =>
+                                settingsQuery.data?.capabilities[
+                                  `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
+                                ] === true,
+                            )}
+                            slackOptions={buildSlackDestinationOptions(
+                              formState.mergeAnnouncerTargetProvider === 'slack'
+                                ? formState.mergeAnnouncerTargetChannelId
+                                : null,
+                            )}
+                            discordOptions={mergeAnnouncerDiscordOptions}
+                            defaultSlackChannelId={managerSlackChannelId ?? ''}
+                            defaultDiscordChannelId={
+                              managerDiscordChannelId ?? ''
+                            }
+                            noneLabel="Default"
+                            noneDescription="Uses the Manager Channel or primary conversation fallback."
+                            onChange={(destination) =>
+                              setFormState((previous) =>
+                                previous
+                                  ? {
+                                      ...previous,
+                                      mergeAnnouncerTargetProvider:
+                                        destination.provider,
+                                      mergeAnnouncerTargetMode:
+                                        destination.mode,
+                                      mergeAnnouncerTargetChannelId:
+                                        destination.channelId,
+                                    }
+                                  : previous,
+                              )
+                            }
+                          />
+                        }
                       />
                     ) : (
-                      <CiFailureTriageAdditionalRules
+                      <AutomationAdditionalRules
+                        automationKey="ci_failure_triage"
                         value={formState.ciFailureTriageAdditionalRules ?? ''}
                         onChange={(value) =>
                           setFormState((previous) =>
@@ -3430,7 +3450,7 @@ export function AutomationsSettings() {
 
             <ScheduledAutomationCard
               automation={AUTOMATION_DEFINITIONS.dependabotTriage}
-              isAvailableMatch={availableAutomationMatches.has(
+              isAvailableMatch={visibleBuiltInAutomations.has(
                 'dependabotTriage',
               )}
               isOpen={openAutomationIds.has('dependabotTriage')}
@@ -3508,7 +3528,7 @@ export function AutomationsSettings() {
 
             <ScheduledAutomationCard
               automation={AUTOMATION_DEFINITIONS.codeqlTriage}
-              isAvailableMatch={availableAutomationMatches.has('codeqlTriage')}
+              isAvailableMatch={visibleBuiltInAutomations.has('codeqlTriage')}
               isOpen={openAutomationIds.has('codeqlTriage')}
               onOpenChange={(open) => setAutomationOpen('codeqlTriage', open)}
               iconEnabled={iconEnabled.codeqlTriage}
@@ -3599,7 +3619,7 @@ export function AutomationsSettings() {
                 <AutomationCard
                   key={automation.id}
                   automation={AUTOMATION_DEFINITIONS[automation.id]}
-                  isAvailableMatch={availableAutomationMatches.has(
+                  isAvailableMatch={visibleBuiltInAutomations.has(
                     automation.id,
                   )}
                   isOpen={openAutomationIds.has(automation.id)}
@@ -3669,44 +3689,72 @@ export function AutomationsSettings() {
                       )
                     }
                   >
-                    {renderSlackDestinationField({
-                      field:
+                    <AutomationAdditionalRules
+                      automationKey={automation.automationKey}
+                      value={
                         automation.id === 'securityAuditor'
-                          ? 'securityAuditorSlackChannel'
-                          : automation.id === 'codeQualityAuditor'
-                            ? 'codeQualityAuditorSlackChannel'
-                            : 'ciFailureTriageSlackChannel',
-                      inputId: `${automation.id}-slack-channel`,
-                      label: 'Post follow-up work to this Slack channel',
-                      helperText:
-                        automation.id === 'ciFailureTriage'
-                          ? 'Choose where Roomote should post CI failure triage work.'
-                          : 'Choose where Roomote should post actionable follow-up work.',
-                      savedChannelId:
+                          ? (formState.securityAuditorAdditionalRules ?? '')
+                          : (formState.codeQualityAuditorAdditionalRules ?? '')
+                      }
+                      onChange={(value) =>
+                        setFormState((previous) =>
+                          previous
+                            ? automation.id === 'securityAuditor'
+                              ? {
+                                  ...previous,
+                                  securityAuditorAdditionalRules: value,
+                                }
+                              : {
+                                  ...previous,
+                                  codeQualityAuditorAdditionalRules: value,
+                                }
+                            : previous,
+                        )
+                      }
+                      error={
                         automation.id === 'securityAuditor'
-                          ? (settingsQuery.data?.settings
-                              .securityAuditorSlackChannelId ?? null)
-                          : automation.id === 'codeQualityAuditor'
+                          ? fieldErrors.securityAuditorAdditionalRules
+                          : fieldErrors.codeQualityAuditorAdditionalRules
+                      }
+                      globalDestination={renderSlackDestinationField({
+                        field:
+                          automation.id === 'securityAuditor'
+                            ? 'securityAuditorSlackChannel'
+                            : automation.id === 'codeQualityAuditor'
+                              ? 'codeQualityAuditorSlackChannel'
+                              : 'ciFailureTriageSlackChannel',
+                        inputId: `${automation.id}-slack-channel`,
+                        label: 'Post follow-up work to this Slack channel',
+                        helperText:
+                          automation.id === 'ciFailureTriage'
+                            ? 'Choose where Roomote should post CI failure triage work.'
+                            : 'Choose where Roomote should post actionable follow-up work.',
+                        savedChannelId:
+                          automation.id === 'securityAuditor'
                             ? (settingsQuery.data?.settings
-                                .codeQualityAuditorSlackChannelId ?? null)
-                            : (settingsQuery.data?.settings
-                                .ciFailureTriageSlackChannelId ?? null),
-                      savedDiscordChannelId:
-                        automation.id === 'securityAuditor'
-                          ? (settingsQuery.data?.settings
-                              .securityAuditorDiscordChannelId ?? null)
-                          : automation.id === 'codeQualityAuditor'
+                                .securityAuditorSlackChannelId ?? null)
+                            : automation.id === 'codeQualityAuditor'
+                              ? (settingsQuery.data?.settings
+                                  .codeQualityAuditorSlackChannelId ?? null)
+                              : (settingsQuery.data?.settings
+                                  .ciFailureTriageSlackChannelId ?? null),
+                        savedDiscordChannelId:
+                          automation.id === 'securityAuditor'
                             ? (settingsQuery.data?.settings
-                                .codeQualityAuditorDiscordChannelId ?? null)
-                            : (settingsQuery.data?.settings
-                                .ciFailureTriageDiscordChannelId ?? null),
-                      warningChannelId:
-                        automation.id === 'securityAuditor'
-                          ? slackChannelAccessWarnings.securityAuditorSlackChannel
-                          : automation.id === 'codeQualityAuditor'
-                            ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
-                            : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
-                    })}
+                                .securityAuditorDiscordChannelId ?? null)
+                            : automation.id === 'codeQualityAuditor'
+                              ? (settingsQuery.data?.settings
+                                  .codeQualityAuditorDiscordChannelId ?? null)
+                              : (settingsQuery.data?.settings
+                                  .ciFailureTriageDiscordChannelId ?? null),
+                        warningChannelId:
+                          automation.id === 'securityAuditor'
+                            ? slackChannelAccessWarnings.securityAuditorSlackChannel
+                            : automation.id === 'codeQualityAuditor'
+                              ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
+                              : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
+                      })}
+                    />
                   </ScheduleOnlyAutomationContent>
                 </AutomationCard>
               );
@@ -3714,7 +3762,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.channelAutoStart}
-              isAvailableMatch={availableAutomationMatches.has(
+              isAvailableMatch={visibleBuiltInAutomations.has(
                 'channelAutoStart',
               )}
               isOpen={openAutomationIds.has('channelAutoStart')}
@@ -3772,9 +3820,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.managerChannel}
-              isAvailableMatch={availableAutomationMatches.has(
-                'managerChannel',
-              )}
+              isAvailableMatch={visibleBuiltInAutomations.has('managerChannel')}
               isOpen={openAutomationIds.has('managerChannel')}
               onOpenChange={(open) => setAutomationOpen('managerChannel', open)}
               iconEnabled={iconEnabled.managerChannel}
@@ -3839,7 +3885,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.managerStats}
-              isAvailableMatch={availableAutomationMatches.has('managerStats')}
+              isAvailableMatch={visibleBuiltInAutomations.has('managerStats')}
               isOpen={openAutomationIds.has('managerStats')}
               onOpenChange={(open) => setAutomationOpen('managerStats', open)}
               iconEnabled={iconEnabled.managerStats}
@@ -3926,7 +3972,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.providerUsageLimit}
-              isAvailableMatch={availableAutomationMatches.has(
+              isAvailableMatch={visibleBuiltInAutomations.has(
                 'providerUsageLimit',
               )}
               isOpen={openAutomationIds.has('providerUsageLimit')}
@@ -4056,7 +4102,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.sentryTriage}
-              isAvailableMatch={availableAutomationMatches.has('sentryTriage')}
+              isAvailableMatch={visibleBuiltInAutomations.has('sentryTriage')}
               isOpen={openAutomationIds.has('sentryTriage')}
               onOpenChange={(open) => setAutomationOpen('sentryTriage', open)}
               iconEnabled={iconEnabled.sentryTriage}
@@ -4235,7 +4281,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.suggester}
-              isAvailableMatch={availableAutomationMatches.has('suggester')}
+              isAvailableMatch={visibleBuiltInAutomations.has('suggester')}
               isOpen={openAutomationIds.has('suggester')}
               onOpenChange={(open) => setAutomationOpen('suggester', open)}
               iconEnabled={iconEnabled.suggester}
@@ -4301,29 +4347,43 @@ export function AutomationsSettings() {
                 {suggesterIsEnabled ? (
                   <div className="space-y-5">
                     <>
-                      {renderSlackDestinationField({
-                        field: 'suggesterSlackChannel',
-                        inputId: 'suggester-slack-channel',
-                        label: 'Post suggestions to this Slack channel',
-                        helperText:
-                          'Choose where Roomote should post its suggestion digests.',
-                        savedChannelId:
-                          settingsQuery.data?.settings
-                            .suggesterSlackChannelId ?? null,
-                        savedDiscordChannelId:
-                          settingsQuery.data?.settings
-                            .suggesterDiscordChannelId ?? null,
-                        warningChannelId:
-                          slackChannelAccessWarnings.suggesterSlackChannel,
-                        allowTelegram: true,
-                        savedTelegramSelected: Boolean(
-                          settingsQuery.data?.settings.suggesterTelegramChatId,
-                        ),
-                        allowTeams: true,
-                        savedTeamsSelected: Boolean(
-                          settingsQuery.data?.settings.suggesterTeamsChannelId,
-                        ),
-                      })}
+                      <AutomationAdditionalRules
+                        automationKey="suggester"
+                        value={formState.suggesterAdditionalRules ?? ''}
+                        onChange={(value) =>
+                          setFormState((previous) =>
+                            previous
+                              ? { ...previous, suggesterAdditionalRules: value }
+                              : previous,
+                          )
+                        }
+                        error={fieldErrors.suggesterAdditionalRules}
+                        globalDestination={renderSlackDestinationField({
+                          field: 'suggesterSlackChannel',
+                          inputId: 'suggester-slack-channel',
+                          label: 'Post suggestions to this Slack channel',
+                          helperText:
+                            'Choose where Roomote should post its suggestion digests.',
+                          savedChannelId:
+                            settingsQuery.data?.settings
+                              .suggesterSlackChannelId ?? null,
+                          savedDiscordChannelId:
+                            settingsQuery.data?.settings
+                              .suggesterDiscordChannelId ?? null,
+                          warningChannelId:
+                            slackChannelAccessWarnings.suggesterSlackChannel,
+                          allowTelegram: true,
+                          savedTelegramSelected: Boolean(
+                            settingsQuery.data?.settings
+                              .suggesterTelegramChatId,
+                          ),
+                          allowTeams: true,
+                          savedTeamsSelected: Boolean(
+                            settingsQuery.data?.settings
+                              .suggesterTeamsChannelId,
+                          ),
+                        })}
+                      />
 
                       <div className="space-y-2">
                         <Label htmlFor="suggester-instructions">
@@ -4359,7 +4419,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.announcer}
-              isAvailableMatch={availableAutomationMatches.has('announcer')}
+              isAvailableMatch={visibleBuiltInAutomations.has('announcer')}
               isOpen={openAutomationIds.has('announcer')}
               onOpenChange={(open) => setAutomationOpen('announcer', open)}
               iconEnabled={iconEnabled.announcer}
@@ -4424,21 +4484,33 @@ export function AutomationsSettings() {
 
                 {announcerIsEnabled ? (
                   <div className="space-y-5">
-                    {renderSlackDestinationField({
-                      field: 'announcerSlackChannel',
-                      inputId: 'announcer-slack-channel',
-                      label: 'Post summaries to this Slack channel',
-                      helperText:
-                        'Choose where Roomote should post merged-PR summaries.',
-                      savedChannelId:
-                        settingsQuery.data?.settings.announcerSlackChannelId ??
-                        null,
-                      savedDiscordChannelId:
-                        settingsQuery.data?.settings
-                          .announcerDiscordChannelId ?? null,
-                      warningChannelId:
-                        slackChannelAccessWarnings.announcerSlackChannel,
-                    })}
+                    <AutomationAdditionalRules
+                      automationKey="announcer"
+                      value={formState.announcerAdditionalRules ?? ''}
+                      onChange={(value) =>
+                        setFormState((previous) =>
+                          previous
+                            ? { ...previous, announcerAdditionalRules: value }
+                            : previous,
+                        )
+                      }
+                      error={fieldErrors.announcerAdditionalRules}
+                      globalDestination={renderSlackDestinationField({
+                        field: 'announcerSlackChannel',
+                        inputId: 'announcer-slack-channel',
+                        label: 'Post summaries to this Slack channel',
+                        helperText:
+                          'Choose where Roomote should post merged-PR summaries.',
+                        savedChannelId:
+                          settingsQuery.data?.settings
+                            .announcerSlackChannelId ?? null,
+                        savedDiscordChannelId:
+                          settingsQuery.data?.settings
+                            .announcerDiscordChannelId ?? null,
+                        warningChannelId:
+                          slackChannelAccessWarnings.announcerSlackChannel,
+                      })}
+                    />
 
                     <div className="space-y-2">
                       <Label htmlFor="announcer-instructions">
@@ -4473,7 +4545,7 @@ export function AutomationsSettings() {
 
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.platformIssueAlerts}
-              isAvailableMatch={availableAutomationMatches.has(
+              isAvailableMatch={visibleBuiltInAutomations.has(
                 'platformIssueAlerts',
               )}
               isOpen={openAutomationIds.has('platformIssueAlerts')}
@@ -4533,9 +4605,9 @@ export function AutomationsSettings() {
                 })}
               </div>
             </AutomationCard>
-          </div>
-        </div>
-      )}
+          </AutomationSummaryContext.Provider>
+        )}
+      </CustomAutomationsSection>
     </div>
   );
 }

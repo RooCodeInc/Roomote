@@ -747,6 +747,7 @@ const automationsRouter = createRouter({
          */
         suggesterUseTeams: z.boolean().optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
+        suggesterAdditionalRules: z.string().max(8000).nullable().optional(),
         announcerFrequency: z.enum(['off', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         announcerDiscordChannel: z
@@ -757,6 +758,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         announcerInstructions: z.string().max(8_000).nullable(),
+        announcerAdditionalRules: z.string().max(8000).nullable().optional(),
         platformIssueAlertsEnabled: z.boolean().optional(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
         platformIssueDiscordChannel: z
@@ -778,6 +780,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        securityAuditorAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         codeQualityAuditorSlackChannel: z
           .string()
           .trim()
@@ -790,6 +797,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        codeQualityAuditorAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         ciFailureTriageSlackChannel: z
           .string()
           .trim()
@@ -807,6 +819,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        mergeAnnouncerAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -1090,6 +1107,7 @@ export const appRouter = createRouter({
             sessionId: z.string().uuid().optional(),
             path: z.string(),
             version: z.number().optional(),
+            preview: z.boolean().optional(),
           })
           .refine(
             (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
