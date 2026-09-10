@@ -1,4 +1,5 @@
 import { Env } from '@roomote/env';
+import { buildDataVisualizationBlocks } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
@@ -201,6 +202,7 @@ async function processFastAgentReaction(params: {
           kickoff,
           imageArtifactIds = [],
           videoArtifactIds = [],
+          charts = [],
         }) => {
           const replyImages = await resolveFastAgentSessionImages({
             artifactIds: imageArtifactIds,
@@ -211,6 +213,7 @@ async function processFastAgentReaction(params: {
             channel: event.item.channel,
             threadTs,
             text: message,
+            charts,
             sourceMessageTs: event.item.ts,
             deliverVideos: videoArtifactIds.length
               ? () =>
@@ -249,7 +252,7 @@ async function processFastAgentReaction(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: async ({ messageId }, { message }) => {
+        replaceReply: async ({ messageId }, { message, charts }) => {
           const updated = await withSlackThreadReplyFooterLock({
             channel: event.item.channel,
             threadTs,
@@ -265,6 +268,7 @@ async function processFastAgentReaction(params: {
                   text: message,
                   blocks: [
                     { type: 'markdown', text: message },
+                    ...buildDataVisualizationBlocks(charts),
                     ...(footerMessageTs === messageId
                       ? [
                           buildSlackThreadReplyFooterBlock({

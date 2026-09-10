@@ -37,6 +37,13 @@ Fast is the default for unpinned requests across the web dashboard and
 supported chat providers. Choose an environment or repository explicitly when
 you already know where the work should run.
 
+When work needs a sandbox but no source code, ask Fast to delegate it to
+**Blank slate**. The delegated task starts with an empty workspace and does not
+clone repositories or require source-control credentials. This is useful for
+artifact generation, integration work, and other tasks that need command
+execution without a repository. Custom automations can also select Blank slate
+as their preferred environment.
+
 Select **New Session** in the navigation to open the same launcher from any
 dashboard page.
 
@@ -50,7 +57,7 @@ integrations for focused repository exploration. Reading files and directories,
 searching code, or inspecting commits, pull/merge request diffs, and reported CI
 results does not require a
 coding task, local clone, or workspace provisioning. Available reads depend on
-the connected integration's tools and permissions. Reading CI results is not the
+the integration's tools and permissions. Reading CI results is not the
 same as running tests: local checkout, code edits, command execution, and testing
 are delegated to a task, as are investigations that need a workspace.
 
@@ -68,6 +75,15 @@ limitations when results are partial, truncated, or limited to a search index.
 An empty search is not proof that code is absent. Source inspection is not a
 test run or reproduction, and an access denial is not bypassed through a task.
 Requests for a code review still use the structured Review Code pipeline.
+
+With an eligible deployment GitHub App installation and an active connected
+repository, active Roomote members can use the existing GitHub tools to read
+public `github.com` repositories, including source and code search. Public
+repositories do not themselves need to be connected, and no personal GitHub
+account linkage is required. See
+[public GitHub reads](/providers/source-control/github#public-github-reads)
+for access requirements. Private reads and writes still require the target to
+be connected; access denials are not retried anonymously.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
 also supports updates to existing pull requests, issue or PR comments,
@@ -98,6 +114,11 @@ error, and cost. Select a card to open its details panel. For a live nested
 task, you can reply, attach files, use commands, answer pending requests, cancel
 work, or wake a sleeping task without leaving the Session. Choose **Open full
 workspace** for terminal, logs, diff, and preview tools.
+
+To stop just one active coding task, select **Stop** on its Session card. This
+requires execution access and stops the displayed task run without stopping the
+parent Session or sibling tasks. Cancellation errors appear on the card; check
+the resulting task status rather than assuming the request succeeded.
 
 On desktop, you can keep several task workspaces open beside the Session,
 resize them, and switch between the conversation and task panels without losing
@@ -154,6 +175,11 @@ Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
 sandboxed in the web view. Chat surfaces receive a concise text preview and a
 link to open the rendered widget when both are available.
+
+Agent replies and delegated reports can also include up to two pie, bar, area,
+or line charts. Roomote renders each chart responsively in the web transcript
+with a keyboard-accessible data table. Slack receives a native chart with its
+Markdown fallback; other chat providers receive the fallback text.
 
 ## Reply to a session
 

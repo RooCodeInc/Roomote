@@ -1,4 +1,4 @@
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 
 import { listEnvironments } from './tasks-api-client.js';
 import { textResult, catchError } from './tool-result.js';
@@ -16,6 +16,12 @@ export async function handleListEnvironments(
           instructions:
             'Call "launch" with one of these environmentId values. Do not invent or guess an environmentId.',
           environments: [
+            {
+              environmentId: NO_REPOSITORIES,
+              name: 'Blank slate',
+              description:
+                'Pass this environmentId to "launch" to start a sandbox without repositories',
+            },
             {
               environmentId: ALL_REPOSITORIES,
               name: 'All repositories',

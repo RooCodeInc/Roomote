@@ -53,6 +53,10 @@ import {
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
+import {
+  clearPendingFastSessionLaunch,
+  getPendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import {
   findPendingSessionInputRequest,
@@ -132,6 +136,53 @@ function getUserMessageIdentity(message: TranscriptMessage) {
     getTextFromContentBlocks(message.contentBlocks)?.trim() ?? '',
     getImageUrisFromContentBlocks(message.contentBlocks),
   ]);
+}
+
+function buildOptimisticContentBlocks(text: string, images: string[] = []) {
+  const imageBlocks: TranscriptMessage['contentBlocks'] = images.flatMap(
+    (image) => {
+      const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(image.trim());
+      return match?.[1] && match[2]
+        ? [{ type: 'image', mimeType: match[1], data: match[2] }]
+        : [];
+    },
+  );
+
+  return [{ type: 'text' as const, text }, ...imageBlocks];
+}
+
+function getInitialOptimisticMessage(
+  sessionId: string,
+  initialMessages: FastSessionMessage[],
+): TranscriptMessage | null {
+  const launch = getPendingFastSessionLaunch(sessionId);
+  if (!launch) return null;
+
+  const eventId = `web-kickoff:${launch.fastConversationId}:user`;
+  if (initialMessages.some((message) => message.eventId === eventId)) {
+    clearPendingFastSessionLaunch(sessionId);
+    return null;
+  }
+
+  return {
+    id: eventId,
+    eventId,
+    turnId: `web-kickoff:${launch.fastConversationId}`,
+    turnSeq: 0,
+    ts: launch.createdAt,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+    role: 'user',
+    contentBlocks: buildOptimisticContentBlocks(launch.text, launch.images),
+    metadata: { visibleInTranscript: true },
+    payload: {},
+    source: 'web',
+    nativeSessionId: null,
+    nativeMessageId: null,
+    userName: null,
+    userEmail: null,
+    userImageUrl: null,
+    createdAt: new Date(launch.createdAt),
+  };
 }
 
 function isVisibleResponseActivity(message: TranscriptMessage) {
@@ -306,13 +357,18 @@ export function FastSessionTranscript({
   );
   const serverMessagesRef = useRef(serverMessages);
   const hasReceivedInitialSessionStateRef = useRef(false);
+  const [initialOptimisticMessage] = useState(() =>
+    getInitialOptimisticMessage(sessionId, initialMessages),
+  );
   const [optimisticMessages, setOptimisticMessages] = useState<
     TranscriptMessage[]
-  >([]);
+  >(() => (initialOptimisticMessage ? [initialOptimisticMessage] : []));
   const [isSending, setIsSending] = useState(false);
   const [pendingResponseState, dispatchPendingResponse] = useReducer(
     pendingResponseReducer,
-    initialMessages,
+    initialOptimisticMessage
+      ? [...initialMessages, initialOptimisticMessage]
+      : initialMessages,
     (messages) =>
       pendingResponseReducer(
         {
@@ -412,6 +468,7 @@ export function FastSessionTranscript({
         });
 
         if (canonicalUserMessages.length > 0) {
+          clearPendingFastSessionLaunch(sessionId);
           setOptimisticMessages((current) => {
             const pending = [...current];
             for (const canonical of canonicalUserMessages) {
@@ -646,16 +703,6 @@ export function FastSessionTranscript({
         }
 
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-        const imageBlocks: TranscriptMessage['contentBlocks'] = images.flatMap(
-          (image) => {
-            const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(
-              image.trim(),
-            );
-            return match?.[1] && match[2]
-              ? [{ type: 'image', mimeType: match[1], data: match[2] }]
-              : [];
-          },
-        );
         const optimistic: TranscriptMessage = {
           id: optimisticId,
           eventId: optimisticId,
@@ -664,10 +711,7 @@ export function FastSessionTranscript({
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
           role: 'user',
-          contentBlocks: [
-            { type: 'text', text: prepared.text },
-            ...imageBlocks,
-          ],
+          contentBlocks: buildOptimisticContentBlocks(prepared.text, images),
           metadata: { visibleInTranscript: true },
           payload: {},
           source: 'web',

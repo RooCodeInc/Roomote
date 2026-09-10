@@ -24,6 +24,30 @@ export async function stopTask(
     return c.json({ error: 'taskId is required' }, 400);
   }
 
+  let body: { userInitiated?: boolean } = {};
+  if (c.req.header('content-type')?.includes('application/json')) {
+    try {
+      const parsedBody: unknown = await c.req.json();
+      if (
+        !parsedBody ||
+        typeof parsedBody !== 'object' ||
+        Array.isArray(parsedBody)
+      ) {
+        return c.json({ error: 'Invalid JSON body' }, 400);
+      }
+      body = parsedBody as { userInitiated?: boolean };
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+  }
+
+  if (
+    body.userInitiated !== undefined &&
+    typeof body.userInitiated !== 'boolean'
+  ) {
+    return c.json({ error: 'userInitiated must be a boolean' }, 400);
+  }
+
   try {
     const job = await findLatestTaskRun(taskId, {
       id: true,
@@ -50,7 +74,9 @@ export async function stopTask(
     const result = await stopTaskRun({
       run: job,
       authUserId: auth.userId,
-      cancelledBy: { source: 'api' },
+      ...(body.userInitiated !== false
+        ? { cancelledBy: { source: 'api' } }
+        : {}),
     });
 
     if (!result.success) {

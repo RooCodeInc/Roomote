@@ -24,6 +24,7 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
+  getAutomationAdditionalRules,
   sourceControlProviders,
   TaskPayloadKind,
   type AutomationScanCursor,
@@ -41,6 +42,7 @@ import {
   type ResolvedAutomationDestination,
 } from './destination';
 import { hasAnyActiveRepository } from './github-deployment-scope';
+import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
 import {
   emptyJobResult,
   type AutomationJobResult,
@@ -59,6 +61,7 @@ const MAX_MERGED_PULL_REQUESTS_PER_RUN = 250;
 export type MergedPullRequestAuditScanCursor = AutomationScanCursor;
 
 export interface MergedPullRequest {
+  repositoryId: string;
   externalPullRequestId: number;
   repositoryFullName: string;
   sourceControlProvider: SourceControlProvider;
@@ -107,6 +110,7 @@ type PromptBuilderParams = {
   repositoryCoverage: RepositoryCoverage[];
   scanMode: MergedPullRequestAuditScanMode;
   recentThreadFeedback?: string | null;
+  additionalInstructions?: string | null;
 };
 
 type MergedPullRequestAuditConfig = {
@@ -326,6 +330,7 @@ export async function getMergedPullRequests(
     };
 
     deduped.set(`${row.repositoryId}#${row.prNumber}`, {
+      repositoryId: row.repositoryId,
       externalPullRequestId: row.externalPullRequestId,
       repositoryFullName: row.repositoryFullName,
       sourceControlProvider: row.sourceControlProvider,
@@ -418,6 +423,7 @@ export async function findAmbiguousRepositoryIdentities(
 type ManifestPartition = {
   provider: SourceControlProvider;
   host: string | null;
+  destination: ResolvedAutomationDestination;
   pullRequests: MergedPullRequest[];
 };
 
@@ -444,21 +450,20 @@ async function processDeployment(
       return { kind: 'skipped', reason: 'Automation is disabled.' };
     }
 
-    const destination =
+    const defaultDestination =
       opts.destination ??
       (await resolveAutomationRuntimeDestination({
         runtime,
         slackConnected: deployment.slackConnected,
       }));
 
-    if (!destination) {
-      console.log(
-        `${logPrefix} Skipping deployment: manager channel not configured`,
-      );
+    const rules = getAutomationAdditionalRules(runtime.settings);
+    if (rules === null) {
+      return { kind: 'skipped', reason: 'Additional rules are invalid.' };
+    }
+    if (!defaultDestination && (!rules || rules.destinations.length === 0)) {
       return { kind: 'skipped', reason: 'Manager channel is not configured.' };
     }
-
-    const channelId = destination.channelId;
 
     const intervalMs =
       FREQUENCY_INTERVAL_MS[frequency as keyof typeof FREQUENCY_INTERVAL_MS];
@@ -511,12 +516,6 @@ async function processDeployment(
       };
     }
 
-    const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
-      automationKey: config.automationKey,
-      slackChannelId: channelId,
-      surface: destination.provider,
-      now,
-    });
     // The pull-request read/write tools bind each task to a single
     // source-control provider (resolved from the task payload) and look
     // repositories up by (provider, fullName, host), so a manifest must
@@ -536,6 +535,8 @@ async function processDeployment(
       await findAmbiguousRepositoryIdentities(mergedPullRequests);
     const auditablePullRequests = mergedPullRequests.filter(
       (pullRequest) =>
+        (rules?.repositoryIds == null ||
+          rules.repositoryIds.includes(pullRequest.repositoryId)) &&
         !(
           pullRequest.repositoryHost === null &&
           ambiguousIdentities.has(
@@ -557,8 +558,23 @@ async function processDeployment(
 
     const manifestPartitions = new Map<string, ManifestPartition>();
 
+    const connectedProviders = await listConnectedCommunicationProviders();
     for (const pullRequest of auditablePullRequests) {
-      const partitionKey = `${pullRequest.sourceControlProvider}\u0000${pullRequest.repositoryHost ?? ''}`;
+      const destination = await resolveAutomationRepositoryDestination({
+        runtime,
+        repositoryId: pullRequest.repositoryId,
+        connectedProviders,
+        ...(defaultDestination ? { destination: defaultDestination } : {}),
+      });
+      if (!destination) continue;
+      const partitionKey = JSON.stringify([
+        pullRequest.sourceControlProvider,
+        pullRequest.repositoryHost ?? null,
+        destination.provider,
+        destination.channelId,
+        destination.teamId ?? null,
+        destination.serviceUrl ?? null,
+      ]);
       const partition = manifestPartitions.get(partitionKey);
 
       if (partition) {
@@ -567,9 +583,16 @@ async function processDeployment(
         manifestPartitions.set(partitionKey, {
           provider: pullRequest.sourceControlProvider,
           host: pullRequest.repositoryHost,
+          destination,
           pullRequests: [pullRequest],
         });
       }
+    }
+    if (auditablePullRequests.length > 0 && manifestPartitions.size === 0) {
+      return {
+        kind: 'skipped',
+        reason: 'No configured report destination is currently available.',
+      };
     }
 
     // Iterating the provider enum, then hosts in lexicographic order, keeps
@@ -585,7 +608,19 @@ async function processDeployment(
     let firstLaunchedTaskId: string | null = null;
 
     for (const partition of orderedPartitions) {
-      const { provider, host, pullRequests: partitionPullRequests } = partition;
+      const {
+        provider,
+        host,
+        destination,
+        pullRequests: partitionPullRequests,
+      } = partition;
+      const channelId = destination.channelId;
+      const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
+        automationKey: config.automationKey,
+        slackChannelId: channelId,
+        surface: destination.provider,
+        now,
+      });
 
       const selectedRepositories = getSelectedRepositories(
         partitionPullRequests,
@@ -626,6 +661,7 @@ async function processDeployment(
               repositoryCoverage,
               scanMode,
               recentThreadFeedback: recentThreadFeedback.promptText,
+              additionalInstructions: rules?.instructions,
             }),
             trigger: 'scheduled',
             ...(destination.provider === 'slack'

@@ -132,9 +132,10 @@ Create arbitrary scheduled agent runs with:
 - a clear **name**
 - the **prompt** Roomote should run
 - a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
-- an optional **preferred environment**: a named environment or **All
-  repositories**, offered to the run as a hint for delegated work; leave it
-  as **Let Roomote decide** to route normally
+- an optional **preferred environment**: a named environment, **All
+  repositories**, or **Blank slate**. Blank slate always delegates the run to a
+  sandbox without repositories; leave it as **Let Roomote decide** to route
+  normally
 - an optional **model** override for the automation's Fast session, including
   later turns; without an override, it uses the deployment orchestration default.
   Delegated coding tasks use their own model selection or deployment coding default
@@ -144,7 +145,8 @@ Create arbitrary scheduled agent runs with:
   or a channel, through Slack, Discord, Teams, or Telegram
 
 Each automation card summarizes its cadence, workspace target, report destination,
-creator, and most recent run.
+creator, and most recent run. Blank slate runs do not clone repositories or require
+source-control credentials.
 
 Use **View previous runs** on an automation card to open the task list
 filtered to that automation's runs. For a custom automation, the history is
@@ -155,8 +157,8 @@ When creating an automation through Roomote chat, ask for **suggested tasks** or
 teammates can start from the report. Asking only for a summary or list of action
 items keeps those actions as report text. Launchable suggestions require a chat
 report destination. Each suggestion can select its own named environment,
-**All repositories**, or **Fast** target, so one report can offer follow-ups for
-different workspaces and execution modes. Repository-specific suggestions from
+**All repositories**, **Blank slate**, or **Fast** target, so one report can offer
+follow-ups for different workspaces and execution modes. Repository-specific suggestions from
 **All repositories** runs start in a matching named environment when one is
 available. Choosing **All repositories** is a delegation preference, not a
 request to prepare every repository on every run. Use a named environment when
@@ -375,6 +377,11 @@ manager-facing updates and suggestions.
 | **Platform Issue Alerts**    | Configuration and access issues reported by Roomote tasks        | Immediate when an issue is reported         |
 | **Summarize Merged PRs**     | A digest of recently merged pull requests                        | Daily or weekly                             |
 
+Weekly Manager Stats is enabled by default on new deployments and starts
+posting only after a valid report destination is configured. Slack reports
+include a daily chart of created and merged pull requests for the reporting
+period. Existing deployments keep their saved automation settings.
+
 Set **Automation output** first. This is the shared Slack or Discord Manager
 Channel for manager-facing posts, suggestions, summaries, and setup alerts.
 Make sure the Roomote app can access the channel before you save it.
@@ -484,8 +491,10 @@ For Gitea, repository webhook resync includes the `workflow_run` event so
 Actions completions reach Roomote; host matching uses the deployment
 `GITEA_BASE_URL`.
 
-In **Settings > Automations > CI Failure Triage**, choose the standard report
-destination and optionally describe **Additional rules** in natural language:
+For **Suggest Ideas**, **Summarize Merged PRs**, **Security Auditor**, **Code
+Quality Auditor**, **CI Failure Triage**, and **Merge announcer**, choose the
+standard report destination and optionally describe **Additional rules** in
+natural language:
 
 > Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.
 
@@ -495,13 +504,16 @@ workspace, when names could be ambiguous. Unclear, contradictory, unavailable,
 or unsupported rules cannot be saved. An inference provider must be available
 to interpret new rules. A failed save leaves the previous configuration intact.
 
-Repository restrictions apply to webhook failures and **Run now**. Explicit
+Repository restrictions apply to scheduled runs, **Run now**, and webhook runs
+where the automation uses them. Explicit
 restrictions select the matching repositories at save time; save revised rules
 to include newly added repositories. Destination-only rules do not limit scope:
-other repositories continue using the standard destination. Investigation and
-report-writing guidance can also be included. Workflow, job, branch, and time
-conditions are not supported in additional rules. Clear the rules to restore
-all-repository triage using the standard destination.
+other repositories continue using the standard destination. Workflow and
+report-writing guidance can also be included. Pre-run workflow, job, branch,
+and time conditions are not supported in Additional rules. Clear the rules to
+restore the automation's all-repository behavior using the standard
+destination. Existing **Suggestion preferences** and merged-PR **Additional
+instructions** remain separate and keep their current meaning.
 
 Repositories still need an active connection and a configured environment.
 **Run now** starts at most one eligible investigation per click, using that

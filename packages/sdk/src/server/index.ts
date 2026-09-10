@@ -20,7 +20,7 @@ export {
 } from './lib/source-control-connection';
 
 export {
-  resolveCiFailureTriageRepositoryDestination,
+  resolveAutomationRepositoryDestination,
   isCiFailureTriageRepositoryEnabled,
 } from './automations/ci-failure-triage-routing';
 export {

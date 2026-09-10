@@ -1,4 +1,3 @@
-export { SelectWorkspace } from './SelectWorkspace';
 export { TaskPromptInput } from './TaskPromptInput';
 export { ModelSelect } from './ModelSelect';
 export { SessionModelSwitcher } from './SessionModelSwitcher';

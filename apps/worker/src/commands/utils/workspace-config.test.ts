@@ -2,6 +2,8 @@ const { findEnvironmentMock } = vi.hoisted(() => ({
   findEnvironmentMock: vi.fn(),
 }));
 
+import { NO_REPOSITORIES } from '@roomote/types';
+
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     environments: {
@@ -69,5 +71,12 @@ describe('buildWorkspaceConfig', () => {
         repositories: [{ repository: 'Roomote/example-app' }],
       },
     });
+  });
+
+  it('builds a no-repositories workspace without loading an environment', async () => {
+    await expect(
+      buildWorkspaceConfig({ repo: NO_REPOSITORIES }),
+    ).resolves.toEqual({ type: 'no_repositories' });
+    expect(findEnvironmentMock).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_REPOSITORIES, FAST_EXECUTION } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  FAST_EXECUTION,
+  NO_REPOSITORIES,
+} from '@roomote/types';
 
 import {
   createCustomAutomation,
@@ -33,6 +37,7 @@ describe('custom automations helpers', () => {
     expect(created.executionMode).toBe('fast');
     expect(created.environmentId).toBeNull();
     expect(created.allRepositories).toBe(false);
+    expect(created.noRepositories).toBe(false);
 
     await deleteCustomAutomation(created.id);
   });
@@ -49,6 +54,25 @@ describe('custom automations helpers', () => {
 
     expect(created.environmentId).toBeNull();
     expect(created.allRepositories).toBe(true);
+    expect(created.noRepositories).toBe(false);
+
+    await deleteCustomAutomation(created.id);
+  });
+
+  it('persists an explicit Blank slate sandbox target', async () => {
+    const created = await createCustomAutomation({
+      name: `Blank slate artifact ${Date.now()}`,
+      prompt: 'Create an artifact without source code.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: NO_REPOSITORIES,
+      target: {},
+    });
+
+    expect(created.executionMode).toBe('sandbox_task');
+    expect(created.environmentId).toBeNull();
+    expect(created.allRepositories).toBe(false);
+    expect(created.noRepositories).toBe(true);
 
     await deleteCustomAutomation(created.id);
   });

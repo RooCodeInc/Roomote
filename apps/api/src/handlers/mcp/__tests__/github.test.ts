@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { generateKeyPairSync } from 'node:crypto';
+import { configureAuthClientEnv } from '@roomote/auth/client';
 import {
   db,
   eq,
@@ -21,7 +23,8 @@ const mocks = vi.hoisted(() => ({
   credentials: vi.fn(),
   upstream: vi.fn(),
 }));
-vi.mock('@roomote/auth', () => ({
+vi.mock('@roomote/auth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/auth')>()),
   createGitHubToken: mocks.mint,
   resolveRuntimeGitHubAppCredentials: mocks.credentials,
 }));
@@ -53,6 +56,16 @@ describe('GitHub MCP bounded writes', () => {
   ] as const;
 
   beforeAll(async () => {
+    const keys = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    configureAuthClientEnv({
+      jobAuthPrivateKey: keys.privateKey,
+      jobAuthPublicKey: keys.publicKey,
+      nodeEnv: 'test',
+    });
     actor = await userFactory.create({ role: 'member' });
     installer = await userFactory.create();
     installation = await githubInstallationFactory.create({
@@ -100,6 +113,7 @@ describe('GitHub MCP bounded writes', () => {
       .update(repositories)
       .set({
         isActive: true,
+        private: repository.private,
         installationId: installation.id,
         host: 'github.com',
         githubRepoId: repository.githubRepoId,
@@ -109,6 +123,7 @@ describe('GitHub MCP bounded writes', () => {
   });
 
   afterAll(async () => {
+    configureAuthClientEnv(null);
     await db
       .delete(repositories)
       .where(eq(repositories.id, secondRepository.id));
@@ -130,6 +145,7 @@ describe('GitHub MCP bounded writes', () => {
       version: 1,
     },
     restrict = true,
+    allowedToolNames?: readonly string[],
   ) {
     const hono = new Hono<{ Variables: Variables }>();
     hono.use('*', async (c, next) => {
@@ -140,9 +156,11 @@ describe('GitHub MCP bounded writes', () => {
       '/github',
       createGithubMcp({
         allowAuthTokens: true,
-        ...(restrict
-          ? { allowedToolNames: getAllowedRouterMcpToolNames('github') }
-          : {}),
+        ...(allowedToolNames
+          ? { allowedToolNames }
+          : restrict
+            ? { allowedToolNames: getAllowedRouterMcpToolNames('github') }
+            : {}),
       }),
     );
     return hono;
@@ -151,7 +169,12 @@ describe('GitHub MCP bounded writes', () => {
   function post(body: unknown, target = app()) {
     return target.request('/github', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        authorization: 'Bearer caller-secret',
+        cookie: 'secret-cookie',
+        'x-github-token': 'secret-token',
+      },
       body: JSON.stringify(body),
     });
   }
@@ -644,20 +667,32 @@ describe('GitHub MCP bounded writes', () => {
     { githubRepoId: -1 },
     { sourceControlProvider: 'gitlab' as const },
   ])(
-    'never falls back to another installation for an invalid read target %j',
+    'excludes invalid read targets from the representative token scope %j',
     async (update) => {
       await db
         .update(repositories)
         .set(update)
         .where(eq(repositories.id, repository.id));
+      mocks.upstream.mockImplementation(
+        async () => new Response('Not Found', { status: 404 }),
+      );
       for (const [name, arguments_] of [
         ['get_file_contents', { owner, repo: 'example' }],
         ['search_code', { query: `repo:${owner}/example fix` }],
         ['search_repositories', { query: `repo:${owner}/example` }],
       ] as const)
-        expect((await call(name, arguments_)).status).toBe(403);
-      expect(mocks.mint).not.toHaveBeenCalled();
-      expect(mocks.upstream).not.toHaveBeenCalled();
+        expect((await call(name, arguments_)).status).toBe(404);
+      expect(mocks.mint.mock.calls).toEqual(
+        Array.from({ length: 3 }, () => [
+          {
+            type: 'installationId',
+            installationId: secondInstallation.id,
+            repositoryIds: [secondRepository.githubRepoId],
+          },
+          appCredentials,
+        ]),
+      );
+      expect(mocks.upstream).toHaveBeenCalledTimes(3);
     },
   );
 
@@ -668,10 +703,22 @@ describe('GitHub MCP bounded writes', () => {
         .update(githubInstallations)
         .set(update)
         .where(eq(githubInstallations.id, installation.id));
+      mocks.upstream.mockResolvedValueOnce(
+        new Response('Not Found', { status: 404 }),
+      );
       expect(
         (await call('get_file_contents', { owner, repo: 'example' })).status,
-      ).toBe(403);
-      expect(mocks.mint).not.toHaveBeenCalled();
+      ).toBe(404);
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: secondInstallation.id,
+          repositoryIds: [secondRepository.githubRepoId],
+        },
+        appCredentials,
+      );
+      expect(mocks.upstream).toHaveBeenCalledTimes(1);
+      mocks.mint.mockClear();
       expect(
         (await post({ jsonrpc: '2.0', id: 7, method: 'initialize' })).status,
       ).toBe(200);
@@ -686,23 +733,13 @@ describe('GitHub MCP bounded writes', () => {
     },
   );
 
-  it('rejects disconnected and unspecified reads without using the discovery credential', async () => {
-    expect(
-      (await call('get_file_contents', { owner, repo: 'disconnected' })).status,
-    ).toBe(403);
-    expect(
-      (
-        await call('search_repositories', {
-          query: `repo:${owner}/disconnected`,
-        })
-      ).status,
-    ).toBe(403);
+  it('rejects unspecified reads without using the discovery credential', async () => {
     expect((await call('get_file_contents', {})).status).toBe(400);
     expect(mocks.mint).not.toHaveBeenCalled();
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
 
-  it('skips inactive repositories for discovery and fails when none remain connected', async () => {
+  it('skips inactive repositories for discovery and rejects discovery when none remain connected', async () => {
     await db
       .update(repositories)
       .set({ isActive: false })
@@ -1065,4 +1102,435 @@ describe('GitHub MCP bounded writes', () => {
       log.mockRestore();
     }
   });
+
+  const publicTarget = { owner: 'public-owner', repo: 'public-repository' };
+  const publicFullName = `${publicTarget.owner}/${publicTarget.repo}`;
+
+  it.each([
+    ['get_file_contents', { ...publicTarget, path: 'README.md', ref: 'main' }],
+    [
+      'search_code',
+      { query: `Hello repo:${publicFullName}`, perPage: 5, page: 2 },
+    ],
+    ['search_repositories', { query: `repo:${publicFullName}`, perPage: 5 }],
+    [
+      'search_pull_requests',
+      { query: `repo:${publicFullName} is:open`, sort: 'updated' },
+    ],
+    [
+      'pull_request_read',
+      { ...publicTarget, method: 'get_review_comments', pullNumber: 42 },
+    ],
+    ['issue_read', { ...publicTarget, method: 'get', issue_number: 42 }],
+  ])(
+    'forwards unconnected %s with untouched native arguments and one scoped credential',
+    async (name, arguments_) => {
+      expect((await call(name as string, arguments_)).status).toBe(200);
+      const expected =
+        installation.id < secondInstallation.id
+          ? { installation, repository }
+          : { installation: secondInstallation, repository: secondRepository };
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: expected.installation.id,
+          repositoryIds: [expected.repository.githubRepoId],
+        },
+        appCredentials,
+      );
+      expect(mocks.upstream).toHaveBeenCalledOnce();
+      const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+      expect(JSON.parse(init.body as string).params.arguments).toEqual(
+        arguments_,
+      );
+      expect(new Headers(init.headers).get('X-MCP-Readonly')).toBe('true');
+      expect(new Headers(init.headers).get('authorization')).toBe(
+        'Bearer scoped-test-token',
+      );
+    },
+  );
+
+  it('accepts exactly 2 MiB of native JSON for an unconnected read', async () => {
+    const output = 'x'.repeat(
+      2 * 1024 * 1024 - JSON.stringify({ result: '' }).length,
+    );
+    mocks.upstream.mockResolvedValueOnce(Response.json({ result: output }));
+    const response = await call('get_file_contents', publicTarget);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ result: output });
+    expect(mocks.mint).toHaveBeenCalledOnce();
+    expect(mocks.upstream).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['application/json', 'declared'],
+    ['application/json', 'missing length'],
+    ['application/json', 'understated length'],
+    ['text/event-stream', 'declared'],
+    ['text/event-stream', 'missing length'],
+    ['text/event-stream', 'understated length'],
+  ])('bounds actual native bytes for %s (%s)', async (contentType, kind) => {
+    const cancel = vi.fn().mockRejectedValue(new Error('cancel failed'));
+    let reads = 0;
+    // Multibyte text catches accidental character-count rather than byte limits.
+    const chunk = new TextEncoder().encode('\u00e9'.repeat(256 * 1024));
+    mocks.upstream.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream(
+          {
+            pull(controller) {
+              reads++;
+              controller.enqueue(chunk);
+            },
+            cancel,
+          },
+          { highWaterMark: 0 },
+        ),
+        {
+          headers: {
+            'content-type': contentType!,
+            ...(kind === 'declared'
+              ? { 'content-length': String(2 * 1024 * 1024 + 1) }
+              : kind === 'understated length'
+                ? { 'content-length': '1' }
+                : {}),
+          },
+        },
+      ),
+    );
+    const response = await call('get_file_contents', publicTarget);
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.message).toContain('size limit');
+    expect(reads).toBe(kind === 'declared' ? 0 : 5);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(mocks.upstream).toHaveBeenCalledOnce();
+    expect(mocks.mint).toHaveBeenCalledOnce();
+  });
+
+  it('returns a normal native SSE reply without waiting for closure', async () => {
+    const payload = { jsonrpc: '2.0', id: 7, result: { content: [] } };
+    const cancel = vi.fn();
+    const bytes = new TextEncoder().encode(
+      `data: ${JSON.stringify(payload)}\n\n`,
+    );
+    mocks.upstream.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(bytes.slice(0, 11));
+            controller.enqueue(bytes.slice(11));
+          },
+          cancel,
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+    );
+    const response = await call('get_file_contents', publicTarget);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(payload);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each(['application/json', 'text/event-stream'])(
+    'keeps the native 15-second deadline active through a stalled %s body',
+    async (contentType) => {
+      const abort = new AbortController();
+      const timeout = vi
+        .spyOn(AbortSignal, 'timeout')
+        .mockReturnValueOnce(abort.signal);
+      const cancel = vi.fn();
+      mocks.upstream.mockImplementationOnce(async (_url, init: RequestInit) => {
+        expect(init.signal!.aborted).toBe(false);
+        return new Response(
+          new ReadableStream(
+            {
+              pull() {
+                abort.abort(new DOMException('Timed out', 'TimeoutError'));
+              },
+              cancel,
+            },
+            { highWaterMark: 0 },
+          ),
+          { headers: { 'content-type': contentType } },
+        );
+      });
+      try {
+        const response = await call('get_file_contents', publicTarget);
+        expect(response.status).toBe(502);
+        expect((await response.json()).error.message).toContain('Timed out');
+        expect(timeout).toHaveBeenCalledExactlyOnceWith(15_000);
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(mocks.upstream).toHaveBeenCalledOnce();
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
+  it.each(['application/json', 'text/event-stream'])(
+    'does not apply unconnected byte or deadline bounds to connected %s calls',
+    async (contentType) => {
+      const timeout = vi.spyOn(AbortSignal, 'timeout');
+      const payload = {
+        jsonrpc: '2.0',
+        id: 7,
+        result: 'x'.repeat(2 * 1024 * 1024 + 1),
+      };
+      mocks.upstream.mockResolvedValueOnce(
+        new Response(
+          contentType === 'application/json'
+            ? JSON.stringify(payload)
+            : `data: ${JSON.stringify(payload)}\n\n`,
+          { headers: { 'content-type': contentType } },
+        ),
+      );
+      try {
+        const response = await call('get_file_contents', {
+          owner,
+          repo: 'example',
+        });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual(payload);
+        expect(timeout).not.toHaveBeenCalled();
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
+  it.each(['application/json', 'text/event-stream'])(
+    'fails closed on a native %s body error without retrying',
+    async (contentType) => {
+      mocks.upstream.mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(new Error('Body failed'));
+            },
+          }),
+          { headers: { 'content-type': contentType } },
+        ),
+      );
+      const response = await call('get_file_contents', publicTarget);
+      expect(response.status).toBe(502);
+      expect((await response.json()).error.message).toContain('Body failed');
+      expect(mocks.upstream).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('fails closed when unconnected SSE ends without a matching response', async () => {
+    mocks.upstream.mockResolvedValueOnce(
+      new Response('data: {"id":8,"result":{}}\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    const response = await call('get_file_contents', publicTarget);
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.message).toContain('No matching');
+    expect(mocks.upstream).toHaveBeenCalledOnce();
+  });
+
+  it('applies the unconnected native deadline before response headers arrive', async () => {
+    const abort = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockReturnValueOnce(abort.signal);
+    mocks.upstream.mockImplementationOnce(
+      (_url, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal!.addEventListener(
+            'abort',
+            () => reject(init.signal!.reason),
+            { once: true },
+          );
+          abort.abort(new DOMException('Timed out', 'TimeoutError'));
+        }),
+    );
+    try {
+      const response = await call('get_file_contents', publicTarget);
+      expect(response.status).toBe(502);
+      expect((await response.json()).error.message).toContain('Timed out');
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(15_000);
+      expect(mocks.upstream).toHaveBeenCalledOnce();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it('requires configured App credentials for unconnected reads and discovery', async () => {
+    mocks.credentials.mockRejectedValue(
+      new Error('GitHub App credentials are not configured.'),
+    );
+    expect((await call('get_file_contents', publicTarget)).status).toBe(500);
+    expect(
+      (await post({ jsonrpc: '2.0', id: 7, method: 'tools/list' })).status,
+    ).toBe(500);
+    expect(mocks.mint).not.toHaveBeenCalled();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it('requires an eligible connected repository even for unconnected targets', async () => {
+    mocks.credentials.mockResolvedValue({
+      appId: '999999',
+      privateKey: 'other-key',
+    });
+    expect((await call('get_file_contents', publicTarget)).status).toBe(404);
+    expect(
+      (await post({ jsonrpc: '2.0', id: 7, method: 'tools/list' })).status,
+    ).toBe(404);
+    expect(mocks.mint).not.toHaveBeenCalled();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it('propagates repository lookup errors without attempting unconnected access', async () => {
+    const select = vi
+      .spyOn(Object.getPrototypeOf(db.select().from(repositories)), 'limit')
+      .mockImplementationOnce(() => {
+        throw new Error('lookup failed');
+      });
+    try {
+      expect((await call('get_file_contents', publicTarget)).status).toBe(500);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    } finally {
+      select.mockRestore();
+    }
+  });
+
+  it('does not retry token mint failures through a different credential', async () => {
+    mocks.mint.mockRejectedValueOnce(new Error('installation token denied'));
+    expect((await call('get_file_contents', publicTarget)).status).toBe(500);
+    expect(mocks.mint).toHaveBeenCalledOnce();
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'never retries an upstream authorization denial (connected=%s)',
+    async (connected) => {
+      mocks.upstream.mockResolvedValueOnce(
+        new Response('Denied', { status: 403 }),
+      );
+      expect(
+        (
+          await call(
+            'get_file_contents',
+            connected ? { owner, repo: 'example' } : publicTarget,
+          )
+        ).status,
+      ).toBe(403);
+      expect(mocks.mint).toHaveBeenCalledOnce();
+      expect(mocks.upstream).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(['get_file_contents', 'search_repositories'])(
+    'preserves upstream 404 for unconnected private %s without broad fallback or retry',
+    async (name) => {
+      const arguments_ =
+        name === 'search_repositories'
+          ? { query: `repo:${owner}/private-unconnected` }
+          : { owner, repo: 'private-unconnected' };
+      const error = { message: 'Not Found' };
+      mocks.upstream.mockResolvedValueOnce(
+        Response.json(error, { status: 404 }),
+      );
+      const response = await call(name, arguments_);
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual(error);
+      const expected =
+        installation.id < secondInstallation.id
+          ? { installation, repository }
+          : { installation: secondInstallation, repository: secondRepository };
+      expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'installationId',
+          installationId: expected.installation.id,
+          repositoryIds: [expected.repository.githubRepoId],
+        },
+        appCredentials,
+      );
+      expect(mocks.upstream).toHaveBeenCalledOnce();
+      const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+      expect(JSON.parse(init.body as string).params.arguments).toEqual(
+        arguments_,
+      );
+      expect(new Headers(init.headers).get('authorization')).toBe(
+        'Bearer scoped-test-token',
+      );
+      expect(new Headers(init.headers).get('X-MCP-Readonly')).toBe('true');
+    },
+  );
+
+  it('preserves connected private reads with a per-target token', async () => {
+    await db
+      .update(repositories)
+      .set({ private: true })
+      .where(eq(repositories.id, repository.id));
+    expect(
+      (await call('get_file_contents', { owner, repo: 'example' })).status,
+    ).toBe(200);
+    expect(mocks.mint).toHaveBeenCalledExactlyOnceWith(
+      {
+        type: 'installationId',
+        installationId: installation.id,
+        repositoryIds: [repository.githubRepoId],
+      },
+      appCredentials,
+    );
+  });
+
+  it.each(writeCases)(
+    'never permits unconnected %s writes',
+    async (name, arguments_) => {
+      expect(
+        (await call(name, { ...arguments_, ...publicTarget })).status,
+      ).toBe(403);
+      expect(mocks.mint).not.toHaveBeenCalled();
+      expect(mocks.upstream).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([true, false])(
+    'keeps unconnected native search read-only for persisted runs (human=%s)',
+    async (human) => {
+      const run = await runFactory.create({
+        actingUserId: human ? actor.id : null,
+      });
+      const target = app({
+        tokenType: 'run',
+        version: 1,
+        runId: run.id,
+        userId: human ? actor.id : null,
+        principal: human ? 'user' : 'deployment',
+      });
+      const arguments_ = { query: `Hello repo:${publicFullName}`, perPage: 5 };
+      try {
+        expect((await call('search_code', arguments_, target)).status).toBe(
+          200,
+        );
+        const init = mocks.upstream.mock.calls[0]![1] as RequestInit;
+        expect(JSON.parse(init.body as string).params.arguments).toEqual(
+          arguments_,
+        );
+        expect(new Headers(init.headers).get('X-MCP-Readonly')).toBe('true');
+        expect(
+          (
+            await call(
+              'add_issue_comment',
+              { ...publicTarget, issue_number: 1, body: 'No write' },
+              target,
+            )
+          ).status,
+        ).toBe(403);
+        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+        expect((await call('search_code', arguments_, target)).status).toBe(
+          404,
+        );
+        expect(mocks.mint).toHaveBeenCalledOnce();
+      } finally {
+        await db.delete(taskRuns).where(eq(taskRuns.id, run.id));
+        await db.delete(tasks).where(eq(tasks.id, run.taskId));
+      }
+    },
+  );
 });

@@ -1,5 +1,5 @@
 {
-  "id": "34d7becf-4eb7-4762-a8f5-2e6ef066c97b",
+  "id": "a0b28d54-e9c7-4dda-be12-dee5eb3c30a9",
   "prevId": "75bc14ef-6a2c-44af-ac65-1ec491fb8cba",
   "version": "7",
   "dialect": "postgresql",
@@ -1243,6 +1243,13 @@
         },
         "all_repositories": {
           "name": "all_repositories",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "no_repositories": {
+          "name": "no_repositories",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
@@ -10267,229 +10274,6 @@
       },
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.source_control_connection_requests": {
-      "name": "source_control_connection_requests",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "conversation_id": {
-          "name": "conversation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "actor_user_id": {
-          "name": "actor_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "turn_id": {
-          "name": "turn_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tool": {
-          "name": "tool",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "repository_full_name": {
-          "name": "repository_full_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "environment_id": {
-          "name": "environment_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "capability": {
-          "name": "capability",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "revision": {
-          "name": "revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "sync_attempt": {
-          "name": "sync_attempt",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_by_user_id": {
-          "name": "completed_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "continuation_event_key": {
-          "name": "continuation_event_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "execution_started_at": {
-          "name": "execution_started_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "source_control_connection_requests_active_unique": {
-          "name": "source_control_connection_requests_active_unique",
-          "columns": [
-            {
-              "expression": "conversation_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"source_control_connection_requests\".\"status\" in ('pending', 'ready')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "source_control_connection_requests_pending_idx": {
-          "name": "source_control_connection_requests_pending_idx",
-          "columns": [
-            {
-              "expression": "provider",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "source_control_connection_requests_conversation_id_fast_agent_conversations_id_fk": {
-          "name": "source_control_connection_requests_conversation_id_fast_agent_conversations_id_fk",
-          "tableFrom": "source_control_connection_requests",
-          "tableTo": "fast_agent_conversations",
-          "columnsFrom": ["conversation_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "source_control_connection_requests_actor_user_id_users_id_fk": {
-          "name": "source_control_connection_requests_actor_user_id_users_id_fk",
-          "tableFrom": "source_control_connection_requests",
-          "tableTo": "users",
-          "columnsFrom": ["actor_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "source_control_connection_requests_completed_by_user_id_users_id_fk": {
-          "name": "source_control_connection_requests_completed_by_user_id_users_id_fk",
-          "tableFrom": "source_control_connection_requests",
-          "tableTo": "users",
-          "columnsFrom": ["completed_by_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "source_control_connection_requests_continuation_event_key_unique": {
-          "name": "source_control_connection_requests_continuation_event_key_unique",
-          "nullsNotDistinct": false,
-          "columns": ["continuation_event_key"]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "source_control_connection_requests_status_check": {
-          "name": "source_control_connection_requests_status_check",
-          "value": "\"source_control_connection_requests\".\"status\" in ('pending', 'ready', 'continued', 'cancelled', 'expired', 'superseded')"
-        },
-        "source_control_connection_requests_capability_check": {
-          "name": "source_control_connection_requests_capability_check",
-          "value": "\"source_control_connection_requests\".\"capability\" in ('repository', 'source_control_tool')"
-        },
-        "source_control_connection_requests_provider_check": {
-          "name": "source_control_connection_requests_provider_check",
-          "value": "\"source_control_connection_requests\".\"provider\" is null or \"source_control_connection_requests\".\"provider\" in ('github', 'gitlab', 'gitea', 'ado', 'bitbucket')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.source_control_user_mappings": {

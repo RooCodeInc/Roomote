@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
 
-import { type AuthTokenContext, type RunTokenContext } from '@roomote/types';
+import {
+  NO_REPOSITORIES,
+  type AuthTokenContext,
+  type RunTokenContext,
+} from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
@@ -258,6 +262,38 @@ describe('launchTask', () => {
       task: { payload: { sourceControlProvider?: string } };
     };
     expect(enqueuedTask.task.payload.sourceControlProvider).toBeUndefined();
+  });
+
+  it('launches an explicit Blank slate task without repository validation or provider resolution', async () => {
+    mockLaunchPinned.mockResolvedValue({
+      sessionId: 'session-1',
+      fastConversationId: 'fast-1',
+      runId: 101,
+      taskId: 'task-blank',
+    });
+
+    const response = await createApp(authContext).request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Create a standalone artifact',
+          repo: NO_REPOSITORIES,
+          environmentId: '6f1f3f0a-9f5e-4d2a-8f4e-1a2b3c4d5e6f',
+          selectedRepositories: ['acme/inherited'],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
+    expect(mockEnvironmentsFindFirst).not.toHaveBeenCalled();
+    expect(mockResolveWorkspaceRepositoryProviders).not.toHaveBeenCalled();
+    const launchedTask = mockLaunchPinned.mock.calls[0]?.[0]?.task;
+    expect(launchedTask.payload).toMatchObject({ repo: NO_REPOSITORIES });
+    expect(launchedTask.payload).not.toHaveProperty('sourceControlProvider');
+    expect(launchedTask.payload).not.toHaveProperty('environmentId');
+    expect(launchedTask.payload).not.toHaveProperty('selectedRepositories');
   });
 
   it('stamps a requested reasoning effort and model override into the payload', async () => {
