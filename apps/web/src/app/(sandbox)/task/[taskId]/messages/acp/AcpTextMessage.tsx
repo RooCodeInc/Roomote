@@ -1,4 +1,5 @@
 import { useState, type ComponentType } from 'react';
+import Link from 'next/link';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   type AcpRequestUserInputPayload,
@@ -303,15 +304,31 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
       >
         {isUser ? (
           <BasicTooltip content={userTooltipContent}>
-            <div className="shrink-0 pt-1 mt-8">
-              <Avatar
-                imageUrl={msg.userImageUrl}
-                name={msg.userName}
-                email={msg.userEmail}
-                size="md"
-                alt={msg.userName ?? msg.userEmail ?? 'User'}
-              />
-            </div>
+            {msg.userId ? (
+              <Link
+                href={{ pathname: '/sessions', query: { user: msg.userId } }}
+                aria-label={`View sessions by ${msg.userName?.trim() || msg.userEmail?.trim() || 'user'}`}
+                className="shrink-0 pt-1 mt-8 cursor-pointer"
+              >
+                <Avatar
+                  imageUrl={msg.userImageUrl}
+                  name={msg.userName}
+                  email={msg.userEmail}
+                  size="md"
+                  alt={msg.userName ?? msg.userEmail ?? 'User'}
+                />
+              </Link>
+            ) : (
+              <div className="shrink-0 pt-1 mt-8">
+                <Avatar
+                  imageUrl={msg.userImageUrl}
+                  name={msg.userName}
+                  email={msg.userEmail}
+                  size="md"
+                  alt={msg.userName ?? msg.userEmail ?? 'User'}
+                />
+              </div>
+            )}
           </BasicTooltip>
         ) : null}
         <MessageContent id={anchorId} className={messageContentClassName}>

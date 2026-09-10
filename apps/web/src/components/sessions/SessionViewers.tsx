@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+
 import { Avatar, BasicTooltip } from '@/components/system';
 import {
   useSessionViewers,
@@ -22,20 +24,25 @@ export function SessionViewerAvatars({
     >
       {viewers.map((viewer, index) => {
         const label = `${viewer.name?.trim() || viewer.email.trim()} is viewing`;
+        const identity = viewer.name?.trim() || viewer.email.trim();
         return (
           <BasicTooltip key={viewer.id} content={label}>
-            <Avatar
-              imageUrl={viewer.imageUrl}
-              name={viewer.name}
-              email={viewer.email}
-              alt={label}
-              size="sm"
-              tabIndex={0}
-              className="transition-[margin] duration-200 motion-reduce:transition-none hover:z-10 focus:z-10"
+            <Link
+              href={{ pathname: '/sessions', query: { user: viewer.id } }}
+              aria-label={`View sessions by ${identity}`}
+              className="cursor-pointer transition-[margin] duration-200 motion-reduce:transition-none hover:z-10 focus:z-10"
               style={{
                 marginLeft: index === 0 ? 0 : viewers.length > 3 ? -4 : 2,
               }}
-            />
+            >
+              <Avatar
+                imageUrl={viewer.imageUrl}
+                name={viewer.name}
+                email={viewer.email}
+                alt={label}
+                size="sm"
+              />
+            </Link>
           </BasicTooltip>
         );
       })}
