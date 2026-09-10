@@ -564,10 +564,7 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-import {
-  AutomationsSettings,
-  getAutomationHistoryHref,
-} from './AutomationsSettings';
+import { AutomationsSettings } from './AutomationsSettings';
 import { CustomAutomationsSection } from './CustomAutomationsSection';
 
 it.each([false, true])(
@@ -593,6 +590,12 @@ it('opens the standalone custom editor without querying admin settings', () => {
   state.queriedKeys = [];
   render(<CustomAutomationsSection />);
 
+  expect(
+    screen.queryByRole('radio', { name: 'Built-in' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByText('No custom automations created yet.'),
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'New' }));
   expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
   expect(state.queriedKeys).toContainEqual([
@@ -606,16 +609,16 @@ it('opens the standalone custom editor without querying admin settings', () => {
 
 async function openSuggesterCard() {
   fireEvent.click(
-    await screen.findByRole('button', {
-      name: /(?:Set up|Configure) Suggest Ideas/,
+    await screen.findByRole('switch', {
+      name: /(?:Set up|Configure) Suggest Ideas enabled state/,
     }),
   );
 }
 
 async function openReviewerCard() {
   fireEvent.click(
-    await screen.findByRole('button', {
-      name: /(?:Set up|Configure) Review Code/,
+    await screen.findByRole('switch', {
+      name: /(?:Set up|Configure) Review Code enabled state/,
     }),
   );
 }
@@ -689,8 +692,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     expect(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Weekly Manager Stats/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Weekly Manager Stats enabled state/,
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
@@ -700,8 +703,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'Configure Inference Provider Usage Alerts',
+      await screen.findByRole('switch', {
+        name: 'Configure Inference Provider Usage Alerts enabled state',
       }),
     );
 
@@ -721,8 +724,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'Set up Call Roomote via emoji',
+      await screen.findByRole('switch', {
+        name: 'Set up Call Roomote via emoji enabled state',
       }),
     );
     fireEvent.click(
@@ -786,8 +789,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Weekly Manager Stats/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Weekly Manager Stats enabled state/,
       }),
     );
     expect(
@@ -798,8 +801,8 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
-      screen.getByRole('button', {
-        name: /(?:Set up|Configure) Triage Sentry Issues/,
+      screen.getByRole('switch', {
+        name: /(?:Set up|Configure) Triage Sentry Issues enabled state/,
       }),
     );
     expect(
@@ -807,8 +810,8 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
-      screen.getByRole('button', {
-        name: /(?:Set up|Configure) Triage Dependabot Alerts/,
+      screen.getByRole('switch', {
+        name: /(?:Set up|Configure) Triage Dependabot Alerts enabled state/,
       }),
     );
 
@@ -841,8 +844,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Weekly Manager Stats/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Weekly Manager Stats enabled state/,
       }),
     );
     expect(
@@ -850,8 +853,8 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
-      screen.getByRole('button', {
-        name: /(?:Set up|Configure) Triage Sentry Issues/,
+      screen.getByRole('switch', {
+        name: /(?:Set up|Configure) Triage Sentry Issues enabled state/,
       }),
     );
 
@@ -881,8 +884,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Automation output/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Automation output enabled state/,
       }),
     );
     const destination = await screen.findByRole('button', {
@@ -915,8 +918,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Alert on Config Errors/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Alert on Config Errors enabled state/,
       }),
     );
 
@@ -936,8 +939,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Alert on Config Errors/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Alert on Config Errors enabled state/,
       }),
     );
 
@@ -951,8 +954,8 @@ describe('AutomationsSettings', () => {
   it('hides the launch mode picker when decision mode is disabled', async () => {
     render(<AutomationsSettings />);
 
-    const expandButton = await screen.findByRole('button', {
-      name: /(?:Set up|Configure) Auto-respond to channels/,
+    const expandButton = await screen.findByRole('switch', {
+      name: /(?:Set up|Configure) Auto-respond to channels enabled state/,
     });
     fireEvent.click(expandButton);
 
@@ -991,69 +994,51 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     await screen.findByText('Triage Dependabot Alerts');
-    const providerSupport = screen.getAllByText('GitHub only')[0]!;
-    expect(providerSupport.tagName).toBe('P');
-    expect(providerSupport).toHaveClass('text-sm', 'text-foreground');
+    const providerSupport = screen.getAllByText(/GitHub only/)[0]!;
+    expect(providerSupport.tagName).toBe('SPAN');
+    expect(providerSupport.closest('[role="row"]')).toHaveTextContent(
+      'Triage Dependabot Alerts',
+    );
   });
 
-  it('groups built-in automations into Enabled and Available sections', async () => {
-    render(<AutomationsSettings />);
-
-    expect(await screen.findByText('Enabled')).toBeInTheDocument();
-    expect(screen.getByText('Available')).toBeInTheDocument();
-    expect(screen.queryByText('Source Code automations')).toBeNull();
-    expect(screen.queryByText('Meta automations')).toBeNull();
-  });
-
-  it('links enabled built-in automations to their filtered task history', async () => {
+  it('renders custom and built-in automations in one list by default', async () => {
     render(<AutomationsSettings />);
 
     expect(
-      await screen.findByRole('link', {
-        name: 'View previous runs for Auto-respond to channels',
-      }),
-    ).toHaveAttribute(
-      'href',
-      '/tasks?userId=automation%3Aslack_channel_auto_start',
+      await screen.findByRole('table', { name: 'Automations' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'All' })).toBeChecked();
+    expect(screen.getByText('Auto-respond to channels')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Enabled' })).toHaveClass(
+      'sr-only',
     );
+    expect(screen.getByRole('columnheader', { name: 'Actions' })).toHaveClass(
+      'sr-only',
+    );
+    expect(screen.queryByText('Available')).not.toBeInTheDocument();
+  });
+
+  it('uses the left switch as the built-in configuration entry point', async () => {
+    render(<AutomationsSettings />);
+
+    const enabledSwitch = await screen.findByRole('switch', {
+      name: 'Configure Auto-respond to channels enabled state',
+    });
+    expect(enabledSwitch).toBeChecked();
     expect(
       screen.queryByRole('link', {
-        name: 'View previous runs for Review Code',
+        name: 'View previous runs for Auto-respond to channels',
       }),
     ).not.toBeInTheDocument();
-  });
-
-  it.each([
-    ['callRoomoteViaEmoji', 'call_roomote_via_emoji'],
-    ['channelAutoStart', 'slack_channel_auto_start'],
-    ['managerStats', 'manager_stats'],
-    ['sentryTriage', 'sentry_triage'],
-    ['dependabotTriage', 'dependabot_triage'],
-    ['codeqlTriage', 'codeql_triage'],
-    ['issueFixer', 'issue_fixer'],
-    ['securityAuditor', 'security_auditor'],
-    ['codeQualityAuditor', 'code_quality_auditor'],
-    ['ciFailureTriage', 'ci_failure_triage'],
-    ['reviewer', 'review_code'],
-    ['conflictResolver', 'conflict_resolver'],
-    ['suggester', 'suggester'],
-    ['announcer', 'announcer'],
-    ['platformIssueAlerts', 'platform_issue_alerts'],
-  ] as const)(
-    'builds the filtered task history link for %s',
-    (automationId, automationKey) => {
-      expect(getAutomationHistoryHref(automationId)).toBe(
-        `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`,
-      );
-    },
-  );
-
-  it('does not add task history to non-running built-in configuration', () => {
-    expect(getAutomationHistoryHref('managerChannel')).toBeNull();
-  });
-
-  it('does not add task history to provider usage alerts', () => {
-    expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: 'Configure Auto-respond to channels',
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(enabledSwitch);
+    expect(
+      await screen.findByRole('dialog', { name: 'Auto-respond to channels' }),
+    ).toBeInTheDocument();
   });
 
   it('shows Merge announcer as a webhook-driven automation without task history', async () => {
@@ -1071,10 +1056,10 @@ describe('AutomationsSettings', () => {
         'Summarize commits pushed to each active repository’s default branch and announce who pushed them.',
       ),
     ).toBeInTheDocument();
-    expect(getAutomationHistoryHref('mergeAnnouncer')).toBeNull();
-
     fireEvent.click(
-      screen.getByRole('button', { name: 'Configure Merge announcer' }),
+      screen.getByRole('switch', {
+        name: 'Configure Merge announcer enabled state',
+      }),
     );
     expect(
       screen.getByRole('combobox', { name: 'Destination provider' }),
@@ -1084,33 +1069,22 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('DM me');
   });
 
-  it('filters available automations by category and provider-aware search', async () => {
+  it('filters the unified list by type and searches built-in summaries', async () => {
     render(<AutomationsSettings />);
 
-    const categoryFilter = await screen.findByRole('combobox', {
-      name: 'Filter available automations by category',
-    });
-    expect(categoryFilter).toHaveTextContent('All');
-
     fireEvent.change(
-      screen.getByRole('textbox', { name: 'Search available automations' }),
-      { target: { value: 'Discord' } },
-    );
-
-    expect(screen.getByText('Auto-respond to channels')).toBeInTheDocument();
-    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Clear automation filters' }),
+      await screen.findByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'Pull request events' } },
     );
     expect(screen.getByText('Review Code')).toBeInTheDocument();
-
-    fireEvent.click(categoryFilter);
-    fireEvent.click(await screen.findByRole('option', { name: 'Operations' }));
-    expect(screen.getByText('Triage Sentry Issues')).toBeInTheDocument();
-    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
     expect(
-      screen.queryByText('Call Roomote via emoji'),
+      screen.queryByText('Auto-respond to channels'),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Built-in' }));
+    expect(screen.getByText('Review Code')).toBeInTheDocument();
   });
 
   it('shows independent structural skeletons for custom and built-in automations', () => {
@@ -1143,11 +1117,12 @@ describe('AutomationsSettings', () => {
       screen.queryByText('No built-in automations enabled yet.'),
     ).not.toBeInTheDocument();
     expect(
-      await screen.findByRole('button', {
-        name: 'Configure Alert on Config Errors',
+      await screen.findByRole('switch', {
+        name: 'Configure Alert on Config Errors enabled state',
       }),
     ).toBeInTheDocument();
-    const customEmptyState = screen.getByText(
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+    const customEmptyState = await screen.findByText(
       'No custom automations created yet.',
     );
     expect(customEmptyState.tagName).toBe('P');
@@ -1218,14 +1193,6 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     ).toBeEnabled();
-    expect(
-      screen.getByRole('link', {
-        name: 'View previous runs for Weekly flaky-test scan',
-      }),
-    ).toHaveAttribute(
-      'href',
-      '/tasks?userId=automation%3Acustom_automation%3Aautomation-1',
-    );
     fireEvent.click(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     );
@@ -1269,11 +1236,6 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('button', {
         name: 'Configure Weekly flaky-test scan',
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', {
-        name: 'View previous runs for Weekly flaky-test scan',
       }),
     ).toBeInTheDocument();
     expect(
@@ -1369,14 +1331,14 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     expect(await screen.findByText('Daily →')).toBeInTheDocument();
-    expect(
-      screen.getByText('No actionable regressions found.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', {
-        name: 'View previous runs for Fast daily digest',
-      }),
-    ).toBeInTheDocument();
+    const search = screen.getByRole('textbox', { name: 'Search automations' });
+    fireEvent.change(search, {
+      target: { value: 'Summarize priorities' },
+    });
+    expect(screen.getByText('Fast daily digest')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: 'No matching automation' } });
+    expect(screen.queryByText('Fast daily digest')).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '' } });
     fireEvent.click(
       screen.getByRole('button', { name: 'Configure Fast daily digest' }),
     );
