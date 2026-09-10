@@ -322,6 +322,7 @@ vi.mock('@/components/system', () => ({
   Search: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Settings2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Skeleton: (props: HTMLAttributes<HTMLDivElement>) => <div {...props} />,
+  Sparkles: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Spinner: (props: HTMLAttributes<HTMLDivElement>) => <div {...props} />,
   SquareArrowOutUpRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Textarea: (props: TextareaHTMLAttributes<HTMLTextAreaElement>) => (
@@ -334,7 +335,11 @@ vi.mock('@/components/system', () => ({
 
 import { CustomSkills } from './CustomSkills';
 
-function renderCustomSkills() {
+function renderCustomSkills({
+  marketplaceOpen = false,
+  filter = 'environment' as const,
+  search = '',
+} = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -348,7 +353,11 @@ function renderCustomSkills() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <CustomSkills />
+      <CustomSkills
+        filter={filter}
+        search={search}
+        marketplaceOpen={marketplaceOpen}
+      />
     </QueryClientProvider>,
   );
 }
@@ -425,9 +434,30 @@ describe('CustomSkills settings', () => {
       ).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Installed')).toBeInTheDocument();
+    expect(screen.getByText('Only in')).toBeInTheDocument();
     expect(screen.getByText('Alpha')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Add Skill' })).toBeVisible();
+  });
+
+  it('filters environment rows by skill and availability text', async () => {
+    state.listData.installed.push({
+      kind: 'manual',
+      source: 'manual',
+      name: 'beta-skill',
+      skillId: 'manual@beta-skill#1234567890ab',
+      isAllSelection: false,
+      installsLabel: null,
+      url: null,
+      description: 'Beta instructions',
+      content: '# Beta',
+      environments: [{ id: 'env-2', name: 'Beta' }],
+    });
+
+    renderCustomSkills({ search: 'Beta' });
+
+    expect(await screen.findByText('beta skill')).toBeVisible();
+    expect(
+      screen.queryByText('vercel / react best practices'),
+    ).not.toBeInTheDocument();
   });
 
   it('shows a useful empty state when environments have no skills', async () => {
@@ -438,10 +468,6 @@ describe('CustomSkills settings', () => {
       await screen.findByText(
         'No environment-specific skills yet. Add a custom skill or install one from the marketplace.',
       ),
-    ).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Add Skill' })).toBeVisible();
-    expect(
-      screen.getByPlaceholderText('Search by skill name or source'),
     ).toBeVisible();
   });
 
@@ -455,11 +481,13 @@ describe('CustomSkills settings', () => {
         'No environments are available. Create an environment before adding an environment-specific skill.',
       ),
     ).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Add Skill' })).toBeDisabled();
+    expect(
+      screen.queryByPlaceholderText('Search by skill name or source'),
+    ).not.toBeInTheDocument();
   });
 
   it('debounces search input before rendering marketplace results', async () => {
-    renderCustomSkills();
+    renderCustomSkills({ marketplaceOpen: true });
 
     const input = await screen.findByPlaceholderText(
       'Search by skill name or source',
@@ -481,7 +509,7 @@ describe('CustomSkills settings', () => {
   });
 
   it('supports multi-environment availability updates', async () => {
-    renderCustomSkills();
+    renderCustomSkills({ marketplaceOpen: true });
 
     const input = await screen.findByPlaceholderText(
       'Search by skill name or source',
@@ -543,7 +571,7 @@ describe('CustomSkills settings', () => {
       ],
     };
 
-    renderCustomSkills();
+    renderCustomSkills({ marketplaceOpen: true });
 
     const input = await screen.findByPlaceholderText(
       'Search by skill name or source',
@@ -611,7 +639,7 @@ describe('CustomSkills settings', () => {
       ],
     };
 
-    renderCustomSkills();
+    renderCustomSkills({ marketplaceOpen: true });
 
     const input = await screen.findByPlaceholderText(
       'Search by skill name or source',
@@ -623,39 +651,6 @@ describe('CustomSkills settings', () => {
     });
 
     expect(installedButton).toBeDisabled();
-  });
-
-  it('lets users add a manual skill with separate fields', async () => {
-    renderCustomSkills();
-
-    await screen.findByRole('heading', { name: 'Installed' });
-    fireEvent.click(screen.getByRole('button', { name: 'Add Skill' }));
-
-    fireEvent.change(screen.getByLabelText('Manual skill slug'), {
-      target: { value: 'my manual/skill' },
-    });
-    fireEvent.change(screen.getByLabelText('Manual skill description'), {
-      target: { value: 'Manual skill.' },
-    });
-    fireEvent.change(screen.getByLabelText('Manual skill content'), {
-      target: {
-        value: '# My Manual Skill',
-      },
-    });
-
-    fireEvent.click(screen.getByLabelText('Alpha'));
-    fireEvent.click(screen.getByLabelText('Beta'));
-    fireEvent.click(screen.getByRole('button', { name: 'Save Skill' }));
-
-    await waitFor(() => {
-      expect(saveManualMock.mock.calls[0]?.[0]).toEqual({
-        name: 'mymanualskill',
-        description: 'Manual skill.',
-        content: '# My Manual Skill',
-        environmentIds: ['env-1', 'env-2'],
-        previousSkillId: undefined,
-      });
-    });
   });
 
   it('opens installed manual skills in the manual editor', async () => {
@@ -711,13 +706,26 @@ describe('CustomSkills settings', () => {
     });
   });
 
-  it('prompts before closing the manual editor with unsaved changes', async () => {
+  it('prompts before closing an environment skill editor with unsaved changes', async () => {
     const confirmMock = vi.spyOn(window, 'confirm').mockReturnValue(false);
-
+    state.listData.installed = [
+      {
+        kind: 'manual',
+        source: 'manual',
+        name: 'my-manual-skill',
+        skillId: 'manual@my-manual-skill#1234567890ab',
+        isAllSelection: false,
+        installsLabel: null,
+        url: null,
+        description: 'Manual skill',
+        content: '# My Manual Skill',
+        environments: [{ id: 'env-1', name: 'Alpha' }],
+      },
+    ];
     renderCustomSkills();
-
-    await screen.findByRole('heading', { name: 'Installed' });
-    fireEvent.click(screen.getByRole('button', { name: 'Add Skill' }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit my-manual-skill' }),
+    );
     fireEvent.change(screen.getByLabelText('Manual skill description'), {
       target: { value: 'Changed description' },
     });

@@ -11,8 +11,6 @@ import { useTRPC } from '@/trpc/client';
 import {
   BasicTooltip,
   Button,
-  Card,
-  CardContent,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -28,10 +26,15 @@ import {
   FormMessage,
   Input,
   Pencil,
+  Sparkles,
   Skeleton,
   Textarea,
   Trash2,
 } from '@/components/system';
+import {
+  SkillListRow,
+  type SkillListFilter,
+} from '@/components/settings/SkillList';
 
 type SkillDefinition = z.infer<typeof createCustomSkillInputSchema>;
 type Skill = SkillDefinition & {
@@ -84,7 +87,7 @@ function SkillEditor({
     >
       <DialogContent size="2xl">
         <DialogHeader>
-          <DialogTitle>{skill ? 'Edit Skill' : 'Add Skill'}</DialogTitle>
+          <DialogTitle>{skill ? 'Edit Skill' : 'Add Custom Skill'}</DialogTitle>
           <DialogDescription>
             Available across this instance in Sessions and coding tasks.
           </DialogDescription>
@@ -194,11 +197,11 @@ function SkillEditor({
 }
 
 export function InstanceSkills({
-  isCreating,
-  onCloseCreate,
+  filter,
+  search,
 }: {
-  isCreating: boolean;
-  onCloseCreate: () => void;
+  filter: SkillListFilter;
+  search: string;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -218,103 +221,109 @@ export function InstanceSkills({
       onError: (error) => toast.error(error.message),
     }),
   );
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleSkills =
+    filter === 'environment'
+      ? []
+      : (list.data ?? []).filter((skill) =>
+          [
+            skill.name,
+            skill.description,
+            skill.createdByName ?? '',
+            'Everywhere',
+          ]
+            .join(' ')
+            .toLowerCase()
+            .includes(normalizedSearch),
+        );
 
   return (
     <>
       {list.isPending ? (
-        <Card variant="snug" data-testid="shared-skills-skeleton">
-          <CardContent>
-            <div className="divide-y divide-background">
-              {Array.from({ length: 2 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
-                >
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-48" />
-                    <Skeleton className="h-3 w-full max-w-lg" />
-                  </div>
+        filter !== 'environment' ? (
+          <div data-testid="shared-skills-skeleton">
+            {Array.from({ length: 2 }).map((_, index) => (
+              <div key={index} className="flex items-start gap-3 px-4 py-3">
+                <Skeleton className="size-4" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-48" />
+                  <Skeleton className="h-3 w-full max-w-lg" />
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            ))}
+          </div>
+        ) : null
       ) : list.isError ? (
-        <ErrorState
-          title="Failed to load skills"
-          description={list.error.message}
-        />
-      ) : list.data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No shared skills yet. Add a skill to share reusable instructions with
-          your team.
-        </p>
+        filter !== 'environment' ? (
+          <div className="px-4 py-6">
+            <ErrorState
+              title="Failed to load skills"
+              description={list.error.message}
+            />
+          </div>
+        ) : null
+      ) : visibleSkills.length === 0 ? (
+        filter === 'shared' ? (
+          <p className="px-4 py-6 text-sm text-muted-foreground">
+            {normalizedSearch
+              ? 'No shared skills match your search.'
+              : 'No shared skills yet. Add a custom skill to share reusable instructions with your team.'}
+          </p>
+        ) : null
       ) : (
-        <Card variant="snug">
-          <CardContent>
-            <ul
-              className="divide-y divide-background"
-              aria-label="Shared skills"
-            >
-              {list.data.map((skill) => (
-                <li
-                  key={skill.id}
-                  className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0"
-                >
-                  <button
-                    type="button"
-                    className="min-w-0 flex-1 space-y-1 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => setViewing(skill)}
-                    aria-label={`View ${skill.name}`}
-                  >
-                    <span className="block break-words text-sm font-semibold hover:underline">
-                      {skill.name}
-                    </span>
-                    <span className="line-clamp-2 break-words text-sm text-muted-foreground">
-                      {skill.description}
-                    </span>
-                    <span className="block text-xs text-muted-foreground">
-                      Created by {skill.createdByName ?? 'Unknown'}
-                    </span>
-                  </button>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {skill.canManage ? (
-                      <>
-                        <BasicTooltip content="Edit">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            aria-label={`Edit ${skill.name}`}
-                            onClick={() => setEditor({ skill })}
-                          >
-                            <Pencil />
-                          </Button>
-                        </BasicTooltip>
-                        <BasicTooltip content="Delete">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            aria-label={`Delete ${skill.name}`}
-                            onClick={() => setDeleting(skill)}
-                          >
-                            <Trash2 />
-                          </Button>
-                        </BasicTooltip>
-                      </>
-                    ) : null}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+        visibleSkills.map((skill) => (
+          <SkillListRow
+            key={skill.id}
+            icon={Sparkles}
+            name={
+              <button
+                type="button"
+                className="max-w-full truncate rounded-sm text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setViewing(skill)}
+                aria-label={`View ${skill.name}`}
+              >
+                {skill.name}
+              </button>
+            }
+            summary={`Created by ${skill.createdByName ?? 'Unknown'}`}
+            description={
+              <p className="line-clamp-2 break-words">{skill.description}</p>
+            }
+            availability={<span>Everywhere</span>}
+            actions={
+              skill.canManage ? (
+                <>
+                  <BasicTooltip content="Edit">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Edit ${skill.name}`}
+                      onClick={() => setEditor({ skill })}
+                    >
+                      <Pencil />
+                    </Button>
+                  </BasicTooltip>
+                  <BasicTooltip content="Delete">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={`Delete ${skill.name}`}
+                      onClick={() => setDeleting(skill)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </BasicTooltip>
+                </>
+              ) : undefined
+            }
+          />
+        ))
       )}
       {editor ? (
         <SkillEditor skill={editor.skill} onClose={() => setEditor(null)} />
       ) : null}
-      {isCreating ? <SkillEditor skill={null} onClose={onCloseCreate} /> : null}
       <Dialog
         open={viewing !== null}
         onOpenChange={(open) => {
