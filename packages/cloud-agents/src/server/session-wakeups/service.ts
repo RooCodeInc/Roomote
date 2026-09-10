@@ -218,7 +218,7 @@ export async function handleManageWakeupsToolCall(
           nextRunLocal: formatNextRun(result.wakeup.nextRunAt, result.timeZone),
           note: result.duplicate
             ? 'An equivalent wakeup was already active in this conversation; it was reused instead of creating a duplicate.'
-            : 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation. Confirm the plan to the user in one sentence.',
+            : 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation.',
         };
       }
       case 'list': {

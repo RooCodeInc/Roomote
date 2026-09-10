@@ -60,6 +60,12 @@ describe('manage wakeups tool contract', () => {
     expect(MANAGE_WAKEUPS_TOOL.description).toContain(
       'Never poll, sleep, or wait',
     );
+    expect(MANAGE_WAKEUPS_TOOL.description).toContain(
+      'After creating a user-requested wakeup, confirm what will happen and when',
+    );
+    expect(MANAGE_WAKEUPS_TOOL.description).toContain(
+      'Automatic wakeups required by system instructions follow their stated communication policy',
+    );
     expect(MANAGE_WAKEUPS_TOOL.inputSchema.schedule.description).toContain(
       'cron 0 9 * * 1-5 America/New_York',
     );

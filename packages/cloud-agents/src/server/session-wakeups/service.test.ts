@@ -79,6 +79,7 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
           reportPolicy: 'always',
           status: 'active',
         },
+        note: 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation.',
       });
       const rows = await listSessionWakeups(actor.conversationId);
       expect(rows).toHaveLength(1);
