@@ -2506,8 +2506,13 @@ export function getAnswerDisplayValue(
     return '[hidden]';
   }
 
+  const optionLabelsById = new Map(
+    question?.options?.flatMap((option) =>
+      option.id ? [[option.id, option.label] as const] : [],
+    ) ?? [],
+  );
   const joined = answers
-    .map((answer) => answer.trim())
+    .map((answer) => (optionLabelsById.get(answer) ?? answer).trim())
     .filter(Boolean)
     .join(', ');
 

@@ -395,7 +395,7 @@ describe('setup context on ordinary Fast session input', () => {
     expect(mocks.after).not.toHaveBeenCalled();
   });
 
-  it('treats a duplicate saved setup category response as successful without scheduling twice', async () => {
+  it('recovers a saved response when the original process died before scheduling', async () => {
     const saved = {
       eventId: 'response-event',
       payload: {
@@ -409,7 +409,7 @@ describe('setup context on ordinary Fast session input', () => {
     };
     mocks.dbSelectLimit
       .mockResolvedValueOnce([request])
-      .mockResolvedValueOnce([saved]);
+      .mockResolvedValueOnce([]);
     mocks.resolveSetupContext.mockResolvedValue({
       ...setupContext,
       setupSnapshot: freshSnapshot,
@@ -418,26 +418,92 @@ describe('setup context on ordinary Fast session input', () => {
         setupSnapshot: freshSnapshot,
       },
     });
-    await submitFastSessionUserInputCommand(auth, input);
-    expect(mocks.upsertMessage).not.toHaveBeenCalled();
-    expect(mocks.after).not.toHaveBeenCalled();
-  });
-
-  it('does not schedule when another generic response-row claimant won', async () => {
-    mocks.dbSelectLimit
-      .mockResolvedValueOnce([request])
-      .mockResolvedValueOnce([]);
-    mocks.upsertMessage.mockResolvedValueOnce({
-      initialHumanTurn: false,
-      inserted: false,
+    const scheduled: Array<() => Promise<void>> = [];
+    mocks.after.mockImplementation((callback) => {
+      scheduled.push(callback);
     });
 
-    await expect(
-      submitFastSessionUserInputCommand(auth, input),
-    ).resolves.toEqual({ success: true });
-
+    // The first request persists the response, then its process dies before
+    // the registered callback gets a chance to admit or run the turn.
+    await submitFastSessionUserInputCommand(auth, input);
     expect(mocks.upsertMessage).toHaveBeenCalledOnce();
-    expect(mocks.after).not.toHaveBeenCalled();
+    expect(scheduled).toHaveLength(1);
+
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([request])
+      .mockResolvedValueOnce([saved]);
+    await submitFastSessionUserInputCommand(auth, {
+      ...input,
+      answers: {
+        'setup-tools-documents': { answers: ['Different retry value'] },
+      },
+    });
+    expect(mocks.upsertMessage).toHaveBeenCalledOnce();
+    expect(scheduled).toHaveLength(2);
+
+    mocks.dbSelectLimit.mockResolvedValueOnce([]);
+    await scheduled[1]?.();
+
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: `<structured_input_response>${JSON.stringify({ requestId: input.requestId, answers: input.answers })}</structured_input_response>`,
+        currentMessageId: `input-response:${input.requestId}`,
+        setupSnapshot: freshSnapshot,
+      }),
+    );
+  });
+
+  it('collapses contending response claimants to one completed turn', async () => {
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([request])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([request])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          payload: {
+            requestId: input.requestId,
+            sessionId: session.id,
+            turnId: request.turnId,
+            callId: input.requestId,
+            answers: input.answers,
+            resolution: 'submitted',
+          },
+        },
+      ]);
+    mocks.upsertMessage
+      .mockResolvedValueOnce({ initialHumanTurn: false, inserted: true })
+      .mockResolvedValueOnce({ initialHumanTurn: false, inserted: false });
+    const scheduled: Array<() => Promise<void>> = [];
+    mocks.after.mockImplementation((callback) => {
+      scheduled.push(callback);
+    });
+
+    // Model two requests that both completed their pre-insert read before the
+    // database selected one response-row winner. Neither callback runs yet.
+    await submitFastSessionUserInputCommand(auth, input);
+    await submitFastSessionUserInputCommand(auth, {
+      ...input,
+      answers: {
+        'setup-tools-documents': { answers: ['Losing response'] },
+      },
+    });
+
+    expect(mocks.upsertMessage).toHaveBeenCalledTimes(2);
+    expect(scheduled).toHaveLength(2);
+
+    mocks.dbSelectLimit.mockResolvedValueOnce([]);
+    await scheduled[0]?.();
+    mocks.dbSelectLimit.mockResolvedValueOnce([{ id: 'terminal-response' }]);
+    await scheduled[1]?.();
+
+    expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: `<structured_input_response>${JSON.stringify({ requestId: input.requestId, answers: input.answers })}</structured_input_response>`,
+      }),
+    );
   });
 
   it('routes final presets through setup-specific persistence, not ordinary response writes', async () => {

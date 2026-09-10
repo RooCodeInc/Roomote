@@ -47,6 +47,7 @@ import {
   isSetupIntegrationDiscoveryQuestionId,
   parseAcpRequestUserInputAnswers,
   parseAcpRequestUserInputPayload,
+  parseAcpRequestUserInputResponsePayload,
   normalizeAcpRequestUserInputAnswers,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
@@ -852,6 +853,17 @@ export async function submitFastSessionUserInputCommand(
   if (validationError) {
     throw new Error(validationError);
   }
+  if (requestPayload.preset && existingResponse) {
+    return { success: true };
+  }
+  const savedResponse = existingResponse
+    ? parseAcpRequestUserInputResponsePayload(existingResponse.payload)
+    : null;
+  if (existingResponse && !savedResponse) {
+    throw new Error('This input response is no longer valid.');
+  }
+  let responseAnswers = savedResponse?.answers ?? submitted;
+  let responseResolution = savedResponse?.resolution ?? resolution;
 
   const scheduleResponseTurn = async (
     answers: AcpRequestUserInputAnswers,
@@ -919,10 +931,6 @@ export async function submitFastSessionUserInputCommand(
     });
   };
 
-  if (existingResponse) {
-    return { success: true };
-  }
-
   const responseEventId = `${request.eventId}:response`;
   if (requestPayload.preset) {
     if (setupContext && !options.persistSetupPresetResponse) {
@@ -942,41 +950,63 @@ export async function submitFastSessionUserInputCommand(
     });
     return { success: true };
   }
-  const responseClaim = await upsertFastAgentMessage({
-    sessionId: session.id,
-    insertOnly: true,
-    message: {
-      eventId: responseEventId,
-      turnId: request.turnId,
-      turnSeq: 2_000_000_000,
-      ts: Date.now(),
-      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
-      role: 'user',
-      contentBlocks: [
-        {
-          type: 'text' as const,
-          text: formatRequestUserInputResponseText(requestPayload, {
-            answers: submitted,
-            resolution,
-          }),
-        },
-      ],
-      metadata: { visibleInTranscript: true },
-      payload: {
-        requestId: input.requestId,
-        sessionId: session.id,
+  if (!existingResponse) {
+    const responseClaim = await upsertFastAgentMessage({
+      sessionId: session.id,
+      insertOnly: true,
+      message: {
+        eventId: responseEventId,
         turnId: request.turnId,
-        callId: input.requestId,
-        answers: submitted,
-        resolution,
+        turnSeq: 2_000_000_000,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+        role: 'user',
+        contentBlocks: [
+          {
+            type: 'text' as const,
+            text: formatRequestUserInputResponseText(requestPayload, {
+              answers: responseAnswers,
+              resolution: responseResolution,
+            }),
+          },
+        ],
+        metadata: { visibleInTranscript: true },
+        payload: {
+          requestId: input.requestId,
+          sessionId: session.id,
+          turnId: request.turnId,
+          callId: input.requestId,
+          answers: responseAnswers,
+          resolution: responseResolution,
+        },
+        source: 'web',
       },
-      source: 'web',
-    },
-  });
-
-  if (responseClaim?.inserted !== false) {
-    await scheduleResponseTurn(submitted, resolution);
+    });
+    if (responseClaim?.inserted === false) {
+      const [winningResponse] = await db
+        .select({ payload: fastAgentMessages.payload })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, responseEventId),
+          ),
+        )
+        .limit(1);
+      const winningPayload = parseAcpRequestUserInputResponsePayload(
+        winningResponse?.payload ?? null,
+      );
+      if (!winningPayload) {
+        throw new Error('This input response is no longer valid.');
+      }
+      responseAnswers = winningPayload.answers;
+      responseResolution = winningPayload.resolution;
+    }
   }
+  // A retry may be the first process that survives long enough to register
+  // `after()`. Re-admit the deterministic turn on every accepted submission;
+  // the durable event key and terminal-output check collapse contenders.
+  await scheduleResponseTurn(responseAnswers, responseResolution);
 
   return { success: true };
 }

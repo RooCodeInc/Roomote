@@ -105,7 +105,10 @@ function getTranscriptMessageText(message: TranscriptMessage) {
     : text;
 }
 
-function isRequestUserInputToolMessage(message: TranscriptMessage) {
+function shouldSuppressRequestUserInputToolMessage(
+  message: TranscriptMessage,
+  requestTurnIds: ReadonlySet<string>,
+) {
   if (
     message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
     message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
@@ -117,10 +120,15 @@ function isRequestUserInputToolMessage(message: TranscriptMessage) {
   const payload = message.payload as {
     toolName?: unknown;
     title?: unknown;
+    status?: unknown;
   } | null;
-  return (
+  const isRequestUserInput =
     payload?.toolName === 'request_user_input' ||
-    payload?.title === 'request_user_input'
+    payload?.title === 'request_user_input';
+  return (
+    isRequestUserInput &&
+    payload?.status !== 'failed' &&
+    requestTurnIds.has(message.turnId)
   );
 }
 
@@ -631,19 +639,26 @@ export function FastSessionTranscript({
       }) ?? null
     );
   }, [messages, pendingInputRequest]);
-  const requestUserInputById = useMemo(() => {
+  const { requestUserInputById, requestUserInputTurnIds } = useMemo(() => {
     const requests = new Map<
       string,
       NonNullable<ReturnType<typeof parseAcpRequestUserInputPayload>>
     >();
+    const turnIds = new Set<string>();
     for (const message of messages) {
       if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
         continue;
       }
       const request = parseAcpRequestUserInputPayload(message.payload);
-      if (request) requests.set(request.requestId, request);
+      if (request) {
+        requests.set(request.requestId, request);
+        turnIds.add(request.turnId);
+      }
     }
-    return requests;
+    return {
+      requestUserInputById: requests,
+      requestUserInputTurnIds: turnIds,
+    };
   }, [messages]);
   const { persistedBeforeInput, persistedAfterInput } = useMemo(() => {
     const before: AcpUiMessage[] = [];
@@ -655,7 +670,10 @@ export function FastSessionTranscript({
           (message.payload as { taskNavigation?: unknown } | null)
             ?.taskNavigation === true) ||
         message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput ||
-        isRequestUserInputToolMessage(message)
+        shouldSuppressRequestUserInputToolMessage(
+          message,
+          requestUserInputTurnIds,
+        )
       ) {
         continue;
       }
@@ -737,7 +755,13 @@ export function FastSessionTranscript({
       persistedBeforeInput: before,
       persistedAfterInput: after,
     };
-  }, [messages, owner, pendingInputRequestOrder, requestUserInputById]);
+  }, [
+    messages,
+    owner,
+    pendingInputRequestOrder,
+    requestUserInputById,
+    requestUserInputTurnIds,
+  ]);
   const hasVisibleAssistantMessage = useMemo(
     () =>
       messages.some(
