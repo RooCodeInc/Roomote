@@ -301,7 +301,7 @@ export class ModalClient implements ComputeProviderClient {
     return this.resolvedRegistrySecretPromise;
   }
 
-  private async resolveImage(): Promise<Image> {
+  private async resolveImage(signal?: AbortSignal): Promise<Image> {
     if (this.imageMode === 'ecr-oidc') {
       const secret = await this.getEcrSecret();
       return this.sdk.images.fromAwsEcr(this.baseImageRef, secret);
@@ -314,6 +314,7 @@ export class ModalClient implements ComputeProviderClient {
       ref: this.baseImageRef,
       registryUsername: this.config.registryUsername,
       registryPassword: this.config.registryPassword,
+      signal,
     });
 
     if (this.imageMode === 'registry-auth') {
@@ -461,7 +462,7 @@ export class ModalClient implements ComputeProviderClient {
     }
 
     const image = await raceWithAbort({
-      promise: this.resolveImage(),
+      promise: this.resolveImage(input.signal),
       signal: input.signal,
       abortMessage: `Resolving Modal image "${this.baseImageRef}" was aborted`,
     });

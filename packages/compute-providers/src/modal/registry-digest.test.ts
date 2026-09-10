@@ -338,6 +338,100 @@ describe('pinModalBaseImageRef', () => {
     );
   });
 
+  it('serves the last resolved digest when a refresh fails', async () => {
+    let fail = false;
+    const fetchImpl = vi.fn(async () => {
+      if (fail) throw new Error('network down');
+      return response({
+        status: 200,
+        headers: { 'docker-content-digest': DIGEST },
+      });
+    }) as unknown as typeof fetch;
+    let now = 1_000;
+    const pin = () =>
+      pinModalBaseImageRef({
+        ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
+        fetchImpl,
+        now: () => now,
+      });
+
+    await expect(pin()).resolves.toBe(
+      `ghcr.io/roocodeinc/roomote-worker@${DIGEST}`,
+    );
+
+    fail = true;
+    now += 120_000;
+    await expect(pin()).resolves.toBe(
+      `ghcr.io/roocodeinc/roomote-worker@${DIGEST}`,
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('using last resolved digest'),
+    );
+  });
+
+  it('caches failures briefly instead of retrying on every call', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('network down');
+    }) as unknown as typeof fetch;
+    let now = 1_000;
+    const pin = () =>
+      pinModalBaseImageRef({
+        ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
+        fetchImpl,
+        now: () => now,
+      });
+
+    await expect(pin()).resolves.toBe(
+      'ghcr.io/roocodeinc/roomote-worker:develop',
+    );
+    await expect(pin()).resolves.toBe(
+      'ghcr.io/roocodeinc/roomote-worker:develop',
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+    now += 20_000;
+    await pin();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts the lookup with the caller signal and does not cache the abort', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(
+      (_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(init.signal?.reason ?? new Error('aborted')),
+          );
+        }),
+    ) as unknown as typeof fetch;
+
+    const pending = pinModalBaseImageRef({
+      ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
+      fetchImpl,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).resolves.toBe(
+      'ghcr.io/roocodeinc/roomote-worker:develop',
+    );
+    expect(console.warn).not.toHaveBeenCalled();
+
+    const ok = vi.fn(async () =>
+      response({
+        status: 200,
+        headers: { 'docker-content-digest': DIGEST },
+      }),
+    ) as unknown as typeof fetch;
+    await expect(
+      pinModalBaseImageRef({
+        ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
+        fetchImpl: ok,
+      }),
+    ).resolves.toBe(`ghcr.io/roocodeinc/roomote-worker@${DIGEST}`);
+    expect(ok).toHaveBeenCalledTimes(1);
+  });
+
   it('leaves bare local tags and digest refs alone', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
 

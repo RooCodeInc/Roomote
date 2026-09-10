@@ -9,6 +9,11 @@
  */
 
 const DIGEST_CACHE_TTL_MS = 60_000;
+/**
+ * How long a failed lookup is remembered before the registry is retried, so a
+ * registry outage costs one timeout per window instead of one per spawn.
+ */
+const DIGEST_FAILURE_CACHE_TTL_MS = 15_000;
 
 const MANIFEST_ACCEPT = [
   'application/vnd.oci.image.index.v1+json',
@@ -123,6 +128,8 @@ interface ResolveImageRefDigestOptions {
   registryPassword?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /** Caller abort (for example the sandbox spawn being canceled). */
+  signal?: AbortSignal;
 }
 
 async function fetchBearerToken(
@@ -192,7 +199,10 @@ export async function resolveImageRefDigest(
   }
 
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  const signal = AbortSignal.timeout(options.timeoutMs ?? 10_000);
+  const timeoutSignal = AbortSignal.timeout(options.timeoutMs ?? 10_000);
+  const signal = options.signal
+    ? AbortSignal.any([timeoutSignal, options.signal])
+    : timeoutSignal;
   const manifestUrl = `https://${parsed.registry}/v2/${parsed.repository}/manifests/${parsed.tag}`;
 
   const head = (authorization?: string) =>
@@ -262,17 +272,28 @@ export async function resolveImageRefDigest(
   return `${registry}/${parsed.repository}@${digest}`;
 }
 
-const digestCache = new Map<
-  string,
-  { expiresAt: number; promise: Promise<string> }
->();
+interface DigestCacheEntry {
+  expiresAt: number;
+  promise: Promise<string>;
+  /**
+   * Most recent successfully resolved digest ref for this key. Served when a
+   * refresh fails so a registry hiccup never silently drops back to the
+   * mutable tag (which would re-trigger Modal's stale image cache).
+   */
+  lastPinned: string | undefined;
+}
+
+const digestCache = new Map<string, DigestCacheEntry>();
 
 /**
  * Pins a Modal base image ref to its current digest so Modal's image cache key
- * tracks the tag. Falls back to the original ref (and logs) when the registry
- * cannot be queried, so a registry hiccup never blocks sandbox creation.
- * Results are cached briefly per process to keep the lookup cheap on the
- * per-spawn path while still picking up new pushes within a minute.
+ * tracks the tag. When the registry cannot be queried the last successfully
+ * resolved digest is reused; only when no digest has ever been resolved in
+ * this process does it fall back to the original tag (and logs), so a
+ * registry hiccup never blocks sandbox creation. Results are cached briefly
+ * per process to keep the lookup cheap on the per-spawn path while still
+ * picking up new pushes within a minute; failures are cached for a shorter
+ * window so an outage does not cost a full lookup timeout on every spawn.
  */
 export async function pinModalBaseImageRef(
   options: ResolveImageRefDigestOptions & { now?: () => number },
@@ -290,32 +311,50 @@ export async function pinModalBaseImageRef(
     return cached.promise;
   }
 
-  const promise = resolveImageRefDigest(options)
+  const entry: DigestCacheEntry = {
+    expiresAt: now() + DIGEST_CACHE_TTL_MS,
+    promise: Promise.resolve(ref),
+    lastPinned: cached?.lastPinned,
+  };
+
+  entry.promise = resolveImageRefDigest({ ...options, ref })
     .then((pinned) => {
+      entry.lastPinned = pinned;
       console.log(
         `[ModalClient] Pinned base image ${JSON.stringify({ ref, pinned })}`,
       );
       return pinned;
     })
     .catch((error) => {
-      digestCache.delete(cacheKey);
+      const fallback = entry.lastPinned ?? ref;
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
+      if (options.signal?.aborted) {
+        // The caller gave up; let the next spawn retry immediately.
+        digestCache.delete(cacheKey);
+        return fallback;
+      }
+
+      entry.expiresAt = now() + DIGEST_FAILURE_CACHE_TTL_MS;
       console.warn(
-        `[ModalClient] Could not resolve base image digest; using tag as-is ${JSON.stringify(
-          {
-            ref,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        )}`,
+        `[ModalClient] Could not resolve base image digest; ${
+          entry.lastPinned
+            ? 'using last resolved digest'
+            : 'using tag as-is (Modal may reuse a stale cached image)'
+        } ${JSON.stringify({
+          ref,
+          fallback,
+          retryAfterMs: DIGEST_FAILURE_CACHE_TTL_MS,
+          error: errorMessage,
+        })}`,
       );
-      return ref;
+      return fallback;
     });
 
-  digestCache.set(cacheKey, {
-    expiresAt: now() + DIGEST_CACHE_TTL_MS,
-    promise,
-  });
+  digestCache.set(cacheKey, entry);
 
-  return promise;
+  return entry.promise;
 }
 
 /** Clears the per-process digest cache (tests). */
