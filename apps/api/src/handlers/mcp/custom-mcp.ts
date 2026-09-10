@@ -38,6 +38,7 @@ const MAX_CUSTOM_MCP_REQUEST_BODY_BYTES = 1024 * 1024;
 export function createCustomMcpProxy() {
   return createMcpProxy({
     name: 'Custom',
+    allowAuthTokens: true,
     guardUpstreamEgress: {
       allowedPrivateCidrs: Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS,
     },
