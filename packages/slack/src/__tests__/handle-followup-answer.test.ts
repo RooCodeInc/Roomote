@@ -457,6 +457,9 @@ describe('handleFollowupAnswer', () => {
         ts: 'prompt-ts',
       }),
     );
+    expect(postMessageMock.mock.invocationCallOrder[0]!).toBeLessThan(
+      updateMessageMock.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('recovers a persisted question advance when posting the next prompt fails', async () => {
@@ -518,7 +521,16 @@ describe('handleFollowupAnswer', () => {
       .mockResolvedValueOnce('next-prompt-ts');
 
     await handleFollowupAnswer(buildPayload());
+
+    expect(updateMessageMock).not.toHaveBeenCalled();
+
     await handleFollowupAnswer(buildPayload());
+
+    expect(updateMessageMock).toHaveBeenCalledTimes(1);
+    expect(postMessageMock.mock.invocationCallOrder[1]!).toBeLessThan(
+      updateMessageMock.mock.invocationCallOrder[0]!,
+    );
+
     await handleFollowupAnswer(buildPayload());
 
     expect(

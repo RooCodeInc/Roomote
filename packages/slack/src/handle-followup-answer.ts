@@ -218,25 +218,6 @@ async function deliverPendingSlackRequestUserInputQuestion(params: {
   previousAnswer: string;
   taskUrl: string;
 }): Promise<void> {
-  if (params.request.promptMessageTs) {
-    await params.slack
-      .updateMessage({
-        channel: params.channel,
-        ts: params.request.promptMessageTs,
-        message: {
-          blocks: buildSlackAnsweredRequestUserInputBlocks({
-            question: params.previousQuestion,
-            answer: params.previousAnswer,
-          }),
-        },
-      })
-      .catch((error) => {
-        console.error(
-          `Failed to update answered Slack request_user_input prompt: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-  }
-
   const nextPromptMessageTs = await params.slack.postMessage({
     channel: params.channel,
     thread_ts: params.threadId,
@@ -264,6 +245,25 @@ async function deliverPendingSlackRequestUserInputQuestion(params: {
     throw new Error(
       'Your answer was saved, but I could not show the next question. Please try your answer again.',
     );
+  }
+
+  if (params.request.promptMessageTs) {
+    await params.slack
+      .updateMessage({
+        channel: params.channel,
+        ts: params.request.promptMessageTs,
+        message: {
+          blocks: buildSlackAnsweredRequestUserInputBlocks({
+            question: params.previousQuestion,
+            answer: params.previousAnswer,
+          }),
+        },
+      })
+      .catch((error) => {
+        console.error(
+          `Failed to update answered Slack request_user_input prompt: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
   }
 
   await setPendingSlackRequestUserInputPromptMessageTs(
