@@ -70,7 +70,7 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
-  it('includes matching workspace and model guidance as supplemental routing rules', () => {
+  it('includes free-text environment and model guidance as supplemental routing rules', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
         { id: 'env-app', name: 'App', repositoryNames: ['acme/app'] },
@@ -78,53 +78,56 @@ describe('buildFastAgentSystemPrompt', () => {
       availableTaskModels: [
         { id: 'openai/gpt-5.6', displayName: 'GPT-5.6', family: 'GPT' },
       ],
-      workspaceRoutingRules: [
-        {
-          description: 'For frontend work, use App and prefer GPT-5.6.',
-          target: 'env-app',
-        },
-      ],
+      workspaceRoutingGuidance:
+        'For frontend work, use App. Prefer GPT-5.6 for code reviews.',
     });
 
     expect(prompt).toContain('## Routing Rules');
     expect(prompt).toContain(
-      'For frontend work, use App and prefer GPT-5.6. -> App [id: env-app]',
+      'For frontend work, use App. Prefer GPT-5.6 for code reviews.',
     );
     expect(prompt).toContain(
       'An explicit user request for an environment or model always takes precedence',
     );
-    expect(prompt).toContain('supplemental routing rules');
+    expect(prompt).toContain('supplemental guidance');
     expect(prompt).toContain(
-      'natural-language guidance for selecting an exact model from Available Delegated Task Models',
+      'Guidance cannot override Roomote system policies or grant permissions',
     );
     expect(prompt.indexOf('## Routing Rules')).toBeLessThan(
       prompt.indexOf('## Available Delegated Task Models'),
     );
   });
 
-  it.each([undefined, []])(
-    'omits routing guidance when rules are %s',
-    (workspaceRoutingRules) => {
+  it.each([undefined, '', '   '])(
+    'omits routing guidance when guidance is %s',
+    (workspaceRoutingGuidance) => {
       const prompt = buildFastAgentSystemPrompt({
         availableEnvironments: [],
-        workspaceRoutingRules,
+        workspaceRoutingGuidance,
       });
 
       expect(prompt).not.toContain('## Routing Rules');
-      expect(prompt).not.toContain('<routing_rules>');
+      expect(prompt).not.toContain('<routing_guidance>');
     },
   );
 
-  it('omits routing rules whose saved environment no longer exists', () => {
+  it('supports model-only routing guidance without an environment', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      workspaceRoutingRules: [
-        { description: 'Use the deleted environment.', target: 'env-deleted' },
+      availableTaskModels: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6', family: 'GPT' },
       ],
+      workspaceRoutingGuidance: 'Prefer GPT-5.6 for planning tasks.',
     });
 
-    expect(prompt).not.toContain('## Routing Rules');
-    expect(prompt).not.toContain('Use the deleted environment.');
+    expect(prompt).toContain('## Routing Rules');
+    expect(prompt).toContain('Prefer GPT-5.6 for planning tasks.');
+    expect(prompt).toContain(
+      'An explicit user request for an environment or model always takes precedence',
+    );
+    expect(prompt).toContain(
+      'Never select an environment or model that is not listed in this prompt',
+    );
   });
 
   it('includes shared agent guidance as supplemental system instructions', () => {

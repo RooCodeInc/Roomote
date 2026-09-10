@@ -39,6 +39,7 @@ import {
   type ComputeProvider,
   type EnvironmentConfig,
   environmentConfigSchema,
+  legacyWorkspaceRoutingSettingsSchema,
   workspaceRoutingSettingsSchema,
   type WorkspaceRoutingSettings,
   getAmbiguousEnvironmentRepositoryError,
@@ -369,7 +370,7 @@ export async function getWorkspaceRoutingSettingsCommand(
     .limit(1);
 
   return workspaceRoutingSettingsSchema.parse(
-    settings?.workspaceRoutingSettings ?? { rules: [] },
+    settings?.workspaceRoutingSettings ?? { guidance: '' },
   );
 }
 
@@ -379,13 +380,28 @@ export async function updateWorkspaceRoutingSettingsCommand(
 ): Promise<WorkspaceRoutingSettings> {
   assertAdmin(auth);
   const settings = workspaceRoutingSettingsSchema.parse(input);
+  const [existing] = await db
+    .select({
+      workspaceRoutingSettings: deploymentSettings.workspaceRoutingSettings,
+    })
+    .from(deploymentSettings)
+    .where(eq(deploymentSettings.id, 'default'))
+    .limit(1);
+  const legacyRules = legacyWorkspaceRoutingSettingsSchema.safeParse(
+    existing?.workspaceRoutingSettings,
+  );
+  // Keep structured rules for one release so N-1 code remains rollback-safe.
+  const storedSettings = {
+    ...settings,
+    rules: legacyRules.success ? legacyRules.data.rules : [],
+  };
 
   await db
     .insert(deploymentSettings)
-    .values({ id: 'default', workspaceRoutingSettings: settings })
+    .values({ id: 'default', workspaceRoutingSettings: storedSettings })
     .onConflictDoUpdate({
       target: deploymentSettings.id,
-      set: { workspaceRoutingSettings: settings },
+      set: { workspaceRoutingSettings: storedSettings },
     });
 
   return settings;

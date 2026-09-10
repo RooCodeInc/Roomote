@@ -75,7 +75,7 @@ import type {
   McpConnectionRole,
   SourceControlProvider,
   TaskModelSettings,
-  WorkspaceRoutingSettings,
+  WorkspaceRoutingSettingsStorage,
   TaskRunErrorCode,
   UserRole,
   RepositoryAutomationSignals,
@@ -193,7 +193,7 @@ export const deploymentSettings = pgTable('deployment_settings', {
   taskModelSettings: jsonb('task_model_settings').$type<TaskModelSettings>(),
   workspaceRoutingSettings: jsonb(
     'workspace_routing_settings',
-  ).$type<WorkspaceRoutingSettings>(),
+  ).$type<WorkspaceRoutingSettingsStorage>(),
   // N-1 rollback: router diagnostics were removed with the LLM router. The
   // previous release still reads and writes these four columns; drop them
   // only after that release is no longer the supported rollback target.

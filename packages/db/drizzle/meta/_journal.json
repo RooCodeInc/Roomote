@@ -575,6 +575,13 @@
       "when": 1789059502690,
       "tag": "0081_agentmail_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1789070914121,
+      "tag": "0082_workspace_routing_guidance",
+      "breakpoints": true
     }
   ]
 }

@@ -625,16 +625,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
   });
 
-  it('includes saved routing rules in the Fast system prompt', async () => {
+  it('includes saved free-text routing guidance in the Fast system prompt', async () => {
     mocks.getDeploymentSettings.mockResolvedValueOnce({
       globalAgentInstructions: null,
       workspaceRoutingSettings: {
-        rules: [
-          {
-            description: 'Use App for frontend work and prefer GPT-5.6.',
-            target: 'env-1',
-          },
-        ],
+        guidance: 'Use App for frontend work. Prefer GPT-5.6 for reviews.',
       },
     });
 
@@ -649,7 +644,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(systemPrompt).toContain('## Routing Rules');
     expect(systemPrompt).toContain(
-      'Use App for frontend work and prefer GPT-5.6. -> App [id: env-1]',
+      'Use App for frontend work. Prefer GPT-5.6 for reviews.',
     );
   });
 

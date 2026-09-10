@@ -12,32 +12,20 @@ import {
 import { workspaceRoutingSettingsSchema } from '../workspace-routing';
 
 describe('workspaceRoutingSettingsSchema', () => {
-  it('normalizes centralized routing rules', () => {
+  it('normalizes free-text routing guidance', () => {
     expect(
       workspaceRoutingSettingsSchema.parse({
-        rules: [
-          {
-            description: '  Messages from hospital-bugs belong here.  ',
-            target: 'env-1',
-          },
-        ],
+        guidance: '  Use App for frontend work.\nPrefer GPT-5.6 for reviews.  ',
       }),
     ).toEqual({
-      rules: [
-        {
-          description: 'Messages from hospital-bugs belong here.',
-          target: 'env-1',
-        },
-      ],
+      guidance: 'Use App for frontend work.\nPrefer GPT-5.6 for reviews.',
     });
   });
 
-  it('rejects empty descriptions and targets', () => {
-    expect(
-      workspaceRoutingSettingsSchema.safeParse({
-        rules: [{ description: ' ', target: '' }],
-      }).success,
-    ).toBe(false);
+  it('accepts cleared routing guidance', () => {
+    expect(workspaceRoutingSettingsSchema.parse({ guidance: '  ' })).toEqual({
+      guidance: '',
+    });
   });
 });
 
