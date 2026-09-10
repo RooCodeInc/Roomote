@@ -1,7 +1,5 @@
 import { z } from 'zod';
 
-import { ALL_REPOSITORIES } from './constants';
-
 export const MAX_WORKSPACE_ROUTING_RULES = 20;
 export const MAX_WORKSPACE_ROUTING_RULE_LENGTH = 500;
 export const MAX_WORKSPACE_ROUTING_GUIDANCE_LENGTH = 20_000;
@@ -35,26 +33,11 @@ export const workspaceRoutingSettingsSchema = z.object({
 export type WorkspaceRoutingSettings = z.infer<
   typeof workspaceRoutingSettingsSchema
 >;
+export type LegacyWorkspaceRoutingSettings = z.infer<
+  typeof legacyWorkspaceRoutingSettingsSchema
+>;
 
-export function normalizeWorkspaceRoutingSettings(
-  value: unknown,
-  environmentNames: ReadonlyMap<string, string> = new Map(),
-): WorkspaceRoutingSettings {
-  const current = workspaceRoutingSettingsSchema.safeParse(value);
-  if (current.success) return current.data;
-
-  const legacy = legacyWorkspaceRoutingSettingsSchema.parse(value);
-  return {
-    guidance: legacy.rules
-      .map((rule) => {
-        const target =
-          rule.target === ALL_REPOSITORIES
-            ? 'All repositories'
-            : environmentNames.get(rule.target)
-              ? `the "${environmentNames.get(rule.target)}" environment`
-              : `environment "${rule.target}"`;
-        return `- ${rule.description} -> Use ${target}.`;
-      })
-      .join('\n'),
-  };
-}
+/** Legacy rules remain for one release so N-1 code can still read the column. */
+export type WorkspaceRoutingSettingsStorage =
+  | LegacyWorkspaceRoutingSettings
+  | (WorkspaceRoutingSettings & LegacyWorkspaceRoutingSettings);

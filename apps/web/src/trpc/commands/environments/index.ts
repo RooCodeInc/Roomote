@@ -40,7 +40,6 @@ import {
   type EnvironmentConfig,
   environmentConfigSchema,
   legacyWorkspaceRoutingSettingsSchema,
-  normalizeWorkspaceRoutingSettings,
   workspaceRoutingSettingsSchema,
   type WorkspaceRoutingSettings,
   getAmbiguousEnvironmentRepositoryError,
@@ -370,35 +369,8 @@ export async function getWorkspaceRoutingSettingsCommand(
     .where(eq(deploymentSettings.id, 'default'))
     .limit(1);
 
-  const storedSettings = settings?.workspaceRoutingSettings ?? { guidance: '' };
-  const currentSettings =
-    workspaceRoutingSettingsSchema.safeParse(storedSettings);
-  if (currentSettings.success) return currentSettings.data;
-
-  const legacySettings =
-    legacyWorkspaceRoutingSettingsSchema.parse(storedSettings);
-  const targetIds = legacySettings.rules
-    .map((rule) => rule.target)
-    .filter((target) => target !== ALL_REPOSITORIES);
-  const environmentRows =
-    targetIds.length === 0
-      ? []
-      : await db
-          .select({ id: environments.id, name: environments.name })
-          .from(environments)
-          .where(
-            and(
-              buildOwnershipFilter(),
-              eq(environments.isEval, false),
-              inArray(environments.id, targetIds),
-            ),
-          );
-
-  return normalizeWorkspaceRoutingSettings(
-    storedSettings,
-    new Map(
-      environmentRows.map((environment) => [environment.id, environment.name]),
-    ),
+  return workspaceRoutingSettingsSchema.parse(
+    settings?.workspaceRoutingSettings ?? { guidance: '' },
   );
 }
 
@@ -408,13 +380,28 @@ export async function updateWorkspaceRoutingSettingsCommand(
 ): Promise<WorkspaceRoutingSettings> {
   assertAdmin(auth);
   const settings = workspaceRoutingSettingsSchema.parse(input);
+  const [existing] = await db
+    .select({
+      workspaceRoutingSettings: deploymentSettings.workspaceRoutingSettings,
+    })
+    .from(deploymentSettings)
+    .where(eq(deploymentSettings.id, 'default'))
+    .limit(1);
+  const legacyRules = legacyWorkspaceRoutingSettingsSchema.safeParse(
+    existing?.workspaceRoutingSettings,
+  );
+  // Keep structured rules for one release so N-1 code remains rollback-safe.
+  const storedSettings = {
+    ...settings,
+    rules: legacyRules.success ? legacyRules.data.rules : [],
+  };
 
   await db
     .insert(deploymentSettings)
-    .values({ id: 'default', workspaceRoutingSettings: settings })
+    .values({ id: 'default', workspaceRoutingSettings: storedSettings })
     .onConflictDoUpdate({
       target: deploymentSettings.id,
-      set: { workspaceRoutingSettings: settings },
+      set: { workspaceRoutingSettings: storedSettings },
     });
 
   return settings;

@@ -31,7 +31,7 @@ import {
   type RunStatus,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
-  normalizeWorkspaceRoutingSettings,
+  workspaceRoutingSettingsSchema,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -3174,14 +3174,8 @@ export async function answerFastAgentQuestion({
       therapistModeEnabled,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingGuidance: agentBehaviorSettings?.workspaceRoutingSettings
-        ? normalizeWorkspaceRoutingSettings(
+        ? workspaceRoutingSettingsSchema.parse(
             agentBehaviorSettings.workspaceRoutingSettings,
-            new Map(
-              availableEnvironments.map((environment) => [
-                environment.id,
-                environment.name,
-              ]),
-            ),
           ).guidance
         : undefined,
     });

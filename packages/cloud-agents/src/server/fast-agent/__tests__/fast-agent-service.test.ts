@@ -648,27 +648,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('preserves legacy saved rules as readable Fast guidance', async () => {
-    mocks.getDeploymentSettings.mockResolvedValueOnce({
-      globalAgentInstructions: null,
-      workspaceRoutingSettings: {
-        rules: [
-          {
-            description: 'Frontend work belongs here.',
-            target: 'env-1',
-          },
-        ],
-      },
-    });
-
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
-
-    const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system;
-    expect(systemPrompt).toContain(
-      '- Frontend work belongs here. -> Use the "App" environment.',
-    );
-  });
-
   it('cuts the trailing model request once the closeout is delivered', async () => {
     const adapter = callbacks();
     const abortedAtSecondRequest = vi.fn();

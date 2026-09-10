@@ -9,10 +9,7 @@ import {
   getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '../environment-config';
-import {
-  normalizeWorkspaceRoutingSettings,
-  workspaceRoutingSettingsSchema,
-} from '../workspace-routing';
+import { workspaceRoutingSettingsSchema } from '../workspace-routing';
 
 describe('workspaceRoutingSettingsSchema', () => {
   it('normalizes free-text routing guidance', () => {
@@ -28,31 +25,6 @@ describe('workspaceRoutingSettingsSchema', () => {
   it('accepts cleared routing guidance', () => {
     expect(workspaceRoutingSettingsSchema.parse({ guidance: '  ' })).toEqual({
       guidance: '',
-    });
-  });
-
-  it('converts legacy rules without losing their environment targets', () => {
-    expect(
-      normalizeWorkspaceRoutingSettings(
-        {
-          rules: [
-            {
-              description: 'Messages from hospital-bugs belong here.',
-              target: 'env-1',
-            },
-            {
-              description: 'Cross-repository migrations use the broad scope.',
-              target: '__all_repositories__',
-            },
-          ],
-        },
-        new Map([['env-1', 'Hospital app']]),
-      ),
-    ).toEqual({
-      guidance: [
-        '- Messages from hospital-bugs belong here. -> Use the "Hospital app" environment.',
-        '- Cross-repository migrations use the broad scope. -> Use All repositories.',
-      ].join('\n'),
     });
   });
 });
