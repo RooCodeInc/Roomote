@@ -74,7 +74,7 @@ export function SkillListHeader() {
   return (
     <div
       role="row"
-      className="hidden grid-cols-[minmax(0,4fr)_minmax(0,5fr)_minmax(12rem,3fr)_auto] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+      className="hidden grid-cols-[minmax(0,4fr)_minmax(0,5fr)_minmax(12rem,3fr)_5rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
     >
       <span role="columnheader">Name</span>
       <span role="columnheader">Description</span>
@@ -99,7 +99,7 @@ export function SkillListRow({
   return (
     <div
       role="row"
-      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[minmax(0,4fr)_minmax(0,5fr)_minmax(12rem,3fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
+      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[minmax(0,4fr)_minmax(0,5fr)_minmax(12rem,3fr)_5rem] md:items-center md:gap-4 md:px-4 md:py-3"
     >
       <div role="cell" className="col-start-1 row-start-1 min-w-0 space-y-1">
         <div className="truncate text-sm font-semibold">{name}</div>
@@ -121,7 +121,7 @@ export function SkillListRow({
       </div>
       <div
         role="cell"
-        className="col-start-2 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4"
+        className="col-start-2 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4 md:w-20"
       >
         {actions}
       </div>
