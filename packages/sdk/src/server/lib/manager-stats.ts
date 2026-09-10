@@ -121,6 +121,11 @@ export type ManagerStatsDigest = {
     label: string;
     pullRequestCount: number;
   }>;
+  dailyPullRequestActivity: Array<{
+    label: string;
+    createdPullRequests: number;
+    mergedPullRequests: number;
+  }>;
 };
 
 /**
@@ -268,7 +273,7 @@ async function getActiveUserCount(since: Date) {
 
 /**
  * The provider-neutral analytics shape the digest is computed from: one row
- * per PR created inside the stats window, from any source-control provider.
+ * per PR created or merged inside the stats window, from any provider.
  */
 export type AnalyticsPullRequest = {
   sourceControlProvider: SourceControlProvider;
@@ -276,7 +281,145 @@ export type AnalyticsPullRequest = {
   number: number;
   state: string;
   authorLogin: string | null;
+  createdAt: string;
+  mergedAt: string | null;
 };
+
+function isInReportingWindow(
+  timestamp: string | null,
+  since: Date,
+  until: Date,
+) {
+  if (!timestamp) {
+    return false;
+  }
+
+  const date = new Date(timestamp);
+  return date >= since && date <= until;
+}
+
+function getLocalDateParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  return {
+    year: Number(parts.find((part) => part.type === 'year')?.value),
+    month: Number(parts.find((part) => part.type === 'month')?.value),
+    day: Number(parts.find((part) => part.type === 'day')?.value),
+  };
+}
+
+function getLocalDateTimeParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value);
+
+  return {
+    year: value('year'),
+    month: value('month'),
+    day: value('day'),
+    hour: value('hour'),
+    minute: value('minute'),
+    second: value('second'),
+  };
+}
+
+function formatLocalDateKey(date: Date, timeZone: string) {
+  const { year, month, day } = getLocalDateParts(date, timeZone);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Start of the seven-day reporting window in the deployment timezone. */
+export function getManagerStatsWindowStart(until: Date, timeZone: string) {
+  const localToday = getLocalDateParts(until, timeZone);
+  const targetDate = new Date(
+    Date.UTC(localToday.year, localToday.month - 1, localToday.day - 6),
+  );
+  const targetTimestamp = targetDate.getTime();
+  let candidate = new Date(targetTimestamp);
+
+  // Converge from UTC midnight to midnight in the requested zone. Repeating
+  // handles offset changes near daylight-saving boundaries.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const localCandidate = getLocalDateTimeParts(candidate, timeZone);
+    const representedTimestamp = Date.UTC(
+      localCandidate.year,
+      localCandidate.month - 1,
+      localCandidate.day,
+      localCandidate.hour,
+      localCandidate.minute,
+      localCandidate.second,
+    );
+    candidate = new Date(
+      candidate.getTime() + targetTimestamp - representedTimestamp,
+    );
+  }
+
+  return candidate;
+}
+
+export function computeDailyPullRequestActivity(params: {
+  pullRequests: AnalyticsPullRequest[];
+  until: Date;
+  timeZone: string;
+}): ManagerStatsDigest['dailyPullRequestActivity'] {
+  const localToday = getLocalDateParts(params.until, params.timeZone);
+  const labelFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+  });
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(
+      Date.UTC(
+        localToday.year,
+        localToday.month - 1,
+        localToday.day - 6 + index,
+      ),
+    );
+
+    return {
+      key: date.toISOString().slice(0, 10),
+      label: labelFormatter.format(date),
+      createdPullRequests: 0,
+      mergedPullRequests: 0,
+    };
+  });
+  const dayByKey = new Map(days.map((day) => [day.key, day]));
+
+  for (const pullRequest of params.pullRequests) {
+    const created = dayByKey.get(
+      formatLocalDateKey(new Date(pullRequest.createdAt), params.timeZone),
+    );
+    if (created) {
+      created.createdPullRequests += 1;
+    }
+
+    if (pullRequest.mergedAt) {
+      const merged = dayByKey.get(
+        formatLocalDateKey(new Date(pullRequest.mergedAt), params.timeZone),
+      );
+      if (merged) {
+        merged.mergedPullRequests += 1;
+      }
+    }
+  }
+
+  return days.map(({ key: _key, ...day }) => day);
+}
 
 type ClassifiedPullRequest = {
   pullRequest: AnalyticsPullRequest;
@@ -285,9 +428,9 @@ type ClassifiedPullRequest = {
 
 /**
  * Map provider-neutral list summaries (open + merged) to the analytics shape,
- * keeping only PRs created inside the stats window. Rows without a created
- * timestamp are dropped: window membership cannot be confirmed, and counting
- * a PR of unknown age would inflate the weekly totals. Summaries are deduped
+ * keeping PRs created or merged inside the stats window. Rows without a
+ * created timestamp are dropped because their identity cannot be represented
+ * consistently in both activity series. Summaries are deduped
  * by PR number, preferring the merged summary on a collision: the open and
  * merged lists are fetched concurrently, so a PR that merges between the two
  * requests can appear in both, and keeping the stale open row would
@@ -298,16 +441,22 @@ export function toAnalyticsPullRequests({
   repoFullName,
   summaries,
   since,
+  until = new Date(8_640_000_000_000_000),
 }: {
   provider: SourceControlProvider;
   repoFullName: string;
   summaries: SourceControlPullRequestSummary[];
   since: Date;
+  until?: Date;
 }): AnalyticsPullRequest[] {
   const byNumber = new Map<number, AnalyticsPullRequest>();
 
   for (const summary of summaries) {
-    if (!summary.createdAt || new Date(summary.createdAt) < since) {
+    if (
+      !summary.createdAt ||
+      (!isInReportingWindow(summary.createdAt, since, until) &&
+        !isInReportingWindow(summary.mergedAt, since, until))
+    ) {
       continue;
     }
 
@@ -329,6 +478,8 @@ export function toAnalyticsPullRequests({
       state:
         summary.state === 'open' && summary.draft ? 'draft' : summary.state,
       authorLogin: summary.author?.login ?? null,
+      createdAt: summary.createdAt,
+      mergedAt: summary.mergedAt,
     });
   }
 
@@ -336,7 +487,7 @@ export function toAnalyticsPullRequests({
 }
 
 /**
- * PRs created in the window for one non-GitHub repository, via the
+ * PRs created or merged in the window for one non-GitHub repository, via the
  * provider-neutral open/merged list primitives.
  *
  * Known degradation: the list primitive supports the open and merged states
@@ -348,9 +499,11 @@ export function toAnalyticsPullRequests({
 async function listSourceControlAnalyticsPullRequests({
   repository,
   since,
+  until,
 }: {
   repository: RepositoryRow;
   since: Date;
+  until: Date;
 }): Promise<AnalyticsPullRequest[]> {
   const provider = repository.sourceControlProvider;
 
@@ -385,6 +538,7 @@ async function listSourceControlAnalyticsPullRequests({
     repoFullName: repository.fullName,
     summaries: [...openResult.pullRequests, ...mergedResult.pullRequests],
     since,
+    until,
   });
 }
 
@@ -392,9 +546,11 @@ async function listSourceControlAnalyticsPullRequests({
 export async function getSourceControlAnalyticsPullRequests({
   repositoryRows,
   since,
+  until = new Date(8_640_000_000_000_000),
 }: {
   repositoryRows: RepositoryRow[];
   since: Date;
+  until?: Date;
 }): Promise<AnalyticsPullRequest[]> {
   const results: AnalyticsPullRequest[] = [];
 
@@ -404,6 +560,7 @@ export async function getSourceControlAnalyticsPullRequests({
         ...(await listSourceControlAnalyticsPullRequests({
           repository,
           since,
+          until,
         })),
       );
     } catch (error) {
@@ -424,10 +581,12 @@ async function getGitHubAnalyticsPullRequests({
   actorUserId,
   repositoryIds,
   since,
+  until,
 }: {
   actorUserId: string | null;
   repositoryIds: string[];
   since: Date;
+  until: Date;
 }): Promise<AnalyticsPullRequest[]> {
   if (repositoryIds.length === 0) {
     return [];
@@ -447,19 +606,28 @@ async function getGitHubAnalyticsPullRequests({
   // cached configured app slug.
   await GitHub.resolveConfiguredGitHubAppSlug();
 
-  const items = await GitHub.getPullRequestsForAnalytics({
+  const items = await GitHub.getUpdatedPullRequestsForAnalytics({
     userId: actorUserId,
     repositoryIds,
-    createdAfter: since,
+    updatedAfter: new Date(since.getTime() - 1),
   });
 
-  return items.map((item) => ({
-    sourceControlProvider: 'github' as const,
-    repoFullName: item.repoFullName,
-    number: item.number,
-    state: item.state,
-    authorLogin: item.authorLogin,
-  }));
+  return items.flatMap((item) =>
+    isInReportingWindow(item.createdAt, since, until) ||
+    isInReportingWindow(item.mergedAt, since, until)
+      ? [
+          {
+            sourceControlProvider: 'github' as const,
+            repoFullName: item.repoFullName,
+            number: item.number,
+            state: item.state,
+            authorLogin: item.authorLogin,
+            createdAt: item.createdAt,
+            mergedAt: item.mergedAt,
+          },
+        ]
+      : [],
+  );
 }
 
 /**
@@ -616,6 +784,8 @@ export async function buildManagerStatsDigest(params: {
    */
   actorUserId: string | null;
   since: Date;
+  until: Date;
+  timeZone: string;
 }) {
   const repositoryRows = await getAnalyticsRepositories();
 
@@ -634,6 +804,11 @@ export async function buildManagerStatsDigest(params: {
       locScope: 'all',
       mostActiveRepo: null,
       topUsers: [],
+      dailyPullRequestActivity: computeDailyPullRequestActivity({
+        pullRequests: [],
+        until: params.until,
+        timeZone: params.timeZone,
+      }),
     } satisfies ManagerStatsDigest;
   }
 
@@ -650,15 +825,23 @@ export async function buildManagerStatsDigest(params: {
         actorUserId: params.actorUserId,
         repositoryIds: githubRepositoryIds,
         since: params.since,
+        until: params.until,
       }),
       getSourceControlAnalyticsPullRequests({
         repositoryRows: sourceControlRepositories,
         since: params.since,
+        until: params.until,
       }),
       getRoomotePullRequestMetadataByKey(),
     ]);
 
-  const pullRequests = [...githubPullRequests, ...sourceControlPullRequests];
+  const activityPullRequests = [
+    ...githubPullRequests,
+    ...sourceControlPullRequests,
+  ];
+  const pullRequests = activityPullRequests.filter((pullRequest) =>
+    isInReportingWindow(pullRequest.createdAt, params.since, params.until),
+  );
 
   const {
     roomotePullRequests: classifiedPullRequests,
@@ -746,5 +929,10 @@ export async function buildManagerStatsDigest(params: {
     locScope,
     mostActiveRepo,
     topUsers,
+    dailyPullRequestActivity: computeDailyPullRequestActivity({
+      pullRequests: activityPullRequests,
+      until: params.until,
+      timeZone: params.timeZone,
+    }),
   } satisfies ManagerStatsDigest;
 }

@@ -506,16 +506,20 @@ export async function ensureAutomationRows(
       BACKGROUND_AUTOMATION_KEYS.map((key) => ({
         key,
         enabled:
-          key === 'platform_issue_alerts' || key === 'provider_usage_limit',
+          key === 'platform_issue_alerts' ||
+          key === 'provider_usage_limit' ||
+          key === 'manager_stats',
         internal: isInternalAutomationKey(key),
-        ...(key === 'provider_usage_limit'
-          ? {
-              schedule: { mode: DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY },
-              settings: {
-                threshold: DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
-              },
-            }
-          : {}),
+        ...(key === 'manager_stats'
+          ? { schedule: { mode: 'weekly' } }
+          : key === 'provider_usage_limit'
+            ? {
+                schedule: { mode: DEFAULT_PROVIDER_USAGE_LIMIT_FREQUENCY },
+                settings: {
+                  threshold: DEFAULT_PROVIDER_USAGE_LIMIT_THRESHOLD,
+                },
+              }
+            : {}),
       })),
     )
     .onConflictDoNothing({ target: automations.key });

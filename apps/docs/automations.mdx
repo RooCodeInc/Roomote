@@ -377,6 +377,11 @@ manager-facing updates and suggestions.
 | **Platform Issue Alerts**    | Configuration and access issues reported by Roomote tasks        | Immediate when an issue is reported         |
 | **Summarize Merged PRs**     | A digest of recently merged pull requests                        | Daily or weekly                             |
 
+Weekly Manager Stats is enabled by default on new deployments and starts
+posting only after a valid report destination is configured. Slack reports
+include a daily chart of created and merged pull requests for the reporting
+period. Existing deployments keep their saved automation settings.
+
 Set **Automation output** first. This is the shared Slack or Discord Manager
 Channel for manager-facing posts, suggestions, summaries, and setup alerts.
 Make sure the Roomote app can access the channel before you save it.
