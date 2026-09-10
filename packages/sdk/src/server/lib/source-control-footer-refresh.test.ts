@@ -490,6 +490,61 @@ describe('source-control current footer refresh', () => {
     warning.mockRestore();
   });
 
+  it('restores under the destination lock, so a later owner cannot be painted over', async () => {
+    const first = adapter('123');
+    await first.postReply({ message: 'Original' });
+    mocks.context.mockResolvedValue({ runningTasks: { count: 1 } });
+    let releaseRestore!: () => void;
+    let restoreStarted!: () => void;
+    const restoring = new Promise<void>((resolve) => {
+      restoreStarted = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      releaseRestore = resolve;
+    });
+    mocks.update
+      .mockImplementationOnce(async () => {
+        mocks.store.delete(
+          `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
+        );
+        await adapter('123').replaceReply!(
+          { messageId: '123' },
+          { message: 'Updated B' },
+        );
+      })
+      .mockImplementationOnce(async () => {}) // The competitor's own edit.
+      .mockImplementationOnce(async () => {
+        restoreStarted();
+        await gate;
+      });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const recovery = first.replaceReply!(
+      { messageId: '123' },
+      { message: 'Updated A' },
+    );
+    await restoring;
+    // A third owner arrives while the restoration edit is in flight: it must
+    // wait for the lock rather than have its content overwritten.
+    const later = adapter('123').replaceReply!(
+      { messageId: '123' },
+      { message: 'Updated C' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mocks.update).toHaveBeenCalledTimes(3);
+    releaseRestore();
+    await recovery;
+    await later;
+    expect(mocks.update).toHaveBeenLastCalledWith({
+      messageId: '123',
+      body: 'Updated C\n\n1 running; preview=none',
+    });
+    expect(await record()).toMatchObject({
+      messageId: '123',
+      body: 'Updated C',
+    });
+    warning.mockRestore();
+  });
+
   it('does not fail an accepted reply or refresh an old body when pointer persistence fails', async () => {
     await adapter('123').postReply({ message: 'Old body' });
     mocks.failRemember = true;

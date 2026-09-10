@@ -892,27 +892,55 @@ function isCommentGoneError(error: unknown): boolean {
  * its current owner recorded it. The competitor may have relocated the footer
  * to another comment (then this comment keeps only its body) or rewritten
  * this same comment with newer content (then that content comes back).
+ *
+ * The restoration runs under the destination lock (the caller's lease when it
+ * still holds it, otherwise a fresh one) and re-reads the record under it, so
+ * a further owner cannot persist newer content between the read and the edit
+ * and then have this recovery paint over it.
  */
 async function restoreCompetingCarrier(params: {
   channelId: string;
   threadId: string;
   mine: { messageId: string; body: string; footerText: string };
+  /** The caller's lease; used directly while it still holds the lock. */
+  assertLock: () => Promise<void>;
   update: (body: string) => Promise<void>;
 }): Promise<void> {
-  const current = await getSourceControlFooterRecord(
-    params.channelId,
-    params.threadId,
-  ).catch(() => undefined);
-  if (current === undefined) return;
-  if (!current || current.messageId !== params.mine.messageId) {
-    await params.update(params.mine.body).catch(() => {});
-  } else if (
-    current.body !== params.mine.body ||
-    current.footerText !== params.mine.footerText
-  ) {
-    await params
-      .update(`${current.body}\n\n${current.footerText}`)
-      .catch(() => {});
+  const restore = async (assertLock: () => Promise<void>) => {
+    const current = await getSourceControlFooterRecord(
+      params.channelId,
+      params.threadId,
+    );
+    let body: string | null = null;
+    if (!current || current.messageId !== params.mine.messageId) {
+      body = params.mine.body;
+    } else if (
+      current.body !== params.mine.body ||
+      current.footerText !== params.mine.footerText
+    ) {
+      body = `${current.body}\n\n${current.footerText}`;
+    }
+    if (body === null) return;
+    await assertLock();
+    await params.update(body);
+  };
+  try {
+    let heldLease = true;
+    await params.assertLock().catch(() => {
+      heldLease = false;
+    });
+    if (heldLease) {
+      await restore(params.assertLock);
+      return;
+    }
+    await withThreadReplyFooterLock({
+      lockKey: `source_control:thread_reply_footer_lock:${params.channelId}:${params.threadId}`,
+      fn: restore,
+    });
+  } catch (error) {
+    console.warn(
+      `[Fast Agent] Could not restore the comment a lost footer lease edited: ${formatErrorForLog(error)}`,
+    );
   }
 }
 
@@ -1079,6 +1107,7 @@ export function buildSourceControlFastAdapter(params: {
           channelId: target.channelId,
           threadId: target.threadId,
           mine: { messageId: comment.messageId, body, footerText },
+          assertLock,
           update,
         });
       console.warn(
@@ -1323,6 +1352,7 @@ export async function refreshSourceControlThreadFooter(target: {
           channelId: target.channelId,
           threadId: target.threadId,
           mine: { messageId: latest.messageId, body: latest.body, footerText },
+          assertLock,
           update: (body) =>
             delivery.updateCommentById!({
               discussion,
