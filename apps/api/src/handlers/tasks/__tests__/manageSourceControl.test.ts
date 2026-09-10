@@ -226,6 +226,50 @@ describe('manageSourceControl', () => {
     });
   });
 
+  it('dispatches explicit pull request updates to the authenticated write surface', async () => {
+    mockWriteSourceControlPullRequestForTaskRun.mockResolvedValue({
+      success: true,
+      action: 'update_pull_request',
+      provider: 'github',
+      repositoryFullName: 'acme/frontend',
+      number: 55,
+      threadId: null,
+      commentId: null,
+      url: 'https://github.com/acme/frontend/pull/55',
+      applied: true,
+      warnings: [],
+    });
+
+    const response = await createApp().request('/task-1/source_control', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/frontend',
+        prNumber: 55,
+        targetBranch: 'main',
+        title: 'Updated title',
+        body: '',
+        draft: false,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockClaimLatestUserMessageForReplyQuote).not.toHaveBeenCalled();
+    expect(mockWriteSourceControlPullRequestForTaskRun).toHaveBeenCalledWith({
+      taskRun: expect.objectContaining({ id: 123 }),
+      input: expect.objectContaining({
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/frontend',
+        prNumber: 55,
+        targetBranch: 'main',
+        title: 'Updated title',
+        body: '',
+        draft: false,
+      }),
+    });
+  });
+
   it('defers unmapped provider errors until after repository scope validation', async () => {
     mockManageSourceControlIssueForTaskRun.mockRejectedValueOnce(
       new Error(

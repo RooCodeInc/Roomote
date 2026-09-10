@@ -493,6 +493,8 @@ export async function writeSourceControl(
   params: {
     action:
       | 'close_pull_request'
+      | 'update_pull_request'
+      | 'reopen_pull_request'
       | 'reply_to_pull_request_comment'
       | 'create_pull_request_comment'
       | 'create_pull_request_review_comment'
@@ -506,7 +508,10 @@ export async function writeSourceControl(
     threadId?: string;
     commentId?: string;
     reviewId?: string;
+    targetBranch?: string;
+    title?: string;
     body?: string;
+    draft?: boolean;
     resolved?: boolean;
     reviewEvent?: 'approve' | 'request_changes' | 'comment';
     reviewers?: string[];
