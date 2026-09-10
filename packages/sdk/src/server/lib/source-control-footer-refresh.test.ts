@@ -545,7 +545,7 @@ describe('source-control current footer refresh', () => {
     warning.mockRestore();
   });
 
-  it('restores again when the restoring edit itself outlives the lease', async () => {
+  it('hands an unproven restoration to the scheduled refresh instead of guessing again', async () => {
     const first = adapter('123');
     await first.postReply({ message: 'Original' });
     mocks.context.mockResolvedValue({ runningTasks: { count: 1 } });
@@ -561,7 +561,7 @@ describe('source-control current footer refresh', () => {
       .mockImplementationOnce(async () => {}) // The competitor's own edit.
       .mockImplementationOnce(async () => {
         // The restoring edit outlives its lease; a third owner rewrites the
-        // comment and records it before the edit completes.
+        // comment and records it before the stale edit completes.
         mocks.store.delete(lockKey);
         await adapter('123').replaceReply!(
           { messageId: '123' },
@@ -569,19 +569,27 @@ describe('source-control current footer refresh', () => {
         );
       });
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.schedule.mockClear();
     await first.replaceReply!({ messageId: '123' }, { message: 'Updated A' });
-    // The stale restoration wrote B over C; the post-edit lease check caught
-    // it and a fresh, fenced pass put C back.
-    expect(mocks.update).toHaveBeenLastCalledWith({
-      messageId: '123',
-      body: 'Updated C\n\n1 running; preview=none',
-    });
-    expect(mocks.update).toHaveBeenCalledTimes(5);
+    // No further guess: the record keeps C's body with its footer marked
+    // unknown, and a refresh is scheduled to rewrite the comment from it.
+    expect(mocks.update).toHaveBeenCalledTimes(4);
     expect(await record()).toMatchObject({
       messageId: '123',
       body: 'Updated C',
+      footerText: '',
     });
+    expect(mocks.schedule).toHaveBeenLastCalledWith(target);
     expect(mocks.store.has(lockKey)).toBe(false);
+    mocks.update.mockClear();
+    await refreshSourceControlThreadFooter(target);
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        comment_id: 123,
+        body: 'Updated C\n\n1 running; preview=none',
+      }),
+    );
+    expect((await record())?.footerText).toBe('1 running; preview=none');
     warning.mockRestore();
   });
 

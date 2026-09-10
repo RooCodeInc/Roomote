@@ -11,6 +11,7 @@ import {
   resolveFastSessionReplyFooterContext,
   withThreadReplyFooterLock,
   forgetThreadFooterRefresh,
+  scheduleThreadFooterRefresh,
   type ThreadFooterRefreshOutcome,
   type ThreadReplyFooterLock,
 } from '@roomote/communication';
@@ -896,9 +897,12 @@ function isCommentGoneError(error: unknown): boolean {
  * The restoration runs under the destination lock (the caller's lease when it
  * still holds it, otherwise a fresh one) and re-reads the record under it, so
  * a further owner cannot persist newer content between the read and the edit.
- * A provider edit can still outlive the lease, so only a lease that is still
- * held after the edit proves nothing newer landed meanwhile; otherwise the
- * restoration starts over under a fresh lock, a bounded number of times.
+ * A provider edit can still outlive the lease, and only a lease still held
+ * after the edit proves nothing newer landed meanwhile. When that proof is
+ * missing, the recovery does not guess again: it marks the record's footer
+ * as unknown under a fenced write and schedules a refresh, so the next pass
+ * rewrites the comment from the record (the newest owner's body) with its own
+ * fenced post-edit write. The record, not a stale response, always wins.
  */
 async function restoreCompetingCarrier(params: {
   channelId: string;
@@ -908,14 +912,10 @@ async function restoreCompetingCarrier(params: {
   assertLock: () => Promise<void>;
   update: (body: string) => Promise<void>;
 }): Promise<void> {
-  // What this recovery believes the comment currently shows.
-  let onComment = {
-    body: params.mine.body,
-    footerText: params.mine.footerText,
-  };
+  const lockKey = `source_control:thread_reply_footer_lock:${params.channelId}:${params.threadId}`;
   const restore = async (
     assertLock: () => Promise<void>,
-  ): Promise<'done' | 'retry'> => {
+  ): Promise<'done' | 'unproven'> => {
     const current = await getSourceControlFooterRecord(
       params.channelId,
       params.threadId,
@@ -925,8 +925,8 @@ async function restoreCompetingCarrier(params: {
         ? { body: params.mine.body, footerText: '' }
         : { body: current.body, footerText: current.footerText };
     if (
-      desired.body === onComment.body &&
-      desired.footerText === onComment.footerText
+      desired.body === params.mine.body &&
+      desired.footerText === params.mine.footerText
     )
       return 'done';
     await assertLock();
@@ -935,31 +935,43 @@ async function restoreCompetingCarrier(params: {
         ? `${desired.body}\n\n${desired.footerText}`
         : desired.body,
     );
-    onComment = desired;
     try {
       await assertLock();
       return 'done';
     } catch {
-      // The edit outlived the lease: a newer owner may have written since.
-      return 'retry';
+      return 'unproven';
     }
   };
-  const lockKey = `source_control:thread_reply_footer_lock:${params.channelId}:${params.threadId}`;
+  const reconcileLater = async () => {
+    await withThreadReplyFooterLock({
+      lockKey,
+      fn: async (_assertLock, lock) => {
+        const current = await getSourceControlFooterRecord(
+          params.channelId,
+          params.threadId,
+        );
+        if (!current) return;
+        await setSourceControlFooterRecord(
+          { ...current, footerText: '' },
+          { keepTtl: true, lock },
+        );
+      },
+    });
+    await scheduleThreadFooterRefresh({
+      provider: 'source-control',
+      channelId: params.channelId,
+      threadId: params.threadId,
+    });
+  };
   try {
     let heldLease = true;
     await params.assertLock().catch(() => {
       heldLease = false;
     });
-    let outcome: 'done' | 'retry' = heldLease
+    const outcome = heldLease
       ? await restore(params.assertLock)
-      : 'retry';
-    for (let attempt = 0; outcome === 'retry' && attempt < 3; attempt += 1) {
-      outcome = await withThreadReplyFooterLock({ lockKey, fn: restore });
-    }
-    if (outcome === 'retry')
-      console.warn(
-        `[Fast Agent] Gave up restoring comment ${params.mine.messageId} after repeated lease loss`,
-      );
+      : await withThreadReplyFooterLock({ lockKey, fn: restore });
+    if (outcome === 'unproven') await reconcileLater();
   } catch (error) {
     console.warn(
       `[Fast Agent] Could not restore the comment a lost footer lease edited: ${formatErrorForLog(error)}`,
