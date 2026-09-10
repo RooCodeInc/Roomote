@@ -132,9 +132,10 @@ Create arbitrary scheduled agent runs with:
 - a clear **name**
 - the **prompt** Roomote should run
 - a **cadence** (`every hour`, `every 6 hours`, `daily`, or `weekly`)
-- an optional **preferred environment**: a named environment or **All
-  repositories**, offered to the run as a hint for delegated work; leave it
-  as **Let Roomote decide** to route normally
+- an optional **preferred environment**: a named environment, **All
+  repositories**, or **Blank slate**. Blank slate always delegates the run to a
+  sandbox without repositories; leave it as **Let Roomote decide** to route
+  normally
 - an optional **model** override for the automation's Fast session, including
   later turns; without an override, it uses the deployment orchestration default.
   Delegated coding tasks use their own model selection or deployment coding default
@@ -144,7 +145,8 @@ Create arbitrary scheduled agent runs with:
   or a channel, through Slack, Discord, Teams, or Telegram
 
 Each automation card summarizes its cadence, workspace target, report destination,
-creator, and most recent run.
+creator, and most recent run. Blank slate runs do not clone repositories or require
+source-control credentials.
 
 Use **View previous runs** on an automation card to open the task list
 filtered to that automation's runs. For a custom automation, the history is
@@ -155,8 +157,8 @@ When creating an automation through Roomote chat, ask for **suggested tasks** or
 teammates can start from the report. Asking only for a summary or list of action
 items keeps those actions as report text. Launchable suggestions require a chat
 report destination. Each suggestion can select its own named environment,
-**All repositories**, or **Fast** target, so one report can offer follow-ups for
-different workspaces and execution modes. Repository-specific suggestions from
+**All repositories**, **Blank slate**, or **Fast** target, so one report can offer
+follow-ups for different workspaces and execution modes. Repository-specific suggestions from
 **All repositories** runs start in a matching named environment when one is
 available. Choosing **All repositories** is a delegation preference, not a
 request to prepare every repository on every run. Use a named environment when

@@ -188,11 +188,42 @@ If you add Organization projects permission to an existing app, an organization
 owner must approve the updated permission before Roomote can manage project
 items.
 
+## Public GitHub reads
+
+An eligible deployment GitHub App installation with an active connected
+repository is required to mint the scoped installation token used by the GitHub
+tools, including public reads. With that connection, active
+Roomote members can inspect any public `github.com` repository in Fast without
+connecting the public target or linking a personal GitHub account. The same
+reads are available in coding tasks, including automated tasks without a human
+driver. No clone or personal access token is needed.
+
+Use the existing GitHub tools for files and directories, code search, issues,
+and pull requests. Tool discovery supplies their native descriptions and
+argument schemas. Searches require exactly one positive `repo:owner/name`
+qualifier, for example `Hello repo:octocat/Hello-World`. GitHub's tool
+availability, permissions, rate limits, pagination, and search-index limits
+apply; partial or empty search results are not proof of absence.
+
+Native reads of unconnected repositories are limited to 2 MiB of response
+bytes and a 15-second upstream deadline, including JSON or SSE body reads.
+Oversized, timed-out, or failed reads are not retried through another path.
+These additional limits do not apply to connected repository calls.
+
+Unconnected reads use a token scoped to one active connected repository.
+GitHub denies private repositories outside that token's scope.
+Private reads and all writes still require an eligible connection to the
+target repository. Connected access keeps its existing authorization; Roomote
+does not retry lookup or authorization failures through another credential.
+The coding-task GitHub MCP remains read-only; writes use the existing
+authorized coding-task source-control workflow. Other source-control providers
+are unchanged.
+
 ## Multiple installations and searches
 
 GitHub tool discovery supports multiple installations of the configured GitHub
-App. Repository reads and supported writes use the installation connected to the
-requested active repository, with a token scoped to that repository. Suspended
+App. Connected repository reads and supported writes use the installation
+connected to the requested active repository, with a token scoped to that repository. Suspended
 installations, inactive or disconnected repositories, and installations of a
 different app are not eligible. Personal GitHub account linkage is not required
 for these deployment-connected tools; coding-run tokens remain read-only on this
@@ -204,9 +235,9 @@ qualifier, for example `repo:example/service is:open`. Searches without a
 repository scope, across multiple repositories, or with ambiguous boolean,
 negation, grouping, quoted, or regex syntax are rejected with guidance to split
 the request. Optional `owner` and `repo` search arguments must match the query.
-This applies with one installation too: Roomote does not silently choose one
-installation or return partial cross-installation search coverage. Run separate,
-bounded searches for each connected repository when investigating several.
+This applies with one installation too: Roomote does not return partial
+cross-repository search coverage. Run separate, bounded searches for each
+connected or public repository when investigating several.
 
 ## Daily GitHub management
 

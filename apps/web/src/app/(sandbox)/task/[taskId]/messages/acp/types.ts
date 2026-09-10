@@ -4,6 +4,7 @@ import type {
   AcpToolCallPayload,
   AcpToolResultPayload,
   AcpEventType,
+  DataVisualizationBlock,
   TaskMessageRole,
 } from '@roomote/types';
 
@@ -30,6 +31,7 @@ interface AcpUiMessageBase {
   text?: string;
   images?: string[];
   imageArtifacts?: AcpUiMessageImageArtifact[];
+  charts?: DataVisualizationBlock[];
   toolCallId?: string;
   previousTs?: number;
   userId?: string;

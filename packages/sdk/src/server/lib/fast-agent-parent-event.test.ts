@@ -249,6 +249,8 @@ vi.mock('./source-control-fast-delivery', async (importOriginal) => ({
   buildSourceControlFastDelivery: mocks.buildSourceControlFastDelivery,
 }));
 
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
+
 import {
   deliverFastAgentParentEvent,
   deliverFastAgentParentEventWithLock,
@@ -811,6 +813,59 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
 
+  it('delivers charts from queued Slack human follow-ups as native blocks', async () => {
+    const chart = {
+      title: 'Weekly signups',
+      chart: {
+        type: 'line' as const,
+        series: [
+          {
+            name: 'Signups',
+            data: [
+              { label: 'Week 1', value: 12 },
+              { label: 'Week 2', value: 18 },
+            ],
+          },
+        ],
+        axis_config: { categories: ['Week 1', 'Week 2'] },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'Signups increased.',
+        charts: [chart],
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'human_follow_up',
+        eventId: '100.004',
+        currentMessageId: '100.004',
+        userId: 'u1',
+        question: 'Show the chart in Slack.',
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '100.001',
+        text: 'Signups increased.',
+        blocks: [
+          { type: 'markdown', text: 'Signups increased.' },
+          { type: 'data_visualization', ...chart },
+          expect.objectContaining({
+            type: 'context',
+            block_id: 'roomote_thread_reply_footer',
+          }),
+        ],
+      }),
+    );
+  });
+
   it('keeps child lifecycle text private until the Fast parent composes a reply', async () => {
     const childEvent = {
       type: 'child_message' as const,
@@ -847,7 +902,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
-  it('carries child-selected image IDs into the Fast parent turn by default', async () => {
+  it('carries child-selected images and charts into the Fast parent turn by default', async () => {
     mocks.answerQuestion.mockResolvedValueOnce('Shared the proof.');
 
     await deliverFastAgentParentEvent({
@@ -860,12 +915,30 @@ describe('deliverFastAgentParentEvent', () => {
         purpose: 'closeout',
         message: 'The visual comparison is ready.',
         imageArtifactIds: ['artifact-1'],
+        charts: [
+          {
+            title: 'Traffic sources',
+            chart: {
+              type: 'pie',
+              segments: [{ label: 'Search', value: 65 }],
+            },
+          },
+        ],
       },
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultImageArtifactIds: ['artifact-1'],
+        defaultCharts: [
+          {
+            title: 'Traffic sources',
+            chart: {
+              type: 'pie',
+              segments: [{ label: 'Search', value: 65 }],
+            },
+          },
+        ],
       }),
     );
   });
@@ -906,7 +979,88 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.createDiscordProvider).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: 'Blank slate',
+      environmentId: NO_REPOSITORIES,
+      expectedWorkspace: { repo: NO_REPOSITORIES },
+    },
+    {
+      name: 'a normal environment',
+      environmentId: 'environment-1',
+      expectedWorkspace: {
+        repo: ALL_REPOSITORIES,
+        environmentId: 'environment-1',
+      },
+    },
+  ])(
+    'maps $name when an automation delegates a task',
+    async ({ environmentId, expectedWorkspace }) => {
+      const automationParent = {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'automation' as const,
+          workspaceId: 'automation-1',
+          conversationId: 'occurrence-1',
+        },
+      };
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { launchTask: (input: unknown) => unknown };
+        }) =>
+          adapter.launchTask({
+            prompt: 'Inspect the workspace.',
+            environmentId,
+            model: null,
+            parentSessionId: parent.sessionId,
+            postKickoff: vi.fn().mockResolvedValue(undefined),
+          }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: automationParent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger: 'schedule',
+        },
+      });
+
+      const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
+      expect(task.payload).toMatchObject(expectedWorkspace);
+      if (environmentId === NO_REPOSITORIES) {
+        expect(task.payload).not.toHaveProperty('environmentId');
+      }
+    },
+  );
+
   it('updates the Slack root for a channel-backed automation turn', async () => {
+    const chart = {
+      title: 'Weekly findings',
+      chart: {
+        type: 'bar' as const,
+        series: [
+          {
+            name: 'Findings',
+            data: [{ label: 'This week', value: 4 }],
+          },
+        ],
+        axis_config: { categories: ['This week'] },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'The report is ready.',
+        charts: [chart],
+      }),
+    );
+
     await deliverFastAgentParentEvent({
       parent,
       event: {
@@ -924,7 +1078,7 @@ describe('deliverFastAgentParentEvent', () => {
       channel: 'C123',
       ts: '100.001',
       message: {
-        text: 'The proof is ready.',
+        text: 'The report is ready.',
         blocks: [
           expect.objectContaining({
             type: 'context',
@@ -932,7 +1086,8 @@ describe('deliverFastAgentParentEvent', () => {
               expect.objectContaining({ text: 'Weekly scan' }),
             ]),
           }),
-          { type: 'markdown', text: 'The proof is ready.' },
+          { type: 'markdown', text: 'The report is ready.' },
+          { type: 'data_visualization', ...chart },
           expect.objectContaining({
             type: 'actions',
             elements: [

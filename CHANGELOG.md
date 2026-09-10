@@ -2,6 +2,48 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.6.0 (2026-09-09)
+
+Roomote 1.6 adds flexible sandbox and public-repository work, native conversation charts, leaner scheduling discovery, and more reliable Sessions and skill management.
+
+### Highlights
+
+- Run sandbox tasks without repositories or source-control credentials through the new Blank slate target.
+- Present data as accessible native charts in Slack and Roomote web transcripts.
+- Inspect public GitHub repositories from Fast and coding tasks without connecting each target repository.
+- Opt into leaner scheduling discovery for ordinary Fast turns while preserving reminders and custom automations.
+
+### Minor changes
+
+- Sessions and custom automations can delegate sandbox work to a Blank slate target that starts without cloning repositories or requiring source-control credentials.
+- Agent replies and delegated reports can present pie, bar, area, and line charts in Slack and Roomote web transcripts, with accessible data tables and text fallbacks for other chat providers.
+- Fast and coding tasks can inspect public GitHub repositories through native tools without connecting the target repository or linking a personal account, while private access and writes remain connection-scoped.
+- Operators can opt into progressive scheduling discovery for Fast Sessions, reducing the tools and guidance sent on ordinary turns while preserving reminder and custom automation behavior when scheduling is needed.
+
+### Patch changes
+
+- Newly started web Sessions show the submitted prompt immediately and reconcile ambiguous retries without duplicate messages.
+- Fast can stop and resume an unresponsive delegated task without terminally cancelling it, while explicit cancellation remains terminal.
+- Restore admin management for environment-specific skills in Settings, including custom skill editing and marketplace installation.
+- Fix Blank slate custom automations so delegated tasks start without repositories.
+
+## 1.5.1 (2026-09-09)
+
+Roomote 1.5.1 makes Fast guidance and follow-up behavior more reliable, clarifies delegated review work, and restores Better Stack tool discovery.
+
+### Highlights
+
+- Apply deployment-wide Agent Guidance to every Fast turn and offer bounded monitoring when an eligible outcome remains unresolved.
+- Distinguish code review agents from ordinary coding agents in Session task cards.
+- Restore exact-name integration tool discovery for Better Stack operational triage.
+
+### Patch changes
+
+- Session task cards now label pull request review work as a Code review agent and use matching task descriptions, making review work easier to distinguish from ordinary coding tasks on desktop and mobile.
+- Fast Sessions now apply deployment-wide Agent Guidance and reload saved guidance for each new turn, matching the behavior promised in Settings while leaving already-running coding tasks unchanged.
+- Fast now evaluates bounded monitoring at eligible closeouts, offering a specific follow-up when an unresolved outcome can be checked while preserving consent, evidence, deduplication, and finite monitoring bounds.
+- On-demand integration tools can be found reliably by exact name again, restoring capability discovery for Better Stack operational triage without weakening integration scope or authorization checks.
+
 ## 1.5.0 (2026-09-09)
 
 Roomote 1.5 brings shared skills, more control over automations and coding tasks, and direct repository work across GitHub, GitLab and Bitbucket Cloud, alongside security and integration fixes.

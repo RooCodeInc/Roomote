@@ -10,6 +10,7 @@ import { formatErrorForLog } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   getUserDisplayName,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
@@ -45,12 +46,19 @@ type StartPinnedFastSessionLaunchResult = {
 function getPinnedRepositoryFullNames(
   pinnedLaunch: PinnedFastSessionLaunchInput,
 ): string[] {
-  return pinnedLaunch.repo !== ALL_REPOSITORIES ? [pinnedLaunch.repo] : [];
+  return pinnedLaunch.repo !== ALL_REPOSITORIES &&
+    pinnedLaunch.repo !== NO_REPOSITORIES
+    ? [pinnedLaunch.repo]
+    : [];
 }
 
 async function describeLaunchTarget(
   pinnedLaunch: PinnedFastSessionLaunchInput,
 ): Promise<string> {
+  if (pinnedLaunch.repo === NO_REPOSITORIES) {
+    return 'Blank slate';
+  }
+
   if (pinnedLaunch.environmentId) {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, pinnedLaunch.environmentId),
@@ -91,12 +99,18 @@ export async function startPinnedFastSessionLaunch(
   const selectedRepositories = availableRepositories.filter((repository) =>
     selectedRepositoryFullNames.includes(repository.fullName),
   );
+  const environmentId =
+    pinnedLaunch.repo === NO_REPOSITORIES
+      ? undefined
+      : pinnedLaunch.environmentId;
   const sourceControlProvider =
     resolveSelectedRepositorySourceControlProvider(
       selectedRepositories,
       selectedRepositoryFullNames,
     ) ??
-    (await resolveEnvironmentSourceControlProvider(pinnedLaunch.environmentId));
+    (environmentId
+      ? await resolveEnvironmentSourceControlProvider(environmentId)
+      : undefined);
 
   const text = input.text.trim();
   const description = appendAttachmentTextsToPromptText({
@@ -113,9 +127,7 @@ export async function startPinnedFastSessionLaunch(
       repo: pinnedLaunch.repo,
       ...(pinnedLaunch.branch ? { branch: pinnedLaunch.branch } : {}),
       ...(pinnedLaunch.sha ? { sha: pinnedLaunch.sha } : {}),
-      ...(pinnedLaunch.environmentId
-        ? { environmentId: pinnedLaunch.environmentId }
-        : {}),
+      ...(environmentId ? { environmentId } : {}),
       ...(description.length > 0 ? { description } : {}),
       ...(input.images?.length ? { images: input.images } : {}),
       blank,
