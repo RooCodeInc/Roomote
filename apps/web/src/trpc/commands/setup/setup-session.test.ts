@@ -177,10 +177,10 @@ describe('optional setup integration discovery', () => {
     });
     await db
       .insert(deploymentSettings)
-      .values({ id: 'default', setupNewState: state })
+      .values({ id: 'default', setupCompletedAt: null, setupNewState: state })
       .onConflictDoUpdate({
         target: deploymentSettings.id,
-        set: { setupNewState: state },
+        set: { setupCompletedAt: null, setupNewState: state },
       });
     mocks.getStatus.mockImplementation(async () => ({
       setupNewState: await readState(),
@@ -344,6 +344,25 @@ describe('optional setup integration discovery', () => {
       await expect(
         resolveSetupSessionTurnContext(collaboratorAuth, sessionId),
       ).rejects.toThrow('Only the setup Session owner can reply during setup.');
+    } finally {
+      await db.delete(users).where(eq(users.id, collaborator.id));
+    }
+  });
+
+  it('allows normal collaborative context after setup completes', async () => {
+    const collaborator = await userFactory.create({ role: 'admin' });
+    const collaboratorAuth = {
+      userId: collaborator.id,
+      isAdmin: true,
+    } as UserAuthSuccess;
+    await db
+      .update(deploymentSettings)
+      .set({ setupCompletedAt: new Date() })
+      .where(eq(deploymentSettings.id, 'default'));
+    try {
+      await expect(
+        resolveSetupSessionTurnContext(collaboratorAuth, sessionId),
+      ).resolves.toBeNull();
     } finally {
       await db.delete(users).where(eq(users.id, collaborator.id));
     }

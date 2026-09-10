@@ -1124,7 +1124,16 @@ export async function resolveSetupSessionTurnContext(
   auth: UserAuthSuccess,
   sessionId: string,
 ) {
-  const state = await readSetupNewState();
+  const [settings] = await db
+    .select({
+      setupCompletedAt: deploymentSettings.setupCompletedAt,
+      setupNewState: deploymentSettings.setupNewState,
+    })
+    .from(deploymentSettings)
+    .where(eq(deploymentSettings.id, 'default'))
+    .limit(1);
+  if (settings?.setupCompletedAt) return null;
+  const state = normalizeSetupNewState(settings?.setupNewState ?? {});
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
   if (!setupSession) return null;
   const [linkedSession] = await db
