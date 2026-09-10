@@ -819,6 +819,78 @@ describe('FastSessionTranscript', () => {
     expect(screen.queryByText('Choose a path')).toBeNull();
   });
 
+  it.each([
+    ['failed', 'Failed to Ask for'],
+    ['completed', 'Asked for'],
+  ] as const)(
+    'keeps a %s request_user_input tool row when no interaction card was persisted',
+    (status, actionLabel) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'request-tool-result',
+              eventId: 'turn-1:tool-result:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 1,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+              role: 'tool',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: status === 'completed',
+                    ...(status === 'failed'
+                      ? { error: 'Preset unavailable' }
+                      : {}),
+                  }),
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                toolCallId: 'turn-1:tool:0',
+                title: 'request_user_input',
+                kind: 'tool',
+                status,
+                isExecute: false,
+                isRead: false,
+                isMcp: false,
+                mcpServerName: null,
+                mcpToolName: null,
+                toolName: 'request_user_input',
+                command: null,
+                output: JSON.stringify({
+                  success: status === 'completed',
+                  ...(status === 'failed'
+                    ? { error: 'Preset unavailable' }
+                    : {}),
+                }),
+                rawInput: {
+                  arguments: { preset: 'setup_starter_tasks' },
+                },
+              },
+              source: 'web',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ]}
+        />,
+      );
+
+      expect(screen.getByText(actionLabel)).toBeInTheDocument();
+      expect(screen.getByText('human guidance')).toBeInTheDocument();
+      if (status === 'failed') {
+        expect(screen.getByText('Failed')).toBeInTheDocument();
+      } else {
+        expect(screen.getByText('Completed')).toBeInTheDocument();
+      }
+      expect(screen.queryByText('Structured input request')).toBeNull();
+    },
+  );
+
   it('places a pending interaction at its chronological position', () => {
     const request = {
       ...textMessage({
