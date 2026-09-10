@@ -945,10 +945,21 @@ export function FastSessionTranscript({
   const recordVoiceTurnRef = useRef<
     (role: 'user' | 'assistant', text: string) => void
   >(() => undefined);
+  // GPT-Live acknowledges a request the moment it delegates, before the
+  // request itself has been cleaned up and sent. Spoken turns wait until no
+  // request is in flight so the acknowledgement lands after what it answers.
+  const heldSpokenTurnsRef = useRef<string[]>([]);
+  const requestInFlightRef = useRef(false);
   const liveVoice = useLiveVoice({
     onUtterance: enqueueVoiceUtterance,
     onHeardTurn: (text) => recordVoiceTurnRef.current('user', text),
-    onSpokenTurn: (text) => recordVoiceTurnRef.current('assistant', text),
+    onSpokenTurn: (text) => {
+      if (requestInFlightRef.current) {
+        heldSpokenTurnsRef.current.push(text);
+        return;
+      }
+      recordVoiceTurnRef.current('assistant', text);
+    },
     onHeardTurnDelta: (text) =>
       setLiveVoiceTurns((current) => ({
         ...current,
@@ -1106,6 +1117,17 @@ export function FastSessionTranscript({
     [sessionId, trpcClient],
   );
   recordVoiceTurnRef.current = recordVoiceTurn;
+  const requestInFlight =
+    liveVoice.deliveringUtterances > 0 ||
+    isSending ||
+    pendingUtterancesRef.current.length > 0;
+  requestInFlightRef.current = requestInFlight;
+  useEffect(() => {
+    if (requestInFlight || heldSpokenTurnsRef.current.length === 0) return;
+    const held = heldSpokenTurnsRef.current;
+    heldSpokenTurnsRef.current = [];
+    for (const text of held) recordVoiceTurn('assistant', text);
+  }, [requestInFlight, recordVoiceTurn, utteranceQueueVersion]);
   const callStartedAtRef = useRef<number | null>(null);
   useEffect(() => {
     if (liveVoice.active && liveVoice.startedAt !== null) {

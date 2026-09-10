@@ -66,6 +66,7 @@ const {
     setMicMuted: vi.fn(),
     setOutputMuted: vi.fn(),
     startedAt: null as number | null,
+    deliveringUtterances: 0,
     onUtterance: undefined as
       | ((text: string, delegationId: string | null) => void)
       | undefined,
@@ -106,6 +107,7 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       outputMuted: false,
       setOutputMuted: liveVoiceState.setOutputMuted,
       startedAt: liveVoiceState.startedAt,
+      deliveringUtterances: liveVoiceState.deliveringUtterances,
     };
   },
 }));
@@ -294,6 +296,7 @@ beforeEach(() => {
   recordVoiceCallEventMutate.mockReset();
   recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
   liveVoiceState.startedAt = null;
+  liveVoiceState.deliveringUtterances = 0;
   liveVoiceState.onHeardTurn = undefined;
   liveVoiceState.onSpokenTurn = undefined;
   liveVoiceState.active = false;
@@ -2465,6 +2468,50 @@ describe('FastSessionTranscript', () => {
         expect(
           screen.getAllByText('Roo-Code has about 452,000 lines.'),
         ).toHaveLength(1),
+      );
+    });
+
+    it('records a spoken acknowledgement only after the request it answers is sent', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      // The person has finished speaking; the utterance is still being
+      // cleaned up when GPT-Live says its acknowledgement.
+      liveVoiceState.deliveringUtterances = 1;
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onSpokenTurn?.('Sure, checking what it would take.');
+      });
+      expect(recordVoiceTurnMutate).not.toHaveBeenCalled();
+
+      // The cleaned request reaches the Session first...
+      replyMutate.mockResolvedValue({ success: true });
+      liveVoiceState.deliveringUtterances = 0;
+      act(() => {
+        liveVoiceState.onUtterance?.(
+          'Can you add a dinosaur to the Sunny Acres game?',
+          'item_1',
+        );
+      });
+      rerender(transcript());
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
+
+      // ...and the acknowledgement is recorded after it.
+      await waitFor(() =>
+        expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          role: 'assistant',
+          text: 'Sure, checking what it would take.',
+        }),
       );
     });
 

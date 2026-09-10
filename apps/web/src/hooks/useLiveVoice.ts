@@ -71,6 +71,12 @@ interface UseLiveVoiceReturn {
   setOutputMuted: (muted: boolean) => void;
   /** Milliseconds since the conversation connected, 0 when idle. */
   startedAt: number | null;
+  /**
+   * Utterances that have ended but not yet reached `onUtterance` (transcript
+   * cleanup in flight). Callers use it to keep spoken replies ordered after
+   * the request they answer.
+   */
+  deliveringUtterances: number;
 }
 
 type LiveServerEvent = {
@@ -121,6 +127,7 @@ export function useLiveVoice({
   const [micMuted, setMicMutedState] = useState(false);
   const [outputMuted, setOutputMutedState] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [deliveringUtterances, setDeliveringUtterances] = useState(0);
   const onSpokenTurnRef = useRef(onSpokenTurn);
   onSpokenTurnRef.current = onSpokenTurn;
   const onHeardTurnRef = useRef(onHeardTurn);
@@ -165,19 +172,24 @@ export function useLiveVoice({
   const deliverUtterance = useCallback(
     (utterance: string, delegationId: string | null) => {
       const generation = startGenerationRef.current;
-      deliveryChainRef.current = deliveryChainRef.current.then(async () => {
-        let text = utterance;
-        try {
-          const cleaned = await trpcClient.voice.cleanTranscript.mutate({
-            text: utterance,
-          });
-          if (cleaned.text.trim()) text = cleaned.text.trim();
-        } catch {
-          // The raw transcript still carries the request.
-        }
-        if (startGenerationRef.current !== generation) return;
-        onUtteranceRef.current(text, delegationId);
-      });
+      setDeliveringUtterances((count) => count + 1);
+      deliveryChainRef.current = deliveryChainRef.current
+        .then(async () => {
+          let text = utterance;
+          try {
+            const cleaned = await trpcClient.voice.cleanTranscript.mutate({
+              text: utterance,
+            });
+            if (cleaned.text.trim()) text = cleaned.text.trim();
+          } catch {
+            // The raw transcript still carries the request.
+          }
+          if (startGenerationRef.current !== generation) return;
+          onUtteranceRef.current(text, delegationId);
+        })
+        .finally(() => {
+          setDeliveringUtterances((count) => Math.max(0, count - 1));
+        });
     },
     [trpcClient],
   );
@@ -561,5 +573,6 @@ export function useLiveVoice({
     outputMuted,
     setOutputMuted,
     startedAt,
+    deliveringUtterances,
   };
 }
