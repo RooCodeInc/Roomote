@@ -1,4 +1,11 @@
-import { and, db, eq, slackInstallations } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  slackInstallations,
+  taskRuns,
+  tasks,
+} from '@roomote/db/server';
 import { acquireRedisLock, getRedis } from '@roomote/redis';
 import {
   claimThreadFooterRefreshTargets,
@@ -14,6 +21,11 @@ import {
   refreshSlackThreadReplyFooter,
   withSlackThreadReplyFooterLock,
 } from '@roomote/slack';
+import {
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationProviderFromTaskPayload,
+  getCommunicationThreadIdFromTaskPayload,
+} from '@roomote/types';
 
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
@@ -117,10 +129,45 @@ export async function refreshThreadFooterTarget(
   });
 }
 
+/** Refresh the Slack Session footer bound to a task-run lifecycle event. */
+export async function refreshTaskRunThreadFooter(runId: number): Promise<void> {
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
+    columns: { taskId: true, payload: true },
+  });
+  if (!run?.taskId) return;
+
+  let channelId: string | null = null;
+  let threadId: string | null = null;
+  if (getCommunicationProviderFromTaskPayload(run.payload) === 'slack') {
+    channelId = getCommunicationChannelFromTaskPayload(run.payload);
+    threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
+  }
+  if (!channelId || !threadId) {
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: { slackChannelId: true, slackThreadTs: true },
+    });
+    channelId = task?.slackChannelId ?? null;
+    threadId = task?.slackThreadTs ?? null;
+  }
+  if (!channelId || !threadId) return;
+
+  const target = {
+    provider: 'slack' as const,
+    channelId,
+    threadId,
+  };
+  const outcome = await refreshThreadFooterTarget(target);
+  if (outcome !== 'gone') {
+    await rescheduleThreadFooterRefresh(target, outcome);
+  }
+}
+
 /**
- * One bounded pass over due destinations. No history scans, task-status
- * event coupling, or provider calls from workers. Only one pass runs at a
- * time: a slow pass makes the next tick skip rather than double the work.
+ * One bounded pass over due destinations. No history scans or provider calls
+ * from workers. Only one pass runs at a time: a slow pass makes the next tick
+ * skip rather than double the work.
  */
 export async function refreshCurrentThreadFooters(): Promise<void> {
   const release = await acquireRedisLock(JOB_LOCK_KEY, {
