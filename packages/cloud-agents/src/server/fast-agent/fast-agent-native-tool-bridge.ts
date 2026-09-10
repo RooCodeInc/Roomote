@@ -454,7 +454,6 @@ export default {
     prompt: z.string().min(10).max(${SESSION_WAKEUP_PROMPT_MAX_LENGTH}).optional().describe("[create] What to do when it fires. This conversation stays in context, so keep it short: what to check, what counts as done, what to tell the user."),
     schedule: z.string().max(${SESSION_WAKEUP_SCHEDULE_MAX_LENGTH}).optional().describe(${JSON.stringify(`[create] ${SESSION_WAKEUP_SCHEDULE_GRAMMAR}`)}),
     reportPolicy: z.enum(["always", "only_when_notable"]).optional().describe("[create] 'always' replies on every run (default for one-shots); 'only_when_notable' stays silent unless there is news (default for repeating schedules). Omit to use the default."),
-    internal: z.boolean().optional().describe("[create] Set true only when system instructions explicitly require an internal wakeup. Omit otherwise."),
   },
   execute: (args, context) => invoke("manage_wakeups", args, context),
 }

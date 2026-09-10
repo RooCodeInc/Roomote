@@ -63,6 +63,7 @@ import packageJson from '../../../../../package.json';
 
 import { appendAttachmentTextsToPromptText } from '../../file-attachments';
 import {
+  ensureOwnTaskFollowThroughWakeup,
   handleManageWakeupsToolCall,
   normalizeManageWakeupsArgs,
 } from '../session-wakeups';
@@ -4118,6 +4119,18 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              if (substantiveHumanInput) {
+                try {
+                  await ensureOwnTaskFollowThroughWakeup({
+                    conversationId: session.id,
+                    userId,
+                  });
+                } catch (error) {
+                  console.warn(
+                    `[Fast Agent] Failed to schedule own-task follow-through after launch: ${formatErrorForLog(error)}`,
+                  );
+                }
+              }
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
               }

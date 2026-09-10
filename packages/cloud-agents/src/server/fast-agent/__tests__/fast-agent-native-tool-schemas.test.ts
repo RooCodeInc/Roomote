@@ -430,7 +430,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     ).toEqual(request);
   });
 
-  it('preserves internal wakeup intent through generated tool execution and server parsing', async () => {
+  it('keeps internal wakeup visibility out of model-controlled arguments', async () => {
     const wakeupsTool = tools.find(
       (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
     )!;
@@ -451,10 +451,18 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     ) => Promise<{ name: string; args: unknown }>;
     const forwarded = await execute(parsed, {});
 
+    expect(parsed).not.toHaveProperty('internal');
+    expect(wakeupsTool.args).not.toHaveProperty('internal');
     expect(forwarded.name).toBe(FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups);
     expect(
       z.object(MANAGE_WAKEUPS_TOOL.inputSchema).parse(forwarded.args),
-    ).toEqual(request);
+    ).toEqual({
+      action: 'create',
+      name: request.name,
+      prompt: request.prompt,
+      schedule: request.schedule,
+      reportPolicy: request.reportPolicy,
+    });
   });
 
   // Synthetic arguments verify the generic bridge, not live upstream schemas.

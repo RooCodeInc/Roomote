@@ -705,22 +705,14 @@ describe('buildFastAgentSystemPrompt', () => {
       'After "launch_task" successfully creates a coding task for a human-authored request',
     );
     expect(prompt).toContain(
-      'list active wakeups and silently ensure this conversation has exactly one session-wide one-shot check',
+      'the runtime silently ensures this conversation has exactly one internal session-wide one-shot check',
     );
-    expect(prompt).toContain('name "Follow through on session tasks"');
-    expect(prompt).toContain(
-      'Run the Own Coding Task Follow-Through session check for all tasks in this conversation',
-    );
-    expect(prompt).toContain('schedule "in 10m"');
-    expect(prompt).toContain('reportPolicy "only_when_notable"');
-    expect(prompt).toContain('and internal true');
+    expect(prompt).toContain('Do not create another wakeup for this purpose');
+    expect(prompt).not.toContain('and internal true');
     expect(prompt).toContain(
       'not external-process monitoring, so do not ask for monitoring consent',
     );
-    expect(prompt).toContain('Do not schedule after a failed launch');
-    expect(prompt).toContain(
-      'task-independent so concurrent or successive launches deduplicate to one monitor for the Session',
-    );
+    expect(prompt).toContain('Failed launches do not schedule follow-through');
     expect(prompt).toContain(
       'Do not mention this automatic monitor, its setup, cadence, or next run in the acknowledgement or closeout',
     );

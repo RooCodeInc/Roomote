@@ -45,17 +45,14 @@ describe('manage wakeups tool contract', () => {
     }
   });
 
-  it('accepts an explicit internal create flag without adding it by default', () => {
-    expect(
-      manageWakeupsInputSchema.parse({ action: 'create', internal: true }),
-    ).toEqual({ action: 'create', internal: true });
+  it('does not expose internal visibility as model input', () => {
     expect(manageWakeupsInputSchema.parse({ action: 'create' })).toEqual({
       action: 'create',
     });
     expect(
-      manageWakeupsInputSchema.safeParse({ action: 'create', internal: 'true' })
-        .success,
-    ).toBe(false);
+      manageWakeupsInputSchema.parse({ action: 'create', internal: true }),
+    ).toEqual({ action: 'create' });
+    expect(MANAGE_WAKEUPS_TOOL.inputSchema).not.toHaveProperty('internal');
   });
 
   it('publishes the canonical descriptor and is a Fast native tool', () => {
@@ -114,7 +111,6 @@ describe('manage wakeups tool contract', () => {
   it('takes the schedule as one string and nothing else schedule-shaped', () => {
     expect(Object.keys(MANAGE_WAKEUPS_TOOL.inputSchema).sort()).toEqual([
       'action',
-      'internal',
       'name',
       'prompt',
       'reportPolicy',

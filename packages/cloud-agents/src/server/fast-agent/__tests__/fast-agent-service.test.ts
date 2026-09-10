@@ -51,6 +51,7 @@ const mocks = vi.hoisted(() => ({
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
+  ensureOwnTaskFollowThroughWakeup: vi.fn(),
   inArray: vi.fn((...values: unknown[]) => values),
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
@@ -130,6 +131,11 @@ vi.mock('../fast-agent-conversation-repository', () => ({
 
 vi.mock('../../available-environments', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
+}));
+
+vi.mock('../../session-wakeups', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../session-wakeups')>()),
+  ensureOwnTaskFollowThroughWakeup: mocks.ensureOwnTaskFollowThroughWakeup,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -413,6 +419,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
+    mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
     mocks.updateParentEventWhere.mockResolvedValue(undefined);
     mocks.nativeSteer.mockResolvedValue(undefined);
     mocks.getNativeRuntime.mockImplementation(async () => {
@@ -7850,6 +7857,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           'Fix checkout.\n\nAttachment: checkout-plan.md\nAdd a retry test.',
       }),
     );
+    expect(mocks.ensureOwnTaskFollowThroughWakeup).toHaveBeenCalledOnce();
+    expect(mocks.ensureOwnTaskFollowThroughWakeup).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      userId: 'user-1',
+    });
     const canonicalWrites = mocks.upsertMessage.mock.calls.map(
       ([input]) => input.message,
     );
@@ -8315,6 +8327,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'I could not start the checkout work because no task capacity is available.',
     });
     expect(adapter.postReply).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureOwnTaskFollowThroughWakeup).not.toHaveBeenCalled();
   });
 
   it('allows a corrected launch after rejecting an unavailable model', async () => {
