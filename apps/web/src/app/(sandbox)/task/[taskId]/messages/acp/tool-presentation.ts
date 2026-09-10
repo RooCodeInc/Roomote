@@ -179,6 +179,7 @@ export function resolveToolPresentation(
     toolName,
     phase,
     readToolArguments(data),
+    toolName === 'manage_wakeups' ? readToolResult(data) : null,
     category,
     serverName,
     providerKind === 'native'
@@ -312,6 +313,7 @@ function resolveReceiptLanguage(
   toolName: string | null,
   phase: ToolPresentationPhase,
   args: ToolArguments | null,
+  result: ToolArguments | null,
   category: ToolPresentationCategory,
   serverName: string | null,
   nativeToolName: string | null,
@@ -418,10 +420,7 @@ function resolveReceiptLanguage(
   if (toolName === 'manage_tasks' && serverName === 'roomote')
     return manageTasksReceipt(args, phase);
   if (toolName === 'manage_wakeups')
-    return {
-      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
-      object: 'timers',
-    };
+    return manageWakeupsReceipt(args, result, phase);
   if (toolName === 'find_integration_tools')
     return {
       verb: byPhase('Searching', 'Searched', 'Failed to Search'),
@@ -500,6 +499,18 @@ export function readToolArguments(data: ToolData): ToolArguments | null {
   return nested && typeof nested === 'object' && !Array.isArray(nested)
     ? (nested as ToolArguments)
     : input;
+}
+
+function readToolResult(data: ToolData): ToolArguments | null {
+  if (!('output' in data) || typeof data.output !== 'string') return null;
+  try {
+    const result = JSON.parse(data.output) as unknown;
+    return result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as ToolArguments)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function stringArgument(
@@ -597,6 +608,44 @@ function manageTasksReceipt(
   };
 
   return action ? (receipts[action] ?? null) : null;
+}
+
+function manageWakeupsReceipt(
+  args: ToolArguments | null,
+  result: ToolArguments | null,
+  phase: ToolPresentationPhase,
+): { verb: string; object: string } {
+  const action = stringArgument(args, 'action');
+  const byPhase = (running: string, completed: string, failed: string) =>
+    phase === 'running' ? running : phase === 'failed' ? failed : completed;
+  const receipts: Record<string, { verb: string; object: string }> = {
+    create: {
+      verb:
+        phase === 'completed' && result?.duplicate === true
+          ? 'Reused'
+          : byPhase('Creating', 'Created', 'Failed to Create'),
+      object: 'timer',
+    },
+    list: {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'timers',
+    },
+    get: {
+      verb: byPhase('Fetching', 'Fetched', 'Failed to Fetch'),
+      object: 'timer',
+    },
+    cancel: {
+      verb: byPhase('Canceling', 'Canceled', 'Failed to Cancel'),
+      object: 'timer',
+    },
+  };
+
+  return (
+    (action ? receipts[action] : undefined) ?? {
+      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
+      object: 'timers',
+    }
+  );
 }
 
 export function summarizeToolGroup(
