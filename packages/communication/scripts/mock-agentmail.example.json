@@ -1,11 +1,20 @@
 {
   "port": 3015,
   "state": {
+    "pods": [
+      { "pod_id": "pod_acme", "name": "Acme", "client_id": "tenant-acme" }
+    ],
     "inboxes": [
       {
         "inbox_id": "roomote@agentmail.to",
         "display_name": "Roomote",
         "client_id": "roomote-mock-inbox"
+      },
+      {
+        "inbox_id": "roomote-acme@agentmail.to",
+        "display_name": "Roomote",
+        "client_id": "roomote-mock-inbox-acme",
+        "pod_id": "pod_acme"
       }
     ],
     "webhooks": [

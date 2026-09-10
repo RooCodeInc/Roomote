@@ -2,76 +2,8 @@
 
 import { readFile } from 'node:fs/promises';
 
-import { z } from 'zod';
-
-import {
-  MockAgentMailServer,
-  type MockAgentMailReplayEvent,
-  type MockAgentMailState,
-} from '../src/mock-agentmail-server';
-
-const inboundEmailSchema = z
-  .object({
-    kind: z.literal('message').optional(),
-    inboxId: z.string().min(1),
-    from: z.string().min(1),
-    to: z.array(z.string().min(1)).optional(),
-    cc: z.array(z.string().min(1)).optional(),
-    subject: z.string().optional(),
-    text: z.string().optional(),
-    html: z.string().optional(),
-    threadId: z.string().optional(),
-    timestamp: z.string().optional(),
-    autoSubmitted: z.boolean().optional(),
-    oversize: z.boolean().optional(),
-    duplicate: z.boolean().optional(),
-  })
-  .passthrough();
-
-const configSchema = z.object({
-  port: z.number().int().positive().optional(),
-  state: z.object({
-    acceptedApiKeys: z.array(z.string().min(1)).optional(),
-    inboxes: z.array(
-      z
-        .object({
-          inbox_id: z.string().min(1),
-          display_name: z.string().optional(),
-          client_id: z.string().optional(),
-        })
-        .passthrough(),
-    ),
-    webhooks: z
-      .array(
-        z
-          .object({
-            webhook_id: z.string().min(1),
-            url: z.string().url(),
-            secret: z.string().min(1).optional(),
-            client_id: z.string().optional(),
-            inbox_ids: z.array(z.string().min(1)).optional(),
-            event_types: z.array(z.string().min(1)).optional(),
-            enabled: z.boolean().optional(),
-          })
-          .passthrough(),
-      )
-      .optional(),
-    messages: z.array(z.record(z.unknown())).optional(),
-  }),
-  replay: z
-    .array(
-      z.union([
-        z.object({
-          kind: z.literal('redeliver'),
-          eventId: z.string().min(1),
-        }),
-        inboundEmailSchema,
-      ]),
-    )
-    .optional(),
-});
-
-type HarnessConfig = z.infer<typeof configSchema>;
+import { parseMockAgentMailConfig } from '../src/mock-agentmail-config';
+import { MockAgentMailServer } from '../src/mock-agentmail-server';
 
 type ParsedOptions = {
   statePath: string;
@@ -138,11 +70,9 @@ function printHelp(): void {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const rawConfig = await readFile(options.statePath, 'utf8');
-  const config = configSchema.parse(JSON.parse(rawConfig)) as HarnessConfig;
+  const config = parseMockAgentMailConfig(JSON.parse(rawConfig));
 
-  const server = new MockAgentMailServer({
-    state: config.state as MockAgentMailState,
-  });
+  const server = new MockAgentMailServer({ state: config.state });
 
   const baseUrl = await server.start(options.port ?? config.port ?? 0);
 
@@ -159,7 +89,7 @@ async function main() {
 
   if (config.replay?.length) {
     for (const [index, event] of config.replay.entries()) {
-      const result = await server.dispatch(event as MockAgentMailReplayEvent);
+      const result = await server.dispatch(event);
       const statuses =
         result.deliveries
           .map((delivery) => `${delivery.url} ${delivery.status}`)
