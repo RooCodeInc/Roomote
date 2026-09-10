@@ -676,6 +676,7 @@ describe('Fast session PR review actions', () => {
 
     await replyToFastSessionCommand(auth, {
       sessionId: automationSession.id,
+      clientMessageId: '11111111-1111-4111-8111-111111111111',
       text: 'Continue this scheduled run.',
     });
 
@@ -692,6 +693,7 @@ describe('Fast session PR review actions', () => {
       expect.objectContaining({
         userId: 'user-1',
         conversation,
+        currentMessageId: '11111111-1111-4111-8111-111111111111',
       }),
     );
     expect(release).toHaveBeenCalledOnce();

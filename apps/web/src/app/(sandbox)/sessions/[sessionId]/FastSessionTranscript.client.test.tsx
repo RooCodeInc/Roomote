@@ -59,19 +59,29 @@ const {
     start: vi.fn(),
     stop: vi.fn(),
     speak: vi.fn(),
+    onUtterance: undefined as
+      | ((text: string, delegationId: string) => void)
+      | undefined,
   },
 }));
 
 vi.mock('@/hooks/useLiveVoice', () => ({
-  useLiveVoice: () => ({
-    active: liveVoiceState.active,
-    status: liveVoiceState.status,
-    interimTranscript: '',
-    error: null,
-    start: liveVoiceState.start,
-    stop: liveVoiceState.stop,
-    speak: liveVoiceState.speak,
-  }),
+  useLiveVoice: ({
+    onUtterance,
+  }: {
+    onUtterance: (text: string, delegationId: string) => void;
+  }) => {
+    liveVoiceState.onUtterance = onUtterance;
+    return {
+      active: liveVoiceState.active,
+      status: liveVoiceState.status,
+      interimTranscript: '',
+      error: null,
+      start: liveVoiceState.start,
+      stop: liveVoiceState.stop,
+      speak: liveVoiceState.speak,
+    };
+  },
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -256,6 +266,7 @@ beforeEach(() => {
   liveVoiceState.start.mockReset();
   liveVoiceState.stop.mockReset();
   liveVoiceState.speak.mockReset();
+  liveVoiceState.onUtterance = undefined;
   clearPendingFastSessionLaunch('session-1');
   vi.stubGlobal('EventSource', FakeEventSource);
 });
@@ -2305,6 +2316,7 @@ describe('FastSessionTranscript', () => {
       expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
       expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
         'First sentence. Second part is here.',
+        null,
       );
 
       // A later message in the same turn is spoken too; nothing is skipped
@@ -2324,6 +2336,72 @@ describe('FastSessionTranscript', () => {
       expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
       expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
         'Here is the result.',
+        null,
+      );
+    });
+
+    it('returns overlapping Fast results to their originating Live delegations', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the first build', 'item_first');
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
+      const firstTurnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
+
+      act(() => {
+        liveVoiceState.onUtterance?.(
+          'Actually check the second',
+          'item_second',
+        );
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(2));
+      const secondTurnId = replyMutate.mock.calls[1]?.[0].clientMessageId;
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'assistant-first',
+                role: 'assistant',
+                text: 'First build result',
+                ts: 5,
+              }),
+              turnId: firstTurnId,
+            },
+            {
+              ...textMessage({
+                id: 'assistant-second',
+                role: 'assistant',
+                text: 'Second build result',
+                ts: 6,
+              }),
+              turnId: secondTurnId,
+            },
+          ],
+        });
+      });
+
+      expect(liveVoiceState.speak).toHaveBeenNthCalledWith(
+        1,
+        'First build result',
+        'item_first',
+      );
+      expect(liveVoiceState.speak).toHaveBeenNthCalledWith(
+        2,
+        'Second build result',
+        'item_second',
       );
     });
 
@@ -2385,7 +2463,10 @@ describe('FastSessionTranscript', () => {
       });
 
       expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
-      expect(liveVoiceState.speak).toHaveBeenCalledWith('Server-timed reply');
+      expect(liveVoiceState.speak).toHaveBeenCalledWith(
+        'Server-timed reply',
+        null,
+      );
     });
 
     it('stops the voice conversation when a structured input request arrives', async () => {
@@ -2481,7 +2562,10 @@ describe('FastSessionTranscript', () => {
           ],
         });
       });
-      expect(liveVoiceState.speak).toHaveBeenCalledWith('Hi! What can I do?');
+      expect(liveVoiceState.speak).toHaveBeenCalledWith(
+        'Hi! What can I do?',
+        null,
+      );
     });
 
     it('does not auto-start voice when the deployment has it disabled', async () => {

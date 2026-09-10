@@ -123,10 +123,18 @@ describe('useLiveVoice', () => {
       vi.advanceTimersByTime(250);
     });
 
-    expect(onUtterance).toHaveBeenCalledWith('Check the build status');
+    expect(onUtterance).toHaveBeenCalledWith(
+      'Check the build status',
+      'item_123',
+    );
     expect(result.current.interimTranscript).toBe('');
 
-    act(() => result.current.speak('See [the result](https://example.com).'));
+    act(() =>
+      result.current.speak(
+        'See [the result](https://example.com).',
+        'item_123',
+      ),
+    );
     expect(
       FakePeer.instance.channel.sent.map((value) => JSON.parse(value)),
     ).toContainEqual(
@@ -136,5 +144,37 @@ describe('useLiveVoice', () => {
         content: 'See the result.',
       }),
     );
+  });
+
+  it('releases handshake resources immediately when voice is ended', async () => {
+    let finishHandshake:
+      | ((value: { sessionId: string; sdp: string }) => void)
+      | undefined;
+    createLiveSessionMutate.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishHandshake = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useLiveVoice({ onUtterance: vi.fn() }));
+
+    let starting!: Promise<void>;
+    act(() => {
+      starting = result.current.start();
+    });
+    await act(async () => {
+      await vi.waitFor(() =>
+        expect(createLiveSessionMutate).toHaveBeenCalled(),
+      );
+    });
+
+    act(() => result.current.stop());
+    expect(stopTrack).toHaveBeenCalled();
+    expect(FakePeer.instance.channel.readyState).toBe('closed');
+
+    await act(async () => {
+      finishHandshake?.({ sessionId: 'live_123', sdp: 'answer-sdp' });
+      await starting;
+    });
+    expect(result.current.active).toBe(false);
   });
 });

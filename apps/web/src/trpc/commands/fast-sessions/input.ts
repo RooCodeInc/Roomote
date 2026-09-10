@@ -95,6 +95,7 @@ export const startFastSessionInputSchema = z
 export const replyToFastSessionInputSchema = z
   .object({
     sessionId: z.string().uuid(),
+    clientMessageId: z.string().uuid().optional(),
     ...fastSessionMessageInputShape,
   })
   .superRefine(requireFastSessionContent);

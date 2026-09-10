@@ -655,6 +655,7 @@ export async function replyToFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
     sessionId: string;
+    clientMessageId?: string;
     text: string;
     images?: string[];
     attachmentTexts?: string[];
@@ -707,6 +708,7 @@ export async function replyToFastSessionCommand(
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),
+    currentMessageId: input.clientMessageId,
     durableSessionId: session.id,
   });
 

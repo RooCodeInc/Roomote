@@ -17,7 +17,7 @@ export type LiveVoiceStatus =
 
 interface UseLiveVoiceOptions {
   /** Called when GPT-Live delegates a spoken request to the Fast session. */
-  onUtterance: (text: string) => void;
+  onUtterance: (text: string, delegationId: string) => void;
   disabled?: boolean;
 }
 
@@ -29,7 +29,7 @@ interface UseLiveVoiceReturn {
   start: () => Promise<void>;
   stop: () => void;
   /** Return verified Fast output to GPT-Live for natural spoken delivery. */
-  speak: (markdown: string) => void;
+  speak: (markdown: string, delegationId: string | null) => void;
 }
 
 type LiveServerEvent = {
@@ -87,7 +87,6 @@ export function useLiveVoice({
 
   const inputTranscriptRef = useRef('');
   const pendingDelegationsRef = useRef<string[]>([]);
-  const currentDelegationIdRef = useRef<string | null>(null);
   const delegationTimerRef = useRef<number | null>(null);
   const speakingTimerRef = useRef<number | null>(null);
 
@@ -101,10 +100,9 @@ export function useLiveVoice({
     if (!delegationId || !utterance) return;
 
     pendingDelegationsRef.current.shift();
-    currentDelegationIdRef.current = delegationId;
     inputTranscriptRef.current = '';
     setInterimTranscript('');
-    onUtteranceRef.current(utterance);
+    onUtteranceRef.current(utterance, delegationId);
   }, []);
 
   const scheduleDelegationFlush = useCallback(() => {
@@ -203,18 +201,13 @@ export function useLiveVoice({
     micStreamRef.current = null;
     outputAudioRef.current = null;
 
-    mic?.getTracks().forEach((track) => track.stop());
-    audio?.pause();
     if (channel?.readyState === 'open') {
       channel.send(JSON.stringify({ type: 'session.close' }));
-      window.setTimeout(() => release(peer, channel, null, audio), 1_500);
-    } else {
-      release(peer, channel, null, audio);
     }
+    release(peer, channel, mic, audio);
 
     inputTranscriptRef.current = '';
     pendingDelegationsRef.current = [];
-    currentDelegationIdRef.current = null;
     setActive(false);
     setStatus('idle');
     setInterimTranscript('');
@@ -246,10 +239,13 @@ export function useLiveVoice({
         release(peer, channel, mic, audio);
         return;
       }
+      micStreamRef.current = mic;
 
       peer = new RTCPeerConnection();
       audio = new Audio();
       audio.autoplay = true;
+      peerRef.current = peer;
+      outputAudioRef.current = audio;
       peer.addEventListener('track', (event) => {
         if (!audio) return;
         audio.srcObject = new MediaStream([event.track]);
@@ -263,6 +259,7 @@ export function useLiveVoice({
       peer.addTrack(audioTrack, mic);
 
       channel = peer.createDataChannel('oai-events');
+      dataChannelRef.current = channel;
       channel.addEventListener('message', (event) =>
         handleServerEvent(String(event.data)),
       );
@@ -337,6 +334,10 @@ export function useLiveVoice({
     } catch (caught) {
       release(peer, channel, mic, audio);
       if (isStale()) return;
+      if (peerRef.current === peer) peerRef.current = null;
+      if (dataChannelRef.current === channel) dataChannelRef.current = null;
+      if (micStreamRef.current === mic) micStreamRef.current = null;
+      if (outputAudioRef.current === audio) outputAudioRef.current = null;
       connectingRef.current = false;
       setActive(false);
       setStatus('error');
@@ -348,7 +349,7 @@ export function useLiveVoice({
     }
   }, [disabled, handleServerEvent, release, stop, trpcClient]);
 
-  const speak = useCallback((markdown: string) => {
+  const speak = useCallback((markdown: string, delegationId: string | null) => {
     const channel = dataChannelRef.current;
     if (!activeRef.current || channel?.readyState !== 'open') return;
 
@@ -358,7 +359,7 @@ export function useLiveVoice({
         JSON.stringify({
           type: 'session.commentary.append',
           event_id: crypto.randomUUID(),
-          delegation_id: currentDelegationIdRef.current,
+          delegation_id: delegationId,
           content,
         }),
       );

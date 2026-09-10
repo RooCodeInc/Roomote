@@ -656,6 +656,18 @@ export function FastSessionTranscript({
         }),
     [messages, owner],
   );
+  const persistedAssistantTurnIds = useMemo(() => {
+    const turnIds = new Map<string, string>();
+    for (const message of serverMessages.values()) {
+      if (
+        message.role === 'assistant' &&
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage
+      ) {
+        turnIds.set(`assistant:${message.eventId}`, message.turnId);
+      }
+    }
+    return turnIds;
+  }, [serverMessages]);
   const hasVisibleAssistantMessage = useMemo(
     () =>
       messages.some(
@@ -697,8 +709,12 @@ export function FastSessionTranscript({
     resetKey: `${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
   });
 
+  const voiceDelegationByTurnIdRef = useRef(new Map<string, string>());
   const sendReply = useCallback(
-    async (message: SessionPromptSubmission): Promise<boolean> => {
+    async (
+      message: SessionPromptSubmission,
+      options?: { voiceDelegationId?: string },
+    ): Promise<boolean> => {
       if (isSending) {
         return false;
       }
@@ -706,6 +722,7 @@ export function FastSessionTranscript({
       setIsSending(true);
       setReplyError(null);
       let optimisticId: string | null = null;
+      let clientMessageId: string | undefined;
       try {
         const prepared = await preparePromptAttachments({
           text: message.text.trim(),
@@ -716,6 +733,13 @@ export function FastSessionTranscript({
           return false;
         }
 
+        if (options?.voiceDelegationId) {
+          clientMessageId = crypto.randomUUID();
+          voiceDelegationByTurnIdRef.current.set(
+            clientMessageId,
+            options.voiceDelegationId,
+          );
+        }
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
         const optimistic: TranscriptMessage = {
           id: optimisticId,
@@ -740,6 +764,7 @@ export function FastSessionTranscript({
         dispatchPendingResponse({ type: 'optimistic', message: optimistic });
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
+          ...(clientMessageId ? { clientMessageId } : {}),
           text: prepared.text,
           ...(images.length > 0 ? { images } : {}),
           ...(prepared.attachmentTexts?.length
@@ -754,6 +779,9 @@ export function FastSessionTranscript({
         });
         return true;
       } catch (error) {
+        if (clientMessageId) {
+          voiceDelegationByTurnIdRef.current.delete(clientMessageId);
+        }
         if (optimisticId) {
           const failedId = optimisticId;
           setOptimisticMessages((previous) =>
@@ -800,13 +828,18 @@ export function FastSessionTranscript({
   const voiceCutoffTsRef = useRef(0);
   /** Persisted assistant messages already returned to the Live conversation. */
   const spokenMessageIdsRef = useRef(new Set<string>());
-  const pendingUtterancesRef = useRef<string[]>([]);
+  const pendingUtterancesRef = useRef<
+    Array<{ text: string; delegationId: string }>
+  >([]);
   const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
 
-  const enqueueVoiceUtterance = useCallback((text: string) => {
-    pendingUtterancesRef.current.push(text);
-    setUtteranceQueueVersion((version) => version + 1);
-  }, []);
+  const enqueueVoiceUtterance = useCallback(
+    (text: string, delegationId: string) => {
+      pendingUtterancesRef.current.push({ text, delegationId });
+      setUtteranceQueueVersion((version) => version + 1);
+    },
+    [],
+  );
 
   const liveVoice = useLiveVoice({ onUtterance: enqueueVoiceUtterance });
 
@@ -823,12 +856,15 @@ export function FastSessionTranscript({
       return;
     }
 
-    void sendReply({
-      text: next,
-      files: [],
-      model: modelSelectionRef.current.model,
-      reasoningEffort: modelSelectionRef.current.reasoningEffort,
-    });
+    void sendReply(
+      {
+        text: next.text,
+        files: [],
+        model: modelSelectionRef.current.model,
+        reasoningEffort: modelSelectionRef.current.reasoningEffort,
+      },
+      { voiceDelegationId: next.delegationId },
+    );
   }, [isSending, utteranceQueueVersion, sendReply]);
 
   const agentWorking =
@@ -862,9 +898,14 @@ export function FastSessionTranscript({
 
       if (spokenMessageIdsRef.current.has(message.id)) continue;
       spokenMessageIdsRef.current.add(message.id);
-      speakRef.current(message.text);
+      speakRef.current(
+        message.text,
+        voiceDelegationByTurnIdRef.current.get(
+          persistedAssistantTurnIds.get(message.id) ?? '',
+        ) ?? null,
+      );
     }
-  }, [uiMessages, liveVoiceActive]);
+  }, [uiMessages, liveVoiceActive, persistedAssistantTurnIds]);
 
   const handleVoiceToggle = useCallback(() => {
     // Toggling while the handshake is still connecting cancels it.
@@ -881,6 +922,7 @@ export function FastSessionTranscript({
       voiceCutoffTsRef.current = Math.max(voiceCutoffTsRef.current, message.ts);
     }
     spokenMessageIdsRef.current.clear();
+    voiceDelegationByTurnIdRef.current.clear();
     pendingUtterancesRef.current = [];
     void liveVoice.start();
   }, [liveVoice, serverMessages]);
@@ -901,6 +943,7 @@ export function FastSessionTranscript({
     autoStartedVoiceRef.current = true;
     voiceCutoffTsRef.current = 0;
     spokenMessageIdsRef.current.clear();
+    voiceDelegationByTurnIdRef.current.clear();
     pendingUtterancesRef.current = [];
     void startLiveVoiceRef.current();
 
