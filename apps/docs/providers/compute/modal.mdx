@@ -53,6 +53,18 @@ the task. Roomote starts Docker as the VM sandbox's primary service and requests
 standard sandbox runtime with 2 CPU cores and 4 GiB of memory.
 Container builds and services share the task sandbox's CPU and memory.
 
+## Worker image
+
+Modal sandboxes start from the published Roomote worker image for the running
+release. Override it with `MODAL_BASE_IMAGE_REF` to use a fork or registry
+mirror. Modal caches images by their reference string, so a mutable tag such as
+`develop` or `latest` would never be re-pulled after the first launch. Roomote
+resolves mutable tags to their current digest at launch time and reuses the
+last resolved digest if the registry is briefly unreachable. Immutable tags
+(`develop-<sha>`, `main-<sha>`, `v*`) and `@sha256` references are used as-is.
+ECR references are not resolved because the Roomote server holds no AWS
+credentials of its own; pin a digest or enable ECR tag immutability there.
+
 ## Verify setup
 
 1. save Modal credentials

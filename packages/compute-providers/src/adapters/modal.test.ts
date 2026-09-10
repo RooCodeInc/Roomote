@@ -29,7 +29,8 @@ const { pinModalBaseImageRefMock } = vi.hoisted(() => ({
   pinModalBaseImageRefMock: vi.fn(),
 }));
 
-vi.mock('../modal/registry-digest', () => ({
+vi.mock('../modal/registry-digest', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../modal/registry-digest')>()),
   pinModalBaseImageRef: pinModalBaseImageRefMock,
 }));
 

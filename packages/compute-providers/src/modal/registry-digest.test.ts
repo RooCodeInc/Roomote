@@ -1,7 +1,9 @@
 import {
-  clearModalBaseImageDigestCache,
+  isImmutableImageTag,
   parseImageRef,
+  parseWwwAuthenticate,
   pinModalBaseImageRef,
+  resetModalBaseImageDigestCache,
   resolveImageRefDigest,
 } from './registry-digest';
 
@@ -74,6 +76,57 @@ describe('parseImageRef', () => {
     expect(parseImageRef('roomote-worker:local')).toBeNull();
     expect(parseImageRef('ghcr.io/org/repo@sha256:nope')).toBeNull();
     expect(parseImageRef('')).toBeNull();
+  });
+});
+
+describe('parseWwwAuthenticate', () => {
+  it('parses quoted and bare parameter values', () => {
+    expect(
+      parseWwwAuthenticate(
+        'Bearer realm=https://r.example/token,service=r.example,scope="repository:a/b:pull"',
+      ),
+    ).toEqual([
+      {
+        scheme: 'bearer',
+        params: {
+          realm: 'https://r.example/token',
+          service: 'r.example',
+          scope: 'repository:a/b:pull',
+        },
+      },
+    ]);
+  });
+
+  it('splits comma-separated challenge lists', () => {
+    expect(
+      parseWwwAuthenticate(
+        'Bearer realm="https://a.example/token",service="a", Basic realm="Registry Realm"',
+      ),
+    ).toEqual([
+      {
+        scheme: 'bearer',
+        params: { realm: 'https://a.example/token', service: 'a' },
+      },
+      { scheme: 'basic', params: { realm: 'Registry Realm' } },
+    ]);
+  });
+});
+
+describe('isImmutableImageTag', () => {
+  it('recognizes release-pipeline tags and commit SHAs', () => {
+    expect(isImmutableImageTag('develop-0a1b2c3d')).toBe(true);
+    expect(isImmutableImageTag('main-0a1b2c3d')).toBe(true);
+    expect(isImmutableImageTag('v1.3.0')).toBe(true);
+    expect(isImmutableImageTag('v1.3.0-rc.1')).toBe(true);
+    expect(isImmutableImageTag('a'.repeat(40))).toBe(true);
+  });
+
+  it('treats channel aliases and custom tags as mutable', () => {
+    expect(isImmutableImageTag('develop')).toBe(false);
+    expect(isImmutableImageTag('main')).toBe(false);
+    expect(isImmutableImageTag('latest')).toBe(false);
+    expect(isImmutableImageTag('arm64-real')).toBe(false);
+    expect(isImmutableImageTag(undefined)).toBe(false);
   });
 });
 
@@ -250,6 +303,78 @@ describe('resolveImageRefDigest', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses to send credentials to a token realm on another site', async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes('ghcr.io/token')) {
+        throw new Error('credentials must not reach the foreign realm');
+      }
+      return response({
+        status: 401,
+        headers: {
+          'www-authenticate':
+            'Bearer realm="https://ghcr.io/token",service="ghcr.io"',
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      resolveImageRefDigest({
+        ref: 'mirror.example.com/roomote/worker:develop',
+        registryUsername: 'user',
+        registryPassword: 'pass',
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/refusing to send registry credentials/u);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses plaintext token realms', async () => {
+    const fetchImpl = vi.fn(async () =>
+      response({
+        status: 401,
+        headers: {
+          'www-authenticate':
+            'Bearer realm="http://registry.example.com/token",service="registry.example.com"',
+        },
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(
+      resolveImageRefDigest({
+        ref: 'registry.example.com/roomote/worker:develop',
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/refusing to request a registry token over http:/u);
+  });
+
+  it('accepts a token realm on a sibling host of the same site', async () => {
+    const fetchImpl = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.startsWith('https://auth.docker.io/token')) {
+          return response({ status: 200, body: { token: 'hub-token' } });
+        }
+        if (new Headers(init?.headers).get('authorization')) {
+          return response({
+            status: 200,
+            headers: { 'docker-content-digest': DIGEST },
+          });
+        }
+        return response({
+          status: 401,
+          headers: {
+            'www-authenticate':
+              'Bearer realm="https://auth.docker.io/token",service="registry.docker.io"',
+          },
+        });
+      },
+    ) as unknown as typeof fetch;
+
+    await expect(
+      resolveImageRefDigest({ ref: 'docker.io/roomote/worker:1.0', fetchImpl }),
+    ).resolves.toBe(`docker.io/roomote/worker@${DIGEST}`);
+  });
+
   it('returns digest-pinned refs unchanged without touching the registry', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const ref = `ghcr.io/roocodeinc/roomote-worker@${DIGEST}`;
@@ -279,13 +404,17 @@ describe('resolveImageRefDigest', () => {
 });
 
 describe('pinModalBaseImageRef', () => {
+  let now = 1_000;
+
   beforeEach(() => {
-    clearModalBaseImageDigestCache();
+    now = 1_000;
+    resetModalBaseImageDigestCache({ now: () => now });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
+    resetModalBaseImageDigestCache();
     vi.restoreAllMocks();
   });
 
@@ -296,17 +425,14 @@ describe('pinModalBaseImageRef', () => {
         headers: { 'docker-content-digest': DIGEST },
       }),
     ) as unknown as typeof fetch;
-    let now = 1_000;
 
     const first = await pinModalBaseImageRef({
       ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
       fetchImpl,
-      now: () => now,
     });
     const second = await pinModalBaseImageRef({
       ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
       fetchImpl,
-      now: () => now,
     });
 
     expect(first).toBe(`ghcr.io/roocodeinc/roomote-worker@${DIGEST}`);
@@ -317,7 +443,6 @@ describe('pinModalBaseImageRef', () => {
     await pinModalBaseImageRef({
       ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
       fetchImpl,
-      now: () => now,
     });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
@@ -347,12 +472,10 @@ describe('pinModalBaseImageRef', () => {
         headers: { 'docker-content-digest': DIGEST },
       });
     }) as unknown as typeof fetch;
-    let now = 1_000;
     const pin = () =>
       pinModalBaseImageRef({
         ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
         fetchImpl,
-        now: () => now,
       });
 
     await expect(pin()).resolves.toBe(
@@ -374,12 +497,10 @@ describe('pinModalBaseImageRef', () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('network down');
     }) as unknown as typeof fetch;
-    let now = 1_000;
     const pin = () =>
       pinModalBaseImageRef({
         ref: 'ghcr.io/roocodeinc/roomote-worker:develop',
         fetchImpl,
-        now: () => now,
       });
 
     await expect(pin()).resolves.toBe(
@@ -430,6 +551,24 @@ describe('pinModalBaseImageRef', () => {
       }),
     ).resolves.toBe(`ghcr.io/roocodeinc/roomote-worker@${DIGEST}`);
     expect(ok).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the registry for immutable release tags', async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    await expect(
+      pinModalBaseImageRef({
+        ref: 'ghcr.io/roocodeinc/roomote-worker:develop-0a1b2c3d',
+        fetchImpl,
+      }),
+    ).resolves.toBe('ghcr.io/roocodeinc/roomote-worker:develop-0a1b2c3d');
+    await expect(
+      pinModalBaseImageRef({
+        ref: 'ghcr.io/roocodeinc/roomote-worker:v1.3.0',
+        fetchImpl,
+      }),
+    ).resolves.toBe('ghcr.io/roocodeinc/roomote-worker:v1.3.0');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('leaves bare local tags and digest refs alone', async () => {

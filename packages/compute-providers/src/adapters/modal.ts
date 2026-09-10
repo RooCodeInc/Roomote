@@ -40,10 +40,39 @@ import {
   toAbortError,
   throwIfAborted,
 } from '../modal/abort';
-import { pinModalBaseImageRef } from '../modal/registry-digest';
+import {
+  isImmutableImageTag,
+  parseImageRef,
+  pinModalBaseImageRef,
+} from '../modal/registry-digest';
 import { normalizeModalRpcError } from '../modal/rpc-diagnostics';
 
 const DEFAULT_APP_NAME = 'roomote';
+
+const warnedUnpinnedEcrRefs = new Set<string>();
+
+/**
+ * ECR digests cannot be resolved from the controller: the OCI token flow does
+ * not apply, and the controller holds only the OIDC role Modal assumes, not
+ * AWS credentials of its own for `ecr:GetAuthorizationToken`. Modal keys its
+ * image cache on the ref string, so a mutable ECR tag will not be re-pulled
+ * after the first build. Warn once per process so operators know to pin.
+ */
+function warnUnpinnedEcrBaseImageRef(ref: string): void {
+  const parsed = parseImageRef(ref);
+  if (!parsed || parsed.digest || isImmutableImageTag(parsed.tag)) {
+    return;
+  }
+  if (warnedUnpinnedEcrRefs.has(ref)) {
+    return;
+  }
+  warnedUnpinnedEcrRefs.add(ref);
+  console.warn(
+    `[ModalClient] ECR base image uses a mutable tag; Modal will not re-pull it after the first build. Pin an @sha256 digest or an immutable tag, or enable ECR tag immutability ${JSON.stringify(
+      { ref },
+    )}`,
+  );
+}
 
 const DEFAULT_MODAL_WORKDIR = '/sandbox';
 const MODAL_VM_DOCKER_COMMAND = [
@@ -301,10 +330,16 @@ export class ModalClient implements ComputeProviderClient {
     return this.resolvedRegistrySecretPromise;
   }
 
-  private async resolveImage(signal?: AbortSignal): Promise<Image> {
+  private async resolveImage(
+    signal?: AbortSignal,
+  ): Promise<{ image: Image; imageRef: string }> {
     if (this.imageMode === 'ecr-oidc') {
+      warnUnpinnedEcrBaseImageRef(this.baseImageRef);
       const secret = await this.getEcrSecret();
-      return this.sdk.images.fromAwsEcr(this.baseImageRef, secret);
+      return {
+        image: this.sdk.images.fromAwsEcr(this.baseImageRef, secret),
+        imageRef: this.baseImageRef,
+      };
     }
 
     // Modal keys its image cache on the ref string, so a mutable tag such as
@@ -319,10 +354,13 @@ export class ModalClient implements ComputeProviderClient {
 
     if (this.imageMode === 'registry-auth') {
       const secret = await this.getRegistrySecret();
-      return this.sdk.images.fromRegistry(imageRef, secret);
+      return {
+        image: this.sdk.images.fromRegistry(imageRef, secret),
+        imageRef,
+      };
     }
 
-    return this.sdk.images.fromRegistry(imageRef);
+    return { image: this.sdk.images.fromRegistry(imageRef), imageRef };
   }
 
   private normalizeSandboxTags(
@@ -461,7 +499,7 @@ export class ModalClient implements ComputeProviderClient {
       throw error;
     }
 
-    const image = await raceWithAbort({
+    const { image, imageRef } = await raceWithAbort({
       promise: this.resolveImage(input.signal),
       signal: input.signal,
       abortMessage: `Resolving Modal image "${this.baseImageRef}" was aborted`,
@@ -472,6 +510,7 @@ export class ModalClient implements ComputeProviderClient {
     try {
       console.log(
         `[ModalClient] Creating sandbox... ${JSON.stringify({
+          imageRef,
           encryptedPorts: input.ports,
           regions: this.config.regions ?? '(default)',
           cpu: this.config.cpu ?? '(default)',

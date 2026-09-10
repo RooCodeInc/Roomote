@@ -8,6 +8,8 @@
  * Modal pull the new image instead of silently reusing a months-old build.
  */
 
+import { LRUCache } from 'lru-cache';
+
 const DIGEST_CACHE_TTL_MS = 60_000;
 /**
  * How long a failed lookup is remembered before the registry is retried, so a
@@ -25,6 +27,19 @@ const MANIFEST_ACCEPT = [
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 
 const DOCKER_HUB_REGISTRY = 'registry-1.docker.io';
+
+/**
+ * Tags the release pipeline publishes exactly once and never moves:
+ * `develop-<sha>` / `main-<sha>` channel builds, `v*` releases, and raw
+ * commit SHAs. These never need a registry lookup to stay fresh.
+ */
+const IMMUTABLE_TAG_PATTERN =
+  /^(?:(?:develop|main)-[0-9a-f]{7,40}|v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?|[0-9a-f]{40})$/u;
+
+/** True for tags that are published once and never re-pointed. */
+export function isImmutableImageTag(tag: string | undefined): boolean {
+  return tag !== undefined && IMMUTABLE_TAG_PATTERN.test(tag);
+}
 
 interface ParsedImageRef {
   /** Registry host, e.g. `ghcr.io` or `registry-1.docker.io`. */
@@ -97,21 +112,61 @@ export function parseImageRef(ref: string): ParsedImageRef | null {
   };
 }
 
-function parseWwwAuthenticate(
-  header: string,
-): { realm: string; params: Record<string, string> } | null {
-  const match = /^Bearer\s+(.*)$/iu.exec(header.trim());
-  if (!match) return null;
+interface AuthChallenge {
+  scheme: string;
+  params: Record<string, string>;
+}
 
-  const params: Record<string, string> = {};
-  for (const part of match[1]!.matchAll(/(\w+)="([^"]*)"/gu)) {
-    params[part[1]!] = part[2]!;
+/**
+ * Parses a `WWW-Authenticate` header into its challenges. Handles quoted and
+ * bare (RFC 7235 token) parameter values and comma-separated challenge lists
+ * such as `Bearer realm="...",service="...", Basic realm="..."`. Values are
+ * only used when a challenge matches a scheme we know how to satisfy.
+ */
+export function parseWwwAuthenticate(header: string): AuthChallenge[] {
+  const challenges: AuthChallenge[] = [];
+  let current: AuthChallenge | undefined;
+
+  const token =
+    /([A-Za-z][A-Za-z0-9._~+/-]*)(?:\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^\s,"]+)))?/gu;
+  for (const match of header.matchAll(token)) {
+    const [, name, quoted, bare] = match;
+    if (quoted === undefined && bare === undefined) {
+      // A bare word (no `=`) starts a new challenge with that scheme.
+      current = { scheme: name!.toLowerCase(), params: {} };
+      challenges.push(current);
+      continue;
+    }
+    if (!current) continue;
+    current.params[name!.toLowerCase()] =
+      quoted !== undefined ? quoted.replace(/\\(.)/gu, '$1') : bare!;
   }
 
-  const realm = params.realm;
-  if (!realm) return null;
-  delete params.realm;
-  return { realm, params };
+  return challenges;
+}
+
+function registrySite(host: string): string {
+  const labels = host.toLowerCase().replace(/:\d+$/u, '').split('.');
+  return labels.slice(-2).join('.');
+}
+
+/**
+ * Refuses to present registry credentials to a token endpoint the registry
+ * did not plausibly own: the realm must be HTTPS and share the registry's
+ * site (`registry-1.docker.io` -> `auth.docker.io` is fine; a mirror relaying
+ * an upstream `ghcr.io` challenge, or an attacker-controlled realm, is not).
+ */
+function assertTrustedTokenRealm(realm: URL, registry: string): void {
+  if (realm.protocol !== 'https:') {
+    throw new Error(
+      `refusing to request a registry token over ${realm.protocol} from ${realm.origin}`,
+    );
+  }
+  if (registrySite(realm.hostname) !== registrySite(registry)) {
+    throw new Error(
+      `refusing to send registry credentials for ${registry} to token realm ${realm.origin}`,
+    );
+  }
 }
 
 function basicAuthorization(
@@ -133,19 +188,24 @@ interface ResolveImageRefDigestOptions {
 }
 
 async function fetchBearerToken(
-  challenge: { realm: string; params: Record<string, string> },
-  repository: string,
+  challenge: AuthChallenge,
+  parsed: ParsedImageRef,
   options: ResolveImageRefDigestOptions,
   fetchImpl: typeof fetch,
   signal: AbortSignal,
 ): Promise<string> {
-  const url = new URL(challenge.realm);
-  for (const [key, value] of Object.entries(challenge.params)) {
+  const { realm, scope: _ignoredScope, ...params } = challenge.params;
+  if (!realm) {
+    throw new Error('registry Bearer challenge did not include a realm');
+  }
+  const url = new URL(realm);
+  assertTrustedTokenRealm(url, parsed.registry);
+  for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);
   }
   // Some registries (ghcr.io) answer a rejected Basic header with a
   // placeholder scope, so always ask for the repository we actually need.
-  url.searchParams.set('scope', `repository:${repository}:pull`);
+  url.searchParams.set('scope', `repository:${parsed.repository}:pull`);
 
   const authorization = basicAuthorization(
     options.registryUsername,
@@ -197,7 +257,13 @@ export async function resolveImageRefDigest(
   if (parsed.digest) {
     return options.ref.trim();
   }
+  return resolveParsedImageRefDigest(parsed, options);
+}
 
+async function resolveParsedImageRefDigest(
+  parsed: ParsedImageRef,
+  options: ResolveImageRefDigestOptions,
+): Promise<string> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const timeoutSignal = AbortSignal.timeout(options.timeoutMs ?? 10_000);
   const signal = options.signal
@@ -220,10 +286,24 @@ export async function resolveImageRefDigest(
   let response = await head();
 
   if (response.status === 401) {
-    const challengeHeader = response.headers.get('www-authenticate') ?? '';
-    const scheme = challengeHeader.trim().split(/\s+/u)[0]?.toLowerCase();
+    const challenges = parseWwwAuthenticate(
+      response.headers.get('www-authenticate') ?? '',
+    );
+    const bearer = challenges.find(
+      (challenge) => challenge.scheme === 'bearer' && challenge.params.realm,
+    );
+    const basic = challenges.find((challenge) => challenge.scheme === 'basic');
 
-    if (scheme === 'basic') {
+    if (bearer) {
+      const token = await fetchBearerToken(
+        bearer,
+        parsed,
+        options,
+        fetchImpl,
+        signal,
+      );
+      response = await head(`Bearer ${token}`);
+    } else if (basic) {
       // Docker Distribution registries secured with htpasswd-style auth
       // challenge with Basic directly; there is no token endpoint to call.
       const authorization = basicAuthorization(
@@ -237,20 +317,9 @@ export async function resolveImageRefDigest(
       }
       response = await head(authorization);
     } else {
-      const challenge = parseWwwAuthenticate(challengeHeader);
-      if (!challenge) {
-        throw new Error(
-          `registry returned 401 for ${manifestUrl} without a usable challenge`,
-        );
-      }
-      const token = await fetchBearerToken(
-        challenge,
-        parsed.repository,
-        options,
-        fetchImpl,
-        signal,
+      throw new Error(
+        `registry returned 401 for ${manifestUrl} without a usable challenge`,
       );
-      response = await head(`Bearer ${token}`);
     }
   }
 
@@ -272,92 +341,115 @@ export async function resolveImageRefDigest(
   return `${registry}/${parsed.repository}@${digest}`;
 }
 
-interface DigestCacheEntry {
-  expiresAt: number;
-  promise: Promise<string>;
-  /**
-   * Most recent successfully resolved digest ref for this key. Served when a
-   * refresh fails so a registry hiccup never silently drops back to the
-   * mutable tag (which would re-trigger Modal's stale image cache).
-   */
-  lastPinned: string | undefined;
+interface DigestFetchContext {
+  ref: string;
+  parsed: ParsedImageRef;
+  options: ResolveImageRefDigestOptions;
 }
 
-const digestCache = new Map<string, DigestCacheEntry>();
+let cacheClock: () => number = Date.now;
 
 /**
- * Pins a Modal base image ref to its current digest so Modal's image cache key
- * tracks the tag. When the registry cannot be queried the last successfully
- * resolved digest is reused; only when no digest has ever been resolved in
- * this process does it fall back to the original tag (and logs), so a
- * registry hiccup never blocks sandbox creation. Results are cached briefly
- * per process to keep the lookup cheap on the per-spawn path while still
- * picking up new pushes within a minute; failures are cached for a shorter
- * window so an outage does not cost a full lookup timeout on every spawn.
+ * Per-process digest cache keyed by ref + registry user. `fetch()` coalesces
+ * concurrent lookups for the same key, and a stale (expired) entry is handed
+ * back to `fetchMethod` so a failed refresh can keep serving the last good
+ * digest instead of dropping back to the mutable tag.
  */
-export async function pinModalBaseImageRef(
-  options: ResolveImageRefDigestOptions & { now?: () => number },
-): Promise<string> {
-  const ref = options.ref.trim();
-  const parsed = parseImageRef(ref);
-  if (!parsed || parsed.digest) {
-    return ref;
-  }
-
-  const now = options.now ?? Date.now;
-  const cacheKey = `${ref} ${options.registryUsername ?? ''}`;
-  const cached = digestCache.get(cacheKey);
-  if (cached && cached.expiresAt > now()) {
-    return cached.promise;
-  }
-
-  const entry: DigestCacheEntry = {
-    expiresAt: now() + DIGEST_CACHE_TTL_MS,
-    promise: Promise.resolve(ref),
-    lastPinned: cached?.lastPinned,
-  };
-
-  entry.promise = resolveImageRefDigest({ ...options, ref })
-    .then((pinned) => {
-      entry.lastPinned = pinned;
+const digestCache = new LRUCache<string, string, DigestFetchContext>({
+  max: 32,
+  ttl: DIGEST_CACHE_TTL_MS,
+  // A handful of entries read on the spawn path; skip the perf.now() debounce
+  // so expiry follows the clock exactly (and the fake clock in tests).
+  ttlResolution: 0,
+  perf: { now: () => cacheClock() },
+  // A rejected refresh (caller abort) must neither drop the last good digest
+  // nor fail callers who can be served from it.
+  noDeleteOnFetchRejection: true,
+  allowStaleOnFetchRejection: true,
+  fetchMethod: async (
+    _key,
+    staleValue,
+    { options: entryOptions, signal, context },
+  ) => {
+    const { ref, parsed, options } = context;
+    try {
+      const pinned = await resolveParsedImageRefDigest(parsed, {
+        ...options,
+        ref,
+        signal: options.signal
+          ? AbortSignal.any([signal, options.signal])
+          : signal,
+      });
       console.log(
         `[ModalClient] Pinned base image ${JSON.stringify({ ref, pinned })}`,
       );
       return pinned;
-    })
-    .catch((error) => {
-      const fallback = entry.lastPinned ?? ref;
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-
+    } catch (error) {
       if (options.signal?.aborted) {
-        // The caller gave up; let the next spawn retry immediately.
-        digestCache.delete(cacheKey);
-        return fallback;
+        // The caller gave up; keep the stale entry (if any) and let the next
+        // spawn retry immediately.
+        throw error;
       }
 
-      entry.expiresAt = now() + DIGEST_FAILURE_CACHE_TTL_MS;
+      const lastPinned =
+        staleValue && parseImageRef(staleValue)?.digest
+          ? staleValue
+          : undefined;
+      const fallback = lastPinned ?? ref;
+      // Remember the failure briefly so an outage costs one lookup timeout
+      // per window instead of one per spawn.
+      entryOptions.ttl = DIGEST_FAILURE_CACHE_TTL_MS;
       console.warn(
         `[ModalClient] Could not resolve base image digest; ${
-          entry.lastPinned
+          lastPinned
             ? 'using last resolved digest'
             : 'using tag as-is (Modal may reuse a stale cached image)'
         } ${JSON.stringify({
           ref,
           fallback,
           retryAfterMs: DIGEST_FAILURE_CACHE_TTL_MS,
-          error: errorMessage,
+          error: error instanceof Error ? error.message : String(error),
         })}`,
       );
       return fallback;
+    }
+  },
+});
+
+/**
+ * Pins a Modal base image ref to its current digest so Modal's image cache key
+ * tracks the tag. Refs that are already digest-pinned, not registry-qualified,
+ * or carry an immutable release tag are returned unchanged without touching
+ * the registry. When the registry cannot be queried the last successfully
+ * resolved digest is reused; only when no digest has ever been resolved in
+ * this process does it fall back to the original tag (and logs), so a
+ * registry hiccup never blocks sandbox creation.
+ */
+export async function pinModalBaseImageRef(
+  options: ResolveImageRefDigestOptions,
+): Promise<string> {
+  const ref = options.ref.trim();
+  const parsed = parseImageRef(ref);
+  if (!parsed || parsed.digest || isImmutableImageTag(parsed.tag)) {
+    return ref;
+  }
+
+  const cacheKey = `${ref} ${options.registryUsername ?? ''}`;
+  try {
+    const pinned = await digestCache.fetch(cacheKey, {
+      context: { ref, parsed, options },
     });
-
-  digestCache.set(cacheKey, entry);
-
-  return entry.promise;
+    return pinned ?? ref;
+  } catch {
+    // Only reachable when the caller aborted and nothing was cached yet.
+    return ref;
+  }
 }
 
-/** Clears the per-process digest cache (tests). */
-export function clearModalBaseImageDigestCache(): void {
+/** Resets the per-process digest cache, optionally with a fake clock (tests). */
+export function resetModalBaseImageDigestCache(options?: {
+  now?: () => number;
+}): void {
+  cacheClock = options?.now ?? Date.now;
   digestCache.clear();
 }
