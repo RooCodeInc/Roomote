@@ -154,7 +154,8 @@ function AddCustomSkillDialog({
                       disabled={
                         isSaving ||
                         environments.isPending ||
-                        environments.data?.environments.length === 0
+                        !environments.data ||
+                        environments.data.environments.length === 0
                       }
                     />
                     <Label
@@ -166,6 +167,11 @@ function AddCustomSkillDialog({
                   </div>
                 ) : null}
               </RadioGroup>
+              {isAdmin && environments.isError ? (
+                <p className="text-sm text-destructive" role="alert">
+                  Failed to load environments. Try again.
+                </p>
+              ) : null}
               {availability === 'environment' ? (
                 <div className="space-y-2 rounded-md border p-3">
                   {environments.data?.environments.map((environment) => (

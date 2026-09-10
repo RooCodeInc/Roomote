@@ -34,6 +34,7 @@ const { state, createMock, updateMock, deleteMock, saveManualMock } =
         { id: '00000000-0000-4000-8000-000000000012', name: 'Beta' },
       ],
       createResult: null as Promise<{ success: true }> | null,
+      environmentError: false,
       isAdmin: false,
     },
     createMock: vi.fn(
@@ -80,11 +81,16 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['customSkills', 'list'],
         queryOptions: () => ({
           queryKey: ['customSkills', 'list'],
-          queryFn: async () => ({
-            deploymentName: 'this deployment',
-            environments: state.environments,
-            installed: [],
-          }),
+          queryFn: async () => {
+            if (state.environmentError) {
+              throw new Error('Environment query failed');
+            }
+            return {
+              deploymentName: 'this deployment',
+              environments: state.environments,
+              installed: [],
+            };
+          },
         }),
       },
       saveManual: {
@@ -162,6 +168,7 @@ function renderSkills() {
 beforeEach(() => {
   vi.clearAllMocks();
   state.createResult = null;
+  state.environmentError = false;
   state.isAdmin = false;
 });
 
@@ -295,6 +302,26 @@ it('keeps the submitted catalog invalidation stable while creation is pending', 
   expect(invalidate).not.toHaveBeenCalledWith({
     queryKey: ['customSkills', 'list'],
   });
+});
+
+it('disables environment creation when environments fail to load', async () => {
+  state.isAdmin = true;
+  state.environmentError = true;
+  renderSkills();
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Add Custom Skill' }),
+  );
+  const dialog = screen.getByRole('dialog');
+
+  const loadError = await within(dialog).findByText(
+    'Failed to load environments. Try again.',
+  );
+  expect(loadError).toHaveAttribute('role', 'alert');
+  expect(
+    within(dialog).getByRole('radio', {
+      name: 'Only in selected environments',
+    }),
+  ).toBeDisabled();
 });
 
 it('updates a creator skill and invalidates the catalog', async () => {
