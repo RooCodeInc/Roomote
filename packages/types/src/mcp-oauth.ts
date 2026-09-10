@@ -507,6 +507,8 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     description: `Enable Sentry so this deployment can access alerts and performance indicators from ${PRODUCT_NAME} tasks.`,
     icon: 'sentry',
     connectionScope: 'deployment',
+    instructions:
+      'Sentry advertises only a few tools directly (find_organizations, find_projects, search_issues, search_events, get_sentry_resource). Reach everything else (issue details, event stack traces, breadcrumbs, tag values, issue events, releases, traces, replays, attachments, monitors, alert rules, docs) by calling search_sentry_tools with a short query, then execute_sentry_tool with the returned tool name and arguments. Which tools exist depends on the access the admin granted when connecting. Treat Sentry as read-only unless the request explicitly asks to change Sentry state: do not resolve, assign, ignore, or otherwise update issues, and do not create or modify projects, teams, DSNs, or monitors on your own initiative.',
   },
   {
     id: 'pylon',
