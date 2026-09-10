@@ -73,6 +73,52 @@ describe('mock AgentMail harness config', () => {
     }
   });
 
+  it('keeps seeded events so a scenario can redeliver one by id', async () => {
+    const payload = JSON.stringify({
+      type: 'event',
+      event_type: 'message.received',
+      event_id: 'evt_seeded',
+      message: {
+        message_id: 'm_seeded',
+        thread_id: 'thread_seeded',
+        inbox_id: 'roomote@agentmail.to',
+        from: 'grace@example.com',
+        to: ['roomote@agentmail.to'],
+        text: 'seeded',
+        timestamp: '2026-08-01T00:00:00.000Z',
+      },
+    });
+    const config = parseMockAgentMailConfig({
+      state: {
+        inboxes: [{ inbox_id: 'roomote@agentmail.to' }],
+        events: [
+          {
+            event_id: 'evt_seeded',
+            svix_id: 'msg_seeded_svix',
+            event_type: 'message.received',
+            inbox_id: 'roomote@agentmail.to',
+            message_id: 'm_seeded',
+            payload,
+          },
+        ],
+      },
+      replay: [{ kind: 'redeliver', eventId: 'evt_seeded' }],
+    });
+    expect(config.state.events?.[0]?.event_id).toBe('evt_seeded');
+
+    const server = new MockAgentMailServer({ state: config.state });
+    await server.start();
+    try {
+      const result = await server.dispatch(config.replay![0]!);
+      // A redelivery reuses the seeded svix id, which is what lets the
+      // production verifier recognize it as a duplicate.
+      expect(result.eventId).toBe('evt_seeded');
+      expect(result.svixId).toBe('msg_seeded_svix');
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('accepts the checked-in example scenario', async () => {
     const raw = await readFile(
       join(__dirname, '..', '..', 'scripts', 'mock-agentmail.example.json'),

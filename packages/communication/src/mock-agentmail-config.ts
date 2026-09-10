@@ -86,6 +86,23 @@ const configSchema = z.object({
       )
       .optional(),
     messages: z.array(z.record(z.unknown())).optional(),
+    // Seeded events make `kind: "redeliver"` usable from a scenario file:
+    // the redelivery reuses the stored svix id and resends the payload.
+    events: z
+      .array(
+        z
+          .object({
+            event_id: z.string().min(1),
+            svix_id: z.string().min(1),
+            event_type: z.string().min(1),
+            inbox_id: z.string().min(1),
+            message_id: z.string().min(1),
+            payload: z.string().min(1),
+            deliveries: z.array(z.record(z.unknown())).optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
   }),
   replay: z
     .array(

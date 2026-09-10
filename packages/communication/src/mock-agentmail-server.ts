@@ -249,7 +249,11 @@ function normalizeState(state: MockAgentMailState): MockAgentMailState {
       created_at: webhook.created_at ?? new Date(0).toISOString(),
     })),
     messages: (state.messages ?? []).map((message) => ({ ...message })),
-    events: (state.events ?? []).map((event) => ({ ...event })),
+    // Seeded events may omit the delivery log; a redelivery appends to it.
+    events: (state.events ?? []).map((event) => ({
+      ...event,
+      deliveries: event.deliveries ?? [],
+    })),
   };
 }
 
