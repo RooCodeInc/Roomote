@@ -9,6 +9,7 @@ import {
 import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { useExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { getAutomationOnboardingStatusCommand } from '../onboarding-status';
 
@@ -34,6 +35,8 @@ const adminAuth: UserAuthSuccess = {
   },
 };
 
+useExclusiveAutomationSettingsDatabaseLock();
+
 describe('getAutomationOnboardingStatusCommand', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
@@ -54,10 +57,10 @@ describe('getAutomationOnboardingStatusCommand', () => {
     fetchSpy.mockRestore();
   });
 
-  it('reports no enabled automations on a fresh deployment without calling Slack', async () => {
+  it('reports the default manager stats automation without calling Slack', async () => {
     await expect(
       getAutomationOnboardingStatusCommand(adminAuth),
-    ).resolves.toEqual({ hasEnabledAutomations: false });
+    ).resolves.toEqual({ hasEnabledAutomations: true });
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -77,6 +80,7 @@ describe('getAutomationOnboardingStatusCommand', () => {
   });
 
   it('still reports nothing enabled when an automation exists but is off', async () => {
+    // Override the seeded manager-stats default so this case is fully off.
     await upsertAutomation(db, {
       key: 'manager_stats',
       enabled: false,

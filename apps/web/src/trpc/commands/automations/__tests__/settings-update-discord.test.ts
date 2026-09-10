@@ -19,6 +19,7 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { useExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { updateBackgroundAgentSettingsCommand } from '../settings-update';
 import { mergeAnnouncerDestinationInputSchema } from '../settings-schema';
@@ -43,6 +44,8 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
 vi.mock('@roomote/telemetry/server', () => ({
   captureActivationAutomationChanged: mockCaptureActivationAutomationChanged,
 }));
+
+useExclusiveAutomationSettingsDatabaseLock();
 
 // Keep the test hermetic: the command constructs a SlackNotifier whenever a
 // Slack installation exists and probes channel membership/names after saving.
@@ -242,6 +245,11 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   });
 
   it('tracks a built-in automation when its enabled state changes', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     await insertAvailableDiscordChannel({
       guildId: 'guild-1',
       channelId: 'channel-1',
@@ -480,6 +488,11 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   });
 
   it('does not track a built-in automation when its enabled state is unchanged', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     const result = await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({ savingAutomation: 'managerStats' }),
@@ -664,6 +677,11 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   }, 15_000);
 
   it('switches a Discord manager channel to Slack and clears Discord', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     await insertSlackInstallation();
     await db.insert(deploymentSettings).values({
       id: 'default',

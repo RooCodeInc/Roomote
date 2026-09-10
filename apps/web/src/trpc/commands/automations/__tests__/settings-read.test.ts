@@ -10,8 +10,11 @@ import {
 import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { useExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { getBackgroundAgentSettingsCommand } from '../settings-read';
+
+useExclusiveAutomationSettingsDatabaseLock();
 
 const SETTINGS_READ_USER_ID = 'user-settings-read-admin';
 const MANAGER_CHANNEL_ID = 'CMANAGER1';
