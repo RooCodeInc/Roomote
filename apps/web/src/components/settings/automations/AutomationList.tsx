@@ -1,7 +1,6 @@
 'use client';
 
 import type { ComponentType, ReactNode } from 'react';
-import { createContext, useContext } from 'react';
 
 import {
   Input,
@@ -12,34 +11,6 @@ import {
 } from '@/components/system';
 
 export type AutomationListFilter = 'all' | 'custom' | 'built-in';
-
-const AutomationListOrderContext = createContext<ReadonlyMap<string, number>>(
-  new Map(),
-);
-
-export function useAutomationListOrder(name: string) {
-  return useContext(AutomationListOrderContext).get(name);
-}
-
-export function AutomationListOrderProvider({
-  names,
-  children,
-}: {
-  names: readonly string[];
-  children: ReactNode;
-}) {
-  const order = new Map(
-    names
-      .toSorted((left, right) => left.localeCompare(right))
-      .map((name, index) => [name, index]),
-  );
-
-  return (
-    <AutomationListOrderContext.Provider value={order}>
-      {children}
-    </AutomationListOrderContext.Provider>
-  );
-}
 
 export function AutomationListToolbar({
   filter,
@@ -134,7 +105,6 @@ export function AutomationListRow({
   description,
   enabledControl,
   actions,
-  order: explicitOrder,
 }: {
   icon: ComponentType<{ className?: string }>;
   name: string;
@@ -142,16 +112,10 @@ export function AutomationListRow({
   description: ReactNode;
   enabledControl: ReactNode;
   actions?: ReactNode;
-  order?: number;
 }) {
-  const contextualOrder = useAutomationListOrder(name);
-  const order = explicitOrder ?? contextualOrder;
-
   return (
     <div
       role="row"
-      aria-rowindex={order === undefined ? undefined : order + 2}
-      style={order === undefined ? undefined : { order }}
       className="grid grid-cols-[2rem_1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[2rem_1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] md:items-center md:gap-4 md:px-4 md:py-3"
     >
       <div

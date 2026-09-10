@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from '@testing-library/react';
 import { toast } from 'sonner';
@@ -1029,11 +1030,14 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     await screen.findByText('Triage Dependabot Alerts');
-    const providerSupport = screen.getAllByText(/GitHub only/)[0]!;
-    expect(providerSupport.tagName).toBe('SPAN');
-    expect(providerSupport.closest('[role="row"]')).toHaveTextContent(
-      'Triage Dependabot Alerts',
+    const dependabotRow = screen
+      .getByText('Triage Dependabot Alerts')
+      .closest('[role="row"]');
+    expect(dependabotRow).not.toBeNull();
+    const providerSupport = within(dependabotRow as HTMLElement).getByText(
+      /GitHub only/,
     );
+    expect(providerSupport.tagName).toBe('SPAN');
   });
 
   it('renders custom and built-in automations in one list by default', async () => {
@@ -1097,23 +1101,15 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    const firstCustomRow = (
-      await screen.findByText('Aardvark custom automation')
-    ).closest('[role="row"]');
-    const firstBuiltInRow = screen
-      .getByText('Alert on Config Errors')
-      .closest('[role="row"]');
-    const lastCustomRow = screen
-      .getByText('Zulu custom automation')
-      .closest('[role="row"]');
+    await screen.findByText('Aardvark custom automation');
+    const orderedRows = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.textContent ?? '');
 
-    expect(firstCustomRow).toHaveStyle({ order: 0 });
-    expect(
-      Number((firstBuiltInRow as HTMLElement).style.order),
-    ).toBeGreaterThan(0);
-    expect(Number((lastCustomRow as HTMLElement).style.order)).toBeGreaterThan(
-      Number((firstBuiltInRow as HTMLElement).style.order),
-    );
+    expect(orderedRows[0]).toContain('Aardvark custom automation');
+    expect(orderedRows[1]).toContain('Alert on Config Errors');
+    expect(orderedRows.at(-1)).toContain('Zulu custom automation');
     expect(
       state.customAutomations.map((automation) => automation.name),
     ).toEqual(['Zulu custom automation', 'Aardvark custom automation']);
