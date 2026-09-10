@@ -86,7 +86,7 @@ describe('bounded footer refresh registry', () => {
       JSON.stringify(target),
     );
   });
-  it('settles only quiet Sessions with nothing running or previewing', () => {
+  it('settles only quiet Sessions with nothing running', () => {
     const now = THREAD_FOOTER_SETTLED_AFTER_MS * 2;
     vi.spyOn(Date, 'now').mockReturnValue(now);
     const recent = { sessionActivityAt: now - 60_000 };
@@ -101,7 +101,7 @@ describe('bounded footer refresh registry', () => {
     ).toEqual({ active: true, settled: false });
     expect(
       classifyThreadFooterActivity({ ...quiet, livePreviewUrl: 'https://p' }),
-    ).toEqual({ active: true, settled: false });
+    ).toEqual({ active: false, settled: true });
     expect(
       classifyThreadFooterActivity({
         ...recent,

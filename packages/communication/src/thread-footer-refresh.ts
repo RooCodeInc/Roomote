@@ -208,7 +208,7 @@ async function mergeCarriedPullRequests(
 }
 
 export type ThreadFooterActivity = {
-  /** Coding is running or a preview is live: the footer can change any moment. */
+  /** Coding is running, so the footer can change any moment. */
   active: boolean;
   /** Nothing is running and the Session has been quiet long enough to stop polling. */
   settled: boolean;
@@ -220,8 +220,7 @@ export function classifyThreadFooterActivity(context: {
   /** Session `activityAt` in epoch milliseconds; null when there is no Session. */
   sessionActivityAt?: number | null;
 }): ThreadFooterActivity {
-  const active =
-    (context.runningTasks?.count ?? 0) > 0 || Boolean(context.livePreviewUrl);
+  const active = (context.runningTasks?.count ?? 0) > 0;
   const quietForMs = Date.now() - (context.sessionActivityAt ?? 0);
   return {
     active,
