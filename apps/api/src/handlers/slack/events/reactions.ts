@@ -171,11 +171,6 @@ const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
 const UNLINKED_SLACK_ACCOUNT_FAST_LAUNCH_FAILURE =
   'This suggestion starts in Fast mode, which needs a linked Roomote account. Link your account, then react again.';
 
-/**
- * The Slack thread that hosts a suggestion's origin Session, when it has one
- * in this workspace. A launch announces there, inside the automation's own
- * report thread, instead of seeding a separate top-level thread.
- */
 async function resolveOriginSessionSlackThread(input: {
   originSessionId: string;
   teamId: string;
@@ -243,6 +238,7 @@ async function launchTaskSuggestionTaskFromReaction({
   const cardColumns = {
     id: true as const,
     workItemId: true as const,
+    channelId: true as const,
     metadata: true as const,
   };
 
@@ -536,6 +532,7 @@ async function launchTaskSuggestionTaskFromReaction({
     title: workItem.title,
     brief: suggestionBrief,
   });
+  const isSuggestedTask = suggestionType === 'suggested_tasks';
   const seededSuggestionSlackText = buildSeededSuggestionSlackText(
     suggestionSlackText,
     reactionEvent.user,
@@ -557,29 +554,123 @@ async function launchTaskSuggestionTaskFromReaction({
       : null,
   });
 
-  let announceMessageTs: string | undefined;
-  let announceChannelId = channelId;
+  const storedExecutionChannelId =
+    isSuggestedTask &&
+    typeof suggestionCard.metadata?.executionChannelId === 'string'
+      ? suggestionCard.metadata.executionChannelId
+      : null;
+  const storedExecutionThreadTs =
+    isSuggestedTask &&
+    typeof suggestionCard.metadata?.executionThreadTs === 'string'
+      ? suggestionCard.metadata.executionThreadTs
+      : null;
+  let announceMessageTs =
+    storedExecutionChannelId && storedExecutionThreadTs
+      ? storedExecutionThreadTs
+      : undefined;
+  let announceChannelId = storedExecutionChannelId ?? channelId;
+  const clearExecutionThread = async (): Promise<void> => {
+    if (!announceMessageTs) {
+      return;
+    }
+    if (!isSuggestedTask) {
+      await slack
+        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
+        .catch(() => {});
+      return;
+    }
+    const {
+      executionChannelId: _executionChannelId,
+      executionThreadTs: _executionThreadTs,
+      ...metadata
+    } = suggestionCard.metadata ?? {};
+    const cleared = await db
+      .update(trackedMessages)
+      .set({ metadata, updatedAt: new Date() })
+      .where(
+        and(
+          eq(trackedMessages.id, suggestionCard.id),
+          eq(trackedMessages.surface, 'slack'),
+          eq(trackedMessages.channelId, suggestionCard.channelId ?? channelId),
+        ),
+      )
+      .then(() => true)
+      .catch((error) => {
+        apiLogger.warn(
+          `${logPrefix} failed to clear rejected suggestion execution thread: ${formatErrorForLog(error)}`,
+        );
+        return false;
+      });
+    if (cleared) {
+      await slack
+        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
+        .catch(() => {});
+    }
+  };
   let taskRun: { id: number | null; taskId: string | null } | null = null;
   try {
-    const originSessionId = await resolveSuggestionOriginSessionId(
-      workItem.sourceTaskId,
-      suggestionCard.metadata?.originSessionId,
-    );
+    const originSessionId = isSuggestedTask
+      ? null
+      : await resolveSuggestionOriginSessionId(
+          workItem.sourceTaskId,
+          suggestionCard.metadata?.originSessionId,
+        );
     const originThread = originSessionId
       ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
       : null;
-    announceChannelId = originThread?.channelId ?? channelId;
-    announceMessageTs = await slack.postMessage({
-      channel: announceChannelId,
-      ...(originThread ? { thread_ts: originThread.threadTs } : {}),
-      text: seededSuggestionSlackText,
-      blocks: [
-        {
-          type: 'markdown',
-          text: seededSuggestionSlackText,
-        },
-      ],
-    });
+    announceChannelId =
+      storedExecutionChannelId ?? originThread?.channelId ?? channelId;
+
+    if (!announceMessageTs) {
+      if (isSuggestedTask) {
+        const acknowledged = await slack.addReaction?.({
+          channel: channelId,
+          timestamp: messageTs,
+          name: ackEmoji,
+        });
+        if (acknowledged === false) {
+          await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
+          apiLogger.warn(
+            `${logPrefix} failed to add the Slack launch acknowledgement`,
+          );
+          return false;
+        }
+      }
+      announceMessageTs = await slack.postMessage({
+        channel: announceChannelId,
+        ...(originThread ? { thread_ts: originThread.threadTs } : {}),
+        text: seededSuggestionSlackText,
+        blocks: [
+          {
+            type: 'markdown',
+            text: seededSuggestionSlackText,
+          },
+        ],
+      });
+
+      if (announceMessageTs && isSuggestedTask) {
+        await db
+          .update(trackedMessages)
+          .set({
+            metadata: {
+              ...suggestionCard.metadata,
+              executionChannelId: announceChannelId,
+              executionThreadTs: announceMessageTs,
+            },
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(trackedMessages.id, suggestionCard.id),
+              eq(trackedMessages.surface, 'slack'),
+              eq(
+                trackedMessages.channelId,
+                suggestionCard.channelId ?? channelId,
+              ),
+            ),
+          );
+      }
+    }
 
     if (!announceMessageTs) {
       await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
@@ -661,9 +752,8 @@ async function launchTaskSuggestionTaskFromReaction({
         if (!suggestionWorkspace) {
           throw new Error('Setup suggestion workspace was not resolved.');
         }
-        // The card already names the workspace, so the owning Session
-        // delegates the task straight away, without a Fast turn. The seeded
-        // thread is the Session's home in Slack.
+        // The card already names the workspace, so a new execution Session
+        // delegates the task straight away without a Fast turn.
         const workspace = suggestionWorkspace;
         const launchOwnerUserId = activeUserMapping?.userId ?? null;
         if (!launchOwnerUserId) {
@@ -684,7 +774,9 @@ async function launchTaskSuggestionTaskFromReaction({
               threadId: launchThreadTs,
             },
           },
-          launchId: `slack-suggestion:${workItemId}:${launchThreadTs}`,
+          launchId: isSuggestedTask
+            ? `slack-suggestion:${workItemId}`
+            : `slack-suggestion:${workItemId}:${launchThreadTs}`,
           prompt: suggestionSlackText,
           surface: 'slack',
           initiator,
@@ -736,9 +828,7 @@ async function launchTaskSuggestionTaskFromReaction({
       launchResult.status === 'rejected' ||
       launchResult.status === 'failed'
     ) {
-      await slack
-        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
-        .catch(() => {});
+      await clearExecutionThread();
       await postSuggestionLaunchFailureMessage({
         slack,
         channelId,
@@ -759,9 +849,7 @@ async function launchTaskSuggestionTaskFromReaction({
       apiLogger.warn(
         `${logPrefix} failed to finalize work item ${workItemId}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
       );
-      await slack
-        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
-        .catch(() => {});
+      await clearExecutionThread();
       return true;
     }
 
@@ -787,11 +875,7 @@ async function launchTaskSuggestionTaskFromReaction({
     );
     return true;
   } catch (error) {
-    if (announceMessageTs) {
-      await slack
-        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
-        .catch(() => {});
-    }
+    await clearExecutionThread();
     await releaseWorkItemClaim(db, { id: workItemId, claimedAt }).catch(
       () => undefined,
     );
