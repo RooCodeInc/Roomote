@@ -235,7 +235,7 @@ describe('chat message copy builders', () => {
       buildThreadReplyFooterText({
         taskUrl: 'https://roomote.dev/task/123',
       }),
-    ).toBe('_[Web app](https://roomote.dev/task/123)_');
+    ).toBe('[Open in Roomote](https://roomote.dev/task/123)');
 
     expect(
       buildThreadReplyFooterText({
@@ -249,7 +249,7 @@ describe('chat message copy builders', () => {
         livePreviewUrl: 'https://preview.roomote.dev',
       }),
     ).toBe(
-      '_[Live preview](https://preview.roomote.dev) · [PR #7](https://github.com/org/repo/pull/7) · [Web app](https://roomote.dev/task/123)_',
+      '[Live preview](https://preview.roomote.dev) · [PR #7](https://github.com/org/repo/pull/7) · [Open in Roomote](https://roomote.dev/task/123)',
     );
 
     expect(
@@ -267,7 +267,7 @@ describe('chat message copy builders', () => {
         ],
       }),
     ).toBe(
-      '_[PR #7](https://github.com/org/repo/pull/7) · [PR #8](https://github.com/org/other-repo/pull/8) · [Web app](https://roomote.dev/task/123)_',
+      '[PR #7](https://github.com/org/repo/pull/7) · [PR #8](https://github.com/org/other-repo/pull/8) · [Open in Roomote](https://roomote.dev/task/123)',
     );
 
     expect(
@@ -277,7 +277,7 @@ describe('chat message copy builders', () => {
         formatLink: (label, url) => `<${url}|${label}>`,
       }),
     ).toBe(
-      '_<https://preview.roomote.dev|Live preview> · <https://roomote.dev/task/123|Web app>_',
+      '<https://preview.roomote.dev|Live preview> · <https://roomote.dev/task/123|Open in Roomote>',
     );
 
     expect(
@@ -285,7 +285,7 @@ describe('chat message copy builders', () => {
         taskUrl: 'https://roomote.dev/task/123',
         formatFooterText: (text) => `-# ${text}`,
       }),
-    ).toBe('-# [Web app](https://roomote.dev/task/123)');
+    ).toBe('-# [Open in Roomote](https://roomote.dev/task/123)');
   });
 
   it.each([0, 1, 2])(
@@ -302,7 +302,7 @@ describe('chat message copy builders', () => {
           livePreviewUrl: 'https://preview.roomote.dev',
         }),
       ).toBe(
-        `_[${label}](https://roomote.dev/tasks) · [Live preview](https://preview.roomote.dev) · [Web app](https://roomote.dev/sessions/1)_`,
+        `[${label}](https://roomote.dev/tasks) · [Live preview](https://preview.roomote.dev) · [Open in Roomote](https://roomote.dev/sessions/1)`,
       );
     },
   );
@@ -323,7 +323,7 @@ describe('chat message copy builders', () => {
     'https://roomote.dev/sessions/1?task=task-1&artifact=notes.md&v=2&utm_source=slack',
   ])('preserves caller-provided navigation in %s', (taskUrl) => {
     expect(buildThreadReplyFooterText({ taskUrl })).toBe(
-      `_[Web app](${taskUrl})_`,
+      `[Open in Roomote](${taskUrl})`,
     );
   });
 
@@ -333,7 +333,7 @@ describe('chat message copy builders', () => {
         taskUrl: 'https://roomote.dev/setup?utm_source=slack',
         webAppUrl: 'https://roomote.dev/sessions/owner',
       }),
-    ).toBe('_[Web app](https://roomote.dev/setup?utm_source=slack)_');
+    ).toBe('[Open in Roomote](https://roomote.dev/setup?utm_source=slack)');
   });
 
   it('opens the owning Session with the thread task selected, retaining attribution', () => {
@@ -348,7 +348,7 @@ describe('chat message copy builders', () => {
         },
       }),
     ).toBe(
-      '_[1 running task](https://roomote.dev/sessions/owner?task=task-1) · [Web app](https://roomote.dev/sessions/owner?utm_source=slack&utm_medium=link&utm_campaign=reply&task=task-1)_',
+      '[1 running task](https://roomote.dev/sessions/owner?task=task-1) · [Open in Roomote](https://roomote.dev/sessions/owner?utm_source=slack&utm_medium=link&utm_campaign=reply&task=task-1)',
     );
   });
 

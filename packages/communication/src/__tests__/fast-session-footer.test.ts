@@ -34,7 +34,7 @@ describe('buildFastSessionReplyFooterText', () => {
         sessionId: '11111111-1111-4111-8111-111111111111',
       });
 
-      expect(footer).toContain('Web app');
+      expect(footer).toContain('Open in Roomote');
       expect(footer).toContain(
         '/sessions/11111111-1111-4111-8111-111111111111',
       );
@@ -46,22 +46,22 @@ describe('buildFastSessionReplyFooterText', () => {
     {
       provider: 'slack' as const,
       expectedPrLink: '<https://github.com/roomote/roomote/pull/123|PR #123>',
-      expectedWebLink: '|Web app>',
+      expectedWebLink: '|Open in Roomote>',
     },
     {
       provider: 'discord' as const,
       expectedPrLink: '[PR #123](https://github.com/roomote/roomote/pull/123)',
-      expectedWebLink: '[Web app](',
+      expectedWebLink: '[Open in Roomote](',
     },
     {
       provider: 'teams' as const,
       expectedPrLink: '[PR #123](https://github.com/roomote/roomote/pull/123)',
-      expectedWebLink: '[Web app](',
+      expectedWebLink: '[Open in Roomote](',
     },
     {
       provider: 'telegram' as const,
       expectedPrLink: '[PR #123](https://github.com/roomote/roomote/pull/123)',
-      expectedWebLink: '[Web app](',
+      expectedWebLink: '[Open in Roomote](',
     },
   ])(
     'includes a linked pull request in the $provider footer',
@@ -116,7 +116,7 @@ describe('buildFastSessionReplyFooterText', () => {
         livePreviewUrl: 'https://preview.roomote.dev',
       }),
     ).toBe(
-      `<sub><em>[Live preview](https://preview.roomote.dev) · [PR #123](https://github.com/roomote/roomote/pull/123) · [Web app](${buildFastSessionUrl('github', sessionId)})</em></sub>`,
+      `<sub>[Live preview](https://preview.roomote.dev) · [PR #123](https://github.com/roomote/roomote/pull/123) · [Open in Roomote](${buildFastSessionUrl('github', sessionId)})</sub>`,
     );
   });
 
@@ -132,7 +132,7 @@ describe('buildFastSessionReplyFooterText', () => {
     });
 
     expect(footer).not.toContain('Working on');
-    expect(footer).toContain('Web app');
+    expect(footer).toContain('Open in Roomote');
   });
 
   it.each([
@@ -165,14 +165,16 @@ describe('buildFastSessionReplyFooterText', () => {
         ),
       ).toBe(false);
       expect(footer).toContain(
-        provider === 'slack' ? '|Web app>' : '[Web app](',
+        provider === 'slack' ? '|Open in Roomote>' : '[Open in Roomote](',
       );
       expect(footer).toMatch(
         provider === 'github'
-          ? /^<sub><em>/
+          ? /^<sub>/
           : provider === 'discord'
-            ? /^-# _/
-            : /^_/,
+            ? /^-# /
+            : provider === 'slack'
+              ? /^</
+              : /^\[/,
       );
     },
   );

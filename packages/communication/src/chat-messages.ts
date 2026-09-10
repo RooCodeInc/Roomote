@@ -301,7 +301,7 @@ export function buildThreadReplyFooterText({
   runningTasks,
   webAppUrl,
   formatLink = formatMarkdownLink,
-  formatFooterText = (text) => `_${text}_`,
+  formatFooterText = (text) => text,
 }: {
   taskUrl: string;
   linkedPrs?: ThreadReplyLinkedPr[];
@@ -340,7 +340,7 @@ export function buildThreadReplyFooterText({
     sessionUrl.searchParams.set('task', ownTaskId);
     webUrl = sessionUrl;
   }
-  items.push(formatLink('Web app', webUrl.toString()));
+  items.push(formatLink('Open in Roomote', webUrl.toString()));
   return formatFooterText(items.join(' · '));
 }
 

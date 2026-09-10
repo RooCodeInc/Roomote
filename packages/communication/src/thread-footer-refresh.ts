@@ -137,8 +137,8 @@ export async function forgetThreadFooterRefresh(
 /** Only accept the navigation link in a product-generated footer, never body links. */
 export function getThreadFooterNavigationUrl(footerText: string): URL | null {
   const link =
-    /<([^<>|]+)\|[Ww]eb app>/.exec(footerText)?.[1] ??
-    /\[[Ww]eb app\]\(([^()]+)\)/.exec(footerText)?.[1];
+    /<([^<>|]+)\|(?:Open in Roomote|[Ww]eb app)>/.exec(footerText)?.[1] ??
+    /\[(?:Open in Roomote|[Ww]eb app)\]\(([^()]+)\)/.exec(footerText)?.[1];
   if (!link) return null;
   try {
     const url = new URL(link.replaceAll('&amp;', '&'));
@@ -321,12 +321,9 @@ export async function resolveCurrentThreadFooter(
         ? (label, href) => `<${href}|${label}>`
         : formatMarkdownLink,
     ...(provider === 'discord'
-      ? {
-          formatFooterText: (text: string) =>
-            footerText.startsWith('-# _') ? `-# _${text}_` : `-# ${text}`,
-        }
+      ? { formatFooterText: (text: string) => `-# ${text}` }
       : provider === 'github'
-        ? { formatFooterText: (text: string) => `<sub><em>${text}</em></sub>` }
+        ? { formatFooterText: (text: string) => `<sub>${text}</sub>` }
         : {}),
   });
   return {

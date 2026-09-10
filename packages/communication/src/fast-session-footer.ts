@@ -171,12 +171,12 @@ export function buildFastSessionReplyFooterText(params: {
       : params.provider === 'discord'
         ? {
             formatLink: formatMarkdownLink,
-            formatFooterText: (text: string) => `-# _${text}_`,
+            formatFooterText: (text: string) => `-# ${text}`,
           }
         : params.provider === 'github'
           ? {
               formatLink: formatMarkdownLink,
-              formatFooterText: (text: string) => `<sub><em>${text}</em></sub>`,
+              formatFooterText: (text: string) => `<sub>${text}</sub>`,
             }
           : { formatLink: formatMarkdownLink }),
   });

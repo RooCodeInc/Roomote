@@ -714,7 +714,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
           channelId,
           ...(threadId ? { threadId } : {}),
           ...(currentMessageId ? { replyToMessageId: currentMessageId } : {}),
-          text: expect.stringContaining('[Web app]'),
+          text: expect.stringContaining('[Open in Roomote]'),
         }),
       );
       expect(binding?.messageId).toBe(

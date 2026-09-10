@@ -846,7 +846,7 @@ describe('deliverFastAgentParentEvent', () => {
             elements: [
               {
                 type: 'mrkdwn',
-                text: expect.stringContaining('|Web app>'),
+                text: expect.stringContaining('|Open in Roomote>'),
               },
             ],
           },
@@ -2212,7 +2212,7 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'channel-1',
       idempotencyKey: 'fast-parent-artifact:artifact-1:v1',
       text: expect.stringMatching(
-        /^The proof is ready\.\n\n-# _\[Web app\]\(.*\/sessions\/.*\)_$/,
+        /^The proof is ready\.\n\n-# \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
       ),
       textFormat: 'markdown',
       images: [
@@ -2305,7 +2305,7 @@ describe('deliverFastAgentParentEvent', () => {
           ...(threadId ? { threadId } : {}),
           text: expect.stringMatching(
             new RegExp(
-              `^The proof is ready\\.\\n\\n_\\[Web app\\]\\(.*utm_source=${surface}.*\\)_$`,
+              `^The proof is ready\\.\\n\\n\\[Open in Roomote\\]\\(.*utm_source=${surface}.*\\)$`,
             ),
           ),
           textFormat: 'markdown',
@@ -3213,7 +3213,7 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
       text: expect.stringMatching(
-        /^There is new PR feedback\.\n\n-# _\[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Web app\]\(.*\/sessions\/.*\)_$/,
+        /^There is new PR feedback\.\n\n-# \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
       ),
       textFormat: 'markdown',
       images: [],

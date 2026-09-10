@@ -445,7 +445,7 @@ describe('processDiscordFastAgentMessage', () => {
     expect(provider.editMessage).toHaveBeenCalledWith({
       channelId: 'channel-1',
       messageId: 'retry-1',
-      text: 'Connection restored.\n\n-# _[Web app](https://roomote.example.com/sessions/fast-session-1?utm_source=discord&utm_medium=link&utm_campaign=discord.fast_reply)_',
+      text: 'Connection restored.\n\n-# [Open in Roomote](https://roomote.example.com/sessions/fast-session-1?utm_source=discord&utm_medium=link&utm_campaign=discord.fast_reply)',
     });
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
