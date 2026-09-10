@@ -491,8 +491,10 @@ For Gitea, repository webhook resync includes the `workflow_run` event so
 Actions completions reach Roomote; host matching uses the deployment
 `GITEA_BASE_URL`.
 
-In **Settings > Automations > CI Failure Triage**, choose the standard report
-destination and optionally describe **Additional rules** in natural language:
+For **Suggest Ideas**, **Summarize Merged PRs**, **Security Auditor**, **Code
+Quality Auditor**, **CI Failure Triage**, and **Merge announcer**, choose the
+standard report destination and optionally describe **Additional rules** in
+natural language:
 
 > Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.
 
@@ -502,13 +504,16 @@ workspace, when names could be ambiguous. Unclear, contradictory, unavailable,
 or unsupported rules cannot be saved. An inference provider must be available
 to interpret new rules. A failed save leaves the previous configuration intact.
 
-Repository restrictions apply to webhook failures and **Run now**. Explicit
+Repository restrictions apply to scheduled runs, **Run now**, and webhook runs
+where the automation uses them. Explicit
 restrictions select the matching repositories at save time; save revised rules
 to include newly added repositories. Destination-only rules do not limit scope:
-other repositories continue using the standard destination. Investigation and
-report-writing guidance can also be included. Workflow, job, branch, and time
-conditions are not supported in additional rules. Clear the rules to restore
-all-repository triage using the standard destination.
+other repositories continue using the standard destination. Workflow and
+report-writing guidance can also be included. Pre-run workflow, job, branch,
+and time conditions are not supported in Additional rules. Clear the rules to
+restore the automation's all-repository behavior using the standard
+destination. Existing **Suggestion preferences** and merged-PR **Additional
+instructions** remain separate and keep their current meaning.
 
 Repositories still need an active connection and a configured environment.
 **Run now** starts at most one eligible investigation per click, using that
