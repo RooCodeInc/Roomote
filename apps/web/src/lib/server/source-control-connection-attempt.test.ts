@@ -143,7 +143,7 @@ describe('connection attempts and request authorization (PostgreSQL)', () => {
       await db.delete(users).where(eq(users.id, user.id));
   });
 
-  it.each([false, 'true', null])(
+  it.each([false])(
     'fails closed on rollout value %s while preserving ordinary settings authorization and request visibility',
     async (flag) => {
       const { request, session } = await makeRequest();
@@ -203,6 +203,37 @@ describe('connection attempts and request authorization (PostgreSQL)', () => {
         }),
       ).toBeTruthy();
       expect(mocks.reconcile).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['true', null])(
+    'allows connection attempts unless rollout is explicitly false (value %s)',
+    async (flag) => {
+      await db
+        .update(deploymentSettings)
+        .set({
+          metadata:
+            flag === null ? {} : { optional_source_control_enabled: flag },
+        })
+        .where(eq(deploymentSettings.id, 'default'));
+      const { request, session } = await makeRequest();
+      expect(
+        await connectionRequestCommand(auth(admin), {
+          sessionId: session.id,
+          requestId: request.id,
+        }),
+      ).toMatchObject({ enabled: true, canCheck: true, canConnect: true });
+      const state = await beginConnectionAttempt(auth(admin), {
+        provider: 'gitlab',
+        requestId: request.id,
+      });
+      const sync = vi.fn(async () => ({ success: true }));
+      await completeConnectionAttempt(
+        auth(admin),
+        { provider: 'gitlab', state },
+        sync,
+      );
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(mocks.reconcile).toHaveBeenCalledTimes(1);
     },
   );
   it('authorizes reads but limits cancellation to requester/admin, and scopes IDs to the Session', async () => {
