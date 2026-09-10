@@ -429,6 +429,18 @@ describe('setup context on ordinary Fast session input', () => {
     // the registered callback gets a chance to admit or run the turn.
     await submitFastSessionUserInputCommand(auth, input);
     expect(mocks.upsertMessage).toHaveBeenCalledOnce();
+    expect(mocks.upsertMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          metadata: expect.objectContaining({
+            visibleInTranscript: true,
+            userId: 'user-1',
+            userName: 'User One',
+            userEmail: 'user@example.com',
+          }),
+        }),
+      }),
+    );
     expect(scheduled).toHaveLength(1);
 
     mocks.dbSelectLimit

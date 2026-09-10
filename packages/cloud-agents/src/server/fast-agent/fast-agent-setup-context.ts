@@ -80,6 +80,9 @@ async function completeEmptySetupIntegrationDiscovery(
 /** Rebuild trusted setup-only adapter behavior from durable, serializable data. */
 export function buildFastAgentSetupAdapter(
   context: FastAgentSetupTurnContext,
+  lifecycle: {
+    onIntegrationDiscoveryCompleted?: () => Promise<void>;
+  } = {},
 ): Pick<FastAgentTurnAdapter, 'assertTaskLaunch' | 'resolveUserInputPreset'> {
   return {
     resolveUserInputPreset: async (preset, setupIntegrationAnswers) => {
@@ -104,6 +107,7 @@ export function buildFastAgentSetupAdapter(
         }));
         if (options.length === 0) {
           await completeEmptySetupIntegrationDiscovery(context);
+          await lifecycle.onIntegrationDiscoveryCompleted?.();
           return [];
         }
         return [
