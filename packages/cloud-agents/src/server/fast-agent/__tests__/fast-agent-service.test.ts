@@ -618,6 +618,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
   });
 
+  it('includes saved routing rules in the Fast system prompt', async () => {
+    mocks.getDeploymentSettings.mockResolvedValueOnce({
+      globalAgentInstructions: null,
+      workspaceRoutingSettings: {
+        rules: [
+          {
+            description: 'Use App for frontend work and prefer GPT-5.6.',
+            target: 'env-1',
+          },
+        ],
+      },
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system;
+    expect(mocks.getDeploymentSettings).toHaveBeenCalledWith({
+      columns: {
+        globalAgentInstructions: true,
+        workspaceRoutingSettings: true,
+      },
+    });
+    expect(systemPrompt).toContain('## Routing Rules');
+    expect(systemPrompt).toContain(
+      'Use App for frontend work and prefer GPT-5.6. -> App [id: env-1]',
+    );
+  });
+
   it('cuts the trailing model request once the closeout is delivered', async () => {
     const adapter = callbacks();
     const abortedAtSecondRequest = vi.fn();
