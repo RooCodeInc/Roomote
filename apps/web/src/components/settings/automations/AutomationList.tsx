@@ -17,6 +17,7 @@ export function AutomationListToolbar({
   search,
   leading,
   action,
+  showBuiltInFilter = true,
   onFilterChange,
   onSearchChange,
 }: {
@@ -24,6 +25,7 @@ export function AutomationListToolbar({
   search: string;
   leading?: ReactNode;
   action?: ReactNode;
+  showBuiltInFilter?: boolean;
   onFilterChange: (filter: AutomationListFilter) => void;
   onSearchChange: (search: string) => void;
 }) {
@@ -42,17 +44,19 @@ export function AutomationListToolbar({
             ['custom', 'Custom'],
             ['built-in', 'Built-in'],
           ] as const
-        ).map(([value, label]) => (
-          <div key={value} className="flex items-center gap-2">
-            <RadioGroupItem value={value} id={`automation-filter-${value}`} />
-            <Label
-              htmlFor={`automation-filter-${value}`}
-              className="cursor-pointer text-sm font-normal"
-            >
-              {label}
-            </Label>
-          </div>
-        ))}
+        )
+          .filter(([value]) => showBuiltInFilter || value !== 'built-in')
+          .map(([value, label]) => (
+            <div key={value} className="flex items-center gap-2">
+              <RadioGroupItem value={value} id={`automation-filter-${value}`} />
+              <Label
+                htmlFor={`automation-filter-${value}`}
+                className="cursor-pointer text-sm font-normal"
+              >
+                {label}
+              </Label>
+            </div>
+          ))}
       </RadioGroup>
       <div className="relative">
         <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />

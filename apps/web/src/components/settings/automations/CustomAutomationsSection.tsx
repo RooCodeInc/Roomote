@@ -999,6 +999,7 @@ export function CustomAutomationsSection({
         search={search}
         leading={toolbarLeading}
         action={newButton}
+        showBuiltInFilter={Boolean(children)}
         onFilterChange={setFilter}
         onSearchChange={setSearch}
       />
