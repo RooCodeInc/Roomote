@@ -59,9 +59,8 @@ export async function cleanVoiceTranscriptCommand(
   input: { text: string },
 ): Promise<{ text: string }> {
   const text = input.text.trim();
-  const apiKey = await resolveVoiceOpenAiKey();
 
-  if (!apiKey) {
+  if (!(await resolveVoiceOpenAiKey())) {
     throw new TRPCError({
       code: 'PRECONDITION_FAILED',
       message: 'Voice is not configured for this deployment',
@@ -71,7 +70,13 @@ export async function cleanVoiceTranscriptCommand(
   const context = await loadVoiceWorkspaceContext(auth.userId);
 
   try {
-    return { text: await cleanVoiceTranscript({ apiKey, text, context }) };
+    return {
+      text: await cleanVoiceTranscript({
+        userId: auth.userId,
+        text,
+        context,
+      }),
+    };
   } catch (error) {
     console.error('[voice] Failed to clean transcript, using raw text', error);
     return { text };

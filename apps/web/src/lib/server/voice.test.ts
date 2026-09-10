@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const { generateTrackedNonTaskText } = vi.hoisted(() => ({
+  generateTrackedNonTaskText: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
+  generateTrackedNonTaskText,
+  NON_TASK_INFERENCE_SURFACES: {
+    voiceTranscriptCleanup: 'voice_transcript_cleanup',
+  },
+}));
+
 import { cleanVoiceTranscript, createVoiceLiveSession } from './voice';
 import type { VoiceWorkspaceContext } from './voice-context';
 
@@ -72,41 +83,37 @@ describe('createVoiceLiveSession', () => {
 });
 
 describe('cleanVoiceTranscript', () => {
-  it('gives the cleanup model the workspace names as vocabulary', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          output: [
-            {
-              type: 'message',
-              content: [
-                { type: 'output_text', text: 'Open the Roomote repo.' },
-              ],
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
-    );
-    vi.stubGlobal('fetch', fetchMock);
+  it('runs on the helper model with the workspace names as vocabulary', async () => {
+    generateTrackedNonTaskText.mockResolvedValue(' Open the Roomote repo. ');
 
     await expect(
       cleanVoiceTranscript({
-        apiKey: 'sk-test',
+        userId: 'user-1',
         text: 'um open the the room oat repo',
         context,
       }),
     ).resolves.toBe('Open the Roomote repo.');
 
-    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    const body = JSON.parse(String(request.body)) as {
-      model: string;
-      instructions: string;
-      input: string;
+    expect(generateTrackedNonTaskText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'voice_transcript_cleanup',
+        userId: 'user-1',
+        modelRole: 'small',
+        prompt: 'um open the the room oat repo',
+      }),
+    );
+    const { system } = generateTrackedNonTaskText.mock.calls[0]![0] as {
+      system: string;
     };
-    expect(body.model).toBe('gpt-5.4-mini');
-    expect(body.input).toBe('um open the the room oat repo');
-    expect(body.instructions).toContain('- RooCodeInc/Roomote');
-    expect(body.instructions).toContain('- GitHub');
+    expect(system).toContain('- RooCodeInc/Roomote');
+    expect(system).toContain('- GitHub');
+  });
+
+  it('rejects an empty cleanup result so the caller falls back to the raw text', async () => {
+    generateTrackedNonTaskText.mockResolvedValue('   ');
+
+    await expect(
+      cleanVoiceTranscript({ userId: 'user-1', text: 'hello', context }),
+    ).rejects.toThrow('Transcript cleanup returned no text');
   });
 });

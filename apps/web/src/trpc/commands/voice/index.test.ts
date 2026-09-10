@@ -112,7 +112,7 @@ describe('cleanVoiceTranscriptCommand', () => {
       }),
     ).resolves.toEqual({ text: 'Check the build status.' });
     expect(mockCleanVoiceTranscript).toHaveBeenCalledWith({
-      apiKey: 'sk-test',
+      userId: 'user-1',
       text: 'um check the the build status',
       context: voiceContext,
     });

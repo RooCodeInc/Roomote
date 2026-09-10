@@ -1,3 +1,7 @@
+import {
+  generateTrackedNonTaskText,
+  NON_TASK_INFERENCE_SURFACES,
+} from '@roomote/cloud-agents/server/non-task-provider-usage';
 import { resolveModelProviderEnvValue } from '@roomote/db/server';
 
 import {
@@ -23,12 +27,12 @@ const VOICE_LIVE_MODEL = 'gpt-live-1';
 const LIVE_SESSION_TIMEOUT_MS = 30_000;
 
 /**
- * Small non-reasoning pass that turns raw speech-to-text into the text that
- * enters the Session transcript. Kept on the voice key so cleanup is billed
- * with the rest of voice and works wherever GPT-Live does.
+ * Small pass that turns raw speech-to-text into the text that enters the
+ * Session transcript. Runs on the deployment's helper model through the
+ * shared non-task inference path, so it follows the operator's model choice
+ * and works on deployments whose inference is not on OpenAI.
  */
-const VOICE_TRANSCRIPT_MODEL = 'gpt-5.4-mini';
-const TRANSCRIPT_CLEANUP_TIMEOUT_MS = 8_000;
+const TRANSCRIPT_CLEANUP_TIMEOUT_MS = 10_000;
 const TRANSCRIPT_CLEANUP_MAX_OUTPUT_TOKENS = 2_048;
 const TRANSCRIPT_CLEANUP_MAX_VOCABULARY = 120;
 
@@ -147,53 +151,25 @@ export async function createVoiceLiveSession(options: {
 
 /** Clean one spoken utterance before it is sent to the Fast session. */
 export async function cleanVoiceTranscript(options: {
-  apiKey: string;
+  userId: string;
   text: string;
   context: VoiceWorkspaceContext;
 }): Promise<string> {
-  const response = await fetch(`${OPENAI_API_BASE_URL}/v1/responses`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${options.apiKey}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: VOICE_TRANSCRIPT_MODEL,
-      reasoning: { effort: 'none' },
-      instructions: buildTranscriptCleanupInstructions(
-        voiceContextVocabulary(options.context),
-      ),
-      input: options.text,
-      max_output_tokens: TRANSCRIPT_CLEANUP_MAX_OUTPUT_TOKENS,
-    }),
-    signal: AbortSignal.timeout(TRANSCRIPT_CLEANUP_TIMEOUT_MS),
+  const text = await generateTrackedNonTaskText({
+    surface: NON_TASK_INFERENCE_SURFACES.voiceTranscriptCleanup,
+    userId: options.userId,
+    modelRole: 'small',
+    system: buildTranscriptCleanupInstructions(
+      voiceContextVocabulary(options.context),
+    ),
+    prompt: options.text,
+    maxOutputTokens: TRANSCRIPT_CLEANUP_MAX_OUTPUT_TOKENS,
+    timeoutMs: TRANSCRIPT_CLEANUP_TIMEOUT_MS,
   });
 
-  if (!response.ok) {
-    const body = (await response.text().catch(() => '')).slice(0, 2_000);
-    throw new Error(
-      `OpenAI transcript cleanup request failed with status ${response.status}: ${body}`,
-    );
+  const cleaned = text.trim();
+  if (!cleaned) {
+    throw new Error('Transcript cleanup returned no text');
   }
-
-  const payload = (await response.json()) as {
-    output?: Array<{
-      type?: string;
-      content?: Array<{ type?: string; text?: string }>;
-    }>;
-  };
-
-  const text = (payload.output ?? [])
-    .filter((item) => item.type === 'message')
-    .flatMap((item) => item.content ?? [])
-    .filter((part) => part.type === 'output_text')
-    .map((part) => part.text ?? '')
-    .join('')
-    .trim();
-
-  if (!text) {
-    throw new Error('OpenAI transcript cleanup response was empty');
-  }
-
-  return text;
+  return cleaned;
 }
