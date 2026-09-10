@@ -168,51 +168,33 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
     expect(enqueueSessionWakeupFireBestEffort).not.toHaveBeenCalled();
   });
 
-  it('keeps ordinary reminders visible and deduplicated even when they copy follow-through fields', async () => {
-    const visible = await handleManageWakeupsToolCall(actor, {
-      ...ownTaskFollowThroughInput,
+  it('accepts explicit internal wakeups and keeps user reminders visible by default', async () => {
+    const internal = await handleManageWakeupsToolCall(actor, {
+      ...createInput,
       internal: true,
-    } as typeof ownTaskFollowThroughInput);
+    });
+    expect(internal).toMatchObject({
+      success: true,
+      duplicate: false,
+      wakeup: { internal: true, status: 'active' },
+    });
+
+    const visible = await handleManageWakeupsToolCall(actor, createInput);
     expect(visible).toMatchObject({
       success: true,
       duplicate: false,
       wakeup: { internal: false, status: 'active' },
     });
     await expect(
-      handleManageWakeupsToolCall(actor, ownTaskFollowThroughInput),
+      handleManageWakeupsToolCall(actor, createInput),
     ).resolves.toMatchObject({
       success: true,
       duplicate: true,
       wakeup: { id: (visible.wakeup as { id: string }).id, internal: false },
     });
-
-    const visibleWakeupId = (visible.wakeup as { id: string }).id;
-    await db
-      .update(sessionWakeups)
-      .set({ status: 'completed', nextRunAt: null })
-      .where(eq(sessionWakeups.id, visibleWakeupId));
-    await expect(
-      handleManageWakeupsToolCall(actor, ownTaskFollowThroughInput, {
-        sourceWakeupId: visibleWakeupId,
-      }),
-    ).resolves.toMatchObject({
-      success: true,
-      duplicate: false,
-      wakeup: { internal: false, status: 'active' },
-    });
-
-    const created = await ensureOwnTaskFollowThroughWakeup(actor);
-    expect(created).toMatchObject({
-      duplicate: false,
-      wakeup: {
-        name: 'Follow through on session tasks',
-        internal: true,
-        status: 'active',
-      },
-    });
   });
 
-  it('rearms server-owned task follow-through as internal', async () => {
+  it('creates and rearms task follow-through as explicitly internal', async () => {
     const created = await ensureOwnTaskFollowThroughWakeup(actor);
     const sourceWakeupId = created.wakeup.id;
     await db
@@ -221,11 +203,10 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
       .where(eq(sessionWakeups.id, sourceWakeupId));
 
     vi.setSystemTime(new Date(now.getTime() + 10 * 60_000));
-    const rearmed = await handleManageWakeupsToolCall(
-      actor,
-      ownTaskFollowThroughInput,
-      { sourceWakeupId },
-    );
+    const rearmed = await handleManageWakeupsToolCall(actor, {
+      ...ownTaskFollowThroughInput,
+      internal: true,
+    });
     expect(rearmed).toMatchObject({
       success: true,
       duplicate: false,

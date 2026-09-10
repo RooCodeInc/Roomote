@@ -55,11 +55,6 @@ export type CreateSessionWakeupResult = {
   timeZone: string;
 };
 
-type ManageWakeupsToolCallOptions = {
-  /** Trusted platform-event source; never populated from model arguments. */
-  sourceWakeupId?: string;
-};
-
 export function ensureOwnTaskFollowThroughWakeup(
   actor: SessionWakeupActor,
 ): Promise<CreateSessionWakeupResult> {
@@ -67,36 +62,6 @@ export function ensureOwnTaskFollowThroughWakeup(
     ...OWN_TASK_FOLLOW_THROUGH_WAKEUP,
     internal: true,
   });
-}
-
-async function isOwnTaskFollowThroughRearm(
-  actor: SessionWakeupActor,
-  input: ManageWakeupsInput,
-  sourceWakeupId: string | undefined,
-): Promise<boolean> {
-  if (
-    !sourceWakeupId ||
-    input.action !== 'create' ||
-    input.name !== OWN_TASK_FOLLOW_THROUGH_WAKEUP.name ||
-    input.prompt !== OWN_TASK_FOLLOW_THROUGH_WAKEUP.prompt ||
-    input.schedule !== OWN_TASK_FOLLOW_THROUGH_WAKEUP.schedule ||
-    input.reportPolicy !== OWN_TASK_FOLLOW_THROUGH_WAKEUP.reportPolicy
-  ) {
-    return false;
-  }
-
-  const source = await getSessionWakeupForConversation(
-    actor.conversationId,
-    sourceWakeupId,
-  );
-  return Boolean(
-    source?.internal &&
-    source.name === OWN_TASK_FOLLOW_THROUGH_WAKEUP.name &&
-    source.prompt === OWN_TASK_FOLLOW_THROUGH_WAKEUP.prompt &&
-    source.schedule.mode === 'once' &&
-    source.schedule.inMinutes === 10 &&
-    source.reportPolicy === OWN_TASK_FOLLOW_THROUGH_WAKEUP.reportPolicy,
-  );
 }
 
 /**
@@ -248,7 +213,6 @@ function formatNextRun(nextRunAt: string | null, timeZone: string): string {
 export async function handleManageWakeupsToolCall(
   actor: SessionWakeupActor,
   input: ManageWakeupsInput,
-  options: ManageWakeupsToolCallOptions = {},
 ): Promise<Record<string, unknown>> {
   try {
     switch (input.action) {
@@ -259,19 +223,13 @@ export async function handleManageWakeupsToolCall(
             error: 'create requires name, prompt, and schedule.',
           };
         }
-        const internal = await isOwnTaskFollowThroughRearm(
-          actor,
-          input,
-          options.sourceWakeupId,
-        );
-        const result = internal
-          ? await ensureOwnTaskFollowThroughWakeup(actor)
-          : await createSessionWakeup(actor, {
-              name: input.name,
-              prompt: input.prompt,
-              schedule: input.schedule,
-              reportPolicy: input.reportPolicy ?? null,
-            });
+        const result = await createSessionWakeup(actor, {
+          name: input.name,
+          prompt: input.prompt,
+          schedule: input.schedule,
+          reportPolicy: input.reportPolicy ?? null,
+          internal: input.internal ?? false,
+        });
         return {
           success: true,
           duplicate: result.duplicate,

@@ -1590,7 +1590,6 @@ export async function answerFastAgentQuestion({
   defaultCharts = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
-  sourceWakeupId,
   slackRoomoteUserId,
   currentDurableHumanFollowUpEventId,
   setupSnapshot,
@@ -1635,8 +1634,6 @@ export async function answerFastAgentQuestion({
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
-  /** Trusted scheduled-wakeup source supplied by the parent-event runtime. */
-  sourceWakeupId?: string;
   slackRoomoteUserId?: string;
   /** The durable row currently running as a fallback whole turn. Excluding it
    * keeps this turn's native steer poller from injecting its own prompt. */
@@ -4353,8 +4350,8 @@ export async function answerFastAgentQuestion({
 
             return await handleManageWakeupsToolCall(
               { conversationId: session.id, userId },
+
               args,
-              { sourceWakeupId },
             );
           }
 
