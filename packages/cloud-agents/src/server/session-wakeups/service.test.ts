@@ -26,6 +26,14 @@ const createInput = {
   prompt: 'Check the deploy.',
   schedule: 'in 30s',
 };
+const ownTaskFollowThroughInput = {
+  action: 'create' as const,
+  name: 'Follow through on session tasks',
+  prompt:
+    'Run the Own Coding Task Follow-Through session check for all tasks in this conversation. Follow that system policy exactly, including inspection, reporting, correction, stopping, and rearming.',
+  schedule: 'in 10m',
+  reportPolicy: 'only_when_notable' as const,
+};
 
 describe('handleManageWakeupsToolCall relative reminders', () => {
   let actor: SessionWakeupActor;
@@ -160,44 +168,92 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
     expect(enqueueSessionWakeupFireBestEffort).not.toHaveBeenCalled();
   });
 
-  it('reserves internal wakeups for server-owned task follow-through', async () => {
+  it('keeps ordinary reminders visible and deduplicated even when they copy follow-through fields', async () => {
     const visible = await handleManageWakeupsToolCall(actor, {
-      ...createInput,
+      ...ownTaskFollowThroughInput,
       internal: true,
-    } as typeof createInput);
+    } as typeof ownTaskFollowThroughInput);
     expect(visible).toMatchObject({
       success: true,
+      duplicate: false,
+      wakeup: { internal: false, status: 'active' },
+    });
+    await expect(
+      handleManageWakeupsToolCall(actor, ownTaskFollowThroughInput),
+    ).resolves.toMatchObject({
+      success: true,
+      duplicate: true,
+      wakeup: { id: (visible.wakeup as { id: string }).id, internal: false },
+    });
+
+    const visibleWakeupId = (visible.wakeup as { id: string }).id;
+    await db
+      .update(sessionWakeups)
+      .set({ status: 'completed', nextRunAt: null })
+      .where(eq(sessionWakeups.id, visibleWakeupId));
+    await expect(
+      handleManageWakeupsToolCall(actor, ownTaskFollowThroughInput, {
+        sourceWakeupId: visibleWakeupId,
+      }),
+    ).resolves.toMatchObject({
+      success: true,
+      duplicate: false,
       wakeup: { internal: false, status: 'active' },
     });
 
     const created = await ensureOwnTaskFollowThroughWakeup(actor);
-    expect(created.wakeup).toMatchObject({
-      name: 'Follow through on session tasks',
-      internal: true,
-      status: 'active',
+    expect(created).toMatchObject({
+      duplicate: false,
+      wakeup: {
+        name: 'Follow through on session tasks',
+        internal: true,
+        status: 'active',
+      },
     });
-    const wakeupId = created.wakeup.id;
+  });
+
+  it('rearms server-owned task follow-through as internal', async () => {
+    const created = await ensureOwnTaskFollowThroughWakeup(actor);
+    const sourceWakeupId = created.wakeup.id;
+    await db
+      .update(sessionWakeups)
+      .set({ status: 'completed', nextRunAt: null })
+      .where(eq(sessionWakeups.id, sourceWakeupId));
+
+    vi.setSystemTime(new Date(now.getTime() + 10 * 60_000));
+    const rearmed = await handleManageWakeupsToolCall(
+      actor,
+      ownTaskFollowThroughInput,
+      { sourceWakeupId },
+    );
+    expect(rearmed).toMatchObject({
+      success: true,
+      duplicate: false,
+      wakeup: {
+        name: 'Follow through on session tasks',
+        internal: true,
+        status: 'active',
+      },
+    });
+    expect((rearmed.wakeup as { id: string }).id).not.toBe(sourceWakeupId);
+
     expect(enqueueSessionWakeupFireBestEffort).toHaveBeenNthCalledWith(2, {
       wakeupId: expect.any(String),
-      runAt: now.getTime() + 10 * 60_000,
+      runAt: now.getTime() + 20 * 60_000,
     });
 
-    const listed = await handleManageWakeupsToolCall(actor, { action: 'list' });
-    expect(listed.count).toBe(2);
-    expect(listed.wakeups).toEqual(
+    const rows = await listSessionWakeups(actor.conversationId, {
+      includeTerminal: true,
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: wakeupId, internal: true }),
+        expect.objectContaining({ id: sourceWakeupId, internal: true }),
+        expect.objectContaining({
+          id: (rearmed.wakeup as { id: string }).id,
+          internal: true,
+        }),
       ]),
     );
-    await expect(
-      handleManageWakeupsToolCall(actor, { action: 'get', wakeupId }),
-    ).resolves.toMatchObject({ wakeup: { id: wakeupId, internal: true } });
-    await expect(
-      handleManageWakeupsToolCall(actor, { action: 'cancel', wakeupId }),
-    ).resolves.toMatchObject({
-      success: true,
-      cancelled: true,
-      wakeup: { id: wakeupId, internal: true, status: 'cancelled' },
-    });
   });
 });

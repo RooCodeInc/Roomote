@@ -2581,6 +2581,9 @@ export async function deliverFastAgentParentEventWithLock(
           : params.event.type === 'scheduled_wakeup'
             ? 'scheduled_wakeup'
             : 'delegated_task'),
+      ...(params.event.type === 'scheduled_wakeup'
+        ? { sourceWakeupId: params.event.wakeupId }
+        : {}),
       automationReport:
         params.event.type === 'task_settled' &&
         Boolean(params.event.customAutomationId),

@@ -3603,6 +3603,7 @@ describe('deliverFastAgentParentEvent', () => {
         turnSource: 'platform_event',
         platformEventKind: 'scheduled_wakeup',
         platformEventVisibility: 'required',
+        sourceWakeupId: 'wakeup-1',
         userId: 'user-1',
       }),
     );
