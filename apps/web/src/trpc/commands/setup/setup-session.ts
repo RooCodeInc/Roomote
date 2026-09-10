@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import { type FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
 import { buildFastAgentArtifactCreator } from '@roomote/sdk/server';
+import { buildFastAgentSetupAdapter } from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -34,6 +34,7 @@ import {
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type AutomationRecommendationBatch,
+  type FastAgentSetupTurnContext,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -60,6 +61,7 @@ const SETUP_SESSION_ADVISORY_LOCK = 'setup-session';
 const SETUP_SESSION_TITLE = 'Set up Roomote';
 
 type SetupPlatformEventKind =
+  | 'setup_state_changed'
   | 'session_creation'
   | 'provider_selection'
   | 'source_connection'
@@ -98,14 +100,6 @@ async function assertSetupStarterWorkReady(
   const setupSession = normalizeSetupNewSetupSession(
     status.setupNewState.setupSession,
   );
-  if (
-    setupSession?.integrationDiscoveryCompletedAt === null &&
-    !setupSession.starterTaskSelection
-  ) {
-    throw new Error(
-      'Finish or skip the optional tool discovery before choosing first work. No connections are required.',
-    );
-  }
   if (options.requireStarterSelection && !setupSession?.starterTaskSelection) {
     throw new Error('Choose your first work before starting a task.');
   }
@@ -261,6 +255,22 @@ async function resolveSetupSnapshot(auth: UserAuthSuccess): Promise<string> {
         )
       : false,
   });
+}
+
+function buildSetupTurnContext(
+  conversation: SetupSessionConversation,
+  setupSnapshot: string,
+): FastAgentSetupTurnContext {
+  return {
+    sessionId: conversation.sessionId,
+    fastConversationId: conversation.fastConversationId,
+    setupSnapshot,
+    starterTaskOptions: SETUP_STARTER_TASKS.map((task) => ({
+      id: task.id,
+      label: task.title,
+      description: task.description,
+    })),
+  };
 }
 
 async function readSetupIntegrationDiscovery(
@@ -424,69 +434,6 @@ function deriveSetupRailMilestones(
   };
 }
 
-async function buildSetupSessionAdapterExtensions(
-  auth: UserAuthSuccess,
-): Promise<Partial<FastAgentTurnAdapter>> {
-  return {
-    resolveUserInputPreset: async (preset, setupIntegrationAnswers) => {
-      assertAdmin(auth);
-      if (!(await findSetupSessionConversation(auth)))
-        throw new Error('This request does not belong to the setup Session.');
-      if (preset === 'setup_integrations') {
-        const discovery = await readSetupIntegrationDiscovery(
-          auth,
-          setupIntegrationAnswers,
-        );
-        if (discovery.completed)
-          throw new Error('Optional tool discovery is already complete.');
-        return [
-          {
-            id: SETUP_INTEGRATIONS_QUESTION_ID,
-            header: 'Your tools',
-            question:
-              'Connect any useful tools, or continue without connections.',
-            isOther: false,
-            isSecret: false,
-            options: [
-              ...SETUP_INTEGRATIONS.filter((integration) =>
-                discovery.matchedIntegrationIds.includes(integration.id),
-              ).map((integration) => ({
-                id: integration.id,
-                label: integration.name,
-                description: `Connect ${integration.name} in Settings.`,
-              })),
-              SETUP_INTEGRATIONS_CONTINUE_OPTION,
-            ],
-          },
-        ];
-      }
-      if (preset !== 'setup_starter_tasks') {
-        throw new Error('Unsupported setup input preset.');
-      }
-      await assertSetupStarterWorkReady(auth);
-      return [
-        {
-          id: 'setup-starter-tasks',
-          header: 'First work',
-          question: 'What should Roomote work on first?',
-          isOther: false,
-          isSecret: false,
-          multiple: true,
-          options: SETUP_STARTER_TASKS.map((task) => ({
-            label: task.title,
-            description: task.description,
-          })),
-        },
-      ];
-    },
-    assertTaskLaunch: () =>
-      assertSetupStarterWorkReady(auth, {
-        requireStarterSelection: true,
-        requireCompute: true,
-      }),
-  };
-}
-
 export async function scheduleSetupPlatformEvent(
   auth: UserAuthSuccess,
   input: {
@@ -511,24 +458,12 @@ async function buildSetupPlatformEventTurn(
   prepared?: {
     conversation: SetupSessionConversation;
     setupSnapshot: string;
-    integrationDiscovery: Awaited<
-      ReturnType<typeof readSetupIntegrationDiscovery>
-    >;
   },
 ): Promise<Parameters<typeof scheduleWebFastAgentTurn>[0] | null> {
   assertAdmin(auth);
   const conversation =
     prepared?.conversation ?? (await findSetupSessionConversation(auth));
   if (!conversation) return null;
-
-  const integrationDiscovery =
-    prepared?.integrationDiscovery ??
-    (await readSetupIntegrationDiscovery(auth));
-  if (
-    !integrationDiscovery.completed &&
-    (input.kind !== 'session_creation' || integrationDiscovery.hasInputRequest)
-  )
-    return null;
 
   const currentMessageId = buildSetupEventTurnId({
     sessionId: conversation.sessionId,
@@ -568,10 +503,12 @@ async function buildSetupPlatformEventTurn(
       conversationId: conversation.fastConversationId,
       turnId: currentMessageId,
     },
-    adapterExtensions: await buildSetupSessionAdapterExtensions(auth),
     setupSession: true,
-    setupSnapshot:
+    setupContext: buildSetupTurnContext(
+      conversation,
       prepared?.setupSnapshot ?? (await resolveSetupSnapshot(auth)),
+    ),
+    durableSessionId: conversation.fastConversationId,
   };
 }
 
@@ -786,14 +723,27 @@ export async function reconcileSetupPlatformEvents(
     { allowAfterSetupCompletion: true },
   );
 
-  for (const event of events) {
-    const turn = await buildSetupPlatformEventTurn(auth, event, {
-      conversation,
-      setupSnapshot,
-      integrationDiscovery,
-    });
-    if (turn) scheduleWebFastAgentTurn(turn);
-  }
+  const changes = events.map((event) => ({
+    type: event.kind,
+    ...event.payload,
+  }));
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify({ setupSnapshot, changes }))
+    .digest('hex')
+    .slice(0, 24);
+  const turn = await buildSetupPlatformEventTurn(
+    auth,
+    {
+      kind: 'setup_state_changed',
+      fingerprint,
+      payload: {
+        snapshot: JSON.parse(setupSnapshot),
+        changes,
+      },
+    },
+    { conversation, setupSnapshot },
+  );
+  if (turn) scheduleWebFastAgentTurn(turn);
   return setupCompleted;
 }
 
@@ -980,8 +930,12 @@ async function persistSetupPresetResponse(input: {
     await assertSetupStarterWorkReady(input.auth);
   else if (
     input.answers[SETUP_INTEGRATIONS_QUESTION_ID]?.answers.length !== 1 ||
-    input.answers[SETUP_INTEGRATIONS_QUESTION_ID]?.answers[0] !==
-      SETUP_INTEGRATIONS_CONTINUE_OPTION.label
+    !(
+      [
+        SETUP_INTEGRATIONS_CONTINUE_OPTION.id,
+        SETUP_INTEGRATIONS_CONTINUE_OPTION.label,
+      ] as readonly string[]
+    ).includes(input.answers[SETUP_INTEGRATIONS_QUESTION_ID]!.answers[0]!)
   ) {
     throw new Error('Continue with or without connecting tools.');
   }
@@ -1141,9 +1095,9 @@ export async function submitSetupSessionUserInputCommand(
   ) {
     throw new Error('This input request does not belong to the setup Session.');
   }
+  const setupSnapshot = await resolveSetupSnapshot(auth);
   return submitFastSessionUserInputCommand(auth, input, {
-    adapterExtensions: await buildSetupSessionAdapterExtensions(auth),
-    setupSnapshot: await resolveSetupSnapshot(auth),
+    setupContext: buildSetupTurnContext(setupConversation, setupSnapshot),
     setupSession: true,
     persistSetupPresetResponse: async (details) => {
       const result = await persistSetupPresetResponse({ auth, ...details });
@@ -1166,9 +1120,12 @@ export async function resolveSetupSessionTurnContext(
   )
     return null;
   assertAdmin(auth);
+  const setupSnapshot = await resolveSetupSnapshot(auth);
+  const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
   return {
-    adapterExtensions: await buildSetupSessionAdapterExtensions(auth),
-    setupSnapshot: await resolveSetupSnapshot(auth),
+    adapterExtensions: buildFastAgentSetupAdapter(setupContext),
+    setupSnapshot,
+    setupContext,
     setupSession: true as const,
   };
 }

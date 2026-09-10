@@ -6,6 +6,7 @@ import { after } from 'next/server';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  buildFastAgentSetupAdapter,
   createFastAgentWebTaskLauncher,
   FastAgentDurableRetryScheduledError,
   getOrCreateFastAgentSession,
@@ -46,9 +47,10 @@ import {
   isSetupIntegrationDiscoveryQuestionId,
   parseAcpRequestUserInputAnswers,
   parseAcpRequestUserInputPayload,
-  parseAcpRequestUserInputResponsePayload,
+  normalizeAcpRequestUserInputAnswers,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
+  type FastAgentSetupTurnContext,
   type ReasoningEffort,
 } from '@roomote/types';
 import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
@@ -162,6 +164,7 @@ type WebFastAgentTurnInput = {
   /** Spoken on a voice call: Fast returns its result to the voice instead
    * of writing a chat reply. */
   voiceMode?: boolean;
+  setupContext?: FastAgentSetupTurnContext;
   adapterExtensions?: Partial<FastAgentTurnAdapter>;
 };
 
@@ -213,6 +216,7 @@ async function runWebFastAgentTurn({
   setupSnapshot,
   setupSession,
   voiceMode,
+  setupContext,
   adapterExtensions,
   durableSessionId,
 }: WebFastAgentTurnInput): Promise<void> {
@@ -261,11 +265,10 @@ async function runWebFastAgentTurn({
     const turnMessageId = currentMessageId ?? `web-${randomUUID()}`;
     // Durable admission: a web turn is persisted under this process's claim
     // before it runs, so an interruption hands it to the queue. Platform
-    // events ride the same row with their framing recorded; the ones that
-    // need adapter extensions or a setup snapshot cannot be rebuilt by the
-    // queue and stay process-bound.
+    // events ride the same row with their framing recorded. Setup context is
+    // serializable, so its trusted adapter can be rebuilt by queue recovery.
     const durableTurn =
-      durableSessionId && !adapterExtensions && !setupSnapshot
+      durableSessionId && (!adapterExtensions || setupContext)
         ? await persistFastAgentInlineHumanTurn({
             parent: { sessionId: durableSessionId, conversation },
             event: {
@@ -287,6 +290,7 @@ async function runWebFastAgentTurn({
                 : {}),
               ...(setupSession ? { setupSession: true } : {}),
               ...(voiceMode ? { voiceMode: true } : {}),
+              ...(setupContext ? { setupContext } : {}),
             },
           }).catch((error) => {
             console.error(
@@ -327,7 +331,9 @@ async function runWebFastAgentTurn({
             ...(platformEventVisibility ? { platformEventVisibility } : {}),
           }
         : {}),
-      ...(setupSnapshot ? { setupSnapshot } : {}),
+      ...(setupContext?.setupSnapshot || setupSnapshot
+        ? { setupSnapshot: setupContext?.setupSnapshot ?? setupSnapshot }
+        : {}),
       setupSession,
       ...(voiceMode ? { voiceMode: true } : {}),
       adapter: {
@@ -355,6 +361,7 @@ async function runWebFastAgentTurn({
             }
           : {}),
         ...delivery.adapter,
+        ...(setupContext ? buildFastAgentSetupAdapter(setupContext) : {}),
         ...adapterExtensions,
       },
     });
@@ -786,6 +793,7 @@ export async function submitFastSessionUserInputCommand(
     adapterExtensions?: Partial<FastAgentTurnAdapter>;
     setupSnapshot?: string;
     setupSession?: boolean;
+    setupContext?: FastAgentSetupTurnContext;
     persistSetupPresetResponse?: (input: {
       fastConversationId: string;
       request: {
@@ -845,7 +853,11 @@ export async function submitFastSessionUserInputCommand(
   if (!requestPayload) {
     throw new Error('This input request is no longer valid.');
   }
-  const submitted = parseAcpRequestUserInputAnswers(input.answers) ?? {};
+  const parsedAnswers = parseAcpRequestUserInputAnswers(input.answers) ?? {};
+  const submitted = normalizeAcpRequestUserInputAnswers(
+    requestPayload.questions,
+    parsedAnswers,
+  );
   const resolution = input.resolution ?? 'submitted';
   if (requestPayload.preset && resolution === 'cancelled') {
     throw new Error('This required setup choice cannot be cancelled.');
@@ -919,21 +931,13 @@ export async function submitFastSessionUserInputCommand(
       ...(options.setupSnapshot
         ? { setupSnapshot: options.setupSnapshot }
         : {}),
+      ...(options.setupContext ? { setupContext: options.setupContext } : {}),
       setupSession: options.setupSession ?? false,
       ...freshSetupContext,
     });
   };
 
   if (existingResponse) {
-    const persistedResponse = parseAcpRequestUserInputResponsePayload(
-      existingResponse.payload,
-    );
-    if (!requestPayload.preset && persistedResponse) {
-      await scheduleResponseTurn(
-        persistedResponse.answers,
-        persistedResponse.resolution,
-      );
-    }
     return { success: true };
   }
 
@@ -956,8 +960,9 @@ export async function submitFastSessionUserInputCommand(
     });
     return { success: true };
   }
-  await upsertFastAgentMessage({
+  const responseClaim = await upsertFastAgentMessage({
     sessionId: session.id,
+    insertOnly: true,
     message: {
       eventId: responseEventId,
       turnId: request.turnId,
@@ -987,7 +992,9 @@ export async function submitFastSessionUserInputCommand(
     },
   });
 
-  await scheduleResponseTurn(submitted, resolution);
+  if (responseClaim?.inserted !== false) {
+    await scheduleResponseTurn(submitted, resolution);
+  }
 
   return { success: true };
 }

@@ -65,17 +65,31 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 vi.mock('@/hooks/mcp-connections', () => ({
   useConnectMcp: () => ({ mutate: mocks.mutate, isPending: false }),
-  useUserMcpConnections: () => ({
-    data: mocks.connections,
+  useEffectiveMcpIntegrations: () => ({
+    data: SETUP_INTEGRATIONS.map((integration) => {
+      const enabled = mocks.enablements.some(
+        (entry) => entry.mcpId === integration.id && entry.enabled,
+      );
+      const connected = mocks.connections.some(
+        (entry) =>
+          entry.mcpId === integration.id &&
+          entry.authStatus === 'authenticated',
+      );
+      return {
+        id: integration.id,
+        authStatus: connected ? 'authenticated' : null,
+        status: !mocks.enabled
+          ? 'unavailable'
+          : enabled
+            ? connected
+              ? 'connected'
+              : 'needs_connection'
+            : 'not_enabled',
+      };
+    }),
     refetch: mocks.refetch,
-  }),
-  useDeploymentMcpEnablements: () => ({
-    data: mocks.enablements,
-    refetch: mocks.refetch,
-  }),
-  useCuratedIntegrationsAvailability: () => ({
-    data: { enabled: mocks.enabled },
-    refetch: mocks.refetch,
+    isPending: mocks.pending,
+    isError: mocks.error,
   }),
 }));
 vi.mock('@/components/settings/Integrations', () => ({
@@ -212,7 +226,7 @@ it.each(['Back to setup', 'Escape'])(
     await waitFor(() =>
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
     );
-    expect(mocks.refetch).toHaveBeenCalledTimes(4);
+    expect(mocks.refetch).toHaveBeenCalledOnce();
     expect(screen.getByRole('button', { name: 'Keep going' })).toBeEnabled();
   },
 );
@@ -372,7 +386,11 @@ it('shows unavailable status without offering manual refresh after a status erro
 it('does not treat an authenticated but disabled connector as connected', () => {
   mocks.connections = [{ mcpId: 'notion', authStatus: 'authenticated' }];
   render(<SetupIntegrationsCard sessionId="s" request={request} />);
-  expect(screen.getByText('Not enabled')).toBeInTheDocument();
+  const notionRow = screen
+    .getByRole('button', { name: 'Connect Notion' })
+    .closest('li');
+  expect(notionRow).not.toBeNull();
+  expect(within(notionRow!).getByText('Not enabled')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Connect Notion' })).toBeEnabled();
   expect(screen.queryByText('Connected')).not.toBeInTheDocument();
 });

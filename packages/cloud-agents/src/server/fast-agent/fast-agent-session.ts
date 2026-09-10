@@ -148,9 +148,11 @@ export async function appendFastAgentVisibleMessages({
 export async function upsertFastAgentMessage({
   sessionId,
   message,
+  insertOnly,
 }: {
   sessionId: string;
   message: FastAgentMessageWrite;
+  insertOnly?: boolean;
 }): Promise<FastAgentMessageUpsertResult> {
   let lastError: unknown;
 
@@ -159,6 +161,7 @@ export async function upsertFastAgentMessage({
       return await fastAgentConversationRepository.upsertMessage({
         conversationId: sessionId,
         message,
+        insertOnly,
       });
     } catch (error) {
       lastError = error;

@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  buildFastAgentSetupAdapter,
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
@@ -2568,6 +2569,9 @@ export async function deliverFastAgentParentEventWithLock(
       ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
       ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
       ...(humanFollowUp?.voiceMode ? { voiceMode: true } : {}),
+      ...(humanFollowUp?.setupContext
+        ? { setupSnapshot: humanFollowUp.setupContext.setupSnapshot }
+        : {}),
       ...(humanFollowUp
         ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
         : {}),
@@ -2628,6 +2632,9 @@ export async function deliverFastAgentParentEventWithLock(
         createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
         ...parentTurn.adapter,
         launchTask: parentTurn.adapter.launchTask,
+        ...(humanFollowUp?.setupContext
+          ? buildFastAgentSetupAdapter(humanFollowUp.setupContext)
+          : {}),
         ...(wakeupGuard
           ? {
               postReply: wakeupGuard.guardPostReply(

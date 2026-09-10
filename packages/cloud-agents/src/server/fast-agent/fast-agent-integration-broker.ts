@@ -501,7 +501,7 @@ export async function listFastAgentIntegrations(
       ...integration,
       tools: (
         await listCachedIntegrationTools({
-          cacheKey: `${context.userId}:${integration.endpoint!.url}`,
+          cacheKey: `${context.userId}:${integration.endpoint!.url}:${configuredServers[integration.id]?.cacheRevision ?? ''}`,
           url: integration.endpoint!.url,
           headers: integration.endpoint!.headers,
         })

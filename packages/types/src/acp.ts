@@ -213,11 +213,13 @@ export function getAcpRequestUserInputValidationError(
       return 'This question accepts a single answer.';
     }
     if (question.options?.length) {
-      const optionLabels = new Set(
-        question.options.map((option) => option.label),
+      const optionValues = new Set(
+        question.options.flatMap((option) =>
+          option.id ? [option.id, option.label] : [option.label],
+        ),
       );
       const customAnswerCount = submitted.filter(
-        (answer) => !optionLabels.has(answer),
+        (answer) => !optionValues.has(answer),
       ).length;
       if (customAnswerCount > (question.isOther ? 1 : 0)) {
         return 'One or more selections are not valid options.';
@@ -225,6 +227,34 @@ export function getAcpRequestUserInputValidationError(
     }
   }
   return null;
+}
+
+/** Normalize trusted option selections to stable IDs while accepting labels
+ * persisted or submitted by clients from before option IDs were available. */
+export function normalizeAcpRequestUserInputAnswers(
+  questions: AcpRequestUserInputQuestion[],
+  answers: AcpRequestUserInputAnswers,
+): AcpRequestUserInputAnswers {
+  const questionsById = new Map(
+    questions.map((question) => [question.id, question]),
+  );
+  return Object.fromEntries(
+    Object.entries(answers).map(([questionId, response]) => {
+      const question = questionsById.get(questionId);
+      return [
+        questionId,
+        {
+          answers: response.answers.map((answer) => {
+            const option = question?.options?.find(
+              (candidate) =>
+                candidate.id === answer || candidate.label === answer,
+            );
+            return option?.id ?? answer;
+          }),
+        },
+      ];
+    }),
+  );
 }
 
 export interface AcpRequestUserInputRequestParams {
@@ -521,7 +551,9 @@ function resolveAcpRequestUserInputAnswerDetailed(
 
     if (optionIndex >= 0 && optionIndex < question.options.length) {
       return {
-        answer: question.options[optionIndex]!.label,
+        answer:
+          question.options[optionIndex]!.id ??
+          question.options[optionIndex]!.label,
         viaOtherFallback: false,
       };
     }
@@ -530,12 +562,17 @@ function resolveAcpRequestUserInputAnswerDetailed(
   const normalizedAnswer = normalizeAcpRequestUserInputOptionLabel(answer);
   const exactMatch = question.options.find(
     (option) =>
+      normalizeAcpRequestUserInputOptionLabel(option.id ?? '') ===
+        normalizedAnswer ||
       normalizeAcpRequestUserInputOptionLabel(option.label) ===
-      normalizedAnswer,
+        normalizedAnswer,
   );
 
   if (exactMatch) {
-    return { answer: exactMatch.label, viaOtherFallback: false };
+    return {
+      answer: exactMatch.id ?? exactMatch.label,
+      viaOtherFallback: false,
+    };
   }
 
   const partialMatches = question.options.filter((option) =>
@@ -545,7 +582,10 @@ function resolveAcpRequestUserInputAnswerDetailed(
   );
 
   if (partialMatches.length === 1) {
-    return { answer: partialMatches[0]!.label, viaOtherFallback: false };
+    return {
+      answer: partialMatches[0]!.id ?? partialMatches[0]!.label,
+      viaOtherFallback: false,
+    };
   }
 
   if (question.isOther) {

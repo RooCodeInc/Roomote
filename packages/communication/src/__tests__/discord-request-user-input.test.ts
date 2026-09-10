@@ -5,6 +5,7 @@ import {
   buildDiscordRequestUserInputButtons,
   buildDiscordRequestUserInputCancelCallbackData,
   buildDiscordRequestUserInputPromptText,
+  matchesDiscordRequestUserInputRequestToken,
   parseDiscordRequestUserInputAnswerCallbackData,
   parseDiscordRequestUserInputCancelCallbackData,
 } from '../discord-request-user-input';
@@ -31,12 +32,20 @@ describe('discord request_user_input helpers', () => {
       optionIndex: 2,
     });
     expect(customId.length).toBeLessThanOrEqual(100);
-    expect(parseDiscordRequestUserInputAnswerCallbackData(customId)).toEqual({
+    const parsed = parseDiscordRequestUserInputAnswerCallbackData(customId);
+    expect(parsed).toEqual({
       runId: 42,
       questionIndex: 0,
       optionIndex: 2,
-      requestToken: 'callid12',
+      requestToken: expect.stringMatching(/^[a-f0-9]{24}$/u),
     });
+    expect(
+      matchesDiscordRequestUserInputRequestToken(
+        'rui:session:turn:callid12',
+        parsed!.requestToken,
+      ),
+    ).toBe(true);
+    expect(parsed!.requestToken).not.toBe('callid12');
   });
 
   it('round-trips cancel callback ids', () => {
@@ -44,10 +53,56 @@ describe('discord request_user_input helpers', () => {
       runId: 7,
       requestId: 'rui:session:turn:callid12',
     });
-    expect(parseDiscordRequestUserInputCancelCallbackData(customId)).toEqual({
+    const parsed = parseDiscordRequestUserInputCancelCallbackData(customId);
+    expect(parsed).toEqual({
       runId: 7,
-      requestToken: 'callid12',
+      requestToken: expect.stringMatching(/^[a-f0-9]{24}$/u),
     });
+    expect(
+      matchesDiscordRequestUserInputRequestToken(
+        'rui:session:turn:callid12',
+        parsed!.requestToken,
+      ),
+    ).toBe(true);
+  });
+
+  it('accepts legacy suffix tokens only when they match the request', () => {
+    expect(
+      matchesDiscordRequestUserInputRequestToken(
+        'rui:session:turn:callid12',
+        'callid12',
+      ),
+    ).toBe(true);
+    expect(
+      matchesDiscordRequestUserInputRequestToken(
+        'rui:session:turn:callid12',
+        'other-id',
+      ),
+    ).toBe(false);
+    expect(
+      parseDiscordRequestUserInputCancelCallbackData(
+        'discord:rui_cancel:7:callid12',
+      ),
+    ).toEqual({ runId: 7, requestToken: 'callid12' });
+  });
+
+  it('keeps full-identity tokens within Discord custom_id limits', () => {
+    const customId = buildDiscordRequestUserInputAnswerCallbackData({
+      runId: Number.MAX_SAFE_INTEGER,
+      requestId: `rui:${'session-'.repeat(20)}:${'call-'.repeat(20)}`,
+      questionIndex: Number.MAX_SAFE_INTEGER,
+      optionIndex: Number.MAX_SAFE_INTEGER,
+    });
+
+    expect(customId.length).toBeLessThanOrEqual(100);
+    expect(
+      parseDiscordRequestUserInputAnswerCallbackData(customId),
+    ).not.toBeNull();
+    expect(
+      parseDiscordRequestUserInputAnswerCallbackData(
+        'discord:rui:42:0:0:token-too-short',
+      ),
+    ).toBeNull();
   });
 
   it('builds option buttons and cancel for a single-question prompt', () => {
@@ -95,13 +150,14 @@ describe('discord request_user_input helpers', () => {
         questions: [sampleQuestion, { ...sampleQuestion, id: 'q2' }],
       },
     });
-    expect(buttons).toEqual([
-      [
-        {
-          text: 'Cancel',
-          callbackData: 'discord:rui_cancel:99:callid12',
-        },
-      ],
-    ]);
+    expect(buttons?.[0]?.[0]?.text).toBe('Cancel');
+    expect(
+      parseDiscordRequestUserInputCancelCallbackData(
+        buttons?.[0]?.[0]?.callbackData,
+      ),
+    ).toEqual({
+      runId: 99,
+      requestToken: expect.stringMatching(/^[a-f0-9]{24}$/u),
+    });
   });
 });

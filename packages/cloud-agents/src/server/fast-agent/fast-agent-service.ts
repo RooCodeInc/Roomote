@@ -4524,6 +4524,13 @@ export async function answerFastAgentQuestion({
                       args.setupIntegrationAnswers,
                     )
                   : await adapter.resolveUserInputPreset!(args.preset);
+            // Trusted setup presets may complete entirely server-side. In
+            // that case no pending request or browser response is needed.
+            if (preset && questions.length === 0) {
+              visibleUpdatePosted = true;
+              closedInstructionVersions.add(instructionVersion);
+              return { success: true, completed: true, closed: true };
+            }
             for (const question of questions) {
               if (question.options && question.isSecret) {
                 return {

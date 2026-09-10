@@ -34,6 +34,7 @@ vi.mock('next/server', () => ({ after: mocks.after }));
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  buildFastAgentSetupAdapter: vi.fn(() => ({})),
   createFastAgentWebTaskLauncher: mocks.createWebTaskLauncher,
   FastAgentDurableRetryScheduledError: class FastAgentDurableRetryScheduledError extends Error {},
   getOrCreateFastAgentSession: mocks.getOrCreateSession,
@@ -169,6 +170,12 @@ describe('setup context on ordinary Fast session input', () => {
     setupSession: true,
     adapterExtensions: { resolveUserInputPreset: resolvePreset },
     setupSnapshot: initialSnapshot,
+    setupContext: {
+      sessionId: 'session-1',
+      fastConversationId: 'session-1',
+      setupSnapshot: initialSnapshot,
+      starterTaskOptions: [],
+    },
   };
   const question = {
     id: 'setup-tools-documents',
@@ -197,6 +204,7 @@ describe('setup context on ordinary Fast session input', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.after.mockReset();
     mocks.resolveSetupContext.mockReset().mockResolvedValue(null);
     mocks.upsertMessage.mockReset().mockResolvedValue(undefined);
     mocks.findAccessibleSession.mockResolvedValue(session);
@@ -247,6 +255,15 @@ describe('setup context on ordinary Fast session input', () => {
       adapter: { resolveUserInputPreset: resolvePreset },
     });
     expect(mocks.resolveSetupContext).toHaveBeenCalledWith(auth, session.id);
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: session.id }),
+      event: expect.objectContaining({
+        setupSession: true,
+        setupContext: setupContext.setupContext,
+      }),
+    });
   });
 
   it('leaves ordinary non-setup replies unchanged', async () => {
@@ -268,7 +285,14 @@ describe('setup context on ordinary Fast session input', () => {
       .mockResolvedValueOnce(setupContext)
       .mockImplementation(async () => {
         expect(mocks.upsertMessage).toHaveBeenCalledOnce();
-        return { ...setupContext, setupSnapshot: freshSnapshot };
+        return {
+          ...setupContext,
+          setupSnapshot: freshSnapshot,
+          setupContext: {
+            ...setupContext.setupContext,
+            setupSnapshot: freshSnapshot,
+          },
+        };
       });
     await submitFastSessionUserInputCommand(auth, input, {
       setupSession: true,
@@ -290,6 +314,17 @@ describe('setup context on ordinary Fast session input', () => {
         }),
       }),
     );
+    const { persistFastAgentInlineHumanTurn } =
+      await import('@roomote/sdk/server');
+    expect(vi.mocked(persistFastAgentInlineHumanTurn)).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: session.id }),
+      event: expect.objectContaining({
+        turnSource: 'platform_event',
+        platformEventKind: 'input_response',
+        setupSession: true,
+        setupContext: expect.objectContaining({ setupSnapshot: freshSnapshot }),
+      }),
+    });
   });
 
   it.each(['documents', 'communication'])(
@@ -313,7 +348,14 @@ describe('setup context on ordinary Fast session input', () => {
         .mockResolvedValueOnce(setupContext)
         .mockImplementation(async () => {
           expect(mocks.upsertMessage).toHaveBeenCalledOnce();
-          return { ...setupContext, setupSnapshot: skippedSnapshot };
+          return {
+            ...setupContext,
+            setupSnapshot: skippedSnapshot,
+            setupContext: {
+              ...setupContext.setupContext,
+              setupSnapshot: skippedSnapshot,
+            },
+          };
         });
       await submitFastSessionUserInputCommand(auth, {
         ...input,
@@ -353,7 +395,7 @@ describe('setup context on ordinary Fast session input', () => {
     expect(mocks.after).not.toHaveBeenCalled();
   });
 
-  it('replays a saved setup category response with a fresh snapshot without persisting twice', async () => {
+  it('treats a duplicate saved setup category response as successful without scheduling twice', async () => {
     const saved = {
       eventId: 'response-event',
       payload: {
@@ -371,13 +413,31 @@ describe('setup context on ordinary Fast session input', () => {
     mocks.resolveSetupContext.mockResolvedValue({
       ...setupContext,
       setupSnapshot: freshSnapshot,
+      setupContext: {
+        ...setupContext.setupContext,
+        setupSnapshot: freshSnapshot,
+      },
     });
     await submitFastSessionUserInputCommand(auth, input);
     expect(mocks.upsertMessage).not.toHaveBeenCalled();
-    expect(await runScheduled()).toMatchObject({
-      setupSession: true,
-      setupSnapshot: freshSnapshot,
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule when another generic response-row claimant won', async () => {
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([request])
+      .mockResolvedValueOnce([]);
+    mocks.upsertMessage.mockResolvedValueOnce({
+      initialHumanTurn: false,
+      inserted: false,
     });
+
+    await expect(
+      submitFastSessionUserInputCommand(auth, input),
+    ).resolves.toEqual({ success: true });
+
+    expect(mocks.upsertMessage).toHaveBeenCalledOnce();
+    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   it('routes final presets through setup-specific persistence, not ordinary response writes', async () => {

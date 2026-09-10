@@ -210,6 +210,7 @@ function buildJoinedConnectionRow({
   return {
     enabledMcpId: mcpId,
     disabledTools,
+    enablementUpdatedAt: new Date('2026-03-13T00:00:00.000Z'),
     connection: {
       id,
       userId,
@@ -217,6 +218,7 @@ function buildJoinedConnectionRow({
       enabled: true,
       authConfig: resolvedAuthConfig,
       createdAt: new Date('2026-03-12T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-12T00:00:00.000Z'),
     },
   };
 }
@@ -224,6 +226,7 @@ function buildJoinedConnectionRow({
 function buildEnabledOnlyRow(mcpId: string) {
   return {
     enabledMcpId: mcpId,
+    enablementUpdatedAt: new Date('2026-03-13T00:00:00.000Z'),
     connection: null,
   };
 }
@@ -280,6 +283,15 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     ).getMcpServerConfigs();
 
     expect(result.servers.notion?.disabledTools).toEqual(['search']);
+  });
+
+  it('includes a non-secret cache revision for Fast server resolution', async () => {
+    const result = await resolveUserMcpServerConfigs({
+      userId: 'owner-user',
+      apiBaseUrl: 'https://api.preview.roomote.run',
+    });
+
+    expect(result.notion?.cacheRevision).toBe('1773360000000:1773273600000');
   });
 
   it('delivers the Brain when an explicit Brain provider key is configured', async () => {

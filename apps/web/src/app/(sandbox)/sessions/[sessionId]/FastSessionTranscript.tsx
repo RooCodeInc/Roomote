@@ -12,9 +12,12 @@ import {
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
+  formatRequestUserInputResponseText,
   getImageUrisFromContentBlocks,
   getTextFromContentBlocks,
   inferAcpMessageKind,
+  parseAcpRequestUserInputPayload,
+  parseAcpRequestUserInputResponsePayload,
   parsePrReviewActionOffer,
   getTaskModelDisplayName,
   type AcpMessage,
@@ -105,6 +108,25 @@ function getTranscriptMessageText(message: TranscriptMessage) {
   return payload?.kickoff === true
     ? text?.replace(ROOMOTE_KICKOFF_LINK, '')
     : text;
+}
+
+function isRequestUserInputToolMessage(message: TranscriptMessage) {
+  if (
+    message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
+    message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+    message.eventType !== ACP_ENVELOPE_EVENT_TYPES.ToolResult
+  ) {
+    return false;
+  }
+
+  const payload = message.payload as {
+    toolName?: unknown;
+    title?: unknown;
+  } | null;
+  return (
+    payload?.toolName === 'request_user_input' ||
+    payload?.title === 'request_user_input'
+  );
 }
 
 type PendingResponseState = {
@@ -695,6 +717,133 @@ export function FastSessionTranscript({
         }),
     [messages, owner],
   );
+
+  const pendingInputRequest = useMemo(
+    () => findPendingSessionInputRequest(messages),
+    [messages],
+  );
+  const pendingInputRequestOrder = useMemo(() => {
+    if (!pendingInputRequest) return null;
+
+    return (
+      messages.find((message) => {
+        if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+          return false;
+        }
+        return (
+          parseAcpRequestUserInputPayload(message.payload)?.requestId ===
+          pendingInputRequest.requestId
+        );
+      }) ?? null
+    );
+  }, [messages, pendingInputRequest]);
+  const requestUserInputById = useMemo(() => {
+    const requests = new Map<
+      string,
+      NonNullable<ReturnType<typeof parseAcpRequestUserInputPayload>>
+    >();
+    for (const message of messages) {
+      if (message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+        continue;
+      }
+      const request = parseAcpRequestUserInputPayload(message.payload);
+      if (request) requests.set(request.requestId, request);
+    }
+    return requests;
+  }, [messages]);
+  const { persistedBeforeInput, persistedAfterInput } = useMemo(() => {
+    const before: AcpUiMessage[] = [];
+    const after: AcpUiMessage[] = [];
+
+    for (const message of messages) {
+      if (
+        (message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+          (message.payload as { taskNavigation?: unknown } | null)
+            ?.taskNavigation === true) ||
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput ||
+        isRequestUserInputToolMessage(message)
+      ) {
+        continue;
+      }
+
+      let uiMessage = toAcpUiMessage({
+        // A reply keeps the id its streamed chunks rendered under, so the
+        // persisted row reconciles in place instead of remounting.
+        id:
+          message.role === 'assistant' &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage
+            ? `assistant:${message.eventId}`
+            : message.id,
+        ts: message.ts,
+        eventType: message.eventType as AcpEventType,
+        role: message.role,
+        kind: inferAcpMessageKind(message.eventType),
+        contentBlocks: message.contentBlocks,
+        metadata: message.metadata,
+        payload: message.payload,
+        text: getTranscriptMessageText(message),
+        userName: message.userName,
+        userEmail: message.userEmail,
+        userImageUrl: message.userImageUrl,
+      });
+
+      if (
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
+      ) {
+        const response = parseAcpRequestUserInputResponsePayload(
+          message.payload,
+        );
+        const requestId =
+          response?.requestId ??
+          (typeof message.payload?.requestId === 'string'
+            ? message.payload.requestId
+            : null);
+        const request = requestId
+          ? (requestUserInputById.get(requestId) ?? null)
+          : null;
+        uiMessage = {
+          ...uiMessage,
+          role: 'user',
+          kind: 'text',
+          text:
+            response !== null
+              ? formatRequestUserInputResponseText(request, response)
+              : (getTranscriptMessageText(message) ??
+                'Submitted input response'),
+          data: request
+            ? { ...(message.payload ?? {}), request }
+            : (message.payload ?? {}),
+          userId: uiMessage.userId ?? owner?.userId,
+          userName: uiMessage.userName ?? owner?.name,
+          userEmail: uiMessage.userEmail ?? owner?.email,
+          userImageUrl: uiMessage.userImageUrl ?? owner?.imageUrl,
+        };
+      } else if (
+        uiMessage.role === 'user' &&
+        owner &&
+        uiMessage.userId === owner.userId
+      ) {
+        uiMessage = {
+          ...uiMessage,
+          userName: uiMessage.userName ?? owner.name,
+          userEmail: uiMessage.userEmail ?? owner.email,
+          userImageUrl: uiMessage.userImageUrl ?? owner.imageUrl,
+        };
+      }
+
+      const target =
+        pendingInputRequestOrder &&
+        compareTranscriptOrder(message, pendingInputRequestOrder) > 0
+          ? after
+          : before;
+      target.push(uiMessage);
+    }
+
+    return {
+      persistedBeforeInput: before,
+      persistedAfterInput: after,
+    };
+  }, [messages, owner, pendingInputRequestOrder, requestUserInputById]);
   const hasVisibleAssistantMessage = useMemo(
     () =>
       messages.some(
@@ -703,10 +852,6 @@ export function FastSessionTranscript({
           message.metadata?.visibleInTranscript !== false &&
           Boolean(getTextFromContentBlocks(message.contentBlocks)?.trim()),
       ),
-    [messages],
-  );
-  const pendingInputRequest = useMemo(
-    () => findPendingSessionInputRequest(messages),
     [messages],
   );
   const reviewOffers = useMemo(
@@ -781,12 +926,39 @@ export function FastSessionTranscript({
     }
     return turns;
   }, [liveVoiceTurns, owner]);
-  const uiMessages = useMemo(
-    () => [...persistedUiMessages, ...streamMessages, ...liveVoiceUiMessages],
-    [persistedUiMessages, streamMessages, liveVoiceUiMessages],
-  );
-  const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
-    messages: uiMessages,
+  const { uiMessagesBeforeInput, uiMessagesAfterInput } = useMemo(() => {
+    if (!pendingInputRequestOrder) {
+      return {
+        uiMessagesBeforeInput: [
+          ...persistedBeforeInput,
+          ...persistedAfterInput,
+          ...streamMessages,
+          ...liveVoiceUiMessages,
+        ],
+        uiMessagesAfterInput: [],
+      };
+    }
+
+    const before = [...persistedBeforeInput];
+    const after = [...persistedAfterInput];
+    for (const message of streamMessages) {
+      (message.ts <= pendingInputRequestOrder.ts ? before : after).push(
+        message,
+      );
+    }
+    return { uiMessagesBeforeInput: before, uiMessagesAfterInput: after };
+  }, [
+    pendingInputRequestOrder,
+    persistedAfterInput,
+    persistedBeforeInput,
+    streamMessages,
+    liveVoiceUiMessages,
+  ]);
+  const {
+    renderBlocks: renderBlocksBeforeInput,
+    suppressMessage: suppressMessageBeforeInput,
+  } = useAcpTranscriptBlocks({
+    messages: uiMessagesBeforeInput,
     artifacts: [],
     displayMode,
     initialPrompt: null,
@@ -794,7 +966,21 @@ export function FastSessionTranscript({
     showInternalMessages: false,
     hasLeadingTextBoundary: false,
     keepDelegatedTasksVisible: true,
-    resetKey: `${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
+    resetKey: `before:${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
+  });
+  const {
+    renderBlocks: renderBlocksAfterInput,
+    suppressMessage: suppressMessageAfterInput,
+  } = useAcpTranscriptBlocks({
+    messages: uiMessagesAfterInput,
+    artifacts: [],
+    displayMode,
+    initialPrompt: null,
+    shouldHideFirstMessage: false,
+    showInternalMessages: false,
+    hasLeadingTextBoundary: false,
+    keepDelegatedTasksVisible: true,
+    resetKey: `after:${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
   });
 
   // Every Fast turn started by the call, keyed by its turn id (the client
@@ -1275,9 +1461,36 @@ export function FastSessionTranscript({
               </p>
             ) : null}
             <AcpTranscriptBlockList
-              blocks={renderBlocks}
+              blocks={renderBlocksBeforeInput}
               showInternalMessages={false}
-              onSuppress={suppressMessage}
+              onSuppress={suppressMessageBeforeInput}
+              onOpenDelegatedTask={openTaskPanel ?? undefined}
+            />
+            {pendingInputRequest ? (
+              <div className="mt-3">
+                {pendingInputRequest.preset === 'setup_starter_tasks' ? (
+                  <SetupStarterTasksCard
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                ) : pendingInputRequest.preset === 'setup_integrations' ? (
+                  <SetupIntegrationsCard
+                    key={pendingInputRequest.requestId}
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                ) : (
+                  <SessionUserInputCard
+                    sessionId={sessionId}
+                    request={pendingInputRequest}
+                  />
+                )}
+              </div>
+            ) : null}
+            <AcpTranscriptBlockList
+              blocks={renderBlocksAfterInput}
+              showInternalMessages={false}
+              onSuppress={suppressMessageAfterInput}
               onOpenDelegatedTask={openTaskPanel ?? undefined}
             />
             {hasVisibleAssistantMessage ? timelineExtras : null}
@@ -1308,31 +1521,10 @@ export function FastSessionTranscript({
                 }
               />
             ))}
-            {pendingInputRequest ? (
-              <div className="mt-3">
-                {pendingInputRequest.preset === 'setup_starter_tasks' ? (
-                  <SetupStarterTasksCard
-                    sessionId={sessionId}
-                    request={pendingInputRequest}
-                  />
-                ) : pendingInputRequest.preset === 'setup_integrations' ? (
-                  <SetupIntegrationsCard
-                    key={pendingInputRequest.requestId}
-                    sessionId={sessionId}
-                    request={pendingInputRequest}
-                  />
-                ) : (
-                  <SessionUserInputCard
-                    sessionId={sessionId}
-                    request={pendingInputRequest}
-                  />
-                )}
-              </div>
-            ) : null}
           </ConversationContent>
           <ConversationScrollButton />
         </Conversation>
-        {canReply && !pendingInputRequest ? (
+        {canReply && !pendingInputRequest?.preset ? (
           <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
             <SessionPromptInput
               sessionId={sessionId}

@@ -24,7 +24,6 @@ import {
 import {
   useAsanaConnection,
   useConnectMcp,
-  useCuratedIntegrationsAvailability,
   useDisconnectMcp,
   useGrafanaConnection,
   useGranolaConnection,
@@ -32,6 +31,7 @@ import {
   useVoiceConnection,
   useDeploymentMcpEnablements,
   useMcpOauthReadiness,
+  useEffectiveMcpIntegrations,
   useNotionConnection,
   useRipplingConnection,
   useSaveAsanaConnection,
@@ -47,7 +47,6 @@ import {
   useSaveXConnection,
   useSetDeploymentMcpEnabled,
   useSnowflakeConnection,
-  useUserMcpConnections,
   useVercelConnection,
   useXConnection,
 } from '@/hooks/mcp-connections';
@@ -1676,19 +1675,16 @@ export function Integrations({
   );
   const disconnectLinear = useDisconnectLinear();
 
-  const deploymentEnablements = useDeploymentMcpEnablements();
-  const integrationsAvailability = useCuratedIntegrationsAvailability();
-  const oauthReadiness = useMcpOauthReadiness();
-  const linearOauthStatus = oauthReadiness.data?.find(
-    (entry) => entry.mcpId === 'linear',
-  )?.status;
+  const effectiveIntegrations = useEffectiveMcpIntegrations();
+  const linearOauthStatus = effectiveIntegrations.data?.find(
+    (entry) => entry.id === 'linear',
+  )?.oauthReadiness;
   const linearOauthUnavailable =
     linearOauthStatus === 'missing' || linearOauthStatus === 'partial';
   const linearOauthSetup = useLinearOauthSetup(
     isAdmin && (linearOauthUnavailable || isLinearOauthSetupOpen),
   );
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
-  const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
   const disconnectMcp = useDisconnectMcp();
   const saveAsanaConnection = useSaveAsanaConnection();
@@ -1702,12 +1698,12 @@ export function Integrations({
   const saveVercelConnection = useSaveVercelConnection();
   const saveXConnection = useSaveXConnection();
   const asanaConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'asana',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'asana',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isAsanaConnected =
     asanaConnectionSummary?.authStatus === 'authenticated';
   const asanaConnection = useAsanaConnection(
@@ -1715,8 +1711,8 @@ export function Integrations({
   );
   const notionConnectionSummary = useMemo(
     () =>
-      (userMcpConnections.data ?? []).find((entry) => entry.mcpId === 'notion'),
-    [userMcpConnections.data],
+      (effectiveIntegrations.data ?? []).find((entry) => entry.id === 'notion'),
+    [effectiveIntegrations.data],
   );
   const notionConnection = useNotionConnection(
     isAdmin &&
@@ -1728,10 +1724,10 @@ export function Integrations({
     notionConnection.data?.authStatus === 'authenticated';
   const ripplingConnectionSummary = useMemo(
     () =>
-      (userMcpConnections.data ?? []).find(
-        (entry) => entry.mcpId === 'rippling',
+      (effectiveIntegrations.data ?? []).find(
+        (entry) => entry.id === 'rippling',
       ),
-    [userMcpConnections.data],
+    [effectiveIntegrations.data],
   );
   const ripplingConnection = useRipplingConnection(
     isAdmin &&
@@ -1742,12 +1738,12 @@ export function Integrations({
     ripplingConnectionSummary?.authStatus === 'authenticated' &&
     ripplingConnection.data?.authStatus === 'authenticated';
   const granolaConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'granola',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'granola',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isGranolaConnected =
     granolaConnectionSummary?.authStatus === 'authenticated';
   const granolaConnection = useGranolaConnection(
@@ -1766,60 +1762,60 @@ export function Integrations({
   const voiceConfiguredByEnvironment =
     voiceConnection.data?.source === 'environment';
   const elevenLabsConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'elevenlabs',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'elevenlabs',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isElevenLabsConnected =
     elevenLabsConnectionSummary?.authStatus === 'authenticated';
   const elevenLabsConnection = useElevenLabsConnection(
     isAdmin && (isElevenLabsConnected || isElevenLabsDialogOpen),
   );
   const grafanaConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'grafana',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'grafana',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isGrafanaConnected =
     grafanaConnectionSummary?.authStatus === 'authenticated';
   const grafanaConnection = useGrafanaConnection(
     isAdmin && (isGrafanaConnected || isGrafanaDialogOpen),
   );
   const snowflakeConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'snowflake',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'snowflake',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isSnowflakeConnected =
     snowflakeConnectionSummary?.authStatus === 'authenticated';
   const snowflakeConnection = useSnowflakeConnection(
     isAdmin && (isSnowflakeConnected || isSnowflakeDialogOpen),
   );
   const vercelConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'vercel',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'vercel',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isVercelConnected =
     vercelConnectionSummary?.authStatus === 'authenticated';
   const vercelConnection = useVercelConnection(
     isAdmin && (isVercelConnected || isVercelDialogOpen),
   );
   const xConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'x',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'x',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isXConnected = xConnectionSummary?.authStatus === 'authenticated';
   const xConnection = useXConnection(
     isAdmin && (isXConnected || isXDialogOpen),
@@ -2006,13 +2002,13 @@ export function Integrations({
   const items = useMemo<IntegrationItem[]>(() => {
     const visibleMcpIntegrations = MCP_INTEGRATIONS;
     const orgEnablementMap = new Map(
-      (deploymentEnablements.data ?? []).map((entry) => [
-        entry.mcpId,
+      (effectiveIntegrations.data ?? []).map((entry) => [
+        entry.id,
         entry.enabled,
       ]),
     );
     const userConnectionMap = new Map(
-      (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
+      (effectiveIntegrations.data ?? []).map((entry) => [entry.id, entry]),
     );
     const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
     const canConfigureLinearOauth = isAdmin && !linearOauthUnavailable;
@@ -2071,7 +2067,7 @@ export function Integrations({
         isMcpBased: false,
         isPending:
           linearInstallation.isPending ||
-          (!linearInstallation.data && oauthReadiness.isPending) ||
+          (!linearInstallation.data && effectiveIntegrations.isPending) ||
           connectLinear.isPending ||
           disconnectLinear.isPending,
         status: linearOauthUnavailable
@@ -2506,7 +2502,7 @@ export function Integrations({
     linearOauthSetup.isPending,
     linearOauthStatus,
     linearOauthUnavailable,
-    oauthReadiness.isPending,
+    effectiveIntegrations.isPending,
     isAdmin,
     isGrafanaDialogOpen,
     isGranolaDialogOpen,
@@ -2521,7 +2517,7 @@ export function Integrations({
     saveElevenLabsConnection.isPending,
     saveVoiceConnection.isPending,
     saveVercelConnection.isPending,
-    deploymentEnablements.data,
+    effectiveIntegrations.data,
     pathname,
     integrationIds,
     setDeploymentEnabled,
@@ -2542,7 +2538,6 @@ export function Integrations({
     xConnection.isPending,
     isXDialogOpen,
     highlightedIntegrationId,
-    userMcpConnections.data,
   ]);
 
   const {
@@ -3225,7 +3220,11 @@ export function Integrations({
     });
   };
 
-  if (integrationsAvailability.data?.enabled === false) {
+  if (
+    effectiveIntegrations.data?.some(
+      (integration) => integration.status === 'unavailable',
+    )
+  ) {
     return (
       <div className="space-y-8">
         <Alert>
