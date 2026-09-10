@@ -734,7 +734,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('schedules one bounded own-task check after a successful coding launch', () => {
+  it('silently schedules one bounded recurring own-task monitor after a successful coding launch', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
     expect(prompt).toContain('## Own Coding Task Follow-Through');
@@ -742,19 +742,31 @@ describe('buildFastAgentSystemPrompt', () => {
       'After "launch_task" successfully creates a coding task for a human-authored request',
     );
     expect(prompt).toContain(
-      'list active wakeups and arrange exactly one equivalent-free one-shot check for the returned task ID',
+      'list active wakeups and silently arrange exactly one equivalent-free bounded recurring check for the returned task ID',
     );
-    expect(prompt).toContain('schedule "in 10m"');
+    expect(prompt).toContain('schedule "every 10m x12"');
     expect(prompt).toContain('reportPolicy "only_when_notable"');
     expect(prompt).toContain(
       'not external-process monitoring, so do not ask for monitoring consent',
     );
     expect(prompt).toContain(
-      'Do not schedule after a failed launch or create a second check when an equivalent one exists',
+      'Do not schedule after a failed launch or create a second monitor when an equivalent one already targets that task',
+    );
+    expect(prompt).toContain(
+      'Do not mention this automatic monitor, its setup, cadence, or next run in the acknowledgement or closeout',
+    );
+    expect(prompt).toContain(
+      'This exception overrides generic wakeup-creation confirmation instructions only for automatic own-task follow-through',
+    );
+    expect(prompt).toContain(
+      'continue to confirm reminders and monitoring that the user requested',
+    );
+    expect(prompt).toContain(
+      'After creating a user-requested wakeup, confirm the plan and the next run time in one sentence',
     );
   });
 
-  it('keeps own-task check-ins useful, quiet, and nonrenewing', () => {
+  it('keeps recurring own-task checks useful, deduplicated, and finite', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
@@ -762,25 +774,31 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'stay silent when the task finished or was canceled',
+      'compare its current summary and recent messages with this conversation',
     );
     expect(prompt).toContain(
-      'completion or useful progress was already reported',
+      'report only newly useful concrete progress, a blocker, or needed input',
     );
     expect(prompt).toContain(
-      'a recent useful update makes another check-in redundant',
+      'unchanged, routine, already reported, superseded by a recent useful update',
     );
     expect(prompt).toContain(
-      'Otherwise report only concrete progress, a blocker, or needed input grounded in the task; never invent progress',
+      'never invent progress or duplicate task, pull-request, or other lifecycle notifications',
     );
     expect(prompt).toContain(
-      'Do not create another wakeup, renew the check, or duplicate task or pull-request lifecycle notifications',
+      'finished or was canceled, the monitor became irrelevant, or current task inspection capability was lost',
+    );
+    expect(prompt).toContain(
+      'cancel the wakeup if runs remain and stay silent',
+    );
+    expect(prompt).toContain(
+      'Never renew or replace the monitor; after 12 runs, let it expire even if the task is still active',
     );
     expect(prompt).toContain(
       'call "ignore_event" without a cancellation closeout',
     );
-    expect(prompt).not.toContain(
-      'when it is already on its final run, finished, canceled',
+    expect(prompt).toContain(
+      'This overrides the generic instruction to announce a resolved monitor',
     );
   });
 
