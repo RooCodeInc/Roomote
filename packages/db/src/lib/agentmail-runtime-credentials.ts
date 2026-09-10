@@ -4,12 +4,6 @@ export type AgentMailRuntimeCredentials = {
   apiKey: string | null;
   webhookSecret: string | null;
   inboxId: string | null;
-  /**
-   * AgentMail pod the inbox lives in, when the deployment was set up with a
-   * pod-scoped key (or asked to keep its resources inside a pod). Null means
-   * organization-level resources.
-   */
-  podId: string | null;
 };
 
 const CACHE_TTL_MS = 30_000;
@@ -29,7 +23,6 @@ function readProcessEnvCredentials(): AgentMailRuntimeCredentials {
     apiKey: process.env.R_AGENTMAIL_API_KEY?.trim() || null,
     webhookSecret: process.env.R_AGENTMAIL_WEBHOOK_SECRET?.trim() || null,
     inboxId: normalizeInboxId(process.env.R_AGENTMAIL_INBOX_ID),
-    podId: process.env.R_AGENTMAIL_POD_ID?.trim() || null,
   };
 }
 
@@ -49,7 +42,7 @@ export async function resolveAgentMailRuntimeCredentials(): Promise<AgentMailRun
   }
 
   const deploymentEnvVars =
-    fromEnv.apiKey && fromEnv.webhookSecret && fromEnv.inboxId && fromEnv.podId
+    fromEnv.apiKey && fromEnv.webhookSecret && fromEnv.inboxId
       ? {}
       : await resolveEffectiveDeploymentEnvVars();
   const value: AgentMailRuntimeCredentials = {
@@ -62,8 +55,6 @@ export async function resolveAgentMailRuntimeCredentials(): Promise<AgentMailRun
     inboxId:
       fromEnv.inboxId ||
       normalizeInboxId(deploymentEnvVars.R_AGENTMAIL_INBOX_ID),
-    podId:
-      fromEnv.podId || deploymentEnvVars.R_AGENTMAIL_POD_ID?.trim() || null,
   };
 
   cachedCredentials = { value, expiresAtMs: nowMs + CACHE_TTL_MS };
