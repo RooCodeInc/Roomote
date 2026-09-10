@@ -118,4 +118,11 @@ describe('stripVoiceAnnotations', () => {
   it('returns nothing for annotation-only speech', () => {
     expect(stripVoiceAnnotations('[cough]')).toBe('');
   });
+
+  it('drops the halves of a tag cut by a turn boundary', () => {
+    expect(stripVoiceAnnotations('[ch')).toBe('');
+    expect(stripVoiceAnnotations('uckle]')).toBe('');
+    expect(stripVoiceAnnotations('Sure thing [chu')).toBe('Sure thing');
+    expect(stripVoiceAnnotations('ckle] Sure thing')).toBe('Sure thing');
+  });
 });

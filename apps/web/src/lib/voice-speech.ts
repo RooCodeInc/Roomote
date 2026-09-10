@@ -53,11 +53,17 @@ export function toSpeakableText(markdown: string): string {
  * callers applying this to the accumulated text.
  */
 export function stripVoiceAnnotations(text: string): string {
-  return text
-    .replace(/\[[a-z][a-z\s'-]{0,40}\]/gi, '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/^[ \t]+|[ \t]+$/gm, '')
-    .trim();
+  return (
+    text
+      .replace(/\[[a-z][a-z\s'-]{0,40}\]/gi, '')
+      // A tag cut by a turn boundary leaves an unfinished "[chu" at the end
+      // of one turn and a stray "ckle]" at the start of the next.
+      .replace(/\[[a-z][a-z\s'-]{0,40}$/i, '')
+      .replace(/^[a-z][a-z\s'-]{0,40}\]/i, '')
+      .replace(/[ \t]{2,}/g, ' ')
+      .replace(/^[ \t]+|[ \t]+$/gm, '')
+      .trim()
+  );
 }
 
 /**
