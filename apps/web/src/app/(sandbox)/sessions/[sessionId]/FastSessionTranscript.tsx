@@ -932,10 +932,15 @@ export function FastSessionTranscript({
   >([]);
   const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
 
+  // Spoken requests between being queued and their reply mutation settling.
+  // Counted explicitly so spoken acknowledgements are never recorded in the
+  // gap between dequeue and the request actually being sent.
+  const [voiceRequestsInFlight, setVoiceRequestsInFlight] = useState(0);
   const enqueueVoiceUtterance = useCallback(
     (text: string, delegationId: string | null) => {
       // The reply's optimistic row takes over from the live speech bubble.
       setLiveVoiceTurns((current) => ({ ...current, user: null }));
+      setVoiceRequestsInFlight((count) => count + 1);
       pendingUtterancesRef.current.push({ text, delegationId });
       setUtteranceQueueVersion((version) => version + 1);
     },
@@ -993,7 +998,9 @@ export function FastSessionTranscript({
         reasoningEffort: modelSelectionRef.current.reasoningEffort,
       },
       { voiceDelegationId: next.delegationId },
-    );
+    ).finally(() => {
+      setVoiceRequestsInFlight((count) => Math.max(0, count - 1));
+    });
   }, [isSending, utteranceQueueVersion, sendReply]);
 
   const agentWorking =
@@ -1118,16 +1125,14 @@ export function FastSessionTranscript({
   );
   recordVoiceTurnRef.current = recordVoiceTurn;
   const requestInFlight =
-    liveVoice.deliveringUtterances > 0 ||
-    isSending ||
-    pendingUtterancesRef.current.length > 0;
+    liveVoice.deliveringUtterances > 0 || voiceRequestsInFlight > 0;
   requestInFlightRef.current = requestInFlight;
   useEffect(() => {
     if (requestInFlight || heldSpokenTurnsRef.current.length === 0) return;
     const held = heldSpokenTurnsRef.current;
     heldSpokenTurnsRef.current = [];
     for (const text of held) recordVoiceTurn('assistant', text);
-  }, [requestInFlight, recordVoiceTurn, utteranceQueueVersion]);
+  }, [requestInFlight, recordVoiceTurn]);
   const callStartedAtRef = useRef<number | null>(null);
   useEffect(() => {
     if (liveVoice.active && liveVoice.startedAt !== null) {
