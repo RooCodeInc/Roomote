@@ -26,6 +26,7 @@ import {
   useGrafanaConnection,
   useGranolaConnection,
   useElevenLabsConnection,
+  useVoiceConnection,
   useDeploymentMcpEnablements,
   useMcpOauthReadiness,
   useNotionConnection,
@@ -36,6 +37,7 @@ import {
   useSaveGrafanaConnection,
   useSaveGranolaConnection,
   useSaveElevenLabsConnection,
+  useSaveVoiceConnection,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
   useSaveXConnection,
@@ -59,6 +61,7 @@ import {
   saveGrafanaConnectionSchema,
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
+  saveVoiceConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
   saveXConnectionSchema,
@@ -103,6 +106,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will use one deployment-wide Granola connection to browse meeting notes, transcripts, decisions, and action items.',
   elevenlabs:
     'Roomote will use one deployment-wide ElevenLabs connection to narrate feature-demo videos. The key stays on the control plane; agents get no ElevenLabs tools.',
+  voice:
+    'Roomote will use one deployment-wide OpenAI key with GPT-Live access to hold voice calls on Sessions. The key stays on the control plane; agents get no tools from it.',
   github:
     'Roomote will be able to inspect PRs, issues, and repository context.',
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
@@ -207,6 +212,10 @@ type ElevenLabsConnectionData = {
   voiceId?: string;
 };
 
+type VoiceFormState = {
+  apiKey: string;
+};
+
 type GrafanaFormState = {
   baseUrl: string;
   serviceAccountToken: string;
@@ -259,6 +268,10 @@ function buildEmptyGranolaForm(): GranolaFormState {
   return {
     apiKey: '',
   };
+}
+
+function buildEmptyVoiceForm(): VoiceFormState {
+  return { apiKey: '' };
 }
 
 function buildEmptyElevenLabsForm(): ElevenLabsFormState {
@@ -395,6 +408,16 @@ function getGranolaFieldErrors(
   return {
     apiKey: fieldErrors.apiKey,
   };
+}
+
+function getVoiceFieldErrors(
+  result: ReturnType<typeof saveVoiceConnectionSchema.safeParse>,
+): Partial<Record<keyof VoiceFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  return { apiKey: result.error.flatten().fieldErrors.apiKey };
 }
 
 function getElevenLabsFieldErrors(
@@ -1133,6 +1156,62 @@ function GranolaConnectionFields({
   );
 }
 
+function VoiceConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankApiKey,
+  onFieldChange,
+}: {
+  form: VoiceFormState;
+  fieldErrors: Partial<Record<keyof VoiceFormState, string[]>>;
+  formError: string | null;
+  allowBlankApiKey: boolean;
+  onFieldChange: (field: keyof VoiceFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="voice-api-key">OpenAI API Key</Label>
+        <Input
+          id="voice-api-key"
+          type="password"
+          placeholder="Enter an OpenAI API key with GPT-Live access"
+          value={form.apiKey}
+          onChange={(event) => onFieldChange('apiKey', event.target.value)}
+          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          Use a key from an OpenAI project with GPT-Live enabled, separate from
+          any key used for task inference. It is used only by this
+          deployment&apos;s control plane to open voice calls; it is never sent
+          to agents or task sandboxes. If the deployment sets
+          R_VOICE_OPENAI_API_KEY, that key is used instead.
+        </p>
+        {allowBlankApiKey ? (
+          <p className="text-sm text-muted-foreground">
+            Leave blank to keep the existing API key.
+          </p>
+        ) : null}
+        {fieldErrors.apiKey ? (
+          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
+        ) : null}
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
 function ElevenLabsConnectionFields({
   form,
   fieldErrors,
@@ -1426,6 +1505,14 @@ export function Integrations() {
   const [granolaForm, setGranolaForm] = useState<GranolaFormState>(
     buildEmptyGranolaForm(),
   );
+  const [isVoiceDialogOpen, setIsVoiceDialogOpen] = useState(false);
+  const [voiceForm, setVoiceForm] = useState<VoiceFormState>(
+    buildEmptyVoiceForm(),
+  );
+  const [voiceFieldErrors, setVoiceFieldErrors] = useState<
+    Partial<Record<keyof VoiceFormState, string[]>>
+  >({});
+  const [voiceFormError, setVoiceFormError] = useState<string | null>(null);
   const [isElevenLabsDialogOpen, setIsElevenLabsDialogOpen] = useState(false);
   const [elevenLabsForm, setElevenLabsForm] = useState<ElevenLabsFormState>(
     buildEmptyElevenLabsForm(),
@@ -1503,6 +1590,7 @@ export function Integrations() {
   const saveGrafanaConnection = useSaveGrafanaConnection();
   const saveGranolaConnection = useSaveGranolaConnection();
   const saveElevenLabsConnection = useSaveElevenLabsConnection();
+  const saveVoiceConnection = useSaveVoiceConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
   const saveVercelConnection = useSaveVercelConnection();
   const saveXConnection = useSaveXConnection();
@@ -1557,6 +1645,16 @@ export function Integrations() {
     granolaConnectionSummary?.authStatus === 'authenticated';
   const granolaConnection = useGranolaConnection(
     isAdmin && (isGranolaConnected || isGranolaDialogOpen),
+  );
+  const voiceConnectionSummary = useMemo(
+    () =>
+      (userMcpConnections.data ?? []).find((entry) => entry.mcpId === 'voice'),
+    [userMcpConnections.data],
+  );
+  const isVoiceConnected =
+    voiceConnectionSummary?.authStatus === 'authenticated';
+  const voiceConnection = useVoiceConnection(
+    isAdmin && (isVoiceConnected || isVoiceDialogOpen),
   );
   const elevenLabsConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
@@ -1667,6 +1765,20 @@ export function Integrations() {
     setGranolaFormError(null);
     setGranolaForm(buildEmptyGranolaForm());
   }, [granolaConnection.isPending, isGranolaConnected, isGranolaDialogOpen]);
+
+  useEffect(() => {
+    if (!isVoiceDialogOpen) {
+      return;
+    }
+
+    if (voiceConnection.isPending && isVoiceConnected) {
+      return;
+    }
+
+    setVoiceFieldErrors({});
+    setVoiceFormError(null);
+    setVoiceForm(buildEmptyVoiceForm());
+  }, [voiceConnection.isPending, isVoiceConnected, isVoiceDialogOpen]);
 
   useEffect(() => {
     if (!isElevenLabsDialogOpen) {
@@ -1994,6 +2106,27 @@ export function Integrations() {
             });
           }
 
+          if (integration.id === 'voice') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: userConnectionMap.get(integration.id),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveVoiceConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isVoiceDialogOpen,
+              connectionPending: voiceConnection.isPending,
+              canConfigure: isAdmin,
+              // Credential-only: no agent tools to manage.
+              canManageTools: false,
+              openDialog: () => setIsVoiceDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           if (integration.id === 'elevenlabs') {
             return buildAdminConfiguredIntegrationItem({
               integration,
@@ -2237,6 +2370,7 @@ export function Integrations() {
     grafanaConnection.isPending,
     granolaConnection.isPending,
     elevenLabsConnection.isPending,
+    voiceConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
     linearOauthSetup.isPending,
@@ -2247,6 +2381,7 @@ export function Integrations() {
     isGrafanaDialogOpen,
     isGranolaDialogOpen,
     isElevenLabsDialogOpen,
+    isVoiceDialogOpen,
     isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveNotionConnection.isPending,
@@ -2254,6 +2389,7 @@ export function Integrations() {
     saveGrafanaConnection.isPending,
     saveGranolaConnection.isPending,
     saveElevenLabsConnection.isPending,
+    saveVoiceConnection.isPending,
     saveVercelConnection.isPending,
     deploymentEnablements.data,
     pathname,
@@ -2405,6 +2541,20 @@ export function Integrations() {
     setGranolaFormError(null);
   };
 
+  const handleVoiceFieldChange = (
+    field: keyof VoiceFormState,
+    value: string,
+  ) => {
+    setVoiceForm((current) => ({ ...current, [field]: value }));
+    setVoiceFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      return { ...current, [field]: undefined };
+    });
+  };
+
   const handleElevenLabsFieldChange = (
     field: keyof ElevenLabsFormState,
     value: string,
@@ -2552,6 +2702,19 @@ export function Integrations() {
     }
 
     setGranolaForm(buildEmptyGranolaForm());
+  };
+
+  const handleVoiceDialogOpenChange = (open: boolean) => {
+    setIsVoiceDialogOpen(open);
+
+    setVoiceFieldErrors({});
+    setVoiceFormError(null);
+
+    if (!open) {
+      return;
+    }
+
+    setVoiceForm(buildEmptyVoiceForm());
   };
 
   const handleElevenLabsDialogOpenChange = (open: boolean) => {
@@ -2741,6 +2904,40 @@ export function Integrations() {
       },
       onError: (error) => {
         setGranolaFormError(error.message);
+      },
+    });
+  };
+
+  const handleVoiceSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveVoiceConnectionSchema.safeParse({
+      apiKey: voiceForm.apiKey,
+    });
+    if (!parsed.success) {
+      setVoiceFieldErrors(getVoiceFieldErrors(parsed));
+      return;
+    }
+
+    if (!isVoiceConnected && parsed.data.apiKey.length === 0) {
+      setVoiceFieldErrors({ apiKey: ['API key is required'] });
+      return;
+    }
+
+    setVoiceFieldErrors({});
+    setVoiceFormError(null);
+
+    saveVoiceConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isVoiceConnected
+            ? 'Voice key updated for this deployment.'
+            : 'Voice enabled for this deployment.',
+        );
+        handleVoiceDialogOpenChange(false);
+      },
+      onError: (error) => {
+        setVoiceFormError(error.message);
       },
     });
   };
@@ -3036,6 +3233,30 @@ export function Integrations() {
           formError={granolaFormError}
           allowBlankApiKey={isGranolaConnected}
           onFieldChange={handleGranolaFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="Voice"
+        open={isVoiceDialogOpen}
+        onOpenChange={handleVoiceDialogOpenChange}
+        isEditing={isVoiceConnected}
+        isPending={saveVoiceConnection.isPending}
+        isLoading={isVoiceConnected && voiceConnection.isPending}
+        description={
+          <>
+            Store an OpenAI API key with GPT-Live access for this deployment.
+            The key stays encrypted server-side and is used only by the control
+            plane to open voice calls on Sessions.
+          </>
+        }
+        onSubmit={handleVoiceSubmit}
+      >
+        <VoiceConnectionFields
+          form={voiceForm}
+          fieldErrors={voiceFieldErrors}
+          formError={voiceFormError}
+          allowBlankApiKey={isVoiceConnected}
+          onFieldChange={handleVoiceFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
       <AdminConfiguredIntegrationDialog

@@ -48,6 +48,9 @@ const state = vi.hoisted(() => ({
     authStatus?: string | null;
     voiceId?: string;
   },
+  voiceConnection: null as null | {
+    authStatus?: string | null;
+  },
   grafanaConnection: null as null | {
     authStatus?: string | null;
     baseUrl: string;
@@ -110,6 +113,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveRipplingConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
+    saveVoiceConnection: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
@@ -292,6 +296,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useElevenLabsConnection: () => ({
     data: state.elevenLabsConnection,
+    isPending: false,
+  }),
+  useSaveVoiceConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveVoiceConnection,
+  }),
+  useVoiceConnection: () => ({
+    data: state.voiceConnection,
     isPending: false,
   }),
   useSaveGrafanaConnection: () => ({
@@ -904,6 +916,7 @@ describe('Integrations settings', () => {
       'Supabase',
       'Supermemory',
       'Vercel',
+      'Voice',
       'X',
       'Zero',
     ]);
@@ -2183,5 +2196,25 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('button', { name: 'Enable search_events' }),
     ).toBeInTheDocument();
+  });
+
+  it('lets an admin store a voice key from the Voice card', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Voice' }),
+    );
+    const input = await screen.findByLabelText('OpenAI API Key');
+    fireEvent.change(input, { target: { value: '  sk-voice-123  ' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+
+    expect(mutations.saveVoiceConnection).toHaveBeenCalledWith(
+      { apiKey: 'sk-voice-123' },
+      expect.anything(),
+    );
   });
 });

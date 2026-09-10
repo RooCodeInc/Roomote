@@ -2,7 +2,19 @@ import {
   generateTrackedNonTaskText,
   NON_TASK_INFERENCE_SURFACES,
 } from '@roomote/cloud-agents/server/non-task-provider-usage';
-import { resolveModelProviderEnvValue } from '@roomote/db/server';
+import {
+  and,
+  db,
+  deploymentMcpEnablements,
+  eq,
+  isNull,
+  mcpConnections,
+  resolveModelProviderEnvValue,
+} from '@roomote/db/server';
+import { decrypt } from '@roomote/db/encryption';
+import { isMcpConnectionVoiceConfig } from '@roomote/types';
+
+import { areCuratedIntegrationsDisabled, Env } from './env';
 
 import {
   formatVoiceWorkspaceContext,
@@ -16,8 +28,41 @@ import {
  * Voice is opt-in through its own key. The general OPENAI_API_KEY is not a
  * fallback: many deployments have one for task inference without wanting a
  * GPT-Live bill, and OpenRouter-only deployments have none at all.
+ *
+ * The key comes from `R_VOICE_OPENAI_API_KEY` when the operator sets it, and
+ * otherwise from the Voice integration an admin configures in Settings.
  */
 const VOICE_OPENAI_ENV_VAR_NAMES = ['R_VOICE_OPENAI_API_KEY'] as const;
+
+/** The admin-entered key from Settings › Integrations › Voice, if any. */
+async function resolveStoredVoiceKey(): Promise<string | undefined> {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+    return undefined;
+  }
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'voice'),
+      isNull(mcpConnections.userId),
+      eq(mcpConnections.enabled, true),
+      eq(mcpConnections.authStatus, 'authenticated'),
+    ),
+    columns: { authConfig: true },
+  });
+  if (!connection || !isMcpConnectionVoiceConfig(connection.authConfig)) {
+    return undefined;
+  }
+
+  const enablement = await db.query.deploymentMcpEnablements.findFirst({
+    where: eq(deploymentMcpEnablements.mcpId, 'voice'),
+    columns: { enabled: true },
+  });
+  if (enablement?.enabled === false) {
+    return undefined;
+  }
+
+  return decrypt(connection.authConfig.encryptedApiKey).trim() || undefined;
+}
 
 const OPENAI_API_BASE_URL = 'https://api.openai.com';
 const VOICE_LIVE_MODEL = 'gpt-live-1';
@@ -64,8 +109,14 @@ export async function resolveVoiceOpenAiKey(): Promise<string | undefined> {
     return cachedVoiceKey.value;
   }
 
-  const apiKey = await resolveModelProviderEnvValue(VOICE_OPENAI_ENV_VAR_NAMES);
-  const value = apiKey?.trim() || undefined;
+  const envKey = await resolveModelProviderEnvValue(VOICE_OPENAI_ENV_VAR_NAMES);
+  const value =
+    envKey?.trim() ||
+    (await resolveStoredVoiceKey().catch((error: unknown) => {
+      console.warn('[voice] Failed to read the stored voice key', error);
+      return undefined;
+    })) ||
+    undefined;
   cachedVoiceKey = { value, expiresAt: now + VOICE_KEY_CACHE_TTL_MS };
   return value;
 }
