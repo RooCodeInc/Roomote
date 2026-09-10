@@ -85,7 +85,10 @@ import { RunStatus } from '@roomote/types';
 describe('resolveFastSessionReplyFooterContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getSessionForFastConversationMock.mockResolvedValue({ id: 'session-1' });
+    getSessionForFastConversationMock.mockResolvedValue({
+      id: 'session-1',
+      activityAt: 1_700_000_000,
+    });
     selectWhereMock.mockResolvedValue([
       { taskId: 'task-1' },
       { taskId: 'task-2' },
@@ -143,7 +146,7 @@ describe('resolveFastSessionReplyFooterContext', () => {
       ],
       livePreviewUrl: 'https://preview.example',
       runningTasks: { count: 0, url: 'https://roomote.example/tasks' },
-      sessionActivityAt: null,
+      sessionActivityAt: 1_700_000_000_000,
     });
 
     expect(getSessionForFastConversationMock).toHaveBeenCalledWith(

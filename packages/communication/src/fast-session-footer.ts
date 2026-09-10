@@ -44,7 +44,7 @@ export type FastSessionReplyFooterContext = {
   linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
   runningTasks?: ThreadReplyRunningTasks | null;
-  /** Session `activityAt` (epoch ms), so a refresh can tell when it has settled. */
+  /** Session `activityAt` in epoch ms, so a refresh can tell when it has settled. */
   sessionActivityAt?: number | null;
 };
 
@@ -114,7 +114,7 @@ export async function resolveFastSessionReplyFooterContext(params: {
 
   return {
     ...(runningTasks ? { runningTasks } : {}),
-    sessionActivityAt: session?.activityAt ?? null,
+    sessionActivityAt: session ? session.activityAt * 1000 : null,
     linkedPrs: collectFastSessionLinkedPrs({
       pullRequest: params.pullRequest,
       pullRequests: params.pullRequests,
