@@ -9,6 +9,14 @@ import { AddressInfo } from 'node:net';
 
 type JsonRecord = Record<string, unknown>;
 
+export type MockAgentMailPod = {
+  pod_id: string;
+  name?: string;
+  /** Creation is idempotent per client_id, matching real AgentMail. */
+  client_id?: string;
+  created_at: string;
+};
+
 export type MockAgentMailInbox = {
   /** Canonical id, `<username>@<domain>` — also the inbox email address. */
   inbox_id: string;
@@ -17,6 +25,8 @@ export type MockAgentMailInbox = {
   display_name?: string;
   /** Creation is idempotent per client_id, matching real AgentMail. */
   client_id?: string;
+  /** Set when the inbox lives inside a pod (`POST /v0/pods/{pod}/inboxes`). */
+  pod_id?: string;
   created_at: string;
 };
 
@@ -28,6 +38,11 @@ export type MockAgentMailWebhook = {
   client_id?: string;
   /** Omitted means the webhook receives events for every inbox. */
   inbox_ids?: string[];
+  /**
+   * Omitted means every pod (and organization-level inboxes). A webhook
+   * created through `POST /v0/pods/{pod}/webhooks` is scoped to that pod.
+   */
+  pod_ids?: string[];
   /** Omitted means the webhook receives every event type. */
   event_types?: string[];
   enabled: boolean;
@@ -86,6 +101,7 @@ export type MockAgentMailState = {
    * set it to catch requests built with the wrong credential.
    */
   acceptedApiKeys?: string[];
+  pods?: MockAgentMailPod[];
   inboxes: MockAgentMailInbox[];
   webhooks?: MockAgentMailWebhook[];
   messages?: MockAgentMailStoredMessage[];
@@ -217,6 +233,10 @@ function normalizeState(state: MockAgentMailState): MockAgentMailState {
   return {
     ...cloneState(state),
     // Seeded scenarios may omit derivable fields; fill them in here.
+    pods: (state.pods ?? []).map((pod) => ({
+      ...pod,
+      created_at: pod.created_at ?? new Date(0).toISOString(),
+    })),
     inboxes: state.inboxes.map((inbox) => ({
       ...splitInboxId(inbox.inbox_id),
       ...inbox,
@@ -231,6 +251,24 @@ function normalizeState(state: MockAgentMailState): MockAgentMailState {
     messages: (state.messages ?? []).map((message) => ({ ...message })),
     events: (state.events ?? []).map((event) => ({ ...event })),
   };
+}
+
+/** Pod filter for management routes; null is the organization level. */
+type PodScope = { podId: string } | null;
+
+function inboxInScope(inbox: MockAgentMailInbox, scope: PodScope): boolean {
+  return scope ? inbox.pod_id === scope.podId : true;
+}
+
+function webhookInScope(
+  webhook: MockAgentMailWebhook,
+  scope: PodScope,
+): boolean {
+  return scope ? Boolean(webhook.pod_ids?.includes(scope.podId)) : true;
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
 }
 
 async function readRequestBody(request: IncomingMessage): Promise<string> {
@@ -538,6 +576,13 @@ export class MockAgentMailServer {
       return false;
     }
 
+    if (webhook.pod_ids?.length) {
+      const podId = this.findInbox(event.inbox_id)?.pod_id;
+      if (!podId || !webhook.pod_ids.includes(podId)) {
+        return false;
+      }
+    }
+
     if (
       webhook.event_types?.length &&
       !webhook.event_types.includes(event.event_type)
@@ -729,41 +774,93 @@ export class MockAgentMailServer {
       ? (JSON.parse(bodyText) as JsonRecord)
       : {};
 
-    // segments[0] is 'v0'.
-    if (segments[1] === 'inboxes') {
+    // segments[0] is 'v0'. Pod-scoped management paths
+    // (`/v0/pods/{pod}/inboxes...`, `/v0/pods/{pod}/webhooks...`) reuse the
+    // organization-level handlers with the pod as a filter, mirroring how the
+    // real API exposes the same resources under both prefixes.
+    let scope: PodScope = null;
+    let resource = segments.slice(1);
+
+    if (segments[1] === 'pods') {
       if (segments.length === 2) {
         if (method === 'GET') {
-          json(response, 200, { inboxes: this.state.inboxes });
+          json(response, 200, { pods: this.state.pods ?? [] });
           return;
         }
 
         if (method === 'POST') {
-          this.handleCreateInbox(response, body);
+          this.handleCreatePod(response, body);
           return;
         }
       }
 
-      const inbox = this.findInbox(segments[2] ?? '');
+      const pod = (this.state.pods ?? []).find(
+        (entry) => entry.pod_id === segments[2],
+      );
+
+      if (!pod) {
+        apiError(response, 404, 'Pod not found');
+        return;
+      }
 
       if (segments.length === 3 && method === 'GET') {
+        json(response, 200, pod);
+        return;
+      }
+
+      scope = { podId: pod.pod_id };
+      resource = segments.slice(3);
+    }
+
+    if (resource[0] === 'inboxes') {
+      if (resource.length === 1) {
+        if (method === 'GET') {
+          json(response, 200, {
+            inboxes: this.state.inboxes.filter((inbox) =>
+              inboxInScope(inbox, scope),
+            ),
+          });
+          return;
+        }
+
+        if (method === 'POST') {
+          this.handleCreateInbox(response, body, scope);
+          return;
+        }
+      }
+
+      const found = this.findInbox(resource[1] ?? '');
+      const inbox = found && inboxInScope(found, scope) ? found : undefined;
+
+      if (resource.length === 2) {
         if (!inbox) {
           apiError(response, 404, 'Inbox not found');
           return;
         }
 
-        json(response, 200, inbox);
-        return;
+        if (method === 'GET') {
+          json(response, 200, inbox);
+          return;
+        }
+
+        if (method === 'PATCH') {
+          if (typeof body.display_name === 'string') {
+            inbox.display_name = body.display_name;
+          }
+          json(response, 200, inbox);
+          return;
+        }
       }
 
-      if (segments[3] === 'messages') {
+      if (resource[2] === 'messages') {
         if (!inbox) {
           apiError(response, 404, 'Inbox not found');
           return;
         }
 
         if (
-          segments.length === 5 &&
-          segments[4] === 'send' &&
+          resource.length === 4 &&
+          resource[3] === 'send' &&
           method === 'POST'
         ) {
           this.handleSendMessage(request, response, inbox, body);
@@ -773,10 +870,10 @@ export class MockAgentMailServer {
         const message = (this.state.messages ?? []).find(
           (entry) =>
             entry.inbox_id === inbox.inbox_id &&
-            entry.message_id === segments[4],
+            entry.message_id === resource[3],
         );
 
-        if (segments.length === 5 && method === 'GET') {
+        if (resource.length === 4 && method === 'GET') {
           if (!message) {
             apiError(response, 404, 'Message not found');
             return;
@@ -787,8 +884,8 @@ export class MockAgentMailServer {
         }
 
         if (
-          segments.length === 6 &&
-          segments[5] === 'reply' &&
+          resource.length === 5 &&
+          resource[4] === 'reply' &&
           method === 'POST'
         ) {
           if (!message) {
@@ -802,22 +899,27 @@ export class MockAgentMailServer {
       }
     }
 
-    if (segments[1] === 'webhooks') {
-      if (segments.length === 2) {
+    if (resource[0] === 'webhooks') {
+      if (resource.length === 1) {
         if (method === 'GET') {
-          json(response, 200, { webhooks: this.state.webhooks ?? [] });
+          json(response, 200, {
+            webhooks: (this.state.webhooks ?? []).filter((webhook) =>
+              webhookInScope(webhook, scope),
+            ),
+          });
           return;
         }
 
         if (method === 'POST') {
-          this.handleCreateWebhook(response, body);
+          this.handleCreateWebhook(response, body, scope);
           return;
         }
       }
 
-      if (segments.length === 3) {
+      if (resource.length === 2) {
         const webhook = (this.state.webhooks ?? []).find(
-          (entry) => entry.webhook_id === segments[2],
+          (entry) =>
+            entry.webhook_id === resource[1] && webhookInScope(entry, scope),
         );
 
         if (!webhook) {
@@ -831,17 +933,38 @@ export class MockAgentMailServer {
         }
 
         if (method === 'PATCH') {
-          if (typeof body.url === 'string') {
-            webhook.url = body.url;
+          // Real AgentMail semantics: the URL is immutable, inbox and pod
+          // scope change through add/remove lists, and a non-empty
+          // event_types list replaces the subscription in full.
+          const addInboxIds = stringList(body.add_inbox_ids);
+          const removeInboxIds = stringList(body.remove_inbox_ids);
+          if (addInboxIds.length || removeInboxIds.length) {
+            webhook.inbox_ids = [
+              ...new Set([
+                ...(webhook.inbox_ids ?? []).filter(
+                  (id) => !removeInboxIds.includes(id),
+                ),
+                ...addInboxIds,
+              ]),
+            ];
           }
-          if (Array.isArray(body.inbox_ids)) {
-            webhook.inbox_ids = body.inbox_ids.map(String);
+          if (!scope) {
+            const addPodIds = stringList(body.add_pod_ids);
+            const removePodIds = stringList(body.remove_pod_ids);
+            if (addPodIds.length || removePodIds.length) {
+              webhook.pod_ids = [
+                ...new Set([
+                  ...(webhook.pod_ids ?? []).filter(
+                    (id) => !removePodIds.includes(id),
+                  ),
+                  ...addPodIds,
+                ]),
+              ];
+            }
           }
-          if (Array.isArray(body.event_types)) {
-            webhook.event_types = body.event_types.map(String);
-          }
-          if (typeof body.enabled === 'boolean') {
-            webhook.enabled = body.enabled;
+          const eventTypes = stringList(body.event_types);
+          if (eventTypes.length) {
+            webhook.event_types = eventTypes;
           }
           json(response, 200, webhook);
           return;
@@ -864,13 +987,43 @@ export class MockAgentMailServer {
     );
   }
 
-  private handleCreateInbox(response: ServerResponse, body: JsonRecord): void {
+  private handleCreatePod(response: ServerResponse, body: JsonRecord): void {
+    const clientId =
+      typeof body.client_id === 'string' ? body.client_id : undefined;
+
+    if (clientId) {
+      const existing = (this.state.pods ?? []).find(
+        (entry) => entry.client_id === clientId,
+      );
+
+      if (existing) {
+        json(response, 200, existing);
+        return;
+      }
+    }
+
+    const pod: MockAgentMailPod = {
+      pod_id: this.nextId('pod'),
+      ...(typeof body.name === 'string' ? { name: body.name } : {}),
+      ...(clientId ? { client_id: clientId } : {}),
+      created_at: new Date().toISOString(),
+    };
+
+    this.state.pods = [...(this.state.pods ?? []), pod];
+    json(response, 200, pod);
+  }
+
+  private handleCreateInbox(
+    response: ServerResponse,
+    body: JsonRecord,
+    scope: PodScope,
+  ): void {
     const clientId =
       typeof body.client_id === 'string' ? body.client_id : undefined;
 
     if (clientId) {
       const existing = this.state.inboxes.find(
-        (entry) => entry.client_id === clientId,
+        (entry) => entry.client_id === clientId && inboxInScope(entry, scope),
       );
 
       if (existing) {
@@ -902,6 +1055,7 @@ export class MockAgentMailServer {
         ? { display_name: body.display_name }
         : {}),
       ...(clientId ? { client_id: clientId } : {}),
+      ...(scope ? { pod_id: scope.podId } : {}),
       created_at: new Date().toISOString(),
     };
 
@@ -912,6 +1066,7 @@ export class MockAgentMailServer {
   private handleCreateWebhook(
     response: ServerResponse,
     body: JsonRecord,
+    scope: PodScope,
   ): void {
     const webhookUrl = typeof body.url === 'string' ? body.url : '';
 
@@ -925,7 +1080,7 @@ export class MockAgentMailServer {
 
     if (clientId) {
       const existing = (this.state.webhooks ?? []).find(
-        (entry) => entry.client_id === clientId,
+        (entry) => entry.client_id === clientId && webhookInScope(entry, scope),
       );
 
       if (existing) {
@@ -934,17 +1089,19 @@ export class MockAgentMailServer {
       }
     }
 
+    const inboxIds = stringList(body.inbox_ids);
+    // Under a pod the path fixes the pod scope; organization-level creates
+    // may name pods explicitly.
+    const podIds = scope ? [scope.podId] : stringList(body.pod_ids);
+    const eventTypes = stringList(body.event_types);
     const webhook: MockAgentMailWebhook = {
       webhook_id: this.nextId('wh'),
       url: webhookUrl,
       secret: mintWebhookSecret(),
       ...(clientId ? { client_id: clientId } : {}),
-      ...(Array.isArray(body.inbox_ids)
-        ? { inbox_ids: body.inbox_ids.map(String) }
-        : {}),
-      ...(Array.isArray(body.event_types)
-        ? { event_types: body.event_types.map(String) }
-        : {}),
+      ...(inboxIds.length ? { inbox_ids: inboxIds } : {}),
+      ...(podIds.length ? { pod_ids: podIds } : {}),
+      ...(eventTypes.length ? { event_types: eventTypes } : {}),
       enabled: true,
       created_at: new Date().toISOString(),
     };

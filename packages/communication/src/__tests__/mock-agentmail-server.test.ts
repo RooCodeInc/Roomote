@@ -147,15 +147,39 @@ describe('MockAgentMailServer', () => {
     expect(second.body.webhook_id).toBe(first.body.webhook_id);
     expect(second.body.secret).toBe(first.body.secret);
 
+    // Real update semantics: add/remove inbox lists, a non-empty event_types
+    // list replaces the subscription, and the URL is immutable.
     const patched = await api(
       baseUrl,
       'PATCH',
       `/v0/webhooks/${first.body.webhook_id}`,
-      { url: 'https://roomote.example.test/api/webhooks/agentmail-v2' },
+      {
+        url: 'https://roomote.example.test/api/webhooks/agentmail-v2',
+        add_inbox_ids: [INBOX_ID, 'other@agentmail.to'],
+        event_types: ['message.received', 'message.bounced'],
+      },
     );
     expect(patched.body.url).toBe(
-      'https://roomote.example.test/api/webhooks/agentmail-v2',
+      'https://roomote.example.test/api/webhooks/agentmail',
     );
+    expect(patched.body.inbox_ids).toEqual([INBOX_ID, 'other@agentmail.to']);
+    expect(patched.body.event_types).toEqual([
+      'message.received',
+      'message.bounced',
+    ]);
+
+    const rescoped = await api(
+      baseUrl,
+      'PATCH',
+      `/v0/webhooks/${first.body.webhook_id}`,
+      { remove_inbox_ids: ['other@agentmail.to'], event_types: [] },
+    );
+    expect(rescoped.body.inbox_ids).toEqual([INBOX_ID]);
+    // An empty list leaves event types unchanged, never clears them.
+    expect(rescoped.body.event_types).toEqual([
+      'message.received',
+      'message.bounced',
+    ]);
 
     const deleted = await api(
       baseUrl,
@@ -166,6 +190,127 @@ describe('MockAgentMailServer', () => {
     expect((await api(baseUrl, 'GET', '/v0/webhooks')).body.webhooks).toEqual(
       [],
     );
+  });
+
+  it('isolates inboxes and webhooks per pod behind the pod-scoped routes', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const pod = await api(baseUrl, 'POST', '/v0/pods', {
+      name: 'Acme',
+      client_id: 'tenant-acme',
+    });
+    expect(pod.status).toBe(200);
+    const podId = String(pod.body.pod_id);
+    const again = await api(baseUrl, 'POST', '/v0/pods', {
+      client_id: 'tenant-acme',
+    });
+    expect(again.body.pod_id).toBe(podId);
+
+    // Unknown pods 404 before any resource work, like the real API.
+    expect(
+      (await api(baseUrl, 'GET', '/v0/pods/pod_missing/inboxes')).status,
+    ).toBe(404);
+
+    const created = await api(baseUrl, 'POST', `/v0/pods/${podId}/inboxes`, {
+      username: 'roomote-acme',
+      client_id: 'roomote-acme',
+    });
+    expect(created.status).toBe(200);
+    expect(created.body.pod_id).toBe(podId);
+    const podInboxId = String(created.body.inbox_id);
+
+    // The pod listing only shows the pod's inbox; the organization listing
+    // shows everything, carrying pod_id on pod inboxes.
+    const podInboxes = await api(baseUrl, 'GET', `/v0/pods/${podId}/inboxes`);
+    expect(
+      (podInboxes.body.inboxes as Array<{ inbox_id: string }>).map(
+        (inbox) => inbox.inbox_id,
+      ),
+    ).toEqual([podInboxId]);
+    const orgInboxes = await api(baseUrl, 'GET', '/v0/inboxes');
+    expect(orgInboxes.body.inboxes).toHaveLength(2);
+    expect(
+      (await api(baseUrl, 'GET', `/v0/pods/${podId}/inboxes/${INBOX_ID}`))
+        .status,
+    ).toBe(404);
+    expect(
+      (
+        await api(baseUrl, 'PATCH', `/v0/pods/${podId}/inboxes/${podInboxId}`, {
+          display_name: 'Roomote',
+        })
+      ).body.display_name,
+    ).toBe('Roomote');
+
+    // Pod webhooks are scoped to the pod by the path and invisible to other
+    // pods; the organization listing still sees them.
+    const webhook = await api(baseUrl, 'POST', `/v0/pods/${podId}/webhooks`, {
+      url: 'https://roomote.example.test/api/webhooks/agentmail',
+      client_id: 'roomote-webhook-acme',
+      inbox_ids: [podInboxId],
+      event_types: ['message.received'],
+    });
+    expect(webhook.status).toBe(200);
+    expect(webhook.body.pod_ids).toEqual([podId]);
+    const webhookId = String(webhook.body.webhook_id);
+    expect(
+      (await api(baseUrl, 'GET', `/v0/pods/${podId}/webhooks`)).body.webhooks,
+    ).toHaveLength(1);
+    expect(
+      (await api(baseUrl, 'GET', '/v0/webhooks')).body.webhooks,
+    ).toHaveLength(1);
+
+    const other = await api(baseUrl, 'POST', '/v0/pods', { name: 'Other' });
+    expect(
+      (
+        await api(
+          baseUrl,
+          'GET',
+          `/v0/pods/${String(other.body.pod_id)}/webhooks/${webhookId}`,
+        )
+      ).status,
+    ).toBe(404);
+
+    await api(baseUrl, 'DELETE', `/v0/pods/${podId}/webhooks/${webhookId}`);
+    expect(
+      (await api(baseUrl, 'GET', `/v0/pods/${podId}/webhooks`)).body.webhooks,
+    ).toEqual([]);
+  });
+
+  it('delivers pod-scoped webhooks only for inboxes inside the pod', async () => {
+    const received: ReceivedDelivery[] = [];
+    const listener = await startStubWebhook(received);
+    onCleanup(() => listener.stop());
+
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const pod = await api(baseUrl, 'POST', '/v0/pods', { name: 'Acme' });
+    const podId = String(pod.body.pod_id);
+    const created = await api(baseUrl, 'POST', `/v0/pods/${podId}/inboxes`, {
+      username: 'roomote-acme',
+    });
+    const podInboxId = String(created.body.inbox_id);
+    await api(baseUrl, 'POST', `/v0/pods/${podId}/webhooks`, {
+      url: listener.url,
+      event_types: ['message.received'],
+    });
+
+    const outside = await server.dispatch({
+      inboxId: INBOX_ID,
+      from: 'grace@example.com',
+      text: 'organization-level inbox: not this pod',
+    });
+    expect(outside.deliveries).toHaveLength(0);
+
+    const inside = await server.dispatch({
+      inboxId: podInboxId,
+      from: 'grace@example.com',
+      text: 'pod inbox: delivered',
+    });
+    expect(inside.deliveries).toHaveLength(1);
+    expect(inside.deliveries[0]?.status).toBe(200);
+    expect(received).toHaveLength(1);
   });
 
   it('delivers message.received events with a valid Svix signature', async () => {
