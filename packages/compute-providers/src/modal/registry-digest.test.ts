@@ -189,6 +189,67 @@ describe('resolveImageRefDigest', () => {
     ]);
   });
 
+  it('retries the manifest request with Basic credentials when the registry challenges with Basic', async () => {
+    const calls: Array<{ method: string; auth: string | null }> = [];
+    const fetchImpl = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        const auth = headers.get('authorization');
+        calls.push({ method: init?.method ?? 'GET', auth });
+
+        if (String(input).includes('/token')) {
+          throw new Error('token endpoint must not be called for Basic');
+        }
+
+        if (auth?.startsWith('Basic ')) {
+          return response({
+            status: 200,
+            headers: { 'docker-content-digest': DIGEST },
+          });
+        }
+
+        return response({
+          status: 401,
+          headers: { 'www-authenticate': 'Basic realm="Registry Realm"' },
+        });
+      },
+    ) as unknown as typeof fetch;
+
+    await expect(
+      resolveImageRefDigest({
+        ref: 'registry.example.com/roomote/worker:develop',
+        registryUsername: 'user',
+        registryPassword: 'pass',
+        fetchImpl,
+      }),
+    ).resolves.toBe(`registry.example.com/roomote/worker@${DIGEST}`);
+
+    expect(calls).toEqual([
+      { method: 'HEAD', auth: null },
+      {
+        method: 'HEAD',
+        auth: `Basic ${Buffer.from('user:pass').toString('base64')}`,
+      },
+    ]);
+  });
+
+  it('throws when the registry challenges with Basic and no credentials are configured', async () => {
+    const fetchImpl = vi.fn(async () =>
+      response({
+        status: 401,
+        headers: { 'www-authenticate': 'Basic realm="Registry Realm"' },
+      }),
+    ) as unknown as typeof fetch;
+
+    await expect(
+      resolveImageRefDigest({
+        ref: 'registry.example.com/roomote/worker:develop',
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/requires Basic credentials/u);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('returns digest-pinned refs unchanged without touching the registry', async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const ref = `ghcr.io/roocodeinc/roomote-worker@${DIGEST}`;

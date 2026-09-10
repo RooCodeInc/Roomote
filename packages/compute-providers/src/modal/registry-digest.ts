@@ -210,23 +210,38 @@ export async function resolveImageRefDigest(
   let response = await head();
 
   if (response.status === 401) {
-    const challengeHeader = response.headers.get('www-authenticate');
-    const challenge = challengeHeader
-      ? parseWwwAuthenticate(challengeHeader)
-      : null;
-    if (!challenge) {
-      throw new Error(
-        `registry returned 401 for ${manifestUrl} without a bearer challenge`,
+    const challengeHeader = response.headers.get('www-authenticate') ?? '';
+    const scheme = challengeHeader.trim().split(/\s+/u)[0]?.toLowerCase();
+
+    if (scheme === 'basic') {
+      // Docker Distribution registries secured with htpasswd-style auth
+      // challenge with Basic directly; there is no token endpoint to call.
+      const authorization = basicAuthorization(
+        options.registryUsername,
+        options.registryPassword,
       );
+      if (!authorization) {
+        throw new Error(
+          `registry requires Basic credentials for ${manifestUrl} and none are configured`,
+        );
+      }
+      response = await head(authorization);
+    } else {
+      const challenge = parseWwwAuthenticate(challengeHeader);
+      if (!challenge) {
+        throw new Error(
+          `registry returned 401 for ${manifestUrl} without a usable challenge`,
+        );
+      }
+      const token = await fetchBearerToken(
+        challenge,
+        parsed.repository,
+        options,
+        fetchImpl,
+        signal,
+      );
+      response = await head(`Bearer ${token}`);
     }
-    const token = await fetchBearerToken(
-      challenge,
-      parsed.repository,
-      options,
-      fetchImpl,
-      signal,
-    );
-    response = await head(`Bearer ${token}`);
   }
 
   if (!response.ok) {
