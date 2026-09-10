@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { ALL_REPOSITORIES, type TaskWorkflow } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  type TaskWorkflow,
+} from '@roomote/types';
 
 import { type TimePeriodFilter, HAS_PULL_REQUEST_FILTER_VALUE } from '@/types';
 
@@ -159,9 +163,16 @@ export const TaskFilters = ({
     { enabled: showRepository },
   );
 
-  // Filter out the __all_repositories__ sentinel — it's not a real repository.
+  // All repositories is not a filterable repository; no repositories is.
   const repositories = useMemo(
-    () => rawRepositories.filter((r) => r.value !== ALL_REPOSITORIES),
+    () =>
+      rawRepositories
+        .filter((repository) => repository.value !== ALL_REPOSITORIES)
+        .map((repository) =>
+          repository.value === NO_REPOSITORIES
+            ? { ...repository, label: 'No Repositories' }
+            : repository,
+        ),
     [rawRepositories],
   );
 
@@ -334,7 +345,9 @@ export const TaskFilters = ({
                     ? (environmentOptions.find(
                         (e) => e.value === repositoryName.slice(4),
                       )?.label ?? repositoryName)
-                    : repositoryName
+                    : (repositories.find(
+                        (repository) => repository.value === repositoryName,
+                      )?.label ?? repositoryName)
                   : 'Environment'}
               </span>
               <ChevronDown className="ml-1 h-3 w-3 hidden lg:inline-block align-middle shrink-0" />

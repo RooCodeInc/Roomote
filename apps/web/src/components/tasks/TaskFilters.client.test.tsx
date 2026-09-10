@@ -1,6 +1,10 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react';
-import { TASK_WORKFLOWS } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  TASK_WORKFLOWS,
+} from '@roomote/types';
 
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
 
@@ -195,6 +199,38 @@ describe('TaskFilters', () => {
       2,
       'automation:custom_automation:automation-2',
     );
+  });
+
+  it('keeps the no-repositories option with a human-readable label', () => {
+    useRepositoriesForFilterMock.mockReturnValue({
+      data: [
+        {
+          value: NO_REPOSITORIES,
+          label: NO_REPOSITORIES,
+        },
+        {
+          value: ALL_REPOSITORIES,
+          label: ALL_REPOSITORIES,
+        },
+      ],
+    });
+    const onRepositoryChange = vi.fn();
+
+    const { getAllByText, queryByText } = render(
+      <TaskFilters
+        {...baseProps}
+        repositoryName={NO_REPOSITORIES}
+        onRepositoryChange={onRepositoryChange}
+      />,
+    );
+
+    const noRepositoriesLabels = getAllByText('No Repositories');
+    expect(noRepositoriesLabels).toHaveLength(2);
+    expect(queryByText(NO_REPOSITORIES)).not.toBeInTheDocument();
+    expect(queryByText(ALL_REPOSITORIES)).not.toBeInTheDocument();
+
+    fireEvent.click(noRepositoriesLabels[1]);
+    expect(onRepositoryChange).toHaveBeenCalledWith(NO_REPOSITORIES);
   });
 
   it('renders all task workflows when the task-type filter is visible', () => {
