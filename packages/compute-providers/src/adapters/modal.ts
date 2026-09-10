@@ -40,6 +40,7 @@ import {
   toAbortError,
   throwIfAborted,
 } from '../modal/abort';
+import { pinModalBaseImageRef } from '../modal/registry-digest';
 import { normalizeModalRpcError } from '../modal/rpc-diagnostics';
 
 const DEFAULT_APP_NAME = 'roomote';
@@ -306,12 +307,21 @@ export class ModalClient implements ComputeProviderClient {
       return this.sdk.images.fromAwsEcr(this.baseImageRef, secret);
     }
 
+    // Modal keys its image cache on the ref string, so a mutable tag such as
+    // `:develop` would never be re-pulled after the first build. Pin the tag to
+    // its current digest so a new push produces a new image definition.
+    const imageRef = await pinModalBaseImageRef({
+      ref: this.baseImageRef,
+      registryUsername: this.config.registryUsername,
+      registryPassword: this.config.registryPassword,
+    });
+
     if (this.imageMode === 'registry-auth') {
       const secret = await this.getRegistrySecret();
-      return this.sdk.images.fromRegistry(this.baseImageRef, secret);
+      return this.sdk.images.fromRegistry(imageRef, secret);
     }
 
-    return this.sdk.images.fromRegistry(this.baseImageRef);
+    return this.sdk.images.fromRegistry(imageRef);
   }
 
   private normalizeSandboxTags(

@@ -25,6 +25,14 @@ const {
   secretFromObjectMock: vi.fn(),
 }));
 
+const { pinModalBaseImageRefMock } = vi.hoisted(() => ({
+  pinModalBaseImageRefMock: vi.fn(),
+}));
+
+vi.mock('../modal/registry-digest', () => ({
+  pinModalBaseImageRef: pinModalBaseImageRefMock,
+}));
+
 vi.mock('modal', () => {
   class MockSdkModalClient {
     public readonly sandboxes = {
@@ -62,6 +70,9 @@ describe('ModalClient', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    pinModalBaseImageRefMock.mockImplementation(
+      async ({ ref }: { ref: string }) => ref,
+    );
     imageFromRegistryMock.mockReturnValue({ imageId: 'img-123' });
     imageFromAwsEcrMock.mockReturnValue({ imageId: 'img-ecr-123' });
     imageFromIdMock.mockResolvedValue({ imageId: 'img-snap-123' });
@@ -247,6 +258,32 @@ describe('ModalClient', () => {
       MODAL_IMAGE_REF,
       registrySecret,
     );
+    expect(pinModalBaseImageRefMock).toHaveBeenCalledWith({
+      ref: MODAL_IMAGE_REF,
+      registryUsername: 'ghcr-user',
+      registryPassword: 'ghcr-token',
+    });
+  });
+
+  it('builds the sandbox image from the digest-pinned base image ref', async () => {
+    const pinnedRef = 'ghcr.io/roomote/modal-worker@sha256:' + 'a'.repeat(64);
+    pinModalBaseImageRefMock.mockResolvedValue(pinnedRef);
+    sandboxCreateMock.mockResolvedValue({
+      sandboxId: 'modal-123',
+      tunnels: vi.fn().mockResolvedValue({}),
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(client.createInstance({})).resolves.toMatchObject({
+      instanceId: 'modal-123',
+    });
+
+    expect(imageFromRegistryMock).toHaveBeenCalledWith(pinnedRef);
   });
 
   it('applies sandbox tags after creating a Modal instance', async () => {

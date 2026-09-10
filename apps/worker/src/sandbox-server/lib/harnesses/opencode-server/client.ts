@@ -484,7 +484,9 @@ export class OpenCodeServerClient {
         )}`,
       );
       throw new Error(
-        `OpenCode request failed method=${method} path=${path} status=${response.status}`,
+        `OpenCode request failed method=${method} path=${path} status=${response.status}${
+          responseText ? ` body=${responseText.slice(0, 300)}` : ''
+        }`,
       );
     } catch (error) {
       const elapsedMs = Date.now() - startedAt;
