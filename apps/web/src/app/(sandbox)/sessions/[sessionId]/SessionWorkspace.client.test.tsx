@@ -106,7 +106,9 @@ vi.mock('@/trpc/client', () => ({
             return (
               artifactQueryState.dataByPath[
                 `${input.taskId ?? input.sessionId}:${input.path}`
-              ] ?? artifactQueryState.dataByPath[input.path]
+              ] ??
+              artifactQueryState.dataByPath[input.path] ??
+              null
             );
           },
           ...options,
@@ -1155,6 +1157,14 @@ describe('SessionWorkspace', () => {
     expect(
       screen.getByRole('button', { name: 'Open Decision from Session' }),
     ).toBeVisible();
+    await waitFor(() =>
+      expect(artifactQueryInputs).toContainEqual({
+        sessionId: 'session-1',
+        path: 'notes/decision.md',
+        version: 1,
+        preview: true,
+      }),
+    );
     fireEvent.click(
       screen.getByRole('button', { name: 'Open Decision from Session' }),
     );

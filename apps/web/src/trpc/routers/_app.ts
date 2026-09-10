@@ -1107,6 +1107,7 @@ export const appRouter = createRouter({
             sessionId: z.string().uuid().optional(),
             path: z.string(),
             version: z.number().optional(),
+            preview: z.boolean().optional(),
           })
           .refine(
             (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
