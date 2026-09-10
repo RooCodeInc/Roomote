@@ -219,6 +219,7 @@ it('lets members view every body but only manage skills authorized by the server
   renderSkills();
   await screen.findByText('my-skill');
   const table = screen.getByRole('table', { name: 'Skills' });
+  expect(table.closest('[data-slot="card"]')).toHaveClass('gap-0', 'p-0');
   expect(within(table).getByText('Created by Me')).toBeInTheDocument();
   expect(within(table).getByText('Created by Teammate')).toBeInTheDocument();
   expect(within(table).getAllByText('Everywhere')).toHaveLength(2);

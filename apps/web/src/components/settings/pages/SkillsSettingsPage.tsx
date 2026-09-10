@@ -306,7 +306,7 @@ export function SkillsSettingsPage() {
             </>
           }
         />
-        <Card variant="snug">
+        <Card variant="snug" className="gap-0 p-0">
           <CardContent className="p-0!">
             <div role="table" aria-label="Skills">
               <SkillListHeader />
