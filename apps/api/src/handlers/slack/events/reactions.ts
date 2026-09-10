@@ -33,6 +33,7 @@ import {
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
   sessions,
+  sql,
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
@@ -569,6 +570,7 @@ async function launchTaskSuggestionTaskFromReaction({
       ? storedExecutionThreadTs
       : undefined;
   let announceChannelId = storedExecutionChannelId ?? channelId;
+  const executionClaimToken = claimedAt.toISOString();
   const clearExecutionThread = async (): Promise<void> => {
     if (!announceMessageTs) {
       return;
@@ -582,6 +584,7 @@ async function launchTaskSuggestionTaskFromReaction({
     const {
       executionChannelId: _executionChannelId,
       executionThreadTs: _executionThreadTs,
+      executionClaimedAt: _executionClaimedAt,
       ...metadata
     } = suggestionCard.metadata ?? {};
     const cleared = await db
@@ -592,9 +595,19 @@ async function launchTaskSuggestionTaskFromReaction({
           eq(trackedMessages.id, suggestionCard.id),
           eq(trackedMessages.surface, 'slack'),
           eq(trackedMessages.channelId, suggestionCard.channelId ?? channelId),
+          sql`${trackedMessages.metadata}->>'executionChannelId' = ${announceChannelId}`,
+          sql`${trackedMessages.metadata}->>'executionThreadTs' = ${announceMessageTs}`,
+          sql`${trackedMessages.metadata}->>'executionClaimedAt' = ${executionClaimToken}`,
+          sql`exists (
+            select 1 from ${workItems}
+            where ${workItems.id} = ${workItemId}
+              and ${workItems.status} = 'launching'
+              and ${workItems.launchClaimedAt} = ${claimedAt}
+          )`,
         ),
       )
-      .then(() => true)
+      .returning({ id: trackedMessages.id })
+      .then(([row]) => Boolean(row))
       .catch((error) => {
         apiLogger.warn(
           `${logPrefix} failed to clear rejected suggestion execution thread: ${formatErrorForLog(error)}`,
@@ -621,6 +634,7 @@ async function launchTaskSuggestionTaskFromReaction({
     announceChannelId =
       storedExecutionChannelId ?? originThread?.channelId ?? channelId;
 
+    let postedExecutionRoot = false;
     if (!announceMessageTs) {
       if (isSuggestedTask) {
         const acknowledged = await slack.addReaction?.({
@@ -647,29 +661,7 @@ async function launchTaskSuggestionTaskFromReaction({
           },
         ],
       });
-
-      if (announceMessageTs && isSuggestedTask) {
-        await db
-          .update(trackedMessages)
-          .set({
-            metadata: {
-              ...suggestionCard.metadata,
-              executionChannelId: announceChannelId,
-              executionThreadTs: announceMessageTs,
-            },
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              eq(trackedMessages.id, suggestionCard.id),
-              eq(trackedMessages.surface, 'slack'),
-              eq(
-                trackedMessages.channelId,
-                suggestionCard.channelId ?? channelId,
-              ),
-            ),
-          );
-      }
+      postedExecutionRoot = Boolean(announceMessageTs && isSuggestedTask);
     }
 
     if (!announceMessageTs) {
@@ -678,6 +670,50 @@ async function launchTaskSuggestionTaskFromReaction({
         `${logPrefix} failed to post the Slack launch announcement; launch canceled`,
       );
       return false;
+    }
+    if (isSuggestedTask) {
+      const [ownedExecutionRoot] = await db
+        .update(trackedMessages)
+        .set({
+          metadata: {
+            ...suggestionCard.metadata,
+            executionChannelId: announceChannelId,
+            executionThreadTs: announceMessageTs,
+            executionClaimedAt: executionClaimToken,
+          },
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(trackedMessages.id, suggestionCard.id),
+            eq(trackedMessages.surface, 'slack'),
+            eq(
+              trackedMessages.channelId,
+              suggestionCard.channelId ?? channelId,
+            ),
+            sql`exists (
+              select 1 from ${workItems}
+              where ${workItems.id} = ${workItemId}
+                and ${workItems.status} = 'launching'
+                and ${workItems.launchClaimedAt} = ${claimedAt}
+            )`,
+          ),
+        )
+        .returning({ id: trackedMessages.id });
+      if (!ownedExecutionRoot) {
+        if (postedExecutionRoot) {
+          await slack
+            .deleteMessage({
+              channel: announceChannelId,
+              ts: announceMessageTs,
+            })
+            .catch(() => {});
+        }
+        await releaseWorkItemClaim(db, { id: workItemId, claimedAt }).catch(
+          () => undefined,
+        );
+        return false;
+      }
     }
     const launchThreadTs = originThread?.threadTs ?? announceMessageTs;
 
@@ -822,13 +858,16 @@ async function launchTaskSuggestionTaskFromReaction({
           taskId,
           claimedAt,
         }),
+      release: async () => {
+        await clearExecutionThread();
+        return releaseWorkItemClaim(db, { id: workItemId, claimedAt });
+      },
     });
 
     if (
       launchResult.status === 'rejected' ||
       launchResult.status === 'failed'
     ) {
-      await clearExecutionThread();
       await postSuggestionLaunchFailureMessage({
         slack,
         channelId,
@@ -849,7 +888,6 @@ async function launchTaskSuggestionTaskFromReaction({
       apiLogger.warn(
         `${logPrefix} failed to finalize work item ${workItemId}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
       );
-      await clearExecutionThread();
       return true;
     }
 
@@ -861,7 +899,7 @@ async function launchTaskSuggestionTaskFromReaction({
         and(
           eq(trackedMessages.id, suggestionCard.id),
           eq(trackedMessages.surface, 'slack'),
-          eq(trackedMessages.channelId, announceChannelId),
+          eq(trackedMessages.channelId, suggestionCard.channelId ?? channelId),
         ),
       )
       .catch((error) => {

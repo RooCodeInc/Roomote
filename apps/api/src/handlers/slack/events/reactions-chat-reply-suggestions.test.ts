@@ -61,9 +61,24 @@ function createWorkItemSelectBuilder() {
   return builder;
 }
 
+let updateBuilderCatchError: Error | null = null;
 const updateBuilder = {
   set: vi.fn(() => updateBuilder),
-  where: vi.fn(async () => undefined),
+  where: vi.fn(() => updateBuilder),
+  returning: vi.fn(async () => [{ id: 'tracked-message-1' }]),
+  then: <TResult1 = undefined, TResult2 = never>(
+    onfulfilled?:
+      | ((value: undefined) => TResult1 | PromiseLike<TResult1>)
+      | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ) => Promise.resolve(undefined).then(onfulfilled, onrejected),
+  catch: vi.fn(
+    async (onRejected?: (reason: unknown) => unknown): Promise<unknown> => {
+      const error = updateBuilderCatchError;
+      updateBuilderCatchError = null;
+      return error ? onRejected?.(error) : undefined;
+    },
+  ),
 };
 
 vi.mock('@roomote/redis', () => ({
@@ -73,6 +88,7 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => args),
   eq: vi.fn((...args) => args),
+  sql: vi.fn((strings, ...values) => ['sql', strings, values]),
   trackedMessages: {
     id: 'id',
     surface: 'surface',
@@ -95,6 +111,7 @@ vi.mock('@roomote/db/server', () => ({
     sortOrder: 'sortOrder',
     status: 'status',
     sourceTaskId: 'sourceTaskId',
+    launchClaimedAt: 'launchClaimedAt',
   },
   claimWorkItem: mocks.claimWorkItem,
   getSessionForTask: mocks.getSessionForTask,
@@ -172,6 +189,7 @@ import { handleReactionAddedEvent } from './reactions';
 describe('chat reply suggestion reactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    updateBuilderCatchError = null;
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.sessionsFindFirst.mockResolvedValue(null);
     mocks.conversationFindById.mockResolvedValue(null);
@@ -376,9 +394,7 @@ describe('chat reply suggestion reactions', () => {
       hasInactiveMapping: false,
       activeMapping: { userId: 'user-1' },
     });
-    updateBuilder.where
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('tracking failed'));
+    updateBuilderCatchError = new Error('tracking failed');
     const slack = {
       postMessage: vi.fn(async () => 'seeded-thread-ts'),
       deleteMessage: vi.fn(async () => undefined),
@@ -464,6 +480,7 @@ describe('chat reply suggestion reactions', () => {
             originSessionId: 'session-origin',
             executionChannelId: 'C1',
             executionThreadTs: 'execution-thread-ts',
+            executionClaimedAt: claimedAt.toISOString(),
           }),
         }),
       );
@@ -603,6 +620,53 @@ describe('chat reply suggestion reactions', () => {
       id: 'work-item-1',
       claimedAt,
     });
+  });
+
+  it('does not delete an execution root after a newer claim takes ownership', async () => {
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      channelId: 'C1',
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        launchRouting: 'router',
+      },
+    });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    mocks.startFastAgentResponse.mockRejectedValue(new Error('startup failed'));
+    updateBuilder.returning
+      .mockResolvedValueOnce([{ id: 'tracked-message-1' }])
+      .mockResolvedValueOnce([]);
+    const slack = {
+      postMessage: vi
+        .fn()
+        .mockResolvedValueOnce('execution-thread-ts')
+        .mockResolvedValueOnce('failure-message-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      addReaction: vi.fn(async () => true),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(updateBuilder.returning).toHaveBeenCalledTimes(2);
+    expect(slack.deleteMessage).not.toHaveBeenCalled();
   });
 
   it('gives two accepted suggestions from one origin separate execution threads', async () => {

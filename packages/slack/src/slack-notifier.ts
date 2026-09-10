@@ -1997,6 +1997,9 @@ export class SlackNotifier {
       const result: SlackResponse = await response.json();
 
       if (!result.ok) {
+        if (result.error === 'already_reacted') {
+          return true;
+        }
         console.error(
           `[addReaction] Slack reactions.add error: ${result.error} - ${JSON.stringify(result)}`,
         );
