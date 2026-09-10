@@ -572,7 +572,6 @@ export async function processSlackChannelAutoStartTask(params: {
   slack: SlackNotifier;
   userMapping: SlackUserMapping | null;
   teamId: string;
-  ackEmoji: string;
   agentPromptPrefix?: string;
   launchCriteria?: string | null;
 }): Promise<boolean> {
@@ -583,7 +582,6 @@ export async function processSlackChannelAutoStartTask(params: {
     slack,
     userMapping,
     teamId,
-    ackEmoji,
     agentPromptPrefix,
     launchCriteria,
   } = params;
@@ -720,7 +718,6 @@ export async function processSlackChannelAutoStartTask(params: {
               },
             }
           : {}),
-        processingReactionName: ackEmoji,
         errorLogPrefix: `❌ Background fast-agent response failed for configured channel auto-start thread ${threadId}:`,
       });
 
@@ -878,8 +875,6 @@ async function maybeHandleChannelAutoStart(params: {
     return true;
   }
 
-  const { ackEmoji } = await resolveSlackReactionNames();
-
   if (
     userMapping &&
     typeof channelAutoStartEvent.user === 'string' &&
@@ -908,7 +903,6 @@ async function maybeHandleChannelAutoStart(params: {
     slack: context.slack,
     userMapping,
     teamId: context.teamId,
-    ackEmoji,
     agentPromptPrefix: channelAutoStartLaunchConfig.agentPromptPrefix,
     launchCriteria: matchedChannelAutoStart?.launchCriteria ?? null,
   });
@@ -1058,7 +1052,6 @@ async function processAutomatedAppMentionTask(params: {
       // automation launch identity and let it delegate coding work itself.
       // The direct task launch below stays as the fallback so an automated
       // ticket is never dropped when the Fast turn cannot start.
-      const { ackEmoji } = await resolveSlackReactionNames();
       const { activeMapping: launchUserMapping } =
         launchIdentity.slackUserId === slackInstallation.botUserId
           ? { activeMapping: null }
@@ -1088,7 +1081,6 @@ async function processAutomatedAppMentionTask(params: {
             channelId: event.channel,
             threadTs: threadId,
           }),
-        processingReactionName: ackEmoji,
         errorLogPrefix: `❌ Background fast-agent response failed for automated mention thread ${threadId}:`,
       });
 
@@ -1166,8 +1158,6 @@ export function startFastAgentResponse(params: {
   teamId: string;
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
-  processingReactionName: string;
-  isExistingConversation?: boolean;
   directedAtRoomote?: boolean;
   /** Attribution for tasks Fast delegates from this turn; automation-identity
    * turns pass their automation initiator so delegated work keeps automation
@@ -1220,7 +1210,6 @@ async function handleSlackEntryEvent(params: {
   slackInstallation: SlackInstallation;
   slack: SlackNotifier;
   teamId: string;
-  ackEmoji: string;
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
 }): Promise<void> {
@@ -1229,7 +1218,6 @@ async function handleSlackEntryEvent(params: {
     slackInstallation,
     slack,
     teamId,
-    ackEmoji,
     skipThreadFollowupHandling = false,
     threadTaskId,
   } = params;
@@ -1336,7 +1324,6 @@ async function handleSlackEntryEvent(params: {
           activeTaskId: activeRun?.taskId,
         }),
       directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
-      processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });
 
@@ -1441,14 +1428,11 @@ export async function handleMessageOrAppMentionEvent(params: {
     return;
   }
 
-  const { ackEmoji } = await resolveSlackReactionNames();
-
   await handleSlackEntryEvent({
     event,
     slackInstallation: context.slackInstallation,
     slack: context.slack,
     teamId: context.teamId,
-    ackEmoji,
     threadTaskId: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.taskId
       : (mentionedThreadAliasTaskId ?? undefined),

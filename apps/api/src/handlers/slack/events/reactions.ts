@@ -772,7 +772,6 @@ async function launchTaskSuggestionTaskFromReaction({
             slack,
             userId: activeUserMapping.userId,
             teamId,
-            processingReactionName: ackEmoji,
             errorLogPrefix: `Failed to start Fast suggestion response for work item ${workItemId}:`,
           });
           return fastStart.accepted
