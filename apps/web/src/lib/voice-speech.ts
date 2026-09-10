@@ -47,6 +47,43 @@ export function toSpeakableText(markdown: string): string {
 }
 
 /**
+ * Split speakable text into sentences so a reply can be read while it is
+ * still streaming. Line breaks and sentence-ending punctuation followed by
+ * whitespace both end a sentence; the trailing fragment is returned as-is so
+ * the caller can decide whether it is complete yet.
+ */
+export function splitSpeakableSentences(text: string): string[] {
+  const sentences: string[] = [];
+  for (const line of text.split('\n')) {
+    let remaining = line.trim();
+    while (remaining) {
+      const end = findFirstSentenceEnd(remaining);
+      if (end === -1) {
+        sentences.push(remaining);
+        break;
+      }
+      const sentence = remaining.slice(0, end).trim();
+      if (sentence) sentences.push(sentence);
+      remaining = remaining.slice(end).trim();
+    }
+  }
+  return sentences;
+}
+
+function findFirstSentenceEnd(text: string): number {
+  for (let i = 0; i < text.length - 1; i++) {
+    const char = text[i];
+    if (
+      (char === '.' || char === '!' || char === '?') &&
+      /\s/.test(text[i + 1] ?? '')
+    ) {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
  * Split a long reply into GPT-Live commentary appends, preferring paragraph
  * and sentence boundaries.
  */

@@ -33,9 +33,10 @@ and receives only the negotiated session answer; it never receives the API key.
    as if you had typed it. From the home page or dialog, the first thing you
    say starts the Session and opens it already in voice mode, where the answer
    is spoken.
-4. GPT-Live speaks verified Fast output as it arrives. Speak at any time to
-   interrupt; GPT-Live continues listening while it speaks, and corrections
-   are sent back through the same Fast Session.
+4. GPT-Live reads the Session's reply aloud word for word, sentence by
+   sentence while it is still being written. Speak at any time to interrupt;
+   GPT-Live continues listening while it speaks, and what you say goes back
+   through the same Fast Session.
 5. Select the voice button again to return to typing. The button stays
    highlighted while the conversation is active.
 
@@ -44,18 +45,18 @@ includes current Chrome, Edge, Safari, and Firefox.
 
 ## How work is handled
 
-GPT-Live is the conversation layer, not a second task agent. Requests that need
-an answer, reasoning, or an action go through the same Fast reply path as typed
-messages. That preserves the Session's selected model, tools, permissions, and
-transcript. Fast output is cleaned for speech before it is returned to
-GPT-Live, so code blocks and raw URLs are not read character-by-character.
+GPT-Live is the spoken channel for the Session, not a second agent. Everything
+you say goes through the same Fast reply path as typed messages, including
+greetings and short remarks, so the Session transcript is the full record of
+the conversation. If GPT-Live does not hand an utterance over on its own, it is
+sent after a short silence anyway. That preserves the Session's selected
+model, tools, permissions, and transcript. Replies are read back exactly as
+written; only code blocks and raw URLs are replaced with short spoken
+placeholders so they are not read character-by-character.
 
 GPT-Live is told which repositories, environments, and integrations the Fast
-Session can reach, so naming one of them is treated as a request to delegate
-rather than something to ask about. The same names guide transcript cleanup,
-so a misheard repository name is corrected to the real one.
+Session can reach, so it recognises their names. The same names guide
+transcript cleanup, so a misheard repository name is corrected to the real one.
 
-Brief greetings and clarifying questions can stay in the live conversation and
-do not start duplicate Fast work. Ending voice stops the microphone; Fast work
-already started remains visible in the Session and follows the normal Session
-lifecycle.
+Ending voice stops the microphone; Fast work already started remains visible
+in the Session and follows the normal Session lifecycle.

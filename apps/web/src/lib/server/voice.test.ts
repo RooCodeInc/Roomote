@@ -73,6 +73,11 @@ describe('createVoiceLiveSession', () => {
     expect(body.session.instructions).toContain(
       'Integrations the backend can use: GitHub.',
     );
+    // Replies are read verbatim and every utterance reaches the Session.
+    expect(body.session.instructions).toContain('word for word');
+    expect(body.session.instructions).toContain(
+      'Delegate every single thing the person says',
+    );
   });
 
   it('rejects an incomplete Live response', async () => {

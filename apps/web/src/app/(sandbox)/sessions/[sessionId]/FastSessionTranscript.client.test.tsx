@@ -2268,7 +2268,7 @@ describe('FastSessionTranscript', () => {
       expect(liveVoiceState.start).not.toHaveBeenCalled();
     });
 
-    it('returns persisted Fast messages to Live without forwarding partial UI chunks', async () => {
+    it('reads reply sentences to Live as they stream and finishes with the persisted row', async () => {
       voiceStatusQuery.mockResolvedValue({ enabled: true });
       const transcript = () => (
         <FastSessionTranscript
@@ -2295,15 +2295,22 @@ describe('FastSessionTranscript', () => {
       rerender(transcript());
       expect(liveVoiceState.speak).not.toHaveBeenCalled();
 
+      // A completed sentence is read while the reply is still streaming; the
+      // growing tail waits.
       act(() => {
         FakeEventSource.instances[0]!.emit(
           'chunk',
           chunkEvent('assistant-1:event', 'First sentence. Second', 11),
         );
       });
-      expect(liveVoiceState.speak).not.toHaveBeenCalled();
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
+        'First sentence.',
+        null,
+      );
 
-      // Only authoritative persisted messages are returned to GPT-Live.
+      // The persisted row shares the stream's id, so only the unread tail is
+      // spoken; nothing is read twice.
       act(() => {
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
@@ -2316,9 +2323,9 @@ describe('FastSessionTranscript', () => {
           ],
         });
       });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
       expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
-        'First sentence. Second part is here.',
+        'Second part is here.',
         null,
       );
 
@@ -2336,7 +2343,7 @@ describe('FastSessionTranscript', () => {
           ],
         });
       });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(3);
       expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
         'Here is the result.',
         null,

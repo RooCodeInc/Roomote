@@ -320,4 +320,53 @@ describe('useLiveVoice', () => {
       }),
     );
   });
+
+  it('sends an utterance to Fast after silence when GPT-Live never delegates', async () => {
+    const onUtterance = vi.fn();
+    const { result } = renderHook(() => useLiveVoice({ onUtterance }));
+
+    await act(async () => result.current.start());
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Thanks, that ',
+        start_ms: 0,
+        end_ms: 300,
+      });
+      vi.advanceTimersByTime(1_000);
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'looks right',
+        start_ms: 300,
+        end_ms: 600,
+      });
+      vi.advanceTimersByTime(1_499);
+    });
+    await act(async () => {});
+    expect(onUtterance).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    await act(async () => {});
+    expect(onUtterance).toHaveBeenCalledWith('Thanks, that looks right.', null);
+
+    // A delegation that shows up right after belongs to that utterance and
+    // must not be held for the next one.
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        delegation: { id: 'item_late', target: 'client' },
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Now check the build',
+        start_ms: 5_000,
+        end_ms: 5_400,
+      });
+      vi.advanceTimersByTime(1_500);
+    });
+    await act(async () => {});
+    expect(onUtterance).toHaveBeenLastCalledWith('Now check the build.', null);
+  });
 });

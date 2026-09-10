@@ -57,6 +57,7 @@ import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
 import { VOICE_AUTOSTART_QUERY_PARAM } from '@/lib/voice-autostart';
+import { splitSpeakableSentences, toSpeakableText } from '@/lib/voice-speech';
 import {
   clearPendingFastSessionLaunch,
   getPendingFastSessionLaunch,
@@ -709,10 +710,13 @@ export function FastSessionTranscript({
   });
 
   const voiceDelegationByTurnIdRef = useRef(new Map<string, string>());
+  // The delegation of the most recent spoken request; streamed reply pieces
+  // are attributed to it until their persisted row pins the exact turn.
+  const lastVoiceDelegationIdRef = useRef<string | null>(null);
   const sendReply = useCallback(
     async (
       message: SessionPromptSubmission,
-      options?: { voiceDelegationId?: string },
+      options?: { voiceDelegationId?: string | null },
     ): Promise<boolean> => {
       if (isSending) {
         return false;
@@ -732,12 +736,15 @@ export function FastSessionTranscript({
           return false;
         }
 
-        if (options?.voiceDelegationId) {
+        if (options?.voiceDelegationId !== undefined) {
           clientMessageId = crypto.randomUUID();
-          voiceDelegationByTurnIdRef.current.set(
-            clientMessageId,
-            options.voiceDelegationId,
-          );
+          lastVoiceDelegationIdRef.current = options.voiceDelegationId;
+          if (options.voiceDelegationId) {
+            voiceDelegationByTurnIdRef.current.set(
+              clientMessageId,
+              options.voiceDelegationId,
+            );
+          }
         }
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
         const optimistic: TranscriptMessage = {
@@ -826,14 +833,14 @@ export function FastSessionTranscript({
   /** Assistant messages at or before this ts predate the conversation. */
   const voiceCutoffTsRef = useRef(0);
   /** Persisted assistant messages already returned to the Live conversation. */
-  const spokenMessageIdsRef = useRef(new Set<string>());
+  const spokenSentenceCountsRef = useRef(new Map<string, number>());
   const pendingUtterancesRef = useRef<
-    Array<{ text: string; delegationId: string }>
+    Array<{ text: string; delegationId: string | null }>
   >([]);
   const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
 
   const enqueueVoiceUtterance = useCallback(
-    (text: string, delegationId: string) => {
+    (text: string, delegationId: string | null) => {
       pendingUtterancesRef.current.push({ text, delegationId });
       setUtteranceQueueVersion((version) => version + 1);
     },
@@ -874,9 +881,10 @@ export function FastSessionTranscript({
   const speakRef = useRef(liveVoice.speak);
   speakRef.current = liveVoice.speak;
 
-  // Return each persisted Fast message once. GPT-Live speaks it natively and
-  // handles interruption itself; partial UI chunks are not authoritative
-  // backend results and can contain incomplete Markdown.
+  // Read each Fast reply to GPT-Live as it streams: every completed sentence
+  // goes out as soon as it exists, and the persisted row (same id as the
+  // stream) finishes the trailing sentence. Progress is tracked per message
+  // so nothing is read twice. GPT-Live handles interruption itself.
   useEffect(() => {
     if (!liveVoiceActive) {
       return;
@@ -887,7 +895,6 @@ export function FastSessionTranscript({
         message.role !== 'assistant' ||
         message.visibleInTranscript === false ||
         message.ts <= voiceCutoffTsRef.current ||
-        message.partial ||
         !message.text ||
         (message.kind !== 'text' &&
           message.updateType !== ACP_ENVELOPE_EVENT_TYPES.AssistantMessage)
@@ -895,13 +902,22 @@ export function FastSessionTranscript({
         continue;
       }
 
-      if (spokenMessageIdsRef.current.has(message.id)) continue;
-      spokenMessageIdsRef.current.add(message.id);
+      const sentences = splitSpeakableSentences(toSpeakableText(message.text));
+      // While streaming, the last sentence may still be growing.
+      const readyCount = message.partial
+        ? Math.max(sentences.length - 1, 0)
+        : sentences.length;
+      const spokenCount = spokenSentenceCountsRef.current.get(message.id) ?? 0;
+      if (readyCount <= spokenCount) continue;
+
+      spokenSentenceCountsRef.current.set(message.id, readyCount);
       speakRef.current(
-        message.text,
+        sentences.slice(spokenCount, readyCount).join(' '),
         voiceDelegationByTurnIdRef.current.get(
           persistedAssistantTurnIds.get(message.id) ?? '',
-        ) ?? null,
+        ) ??
+          lastVoiceDelegationIdRef.current ??
+          null,
       );
     }
   }, [uiMessages, liveVoiceActive, persistedAssistantTurnIds]);
@@ -920,7 +936,7 @@ export function FastSessionTranscript({
     for (const message of serverMessages.values()) {
       voiceCutoffTsRef.current = Math.max(voiceCutoffTsRef.current, message.ts);
     }
-    spokenMessageIdsRef.current.clear();
+    spokenSentenceCountsRef.current.clear();
     voiceDelegationByTurnIdRef.current.clear();
     pendingUtterancesRef.current = [];
     void liveVoice.start();
@@ -948,7 +964,7 @@ export function FastSessionTranscript({
     }
 
     voiceCutoffTsRef.current = 0;
-    spokenMessageIdsRef.current.clear();
+    spokenSentenceCountsRef.current.clear();
     voiceDelegationByTurnIdRef.current.clear();
     pendingUtterancesRef.current = [];
     // This conversation never heard the request that created the Session (a

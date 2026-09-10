@@ -8,6 +8,14 @@ import { playVoiceCue } from '@/lib/voice-cues';
 import { chunkSpeakableText, toSpeakableText } from '@/lib/voice-speech';
 
 const DELEGATION_TRANSCRIPT_SETTLE_MS = 250;
+/**
+ * GPT-Live is instructed to delegate everything, but the instruction is not
+ * a guarantee. An utterance followed by this much silence with no delegation
+ * is sent to Fast anyway so nothing the person says is lost.
+ */
+const UTTERANCE_SILENCE_FLUSH_MS = 1_500;
+/** A delegation this soon after a silence flush belongs to that utterance. */
+const STALE_DELEGATION_WINDOW_MS = 3_000;
 const SESSION_START_TIMEOUT_MS = 15_000;
 
 type LiveVoiceStatus =
@@ -18,8 +26,12 @@ type LiveVoiceStatus =
   | 'error';
 
 interface UseLiveVoiceOptions {
-  /** Called when GPT-Live delegates a spoken request to the Fast session. */
-  onUtterance: (text: string, delegationId: string) => void;
+  /**
+   * Called with each finished utterance for the Fast session. The delegation
+   * id is null when the utterance was flushed on silence rather than through
+   * a GPT-Live delegation; its reply is then spoken as session-wide commentary.
+   */
+  onUtterance: (text: string, delegationId: string | null) => void;
   disabled?: boolean;
   /**
    * `kickoff` is the home page and New Session dialog: the first thing the
@@ -108,8 +120,42 @@ export function useLiveVoice({
   const inputTranscriptRef = useRef('');
   const pendingDelegationsRef = useRef<string[]>([]);
   const delegationTimerRef = useRef<number | null>(null);
+  const silenceTimerRef = useRef<number | null>(null);
+  const lastSilenceFlushAtRef = useRef(0);
   const speakingTimerRef = useRef<number | null>(null);
   const deliveryChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  // Raw speech-to-text is full of disfluencies and misheard terms, so the
+  // utterance is cleaned before it enters the transcript. Delivery is
+  // chained so back-to-back requests keep their spoken order, and a
+  // conversation ended mid-cleanup drops its in-flight request like any
+  // other pending delegation.
+  const deliverUtterance = useCallback(
+    (utterance: string, delegationId: string | null) => {
+      const generation = startGenerationRef.current;
+      deliveryChainRef.current = deliveryChainRef.current.then(async () => {
+        let text = utterance;
+        try {
+          const cleaned = await trpcClient.voice.cleanTranscript.mutate({
+            text: utterance,
+          });
+          if (cleaned.text.trim()) text = cleaned.text.trim();
+        } catch {
+          // The raw transcript still carries the request.
+        }
+        if (startGenerationRef.current !== generation) return;
+        onUtteranceRef.current(text, delegationId);
+      });
+    },
+    [trpcClient],
+  );
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current !== null) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+  }, []);
 
   const flushDelegation = useCallback(() => {
     delegationTimerRef.current = null;
@@ -122,27 +168,9 @@ export function useLiveVoice({
 
     pendingDelegationsRef.current.shift();
     inputTranscriptRef.current = '';
-    const generation = startGenerationRef.current;
-
-    // Raw speech-to-text is full of disfluencies and misheard terms, so the
-    // utterance is cleaned before it enters the transcript. Delivery is
-    // chained so back-to-back requests keep their spoken order, and a
-    // conversation ended mid-cleanup drops its in-flight request like any
-    // other pending delegation.
-    deliveryChainRef.current = deliveryChainRef.current.then(async () => {
-      let text = utterance;
-      try {
-        const cleaned = await trpcClient.voice.cleanTranscript.mutate({
-          text: utterance,
-        });
-        if (cleaned.text.trim()) text = cleaned.text.trim();
-      } catch {
-        // The raw transcript still carries the request.
-      }
-      if (startGenerationRef.current !== generation) return;
-      onUtteranceRef.current(text, delegationId);
-    });
-  }, [trpcClient]);
+    clearSilenceTimer();
+    deliverUtterance(utterance, delegationId);
+  }, [clearSilenceTimer, deliverUtterance]);
 
   const scheduleDelegationFlush = useCallback(() => {
     if (delegationTimerRef.current !== null) {
@@ -153,6 +181,20 @@ export function useLiveVoice({
       DELEGATION_TRANSCRIPT_SETTLE_MS,
     );
   }, [flushDelegation]);
+
+  // Safety net: speech that GPT-Live never delegates still reaches Fast once
+  // the person has been quiet for a moment.
+  const scheduleSilenceFlush = useCallback(() => {
+    clearSilenceTimer();
+    silenceTimerRef.current = window.setTimeout(() => {
+      silenceTimerRef.current = null;
+      const utterance = inputTranscriptRef.current.trim();
+      if (!utterance || pendingDelegationsRef.current.length > 0) return;
+      inputTranscriptRef.current = '';
+      lastSilenceFlushAtRef.current = Date.now();
+      deliverUtterance(utterance, null);
+    }, UTTERANCE_SILENCE_FLUSH_MS);
+  }, [clearSilenceTimer, deliverUtterance]);
 
   const handleServerEvent = useCallback(
     (raw: string) => {
@@ -170,6 +212,8 @@ export function useLiveVoice({
             setStatus('listening');
             if (pendingDelegationsRef.current.length > 0) {
               scheduleDelegationFlush();
+            } else {
+              scheduleSilenceFlush();
             }
           }
           break;
@@ -184,6 +228,15 @@ export function useLiveVoice({
           break;
         case 'session.delegation.created':
           if (event.delegation?.target === 'client' && event.delegation.id) {
+            // A delegation arriving just after the silence flush already sent
+            // that utterance; attaching it to the next one would skew replies.
+            if (
+              !inputTranscriptRef.current.trim() &&
+              Date.now() - lastSilenceFlushAtRef.current <
+                STALE_DELEGATION_WINDOW_MS
+            ) {
+              break;
+            }
             pendingDelegationsRef.current.push(event.delegation.id);
             scheduleDelegationFlush();
           }
@@ -196,7 +249,7 @@ export function useLiveVoice({
           break;
       }
     },
-    [scheduleDelegationFlush],
+    [scheduleDelegationFlush, scheduleSilenceFlush],
   );
 
   const release = useCallback(
@@ -230,6 +283,7 @@ export function useLiveVoice({
         window.clearTimeout(delegationTimerRef.current);
         delegationTimerRef.current = null;
       }
+      clearSilenceTimer();
       if (speakingTimerRef.current !== null) {
         window.clearTimeout(speakingTimerRef.current);
         speakingTimerRef.current = null;
@@ -255,7 +309,7 @@ export function useLiveVoice({
       setStatus('idle');
       if (wasActive && !options?.silent) playVoiceCue('stop');
     },
-    [release],
+    [clearSilenceTimer, release],
   );
 
   const start = useCallback(async () => {

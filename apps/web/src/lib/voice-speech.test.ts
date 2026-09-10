@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { chunkSpeakableText, toSpeakableText } from './voice-speech';
+import {
+  chunkSpeakableText,
+  splitSpeakableSentences,
+  toSpeakableText,
+} from './voice-speech';
 
 describe('toSpeakableText', () => {
   it('summarizes fenced code blocks instead of reading them', () => {
@@ -64,5 +68,31 @@ describe('chunkSpeakableText', () => {
     const chunks = chunkSpeakableText('a'.repeat(25), 10);
 
     expect(chunks).toEqual(['a'.repeat(10), 'a'.repeat(10), 'a'.repeat(5)]);
+  });
+});
+
+describe('splitSpeakableSentences', () => {
+  it('splits on sentence punctuation and line breaks, keeping the tail', () => {
+    expect(
+      splitSpeakableSentences(
+        'First sentence. Second one!\nThird on its own line\nFourth? Trailing fragment',
+      ),
+    ).toEqual([
+      'First sentence.',
+      'Second one!',
+      'Third on its own line',
+      'Fourth?',
+      'Trailing fragment',
+    ]);
+  });
+
+  it('does not split a version number or a trailing period', () => {
+    expect(splitSpeakableSentences('Bumped to 1.2.3 today.')).toEqual([
+      'Bumped to 1.2.3 today.',
+    ]);
+  });
+
+  it('returns nothing for empty text', () => {
+    expect(splitSpeakableSentences('   ')).toEqual([]);
   });
 });
