@@ -253,7 +253,7 @@ export async function resolveCurrentThreadFooter(
       columns: { id: true, fastConversationId: true, activityAt: true },
       where: or(eq(sessions.id, id), eq(sessions.fastConversationId, id)),
     });
-    sessionActivityAt = session?.activityAt ?? null;
+    sessionActivityAt = session ? session.activityAt * 1000 : null;
     if (session && !session.fastConversationId) {
       const linkedTasks = await db
         .select({ taskId: sessionTasks.taskId })
@@ -305,7 +305,7 @@ export async function resolveCurrentThreadFooter(
       getSessionForTask(db, id),
     ]);
     context = taskContext;
-    sessionActivityAt = session?.activityAt ?? null;
+    sessionActivityAt = session ? session.activityAt * 1000 : null;
   }
   const linkedPrs = await mergeCarriedPullRequests(
     footerText,
