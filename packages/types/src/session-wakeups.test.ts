@@ -45,6 +45,19 @@ describe('manage wakeups tool contract', () => {
     }
   });
 
+  it('accepts an explicit internal create flag without adding it by default', () => {
+    expect(
+      manageWakeupsInputSchema.parse({ action: 'create', internal: true }),
+    ).toEqual({ action: 'create', internal: true });
+    expect(manageWakeupsInputSchema.parse({ action: 'create' })).toEqual({
+      action: 'create',
+    });
+    expect(
+      manageWakeupsInputSchema.safeParse({ action: 'create', internal: 'true' })
+        .success,
+    ).toBe(false);
+  });
+
   it('publishes the canonical descriptor and is a Fast native tool', () => {
     expect(MANAGE_WAKEUPS_TOOL.name).toBe('manage_wakeups');
     expect(FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups).toBe(
@@ -59,6 +72,12 @@ describe('manage wakeups tool contract', () => {
     expect(MANAGE_WAKEUPS_TOOL.description).toContain('There is no pause.');
     expect(MANAGE_WAKEUPS_TOOL.description).toContain(
       'Never poll, sleep, or wait',
+    );
+    expect(MANAGE_WAKEUPS_TOOL.description).toContain(
+      'After creating a user-requested wakeup, confirm what will happen and when',
+    );
+    expect(MANAGE_WAKEUPS_TOOL.description).toContain(
+      'Automatic wakeups required by system instructions follow their stated communication policy',
     );
     expect(MANAGE_WAKEUPS_TOOL.inputSchema.schedule.description).toContain(
       'cron 0 9 * * 1-5 America/New_York',
@@ -95,6 +114,7 @@ describe('manage wakeups tool contract', () => {
   it('takes the schedule as one string and nothing else schedule-shaped', () => {
     expect(Object.keys(MANAGE_WAKEUPS_TOOL.inputSchema).sort()).toEqual([
       'action',
+      'internal',
       'name',
       'prompt',
       'reportPolicy',

@@ -38,6 +38,7 @@ const item: SessionWakeupSummary = {
   schedule: { mode: 'interval', everyMinutes: 5 },
   scheduleDescription: 'Every 5 minutes',
   reportPolicy: 'only_when_notable',
+  internal: false,
   status: 'active',
   runCount: 0,
   maxRuns: null,

@@ -61,6 +61,7 @@ const optionalTrimmedNonEmptyStringSchema = z.preprocess((value) => {
 
 export const sourceControlPullRequestWriteInputSchema = z.object({
   action: z.enum([
+    'close_pull_request',
     'reply_to_pull_request_comment',
     'create_pull_request_comment',
     'create_pull_request_review_comment',
@@ -518,6 +519,8 @@ function assertWriteInputFields(
   input: SourceControlPullRequestWriteInput,
 ): void {
   switch (input.action) {
+    case 'close_pull_request':
+      break;
     case 'reply_to_pull_request_comment':
       requireThreadId(input);
       requireBody(input);
@@ -831,6 +834,21 @@ async function writeGitHubPullRequest({
   );
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const { data } = await octokit.rest.pulls.update({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        state: 'closed',
+      });
+
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        url: data.html_url ?? null,
+      });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const response = await octokit.graphql(
@@ -1141,6 +1159,23 @@ async function writeGitLabMergeRequest({
   const mergeRequestPath = `/projects/${encodeURIComponent(projectId)}/merge_requests/${input.prNumber}`;
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const response = await performRequest({
+        fetchImpl,
+        method: 'PUT',
+        url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
+        tokenHeader,
+        body: { state_event: 'close' },
+      });
+
+      if (response.status !== 200) {
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(response),
+        );
+      }
+
+      return buildWriteResult({ input, provider, repository });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const note = await requestJson({
@@ -1599,6 +1634,27 @@ async function writeGiteaPullRequest({
   );
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const response = await performRequest({
+        fetchImpl,
+        method: 'PATCH',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}`,
+          {},
+        ),
+        tokenHeader,
+        body: { state: 'closed' },
+      });
+
+      if (response.status !== 200) {
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(response),
+        );
+      }
+
+      return buildWriteResult({ input, provider, repository });
+    }
     case 'reply_to_pull_request_comment': {
       // Gitea has no API for replying inside a review thread; fall back to an
       // issue comment that references the thread.
@@ -1805,6 +1861,28 @@ async function writeBitbucketPullRequest({
   );
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const response = await performRequest({
+        fetchImpl,
+        method: 'POST',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+            repo,
+          )}/pullrequests/${input.prNumber}/decline`,
+          {},
+        ),
+        tokenHeader,
+      });
+
+      if (response.status !== 200) {
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(response),
+        );
+      }
+
+      return buildWriteResult({ input, provider, repository });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const comment = await requestJson({
@@ -2077,6 +2155,27 @@ async function writeAdoPullRequest({
   const threadsPath = `${repositoryPullRequestsPath}/${input.prNumber}/threads`;
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const response = await performRequest({
+        fetchImpl,
+        method: 'PATCH',
+        url: buildApiUrl(
+          organizationApiBaseUrl,
+          `${repositoryPullRequestsPath}/${input.prNumber}`,
+          { 'api-version': ADO_API_VERSION },
+        ),
+        tokenHeader,
+        body: { status: 'abandoned' },
+      });
+
+      if (response.status !== 200) {
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(response),
+        );
+      }
+
+      return buildWriteResult({ input, provider, repository });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const comment = await requestJson({

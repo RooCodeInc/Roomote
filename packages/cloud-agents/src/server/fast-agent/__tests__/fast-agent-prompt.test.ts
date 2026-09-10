@@ -269,46 +269,6 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('provide a copy-pasteable draft');
   });
 
-  it('keeps only the scheduling distinction and discovery route upfront in the pilot', () => {
-    const baseline = buildFastAgentSystemPrompt({ availableEnvironments: [] });
-    const pilot = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      schedulingProgressiveDisclosureEnabled: true,
-    });
-
-    expect(pilot).toContain('Conversation reminders and checks');
-    expect(pilot).toContain('deployment custom automations');
-    expect(pilot).toContain('`find_integration_tools`');
-    expect(pilot).toContain('`query: "scheduling"`');
-    expect(pilot).toContain('exact packaged scheduling skill to load');
-    expect(pilot).toContain('Loading guidance never grants authorization');
-    expect(pilot).toContain('Ongoing-process monitoring must be finite');
-    expect(pilot).not.toContain('Use `resolve_schedule` before creation');
-    expect(pilot).not.toContain(
-      'use `list` to check for an equivalent automation',
-    );
-    // Static prompt-size comparison only; this is not a latency or reliability
-    // evaluation. Tool-schema savings are measured separately from runtime.
-    expect(
-      Buffer.byteLength(baseline) - Buffer.byteLength(pilot),
-    ).toBeGreaterThan(2_000);
-  });
-
-  it('keeps deferred wakeup cancellation available on scheduled events', () => {
-    const prompt = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      schedulingProgressiveDisclosureEnabled: true,
-      turnSource: 'platform_event',
-      platformEventKind: 'scheduled_wakeup',
-    });
-
-    expect(prompt).toContain('Scheduled Wakeup Event');
-    expect(prompt).toContain('use the discovered scheduling capability');
-    expect(prompt).toContain('`manage_wakeups`');
-    expect(prompt).toContain('action "cancel"');
-    expect(prompt).toContain('`reportPolicy` governs whether to speak');
-  });
-
   it('suppresses implicit offers for automation events and the deployment kill switch', () => {
     const eventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -502,7 +462,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'never claim a video is attached unless native delivery succeeds',
     );
     expect(prompt).toContain(
-      'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
+      'Use `send_chat_reaction` only for an optional meaningful reaction or an emoji-only terminal answer',
+    );
+    expect(prompt).toContain(
+      'do not use "eyes" as an automatic processing or working-status acknowledgement',
     );
     expect(prompt).toContain(
       'It does not satisfy the turn-start acknowledgement required before continuing work',
@@ -734,7 +697,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('schedules one bounded own-task check after a successful coding launch', () => {
+  it('silently ensures one session-scoped one-shot after a successful coding launch', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
     expect(prompt).toContain('## Own Coding Task Follow-Through');
@@ -742,19 +705,37 @@ describe('buildFastAgentSystemPrompt', () => {
       'After "launch_task" successfully creates a coding task for a human-authored request',
     );
     expect(prompt).toContain(
-      'list active wakeups and arrange exactly one equivalent-free one-shot check for the returned task ID',
+      'list active wakeups and silently ensure this conversation has exactly one session-wide one-shot check',
+    );
+    expect(prompt).toContain('name "Follow through on session tasks"');
+    expect(prompt).toContain(
+      'Run the Own Coding Task Follow-Through session check for all tasks in this conversation',
     );
     expect(prompt).toContain('schedule "in 10m"');
     expect(prompt).toContain('reportPolicy "only_when_notable"');
+    expect(prompt).toContain('and internal true');
     expect(prompt).toContain(
       'not external-process monitoring, so do not ask for monitoring consent',
     );
+    expect(prompt).toContain('Do not schedule after a failed launch');
     expect(prompt).toContain(
-      'Do not schedule after a failed launch or create a second check when an equivalent one exists',
+      'task-independent so concurrent or successive launches deduplicate to one monitor for the Session',
+    );
+    expect(prompt).toContain(
+      'Do not mention this automatic monitor, its setup, cadence, or next run in the acknowledgement or closeout',
+    );
+    expect(prompt).toContain(
+      'This exception overrides generic wakeup-creation confirmation instructions only for automatic own-task follow-through',
+    );
+    expect(prompt).toContain(
+      'continue to confirm reminders and monitoring that the user requested',
+    );
+    expect(prompt).toContain(
+      'After creating a user-requested wakeup, confirm the plan and the next run time in one sentence',
     );
   });
 
-  it('keeps own-task check-ins useful, quiet, and nonrenewing', () => {
+  it('inspects and rearms the session check only while work is running', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       turnSource: 'platform_event',
@@ -762,25 +743,89 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'stay silent when the task finished or was canceled',
+      'inspect every task currently listed in this prompt as active or resumable for this conversation',
+    );
+    expect(prompt).toContain('get each current summary and recent messages');
+    expect(prompt).toContain(
+      "compare the evidence with the user's goals and accepted instructions in this conversation",
     );
     expect(prompt).toContain(
-      'completion or useful progress was already reported',
+      'Count a task as still running only when current evidence shows it is booting or actively executing',
     );
     expect(prompt).toContain(
-      'a recent useful update makes another check-in redundant',
+      'stopped, waiting for input, completed, failed, canceled, or merely resumable does not keep the monitor alive',
     );
     expect(prompt).toContain(
-      'Otherwise report only concrete progress, a blocker, or needed input grounded in the task; never invent progress',
+      'Never treat an inspection failure or missing evidence as success',
     );
     expect(prompt).toContain(
-      'Do not create another wakeup, renew the check, or duplicate task or pull-request lifecycle notifications',
+      'do not rearm, and stop the monitor on capability loss',
     );
     expect(prompt).toContain(
-      'call "ignore_event" without a cancellation closeout',
+      'concrete evidence shows drift, a missed requirement, or an actionable blocker a running task can resolve within the accepted scope',
     );
+    expect(prompt).toContain(
+      'use "send_task_message" to send one specific corrective instruction to that task',
+    );
+    expect(prompt).toContain('naming the evidence and expected correction');
+    expect(prompt).toContain(
+      'the same correction is not already queued, accepted, recorded, addressed, or superseded',
+    );
+    expect(prompt).toContain(
+      'Do not steer on silence alone, invent progress or problems, expand scope, or reactivate stopped, waiting, finished, failed, or canceled work',
+    );
+    expect(prompt).toContain(
+      'post one brief consolidated factual status for the Session when either inspection finds a genuinely notable new development',
+    );
+    expect(prompt).toContain(
+      'or the user has received no useful user-visible work update in this conversation for roughly 10 minutes',
+    );
+    expect(prompt).toContain(
+      'Important news is immediate and has no minimum wait',
+    );
+    expect(prompt).toContain(
+      'a recent useful update suppresses only a routine cadence status, not inspection, corrective action, or the next timer',
+    );
+    expect(prompt).toContain(
+      'do not narrate routine logs, invent progress, repeat an already reported development, or emit separate per-task or duplicate lifecycle notifications',
+    );
+    expect(prompt).toContain(
+      'When neither reporting condition is met, call "ignore_event" after ensuring the next check',
+    );
+    expect(prompt).toContain(
+      'ensure exactly one equivalent next one-shot check exists for "in 10m"',
+    );
+    expect(prompt).toContain('If no task remains running, do not rearm');
+    expect(prompt).toContain('otherwise call "ignore_event"');
+    expect(prompt).toContain(
+      'cancel those active per-task monitors before ensuring the session check',
+    );
+    expect(prompt).toContain(
+      'Leave every unrelated reminder or external-process monitor unchanged',
+    );
+    expect(prompt).toContain(
+      'does not loosen the consent, finite-bound, or no-renewal rules for unrelated external-process monitoring',
+    );
+    expect(prompt).toContain(
+      'when the automatic own-task session check above authorizes a corrective instruction to a running task',
+    );
+    expect(prompt).toContain('automatic monitoring must never reactivate it');
+    expect(prompt).toContain(
+      'report notable new developments immediately or one factual consolidated status after roughly 10 minutes without a useful visible work update',
+    );
+    expect(prompt).toContain(
+      'otherwise stay silent while still rearming if work runs',
+    );
+    expect(prompt).toContain(
+      'explicitly authorizes creating its next one-shot only while running work remains',
+    );
+    expect(prompt).toContain(
+      'unless the prompt explicitly asks you to schedule the next check',
+    );
+    expect(prompt).not.toContain('schedule "every 10m x12"');
+    expect(prompt).not.toContain('after 12 runs');
     expect(prompt).not.toContain(
-      'when it is already on its final run, finished, canceled',
+      'post exactly one brief consolidated factual status for the Session on every check',
     );
   });
 

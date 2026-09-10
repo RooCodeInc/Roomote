@@ -472,6 +472,10 @@ import {
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
 import {
+  getExperimentalSettingsCommand,
+  setOpenCodeCodeModeCommand,
+} from '../commands/experimental-settings';
+import {
   backfillBrainTaskMemoriesCommand,
   getBrainPageCommand,
   getBrainSettingsCommand,
@@ -3302,6 +3306,17 @@ export const appRouter = createRouter({
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentTimeZoneCommand(auth, input),
+      ),
+  }),
+
+  experimentalSettings: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getExperimentalSettingsCommand(auth),
+    ),
+    setOpenCodeCodeMode: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setOpenCodeCodeModeCommand(auth, input),
       ),
   }),
 

@@ -15,6 +15,7 @@ type ManageSourceControlParams = {
     | 'get_pull_request'
     | 'list_pull_requests'
     | 'list_pull_request_comments'
+    | 'close_pull_request'
     | 'reply_to_pull_request_comment'
     | 'create_pull_request_comment'
     | 'create_pull_request_review_comment'

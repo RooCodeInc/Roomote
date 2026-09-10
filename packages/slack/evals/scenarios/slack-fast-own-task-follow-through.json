@@ -1,11 +1,16 @@
 {
   "name": "slack-fast-own-task-follow-through",
-  "description": "A Fast coding-task launch and immediate follow-up exercise automatic bounded own-task check-in scheduling without duplicate offers or wakeups.",
+  "description": "A Fast coding-task launch and immediate follow-up exercise one session-scoped chain of one-shot own-task checks that reports notable news or a consolidated status after prolonged silence and can correct evidenced drift without duplicates.",
   "criteria": [
-    "In the first turn, the bot acknowledges the repository fix, launches exactly one coding task, and confirms one automatic check-in in about 10 minutes without asking the user to opt into monitoring",
-    "The check-in described by the bot is scoped to the exact launched task, is one-shot and bounded, and is not presented as a recurring automation or external-process monitor",
-    "In the second turn, the bot routes the test-coverage instruction to the existing task and does not announce, offer, or schedule a second equivalent check-in",
-    "In the third turn, the bot explains that the check inspects the exact task, stays silent for completion, cancellation, already-reported or non-useful state, reports only concrete progress, blockers, or needed input, and never renews itself",
+    "In the first turn, the bot acknowledges the repository fix and launches exactly one coding task without announcing, offering, or confirming its automatic follow-through monitor, cadence, or next check",
+    "Behind the scenes, the bot schedules exactly one task-independent session monitor as a one-shot check in 10 minutes with only-when-notable reporting, without asking the user to opt in",
+    "In the second turn, the bot routes the test-coverage instruction to the existing task and reuses the same session monitor rather than announcing, offering, or scheduling a per-task duplicate",
+    "In the third turn, the bot explains that each check inspects the summaries and recent messages of all active or resumable tasks in this Session, compares running work with the user's goals and accepted instructions, and can send a running task one specific corrective instruction when concrete evidence shows drift, a missed requirement, or an actionable in-scope blocker",
+    "The bot explains that it does not steer on silence alone, invent progress or problems, expand scope, duplicate a correction that is queued, accepted, recorded, addressed, or superseded, or reactivate stopped, waiting, finished, failed, or canceled work",
+    "The bot explains that while any task remains actively running, each check reports a genuinely notable new milestone, actionable blocker, needed input, or corrective action immediately, even within 10 minutes of another update",
+    "The bot explains that without notable news it posts one concise consolidated factual status only when the user has received no useful visible work update for roughly 10 minutes; an intervening useful update suppresses redundant routine status but not inspection or the next one-shot check",
+    "The bot explains that stopped, waiting-for-input, completed, failed, canceled, and merely resumable tasks do not keep checks alive; when no task remains running it does not rearm and stays silent unless there is newly useful completion, blocker, input, or corrective-action news",
+    "The bot treats missing inspection evidence as missing evidence rather than success, stops on inspection capability loss, and leaves unrelated reminders and external-process monitors unchanged",
     "The bot does not claim implementation progress, completion, test results, or a pull request that the task has not reported",
     "Every bot reply stays in the originating Slack thread and no channel-level bot messages are posted"
   ],

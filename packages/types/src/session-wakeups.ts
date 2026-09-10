@@ -156,6 +156,12 @@ export const manageWakeupsFieldSchemas = {
     .describe(
       '[create] "always" replies to the user on every run (default for one-shots). "only_when_notable" stays silent unless there is news or the condition resolved (default for repeating schedules). Omit to use the default.',
     ),
+  internal: z
+    .boolean()
+    .optional()
+    .describe(
+      '[create] Set true only when system instructions explicitly require an internal wakeup. Omit otherwise.',
+    ),
 } satisfies z.ZodRawShape;
 
 export const manageWakeupsInputSchema = z.object(manageWakeupsFieldSchemas);
@@ -172,7 +178,7 @@ The schedule is one short string with positive whole-number s/m/h/d durations. R
 - Results arrive automatically as a new turn in this conversation. Delivery is best effort, not an exact-time guarantee. Never poll, sleep, or wait for a wakeup inside a turn.
 - When the user says stop, cancel, remove, delete, or end a wakeup, use cancel. There is no pause.
 - Creating a wakeup that matches an active one (same prompt and schedule) returns the existing wakeup instead of a duplicate. At most ${MAX_ACTIVE_SESSION_WAKEUPS} wakeups may be active per conversation.
-- Only send the fields the action needs; omit the rest. After creating a wakeup, confirm what will happen and when in one short sentence using the returned nextRunAt.`;
+- Only send the fields the action needs; omit the rest. After creating a user-requested wakeup, confirm what will happen and when in one short sentence using the returned nextRunAt. Automatic wakeups required by system instructions follow their stated communication policy.`;
 
 export const MANAGE_WAKEUPS_TOOL = {
   name: MANAGE_WAKEUPS_TOOL_NAME,
@@ -195,6 +201,7 @@ export type SessionWakeupSummary = {
   schedule: SessionWakeupSchedule;
   scheduleDescription: string;
   reportPolicy: SessionWakeupReportPolicy;
+  internal: boolean;
   status: SessionWakeupStatus;
   runCount: number;
   maxRuns: number | null;

@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from '@testing-library/react';
 import { toast } from 'sonner';
@@ -16,6 +17,7 @@ const state = vi.hoisted(() => ({
   queriedKeys: [] as unknown[],
   customAutomationsPending: false,
   customAutomationRunPendingId: null as string | null,
+  customAutomationTimeZone: 'UTC' as string | undefined,
   customAutomations: [] as Array<{
     id: string;
     name: string;
@@ -293,7 +295,14 @@ const mutations = vi.hoisted(() => ({
     ) => void;
   } | null,
   latestCustomTriggerOptions: null as {
-    onSuccess?: (result: { outcome: 'launched'; taskId: string }) => void;
+    onSuccess?: (
+      result:
+        | { outcome: 'launched'; taskId: string }
+        | { outcome: 'queued' }
+        | { outcome: 'completed' }
+        | { outcome: 'skipped'; reason: string }
+        | { outcome: 'failed'; error: string },
+    ) => void;
   } | null,
 }));
 
@@ -334,7 +343,7 @@ vi.mock('@tanstack/react-query', () => ({
             state.settingsQuery.data.settings.managerSlackChannelId,
           managerDiscordChannelId:
             state.settingsQuery.data.settings.managerDiscordChannelId,
-          effectiveTimeZone: 'UTC',
+          effectiveTimeZone: state.customAutomationTimeZone,
         },
       };
     }
@@ -627,8 +636,34 @@ function closeAutomationDialog() {
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 }
 
+function setRunnableCustomAutomation() {
+  state.customAutomations = [
+    {
+      id: 'automation-1',
+      name: 'Daily scan',
+      prompt: 'Find flaky tests.',
+      enabled: true,
+      scheduleMode: 'daily',
+      cronExpression: null,
+      model: null,
+      executionMode: 'fast',
+      environmentId: '__fast__',
+      target: {},
+      lastRunAt: null,
+      lastSucceededAt: null,
+      lastFailedAt: null,
+      lastError: null,
+      lastLaunchedTaskId: null,
+      createdByName: 'Ada',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+    },
+  ];
+}
+
 describe('AutomationsSettings', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
     state.customAutomationRunPendingId = null;
@@ -671,6 +706,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
     state.customAutomations = [];
+    state.customAutomationTimeZone = 'UTC';
     state.customAutomationsPending = false;
     state.settingsQuery.isPending = false;
     state.environments = [];
@@ -994,11 +1030,14 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     await screen.findByText('Triage Dependabot Alerts');
-    const providerSupport = screen.getAllByText(/GitHub only/)[0]!;
-    expect(providerSupport.tagName).toBe('SPAN');
-    expect(providerSupport.closest('[role="row"]')).toHaveTextContent(
-      'Triage Dependabot Alerts',
+    const dependabotRow = screen
+      .getByText('Triage Dependabot Alerts')
+      .closest('[role="row"]');
+    expect(dependabotRow).not.toBeNull();
+    const providerSupport = within(dependabotRow as HTMLElement).getByText(
+      /GitHub only/,
     );
+    expect(providerSupport.tagName).toBe('SPAN');
   });
 
   it('renders custom and built-in automations in one list by default', async () => {
@@ -1016,6 +1055,75 @@ describe('AutomationsSettings', () => {
       'sr-only',
     );
     expect(screen.queryByText('Available')).not.toBeInTheDocument();
+  });
+
+  it('orders the unified list alphabetically without changing query data', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-z',
+        name: 'Zulu custom automation',
+        prompt: 'Run last alphabetically.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      {
+        id: 'automation-a',
+        name: 'Aardvark custom automation',
+        prompt: 'Run first alphabetically.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    await screen.findByText('Aardvark custom automation');
+    const orderedRows = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.textContent ?? '');
+
+    expect(orderedRows[0]).toContain('Aardvark custom automation');
+    expect(orderedRows[1]).toContain('Alert on Config Errors');
+    expect(orderedRows.at(-1)).toContain('Zulu custom automation');
+    expect(
+      state.customAutomations.map((automation) => automation.name),
+    ).toEqual(['Zulu custom automation', 'Aardvark custom automation']);
+
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'Run first alphabetically' } },
+    );
+    const customRow = screen
+      .getByText('Aardvark custom automation')
+      .closest('[role="row"]');
+    expect(customRow?.nextElementSibling).toBe(
+      screen.getByText('No built-in automations match your search.'),
+    );
   });
 
   it('uses the left switch as the built-in configuration entry point', async () => {
@@ -1211,6 +1319,9 @@ describe('AutomationsSettings', () => {
         action: expect.objectContaining({ label: 'View task' }),
       }),
     );
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['automations', 'listCustomAutomations'],
+    });
 
     state.customAutomations.push({
       ...state.customAutomations[0]!,
@@ -1260,6 +1371,73 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { outcome: 'completed' as const },
+    { outcome: 'failed' as const, error: 'launch failed' },
+  ])('refreshes persisted custom automation state after $outcome', (result) => {
+    setRunnableCustomAutomation();
+    render(<AutomationsSettings />);
+
+    act(() => {
+      mutations.latestCustomTriggerOptions?.onSuccess?.(result);
+    });
+
+    expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['automations', 'listCustomAutomations'],
+    });
+  });
+
+  it.each([
+    { outcome: 'launched' as const, taskId: 'task-custom-1' },
+    { outcome: 'queued' as const },
+  ])('uses bounded follow-up refreshes after $outcome', (result) => {
+    vi.useFakeTimers();
+    setRunnableCustomAutomation();
+    const { unmount } = render(<AutomationsSettings />);
+
+    try {
+      act(() => {
+        mutations.latestCustomTriggerOptions?.onSuccess?.(result);
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(8);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not schedule follow-up refreshes after unmount', () => {
+    vi.useFakeTimers();
+    setRunnableCustomAutomation();
+    const { unmount } = render(<AutomationsSettings />);
+    const onSuccess = mutations.latestCustomTriggerOptions?.onSuccess;
+
+    try {
+      unmount();
+      act(() => {
+        onSuccess?.({ outcome: 'queued' });
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('offers and displays the all-repositories workspace target', async () => {
@@ -1397,13 +1575,99 @@ describe('AutomationsSettings', () => {
 
     expect(
       await screen.findByText(
-        'At 09:00 AM, Monday through Friday, in Production →',
+        'At 09:00 AM, Monday through Friday (UTC), in Production →',
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/Created by Ada/)).toHaveTextContent(
       /Created by Ada · Last run \d+s ago/,
     );
     expect(screen.queryByText('0 9 * * 1-5')).not.toBeInTheDocument();
+  });
+
+  it('shows saved cron cadence in the deployment timezone', async () => {
+    state.customAutomationTimeZone = 'America/New_York';
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Daily scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'cron',
+        cronExpression: '0 9 * * *',
+        model: null,
+        environmentId: 'env-1',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText(
+        'Daily at 09:00 AM (America/New York), in Production →',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'America/New York' } },
+    );
+    expect(screen.getByText('Daily scan')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Daily scan' }),
+    );
+    expect(
+      screen.getByText('Daily at 09:00 AM (America/New York)'),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      reason: 'the deployment timezone is unavailable',
+      timeZone: undefined,
+      cronExpression: '0 9 * * *',
+    },
+    {
+      reason: 'the saved cron is invalid',
+      timeZone: 'UTC',
+      cronExpression: '99 99 * * *',
+    },
+  ])('falls back when $reason', async ({ timeZone, cronExpression }) => {
+    state.customAutomationTimeZone = timeZone;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Daily scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'cron',
+        cronExpression,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Custom schedule →')).toBeInTheDocument();
   });
 
   it('shows Slack DM me as a custom automation destination', async () => {

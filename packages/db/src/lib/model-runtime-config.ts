@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { isOpenCodeCodeModeEnabledFromMetadata } from '@roomote/feature-flags';
 import {
   applyImplicitLiteLlmModelPrefix,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
@@ -112,6 +113,7 @@ async function loadPersistedRuntimeModelConfig(
   const deployment = await executor.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
     columns: {
+      metadata: true,
       runtimeModelConfig: true,
       taskModelSettings: true,
     },
@@ -124,6 +126,9 @@ async function loadPersistedRuntimeModelConfig(
     catalogModels: getTaskModelCatalog(deployment?.taskModelSettings),
     enabledCatalogModels: getEnabledTaskModels(deployment?.taskModelSettings),
     defaultModelId: getDefaultTaskModelId(deployment?.taskModelSettings),
+    openCodeCodeModeEnabled: isOpenCodeCodeModeEnabledFromMetadata(
+      deployment?.metadata,
+    ),
   };
 }
 
@@ -408,7 +413,13 @@ async function resolveModelRuntimeEnv(
   const executor = options.executor ?? db;
   const [
     persistedEnvVars,
-    { runtimeModelConfig, catalogModels, enabledCatalogModels, defaultModelId },
+    {
+      runtimeModelConfig,
+      catalogModels,
+      enabledCatalogModels,
+      defaultModelId,
+      openCodeCodeModeEnabled,
+    },
   ] = await Promise.all([
     resolveEffectiveDeploymentEnvVars({
       deploymentEnvVars: options.deploymentEnvVars,
@@ -703,6 +714,9 @@ async function resolveModelRuntimeEnv(
 
   return {
     ...resolvedRoleEnv,
+    ...(openCodeCodeModeEnabled
+      ? { OPENCODE_EXPERIMENTAL_CODE_MODE: '1' }
+      : {}),
     ...(providerKeyNames.length > 0 && {
       R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),

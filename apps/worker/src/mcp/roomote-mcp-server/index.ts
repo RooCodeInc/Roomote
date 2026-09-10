@@ -874,10 +874,11 @@ roomoteMcpServer.registerTool(
       'Provider-neutral issue and pull request/merge request operations for the current task. ' +
       'Use "get_issue", "list_issue_comments", and "create_issue_comment" for plain issues. ' +
       'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
-      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
+      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. The metadata refresh preserves its current draft or ready state; later human changes and opt-in clean-review promotion are separate transitions. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
       '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
+      'Use "close_pull_request" to close, decline, or abandon an open PR/MR without merging it or deleting its branch. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
       '"resolve_pull_request_thread" to resolve or reopen a thread, "request_pull_request_reviewers" to request user or team reviewers after PR creation, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
@@ -891,6 +892,7 @@ roomoteMcpServer.registerTool(
           'get_pull_request',
           'list_pull_requests',
           'list_pull_request_comments',
+          'close_pull_request',
           'reply_to_pull_request_comment',
           'create_pull_request_comment',
           'create_pull_request_review_comment',
@@ -904,7 +906,7 @@ roomoteMcpServer.registerTool(
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline comment anchored to a file and line of the current diff; resolve_pull_request_thread resolves or reopens a thread; request_pull_request_reviewers requests user or team reviewers after PR creation; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; close_pull_request closes, declines, or abandons a PR/MR without merging it or deleting its branch; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline comment anchored to a file and line of the current diff; resolve_pull_request_thread resolves or reopens a thread; request_pull_request_reviewers requests user or team reviewers after PR creation; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
