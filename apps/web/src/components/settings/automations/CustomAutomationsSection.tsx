@@ -592,7 +592,7 @@ export function CustomAutomationsSection({
             [
               row.name,
               row.prompt,
-              cadenceLabel(row),
+              cadenceLabel(row, schedulingTimeZone),
               environmentName,
               destinationName,
               destinationLabel,
