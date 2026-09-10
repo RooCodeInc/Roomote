@@ -47,12 +47,15 @@ describe('thread footer carrier lifecycle', () => {
         current = carrier;
         return true;
       },
+      afterRemember: async (carrier) => {
+        events.push(`register:${carrier.messageId}`);
+      },
       clearFooter: async (carrier) => {
         events.push(`clear:${carrier.messageId}`);
       },
     });
 
-    expect(events).toEqual(['remember:new', 'clear:old']);
+    expect(events).toEqual(['remember:new', 'register:new', 'clear:old']);
   });
 
   it('clears only its own carrier when a fenced pointer write loses', async () => {

@@ -84,6 +84,11 @@ export async function relocateThreadFooterCarrier<
         }
         return published.result;
       }
+      try {
+        await params.afterRemember?.(published.carrier, assertLock);
+      } catch (error) {
+        params.onAfterRememberError?.(published.carrier, error);
+      }
       if (previous && !params.sameVersion(previous, published.carrier)) {
         try {
           await assertLock();
@@ -91,11 +96,6 @@ export async function relocateThreadFooterCarrier<
         } catch (error) {
           params.onClearError?.(previous, error);
         }
-      }
-      try {
-        await params.afterRemember?.(published.carrier, assertLock);
-      } catch (error) {
-        params.onAfterRememberError?.(published.carrier, error);
       }
       return published.result;
     },

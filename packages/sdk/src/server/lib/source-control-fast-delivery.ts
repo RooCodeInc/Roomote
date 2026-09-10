@@ -8,13 +8,13 @@ import { and, db, eq, repositories } from '@roomote/db/server';
 import {
   buildFastSessionReplyFooterText,
   classifyThreadFooterActivity,
-  refreshThreadFooterCarrier,
   resolveFastSessionReplyFooterContext,
   withThreadReplyFooterLock,
   forgetThreadFooterRefresh,
   scheduleThreadFooterRefresh,
   type ThreadReplyFooterLock,
 } from '@roomote/communication';
+import { refreshThreadFooterCarrier } from '@roomote/communication/thread-footer-carrier-lifecycle';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
