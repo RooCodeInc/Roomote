@@ -38,6 +38,7 @@ export type CreateSessionWakeupInput = {
   /** One schedule string, e.g. "in 20m", "every 10m x3", "cron 0 9 * * 1-5". */
   schedule: string;
   reportPolicy?: SessionWakeupReportPolicy | null;
+  internal?: boolean;
 };
 
 export type CreateSessionWakeupResult = {
@@ -76,6 +77,7 @@ export function toSessionWakeupSummary(
     schedule: row.schedule,
     scheduleDescription: describeSessionWakeupSchedule(row.schedule),
     reportPolicy: row.reportPolicy,
+    internal: row.internal,
     status: row.status,
     runCount: row.runCount,
     maxRuns: row.maxRuns,
@@ -114,6 +116,7 @@ export async function createSessionWakeup(
     prompt,
     schedule,
     reportPolicy,
+    internal: input.internal ?? false,
     maxRuns,
     until,
     nextRunAt: firstRunAt,
@@ -209,6 +212,7 @@ export async function handleManageWakeupsToolCall(
           prompt: input.prompt,
           schedule: input.schedule,
           reportPolicy: input.reportPolicy ?? null,
+          internal: input.internal,
         });
         return {
           success: true,

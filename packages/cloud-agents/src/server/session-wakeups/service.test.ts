@@ -77,6 +77,7 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
           },
           nextRunAt: nextRunAt.toISOString(),
           reportPolicy: 'always',
+          internal: false,
           status: 'active',
         },
         note: 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation.',
@@ -88,6 +89,7 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
         schedule: { mode: 'once', at: nextRunAt.toISOString(), inMinutes: 0.5 },
         nextRunAt,
         reportPolicy: 'always',
+        internal: false,
         status: 'active',
       });
       expect(
@@ -155,5 +157,38 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
     });
     expect(await listSessionWakeups(actor.conversationId)).toEqual([]);
     expect(enqueueSessionWakeupFireBestEffort).not.toHaveBeenCalled();
+  });
+
+  it('persists and manages internal wakeups without changing scheduling', async () => {
+    const created = await handleManageWakeupsToolCall(actor, {
+      ...createInput,
+      internal: true,
+    });
+    expect(created).toMatchObject({
+      success: true,
+      wakeup: { internal: true, status: 'active' },
+    });
+    const wakeupId = (created.wakeup as { id: string }).id;
+    expect(enqueueSessionWakeupFireBestEffort).toHaveBeenCalledExactlyOnceWith({
+      wakeupId,
+      runAt: now.getTime() + 30_000,
+    });
+
+    await expect(
+      handleManageWakeupsToolCall(actor, { action: 'list' }),
+    ).resolves.toMatchObject({
+      count: 1,
+      wakeups: [{ id: wakeupId, internal: true }],
+    });
+    await expect(
+      handleManageWakeupsToolCall(actor, { action: 'get', wakeupId }),
+    ).resolves.toMatchObject({ wakeup: { id: wakeupId, internal: true } });
+    await expect(
+      handleManageWakeupsToolCall(actor, { action: 'cancel', wakeupId }),
+    ).resolves.toMatchObject({
+      success: true,
+      cancelled: true,
+      wakeup: { id: wakeupId, internal: true, status: 'cancelled' },
+    });
   });
 });

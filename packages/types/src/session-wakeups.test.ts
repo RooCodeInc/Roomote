@@ -45,6 +45,19 @@ describe('manage wakeups tool contract', () => {
     }
   });
 
+  it('accepts an explicit internal create flag without adding it by default', () => {
+    expect(
+      manageWakeupsInputSchema.parse({ action: 'create', internal: true }),
+    ).toEqual({ action: 'create', internal: true });
+    expect(manageWakeupsInputSchema.parse({ action: 'create' })).toEqual({
+      action: 'create',
+    });
+    expect(
+      manageWakeupsInputSchema.safeParse({ action: 'create', internal: 'true' })
+        .success,
+    ).toBe(false);
+  });
+
   it('publishes the canonical descriptor and is a Fast native tool', () => {
     expect(MANAGE_WAKEUPS_TOOL.name).toBe('manage_wakeups');
     expect(FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups).toBe(
@@ -101,6 +114,7 @@ describe('manage wakeups tool contract', () => {
   it('takes the schedule as one string and nothing else schedule-shaped', () => {
     expect(Object.keys(MANAGE_WAKEUPS_TOOL.inputSchema).sort()).toEqual([
       'action',
+      'internal',
       'name',
       'prompt',
       'reportPolicy',

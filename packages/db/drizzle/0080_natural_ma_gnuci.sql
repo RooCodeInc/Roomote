@@ -1,0 +1,1 @@
+ALTER TABLE "session_wakeups" ADD COLUMN "internal" boolean DEFAULT false NOT NULL;
