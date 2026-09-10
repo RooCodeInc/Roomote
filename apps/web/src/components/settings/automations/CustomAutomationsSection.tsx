@@ -1035,7 +1035,7 @@ export function CustomAutomationsSection({
               ) : null}
               {!listQuery.isPending &&
               visibleRows.length === 0 &&
-              filter === 'custom' ? (
+              (filter === 'custom' || (!children && filter === 'all')) ? (
                 <p className="px-4 py-6 text-sm text-muted-foreground">
                   {normalizedSearch
                     ? 'No custom automations match your search.'
@@ -1175,7 +1175,8 @@ export function CustomAutomationsSection({
               {!listQuery.isPending &&
               visibleRows.length === 0 &&
               !children &&
-              (filter !== 'custom' || normalizedSearch) ? (
+              filter !== 'custom' &&
+              filter !== 'all' ? (
                 <p className="px-4 py-6 text-sm text-muted-foreground">
                   No automations match your filters.
                 </p>

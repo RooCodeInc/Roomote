@@ -593,6 +593,9 @@ it('opens the standalone custom editor without querying admin settings', () => {
   expect(
     screen.queryByRole('radio', { name: 'Built-in' }),
   ).not.toBeInTheDocument();
+  expect(
+    screen.getByText('No custom automations created yet.'),
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'New' }));
   expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
   expect(state.queriedKeys).toContainEqual([
