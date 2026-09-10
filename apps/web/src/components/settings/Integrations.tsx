@@ -1189,13 +1189,6 @@ function VoiceConnectionFields({
           spellCheck={false}
           data-1p-ignore
         />
-        <p className="text-sm text-muted-foreground">
-          Use a key from an OpenAI project with GPT-Live enabled, separate from
-          any key used for task inference. It is used only by this
-          deployment&apos;s control plane to open voice calls; it is never sent
-          to agents or task sandboxes. If the deployment sets
-          R_VOICE_OPENAI_API_KEY, that key is used instead.
-        </p>
         {allowBlankApiKey ? (
           <p className="text-sm text-muted-foreground">
             Leave blank to keep the existing API key.
@@ -3243,11 +3236,7 @@ export function Integrations() {
         isPending={saveVoiceConnection.isPending}
         isLoading={isVoiceConnected && voiceConnection.isPending}
         description={
-          <>
-            Store an OpenAI API key with GPT-Live access for this deployment.
-            The key stays encrypted server-side and is used only by the control
-            plane to open voice calls on Sessions.
-          </>
+          <>Store an OpenAI API key with GPT-Live access for this deployment.</>
         }
         onSubmit={handleVoiceSubmit}
       >
