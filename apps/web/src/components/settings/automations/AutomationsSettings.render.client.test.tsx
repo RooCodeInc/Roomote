@@ -991,18 +991,23 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     await screen.findByText('Triage Dependabot Alerts');
-    const providerSupport = screen.getAllByText('GitHub only')[0]!;
-    expect(providerSupport.tagName).toBe('P');
-    expect(providerSupport).toHaveClass('text-sm', 'text-foreground');
+    const providerSupport = screen.getAllByText(/GitHub only/)[0]!;
+    expect(providerSupport.tagName).toBe('SPAN');
+    expect(providerSupport.closest('[role="row"]')).toHaveTextContent(
+      'Triage Dependabot Alerts',
+    );
   });
 
-  it('groups built-in automations into Enabled and Available sections', async () => {
+  it('renders custom and built-in automations in one list by default', async () => {
     render(<AutomationsSettings />);
 
-    expect(await screen.findByText('Enabled')).toBeInTheDocument();
-    expect(screen.getByText('Available')).toBeInTheDocument();
-    expect(screen.queryByText('Source Code automations')).toBeNull();
-    expect(screen.queryByText('Meta automations')).toBeNull();
+    expect(
+      await screen.findByRole('table', { name: 'Automations' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'All' })).toBeChecked();
+    expect(screen.getByText('Auto-respond to channels')).toBeInTheDocument();
+    expect(screen.queryByText('Enabled')).not.toBeInTheDocument();
+    expect(screen.queryByText('Available')).not.toBeInTheDocument();
   });
 
   it('links enabled built-in automations to their filtered task history', async () => {
@@ -1084,33 +1089,22 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('DM me');
   });
 
-  it('filters available automations by category and provider-aware search', async () => {
+  it('filters the unified list by type and searches built-in summaries', async () => {
     render(<AutomationsSettings />);
 
-    const categoryFilter = await screen.findByRole('combobox', {
-      name: 'Filter available automations by category',
-    });
-    expect(categoryFilter).toHaveTextContent('All');
-
     fireEvent.change(
-      screen.getByRole('textbox', { name: 'Search available automations' }),
-      { target: { value: 'Discord' } },
-    );
-
-    expect(screen.getByText('Auto-respond to channels')).toBeInTheDocument();
-    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Clear automation filters' }),
+      await screen.findByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'Pull request events' } },
     );
     expect(screen.getByText('Review Code')).toBeInTheDocument();
-
-    fireEvent.click(categoryFilter);
-    fireEvent.click(await screen.findByRole('option', { name: 'Operations' }));
-    expect(screen.getByText('Triage Sentry Issues')).toBeInTheDocument();
-    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
     expect(
-      screen.queryByText('Call Roomote via emoji'),
+      screen.queryByText('Auto-respond to channels'),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Built-in' }));
+    expect(screen.getByText('Review Code')).toBeInTheDocument();
   });
 
   it('shows independent structural skeletons for custom and built-in automations', () => {
@@ -1147,7 +1141,8 @@ describe('AutomationsSettings', () => {
         name: 'Configure Alert on Config Errors',
       }),
     ).toBeInTheDocument();
-    const customEmptyState = screen.getByText(
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+    const customEmptyState = await screen.findByText(
       'No custom automations created yet.',
     );
     expect(customEmptyState.tagName).toBe('P');
@@ -1372,6 +1367,14 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText('No actionable regressions found.'),
     ).toBeInTheDocument();
+    const search = screen.getByRole('textbox', { name: 'Search automations' });
+    fireEvent.change(search, {
+      target: { value: 'No actionable regressions' },
+    });
+    expect(screen.getByText('Fast daily digest')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: 'No matching automation' } });
+    expect(screen.queryByText('Fast daily digest')).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '' } });
     expect(
       screen.getByRole('link', {
         name: 'View previous runs for Fast daily digest',
