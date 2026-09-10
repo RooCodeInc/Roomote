@@ -1,10 +1,9 @@
-import {
-  automations,
-  db,
-  deploymentSettings,
-  slackInstallations,
-  upsertAutomation,
-} from '@roomote/db/server';
+const mockGetBackgroundAgentSettingsForDeployment = vi.hoisted(() => vi.fn());
+
+vi.mock('@roomote/db/server', () => ({
+  getBackgroundAgentSettingsForDeployment:
+    mockGetBackgroundAgentSettingsForDeployment,
+}));
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -35,10 +34,11 @@ const adminAuth: UserAuthSuccess = {
 describe('getAutomationOnboardingStatusCommand', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
-  beforeEach(async () => {
-    await db.delete(automations);
-    await db.delete(deploymentSettings);
-    await db.delete(slackInstallations);
+  beforeEach(() => {
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'off',
+    });
 
     fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -58,10 +58,9 @@ describe('getAutomationOnboardingStatusCommand', () => {
   });
 
   it('reports enabled automations once one is scheduled', async () => {
-    await upsertAutomation(db, {
-      key: 'manager_stats',
-      enabled: true,
-      schedule: { mode: 'weekly' },
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'weekly',
     });
 
     await expect(
@@ -72,10 +71,9 @@ describe('getAutomationOnboardingStatusCommand', () => {
   });
 
   it('still reports nothing enabled when an automation exists but is off', async () => {
-    await upsertAutomation(db, {
-      key: 'manager_stats',
-      enabled: false,
-      schedule: { mode: 'weekly' },
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'off',
     });
 
     await expect(

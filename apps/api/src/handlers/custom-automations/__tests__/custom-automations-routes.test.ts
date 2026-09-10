@@ -171,7 +171,7 @@ describe('custom-automations MCP routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockResolveActingUserIdOrNull.mockResolvedValue('admin-1');
-    mockUsersFindFirst.mockResolvedValue({ id: 'admin-1' });
+    mockUsersFindFirst.mockResolvedValue({ id: 'admin-1', role: 'admin' });
     mockListConnectedCommunicationProviders.mockResolvedValue(['slack']);
     mockGetDeploymentTaskModelOptions.mockResolvedValue({
       models: ENABLED_MODELS,
@@ -274,6 +274,41 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it('returns one configured prompt without unrelated automation fields', async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'automation-1',
+        name: 'Nightly report',
+        prompt: 'Inspect this stored prompt.',
+        enabled: true,
+        lastError: 'previous failure',
+      });
+
+      const result = await handler({
+        action: 'inspect',
+        automationId: 'automation-1',
+      });
+
+      expect(mockGetCustomAutomationById).toHaveBeenCalledWith('automation-1');
+      expect(
+        (result as { structuredContent: unknown }).structuredContent,
+      ).toEqual({
+        automation: {
+          id: 'automation-1',
+          name: 'Nightly report',
+          prompt: 'Inspect this stored prompt.',
+        },
+      });
+    });
+
     it('routes create actions through the existing custom automation domain handler', async () => {
       const authContext: AuthTokenContext = {
         userId: 'admin-1',
@@ -327,6 +362,7 @@ describe('custom-automations MCP routes', () => {
         authContext,
       });
       mockRunCustomAutomationNow.mockResolvedValue({ outcome: 'queued' });
+      mockGetCustomAutomationById.mockResolvedValue({ id: 'automation-1' });
 
       const result = await handler({
         action: 'run_now',
@@ -339,7 +375,7 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
-    it('returns an MCP tool error when the router rejects a non-admin user', async () => {
+    it('returns an MCP tool error when the acting user is not active in the deployment', async () => {
       const authContext: AuthTokenContext = {
         userId: 'member-1',
         tokenType: 'auth',
@@ -352,14 +388,18 @@ describe('custom-automations MCP routes', () => {
       mockResolveActingUserIdOrNull.mockResolvedValue('member-1');
       mockUsersFindFirst.mockResolvedValue(null);
 
-      const result = await handler({ action: 'list' });
+      const result = await handler({
+        action: 'inspect',
+        automationId: 'automation-1',
+      });
 
       expect(mockListCustomAutomations).not.toHaveBeenCalled();
+      expect(mockGetCustomAutomationById).not.toHaveBeenCalled();
       expect(result).toMatchObject({
         isError: true,
         structuredContent: {
           status: 403,
-          error: 'Admin access required',
+          error: 'User access required',
         },
       });
     });
@@ -374,6 +414,169 @@ describe('custom-automations MCP routes', () => {
     await expect(res.json()).resolves.toEqual({
       models: ENABLED_MODELS,
       defaultModelId: 'openai/gpt-5.6-luna',
+    });
+  });
+
+  describe('member ownership', () => {
+    beforeEach(() => {
+      mockResolveActingUserIdOrNull.mockResolvedValue('member-1');
+      mockUsersFindFirst.mockResolvedValue({ id: 'member-1', role: 'member' });
+    });
+
+    it('lists only owned automations', async () => {
+      mockListCustomAutomations.mockResolvedValue([
+        { id: 'own', createdByUserId: 'member-1' },
+        { id: 'other', createdByUserId: 'other' },
+        { id: 'ownerless', createdByUserId: null },
+      ]);
+      const { app } = createApp();
+      const response = await app.request('/custom-automations');
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        automations: [{ id: 'own' }],
+      });
+    });
+
+    it.each(['other', null])(
+      'denies every ID operation for owner %s without side effects',
+      async (createdByUserId) => {
+        mockGetCustomAutomationById.mockResolvedValue({
+          id: 'automation-1',
+          createdByUserId,
+        });
+        const { app } = createApp();
+        for (const [method, suffix] of [
+          ['GET', ''],
+          ['PATCH', ''],
+          ['DELETE', ''],
+          ['POST', '/run'],
+        ]) {
+          const response = await app.request(
+            `/custom-automations/automation-1${suffix}`,
+            {
+              method,
+              ...(method === 'PATCH'
+                ? {
+                    headers: { 'content-type': 'application/json' },
+                    body: '{}',
+                  }
+                : {}),
+            },
+          );
+          expect(response.status).toBe(404);
+        }
+        expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
+        expect(mockDeleteCustomAutomation).not.toHaveBeenCalled();
+        expect(mockRunCustomAutomationNow).not.toHaveBeenCalled();
+      },
+    );
+
+    it('creates with the resolved actor rather than caller-supplied ownership', async () => {
+      mockCreateCustomAutomation.mockResolvedValue({ id: 'own' });
+      const { app } = createApp();
+      const response = await postCreate(
+        app,
+        createBody({ createdByUserId: 'admin-1' }),
+      );
+      expect(response.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ createdByUserId: 'member-1' }),
+      );
+    });
+
+    it('allows owners to inspect, delete and run their automation', async () => {
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'own',
+        createdByUserId: 'member-1',
+        target: {},
+      });
+      mockRunCustomAutomationNow.mockResolvedValue({ outcome: 'queued' });
+      const { app } = createApp();
+      expect((await app.request('/custom-automations/own')).status).toBe(200);
+      expect(
+        (await app.request('/custom-automations/own/run', { method: 'POST' }))
+          .status,
+      ).toBe(200);
+      expect(
+        (await app.request('/custom-automations/own', { method: 'DELETE' }))
+          .status,
+      ).toBe(200);
+    });
+
+    it('allows owner updates without transferring ownership from the request', async () => {
+      const existing = {
+        id: 'own',
+        createdByUserId: 'member-1',
+        name: 'Report',
+        prompt: 'Summarize',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        reasoningEffort: null,
+        executionMode: 'fast',
+        target: {},
+      };
+      mockGetCustomAutomationById.mockResolvedValue(existing);
+      mockUpdateCustomAutomation.mockResolvedValue(existing);
+      const { app } = createApp();
+      const response = await app.request('/custom-automations/own', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Updated', createdByUserId: 'admin-1' }),
+      });
+      expect(response.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'own',
+        expect.objectContaining({ name: 'Updated' }),
+      );
+      expect(mockUpdateCustomAutomation.mock.calls[0]?.[1]).not.toHaveProperty(
+        'createdByUserId',
+      );
+    });
+  });
+
+  it('rejects run-now for an ID missing from this deployment even for an admin', async () => {
+    mockGetCustomAutomationById.mockResolvedValue(null);
+    const { app } = createApp();
+    expect(
+      (await app.request('/custom-automations/missing/run', { method: 'POST' }))
+        .status,
+    ).toBe(404);
+    expect(mockRunCustomAutomationNow).not.toHaveBeenCalled();
+  });
+
+  it('returns a bounded stored prompt record by automation ID', async () => {
+    const { app } = createApp();
+    mockGetCustomAutomationById.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Nightly report',
+      prompt: 'Inspect this stored prompt.',
+      enabled: true,
+      lastError: 'previous failure',
+    });
+
+    const res = await app.request('/custom-automations/automation-1');
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      automation: {
+        id: 'automation-1',
+        name: 'Nightly report',
+        prompt: 'Inspect this stored prompt.',
+      },
+    });
+  });
+
+  it('returns not found when inspecting a missing automation', async () => {
+    const { app } = createApp();
+    mockGetCustomAutomationById.mockResolvedValue(null);
+
+    const res = await app.request('/custom-automations/missing');
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Custom automation was not found.',
     });
   });
 

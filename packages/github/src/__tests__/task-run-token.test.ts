@@ -3,11 +3,13 @@ const {
   mockFindMany,
   mockFindFirst,
   mockFindEnvironmentFirst,
+  mockFindMappings,
 } = vi.hoisted(() => ({
   mockCreateGitHubTokenWithMetadata: vi.fn(),
   mockFindMany: vi.fn(),
   mockFindFirst: vi.fn(),
   mockFindEnvironmentFirst: vi.fn(),
+  mockFindMappings: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -25,6 +27,7 @@ vi.mock('@roomote/db/server', () => ({
       environments: {
         findFirst: mockFindEnvironmentFirst,
       },
+      environmentRepositoryMappings: { findMany: mockFindMappings },
     },
   },
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
@@ -32,6 +35,9 @@ vi.mock('@roomote/db/server', () => ({
   githubPendingInstallations: {},
   environments: {
     id: 'environments.id',
+  },
+  environmentRepositoryMappings: {
+    environmentId: 'environmentRepositoryMappings.environmentId',
   },
   inArray: vi.fn((left: unknown, right: unknown) => ({
     type: 'inArray',
@@ -43,6 +49,7 @@ vi.mock('@roomote/db/server', () => ({
     fullName: 'repositories.fullName',
     isActive: 'repositories.isActive',
     sourceControlProvider: 'repositories.sourceControlProvider',
+    installationId: 'repositories.installationId',
   },
 }));
 
@@ -195,24 +202,57 @@ describe('createTaskRunGitHubToken', () => {
     ).resolves.toBe('ghs_test_token');
   });
 
-  it('uses the environment repositories installation for environment tasks', async () => {
+  it('includes active repositories outside the environment only on its GitHub installation', async () => {
     mockFindEnvironmentFirst.mockResolvedValue({
       id: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
       config: buildEnvironmentConfig(['Roomote/example-app']),
     });
-    mockFindMany.mockResolvedValue([
+    const prepared = {
+      fullName: 'Roomote/example-app',
+      installationId: 'install-roomote',
+      githubRepoId: 201,
+      isActive: true,
+      sourceControlProvider: 'github',
+    };
+    mockFindMappings.mockResolvedValue([{ repository: prepared }]);
+    const rows = [
+      prepared,
+      { ...prepared, fullName: 'Roomote/other-environment', githubRepoId: 202 },
       {
-        fullName: 'Roomote/example-app',
-        installationId: 'install-roomote',
-        githubRepoId: 201,
+        ...prepared,
+        fullName: 'Roomote/inactive',
+        githubRepoId: 203,
+        isActive: false,
       },
-    ]);
+      {
+        ...prepared,
+        fullName: 'Other/app',
+        githubRepoId: 204,
+        installationId: 'other-install',
+      },
+      {
+        ...prepared,
+        fullName: 'Roomote/gitlab',
+        githubRepoId: 205,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+    mockFindMany.mockImplementation(async ({ where }) =>
+      rows.filter((row) =>
+        where.conditions.every(
+          ({ left, right }: { left: string; right: unknown }) =>
+            row[left.replace('repositories.', '') as keyof typeof row] ===
+            right,
+        ),
+      ),
+    );
 
     await expect(
       createTaskRunGitHubToken(
         buildTaskRun({
           repo: '__all_repositories__',
           environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+          repositoryProviders: { 'Roomote/example-app': 'github' },
         } as TaskRun['payload']),
       ),
     ).resolves.toBe('ghs_test_token');
@@ -222,11 +262,77 @@ describe('createTaskRunGitHubToken', () => {
       {
         type: 'installationId',
         installationId: 'install-roomote',
-        repositoryIds: [201],
+        repositoryIds: [201, 202],
       },
       undefined,
       undefined,
     );
+    expect(mockFindMany).toHaveBeenCalledTimes(1);
+    expect(mockFindMany).toHaveBeenCalledWith({
+      where: {
+        type: 'and',
+        conditions: [
+          {
+            type: 'eq',
+            left: 'repositories.sourceControlProvider',
+            right: 'github',
+          },
+          { type: 'eq', left: 'repositories.isActive', right: true },
+          {
+            type: 'eq',
+            left: 'repositories.installationId',
+            right: 'install-roomote',
+          },
+        ],
+      },
+    });
+  });
+
+  it('does not anchor a GitHub installation from a same-name GitLab mapping', async () => {
+    mockFindEnvironmentFirst.mockResolvedValue({
+      id: 'environment-id',
+      config: buildEnvironmentConfig(['acme/app']),
+    });
+    mockFindMappings.mockResolvedValue([
+      {
+        repository: {
+          fullName: 'acme/app',
+          sourceControlProvider: 'gitlab',
+          isActive: true,
+          installationId: null,
+          githubRepoId: null,
+        },
+      },
+    ]);
+    mockFindMany.mockResolvedValue([
+      {
+        fullName: 'acme/app',
+        sourceControlProvider: 'github',
+        isActive: true,
+        installationId: 'github-install',
+        githubRepoId: 301,
+      },
+    ]);
+
+    await expect(
+      createTaskRunGitHubToken(
+        buildTaskRun({
+          repo: 'acme/app',
+          environmentId: 'environment-id',
+          repositoryProviders: { 'acme/app': 'github' },
+        } as TaskRun['payload']),
+      ),
+    ).rejects.toThrow('Environment repositories');
+    expect(mockFindMappings).toHaveBeenCalledWith({
+      where: {
+        type: 'eq',
+        left: 'environmentRepositoryMappings.environmentId',
+        right: 'environment-id',
+      },
+      with: { repository: true },
+    });
+    expect(mockFindMany).not.toHaveBeenCalled();
+    expect(mockCreateGitHubTokenWithMetadata).not.toHaveBeenCalled();
   });
 
   it('rejects environment repository sets that span multiple installations', async () => {
@@ -234,14 +340,22 @@ describe('createTaskRunGitHubToken', () => {
       id: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
       config: buildEnvironmentConfig(['owner-a/api', 'owner-b/web']),
     });
-    mockFindMany.mockResolvedValue([
+    mockFindMappings.mockResolvedValue([
       {
-        fullName: 'owner-a/api',
-        installationId: 'install-a',
+        repository: {
+          fullName: 'owner-a/api',
+          installationId: 'install-a',
+          sourceControlProvider: 'github',
+          isActive: true,
+        },
       },
       {
-        fullName: 'owner-b/web',
-        installationId: 'install-b',
+        repository: {
+          fullName: 'owner-b/web',
+          installationId: 'install-b',
+          sourceControlProvider: 'github',
+          isActive: true,
+        },
       },
     ]);
 

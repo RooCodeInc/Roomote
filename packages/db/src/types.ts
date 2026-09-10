@@ -64,6 +64,7 @@ import type {
   environmentRepositoryMappings,
   automations,
   customAutomations,
+  sessionWakeups,
   trackedMessages,
 } from './schema';
 
@@ -539,11 +540,13 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   /** Primary Teams conversation id when Suggest Ideas posts to Teams. */
   suggesterTeamsChannelId: string | null;
   suggesterInstructions: string | null;
+  suggesterAdditionalRules?: string;
   suggesterLastRunAt: Date | null;
   announcerFrequency: AnnouncerFrequency;
   announcerSlackChannelId: string | null;
   announcerDiscordChannelId: string | null;
   announcerInstructions: string | null;
+  announcerAdditionalRules?: string;
   announcerLastRunAt: Date | null;
   platformIssueAlertsEnabled: boolean;
   platformIssueSlackChannelId: string | null;
@@ -579,14 +582,17 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   securityAuditorDiscordChannelId: string | null;
   securityAuditorLastRunAt: Date | null;
   securityAuditorScanCursor?: SecurityAuditorScanCursor | null;
+  securityAuditorAdditionalRules?: string;
   codeQualityAuditorFrequency: CodeQualityAuditorFrequency;
   codeQualityAuditorSlackChannelId: string | null;
   codeQualityAuditorDiscordChannelId: string | null;
   codeQualityAuditorLastRunAt: Date | null;
   codeQualityAuditorScanCursor?: CodeQualityAuditorScanCursor | null;
+  codeQualityAuditorAdditionalRules?: string;
   ciFailureTriageFrequency: CiFailureTriageFrequency;
   ciFailureTriageSlackChannelId: string | null;
   ciFailureTriageDiscordChannelId: string | null;
+  ciFailureTriageAdditionalRules?: string;
   ciFailureTriageLastRunAt: Date | null;
   ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
   mergeAnnouncerFrequency: MergeAnnouncerFrequency;
@@ -600,6 +606,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
     | null;
   mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
   mergeAnnouncerTargetChannelId: string | null;
+  mergeAnnouncerAdditionalRules?: string;
 };
 
 export type SecurityAuditorScanCursor = AutomationScanCursor;
@@ -624,5 +631,16 @@ export type CustomAutomation = typeof customAutomations.$inferSelect;
 
 export type CreateCustomAutomation = Omit<
   typeof customAutomations.$inferInsert,
+  Timestamp
+>;
+
+/**
+ * session_wakeups
+ */
+
+export type SessionWakeup = typeof sessionWakeups.$inferSelect;
+
+export type CreateSessionWakeup = Omit<
+  typeof sessionWakeups.$inferInsert,
   Timestamp
 >;

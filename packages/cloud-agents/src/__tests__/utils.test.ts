@@ -435,21 +435,6 @@ describe('generateTaskRunTitle', () => {
 
       expect(title).toBe('Review PR #123: Add new feature');
     });
-
-    it('should generate title for initial PR review with headSha (optional)', () => {
-      const title = generateTaskRunTitle({
-        type: TaskPayloadKind.GithubPrReview,
-        payload: {
-          repo: 'owner/repo',
-          prNumber: 123,
-          prTitle: 'Add new feature',
-          prUrl: 'https://github.com/owner/repo/pull/123',
-          headSha: 'abcd1234567890',
-        },
-      });
-
-      expect(title).toBe('Review PR #123: Add new feature');
-    });
   });
 
   describe('github.pr.review.sync', () => {

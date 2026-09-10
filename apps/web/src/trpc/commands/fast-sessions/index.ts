@@ -55,6 +55,7 @@ import type { FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
 import type { UserAuthSuccess } from '@/types';
 import {
   findAccessibleFastSession,
+  findReadableFastSession,
   buildFastSessionPrReviewDestinationKey,
   getFastSessionById,
   getFastSessionPrReviewOfferStatus,
@@ -440,7 +441,6 @@ export async function startFastSessionCommand(
   if (scheduleKickoff) {
     const launchTask = createFastAgentWebTaskLauncher({
       userId: auth.userId,
-      conversation,
     });
 
     scheduleWebFastAgentTurn({
@@ -552,7 +552,6 @@ export async function startSetupFastSessionCommand(
           createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
-            conversation,
           }),
           postReply: async () => {},
         },
@@ -613,11 +612,11 @@ export async function getFastSessionMessagesCommand(
   auth: UserAuthSuccess,
   sessionId: string,
 ) {
-  const session = await findAccessibleFastSession(auth, sessionId);
+  const session = await findReadableFastSession(auth, sessionId);
   if (!session) {
     throw new Error('Fast session not found');
   }
-  const detail = await getFastSessionById(auth, sessionId);
+  const detail = await getFastSessionById(auth, session.id);
   if (!detail) {
     throw new Error('Fast session not found');
   }
@@ -855,7 +854,6 @@ export async function submitFastSessionUserInputCommand(
           createArtifact: buildFastAgentArtifactCreator(session.id),
           launchTask: createFastAgentWebTaskLauncher({
             userId: auth.userId,
-            conversation,
           }),
           postReply: async () => {},
         },

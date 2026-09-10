@@ -1,4 +1,5 @@
 import type {
+  DataVisualizationInput,
   FastAgentConversation,
   FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
   ReasoningEffort,
@@ -30,7 +31,8 @@ export type FastAgentPlatformEventKind =
   | 'delegated_task'
   | 'automation'
   | 'setup'
-  | 'input_response';
+  | 'input_response'
+  | 'scheduled_wakeup';
 
 /** Shared with the durable follow-up event so an admitted reaction resumes as the same input. */
 export type FastAgentReactionExternalInput =
@@ -63,12 +65,16 @@ export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;
   imageArtifactIds?: string[];
+  videoArtifactIds?: string[];
+  charts?: DataVisualizationInput[];
   /** Launchable follow-ups attached to a Fast automation report. */
   suggestions?: FastAgentSuggestedTask[];
   /** True for the parent-owned task kickoff. Deliverers must treat anything
    * short of a visible, durable post (including deliberate suppression) as a
    * failure so the launch gate never opens without its kickoff. */
   kickoff?: boolean;
+  /** Runtime-only navigation; web already exposes the delegated task card. */
+  taskNavigation?: boolean;
 };
 
 export type FastAgentReplyHandle = {
@@ -145,7 +151,10 @@ export type RetryFastAgentTaskStart = () => Promise<
 
 export type FastAgentTurnActivity = {
   start: () => void;
-  settle: () => Promise<void>;
+  /** Idempotent; concurrent calls share completion and the first options win. */
+  settle: (options?: { keepProcessing?: boolean }) => Promise<void>;
+  /** Synchronously cancel delayed starts and fence new status writes, then drain issued writes. */
+  dispose: () => Promise<void>;
   updateTitle?: (title: string | null) => void;
 };
 

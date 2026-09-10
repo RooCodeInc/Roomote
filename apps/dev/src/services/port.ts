@@ -3,7 +3,7 @@ import { createConnection } from 'net';
 import ora from 'ora';
 
 export class PortService {
-  private static readonly REQUIRED_PORTS = [13000, 13001, 13002, 7060, 18081];
+  private static readonly REQUIRED_PORTS = [13000, 13001, 13002, 18081];
   private static readonly PORT_POLL_INTERVAL_MS = 500;
   private static readonly PORT_POLL_TIMEOUT_MS = 15_000;
 

@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   createRoomoteAdvisorAgentPrompt,
@@ -21,6 +22,10 @@ import {
   CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
+  customSkillDefinitionSchema,
+  CUSTOM_SKILL_MAX_COUNT,
+  CUSTOM_SKILL_MAX_DOCUMENT_BYTES,
+  isSafeSkillName,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
@@ -228,12 +233,21 @@ interface ActivateSkillsFolderOptions {
   sourceHomeDir?: string;
   skillsFolderName: string;
   manualSkills?: EnvironmentManualSkill[];
+  instanceSkills?: EnvironmentManualSkill[];
   repoLocalSkills?: RepoLocalSkill[];
   /**
    * Packaged skill directory names to keep out of the task skill catalog.
    * Existing matching runtime entries are removed when present.
    */
   excludeSkillNames?: Iterable<string>;
+}
+
+function removeSkillEntry(entryPath: string): void {
+  if (fs.lstatSync(entryPath, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    fs.unlinkSync(entryPath);
+  } else {
+    fs.rmSync(entryPath, { recursive: true, force: true });
+  }
 }
 
 function replaceMaterializedSkillEntry({
@@ -243,7 +257,7 @@ function replaceMaterializedSkillEntry({
   sourcePath: string;
   destinationPath: string;
 }): void {
-  fs.rmSync(destinationPath, { recursive: true, force: true });
+  removeSkillEntry(destinationPath);
   fs.cpSync(sourcePath, destinationPath, { recursive: true, force: true });
 }
 
@@ -263,7 +277,7 @@ function restoreConfiguredManualSkills({
   for (const manualSkill of manualSkills) {
     const skillName = manualSkill.name.trim();
 
-    if (skillName.length === 0) {
+    if (!isSafeSkillName(skillName)) {
       continue;
     }
 
@@ -274,7 +288,7 @@ function restoreConfiguredManualSkills({
       continue;
     }
 
-    fs.rmSync(destinationPath, { recursive: true, force: true });
+    removeSkillEntry(destinationPath);
     fs.mkdirSync(destinationPath, { recursive: true });
 
     fs.writeFileSync(
@@ -305,7 +319,7 @@ function restoreRepoLocalSkills({
   )) {
     const skillName = repoLocalSkillInvocation.invocationName.trim();
 
-    if (skillName.length === 0) {
+    if (!isSafeSkillName(skillName)) {
       continue;
     }
 
@@ -319,7 +333,7 @@ function restoreRepoLocalSkills({
       continue;
     }
 
-    fs.rmSync(destinationPath, { recursive: true, force: true });
+    removeSkillEntry(destinationPath);
 
     try {
       fs.symlinkSync(
@@ -354,6 +368,7 @@ export function activateSkillsFolder({
   sourceHomeDir,
   skillsFolderName,
   manualSkills,
+  instanceSkills = [],
   repoLocalSkills,
   excludeSkillNames,
 }: ActivateSkillsFolderOptions): boolean {
@@ -376,6 +391,40 @@ export function activateSkillsFolder({
     return false;
   }
 
+  // Validate before changing HOME. Bound the rendered documents, not just bodies.
+  if (instanceSkills.length > CUSTOM_SKILL_MAX_COUNT) {
+    throw new Error('Too many instance skills');
+  }
+  const instanceDocuments = new Map<string, string>();
+  let totalBytes = 0;
+  for (const definition of instanceSkills) {
+    const skill = customSkillDefinitionSchema.parse(definition);
+    if (!SKILLS_FOLDER_NAME_PATTERN.test(skill.name)) {
+      throw new Error('Unsafe instance skill name');
+    }
+    const document = renderManualSkillMarkdown(skill);
+    const bytes = Buffer.byteLength(document, 'utf8');
+    totalBytes += bytes;
+    if (
+      bytes > CUSTOM_SKILL_MAX_DOCUMENT_BYTES ||
+      totalBytes > 8 * 1024 * 1024
+    ) {
+      throw new Error('Instance skills exceed the document size limit');
+    }
+    if (instanceDocuments.has(skill.name)) {
+      throw new Error('Duplicate instance skill name');
+    }
+    instanceDocuments.set(skill.name, document);
+  }
+
+  // Refuse redirected HOME containers before cleanup or any writes beneath them.
+  const claudeDir = path.join(homeDir, '.claude');
+  for (const directory of [agentsDir, targetSkillsDir, claudeDir]) {
+    const stat = fs.lstatSync(directory, { throwIfNoEntry: false });
+    if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) {
+      throw new Error('Unsafe runtime skills directory');
+    }
+  }
   fs.mkdirSync(agentsDir, { recursive: true });
   fs.mkdirSync(targetSkillsDir, { recursive: true });
 
@@ -388,12 +437,110 @@ export function activateSkillsFolder({
     ),
   );
   const materializedSkillNames = new Set<string>();
+  const packagedNames = new Set(sourceEntries.map((entry) => entry.name));
+  const manifestPath = path.join(agentsDir, '.instance-skills.json');
+  const manifestStat = fs.lstatSync(manifestPath, { throwIfNoEntry: false });
+  if (manifestStat) {
+    if (!manifestStat.isFile()) {
+      throw new Error('Unsafe instance skills manifest');
+    }
+    let previous: unknown;
+    if (manifestStat.size <= 64 * 1024) {
+      const fd = fs.openSync(
+        manifestPath,
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+      );
+      try {
+        previous = JSON.parse(fs.readFileSync(fd, 'utf8'));
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+      } finally {
+        fs.closeSync(fd);
+      }
+    }
+    if (!Array.isArray(previous) || previous.length > CUSTOM_SKILL_MAX_COUNT) {
+      // A damaged or removed manifest cannot establish ownership. Preserve those files.
+      console.warn(
+        '[skills] Invalid instance skills manifest; preserving previous files.',
+      );
+      previous = [];
+    }
+    for (const entry of previous as Array<{
+      name?: unknown;
+      sha256?: unknown;
+    }>) {
+      if (
+        !entry ||
+        typeof entry.name !== 'string' ||
+        !SKILLS_FOLDER_NAME_PATTERN.test(entry.name) ||
+        typeof entry.sha256 !== 'string' ||
+        packagedNames.has(entry.name)
+      ) {
+        continue;
+      }
+      const directory = path.join(targetSkillsDir, entry.name);
+      const stat = fs.lstatSync(directory, { throwIfNoEntry: false });
+      if (!stat?.isDirectory() || stat.isSymbolicLink()) continue;
+      const children = fs.readdirSync(directory);
+      if (children.length !== 1 || children[0] !== 'SKILL.md') continue;
+      const documentPath = path.join(directory, 'SKILL.md');
+      const documentStat = fs.lstatSync(documentPath);
+      if (
+        !documentStat.isFile() ||
+        documentStat.size > CUSTOM_SKILL_MAX_DOCUMENT_BYTES
+      )
+        continue;
+      const documentFd = fs.openSync(
+        documentPath,
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+      );
+      let digest: string;
+      try {
+        digest = createHash('sha256')
+          .update(fs.readFileSync(documentFd))
+          .digest('hex');
+      } finally {
+        fs.closeSync(documentFd);
+      }
+      // An unrelated replacement or locally extended directory is not ours to delete.
+      if (digest === entry.sha256)
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  const instanceManifest = [...instanceDocuments]
+    .filter(([name]) => !packagedNames.has(name))
+    .map(([name, document]) => ({
+      name,
+      sha256: createHash('sha256').update(document).digest('hex'),
+    }));
+  // Record planned ownership first so an interrupted materialization can be retried.
+  const temporaryManifestPath = `${manifestPath}.${randomUUID()}.tmp`;
+  const manifestFd = fs.openSync(
+    temporaryManifestPath,
+    fs.constants.O_WRONLY |
+      fs.constants.O_CREAT |
+      fs.constants.O_EXCL |
+      fs.constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    try {
+      fs.writeFileSync(manifestFd, JSON.stringify(instanceManifest), 'utf8');
+    } finally {
+      fs.closeSync(manifestFd);
+    }
+    fs.renameSync(temporaryManifestPath, manifestPath);
+  } finally {
+    fs.rmSync(temporaryManifestPath, { force: true });
+  }
 
   for (const entry of sourceEntries) {
     const destinationPath = path.join(targetSkillsDir, entry.name);
 
     if (excludedSkillNames.has(entry.name)) {
-      fs.rmSync(destinationPath, { recursive: true, force: true });
+      removeSkillEntry(destinationPath);
+      materializedSkillNames.add(entry.name);
       continue;
     }
 
@@ -404,6 +551,17 @@ export function activateSkillsFolder({
     materializedSkillNames.add(entry.name);
   }
 
+  for (const { name } of instanceManifest) {
+    const directory = path.join(targetSkillsDir, name);
+    removeSkillEntry(directory);
+    fs.mkdirSync(directory);
+    fs.writeFileSync(
+      path.join(directory, 'SKILL.md'),
+      instanceDocuments.get(name)!,
+      'utf8',
+    );
+    materializedSkillNames.add(name);
+  }
   restoreConfiguredManualSkills({
     manualSkills,
     targetSkillsDir,
@@ -418,7 +576,7 @@ export function activateSkillsFolder({
   // Create .claude/skills/ with symlinks pointing back to .agents/skills/<name>.
   // Claude Code reads from .claude/skills/ while .agents/skills/ is the source of truth.
   const claudeSkillsDir = path.join(homeDir, '.claude', 'skills');
-  fs.rmSync(claudeSkillsDir, { recursive: true, force: true });
+  removeSkillEntry(claudeSkillsDir);
   fs.mkdirSync(claudeSkillsDir, { recursive: true });
 
   const finalEntries = fs.readdirSync(targetSkillsDir, {
@@ -650,6 +808,11 @@ export function createIntegrationMcpInstructions(
 ): string | undefined {
   let hasPrimaryMemory = false;
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
+    if (mcpServer.name === 'github') {
+      return [
+        '# GitHub reads\n\nDiscover GitHub tools through roomote_find_integration_tools with integrationId github. An eligible deployment GitHub App installation with an active connected repository is required, just as in Fast. Public github.com repositories do not themselves need to be connected, and no personal GitHub account linkage is required. Use the existing native tools and their discovered schemas for source reads, code search, issues, and pull requests. Searches require exactly one positive repo:owner/name qualifier. Private reads retain connected-repository authorization. Respect upstream pagination and search-index limits; disclose incomplete results. Never retry an authorization denial anonymously. This task MCP path is read-only, including for human-driven tasks; use the existing authorized coding-task source-control workflow for writes.',
+      ];
+    }
     if (isMemoryMcpServer(mcpServer.name)) {
       const primary = !hasPrimaryMemory;
       hasPrimaryMemory = true;
@@ -1925,6 +2088,7 @@ export function generateOpenCodeConfig({
   const config = {
     share: 'disabled',
     autoupdate: false,
+    subagent_depth: 2,
     ...(promptModel
       ? {
           model: promptModel,

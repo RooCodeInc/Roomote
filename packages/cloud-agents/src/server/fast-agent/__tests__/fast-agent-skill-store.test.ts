@@ -2,6 +2,7 @@ import {
   mkdtemp,
   mkdir,
   readdir,
+  readFile,
   rm,
   symlink,
   writeFile,
@@ -128,6 +129,36 @@ describe('FastAgentSkillStore', () => {
     expect(reference.content).toContain('Authentication');
   });
 
+  it('loads the shipped implement-changes default workflow as a separate resource', async () => {
+    const skillRoot = resolve(
+      import.meta.dirname,
+      '../../workflows/skills/standard',
+    );
+    const store = new FastAgentSkillStore(skillRoot);
+    const resource = 'resources/default-workflow.md';
+    const expectedContent = await readFile(
+      join(skillRoot, 'implement-changes', resource),
+      'utf8',
+    );
+
+    const root = await store.read('packaged:implement-changes');
+    expect(root.resources).toContain(resource);
+    expect(root.content).toContain(resource);
+    expect(root.content).not.toContain(expectedContent);
+
+    const workflow = await store.read('packaged:implement-changes', resource);
+    expect(expectedContent.trim().length).toBeGreaterThan(0);
+    expect(workflow).toMatchObject({
+      id: 'packaged:implement-changes',
+      invocation: 'implement-changes',
+      name: 'implement-changes',
+      source: 'packaged',
+      resource,
+      content: expectedContent,
+      byteLength: Buffer.byteLength(expectedContent, 'utf8'),
+    });
+  });
+
   it('combines packaged and repository-defined skill catalogs', async () => {
     const repositorySkills = {
       list: vi.fn().mockResolvedValue({
@@ -153,6 +184,7 @@ describe('FastAgentSkillStore', () => {
       environmentId: 'environment-1',
     });
     expect(catalog.counts).toEqual({
+      instance: 0,
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 1,
       settings: 0,
@@ -176,6 +208,7 @@ describe('FastAgentSkillStore', () => {
     const packagedOnlyCatalog = await store.list();
     expect(repositorySkills.list).not.toHaveBeenCalled();
     expect(packagedOnlyCatalog.counts).toEqual({
+      instance: 0,
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 0,
       settings: 0,
@@ -249,6 +282,7 @@ describe('FastAgentSkillStore', () => {
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 0,
       settings: 2,
+      instance: 0,
       total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 2,
     });
   });
@@ -312,6 +346,7 @@ describe('FastAgentSkillStore', () => {
       packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
       repository: 0,
       settings: 1,
+      instance: 0,
       total: FAST_AGENT_PACKAGED_SKILL_NAMES.length + 1,
     });
   });

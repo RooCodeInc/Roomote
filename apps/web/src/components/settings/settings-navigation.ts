@@ -143,7 +143,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     label: 'Agent Guidance',
     title: 'Agent Guidance',
     description:
-      'Configure shared instructions that apply to every task in this workspace.',
+      'Configure shared instructions that apply to every session and task in this workspace.',
     href: SETTINGS_PATHS.agentGuidance,
     icon: ScrollText,
     adminOnly: true,
@@ -154,10 +154,9 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'skills',
     label: 'Skills',
     title: 'Skills',
-    description: 'Add agent skills to your environments.',
+    description: 'Shared instructions for all sessions and coding tasks.',
     href: SETTINGS_PATHS.skills,
     icon: GraduationCap,
-    adminOnly: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.skills),
   },
   {
@@ -175,7 +174,8 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'experimental',
     label: 'Experimental',
     title: 'Experimental',
-    description: 'No experimental features at the moment. Check back soon.',
+    description:
+      'Try opt-in features that may change while they are being evaluated.',
     href: SETTINGS_PATHS.experimental,
     icon: FlaskConical,
     adminOnly: true,

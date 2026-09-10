@@ -5,6 +5,7 @@ import { validatePreviewToken } from '@roomote/auth';
 import { config } from '../config';
 import { db } from '../lib/db';
 import { logger, escapeForLog } from '../lib/logger';
+import { parseHostForConfig } from '../lib/url-parser';
 
 /**
  * Extract cookie value from request headers.
@@ -27,7 +28,10 @@ function getCookie(req: IncomingMessage, name: string): string | undefined {
  *
  * GET /api/resume-status/:resumeStatusId
  *
- * Requires a valid preview auth cookie that matches the run's org/user.
+ * Requires a valid preview auth cookie and a resume run belonging to the task
+ * encoded in the current preview host. Preview tokens are user-scoped but any
+ * authenticated viewer of a task preview must be able to poll the one resume
+ * run won by a concurrent request.
  */
 export async function handleResumeStatusRequest(
   req: IncomingMessage,
@@ -76,8 +80,18 @@ export async function handleResumeStatusRequest(
     return;
   }
 
+  const parsedHost = parseHostForConfig(
+    req.headers.host ?? '',
+    config.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
+  );
+
+  if (!parsedHost.isValid || !parsedHost.taskId) {
+    sendJson(404, { error: 'Resume item not found' });
+    return;
+  }
+
   const taskRun = await db.query.taskRuns.findFirst({
-    where: and(eq(taskRuns.id, runId), eq(taskRuns.actingUserId, token.userId)),
+    where: and(eq(taskRuns.id, runId), eq(taskRuns.taskId, parsedHost.taskId)),
     columns: {
       id: true,
       status: true,
@@ -91,6 +105,7 @@ export async function handleResumeStatusRequest(
       {
         runId,
         userId: escapeForLog(token.userId),
+        taskId: escapeForLog(parsedHost.taskId),
       },
       'Resume status: run not found or unauthorized',
     );

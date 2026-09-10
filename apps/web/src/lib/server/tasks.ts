@@ -43,6 +43,7 @@ import {
 import { type SimpleUser, getUsersById } from './users';
 import { type SimpleTaskRun, getLatestTaskRunsByTaskId } from './task-runs';
 import { getTaskModelDisplayNameMap } from './task-models';
+import { customAutomationTaskAccess } from './custom-automation-task-access';
 
 /**
  * Task Filter Conditions
@@ -361,6 +362,8 @@ async function getTaskParticipantsByTaskIds(
 }
 
 export const getTasks = async ({
+  userId,
+  isAdmin = false,
   limit = 30,
   cursor,
   filters = [],
@@ -382,6 +385,8 @@ export const getTasks = async ({
     (filter) => filter.type === 'taskType',
   );
   const conditions: TaskFilterCondition[] = [isNull(tasks.deletedAt)];
+  const access = customAutomationTaskAccess({ userId, isAdmin });
+  if (access) conditions.push(access);
 
   // An explicit workflow filter is the only way to reveal hidden tasks.
   if (!hasTaskTypeFilter) {
@@ -540,6 +545,7 @@ export const searchTasks = async ({
   const visibleConditions = [
     isNull(tasks.deletedAt),
     eq(tasks.visibility, 'visible'),
+    customAutomationTaskAccess({ userId }),
   ];
 
   const searchConditions = [

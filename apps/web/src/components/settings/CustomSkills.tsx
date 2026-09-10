@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   keepPreviousData,
@@ -18,10 +18,6 @@ import {
   Button,
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  ChartColumnIncreasing,
   Check,
   Checkbox,
   Dialog,
@@ -32,6 +28,7 @@ import {
   DialogTitle,
   Input,
   Label,
+  Pencil,
   Search,
   Skeleton,
   Spinner,
@@ -41,7 +38,10 @@ import {
   VectorSquare,
   X,
 } from '@/components/system';
-import { ChevronDown, Pencil, PencilRuler } from 'lucide-react';
+import {
+  SkillListRow,
+  type SkillListFilter,
+} from '@/components/settings/SkillList';
 
 const SEARCH_DEBOUNCE_MS = 300;
 const MIN_SEARCH_LENGTH = 2;
@@ -221,122 +221,36 @@ function SkillCard({
   environments?: Array<{ id: string; name: string }>;
   actions?: React.ReactNode;
 }) {
-  const descriptionRef = useRef<HTMLParagraphElement | null>(null);
-  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
-  const [canCollapseDescription, setCanCollapseDescription] = useState(false);
-
-  useEffect(() => {
-    setIsDescriptionExpanded(false);
-  }, [description]);
-
-  useEffect(() => {
-    if (!description) {
-      setCanCollapseDescription(false);
-      return;
-    }
-
-    const measureDescription = () => {
-      const element = descriptionRef.current;
-      if (!element) {
-        return;
-      }
-
-      const lineHeight = Number.parseFloat(
-        window.getComputedStyle(element).lineHeight,
-      );
-
-      if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
-        setCanCollapseDescription(
-          description.length > 120 || description.includes('\n'),
-        );
-        return;
-      }
-
-      setCanCollapseDescription(element.scrollHeight > lineHeight * 2 + 1);
-    };
-
-    measureDescription();
-    window.addEventListener('resize', measureDescription);
-
-    return () => window.removeEventListener('resize', measureDescription);
-  }, [description]);
-
   return (
-    <Card className="h-full">
-      <CardHeader>
-        <div className="flex flex-col items-start gap-3 md:flex-row md:justify-between">
-          <div className="min-w-0 space-y-1">
-            <CardTitle className="break-all text-base capitalize">
-              {title}
-            </CardTitle>
-            <CardDescription className="break-all">{byline}</CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            {installLabel && (
-              <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                <ChartColumnIncreasing className="size-4" />
-                {installLabel}
-              </span>
-            )}
-            {url && (
-              <BasicTooltip content="View on Marketplace">
-                <Button asChild variant="outline">
-                  <a href={url} target="_blank" rel="noreferrer">
-                    <SquareArrowOutUpRight />
-                  </a>
-                </Button>
-              </BasicTooltip>
-            )}
-            {actions}
-          </div>
+    <div className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0">
+      <div className="min-w-0 flex-1 space-y-1">
+        <p className="break-words text-sm font-semibold">{title}</p>
+        {description ? (
+          <p className="line-clamp-2 break-words text-sm text-muted-foreground">
+            {description}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span className="break-all">{byline}</span>
+          {installLabel ? <span>{installLabel}</span> : null}
+          {environments?.map((environment) => (
+            <span key={environment.id}>{environment.name}</span>
+          ))}
         </div>
-      </CardHeader>
-      {description || (environments && environments.length > 0) ? (
-        <CardContent className="space-y-3">
-          {description ? (
-            <div className="space-y-1">
-              <p
-                ref={descriptionRef}
-                className={`break-words text-sm text-muted-foreground ${
-                  canCollapseDescription && !isDescriptionExpanded
-                    ? 'line-clamp-2'
-                    : ''
-                }`}
-              >
-                {description}
-              </p>
-              {canCollapseDescription ? (
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className="h-auto p-0 text-muted-foreground font-medium text-xs relative -top-0.5 -left-0.5"
-                  onClick={() =>
-                    setIsDescriptionExpanded((current) => !current)
-                  }
-                >
-                  {isDescriptionExpanded ? 'Less' : 'More'}
-                  <ChevronDown
-                    className={
-                      isDescriptionExpanded ? 'rotate-180' : 'rotate-0'
-                    }
-                  />
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          {environments && environments.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <VectorSquare className="size-4" />
-              <span className="font-semibold">Envs:</span>
-              {environments.map((environment) => (
-                <span key={environment.id}>{environment.name}</span>
-              ))}
-            </div>
-          ) : null}
-        </CardContent>
-      ) : null}
-    </Card>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        {url ? (
+          <BasicTooltip content="View on Marketplace">
+            <Button asChild size="icon" variant="ghost">
+              <a href={url} target="_blank" rel="noreferrer">
+                <SquareArrowOutUpRight />
+              </a>
+            </Button>
+          </BasicTooltip>
+        ) : null}
+        {actions}
+      </div>
+    </div>
   );
 }
 
@@ -351,7 +265,17 @@ function sortEnvironmentIds(
   });
 }
 
-export function CustomSkills() {
+export function CustomSkills({
+  filter = 'all',
+  search = '',
+  marketplaceOpen = false,
+  onMarketplaceOpenChange = () => {},
+}: {
+  filter?: SkillListFilter;
+  search?: string;
+  marketplaceOpen?: boolean;
+  onMarketplaceOpenChange?: (open: boolean) => void;
+}) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
@@ -499,6 +423,24 @@ export function CustomSkills() {
         parsed: parseSkillName(result.name),
       })) as SearchSkill[],
     [searchResultsQuery.data],
+  );
+  const normalizedCatalogSearch = search.trim().toLowerCase();
+  const visibleInstalledSkills = useMemo(
+    () =>
+      filter === 'shared'
+        ? []
+        : installedSkills.filter((skill) =>
+            [
+              formatSkillTitle(skill),
+              skill.description ?? '',
+              skill.source,
+              ...skill.environments.map((environment) => environment.name),
+            ]
+              .join(' ')
+              .toLowerCase()
+              .includes(normalizedCatalogSearch),
+          ),
+    [filter, installedSkills, normalizedCatalogSearch],
   );
 
   const isSavingAvailability = setAvailabilityMutation.isPending;
@@ -666,30 +608,31 @@ export function CustomSkills() {
   };
 
   if (listQuery.isPending) {
-    return (
-      <div className="space-y-8">
-        <div className="space-y-4">
-          <div className="grid gap-2 md:grid-cols-2">
-            <Skeleton className="h-36 w-full" />
-            <Skeleton className="h-36 w-full" />
+    return filter === 'shared' ? null : (
+      <div data-testid="environment-skills-skeleton">
+        {Array.from({ length: 2 }).map((_, index) => (
+          <div key={index} className="flex items-start gap-3 px-4 py-3">
+            <Skeleton className="size-4" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-3 w-full max-w-lg" />
+            </div>
           </div>
-        </div>
+        ))}
       </div>
     );
   }
 
   if (listQuery.isError) {
-    return (
-      <div className="space-y-8">
-        <p className="text-sm text-destructive">
-          Failed to load custom skills.
-        </p>
-      </div>
+    return filter === 'shared' ? null : (
+      <p className="px-4 py-6 text-sm text-destructive">
+        Failed to load environment-specific skills.
+      </p>
     );
   }
 
   return (
-    <div className="space-y-8">
+    <>
       <Dialog
         open={editorState !== null}
         onOpenChange={(open) => {
@@ -814,7 +757,9 @@ export function CustomSkills() {
                     ? 'Edit Skill'
                     : 'Add Skill'}
                 </DialogTitle>
-                <DialogDescription></DialogDescription>
+                <DialogDescription>
+                  Available only in the environments you select below.
+                </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-4">
@@ -849,7 +794,7 @@ export function CustomSkills() {
                 <div className="space-y-2">
                   <Label htmlFor="manual-skill-description">Description</Label>
                   <p className="text-sm text-muted-foreground">
-                    Important for the agent know when to use this skill.
+                    Tell the agent when to use this skill.
                   </p>
                   <Textarea
                     id="manual-skill-description"
@@ -1008,230 +953,245 @@ export function CustomSkills() {
         </DialogContent>
       </Dialog>
 
-      <section aria-labelledby="installed-skills" className="space-y-3">
-        <h2
-          id="installed-skills"
-          className="text-sm font-semibold text-foreground"
-        >
-          Installed
-        </h2>
-
-        {installedSkills.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No custom skills installed yet. Roomote itself has mad skills
-            though.
+      {visibleInstalledSkills.length === 0 ? (
+        filter === 'environment' ? (
+          <p className="px-4 py-6 text-sm text-muted-foreground">
+            {normalizedCatalogSearch
+              ? 'No environment-specific skills match your search.'
+              : environments.length === 0
+                ? 'No environments are available. Create an environment before adding an environment-specific skill.'
+                : 'No environment-specific skills yet. Add a custom skill or install one from the marketplace.'}
           </p>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2">
-            {installedSkills.map((skill) => (
-              <SkillCard
-                key={skill.skillId}
-                title={formatSkillTitle(skill)}
-                byline={formatSkillByline({
-                  kind: skill.kind,
-                  source: skill.source,
-                  deploymentName,
-                })}
-                description={skill.description}
-                environments={skill.environments}
-                actions={
-                  <div className="flex items-center gap-1">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`Edit ${formatSkillReference(skill)}`}
-                      onClick={() =>
-                        skill.kind === 'manual'
-                          ? openManualEditor(skill)
-                          : openAvailabilityEditor({
-                              skillId: skill.skillId,
-                              source: skill.source,
-                              name: skill.parsed.fullName,
-                              isAllSelection: skill.isAllSelection,
-                              selectedEnvironmentIds: skill.environments.map(
-                                (environment) => environment.id,
-                              ),
-                              immutableEnvironmentIds: skill.isAllSelection
-                                ? []
-                                : (allSelectionEnvironmentIdsBySource.get(
-                                    skill.source,
-                                  ) ?? []),
-                            })
-                      }
-                    >
-                      <Pencil />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      aria-label={`Remove ${formatSkillReference(skill)}`}
-                      onClick={() => setRemoveConfirmSkillId(skill.skillId)}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </div>
-                }
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section aria-labelledby="add-skills" className="space-y-3">
-        <h2 id="add-skills" className="text-sm font-semibold text-foreground">
-          Add from the{' '}
-          <Link
-            href="https://skills.sh"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary hover:underline"
-          >
-            Vercel Marketplace
-            <SquareArrowOutUpRight className="ml-1 inline size-3" />
-          </Link>
-        </h2>
-
-        <div className="flex w-full items-center gap-2">
-          <div className="relative w-full md:max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              id="custom-skills-search"
-              value={searchQuery}
-              onChange={(event) => {
-                setHasInteractedWithSearch(true);
-                setSearchQuery(event.currentTarget.value);
-              }}
-              placeholder="Search by skill name or source"
-              className="pl-9"
-            />
-            {searchResultsQuery.isFetching && canRunSearchQuery ? (
-              <Spinner className="absolute right-3 top-1/2 -translate-y-1/2" />
-            ) : (
-              searchQuery && (
-                <button
+        ) : null
+      ) : (
+        visibleInstalledSkills.map((skill) => (
+          <SkillListRow
+            key={skill.skillId}
+            name={formatSkillTitle(skill)}
+            summary={formatSkillByline({
+              kind: skill.kind,
+              source: skill.source,
+              deploymentName,
+            })}
+            description={
+              <p className="line-clamp-2 break-words">
+                {skill.description ?? 'No description provided.'}
+              </p>
+            }
+            availability={`Only in ${skill.environments
+              .map((environment) => environment.name)
+              .join(', ')}`}
+            actions={
+              <>
+                <Button
                   type="button"
-                  onClick={() => {
-                    setSearchQuery('');
-                    setDebouncedSearchQuery('');
-                    queryClient.removeQueries({
-                      queryKey: trpc.customSkills.search.queryKey(),
-                    });
-                  }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
-                  aria-label="Clear search"
+                  size="icon"
+                  variant="ghost"
+                  aria-label={`Edit ${formatSkillReference(skill)}`}
+                  onClick={() =>
+                    skill.kind === 'manual'
+                      ? openManualEditor(skill)
+                      : openAvailabilityEditor({
+                          skillId: skill.skillId,
+                          source: skill.source,
+                          name: skill.parsed.fullName,
+                          isAllSelection: skill.isAllSelection,
+                          selectedEnvironmentIds: skill.environments.map(
+                            (environment) => environment.id,
+                          ),
+                          immutableEnvironmentIds: skill.isAllSelection
+                            ? []
+                            : (allSelectionEnvironmentIdsBySource.get(
+                                skill.source,
+                              ) ?? []),
+                        })
+                  }
                 >
-                  <X className="size-4" />
-                </button>
-              )
-            )}
-          </div>
-        </div>
+                  <Pencil />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  aria-label={`Remove ${formatSkillReference(skill)}`}
+                  onClick={() => setRemoveConfirmSkillId(skill.skillId)}
+                >
+                  <Trash2 />
+                </Button>
+              </>
+            }
+          />
+        ))
+      )}
 
-        {canRunSearchQuery && searchResultsQuery.isError ? (
-          <p className="text-sm text-destructive">
-            {searchResultsQuery.error.message}
-          </p>
-        ) : null}
+      <Dialog open={marketplaceOpen} onOpenChange={onMarketplaceOpenChange}>
+        <DialogContent size="2xl">
+          <DialogHeader>
+            <DialogTitle>Add from Marketplace</DialogTitle>
+            <DialogDescription>
+              Search the{' '}
+              <Link
+                href="https://skills.sh"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                Vercel Marketplace
+                <SquareArrowOutUpRight className="ml-1 inline size-3" />
+              </Link>{' '}
+              and choose the environments where a skill should be available.
+            </DialogDescription>
+          </DialogHeader>
 
-        {canRunSearchQuery && searchResultsQuery.data ? (
-          searchResults.length === 0 ? (
+          {environments.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No skills found for this search.
+              No environments are available. Create an environment before
+              installing a marketplace skill.
             </p>
           ) : (
-            <div className="space-y-2">
-              {searchResults.map((result) => {
-                const installedSkill = installedSkillById.get(result.skillId);
-                const sourceAllEnvironmentIds =
-                  allSelectionEnvironmentIdsBySource.get(result.source) ?? [];
-                const explicitEnvironmentIds =
-                  installedSkill?.environments.map(
-                    (environment) => environment.id,
-                  ) ?? [];
-                const editableEnvironmentIds = environments
-                  .map((environment) => environment.id)
-                  .filter(
-                    (environmentId) =>
-                      !sourceAllEnvironmentIds.includes(environmentId),
-                  );
-                const isCoveredByAllSelection =
-                  sourceAllEnvironmentIds.length > 0 &&
-                  editableEnvironmentIds.length === 0;
-                const isInstalled =
-                  installedSkillIdSet.has(result.skillId) ||
-                  isCoveredByAllSelection;
-                const canInstall =
-                  !isInstalled && editableEnvironmentIds.length > 0;
-                const selectedEnvironmentIds = installedSkill
-                  ? Array.from(
-                      new Set([
-                        ...explicitEnvironmentIds,
-                        ...sourceAllEnvironmentIds,
-                      ]),
-                    )
-                  : sourceAllEnvironmentIds;
-
-                return (
-                  <SkillCard
-                    key={result.skillId}
-                    title={formatSkillTitle(result)}
-                    byline={formatSkillByline({
-                      kind: result.kind,
-                      source: result.source,
-                      deploymentName,
-                    })}
-                    description={result.description}
-                    installLabel={result.installsLabel}
-                    url={result.url}
-                    actions={
-                      <Button
-                        type="button"
-                        size="sm"
-                        disabled={!canInstall}
-                        onClick={() =>
-                          openAvailabilityEditor({
-                            skillId: result.skillId,
-                            source: result.source,
-                            name: result.parsed.fullName,
-                            isAllSelection: result.isAllSelection,
-                            selectedEnvironmentIds,
-                            immutableEnvironmentIds: sourceAllEnvironmentIds,
-                          })
-                        }
-                      >
-                        {isInstalled || !canInstall ? (
-                          <Check />
-                        ) : (
-                          <ArrowUpFromLine />
-                        )}
-                        {isInstalled
-                          ? 'Installed'
-                          : canInstall
-                            ? 'Install'
-                            : 'Available'}
-                      </Button>
-                    }
+            <div className="space-y-3">
+              <div className="flex w-full items-center gap-2">
+                <div className="relative w-full md:max-w-md">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="custom-skills-search"
+                    value={searchQuery}
+                    onChange={(event) => {
+                      setHasInteractedWithSearch(true);
+                      setSearchQuery(event.currentTarget.value);
+                    }}
+                    placeholder="Search by skill name or source"
+                    className="pl-9"
                   />
-                );
-              })}
-            </div>
-          )
-        ) : null}
-      </section>
+                  {searchResultsQuery.isFetching && canRunSearchQuery ? (
+                    <Spinner className="absolute right-3 top-1/2 -translate-y-1/2" />
+                  ) : (
+                    searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setDebouncedSearchQuery('');
+                          queryClient.removeQueries({
+                            queryKey: trpc.customSkills.search.queryKey(),
+                          });
+                        }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
 
-      <section aria-labelledby="manual-skills" className="-mt-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => openManualEditor()}
-        >
-          <PencilRuler />
-          Add a custom skill
-        </Button>
-      </section>
-    </div>
+              {canRunSearchQuery && searchResultsQuery.isError ? (
+                <p className="text-sm text-destructive">
+                  {searchResultsQuery.error.message}
+                </p>
+              ) : null}
+
+              {canRunSearchQuery && searchResultsQuery.data ? (
+                searchResults.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No skills found for this search.
+                  </p>
+                ) : (
+                  <Card variant="snug">
+                    <CardContent>
+                      <div className="divide-y divide-background">
+                        {searchResults.map((result) => {
+                          const installedSkill = installedSkillById.get(
+                            result.skillId,
+                          );
+                          const sourceAllEnvironmentIds =
+                            allSelectionEnvironmentIdsBySource.get(
+                              result.source,
+                            ) ?? [];
+                          const explicitEnvironmentIds =
+                            installedSkill?.environments.map(
+                              (environment) => environment.id,
+                            ) ?? [];
+                          const editableEnvironmentIds = environments
+                            .map((environment) => environment.id)
+                            .filter(
+                              (environmentId) =>
+                                !sourceAllEnvironmentIds.includes(
+                                  environmentId,
+                                ),
+                            );
+                          const isCoveredByAllSelection =
+                            sourceAllEnvironmentIds.length > 0 &&
+                            editableEnvironmentIds.length === 0;
+                          const isInstalled =
+                            installedSkillIdSet.has(result.skillId) ||
+                            isCoveredByAllSelection;
+                          const canInstall =
+                            !isInstalled && editableEnvironmentIds.length > 0;
+                          const selectedEnvironmentIds = installedSkill
+                            ? Array.from(
+                                new Set([
+                                  ...explicitEnvironmentIds,
+                                  ...sourceAllEnvironmentIds,
+                                ]),
+                              )
+                            : sourceAllEnvironmentIds;
+
+                          return (
+                            <SkillCard
+                              key={result.skillId}
+                              title={formatSkillTitle(result)}
+                              byline={formatSkillByline({
+                                kind: result.kind,
+                                source: result.source,
+                                deploymentName,
+                              })}
+                              description={result.description}
+                              installLabel={result.installsLabel}
+                              url={result.url}
+                              actions={
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  disabled={!canInstall}
+                                  onClick={() => {
+                                    onMarketplaceOpenChange(false);
+                                    openAvailabilityEditor({
+                                      skillId: result.skillId,
+                                      source: result.source,
+                                      name: result.parsed.fullName,
+                                      isAllSelection: result.isAllSelection,
+                                      selectedEnvironmentIds,
+                                      immutableEnvironmentIds:
+                                        sourceAllEnvironmentIds,
+                                    });
+                                  }}
+                                >
+                                  {isInstalled || !canInstall ? (
+                                    <Check />
+                                  ) : (
+                                    <ArrowUpFromLine />
+                                  )}
+                                  {isInstalled
+                                    ? 'Installed'
+                                    : canInstall
+                                      ? 'Install'
+                                      : 'Available'}
+                                </Button>
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              ) : null}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

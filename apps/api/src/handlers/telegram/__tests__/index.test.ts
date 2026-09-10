@@ -23,6 +23,7 @@ const {
   insertValuesMock,
   postMessageMock,
   queueCommunicationMessageMock,
+  queueCommunicationMessageOnceMock,
   redisDelMock,
   redisGetMock,
   redisGetdelMock,
@@ -68,6 +69,7 @@ const {
   insertValuesMock: vi.fn(),
   postMessageMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
+  queueCommunicationMessageOnceMock: vi.fn(),
   redisDelMock: vi.fn(),
   redisGetMock: vi.fn(),
   redisGetdelMock: vi.fn(),
@@ -245,6 +247,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/communication/messages', () => ({
   queueCommunicationMessage: queueCommunicationMessageMock,
+  queueCommunicationMessageOnce: queueCommunicationMessageOnceMock,
   setLatestInboundMessageId: setLatestInboundMessageIdMock,
 }));
 
@@ -429,6 +432,7 @@ describe('Telegram webhook handler', () => {
     });
     updateReturningMock.mockResolvedValue([]);
     queueCommunicationMessageMock.mockResolvedValue(undefined);
+    queueCommunicationMessageOnceMock.mockResolvedValue(true);
     enqueueTaskMock.mockResolvedValue({
       id: 88,
       taskId: 'task-new',
@@ -712,6 +716,7 @@ describe('Telegram webhook handler', () => {
       workspaceId: '222',
       channelId: '222',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
@@ -1057,14 +1062,18 @@ describe('Telegram webhook handler', () => {
       runId: 77,
     });
     expect(response.status).toBe(200);
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith('telegram', 77, {
-      provider: 'telegram',
-      text: 'continue the task',
-      user: 'Ada Lovelace',
-      userId: 'launch-owner-1',
-      ts: '456',
-      channel: '222',
-    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
+      'telegram',
+      77,
+      {
+        provider: 'telegram',
+        text: 'continue the task',
+        user: 'Ada Lovelace',
+        userId: 'launch-owner-1',
+        ts: '456',
+        channel: '222',
+      },
+    );
     expect(setLatestInboundMessageIdMock).toHaveBeenCalledWith(
       'telegram',
       77,
@@ -1074,7 +1083,49 @@ describe('Telegram webhook handler', () => {
       runId: 77,
       userId: 'launch-owner-1',
     });
+    expect(redisDelMock).not.toHaveBeenCalled();
     expect(getFastSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the update claim when active-run queueing fails', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+    queueCommunicationMessageOnceMock.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+
+    const response = await postTelegramUpdate(createTelegramUpdate());
+
+    expect(response.status).toBe(500);
+    expect(redisDelMock).toHaveBeenCalledWith('telegram:update:123');
+  });
+
+  it('acks a retried active-run update already queued by message id', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+    queueCommunicationMessageOnceMock.mockResolvedValueOnce(false);
+
+    const response = await postTelegramUpdate(createTelegramUpdate());
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 77,
+    });
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledTimes(1);
   });
 
   it('queues a captioned photo as an active-run follow-up', async () => {
@@ -1109,7 +1160,7 @@ describe('Telegram webhook handler', () => {
       queued: true,
       runId: 77,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       77,
       expect.objectContaining({
@@ -1363,7 +1414,7 @@ describe('Telegram webhook handler', () => {
       queued: true,
       runId: 55,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       55,
       expect.objectContaining({ text: 'Follow up on the first report' }),
@@ -1606,7 +1657,7 @@ describe('Telegram webhook handler', () => {
       queued: true,
       runId: 77,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       77,
       expect.objectContaining({
@@ -1940,7 +1991,7 @@ describe('Telegram webhook handler', () => {
       runId: 55,
     });
     expect(consumeLinkCodeMock).not.toHaveBeenCalled();
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       55,
       expect.objectContaining({ text: 'link-abc123DEF456ghi7' }),
@@ -1964,7 +2015,7 @@ describe('Telegram webhook handler', () => {
       queued: true,
       runId: 55,
     });
-    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+    expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       55,
       expect.objectContaining({ userId: 'linked-user-9' }),

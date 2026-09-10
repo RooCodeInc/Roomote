@@ -19,7 +19,10 @@ import {
   parseTeamsActivity,
   teamsActivityToQueuedCommunicationMessage,
 } from '@roomote/communication/teams-activity';
-import { queueCommunicationMessage } from '@roomote/communication/messages';
+import {
+  queueCommunicationMessage,
+  queueCommunicationMessageOnce,
+} from '@roomote/communication/messages';
 import {
   buildAccountLinkPromptText,
   buildAccountLinkThreadReplyText,
@@ -117,7 +120,10 @@ import {
   resolveAndClaimTeamsSuggestionReaction,
   type ClaimedTeamsSuggestion,
 } from './suggestion-start.js';
-import { resolveSuggestionOriginSessionId } from '../tasks/suggestion-launch.js';
+import {
+  resolveSuggestionFastConversation,
+  resolveSuggestionOriginSessionId,
+} from '../tasks/suggestion-launch.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
@@ -230,13 +236,14 @@ function resolveTeamsFastConversation(params: {
 const TEAMS_FAST_UNAVAILABLE_MESSAGE =
   "Roomote couldn't start a conversation right now. Please try again in a moment.";
 
-function startTeamsFastSuggestion(params: {
+async function startTeamsFastSuggestion(params: {
   activity: TeamsActivity;
   metadata: TeamsActivityCommunicationMetadata;
   mappedUserId: string;
   prompt: string;
   currentMessageId: string;
   images?: string[];
+  originSessionId?: string | null;
 }): Promise<FastAgentStartResult> {
   const conversation = resolveTeamsFastConversation(params);
   if (!conversation) {
@@ -245,11 +252,16 @@ function startTeamsFastSuggestion(params: {
       reason: 'Fast mode is unavailable in this Teams conversation.',
     });
   }
+  const canonicalConversation = await resolveSuggestionFastConversation({
+    userId: params.mappedUserId,
+    originSessionId: params.originSessionId,
+    conversation,
+  });
   return startAcceptedFastAgentTurn({
     run: async ({ onAccepted, onRejected }) => {
       const session = await getOrCreateFastAgentSession({
         userId: params.mappedUserId,
-        conversation,
+        conversation: canonicalConversation,
       });
       return continueFastAgentSurfaceReply({
         sessionId: session.id,
@@ -1561,6 +1573,7 @@ async function launchPinnedTeamsSuggestionTask(input: {
   suggestionId: string;
   /** The task that produced the suggestion; its Session hosts the launch. */
   sourceTaskId?: string | null;
+  originSessionId?: unknown;
   queuedMessage: QueuedTeamsCommunicationMessage;
   workspace: TeamsWorkspaceSelection;
 }) {
@@ -1575,6 +1588,7 @@ async function launchPinnedTeamsSuggestionTask(input: {
   }
   const originSessionId = await resolveSuggestionOriginSessionId(
     input.sourceTaskId,
+    input.originSessionId,
   );
   let launchResult: { id: number; taskId: string } | null = null;
   const pinned = await launchPinnedFastSessionTask({
@@ -1796,7 +1810,21 @@ async function resumePendingTeamsAuthToken(
   return { success: true, status: 'fast' };
 }
 
-export const teams = new Hono();
+type TeamsWebhookVariables = {
+  claimedActivityId: string | undefined;
+};
+
+export const teams = new Hono<{
+  Variables: TeamsWebhookVariables;
+}>();
+
+teams.onError(async (error, c) => {
+  const claimedActivityId = c.get('claimedActivityId');
+  if (claimedActivityId !== undefined) {
+    await releaseTeamsActivityClaim(claimedActivityId).catch(() => {});
+  }
+  throw error;
+});
 
 teams.post('/auth/resume', async (c) => {
   let rawBody: unknown;
@@ -1899,6 +1927,7 @@ teams.post('/', async (c) => {
         );
         return c.json({ ok: true, duplicate: true });
       }
+      c.set('claimedActivityId', activity.id);
     }
 
     const reactionTargetMessageId = activity.replyToId?.trim();
@@ -2107,6 +2136,7 @@ teams.post('/', async (c) => {
     );
     return c.json({ ok: true, duplicate: true });
   }
+  c.set('claimedActivityId', queuedMessage.ts);
 
   const metadata = getTeamsActivityCommunicationMetadata(activity);
   if (claimedSuggestionReaction) {
@@ -2144,14 +2174,19 @@ teams.post('/', async (c) => {
           mappedUserId: mappedUserId!,
           suggestionId: claimedSuggestionReaction.id,
           sourceTaskId: claimedSuggestionReaction.sourceTaskId,
+          originSessionId: claimedSuggestionReaction.originSessionId,
           queuedMessage: {
             ...queuedMessage!,
             text: promptText,
           } as QueuedTeamsCommunicationMessage,
           workspace: workspaceOverride!,
         }),
-      launchFast: (promptText) =>
+      launchFast: async (promptText) =>
         startTeamsFastSuggestion({
+          originSessionId: await resolveSuggestionOriginSessionId(
+            claimedSuggestionReaction.sourceTaskId,
+            claimedSuggestionReaction.originSessionId,
+          ),
           activity,
           metadata,
           mappedUserId: mappedUserId!,
@@ -2244,20 +2279,14 @@ teams.post('/', async (c) => {
     if (!question) {
       return c.json({ ok: true, queued: false, reason: 'fast_message_empty' });
     }
-    let continued: boolean;
-    try {
-      continued = await queueFastAgentSurfaceReply({
-        sessionId: fastSession.id,
-        userId: mappedUserId,
-        senderDisplayName: activity.from?.name?.trim() || null,
-        question,
-        currentMessageId: queuedMessage.ts,
-        ...(fastMessage.images ? { images: fastMessage.images } : {}),
-      });
-    } catch (error) {
-      await releaseTeamsActivityClaim(queuedMessage.ts).catch(() => {});
-      throw error;
-    }
+    const continued = await queueFastAgentSurfaceReply({
+      sessionId: fastSession.id,
+      userId: mappedUserId,
+      senderDisplayName: activity.from?.name?.trim() || null,
+      question,
+      currentMessageId: queuedMessage.ts,
+      ...(fastMessage.images ? { images: fastMessage.images } : {}),
+    });
     if (!continued) {
       apiLogger.warn(
         `[teams] Fast session ${fastSession.id} could not resolve an active delivery route`,
@@ -2399,11 +2428,16 @@ teams.post('/', async (c) => {
               mappedUserId,
               suggestionId: resolution.suggestion.id,
               sourceTaskId: resolution.suggestion.sourceTaskId,
+              originSessionId: resolution.suggestion.originSessionId,
               queuedMessage: { ...queuedMessage!, text: promptText },
               workspace: workspaceOverride!,
             }),
-          launchFast: (promptText) =>
+          launchFast: async (promptText) =>
             startTeamsFastSuggestion({
+              originSessionId: await resolveSuggestionOriginSessionId(
+                resolution.suggestion.sourceTaskId,
+                resolution.suggestion.originSessionId,
+              ),
               activity,
               metadata,
               mappedUserId,
@@ -2626,7 +2660,14 @@ teams.post('/', async (c) => {
     outOfBandClaim = attached.claim;
   }
   try {
-    await queueCommunicationMessage('teams', activeRun.id, activeFollowUp);
+    const queued = await queueCommunicationMessageOnce(
+      'teams',
+      activeRun.id,
+      activeFollowUp,
+    );
+    if (!queued) {
+      await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+    }
   } catch (error) {
     await releaseCommunicationOutOfBandClaim(outOfBandClaim);
     throw error;

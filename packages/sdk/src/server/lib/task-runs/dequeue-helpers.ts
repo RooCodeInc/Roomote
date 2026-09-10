@@ -1,5 +1,6 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
+  DEFAULT_SOURCE_CONTROL_PROVIDER,
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
@@ -467,6 +468,11 @@ export async function resolveTaskRunSourceControlProviders(
     repositoryProviders?: Record<string, unknown>;
     sourceControlProvider?: unknown;
   };
+  const workspace = resolveTaskWorkspace(taskRun.payload);
+
+  if (workspace.type === 'no_repositories') {
+    return [];
+  }
 
   if (
     payload.repositoryProviders &&
@@ -501,7 +507,6 @@ export async function resolveTaskRunSourceControlProviders(
   // shared resolver (covers every workspace shape). It returns undefined when
   // the provider is ambiguous or unknown, in which case fall back to the
   // GitHub default that resolveSourceControlProviderFromPayload applies.
-  const workspace = resolveTaskWorkspace(taskRun.payload);
   const resolvedProvider = await resolveWorkspaceSourceControlProvider(
     dbOrTx,
     workspace,
@@ -733,6 +738,15 @@ export async function createSourceControlTokenForTaskRun(
   } = {},
 ): Promise<SourceControlRuntimeToken | null> {
   const providers = await resolveTaskRunSourceControlProviders(taskRun);
+
+  if (providers.length === 0) {
+    return {
+      ...buildSourceControlTokenMetadata(DEFAULT_SOURCE_CONTROL_PROVIDER, ''),
+      envVars: {},
+      source: 'app',
+      expiresAt: null,
+    };
+  }
 
   // GitLab scoped tokens create revocable remote resources. Mint them last so
   // a later provider failure cannot orphan a successful GitLab token set.

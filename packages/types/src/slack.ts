@@ -1,8 +1,11 @@
+import type { DataVisualizationBlock } from './data-visualization';
+
 export type SlackTableCell =
   | { type: 'raw_text'; text: string }
   | { type: 'rich_text'; elements: Array<Record<string, unknown>> };
 
 export type SlackBlock =
+  | DataVisualizationBlock
   | {
       type: 'section' | 'context' | 'actions';
       block_id?: string;

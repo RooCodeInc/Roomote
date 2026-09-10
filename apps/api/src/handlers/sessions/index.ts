@@ -30,6 +30,7 @@ import {
   type RoomoteSearchSessionsResponse,
   type RoomoteSessionChildTask,
   type RoomoteSessionMessagesResponse,
+  type RoomoteSessionRelayState,
   type RoomoteSessionSummary,
   type RoomoteStartSessionResponse,
   type TaskPhase,
@@ -38,23 +39,31 @@ import {
 import type { Variables } from '../../types';
 import { resolveMcpTaskOrSessionUserId, type McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
+import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 import { getLatestTaskRunsByTaskIds } from '../tasks/helpers';
 import {
   getFastSessionMessagesForUser,
   sendMessageToFastSessionForUser,
 } from '../tasks/fastSessionCommunication';
+import { getSessionRelayUpdates } from '../tasks/getRelayUpdates';
 
 type SessionContext = Context<{
   Variables: Variables & { mcpAuth: McpAuth };
 }>;
 
-// Sessions follow the same visibility rules as tasks: every authenticated
-// user of the deployment can read and interact with every visible Session.
-async function findAccessibleSession(sessionId: string) {
+// Ordinary Sessions remain collaborative; custom automation history is private
+// to the current automation owner and deployment admins.
+async function findAccessibleSession(sessionId: string, auth: McpAuth) {
   const [session] = await db
     .select()
     .from(sessions)
-    .where(and(eq(sessions.id, sessionId), eq(sessions.visibility, 'visible')))
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        eq(sessions.visibility, 'visible'),
+        customAutomationHistoryAccess(auth, 'session'),
+      ),
+    )
     .limit(1);
   if (session) return session;
 
@@ -71,7 +80,13 @@ async function findAccessibleSession(sessionId: string) {
       sessions,
       eq(sessions.fastConversationId, fastAgentConversations.id),
     )
-    .where(eq(fastAgentConversations.id, sessionId))
+    .where(
+      and(
+        eq(fastAgentConversations.id, sessionId),
+        customAutomationHistoryAccess(auth, 'fast'),
+        customAutomationHistoryAccess(auth, 'session'),
+      ),
+    )
     .limit(1);
   if (!alternate) return null;
   if (alternate.session) {
@@ -80,7 +95,23 @@ async function findAccessibleSession(sessionId: string) {
       : null;
   }
 
-  return ensureSessionForFastConversation(db, alternate.conversationId);
+  const ensured = await ensureSessionForFastConversation(
+    db,
+    alternate.conversationId,
+  );
+  // Re-check the canonical row after a lazy backfill attaches its tasks.
+  const [accessible] = await db
+    .select()
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.id, ensured.id),
+        eq(sessions.visibility, 'visible'),
+        customAutomationHistoryAccess(auth, 'session'),
+      ),
+    )
+    .limit(1);
+  return accessible ?? null;
 }
 
 async function sendSessionMessage(c: SessionContext): Promise<Response> {
@@ -99,7 +130,7 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
   if (!message) return c.json({ error: 'message is required' }, 400);
 
   try {
-    const session = await findAccessibleSession(sessionId);
+    const session = await findAccessibleSession(sessionId, c.get('mcpAuth'));
     if (!session) return c.json({ error: 'Session not found' }, 404);
     if (!session.fastConversationId) {
       return c.json({ error: 'Session has no conversation to continue' }, 409);
@@ -109,7 +140,16 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
       userId,
       message,
     });
-    if (result.success) return c.json(result);
+    if (result.success) {
+      return c.json({
+        ...result,
+        sent: {
+          direction: 'Codex → Roomote',
+          target: { kind: 'session', id: session.id },
+          text: message,
+        },
+      });
+    }
     const { status, ...errorBody } = result;
     return c.json(errorBody, { status });
   } catch (error) {
@@ -118,7 +158,7 @@ async function sendSessionMessage(c: SessionContext): Promise<Response> {
   }
 }
 
-async function getChildTasks(sessionIds: string[]) {
+async function getChildTasks(sessionIds: string[], auth: McpAuth) {
   if (sessionIds.length === 0) {
     return new Map<string, RoomoteSessionChildTask[]>();
   }
@@ -138,7 +178,11 @@ async function getChildTasks(sessionIds: string[]) {
     .from(sessionTasks)
     .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
     .where(
-      and(inArray(sessionTasks.sessionId, sessionIds), isNull(tasks.deletedAt)),
+      and(
+        inArray(sessionTasks.sessionId, sessionIds),
+        isNull(tasks.deletedAt),
+        customAutomationHistoryAccess(auth, 'task'),
+      ),
     )
     .orderBy(sessionTasks.attachedAt);
   const latestRuns = await getLatestTaskRunsByTaskIds(
@@ -277,6 +321,7 @@ async function searchSessions(c: SessionContext): Promise<Response> {
     const conditions: Array<SQL | undefined> = [
       eq(sessions.visibility, 'visible'),
       isNull(sessions.archivedAt),
+      customAutomationHistoryAccess(c.get('mcpAuth'), 'session'),
     ];
     if (sessionStatus) {
       conditions.push(eq(sessions.cachedStatus, sessionStatus));
@@ -325,7 +370,10 @@ async function searchSessions(c: SessionContext): Promise<Response> {
       .orderBy(desc(sessions.activityAt), desc(sessions.id))
       .limit(limit + 1);
     const page = rows.slice(0, limit);
-    const childTasks = await getChildTasks(page.map((session) => session.id));
+    const childTasks = await getChildTasks(
+      page.map((session) => session.id),
+      c.get('mcpAuth'),
+    );
     const last = page.at(-1);
 
     const response = {
@@ -349,9 +397,9 @@ async function getSessionSummary(c: SessionContext): Promise<Response> {
   if (!sessionId) return c.json({ error: 'sessionId is required' }, 400);
 
   try {
-    const session = await findAccessibleSession(sessionId);
+    const session = await findAccessibleSession(sessionId, c.get('mcpAuth'));
     if (!session) return c.json({ error: 'Session not found' }, 404);
-    const childTasks = await getChildTasks([session.id]);
+    const childTasks = await getChildTasks([session.id], c.get('mcpAuth'));
     const response = serializeSession(
       session,
       childTasks.get(session.id) ?? [],
@@ -370,7 +418,7 @@ async function getSessionMessages(c: SessionContext): Promise<Response> {
   if (!sessionId) return c.json({ error: 'sessionId is required' }, 400);
 
   try {
-    const session = await findAccessibleSession(sessionId);
+    const session = await findAccessibleSession(sessionId, c.get('mcpAuth'));
     if (!session) return c.json({ error: 'Session not found' }, 404);
     const parsedLimit = Number(c.req.query('limit') ?? 100);
     if (!Number.isFinite(parsedLimit)) {
@@ -385,7 +433,7 @@ async function getSessionMessages(c: SessionContext): Promise<Response> {
           order: 'desc',
         })
       : [];
-    const childTasks = await getChildTasks([session.id]);
+    const childTasks = await getChildTasks([session.id], c.get('mcpAuth'));
 
     const response = {
       sessionId: session.id,
@@ -400,9 +448,52 @@ async function getSessionMessages(c: SessionContext): Promise<Response> {
   }
 }
 
+async function getSessionUpdates(c: SessionContext): Promise<Response> {
+  const userId = c.get('mcpAuth').userId;
+  if (!userId) return c.json({ error: 'User context required' }, 403);
+  const sessionId = c.req.param('sessionId');
+  if (!sessionId) return c.json({ error: 'sessionId is required' }, 400);
+
+  try {
+    const session = await findAccessibleSession(sessionId, c.get('mcpAuth'));
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+    const childTasks = await getChildTasks([session.id], c.get('mcpAuth'));
+    const serialized = serializeSession(
+      session,
+      childTasks.get(session.id) ?? [],
+    );
+    const state = {
+      kind: 'session' as const,
+      status: serialized.status,
+      tasks: serialized.tasks.map((task) => ({
+        taskId: task.taskId,
+        state: task.state,
+        taskRunStatus: task.latestRun?.status ?? null,
+        taskPhase: task.latestRun?.taskPhase ?? null,
+        goalStatus: task.goalStatus,
+      })),
+    } satisfies RoomoteSessionRelayState;
+    const result = await getSessionRelayUpdates({
+      sessionId: session.id,
+      fastConversationId: session.fastConversationId,
+      userId,
+      cursor: c.req.query('cursor'),
+      limit: c.req.query('limit'),
+      state,
+    });
+    if (!result) return c.json({ error: 'Session not found' }, 404);
+    if ('error' in result) return c.json(result, 400);
+    return c.json(result);
+  } catch (error) {
+    logHandlerError('getSessionUpdates', error);
+    return c.json({ error: 'Failed to get session updates' }, 500);
+  }
+}
+
 export const sessionsRouter = new Hono<{ Variables: Variables }>();
 sessionsRouter.get('/', searchSessions);
 sessionsRouter.post('/', startSession);
 sessionsRouter.get('/:sessionId/summary', getSessionSummary);
 sessionsRouter.get('/:sessionId/messages', getSessionMessages);
+sessionsRouter.get('/:sessionId/updates', getSessionUpdates);
 sessionsRouter.post('/:sessionId/send_message', sendSessionMessage);

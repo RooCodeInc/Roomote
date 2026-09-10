@@ -77,6 +77,7 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   return {
     ...actual,
     getRedis: () => ({
+      zadd: async () => 1,
       set: mocks.redisSet,
       eval: mocks.redisEval,
       get: mocks.redisGet,
@@ -355,9 +356,24 @@ describe('Discord Gateway event handler', () => {
       messageId: 'message-1',
     });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
-    mocks.redisSet.mockResolvedValue('OK');
-    mocks.redisEval.mockResolvedValue(1);
-    mocks.redisGet.mockResolvedValue(null);
+    const redisState = new Map<string, string>();
+    mocks.redisSet.mockImplementation(
+      async (key: string, value: string, ...args: unknown[]) => {
+        if (args.includes('NX') && redisState.has(key)) return null;
+        redisState.set(key, value);
+        return 'OK';
+      },
+    );
+    mocks.redisEval.mockImplementation(
+      async (script: string, _count: number, key: string, owner: string) => {
+        if (redisState.get(key) !== owner) return 0;
+        if (script.includes("'del'")) redisState.delete(key);
+        return 1;
+      },
+    );
+    mocks.redisGet.mockImplementation(
+      async (key: string) => redisState.get(key) ?? null,
+    );
     mocks.redisGetdel.mockResolvedValue(null);
     mocks.redisDel.mockResolvedValue(1);
     mocks.component.mockResolvedValue('handled');
@@ -965,7 +981,7 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         replyToMessageId: 'message-1',
         text: expect.stringMatching(
-          /^A quick answer\n\n-# Reply or use the \[web app\]\(.*\/sessions\/fast-session-1.*\)\.$/,
+          /^A quick answer\n\n-# Reply anytime · \[Open in Roomote\]\(.*\/sessions\/fast-session-1\?utm_source=discord&utm_medium=link&utm_campaign=discord.fast_reply\)$/,
         ),
       }),
     );
@@ -1212,6 +1228,111 @@ describe('Discord Gateway event handler', () => {
       }),
     );
     expect(mocks.answerFast).toHaveBeenCalled();
+  });
+
+  describe('unmentioned automation report thread replies', () => {
+    beforeEach(() => {
+      mocks.getChannel.mockResolvedValue({
+        id: 'announcer-root',
+        guildId: 'guild-1',
+        parentId: 'channel-1',
+        name: 'automation-report',
+        type: 11,
+      });
+      mocks.findAutomationReportRun.mockImplementation(async (input) =>
+        input.provider === 'discord' &&
+        input.channelId === 'channel-1' &&
+        input.messageId === 'announcer-root'
+          ? { id: 11, taskId: 'announcer-task', userId: null }
+          : null,
+      );
+    });
+
+    it.each([undefined, 'later-message'])(
+      'resolves the immutable report root with reply reference %s',
+      async (replyToMessageId) => {
+        const response = await postEvent(
+          envelope(
+            message({
+              channel_id: 'announcer-root',
+              guild_id: 'guild-1',
+              content: 'Please explain the report',
+              ...(replyToMessageId
+                ? {
+                    message_reference: {
+                      message_id: replyToMessageId,
+                      channel_id: 'announcer-root',
+                    },
+                  }
+                : {}),
+            }),
+          ),
+        );
+
+        expect(response.status).toBe(200);
+        expect(mocks.findAutomationReportRun).toHaveBeenCalledExactlyOnceWith({
+          provider: 'discord',
+          channelId: 'channel-1',
+          messageId: 'announcer-root',
+        });
+        expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+          expect.objectContaining({
+            isRoomoteThread: true,
+            ownedThreadUserId: null,
+            isAutomationReportThread: true,
+          }),
+        );
+        expect(mocks.answerFast).toHaveBeenCalledOnce();
+        expect(mocks.answerFast).toHaveBeenCalledWith(
+          expect.objectContaining({ question: 'Please explain the report' }),
+        );
+      },
+    );
+
+    it.each([
+      ['unknown thread', 'not_task_entry'],
+      ['unlinked sender', 'discord_sender_not_linked_unmentioned'],
+      ['chatter', 'discord_unmentioned_requires_mention'],
+    ])('ignores %s without starting work', async (scenario, ignored) => {
+      if (scenario === 'unknown thread') {
+        mocks.findAutomationReportRun.mockResolvedValue(null);
+      } else if (scenario === 'unlinked sender') {
+        mocks.findMappedUserId.mockResolvedValue(null);
+      } else {
+        mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+      }
+
+      const response = await postEvent(
+        envelope(
+          message({
+            channel_id: 'announcer-root',
+            guild_id: 'guild-1',
+            content: 'Please explain the report',
+          }),
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true, ignored });
+      expect(mocks.findAutomationReportRun).toHaveBeenCalledWith({
+        provider: 'discord',
+        channelId: 'channel-1',
+        messageId: 'announcer-root',
+      });
+      if (scenario === 'chatter') {
+        expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+          expect.objectContaining({ isAutomationReportThread: true }),
+        );
+      } else {
+        expect(mocks.shouldRouteUnmentioned).not.toHaveBeenCalled();
+      }
+      expect(mocks.answerFast).not.toHaveBeenCalled();
+      expect(mocks.queueMessage).not.toHaveBeenCalled();
+      expect(mocks.startNewTask).not.toHaveBeenCalled();
+      expect(mocks.resumeTask).not.toHaveBeenCalled();
+      expect(mocks.reply).not.toHaveBeenCalled();
+      expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    });
   });
 
   it('treats an attachment-only DM as a Fast entry and passes safe image data', async () => {

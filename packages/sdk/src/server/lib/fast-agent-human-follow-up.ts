@@ -34,12 +34,26 @@ export type FastAgentDurableTurn = {
   resumed?: boolean;
 };
 
+/**
+ * Outcome of durably admitting an inline human turn. `settled` means the same
+ * message already ran to completion (delivered) or was retired (superseded,
+ * replay revoked): the caller must not run it again.
+ */
+export type FastAgentInlineHumanTurnAdmission =
+  | { status: 'admitted'; turn: FastAgentDurableTurn }
+  | { status: 'settled' };
+
 export type FastAgentHumanFollowUpAdmission =
   | {
       kind: 'turn';
       turnLock: FastAgentTurnLockHandle;
-      /** Null when the same message was already settled (duplicate delivery). */
+      /**
+       * Null when durable admission could not be persisted (the turn still
+       * runs, best effort) or when the same message was already settled; the
+       * latter is flagged by `settled` so the caller skips the turn.
+       */
       durable: FastAgentDurableTurn | null;
+      settled?: boolean;
     }
   | { kind: 'queued'; abort: () => Promise<void> }
   | { kind: 'steered'; abort: () => Promise<void> };
@@ -49,14 +63,45 @@ export type FastAgentHumanFollowUpAdmission =
  * row is persisted under a claim lease before any work starts, so the turn
  * survives the accepting process: if that process is interrupted before the
  * turn has posted its closeout, it releases the claim and the parent-event
- * queue resumes the turn, telling it what the earlier attempt already did. The queue is not woken here; a live owner runs
- * the turn itself. An older pending inline row for the same conversation is
- * an interrupted turn this newer message supersedes.
+ * queue resumes the turn, telling it what the earlier attempt already did.
+ * The queue is not woken here; a live owner runs the turn itself.
+ *
+ * A typed human message supersedes an older pending inline row for the same
+ * conversation: that row is an interrupted or parked turn, and the new turn
+ * is told about the request it still owes. A reaction or a platform event
+ * admitted through this path does not supersede anything: neither answers
+ * the earlier request, so the earlier turn keeps its row and resumes once
+ * the conversation is idle again.
  */
+/**
+ * Only a typed human message stands in for the request an older pending turn
+ * still owes. A reaction (`input`) or a platform event admitted through the
+ * human path (`turnSource`) is a side conversation: discarding the older row
+ * for it would silently drop a question that was parked for a retry or
+ * waiting to resume.
+ */
+function supersedesPendingTurns(event: FastAgentHumanFollowUpEvent): boolean {
+  return !event.input && event.turnSource !== 'platform_event';
+}
+
 export async function persistFastAgentInlineHumanTurn(params: {
   parent: FastAgentParent;
   event: FastAgentHumanFollowUpEvent;
 }): Promise<FastAgentDurableTurn | null> {
+  const admission = await admitFastAgentInlineHumanTurn(params);
+  return admission.status === 'admitted' ? admission.turn : null;
+}
+
+/**
+ * Like `persistFastAgentInlineHumanTurn`, but distinguishes "already settled"
+ * from a fresh admission. Callers with a second durable trigger for the same
+ * message (the AgentMail inbound drain) need that distinction: an interrupted
+ * turn the queue already resumed and delivered must be skipped, not re-run.
+ */
+export async function admitFastAgentInlineHumanTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentHumanFollowUpEvent;
+}): Promise<FastAgentInlineHumanTurnAdmission> {
   const eventKey = buildFastAgentParentEventKey(params);
   // Admission and supersession commit together, so recovery can never see
   // the new row without the older interrupted row already retired.
@@ -86,8 +131,13 @@ export async function persistFastAgentInlineHumanTurn(params: {
         discardedAt: true,
       },
     });
-    if (!row || row.deliveredAt || row.discardedAt) {
-      return null;
+    if (!row) {
+      throw new Error(
+        `Fast inline turn admission row ${eventKey} vanished mid-transaction.`,
+      );
+    }
+    if (row.deliveredAt || row.discardedAt) {
+      return { status: 'settled' as const };
     }
     // The row was already there and still pending: an earlier inline attempt
     // was interrupted before it settled. This caller takes the row over as a
@@ -101,24 +151,29 @@ export async function persistFastAgentInlineHumanTurn(params: {
         .where(eq(fastAgentParentEvents.id, row.id));
     }
 
-    await tx
-      .update(fastAgentParentEvents)
-      .set({
-        discardedAt: new Date(),
-        lastError: 'Superseded by a newer human message.',
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(fastAgentParentEvents.conversationId, params.parent.sessionId),
-          eq(fastAgentParentEvents.admission, 'inline'),
-          ne(fastAgentParentEvents.eventKey, eventKey),
-          isNull(fastAgentParentEvents.deliveredAt),
-          isNull(fastAgentParentEvents.discardedAt),
-        ),
-      );
+    if (supersedesPendingTurns(params.event)) {
+      await tx
+        .update(fastAgentParentEvents)
+        .set({
+          discardedAt: new Date(),
+          lastError: 'Superseded by a newer human message.',
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(fastAgentParentEvents.conversationId, params.parent.sessionId),
+            eq(fastAgentParentEvents.admission, 'inline'),
+            ne(fastAgentParentEvents.eventKey, eventKey),
+            isNull(fastAgentParentEvents.deliveredAt),
+            isNull(fastAgentParentEvents.discardedAt),
+          ),
+        );
+    }
 
-    return { id: row.id, eventKey, ...(resumed ? { resumed: true } : {}) };
+    return {
+      status: 'admitted' as const,
+      turn: { id: row.id, eventKey, ...(resumed ? { resumed: true } : {}) },
+    };
   });
 }
 
@@ -139,7 +194,7 @@ export async function admitFastAgentHumanFollowUp(params: {
         maxWaitMs: 0,
       });
   if (turnLock) {
-    const durable = await persistFastAgentInlineHumanTurn(params).catch(
+    const admission = await admitFastAgentInlineHumanTurn(params).catch(
       (error) => {
         // Admission durability is best effort; the turn still runs inline.
         console.error(
@@ -148,7 +203,10 @@ export async function admitFastAgentHumanFollowUp(params: {
         return null;
       },
     );
-    return { kind: 'turn', turnLock, durable };
+    if (admission?.status === 'settled') {
+      return { kind: 'turn', turnLock, durable: null, settled: true };
+    }
+    return { kind: 'turn', turnLock, durable: admission?.turn ?? null };
   }
 
   const { eventKey } = await enqueueFastAgentParentEvent({

@@ -14,6 +14,13 @@ import {
   requestSourceControlJson as requestJson,
 } from './source-control-pull-request-http';
 import {
+  adoPullRequestSchema,
+  bitbucketPullRequestSchema,
+  giteaPullRequestSchema,
+  gitLabMergeRequestSchema,
+  normalizeAdoBranchRef,
+} from './source-control-pull-request-branch-lookup';
+import {
   resolveAdoProviderContext,
   resolveBitbucketProviderContext,
   resolveGiteaProviderContext,
@@ -26,6 +33,7 @@ import {
   buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
+  isDraftTitle,
   resolveRepositoryRow,
   resolveSourceControlHostForRepositoryFromPayload,
   resolveSourceControlProviderForRepositoryFromPayload,
@@ -61,6 +69,9 @@ const optionalTrimmedNonEmptyStringSchema = z.preprocess((value) => {
 
 export const sourceControlPullRequestWriteInputSchema = z.object({
   action: z.enum([
+    'close_pull_request',
+    'update_pull_request',
+    'reopen_pull_request',
     'reply_to_pull_request_comment',
     'create_pull_request_comment',
     'create_pull_request_review_comment',
@@ -89,10 +100,19 @@ export const sourceControlPullRequestWriteInputSchema = z.object({
    * list_pull_request_comments or a prior write result.
    */
   commentId: optionalTrimmedNonEmptyStringSchema,
-  /** Required for dismiss_pull_request_review. */
+  /** Required for dismissal; optional for submitting a specific pending GitHub review. */
   reviewId: optionalTrimmedNonEmptyStringSchema,
+  /** Optional new base branch for update_pull_request. */
+  targetBranch: optionalTrimmedNonEmptyStringSchema,
+  /** Optional new title for update_pull_request. */
+  title: optionalTrimmedNonEmptyStringSchema,
   /** Required for reply, create_comment, and update_comment; optional for review. */
   body: z.string().optional(),
+  /** Optional draft state for update_pull_request. */
+  draft: z.boolean().optional(),
+  /** Pull request identity updates deliberately exclude delivery metadata. */
+  labels: z.never().optional(),
+  assignees: z.never().optional(),
   /**
    * Required for create_pull_request_review_comment: repository-relative
    * POSIX path of the file the comment anchors to.
@@ -181,15 +201,23 @@ const ADO_REVIEW_VOTES = {
   request_changes: -5,
 } as const;
 
-const gitHubReplyMutationResponseSchema = z.object({
-  addPullRequestReviewThreadReply: z
+const gitHubReplyThreadResponseSchema = z.object({
+  node: z
     .object({
-      comment: z
-        .object({
-          databaseId: z.number().nullable().optional(),
-          url: z.string().nullable().optional(),
-        })
-        .nullable(),
+      __typename: z.literal('PullRequestReviewThread'),
+      pullRequest: z.object({
+        number: z.number().int().positive(),
+        repository: z.object({ nameWithOwner: z.string() }),
+      }),
+      comments: z.object({
+        nodes: z.array(
+          z
+            .object({
+              databaseId: z.number().int().positive().safe().nullable(),
+            })
+            .nullable(),
+        ),
+      }),
     })
     .nullable(),
 });
@@ -202,6 +230,10 @@ const gitHubResolvedThreadSchema = z
 const gitHubResolveMutationResponseSchema = z.object({
   resolveReviewThread: gitHubResolvedThreadSchema.optional(),
   unresolveReviewThread: gitHubResolvedThreadSchema.optional(),
+});
+
+const gitHubDraftMutationResponseSchema = z.object({
+  pullRequest: z.object({ isDraft: z.boolean() }).nullable(),
 });
 
 const gitLabNoteSchema = z
@@ -322,6 +354,22 @@ export async function writeSourceControlPullRequestForTaskRun({
     repositoryFullName: input.repositoryFullName,
     host: payloadHost,
   });
+
+  if (
+    input.action === 'submit_pull_request_review' &&
+    input.reviewId &&
+    provider !== 'github'
+  ) {
+    return buildWriteResult({
+      input,
+      provider,
+      repository,
+      applied: false,
+      warnings: [
+        `${getSourceControlProviderLabel(provider)} does not support submitting an existing review by reviewId through this source-control interface.`,
+      ],
+    });
+  }
 
   let result: SourceControlPullRequestWriteResult;
   switch (provider) {
@@ -477,6 +525,8 @@ function normalizeOptionalWriteIds(
     threadId: blankToUndefined(input.threadId),
     commentId: blankToUndefined(input.commentId),
     reviewId: blankToUndefined(input.reviewId),
+    targetBranch: blankToUndefined(input.targetBranch),
+    title: blankToUndefined(input.title),
     path: blankToUndefined(input.path),
   };
 }
@@ -494,6 +544,12 @@ function assertWriteInputFields(
   input: SourceControlPullRequestWriteInput,
 ): void {
   switch (input.action) {
+    case 'close_pull_request':
+    case 'reopen_pull_request':
+      break;
+    case 'update_pull_request':
+      requirePullRequestUpdate(input);
+      break;
     case 'reply_to_pull_request_comment':
       requireThreadId(input);
       requireBody(input);
@@ -525,6 +581,35 @@ function assertWriteInputFields(
       requireBody(input);
       break;
   }
+}
+
+function requirePullRequestUpdate(
+  input: SourceControlPullRequestWriteInput,
+): void {
+  if (
+    input.targetBranch === undefined &&
+    input.title === undefined &&
+    input.body === undefined &&
+    input.draft === undefined
+  ) {
+    throw new SourceControlWriteError(
+      400,
+      'update_pull_request requires at least one of targetBranch, title, body, or draft.',
+    );
+  }
+}
+
+function applyRequestedDraftTitle(
+  title: string,
+  draft: boolean,
+  prefix: 'Draft' | 'WIP',
+): string {
+  if (!draft) {
+    const stripped = title.replace(/^(draft|wip):\s*/i, '').trim();
+    return stripped.length > 0 ? stripped : title;
+  }
+
+  return isDraftTitle(title) ? title : `${prefix}: ${title}`;
 }
 
 function requireThreadId(input: SourceControlPullRequestWriteInput): string {
@@ -807,30 +892,144 @@ async function writeGitHubPullRequest({
   );
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const { data } = await octokit.rest.pulls.update({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        state: 'closed',
+      });
+
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        url: data.html_url ?? null,
+      });
+    }
+    case 'reopen_pull_request': {
+      const { data } = await octokit.rest.pulls.update({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+        state: 'open',
+      });
+
+      return buildWriteResult({
+        input,
+        provider,
+        repository,
+        url: data.html_url ?? null,
+      });
+    }
+    case 'update_pull_request': {
+      const { data: current } = await octokit.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: input.prNumber,
+      });
+      let url = current.html_url ?? null;
+
+      if (
+        input.targetBranch !== undefined ||
+        input.title !== undefined ||
+        input.body !== undefined
+      ) {
+        const { data } = await octokit.rest.pulls.update({
+          owner,
+          repo,
+          pull_number: input.prNumber,
+          ...(input.targetBranch !== undefined
+            ? { base: input.targetBranch }
+            : {}),
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.body !== undefined ? { body: input.body } : {}),
+        });
+        url = data.html_url ?? url;
+      }
+
+      if (input.draft !== undefined && input.draft !== current.draft) {
+        const response = await octokit.graphql(
+          input.draft
+            ? `mutation ConvertPullRequestToDraft($pullRequestId: ID!) {
+                convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
+                  pullRequest { isDraft }
+                }
+              }`
+            : `mutation MarkPullRequestReadyForReview($pullRequestId: ID!) {
+                markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+                  pullRequest { isDraft }
+                }
+              }`,
+          { pullRequestId: current.node_id },
+        );
+        const mutation = gitHubDraftMutationResponseSchema.parse(
+          input.draft
+            ? (response as { convertPullRequestToDraft?: unknown })
+                .convertPullRequestToDraft
+            : (response as { markPullRequestReadyForReview?: unknown })
+                .markPullRequestReadyForReview,
+        );
+        if (mutation.pullRequest?.isDraft !== input.draft) {
+          throw new Error(
+            `GitHub did not confirm draft=${input.draft} for ${repository.fullName}#${input.prNumber}.`,
+          );
+        }
+      }
+
+      return buildWriteResult({ input, provider, repository, url });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const response = await octokit.graphql(
-        `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
-          addPullRequestReviewThreadReply(
-            input: { pullRequestReviewThreadId: $threadId, body: $body }
-          ) {
-            comment { databaseId url }
+        `query PullRequestReplyThread($threadId: ID!) {
+          node(id: $threadId) {
+            __typename
+            ... on PullRequestReviewThread {
+              pullRequest { number repository { nameWithOwner } }
+              comments(first: 1) { nodes { databaseId } }
+            }
           }
         }`,
-        { threadId, body: requireBody(input) },
+        { threadId },
       );
-      const comment =
-        gitHubReplyMutationResponseSchema.parse(response)
-          .addPullRequestReviewThreadReply?.comment;
+      const parsed = gitHubReplyThreadResponseSchema.safeParse(response);
+      const thread = parsed.success ? parsed.data.node : null;
+      if (
+        !thread ||
+        thread.pullRequest.number !== input.prNumber ||
+        thread.pullRequest.repository.nameWithOwner.toLowerCase() !==
+          repository.fullName.toLowerCase()
+      ) {
+        throw new SourceControlWriteError(
+          404,
+          `GitHub review thread ${threadId} was not found on pull request #${input.prNumber} in ${repository.fullName}.`,
+        );
+      }
+      const commentId = thread.comments.nodes[0]?.databaseId;
+      if (!commentId) {
+        throw new SourceControlWriteError(
+          422,
+          `GitHub review thread ${threadId} has no root comment available to reply to.`,
+        );
+      }
+      // REST publishes the reply immediately without creating or submitting a pending review.
+      const { data: comment } =
+        await octokit.rest.pulls.createReplyForReviewComment({
+          owner,
+          repo,
+          pull_number: input.prNumber,
+          comment_id: commentId,
+          body: requireBody(input),
+        });
 
       return buildWriteResult({
         input,
         provider,
         repository,
         threadId,
-        commentId:
-          comment?.databaseId != null ? String(comment.databaseId) : null,
-        url: comment?.url ?? null,
+        commentId: String(comment.id),
+        url: comment.html_url ?? null,
       });
     }
     case 'create_pull_request_comment': {
@@ -965,13 +1164,34 @@ async function writeGitHubPullRequest({
       // GitHub requires a body string for COMMENT reviews; approvals and
       // change requests may omit it entirely.
       const body = reviewEvent === 'comment' ? (input.body ?? '') : input.body;
-      const { data } = await octokit.rest.pulls.createReview({
+      const request = {
         owner,
         repo,
         pull_number: input.prNumber,
         event: GITHUB_REVIEW_EVENTS[reviewEvent],
         ...(body !== undefined ? { body } : {}),
-      });
+      };
+      let response;
+      if (input.reviewId) {
+        const reviewId = Number(input.reviewId);
+        if (
+          !/^\d+$/.test(input.reviewId) ||
+          !Number.isSafeInteger(reviewId) ||
+          reviewId <= 0
+        ) {
+          throw new SourceControlWriteError(
+            400,
+            'reviewId must be a positive safe integer for GitHub review submission.',
+          );
+        }
+        response = await octokit.rest.pulls.submitReview({
+          ...request,
+          review_id: reviewId,
+        });
+      } else {
+        response = await octokit.rest.pulls.createReview(request);
+      }
+      const { data } = response;
 
       return buildWriteResult({
         input,
@@ -1069,6 +1289,68 @@ async function writeGitLabMergeRequest({
   const mergeRequestPath = `/projects/${encodeURIComponent(projectId)}/merge_requests/${input.prNumber}`;
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const response = await performRequest({
+        fetchImpl,
+        method: 'PUT',
+        url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
+        tokenHeader,
+        body: { state_event: 'close' },
+      });
+
+      if (response.status !== 200) {
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(response),
+        );
+      }
+
+      return buildWriteResult({ input, provider, repository });
+    }
+    case 'reopen_pull_request': {
+      await requestJson({
+        fetchImpl,
+        method: 'PUT',
+        url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
+        tokenHeader,
+        body: { state_event: 'reopen' },
+        schema: gitLabMergeRequestSchema,
+      });
+
+      return buildWriteResult({ input, provider, repository });
+    }
+    case 'update_pull_request': {
+      let title = input.title;
+      if (input.draft !== undefined) {
+        const current = await requestJson({
+          fetchImpl,
+          url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
+          tokenHeader,
+          schema: gitLabMergeRequestSchema,
+        });
+        title = applyRequestedDraftTitle(
+          title ?? current.title,
+          input.draft,
+          'Draft',
+        );
+      }
+
+      await requestJson({
+        fetchImpl,
+        method: 'PUT',
+        url: buildApiUrl(apiBaseUrl, mergeRequestPath, {}),
+        tokenHeader,
+        body: {
+          ...(input.targetBranch !== undefined
+            ? { target_branch: input.targetBranch }
+            : {}),
+          ...(title !== undefined ? { title } : {}),
+          ...(input.body !== undefined ? { description: input.body } : {}),
+        },
+        schema: gitLabMergeRequestSchema,
+      });
+
+      return buildWriteResult({ input, provider, repository });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const note = await requestJson({
@@ -1527,6 +1809,104 @@ async function writeGiteaPullRequest({
   );
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const response = await performRequest({
+        fetchImpl,
+        method: 'PATCH',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}`,
+          {},
+        ),
+        tokenHeader,
+        body: { state: 'closed' },
+      });
+
+      if (response.status !== 200) {
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(response),
+        );
+      }
+
+      return buildWriteResult({ input, provider, repository });
+    }
+    case 'reopen_pull_request': {
+      await requestJson({
+        fetchImpl,
+        method: 'PATCH',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}`,
+          {},
+        ),
+        tokenHeader,
+        body: { state: 'open' },
+        schema: giteaPullRequestSchema,
+      });
+
+      return buildWriteResult({ input, provider, repository });
+    }
+    case 'update_pull_request': {
+      const url = buildApiUrl(
+        apiBaseUrl,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}`,
+        {},
+      );
+      let title = input.title;
+      if (input.draft !== undefined) {
+        const current = await requestJson({
+          fetchImpl,
+          url,
+          tokenHeader,
+          schema: giteaPullRequestSchema,
+        });
+        const currentTitle = current.title ?? '';
+        if (!currentTitle && title === undefined) {
+          return buildWriteResult({
+            input,
+            provider,
+            repository,
+            applied: false,
+            warnings: [
+              'Gitea did not expose the current title required for its Draft/WIP title transition, so none of the requested pull request updates were applied.',
+            ],
+          });
+        }
+        if (input.draft === false && current.draft === true) {
+          return buildWriteResult({
+            input,
+            provider,
+            repository,
+            applied: false,
+            warnings: [
+              'Gitea cannot change native draft state through this source-control interface, so none of the requested pull request updates were applied.',
+            ],
+          });
+        }
+        title = applyRequestedDraftTitle(
+          title ?? currentTitle,
+          input.draft,
+          'WIP',
+        );
+      }
+
+      await requestJson({
+        fetchImpl,
+        method: 'PATCH',
+        url,
+        tokenHeader,
+        body: {
+          ...(input.targetBranch !== undefined
+            ? { base: input.targetBranch }
+            : {}),
+          ...(title !== undefined ? { title } : {}),
+          ...(input.body !== undefined ? { body: input.body } : {}),
+        },
+        schema: giteaPullRequestSchema,
+      });
+
+      return buildWriteResult({ input, provider, repository });
+    }
     case 'reply_to_pull_request_comment': {
       // Gitea has no API for replying inside a review thread; fall back to an
       // issue comment that references the thread.
@@ -1733,6 +2113,93 @@ async function writeBitbucketPullRequest({
   );
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const response = await performRequest({
+        fetchImpl,
+        method: 'POST',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+            repo,
+          )}/pullrequests/${input.prNumber}/decline`,
+          {},
+        ),
+        tokenHeader,
+      });
+
+      if (response.status !== 200) {
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(response),
+        );
+      }
+
+      return buildWriteResult({ input, provider, repository });
+    }
+    case 'reopen_pull_request': {
+      await requestJson({
+        fetchImpl,
+        method: 'POST',
+        url: buildApiUrl(
+          apiBaseUrl,
+          `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+            repo,
+          )}/pullrequests/${input.prNumber}/reopen`,
+          {},
+        ),
+        tokenHeader,
+        schema: bitbucketPullRequestSchema,
+      });
+
+      return buildWriteResult({ input, provider, repository });
+    }
+    case 'update_pull_request': {
+      const url = buildApiUrl(
+        apiBaseUrl,
+        `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+          repo,
+        )}/pullrequests/${input.prNumber}`,
+        {},
+      );
+      if (input.draft !== undefined) {
+        const current = await requestJson({
+          fetchImpl,
+          url,
+          tokenHeader,
+          schema: bitbucketPullRequestSchema,
+        });
+        if (typeof current.draft !== 'boolean') {
+          return buildWriteResult({
+            input,
+            provider,
+            repository,
+            applied: false,
+            warnings: [
+              'Bitbucket Cloud did not expose draft state, so none of the requested pull request updates were applied.',
+            ],
+          });
+        }
+      }
+
+      await requestJson({
+        fetchImpl,
+        method: 'PUT',
+        url,
+        tokenHeader,
+        body: {
+          ...(input.targetBranch !== undefined
+            ? {
+                destination: { branch: { name: input.targetBranch } },
+              }
+            : {}),
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.body !== undefined ? { description: input.body } : {}),
+          ...(input.draft !== undefined ? { draft: input.draft } : {}),
+        },
+        schema: bitbucketPullRequestSchema,
+      });
+
+      return buildWriteResult({ input, provider, repository });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const comment = await requestJson({
@@ -2005,6 +2472,87 @@ async function writeAdoPullRequest({
   const threadsPath = `${repositoryPullRequestsPath}/${input.prNumber}/threads`;
 
   switch (input.action) {
+    case 'close_pull_request': {
+      const response = await performRequest({
+        fetchImpl,
+        method: 'PATCH',
+        url: buildApiUrl(
+          organizationApiBaseUrl,
+          `${repositoryPullRequestsPath}/${input.prNumber}`,
+          { 'api-version': ADO_API_VERSION },
+        ),
+        tokenHeader,
+        body: { status: 'abandoned' },
+      });
+
+      if (response.status !== 200) {
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(response),
+        );
+      }
+
+      return buildWriteResult({ input, provider, repository });
+    }
+    case 'reopen_pull_request': {
+      await requestJson({
+        fetchImpl,
+        method: 'PATCH',
+        url: buildApiUrl(
+          organizationApiBaseUrl,
+          `${repositoryPullRequestsPath}/${input.prNumber}`,
+          { 'api-version': ADO_API_VERSION },
+        ),
+        tokenHeader,
+        body: { status: 'active' },
+        schema: adoPullRequestSchema,
+      });
+
+      return buildWriteResult({ input, provider, repository });
+    }
+    case 'update_pull_request': {
+      const url = buildApiUrl(
+        organizationApiBaseUrl,
+        `${repositoryPullRequestsPath}/${input.prNumber}`,
+        { 'api-version': ADO_API_VERSION },
+      );
+      if (input.draft !== undefined) {
+        const current = await requestJson({
+          fetchImpl,
+          url,
+          tokenHeader,
+          schema: adoPullRequestSchema,
+        });
+        if (typeof current.isDraft !== 'boolean') {
+          return buildWriteResult({
+            input,
+            provider,
+            repository,
+            applied: false,
+            warnings: [
+              'Azure DevOps did not expose draft state, so none of the requested pull request updates were applied.',
+            ],
+          });
+        }
+      }
+
+      await requestJson({
+        fetchImpl,
+        method: 'PATCH',
+        url,
+        tokenHeader,
+        body: {
+          ...(input.targetBranch !== undefined
+            ? { targetRefName: normalizeAdoBranchRef(input.targetBranch) }
+            : {}),
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.body !== undefined ? { description: input.body } : {}),
+          ...(input.draft !== undefined ? { isDraft: input.draft } : {}),
+        },
+        schema: adoPullRequestSchema,
+      });
+
+      return buildWriteResult({ input, provider, repository });
+    }
     case 'reply_to_pull_request_comment': {
       const threadId = requireThreadId(input);
       const comment = await requestJson({

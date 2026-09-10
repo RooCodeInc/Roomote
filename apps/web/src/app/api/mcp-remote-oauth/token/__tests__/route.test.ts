@@ -12,6 +12,7 @@ const {
   mockGetClient,
   mockCreateToken,
   mockBootstrapWebRuntimeEnv,
+  mockWarn,
 } = vi.hoisted(() => ({
   mockGetCode: vi.fn(),
   mockConsumeCode: vi.fn(),
@@ -23,6 +24,7 @@ const {
   mockGetClient: vi.fn(),
   mockCreateToken: vi.fn(),
   mockBootstrapWebRuntimeEnv: vi.fn(),
+  mockWarn: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', async (importOriginal) => ({
@@ -44,6 +46,10 @@ vi.mock('@/lib/server/mcp-remote-oauth', async (importOriginal) => ({
 
 vi.mock('@/lib/server/bootstrap-runtime-env', () => ({
   bootstrapWebRuntimeEnv: mockBootstrapWebRuntimeEnv,
+}));
+
+vi.mock('@/lib/server/logger', () => ({
+  logger: { warn: mockWarn },
 }));
 
 import { POST } from '../route';
@@ -191,6 +197,14 @@ describe('POST /api/mcp-remote-oauth/token', () => {
       'session.refresh-token',
       expect.objectContaining({ userId: 'user-1' }),
     );
+    expect(mockPromoteClient).toHaveBeenCalledWith(
+      '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+      'user-1',
+    );
+    expect(mockPromoteClient.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockRotateRefreshToken.mock.invocationCallOrder[0]!,
+    );
+    expect(mockCreateRefreshSession).not.toHaveBeenCalled();
   });
 
   it('uses the session resource when a refresh request omits it', async () => {
@@ -230,15 +244,79 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     await expect(response.json()).resolves.toEqual({ error: 'invalid_grant' });
     expect(mockRotateRefreshToken).not.toHaveBeenCalled();
     expect(mockCreateToken).not.toHaveBeenCalled();
+    expect(mockPromoteClient).not.toHaveBeenCalled();
   });
 
-  it('rejects a refresh token whose rotation detects reuse', async () => {
-    mockRotateRefreshToken.mockResolvedValue({ status: 'reuse' });
+  it.each(['reuse', 'invalid'])(
+    'does not renew registration when rotation returns %s',
+    async (status) => {
+      mockRotateRefreshToken.mockResolvedValue({ status });
 
+      const response = await POST(refreshRequest());
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: 'invalid_grant',
+      });
+      expect(mockPromoteClient).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each<Record<string, string>>([
+    { client_id: '82c0a387-d9cf-410d-bc43-b7185849cd67' },
+    { scope: 'other:scope' },
+  ])(
+    'does not renew registration for an unbound refresh: %j',
+    async (overrides) => {
+      const response = await POST(refreshRequest(overrides));
+      expect(response.status).toBe(400);
+      expect(mockPromoteClient).not.toHaveBeenCalled();
+      expect(mockRotateRefreshToken).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not turn a completed refresh into an error if registration expired concurrently', async () => {
+    mockPromoteClient.mockResolvedValue(false);
+    const response = await POST(refreshRequest());
+    expect(response.status).toBe(200);
+    expect(mockCreateRefreshSession).not.toHaveBeenCalled();
+  });
+
+  it('delivers the rotated token when registration renewal throws and allows the next refresh', async () => {
+    mockPromoteClient.mockRejectedValueOnce(new Error('Redis renewal failed'));
     const response = await POST(refreshRequest());
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: 'invalid_grant' });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const body = await response.json();
+    expect(body).toMatchObject({
+      access_token: 'access-token',
+      refresh_token: 'rotated-refresh-token',
+    });
+    expect(mockRevokeOnReplay).not.toHaveBeenCalled();
+    expect(mockCreateRefreshSession).not.toHaveBeenCalled();
+    expect(mockWarn).toHaveBeenCalledExactlyOnceWith(
+      { event: 'mcp_remote_oauth_client_renewal_failed' },
+      'Could not renew MCP OAuth client registration after token rotation',
+    );
+
+    mockRotateRefreshToken.mockResolvedValueOnce({
+      status: 'ok',
+      refreshToken: 'next-refresh-token',
+    });
+    const next = await POST(
+      refreshRequest({ refresh_token: body.refresh_token }),
+    );
+    expect(next.status).toBe(200);
+    expect(mockRotateRefreshToken).toHaveBeenLastCalledWith(
+      'rotated-refresh-token',
+      expect.objectContaining({ userId: 'user-1' }),
+    );
+    await expect(next.json()).resolves.toMatchObject({
+      refresh_token: 'next-refresh-token',
+    });
+    expect(mockPromoteClient).toHaveBeenCalledTimes(2);
+    expect(mockRevokeOnReplay).not.toHaveBeenCalled();
   });
 
   it('revokes the session family when a rotated refresh token is replayed', async () => {
@@ -255,6 +333,7 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     expect(mockRevokeOnReplay).toHaveBeenCalledWith('session.refresh-token');
     expect(mockRotateRefreshToken).not.toHaveBeenCalled();
     expect(mockCreateToken).not.toHaveBeenCalled();
+    expect(mockPromoteClient).not.toHaveBeenCalled();
   });
 
   it('ignores replay revocation for unknown refresh tokens', async () => {
@@ -266,6 +345,7 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     await expect(response.json()).resolves.toEqual({ error: 'invalid_grant' });
     expect(mockRevokeOnReplay).toHaveBeenCalledWith('session.refresh-token');
     expect(mockRotateRefreshToken).not.toHaveBeenCalled();
+    expect(mockPromoteClient).not.toHaveBeenCalled();
   });
 
   it('rejects a verifier that does not match the authorization code', async () => {

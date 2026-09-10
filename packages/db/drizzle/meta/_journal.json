@@ -540,6 +540,41 @@
       "when": 1788530600978,
       "tag": "0076_fearless_skullbuster",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1788560388583,
+      "tag": "0077_normal_lionheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1788884814843,
+      "tag": "0078_hesitant_punisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1788983310654,
+      "tag": "0079_tan_amazoness",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789052095386,
+      "tag": "0080_natural_ma_gnuci",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1789059502690,
+      "tag": "0081_agentmail_channel",
+      "breakpoints": true
     }
   ]
 }

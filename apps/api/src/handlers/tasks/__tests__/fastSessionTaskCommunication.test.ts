@@ -246,6 +246,13 @@ describe('Fast session communication through task routes', () => {
       },
     );
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: session.id },
+        text: 'Continue this conversation',
+      },
+    });
     expect(mocks.sendMessageToTask).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: session.id }),
     );
@@ -329,6 +336,13 @@ describe('Fast session communication through task routes', () => {
       },
     );
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'task', id: 'normal-task' },
+        text: 'Normal follow-up',
+      },
+    });
     expect(mocks.queueReply).not.toHaveBeenCalled();
   });
 
@@ -347,8 +361,16 @@ describe('Fast session communication through task routes', () => {
     );
     expect(bystanderSend.status).toBe(200);
 
+    // A run without a human driver mints a user-less token. The handler
+    // resolves the actor from the run's acting user, then the task's human
+    // owner; an automation task with neither still has no actor.
+    const orphanTask = await taskFactory.create();
+    const orphanRun = await runFactory.create({
+      taskId: orphanTask.id,
+      actingUserId: null,
+    });
     const deploymentRun: RunTokenContext = {
-      runId: 1,
+      runId: orphanRun.id,
       userId: null,
       principal: 'deployment',
       tokenType: 'run',
@@ -363,6 +385,22 @@ describe('Fast session communication through task routes', () => {
       },
     );
     expect(noActor.status).toBe(403);
+
+    // The same token shape resolves to the task's human owner when one exists.
+    const ownedTask = await taskFactory.create({ initiatorUserId: owner.id });
+    const ownedRun = await runFactory.create({
+      taskId: ownedTask.id,
+      actingUserId: null,
+    });
+    const ownerResolved = await createApp({
+      ...deploymentRun,
+      runId: ownedRun.id,
+    }).request(`/tasks/${session.id}/send_message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Resolved through task owner' }),
+    });
+    expect(ownerResolved.status).toBe(200);
 
     mocks.queueReply.mockResolvedValueOnce(false);
     const unavailable = await createApp(userAuth(owner.id)).request(

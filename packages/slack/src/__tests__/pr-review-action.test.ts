@@ -7,7 +7,6 @@ describe('PR review action blocks', () => {
   it('renders the review summary as modern Slack markdown', () => {
     const blocks = buildSlackPrReviewActionBlocks({
       text: 'Review [PR #42](https://github.com/owner/repo/pull/42)',
-      question: 'Should I resolve these?',
       nonce: 'nonce-1',
     });
 
@@ -15,12 +14,12 @@ describe('PR review action blocks', () => {
       type: 'markdown',
       text: 'Review [PR #42](https://github.com/owner/repo/pull/42)',
     });
+    expect(blocks.map((block) => block.type)).toEqual(['markdown', 'actions']);
   });
 
   it('uses neutral styling for every response button', () => {
     const blocks = buildSlackPrReviewActionBlocks({
       text: 'Review summary',
-      question: 'Should I resolve these?',
       nonce: 'nonce-1',
     });
     const actions = blocks.find((block) => block.type === 'actions');
@@ -53,5 +52,33 @@ describe('PR review action blocks', () => {
         elements: [{ type: 'mrkdwn', text: '_Resolution_' }],
       },
     ]);
+  });
+
+  it('silently removes superseded controls and legacy questions, preserving the summary and footer', () => {
+    const summary = { type: 'markdown', text: 'Two review findings.' };
+    const footer = {
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: 'Footer' }],
+    };
+    expect(
+      buildResolvedSlackPrReviewMessageBlocks([
+        summary,
+        {
+          type: 'section',
+          block_id: 'pr_review_action_question',
+          text: { type: 'mrkdwn', text: 'Resolve these?' },
+        },
+        { type: 'actions', block_id: 'pr_review_action', elements: [] },
+        footer,
+      ]),
+    ).toEqual([summary, footer]);
+    expect(
+      buildResolvedSlackPrReviewMessageBlocks([
+        summary,
+        { type: 'actions', block_id: 'pr_review_action', elements: [] },
+        footer,
+      ]),
+    ).toEqual([summary, footer]);
+    expect(buildResolvedSlackPrReviewMessageBlocks(null)).toEqual([]);
   });
 });

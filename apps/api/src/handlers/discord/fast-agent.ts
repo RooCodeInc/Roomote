@@ -23,7 +23,7 @@ import {
   getDiscordFooterlessFinalChunk,
   getThreadReplyFooterRecord,
   resolveFastSessionReplyFooterContext,
-  setThreadReplyFooterRecord,
+  rememberThreadReplyFooterAfterEdit,
   withThreadReplyFooterLock,
 } from '@roomote/communication';
 import {
@@ -37,9 +37,14 @@ import {
   type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
-import { ALL_REPOSITORIES, type TaskInitiator } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  type FastAgentConversation,
+  type TaskInitiator,
+} from '@roomote/types';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import { resolveSuggestionFastConversation } from '../tasks/suggestion-launch.js';
 import {
   startAcceptedFastAgentTurn,
   type FastAgentStartResult,
@@ -47,6 +52,7 @@ import {
 import { replyToDiscordEvent } from './replies.js';
 import {
   discordMetadataForChannel,
+  resolveDiscordChannelContext,
   resolveDiscordWorkspace,
   type DiscordChannelContext,
 } from './task-launch.js';
@@ -110,6 +116,7 @@ export async function processDiscordFastAgentMessage(
     channel: DiscordChannelContext;
     metadata: ReturnType<typeof discordMetadataForChannel>;
     conversationId: string;
+    originSessionId?: string;
     createAnchoredThread?: boolean;
     /** Real Discord message used for replies and anchored threads. */
     anchorMessageId?: string;
@@ -139,6 +146,7 @@ export async function processDiscordFastAgentMessage(
   let metadata = input.metadata;
   if (
     message &&
+    !input.originSessionId &&
     anchorMessageId &&
     input.createAnchoredThread !== false &&
     !channel.isDirectMessage &&
@@ -165,7 +173,7 @@ export async function processDiscordFastAgentMessage(
     };
   }
 
-  const conversation = {
+  let conversation: Extract<FastAgentConversation, { surface: 'discord' }> = {
     surface: 'discord' as const,
     workspaceId: channel.guildId ?? 'dm',
     conversationId: input.conversationId,
@@ -176,6 +184,30 @@ export async function processDiscordFastAgentMessage(
         : {}),
     },
   };
+  if (input.originSessionId) {
+    const originConversation = await resolveSuggestionFastConversation({
+      userId: input.senderUserId,
+      originSessionId: input.originSessionId,
+      conversation,
+    });
+    if (originConversation.surface !== 'discord') {
+      throw new Error('The suggestion origin is not a Discord conversation.');
+    }
+    conversation = originConversation;
+    const replyChannelId =
+      conversation.replyTarget.threadId ?? conversation.replyTarget.channelId;
+    if (replyChannelId !== channel.channelId) {
+      channel = await resolveDiscordChannelContext(
+        input.provider,
+        replyChannelId,
+      );
+    }
+    metadata = discordMetadataForChannel({ channel, messageId: eventId });
+  }
+  const replyTargetChanged =
+    Boolean(input.originSessionId) &&
+    channel.channelId !== input.channel.channelId;
+  const historyChannel = input.originSessionId ? channel : input.channel;
   let releaseFastAgentLock = await acquireFastAgentTurnLock({
     conversation,
     maxWaitMs: 0,
@@ -183,12 +215,12 @@ export async function processDiscordFastAgentMessage(
 
   try {
     const history =
-      input.channel.isThread || input.channel.isDirectMessage
+      historyChannel.isThread || historyChannel.isDirectMessage
         ? await fetchDiscordThreadHistoryBestEffort({
             provider: input.provider,
-            channelId: input.channel.channelId,
-            ...(input.channel.parentChannelId
-              ? { parentChannelId: input.channel.parentChannelId }
+            channelId: historyChannel.channelId,
+            ...(historyChannel.parentChannelId
+              ? { parentChannelId: historyChannel.parentChannelId }
               : {}),
           })
         : [];
@@ -283,8 +315,12 @@ export async function processDiscordFastAgentMessage(
             provider: input.provider,
             applicationId: input.applicationId,
             channel,
-            ...(input.interaction ? { interaction: input.interaction } : {}),
-            ...(anchorMessageId ? { replyToMessageId: anchorMessageId } : {}),
+            ...(!replyTargetChanged && input.interaction
+              ? { interaction: input.interaction }
+              : {}),
+            ...(!replyTargetChanged && anchorMessageId
+              ? { replyToMessageId: anchorMessageId }
+              : {}),
             text: textWithFooter,
           });
           await recordFastAgentConversationMessageBestEffort({
@@ -298,6 +334,7 @@ export async function processDiscordFastAgentMessage(
               textWithFooter,
               footerText,
             }),
+            refresh: { footerText, channelId: footerMessageChannelId },
           };
         },
         clearPreviousFooter: async (previousFooterRecord) => {
@@ -477,7 +514,7 @@ export async function processDiscordFastAgentMessage(
           // and this replacement would re-mark the old message as carrier.
           const replaced = await withThreadReplyFooterLock({
             lockKey: `discord:thread_reply_footer_lock:${footerChannelId}:${footerStateThreadId}`,
-            fn: async () => {
+            fn: async (assertLock, lock) => {
               const footerRecord = await getThreadReplyFooterRecord(
                 'discord',
                 footerChannelId,
@@ -487,6 +524,7 @@ export async function processDiscordFastAgentMessage(
               const replacementText = isFooterCarrier
                 ? `${text}\n\n${footerText}`
                 : text;
+              await assertLock();
 
               if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
                 const placeholder = 'Reconnected to the inference provider.';
@@ -501,12 +539,26 @@ export async function processDiscordFastAgentMessage(
                   // The relocation that follows rewrites this message to its
                   // stored footerless text; keep that text current so the
                   // edit does not resurrect the pre-retry notice.
-                  await setThreadReplyFooterRecord(
-                    'discord',
-                    footerChannelId,
-                    footerStateThreadId,
-                    { messageId, textWithoutFooter: placeholder },
-                  ).catch(() => {});
+                  await rememberThreadReplyFooterAfterEdit({
+                    provider: 'discord',
+                    channelId: footerChannelId,
+                    threadId: footerStateThreadId,
+                    assertLock,
+                    lock,
+                    record: {
+                      ...footerRecord,
+                      messageId,
+                      textWithoutFooter: placeholder,
+                      refresh: { footerText, channelId: channel.channelId },
+                    },
+                    clearOwnFooter: () =>
+                      input.provider.editMessage({
+                        channelId: channel.channelId,
+                        messageId,
+                        text: placeholder,
+                        preserveButtons: true,
+                      }),
+                  }).catch(() => {});
                 }
                 return false;
               }
@@ -517,12 +569,26 @@ export async function processDiscordFastAgentMessage(
                 text: replacementText,
               });
               if (isFooterCarrier) {
-                await setThreadReplyFooterRecord(
-                  'discord',
-                  footerChannelId,
-                  footerStateThreadId,
-                  { messageId, textWithoutFooter: text },
-                ).catch(() => {});
+                await rememberThreadReplyFooterAfterEdit({
+                  provider: 'discord',
+                  channelId: footerChannelId,
+                  threadId: footerStateThreadId,
+                  assertLock,
+                  lock,
+                  record: {
+                    ...footerRecord,
+                    messageId,
+                    textWithoutFooter: text,
+                    refresh: { footerText, channelId: channel.channelId },
+                  },
+                  clearOwnFooter: () =>
+                    input.provider.editMessage({
+                      channelId: channel.channelId,
+                      messageId,
+                      text,
+                      preserveButtons: true,
+                    }),
+                }).catch(() => {});
               }
               return true;
             },

@@ -1,6 +1,10 @@
 import { tool, type ToolSet } from 'ai';
 import { createAuthToken } from '@roomote/auth';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  type ReasoningEffort,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import { resolveApiBaseUrl } from '../shared-utils';
@@ -114,7 +118,7 @@ async function parseFastAgentTaskApiResponse(
   };
 }
 
-function withAllRepositoriesLaunchTarget(
+function withSyntheticLaunchTargets(
   result: FastAgentTaskToolResult,
 ): FastAgentTaskToolResult {
   const environments = (result as ListEnvironmentsResponse).environments;
@@ -126,6 +130,12 @@ function withAllRepositoriesLaunchTarget(
     ...result,
     environments: [
       {
+        id: NO_REPOSITORIES,
+        name: 'Blank slate',
+        description: 'Start a sandbox without repositories.',
+        repositories: [],
+      },
+      {
         id: ALL_REPOSITORIES,
         name: 'All repositories',
         description:
@@ -133,7 +143,9 @@ function withAllRepositoriesLaunchTarget(
         repositories: [],
       },
       ...environments.filter(
-        (environment) => environment.id !== ALL_REPOSITORIES,
+        (environment) =>
+          environment.id !== NO_REPOSITORIES &&
+          environment.id !== ALL_REPOSITORIES,
       ),
     ],
   };
@@ -156,6 +168,7 @@ async function callFastAgentTaskApi({
     return {
       success: false,
       error: authContext.error,
+      delivery: 'not_accepted',
     };
   }
 
@@ -190,7 +203,7 @@ export async function sendFastAgentTaskMessage(
   context: FastAgentTaskApiContext,
   params: { taskId: string; message: string; images?: string[] },
 ): Promise<FastAgentTaskToolResult> {
-  return callFastAgentTaskApi({
+  const result = await callFastAgentTaskApi({
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
@@ -200,6 +213,14 @@ export async function sendFastAgentTaskMessage(
       senderMode: 'fast_agent',
     },
   });
+
+  return result.success === true
+    ? {
+        ...result,
+        delivery: result.delivery ?? 'accepted',
+        responsePending: true,
+      }
+    : result;
 }
 
 export async function sendFastAgentTaskMessageOnce(
@@ -232,6 +253,8 @@ export async function launchFastAgentPrReview(
     repository: string;
     pullRequestNumber: number;
     fastConversationId: string;
+    model?: string;
+    reasoningEffort?: ReasoningEffort;
   },
 ): Promise<
   FastAgentTaskToolResult & {
@@ -253,6 +276,10 @@ export async function launchFastAgentPrReview(
       repo: params.repository,
       prNumber: params.pullRequestNumber,
       fastConversationId: params.fastConversationId,
+      ...(params.model ? { model: params.model } : {}),
+      ...(params.reasoningEffort
+        ? { reasoningEffort: params.reasoningEffort }
+        : {}),
     },
   });
 }
@@ -265,6 +292,18 @@ export async function cancelFastAgentTask(
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/cancel`,
+  });
+}
+
+export async function stopFastAgentTask(
+  context: FastAgentTaskApiContext,
+  params: { taskId: string; userInitiated: boolean },
+): Promise<FastAgentTaskToolResult> {
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'POST',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/stop`,
+    body: { userInitiated: params.userInitiated },
   });
 }
 
@@ -286,7 +325,7 @@ export function createFastAgentTaskTools(
       description: 'List environments available for launching Roomote tasks.',
       inputSchema: z.object({}).strict(),
       execute: async () =>
-        withAllRepositoriesLaunchTarget(
+        withSyntheticLaunchTargets(
           await callFastAgentTaskApi({
             ...context,
             method: 'GET',
@@ -305,7 +344,7 @@ export function createFastAgentTaskTools(
           environmentId: nonEmptyTrimmedStringSchema
             .optional()
             .describe(
-              'Optional non-empty environment ID. Omit it or pass "__all_repositories__" to use the deployment-wide default target',
+              `Optional launch target ID. Pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" or omit it for all repositories, or pass an exact environment ID`,
             ),
           type: fastAgentTaskTypeSchema
             .optional()
@@ -324,8 +363,13 @@ export function createFastAgentTaskTools(
           path: FAST_AGENT_TASKS_API_PATH,
           body: {
             prompt,
-            repo: ALL_REPOSITORIES,
-            ...(environmentId && environmentId !== ALL_REPOSITORIES
+            repo:
+              environmentId === NO_REPOSITORIES
+                ? NO_REPOSITORIES
+                : ALL_REPOSITORIES,
+            ...(environmentId &&
+            environmentId !== ALL_REPOSITORIES &&
+            environmentId !== NO_REPOSITORIES
               ? { environmentId }
               : {}),
             ...(type ? { type } : {}),
@@ -415,7 +459,7 @@ export function createFastAgentTaskTools(
         sendFastAgentTaskMessage(context, { taskId, message }),
     }),
     cancel_task: tool({
-      description: 'Cancel a running Roomote task.',
+      description: 'Cancel a running Roomote task and end its current run.',
       inputSchema: z
         .object({
           taskId: nonEmptyTrimmedStringSchema.describe(
@@ -424,6 +468,24 @@ export function createFastAgentTaskTools(
         })
         .strict(),
       execute: async ({ taskId }) => cancelFastAgentTask(context, taskId),
+    }),
+    stop_task: tool({
+      description:
+        'Stop a running Roomote task while preserving its resumable sandbox.',
+      inputSchema: z
+        .object({
+          taskId: nonEmptyTrimmedStringSchema.describe(
+            'The non-empty Roomote task ID',
+          ),
+          userInitiated: z
+            .boolean()
+            .describe(
+              'True only when the user explicitly requested this stop; false for autonomous recovery',
+            ),
+        })
+        .strict(),
+      execute: async ({ taskId, userInitiated }) =>
+        stopFastAgentTask(context, { taskId, userInitiated }),
     }),
   };
 }

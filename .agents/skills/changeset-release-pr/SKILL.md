@@ -13,6 +13,26 @@ consumed pending changeset. Merging it makes CI open the frozen Promote PR to
 `main`. For an urgent patch that cannot wait for that path, use the clearly
 separated direct-to-main hotfix workflow below.
 
+## Authorization for release repairs
+
+Complete the requested outcome using the authorization already supplied,
+including routine repairs, validation, delivery and cleanup. Do not stop at a
+diagnosis or intermediate PR when the next steps are available. Reuse existing
+work and check for active runs before creating duplicates. Ask only for a real
+blocker, material ambiguity, or a consequential action outside the request.
+
+Preparation or conflict repair alone does not imply promotion or deployment.
+If the request already includes those actions, carry them out without asking
+for reconfirmation, subject to the actual GitHub and workflow constraints.
+
+Do not add ownership checks or approval ceremonies to this skill. Consult
+permissions only when required by the operation, using authoritative repository
+permissions rather than review `author_association`. Respect enforced protections
+and reuse valid approvals; do not bypass or weaken a failing gate. Repair tooling
+defects with focused tests on a separate develop-based PR, outside the frozen
+candidate, and continue through the normal integration path. Report the actual
+blocking requirement if that path cannot proceed.
+
 ## How releases work here
 
 - Roomote has a **single product version**: the root `package.json` `version`
@@ -35,17 +55,25 @@ Full details: `.changeset/README.md` and `CONTRIBUTING.md#product-releases`.
 
 ### 1. Establish the last release reference point
 
-Cross-check three signals; they should normally agree:
+Fetch the release-bearing refs and tags before checking any boundary signal, then
+cross-check all four signals; they should normally agree:
 
 ```bash
+git fetch --tags origin \
+  refs/heads/main:refs/remotes/origin/main \
+  refs/heads/develop:refs/remotes/origin/develop
 git tag --sort=-creatordate | head -5
 node -p "require('./package.json').version"
 head -10 CHANGELOG.md
+gh release view v<version> --json tagName,isDraft,isPrerelease,publishedAt
 ```
 
-Use the `v<version>` tag as the diff base when it exists. If the root version is
-ahead of the newest tag because a release PR merged but its Promote PR has not
-shipped yet, use the version-bump commit on `develop` as the next diff base:
+Use the exact newest published `v<version>` tag as the diff base. Verify that its
+GitHub Release is published and that the tag is reachable from `origin/main`; a
+local-only tag or an unmerged Promote candidate is not a release boundary. If
+the root version is ahead of the newest published tag because a release PR
+merged but its Promote PR has not shipped yet, use the version-bump commit on
+`develop` as the next diff base:
 
 ```bash
 node scripts/release/find-version-commit.mjs <version> origin/develop
@@ -66,6 +94,9 @@ git fetch origin develop
 git log v<last>..origin/develop --oneline --first-parent
 ```
 
+Here `v<last>` is the exact published tag established in step 1, never an
+earlier version-bump commit for the same release.
+
 For anything ambiguous, read the PR body with `gh pr view <number>` to identify
 the user-facing or operator-facing impact.
 
@@ -77,12 +108,13 @@ of every returned issue with
 `gh issue view <issue-url> --json author,authorAssociation,url`. Classify PR
 authors and issue reporters as external only when they are not bots and are not
 code owners. Also require an issue reporter's `authorAssociation` to be outside
-`OWNER`, `MEMBER`, and `COLLABORATOR`. Read the applicable `CODEOWNERS` file and
-resolve its individual GitHub-owner entries and organization-team entries before
-classifying them; if this repository has no `CODEOWNERS` file, no author or
-reporter is excluded on that basis, but the issue-author association check still
-applies. Do not treat someone as external merely because another person merged
-the PR or implemented the fix.
+`OWNER`, `MEMBER`, and `COLLABORATOR`. Read `.github/CODEOWNERS` directly rather
+than inferring its presence from recursive discovery or glob results, and resolve
+its individual GitHub-owner entries and organization-team entries before
+classifying them. If `.github/CODEOWNERS` does not exist, no author or reporter
+is excluded on that basis, but the issue-author association check still applies.
+Do not treat someone as external merely because another person merged the PR or
+implemented the fix.
 
 - Treat GitHub App and bot accounts as bots; never add contributor thanks for
   them.
@@ -277,6 +309,112 @@ Commit the generated release artifacts on a feature branch and open a PR against
 - a note that squash-merging the PR cuts the release and automatically opens
   the frozen **Promote vX.Y.Z to production** PR against `main`
 
+### 11. Monitor the promotion candidate, not just release preparation
+
+Release preparation and promotion are separate validation boundaries. Passing
+checks or reviews on the release-preparation PR do not clear the Promote PR.
+When the preparation PR merges, find the open Promote PR by its exact
+`release/vX.Y.Z` head and `main` base, and record its current head SHA. If the
+preparation PR has not merged, report that boundary; do not merge it just to
+continue monitoring.
+
+Inspect **both CI and reviews** on the current promotion head:
+
+```bash
+gh pr view <promote-pr> --json state,headRefOid,baseRefName,mergeable,reviewDecision,statusCheckRollup
+gh pr checks <promote-pr>
+gh api --paginate repos/<owner>/<repo>/pulls/<promote-pr>/reviews
+gh api --paginate repos/<owner>/<repo>/pulls/<promote-pr>/comments
+```
+
+Also retrieve all review threads, including their `isResolved` state, through
+the source-control review tool or paginated GraphQL. Inline comments alone do
+not establish whether a finding is resolved. Include top-level review summaries
+and the Roomote code-review check; green CI is not a substitute for review.
+
+- Require successful **CI**, applicable **Docs**, and required checks on the
+  promotion head, not on the preparation head or a previous candidate. Missing,
+  queued, running, cancelled, or failed checks are not a pass. Account explicitly
+  for conditional skipped jobs rather than treating every skip as success.
+- Report outstanding `CHANGES_REQUESTED`, unresolved review findings, failed or
+  pending automated reviews, and missing required human approvals separately
+  from CI. An empty review list or a null `reviewDecision` is not approval.
+- Re-read the head and PR state during each observation. A refresh or
+  reconciliation invalidates the old checks and review evidence; restart against
+  the new SHA. If the head changes while collecting results, discard that mixed
+  snapshot. If the PR merges externally, stop candidate mutation and report the
+  observed publication state without initiating release actions.
+- While authorized monitoring is active, poll at a bounded interval (for example
+  60 seconds for at most 30 minutes), report actionable failures promptly, and
+  stop with an explicit pending/input-needed result at the bound. Do not wait
+  indefinitely for a human review. Reuse an existing equivalent monitor instead
+  of scheduling duplicates; use supported Session follow-up only when available
+  and authorized, otherwise report the remaining checks without claiming a
+  monitor is running.
+- Review fixes stay within the audited candidate scope. Diagnose unrelated
+  runtime findings separately; do not silently pull in newer develop commits.
+  Candidate conflicts use the reconciliation procedure below, never a manual
+  push to the release branch.
+
+Report the Promote PR URL, observed head SHA, CI status, review status, and
+remaining blockers independently. Monitoring, a green status, or approval never
+authorizes merging, enabling auto-merge, tagging, publishing, or deployment by
+itself; use the user's requested scope, without reconfirming authorization
+already supplied.
+
+## Reconcile a frozen candidate with production
+
+Use **Reconcile Release Candidate** (`release-reconcile.yml`) to complete a
+requested repair of an open, unshipped candidate whose production base has
+diverged. The workflow must already be available on trusted `develop`; preparing
+its implementation PR is not evidence that reconciliation ran. It never imports
+the current develop tree. No tag may exist for the candidate, and the candidate
+must not already be contained in `main`.
+
+1. Fetch and pin the full candidate and main SHAs. Revalidate the published
+   baseline and open Promote PR. On an ordinary `reconcile/vX.Y.Z` branch rooted
+   at that exact candidate, merge only the pinned main with `--no-commit --no-ff`.
+   Do not merge develop or use blanket ours/theirs resolution.
+2. Resolve each conflict by intent, retaining production hotfixes and candidate
+   features/tests. Keep automatically merged files unchanged. Preserve the root
+   candidate version, its complete release section, and all published main
+   changelog history; do not run versioning or author new release notes. This is
+   reconciliation of existing generated artifacts, not a new release cut.
+3. Validate the actual merged tree with focused tests and ordinary commit/push
+   gates. The review commit must have exactly two parents in order: pinned
+   candidate, pinned main. Push only the ordinary `reconcile/vX.Y.Z` branch and
+   open a **review-only** PR targeting `release/vX.Y.Z`. Clearly mark it
+   **Do not merge: CI applies this reviewed tree**. Record the pins, each
+   conflict decision, hotfix preservation evidence, and validation. The current
+   reconciliation script enforces independent-human approval at the exact
+   resolution SHA and resolved review threads. Reuse valid existing approval;
+   do not add manual reviewer-permission lookups or another approval round trip.
+   Do not merge this review-only PR; CI applies its tree.
+4. Dispatch **Reconcile Release Candidate** on `develop` with `version` (without
+   `v`), `expected_candidate_sha`, `expected_main_sha`, and `resolution_sha`.
+   It requires `RELEASE_BOT_TOKEN` so the candidate push can trigger fresh PR CI.
+   CI verifies the open PR identities, approval and thread state, exact merge
+   parents, unchanged automatic-merge paths, release artifacts, and repeated
+   remote pins before creating its own merge commit and fast-forwarding the
+   release branch. It never executes code from the candidate or resolution.
+5. Inspect the run and actual remote head, then monitor the Promote PR's new CI
+   **and reviews** using step 11. CI appends reconciliation provenance to the
+   existing Promote PR body. If metadata fails after a successful push, report
+   that partial result; do not retry with stale pins or claim no change occurred.
+   Revalidate the actual remote head, parents, tree and open PR identity, then
+   repair only the missing metadata within the authorized repair. A failed run
+   after a successful push is not a reason to push or reconcile again.
+   After verifying successful application, close the completed review-only PR
+   without merging it as routine cleanup of the requested repair.
+
+After reconciliation the candidate generally diverges from develop. Ordinary
+Release refresh deliberately refuses that state; push-triggered Release runs
+also refuse to replace its metadata with the original version-bump SHA. Do not
+force the candidate back onto develop. Reconcile a later pinned production base
+through another reviewed run, or obtain a separately audited replacement-release
+decision if newer develop work is needed. If any pin, approval, publication, or
+scope guard fails, stop and re-audit rather than bypassing it.
+
 ## Emergency direct-to-main hotfix path
 
 Use this path only for an urgent production patch that cannot wait for the
@@ -459,7 +597,8 @@ validation results, current merge-order gate, and rollback risks.
 - Never push to `release/v*` manually. CI owns release branches; before a
   candidate reaches `main`, maintainers may amend its notes with
   `pnpm run version -- --amend` and explicitly dispatch the Release workflow to
-  fast-forward the open candidate from `develop`.
+  fast-forward the open candidate from `develop`. Production-base conflicts use
+  the explicitly authorized, reviewed CI reconciliation procedure above.
 - Never leave an older Promote PR open when an explicit superseding release is
   prepared. Close it so versions cannot be promoted out of order.
 - Never merge an out-of-date release PR. Regenerate it from the latest

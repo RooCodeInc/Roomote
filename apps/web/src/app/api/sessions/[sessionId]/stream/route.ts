@@ -12,7 +12,7 @@ import {
 
 import { authorizeUserToken } from '@/lib/server';
 import {
-  findAccessibleFastSession,
+  findReadableFastSession,
   getFastSessionMessagesSince,
   getFastSessionDisplayTitle,
 } from '@/lib/server/fast-sessions';
@@ -45,7 +45,7 @@ export async function GET(
     return NextResponse.json({ error: 'Not Found' }, { status: 404 });
   }
 
-  const session = await findAccessibleFastSession(
+  const session = await findReadableFastSession(
     authResult,
     parsedSessionId.data,
   );

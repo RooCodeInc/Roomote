@@ -40,7 +40,7 @@ import { resolveActingUserIdOrNull } from '../mcp/proxy-utils';
 
 type CustomAutomationVariables = Variables & {
   mcpAuth: McpAuth;
-  customAutomationAdminId: string;
+  customAutomationUser: { id: string; role: string };
 };
 
 const modelSchema = z
@@ -141,8 +141,8 @@ function isDuplicateNameViolation(error: unknown): boolean {
  * Expected validation failures thrown as plain Errors by
  * `createCustomAutomation` / `updateCustomAutomation` (packages/db),
  * `buildTarget`, and schedule validation (packages/sdk). These are safe to
- * echo to the admin-only MCP client so the calling agent can self-correct;
- * the web tRPC surface already shows the same messages to admins. Anything
+ * echo to the authorized MCP client so the calling agent can self-correct;
+ * the web tRPC surface already shows the same messages to users. Anything
  * not matched here is rethrown so the app-level onError handler logs it and
  * returns a generic 500.
  */
@@ -195,7 +195,7 @@ function knownErrorResponse(
   return null;
 }
 
-async function requireAdmin(auth: McpAuth): Promise<string | null> {
+async function resolveUser(auth: McpAuth) {
   let userId: string | null;
   try {
     userId = await resolveActingUserIdOrNull({
@@ -209,14 +209,10 @@ async function requireAdmin(auth: McpAuth): Promise<string | null> {
   if (!userId) return null;
 
   const user = await db.query.users.findFirst({
-    where: and(
-      eq(users.id, userId),
-      eq(users.role, 'admin'),
-      isNull(users.deletedAt),
-    ),
-    columns: { id: true },
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+    columns: { id: true, role: true },
   });
-  return user?.id ?? null;
+  return user ?? null;
 }
 
 function buildTarget(
@@ -278,16 +274,24 @@ export const customAutomationsRouter = new Hono<{
 }>();
 
 customAutomationsRouter.use('*', async (c, next) => {
-  const userId = await requireAdmin(c.get('mcpAuth'));
-  if (!userId) return c.json({ error: 'Admin access required' }, 403);
-  c.set('customAutomationAdminId', userId);
+  const user = await resolveUser(c.get('mcpAuth'));
+  if (!user) return c.json({ error: 'User access required' }, 403);
+  c.set('customAutomationUser', user);
   await next();
 });
 
-function adminId(c: {
-  get: (key: 'customAutomationAdminId') => string;
+function actorId(c: {
+  get: (key: 'customAutomationUser') => { id: string; role: string };
 }): string {
-  return c.get('customAutomationAdminId');
+  return c.get('customAutomationUser').id;
+}
+
+function canManage(
+  c: Context<{ Variables: CustomAutomationVariables }>,
+  automation: { createdByUserId: string | null },
+) {
+  const user = c.get('customAutomationUser');
+  return user.role === 'admin' || automation.createdByUserId === user.id;
 }
 
 async function assertEnabledModel(
@@ -333,13 +337,29 @@ function toApiAutomation<
 
 customAutomationsRouter.get('/', async (c) =>
   c.json({
-    automations: (await listCustomAutomations()).map(toApiAutomation),
+    automations: (await listCustomAutomations())
+      .filter((row) => canManage(c, row))
+      .map(toApiAutomation),
   }),
 );
 
 customAutomationsRouter.get('/models', async (c) =>
   c.json(await getDeploymentTaskModelOptions()),
 );
+
+customAutomationsRouter.get('/:id', async (c) => {
+  const automation = await getCustomAutomationById(c.req.param('id'));
+  if (!automation || !canManage(c, automation)) {
+    return c.json({ error: 'Custom automation was not found.' }, 404);
+  }
+  return c.json({
+    automation: {
+      id: automation.id,
+      name: automation.name,
+      prompt: automation.prompt,
+    },
+  });
+});
 
 customAutomationsRouter.post('/resolve-schedule', async (c) => {
   const parsed = z
@@ -350,7 +370,7 @@ customAutomationsRouter.post('/resolve-schedule', async (c) => {
     return c.json(
       await resolveCustomAutomationSchedule({
         schedule: parsed.data.schedule,
-        userId: adminId(c),
+        userId: actorId(c),
       }),
     );
   } catch (error) {
@@ -367,7 +387,7 @@ customAutomationsRouter.post('/', async (c) => {
     await assertEnabledModel(parsed.data.model, parsed.data.reasoningEffort);
     const schedule = await resolveWriteSchedule(
       parsed.data.schedule,
-      adminId(c),
+      actorId(c),
     );
     if (schedule.status === 'ambiguous') return c.json(schedule, 409);
 
@@ -390,8 +410,8 @@ customAutomationsRouter.post('/', async (c) => {
       model: parsed.data.model ?? null,
       reasoningEffort: parsed.data.reasoningEffort ?? null,
       environmentId: parsed.data.environmentId,
-      target: buildTarget(parsed.data, adminId(c)),
-      createdByUserId: adminId(c),
+      target: buildTarget(parsed.data, actorId(c)),
+      createdByUserId: actorId(c),
     });
     void captureActivationCustomAutomationChanged(
       'created',
@@ -415,7 +435,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
   const parsed = updateSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   const existing = await getCustomAutomationById(c.req.param('id'));
-  if (!existing) {
+  if (!existing || !canManage(c, existing)) {
     return c.json({ error: 'Custom automation was not found.' }, 404);
   }
   try {
@@ -427,7 +447,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
         : (parsed.data.reasoningEffort ?? existing.reasoningEffort);
     await assertEnabledModel(model, reasoningEffort);
     const schedule = parsed.data.schedule
-      ? await resolveWriteSchedule(parsed.data.schedule, adminId(c))
+      ? await resolveWriteSchedule(parsed.data.schedule, actorId(c))
       : {
           status: 'resolved' as const,
           scheduleMode: existing.scheduleMode as CustomAutomationScheduleMode,
@@ -512,7 +532,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
                 targetMode,
                 targetChannelId,
               },
-              existing.createdByUserId ?? adminId(c),
+              existing.createdByUserId ?? actorId(c),
             )
           : existingTarget,
     });
@@ -529,7 +549,7 @@ customAutomationsRouter.patch('/:id', async (c) => {
 
 customAutomationsRouter.delete('/:id', async (c) => {
   const existing = await getCustomAutomationById(c.req.param('id'));
-  if (!existing)
+  if (!existing || !canManage(c, existing))
     return c.json({ error: 'Custom automation was not found.' }, 404);
   await deleteCustomAutomation(existing.id);
   void captureActivationCustomAutomationChanged(
@@ -540,6 +560,10 @@ customAutomationsRouter.delete('/:id', async (c) => {
 });
 
 customAutomationsRouter.post('/:id/run', async (c) => {
+  const existing = await getCustomAutomationById(c.req.param('id'));
+  if (!existing || !canManage(c, existing)) {
+    return c.json({ error: 'Custom automation was not found.' }, 404);
+  }
   const result = await runCustomAutomationNow(c.req.param('id'));
   return c.json(result, result.outcome === 'failed' ? 400 : 200);
 });

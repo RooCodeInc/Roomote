@@ -74,6 +74,27 @@ That means you can ask things like:
 - "Check this customer PDF and draft the fix plan."
 - "Look at this screenshot and tell me what UI state it shows."
 
+## Videos from Roomote
+
+For new screencasts, Roomote prefers final MP4 (H.264) artifacts optimized for
+playback while retaining the native recording. Visual proof may use the original
+WebM when conversion tools or time are unavailable, or conversion fails. This
+preference does not convert arbitrary uploads or replace existing artifacts.
+
+Task recordings remain available as uploaded artifacts. In Slack, you can ask
+Roomote to share a selected recording as a native video file, including one from
+an earlier task in the current Session. This requires the Slack app's
+`files:write` permission; existing installations need reinstall or workspace
+admin reapproval after the scope is added. See
+[Slack video replies](/providers/communications/slack#video-replies)
+for recording ownership and size limits.
+
+WebM recordings are converted to MP4 for Slack delivery without replacing the
+original artifact. If conversion or upload fails, or native delivery is not
+available on the current surface, Roomote shares only the artifact viewer link,
+without an error or unavailability explanation. Roomote only describes a video
+as attached when native delivery succeeds.
+
 ## Best practices
 
 - Attach the smallest file that shows the issue clearly.

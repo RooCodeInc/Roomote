@@ -168,6 +168,7 @@ export async function claimTelegramSuggestionLaunch(input: {
   usesRouterLaunch: boolean;
   /** The scan or onboarding task that produced the suggestion. */
   sourceTaskId: string | null;
+  originSessionId?: unknown;
   launchClaimedAt: Date;
 } | null> {
   // Scope: a suggestion card for this work item must have been posted in this
@@ -210,6 +211,7 @@ export async function claimTelegramSuggestionLaunch(input: {
       : {}),
     usesRouterLaunch: routed,
     sourceTaskId: claimed.sourceTaskId,
+    originSessionId: trackedCard.metadata?.originSessionId,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }

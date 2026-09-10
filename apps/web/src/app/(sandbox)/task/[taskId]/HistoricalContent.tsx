@@ -26,6 +26,7 @@ import { PreviewCommand } from './PreviewCommand';
 import { PreviewPaneLayout } from './PreviewPaneLayout';
 import { WakeTaskInput } from './WakeTaskInput';
 import { OnboardingCompletionMessage } from './OnboardingCompletionMessage';
+import { TaskRobotIconScope } from './TaskRobotIconScope';
 
 interface HistoricalContentProps {
   session: TaskSession;
@@ -109,27 +110,34 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
                 taskRun={session.taskRun ?? null}
                 asleep={isAsleep}
               />
-              <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
-                <Header session={session} />
-                <Messages
-                  session={session}
-                  initialScrollBehavior={messagesInitialScrollBehavior}
-                  footer={messagesFooter}
-                />
-                {shouldShowWakeTaskInput && taskRun ? (
-                  <HistoricalInputTray>
-                    <WakeTaskInput
-                      taskRun={taskRun}
-                      initialPrompt={draftPrompt ?? ''}
-                      embedded
-                    />
-                  </HistoricalInputTray>
-                ) : isResuming && draftPrompt ? (
-                  <HistoricalInputTray>
-                    <DraftPromptBanner draftPrompt={draftPrompt} embedded />
-                  </HistoricalInputTray>
-                ) : null}
-              </div>
+              <TaskRobotIconScope
+                taskId={session.taskId}
+                fastAgentSessionId={
+                  session.taskRun?.payload?.fastAgentSessionId
+                }
+              >
+                <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col rounded-r-3xl bg-background">
+                  <Header session={session} />
+                  <Messages
+                    session={session}
+                    initialScrollBehavior={messagesInitialScrollBehavior}
+                    footer={messagesFooter}
+                  />
+                  {shouldShowWakeTaskInput && taskRun ? (
+                    <HistoricalInputTray>
+                      <WakeTaskInput
+                        taskRun={taskRun}
+                        initialPrompt={draftPrompt ?? ''}
+                        embedded
+                      />
+                    </HistoricalInputTray>
+                  ) : isResuming && draftPrompt ? (
+                    <HistoricalInputTray>
+                      <DraftPromptBanner draftPrompt={draftPrompt} embedded />
+                    </HistoricalInputTray>
+                  ) : null}
+                </div>
+              </TaskRobotIconScope>
             </ArtifactLinkProvider>
           </PreviewPaneLayout>
         </WorkspaceSurface>
@@ -157,9 +165,7 @@ function WakingUpMessage() {
       <MessageContent>
         <div className="flex items-center gap-2 text-sm">
           <Sun className="size-4 shrink-0 text-muted-foreground" />
-          <Shimmer direction="rl" duration={1}>
-            Waking up
-          </Shimmer>
+          <Shimmer>Waking up</Shimmer>
         </div>
       </MessageContent>
     </Message>

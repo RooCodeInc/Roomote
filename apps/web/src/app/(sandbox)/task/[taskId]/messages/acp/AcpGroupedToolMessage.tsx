@@ -1,6 +1,12 @@
 import { sanitizeSandboxPathString } from '@/lib';
 
-import { type LucideIcon, AlertCircle } from '@/components/system';
+import {
+  type LucideIcon,
+  AlertCircle,
+  Loader2,
+  Telescope,
+} from '@/components/system';
+import { useTaskRobotIconContext } from '@/components/tasks/TaskRobotIcon';
 import {
   Message,
   MessageContent,
@@ -16,6 +22,9 @@ import type { GroupedToolCallRenderBlock } from './render-blocks';
 import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
 import { resolveToolPresentation } from './tool-presentation';
 import { resolveToolPresentationPolicy } from './tool-presentation-policy';
+import { resolveTaskToolReference } from './task-tool-reference';
+import { useTaskToolIcon } from './task-tool-icon';
+import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
 interface AcpGroupedToolMessageProps {
   group: GroupedToolCallRenderBlock;
@@ -62,7 +71,19 @@ export function AcpGroupedToolMessage({
   const ToolIcon = groupedToolIcon({
     presentation: firstPresentation,
     hasFailed,
+    isExploration: group.action === 'Exploring',
   });
+  const context = useTaskRobotIconContext();
+  const references = group.items.map((item) =>
+    resolveTaskToolReference(item.msg, context),
+  );
+  const firstReference = references[0];
+  const uniformReference =
+    firstReference?.taskId &&
+    references.every((reference) => reference?.taskId === firstReference.taskId)
+      ? firstReference
+      : null;
+  const taskIcon = useTaskToolIcon(uniformReference, hasFailed);
 
   return (
     <Message from="assistant" className="chat-tool-use-message">
@@ -80,6 +101,7 @@ export function AcpGroupedToolMessage({
             action={group.action}
             object={objectSummary}
             icon={ToolIcon}
+            {...taskIcon}
             state={toolState}
             collapsible={showExpandedDetails}
           />
@@ -93,16 +115,11 @@ export function AcpGroupedToolMessage({
                   resolveToolPresentationPolicy(item.msg, {
                     showInternalMessages: showSubagentPayload,
                   }).detailMode === 'expandable';
-                const presentation = resolveToolPresentation(
-                  item.msg.data,
-                  item.msg.partial,
-                );
-
                 return (
                   <section key={item.msg.id} className="space-y-2">
                     <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground">
                       <GroupedToolItemIcon
-                        presentation={presentation}
+                        msg={item.msg}
                         className="size-3 shrink-0"
                       />
                       <span className="truncate">{sectionTitle}</span>
@@ -128,22 +145,56 @@ export function AcpGroupedToolMessage({
 function groupedToolIcon(params: {
   presentation: ReturnType<typeof resolveToolPresentation>;
   hasFailed: boolean;
+  isExploration: boolean;
 }): LucideIcon {
   if (params.hasFailed) return AlertCircle;
+  if (params.isExploration) return Telescope;
   return params.presentation.integrationIcon
     ? mcpIntegrationIconFor(params.presentation.integrationIcon)
     : toolIconForKey(params.presentation.iconKey);
 }
 
 function GroupedToolItemIcon({
-  presentation,
+  msg,
   className,
 }: {
-  presentation: ReturnType<typeof resolveToolPresentation>;
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
   className?: string;
 }) {
-  const Icon = presentation.integrationIcon
-    ? mcpIntegrationIconFor(presentation.integrationIcon)
-    : toolIconForKey(presentation.iconKey);
+  const presentation = resolveToolPresentation(msg.data, msg.partial);
+  const context = useTaskRobotIconContext();
+  const reference = resolveTaskToolReference(msg, context);
+  const failed = presentation.phase === 'failed';
+  const { iconElement, iconAction } = useTaskToolIcon(reference, failed);
+  const Icon =
+    reference && failed
+      ? AlertCircle
+      : presentation.integrationIcon
+        ? mcpIntegrationIconFor(presentation.integrationIcon)
+        : toolIconForKey(presentation.iconKey);
+  if (iconElement) {
+    return (
+      <>
+        {iconAction ? (
+          <button
+            type="button"
+            aria-label={iconAction.label}
+            onClick={iconAction.onClick}
+            className="shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {iconElement}
+          </button>
+        ) : (
+          iconElement
+        )}
+        {presentation.phase === 'running' ? (
+          <Loader2
+            aria-label="Running"
+            className="size-3 shrink-0 animate-spin"
+          />
+        ) : null}
+      </>
+    );
+  }
   return <Icon className={className} />;
 }

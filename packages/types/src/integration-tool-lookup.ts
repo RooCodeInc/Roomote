@@ -49,7 +49,11 @@ export function matchIntegrationTools(
     }
     if (params.toolName && tool.name !== params.toolName) continue;
     const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase();
-    if (terms.length > 0 && !terms.every((term) => haystack.includes(term))) {
+    if (
+      !params.toolName &&
+      terms.length > 0 &&
+      !terms.every((term) => haystack.includes(term))
+    ) {
       continue;
     }
     matches.push({
@@ -70,15 +74,32 @@ export const FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS = {
   integrationId:
     "Exact on-demand integration id from the integrations listed in your instructions; lists that integration's tools",
   toolName: "Exact tool name to fetch one tool's input schema",
-  query: 'Keywords matched against tool names and descriptions',
+  query:
+    'Keywords matched against tool names and descriptions; ignored when toolName is provided',
   limit: `Maximum tools to return (default ${INTEGRATION_TOOL_LOOKUP_DEFAULT_LIMIT}, at most ${INTEGRATION_TOOL_LOOKUP_MAX_LIMIT})`,
 } as const;
 
 export const CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS = {
   integrationId: `Exact on-demand integration id from ${FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools}`,
   toolName: 'Exact tool name on that integration',
-  args: "Tool arguments matching the tool's input schema",
+  args: "Tool arguments matching the tool's input schema. Pass {} when the tool takes none.",
 } as const;
+
+/**
+ * Argument values stay concrete but non-recursive on the wire. A recursive
+ * `z.lazy` schema serializes to JSON-pointer `$ref`s that OpenCode and
+ * provider schema rewrites leave dangling; gpt-5.x models then read `args`
+ * as unsatisfiable and send `null` on every call. Nested values are
+ * validated by the integration's own schema when the tool runs.
+ */
+const integrationToolArgumentValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.unknown()),
+  z.record(z.unknown()),
+]);
 
 /**
  * The on-demand integration tools as the model sees them on every surface.
@@ -143,9 +164,12 @@ export const CALL_INTEGRATION_TOOL_TOOL = {
       .trim()
       .min(1)
       .describe(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.toolName),
+    // Required on purpose: an optional field becomes `anyOf [object, null]`
+    // on the member MCP server (see NullableOptionalsMcpServer), and gpt-5.x
+    // models take the null branch for a property-less object even when the
+    // integration tool needs arguments.
     args: z
-      .record(z.unknown())
-      .optional()
+      .record(integrationToolArgumentValueSchema)
       .describe(CALL_INTEGRATION_TOOL_ARG_DESCRIPTIONS.args),
   },
   annotations: {

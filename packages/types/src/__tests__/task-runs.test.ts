@@ -3,6 +3,7 @@
 import {
   type TaskPayload,
   DEFAULT_CODING_HARNESS,
+  getTaskInitiatorLinkedUserId,
   DEFAULT_LAUNCH_CODING_HARNESS,
   getCommunicationChannelFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
@@ -39,8 +40,39 @@ import {
   WORK_ITEM_ACTIVE_STATUSES,
   shouldUseAppTokenOnly,
 } from '../task-runs';
-import { ALL_REPOSITORIES } from '../constants';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '../constants';
 import { getSnapshotExpiresAt } from '../compute-providers/snapshot-retention';
+
+describe('getTaskInitiatorLinkedUserId', () => {
+  it('links a user initiator to its user', () => {
+    expect(getTaskInitiatorLinkedUserId({ kind: 'user', userId: 'u1' })).toBe(
+      'u1',
+    );
+    expect(
+      getTaskInitiatorLinkedUserId({
+        kind: 'user',
+        externalId: 'U1',
+        matchedUserId: 'u2',
+      }),
+    ).toBe('u2');
+    expect(
+      getTaskInitiatorLinkedUserId({ kind: 'user', externalId: 'U1' }),
+    ).toBeNull();
+  });
+
+  it('links an automation initiator only through its acting user', () => {
+    expect(
+      getTaskInitiatorLinkedUserId({ kind: 'automation', key: 'suggester' }),
+    ).toBeNull();
+    expect(
+      getTaskInitiatorLinkedUserId({
+        kind: 'automation',
+        key: 'custom_automation',
+        actingUserId: 'u3',
+      }),
+    ).toBe('u3');
+  });
+});
 
 describe('isSourceControlTaskSurface', () => {
   it.each(['github', 'gitlab', 'gitea', 'bitbucket', 'ado'] as const)(
@@ -1273,6 +1305,28 @@ describe('taskSpecSchema', () => {
     ).toEqual({
       type: 'repository_set',
       repositories: ['acme/api', 'acme/web'],
+    });
+  });
+
+  it('resolves an explicit no-repositories workspace without widening its scope', () => {
+    expect(
+      resolveTaskWorkspace({
+        repo: NO_REPOSITORIES,
+        selectedRepositories: ['acme/api'],
+      }),
+    ).toEqual({ type: 'no_repositories' });
+  });
+
+  it('keeps an explicit environment authoritative over the no-repositories sentinel', () => {
+    expect(
+      resolveTaskWorkspace({
+        repo: NO_REPOSITORIES,
+        environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+      }),
+    ).toMatchObject({
+      type: 'environment',
+      environmentId: '14f1f7c4-b126-4b3f-a6a8-e37f7d299f4d',
+      sourceRepo: NO_REPOSITORIES,
     });
   });
 

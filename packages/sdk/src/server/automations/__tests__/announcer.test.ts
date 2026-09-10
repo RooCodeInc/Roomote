@@ -1,12 +1,15 @@
 const {
   slackInstallationsTable,
   taskPullRequestsTable,
+  repositoriesTable,
   mockSlackInstallationRows,
   mockMergedPullRequestRows,
+  mockActiveRepositoryRows,
   mockGetAutomationRuntime,
   mockRecordAutomationRunOutcome,
   mockUpsertBackgroundAutomationSlackThread,
   mockResolveAutomationRuntimeDestination,
+  mockResolveAutomationRepositoryDestination,
   mockListConnectedCommunicationProviders,
   mockHasAnyActiveRepository,
   mockGetCommunicationProviderAdapter,
@@ -22,6 +25,9 @@ const {
   },
   taskPullRequestsTable: {
     repository: 'repository',
+    repositoryId: 'repositoryId',
+    sourceControlProvider: 'sourceControlProvider',
+    host: 'host',
     prNumber: 'prNumber',
     prTitle: 'prTitle',
     prUrl: 'prUrl',
@@ -29,12 +35,21 @@ const {
     status: 'status',
     taskId: 'taskId',
   },
+  repositoriesTable: {
+    id: 'repositoryId',
+    fullName: 'repositoryFullName',
+    sourceControlProvider: 'sourceControlProvider',
+    host: 'repositoryHost',
+    isActive: 'isActive',
+  },
   mockSlackInstallationRows: vi.fn(),
   mockMergedPullRequestRows: vi.fn(),
+  mockActiveRepositoryRows: vi.fn(),
   mockGetAutomationRuntime: vi.fn(),
   mockRecordAutomationRunOutcome: vi.fn(),
   mockUpsertBackgroundAutomationSlackThread: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
+  mockResolveAutomationRepositoryDestination: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
   mockHasAnyActiveRepository: vi.fn(),
   mockGetCommunicationProviderAdapter: vi.fn(),
@@ -50,6 +65,9 @@ vi.mock('@roomote/db/server', () => ({
       from: (table: unknown) => {
         if (table === slackInstallationsTable) {
           return { where: () => mockSlackInstallationRows() };
+        }
+        if (table === repositoriesTable) {
+          return { where: () => mockActiveRepositoryRows() };
         }
 
         return {
@@ -70,11 +88,14 @@ vi.mock('@roomote/db/server', () => ({
     mockUpsertBackgroundAutomationSlackThread,
   slackInstallations: slackInstallationsTable,
   taskPullRequests: taskPullRequestsTable,
+  repositories: repositoriesTable,
   tasks: { id: 'id' },
   and: vi.fn(),
   eq: vi.fn(),
   gte: vi.fn(),
   isNotNull: vi.fn(),
+  inArray: vi.fn(),
+  or: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -97,9 +118,12 @@ vi.mock('../destination', () => ({
     provider: string;
     channelId: string;
     serviceUrl?: string;
+    teamId?: string;
   }) =>
     destination.provider === 'slack'
-      ? {}
+      ? destination.teamId
+        ? { teamId: destination.teamId }
+        : {}
       : {
           communicationProvider: destination.provider,
           communicationChannelId: destination.channelId,
@@ -117,6 +141,11 @@ vi.mock('../destination', () => ({
 
 vi.mock('../github-deployment-scope', () => ({
   hasAnyActiveRepository: mockHasAnyActiveRepository,
+}));
+
+vi.mock('../ci-failure-triage-routing', () => ({
+  resolveAutomationRepositoryDestination:
+    mockResolveAutomationRepositoryDestination,
 }));
 
 vi.mock('../../lib/communication-providers', () => ({
@@ -149,6 +178,9 @@ import { announcerJob } from '../announcer';
 const MERGED_PR_ROWS = [
   {
     repo: 'acme/app',
+    repositoryId: '11111111-1111-4111-8111-111111111111',
+    sourceControlProvider: 'github',
+    host: null,
     prNumber: 1,
     prTitle: 'Fix bug',
     prUrl: 'https://github.com/acme/app/pull/1',
@@ -156,6 +188,9 @@ const MERGED_PR_ROWS = [
   },
   {
     repo: 'acme/app',
+    repositoryId: '11111111-1111-4111-8111-111111111111',
+    sourceControlProvider: 'github',
+    host: null,
     prNumber: 2,
     prTitle: 'Add thing',
     prUrl: 'https://github.com/acme/app/pull/2',
@@ -183,8 +218,20 @@ describe('announcerJob non-Slack posting', () => {
       lastRunAt: null,
       instructions: null,
       destination: null,
+      settings: {},
     });
     mockMergedPullRequestRows.mockResolvedValue(MERGED_PR_ROWS);
+    mockActiveRepositoryRows.mockResolvedValue([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        fullName: 'acme/app',
+        sourceControlProvider: 'github',
+        host: null,
+      },
+    ]);
+    mockResolveAutomationRepositoryDestination.mockImplementation(
+      async ({ destination }) => destination ?? null,
+    );
     mockLoadAutomationThreadFeedbackContext.mockResolvedValue(null);
     mockEnqueueTask.mockResolvedValue({ taskId: 'announcer-task-1' });
 
@@ -234,6 +281,46 @@ describe('announcerJob non-Slack posting', () => {
     );
   });
 
+  it('ignores installation A before any outcome and launches the manager report for owner B', async () => {
+    mockSlackInstallationRows.mockResolvedValue([
+      { slackBotToken: 'xoxb-a', slackTeamId: 'T-A' },
+      { slackBotToken: 'xoxb-b', slackTeamId: 'T-B' },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C-MANAGER',
+      teamId: 'T-B',
+      source: 'manager_channel',
+    });
+    mockGetAutomationRuntime.mockImplementation(async () => ({
+      key: 'announcer',
+      enabled: mockRecordAutomationRunOutcome.mock.calls.length === 0,
+      scheduleMode: 'daily',
+      lastRunAt: null,
+      instructions: null,
+      destination: null,
+    }));
+    const result = await announcerJob();
+    expect(result.completed).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            teamId: 'T-B',
+            slackChannel: 'C-MANAGER',
+          }),
+        }),
+      }),
+    );
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ status: 'succeeded' }),
+    );
+  });
+
   it('stamps the Teams destination onto the task', async () => {
     mockListConnectedCommunicationProviders.mockResolvedValue(['teams']);
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
@@ -277,6 +364,53 @@ describe('announcerJob non-Slack posting', () => {
         surface: 'telegram',
       }),
     );
+  });
+
+  it('routes same-name repositories by their persisted repository IDs', async () => {
+    const secondRepositoryId = '22222222-2222-4222-8222-222222222222';
+    mockMergedPullRequestRows.mockResolvedValue([
+      MERGED_PR_ROWS[0],
+      {
+        ...MERGED_PR_ROWS[1],
+        repositoryId: secondRepositoryId,
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.example.com',
+        prUrl: 'https://gitlab.example.com/acme/app/-/merge_requests/2',
+      },
+    ]);
+    mockActiveRepositoryRows.mockResolvedValue([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        fullName: 'acme/app',
+        sourceControlProvider: 'github',
+        host: null,
+      },
+      {
+        id: secondRepositoryId,
+        fullName: 'acme/app',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.example.com',
+      },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+    mockResolveAutomationRepositoryDestination.mockImplementation(
+      async ({ repositoryId }) => ({
+        provider: 'telegram',
+        channelId: repositoryId === secondRepositoryId ? '-100222' : '-100111',
+      }),
+    );
+
+    await announcerJob({ manualTrigger: true });
+
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
+    expect(
+      mockResolveAutomationRepositoryDestination.mock.calls.map(
+        ([params]) => params.repositoryId,
+      ),
+    ).toEqual(['11111111-1111-4111-8111-111111111111', secondRepositoryId]);
   });
 
   it('records a failed outcome when task launch fails', async () => {

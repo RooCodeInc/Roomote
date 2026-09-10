@@ -41,6 +41,13 @@ export function CommsProviders() {
           return;
         }
 
+        if (result?.agentmail) {
+          toast.success(
+            `Email connected. Roomote receives mail at ${result.agentmail.inboxEmail ?? result.agentmail.inboxAddress}.`,
+          );
+          return;
+        }
+
         if (result?.discord) {
           if (result.discord.registered) {
             toast.success(

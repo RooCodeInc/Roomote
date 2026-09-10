@@ -50,6 +50,7 @@ vi.mock('./fast-agent-parent-event-queue', () => ({
 
 import {
   admitFastAgentHumanFollowUp,
+  admitFastAgentInlineHumanTurn,
   persistFastAgentInlineHumanTurn,
 } from './fast-agent-human-follow-up';
 
@@ -133,6 +134,67 @@ describe('persistFastAgentInlineHumanTurn', () => {
     expect(mocks.updateWhere).toHaveBeenCalledOnce();
   });
 
+  it('does not let a reaction supersede a parked or interrupted turn', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    await expect(
+      persistFastAgentInlineHumanTurn({
+        parent,
+        event: {
+          ...event,
+          input: {
+            type: 'reaction',
+            externalInput: {
+              type: 'reaction_added',
+              provider: 'slack',
+              reactions: [{ name: 'thumbsup' }],
+              reactor: { externalUserId: 'user-1' },
+              message: {
+                workspaceId: 'team-1',
+                channelId: 'channel-1',
+                messageId: '100.1',
+                threadId: '100.1',
+                text: 'Earlier message',
+              },
+              eventId: '100.3',
+            },
+          },
+        },
+      }),
+    ).resolves.toEqual({ id: 'row-1', eventKey: 'stable-event-key' });
+    // The reaction's own row is persisted, but the older pending inline row
+    // (a turn parked for a retry or waiting to resume) is left alone.
+    expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    expect(mocks.updateWhere).not.toHaveBeenCalled();
+  });
+
+  it('does not let a platform event supersede a parked or interrupted turn', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+
+    await expect(
+      persistFastAgentInlineHumanTurn({
+        parent,
+        event: {
+          ...event,
+          turnSource: 'platform_event',
+          platformEventKind: 'delegated_task',
+          setupSession: true,
+        },
+      }),
+    ).resolves.toEqual({ id: 'row-1', eventKey: 'stable-event-key' });
+    expect(mocks.updateWhere).not.toHaveBeenCalled();
+  });
+
   it('returns no durable handle when the same message already settled', async () => {
     mocks.findFirst.mockResolvedValue({
       id: 'row-1',
@@ -144,6 +206,31 @@ describe('persistFastAgentInlineHumanTurn', () => {
       persistFastAgentInlineHumanTurn({ parent, event }),
     ).resolves.toBeNull();
     expect(mocks.updateWhere).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes a settled message from a fresh admission', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: new Date(),
+    });
+    await expect(
+      admitFastAgentInlineHumanTurn({ parent, event }),
+    ).resolves.toEqual({ status: 'settled' });
+
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+    await expect(
+      admitFastAgentInlineHumanTurn({ parent, event }),
+    ).resolves.toEqual({
+      status: 'admitted',
+      turn: { id: 'row-1', eventKey: 'stable-event-key' },
+    });
   });
 });
 
@@ -175,6 +262,26 @@ describe('admitFastAgentHumanFollowUp', () => {
       durable: { id: 'row-1', eventKey: 'stable-event-key' },
     });
     expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('flags a settled message so the inline turn is skipped', async () => {
+    const turnLock = vi.fn();
+    mocks.acquireTurnLock.mockResolvedValue(turnLock);
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: new Date(),
+      discardedAt: null,
+    });
+
+    await expect(
+      admitFastAgentHumanFollowUp({ parent, event }),
+    ).resolves.toEqual({
+      kind: 'turn',
+      turnLock,
+      durable: null,
+      settled: true,
+    });
   });
 
   it('still runs the turn inline when durable admission cannot be persisted', async () => {

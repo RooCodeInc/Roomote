@@ -256,6 +256,13 @@ describe('MCP session routes', () => {
       taskId: task.id,
       origin: 'fast_delegation',
     });
+    await db.insert(taskRuns).values({
+      taskId: task.id,
+      actingUserId: owner.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: { repo: '', description: 'Inspect release checks' },
+      taskPhase: 'waiting_for_user_input',
+    });
 
     const listResponse = await createApp(owner.id).request(
       '/sessions?query=release',
@@ -271,7 +278,7 @@ describe('MCP session routes', () => {
               taskId: task.id,
               title: 'Inspect release checks',
               origin: 'fast_delegation',
-              latestRun: null,
+              latestRun: { taskPhase: 'waiting_for_user_input' },
             },
           ],
         },
@@ -285,6 +292,21 @@ describe('MCP session routes', () => {
     await expect(summaryResponse.json()).resolves.toMatchObject({
       id: session.id,
       tasks: [{ taskId: task.id }],
+    });
+
+    const updatesResponse = await createApp(owner.id).request(
+      `/sessions/${session.id}/updates`,
+    );
+    await expect(updatesResponse.json()).resolves.toMatchObject({
+      narrative: [],
+      responseNeeded: true,
+      state: {
+        changed: true,
+        current: {
+          status: 'needs_input',
+          tasks: [{ taskId: task.id, taskPhase: 'waiting_for_user_input' }],
+        },
+      },
     });
   });
 
@@ -350,6 +372,21 @@ describe('MCP session routes', () => {
       },
       {
         conversationId: conversation!.id,
+        eventId: 'visible-same-ts',
+        turnId: 'turn-newer-sequence',
+        turnSeq: 1,
+        ts: 1,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [
+          { type: 'text', text: 'Same timestamp, later sequence' },
+        ],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+        source: 'web',
+      },
+      {
+        conversationId: conversation!.id,
         eventId: 'hidden-middle',
         turnId: 'turn-hidden',
         turnSeq: 0,
@@ -387,10 +424,42 @@ describe('MCP session routes', () => {
         metadata: Record<string, unknown> | null;
       }>;
     };
-    expect(body.returned).toBe(2);
+    expect(body.returned).toBe(3);
     expect(body.messages[0]?.text).not.toBe('Unbounded output');
     expect(body.messages[0]?.metadata).toHaveProperty('truncation');
-    expect(body.messages[1]?.text).toBe('Older message');
+    expect(body.messages[1]?.text).toBe('Same timestamp, later sequence');
+    expect(body.messages[2]?.text).toBe('Older message');
+
+    const updatesResponse = await createApp(owner.id).request(
+      `/sessions/${session.id}/updates`,
+    );
+    expect(updatesResponse.status).toBe(200);
+    const updates = (await updatesResponse.json()) as {
+      narrative: Array<{ direction: string; text: string }>;
+      nextCursor: string;
+      state: { changed: boolean };
+    };
+    expect(updates.narrative).toEqual([
+      expect.objectContaining({
+        direction: 'Codex → Roomote',
+        text: 'Older message',
+      }),
+      expect.objectContaining({
+        direction: 'Roomote → Codex',
+        text: 'Same timestamp, later sequence',
+      }),
+    ]);
+    expect(JSON.stringify(updates)).not.toContain('Unbounded output');
+    expect(updates.state.changed).toBe(true);
+
+    const unchangedUpdates = await createApp(owner.id).request(
+      `/sessions/${session.id}/updates?cursor=${encodeURIComponent(updates.nextCursor)}`,
+    );
+    await expect(unchangedUpdates.json()).resolves.toMatchObject({
+      narrative: [],
+      state: { changed: false },
+      nextCursor: updates.nextCursor,
+    });
 
     const sendResponse = await createApp(owner.id).request(
       `/sessions/${session.id}/send_message`,
@@ -401,6 +470,13 @@ describe('MCP session routes', () => {
       },
     );
     expect(sendResponse.status).toBe(200);
+    await expect(sendResponse.clone().json()).resolves.toMatchObject({
+      sent: {
+        direction: 'Codex → Roomote',
+        target: { kind: 'session', id: session.id },
+        text: 'Continue this Session',
+      },
+    });
     expect(mocks.queueFastAgentSurfaceReply).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: conversation!.id,

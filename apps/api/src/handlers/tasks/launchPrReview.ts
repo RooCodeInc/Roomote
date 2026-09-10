@@ -13,6 +13,7 @@ import {
   TaskPayloadKind,
   type FastAgentParent,
   type FastAgentSourceControlSurface,
+  type HarnessModelOverrides,
   type TaskLaunchRequest,
   type TaskPayload,
 } from '@roomote/types';
@@ -39,6 +40,7 @@ export async function handlePrReviewLaunch(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
   auth: { userId: string },
   body: TaskLaunchRequest,
+  harnessModelOverrides?: HarnessModelOverrides,
 ) {
   const repositoryFullName = body.repo?.trim();
   const prNumber = body.prNumber;
@@ -156,6 +158,8 @@ export async function handlePrReviewLaunch(
     prUrl: pullRequest.url,
     headSha: pullRequest.sha,
     ...(target.branch ? { branchName: target.branch } : {}),
+    ...(body.reasoningEffort ? { reasoningEffort: body.reasoningEffort } : {}),
+    ...(harnessModelOverrides ? { harnessModelOverrides } : {}),
     ...(parent
       ? {
           ...buildFastAgentSessionAttachment(parent),

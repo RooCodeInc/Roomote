@@ -423,6 +423,44 @@ export async function saveBrainAgentSummary(
 }
 
 /**
+ * Re-ingest every completed run of a task after something the task produced
+ * reached an outcome the memory should carry (a linked pull request merged or
+ * was closed unmerged). The page content is rebuilt from live rows by the
+ * drainer, so this only needs to hand the rows back: a settled row returns to
+ * 'pending' with a fresh retry budget and a bumped revision (same fencing as
+ * saveBrainAgentSummary, so an in-flight writer re-puts rather than strands
+ * the stale snapshot), a claimed row keeps its single writer, and a completed
+ * run that never got a row (Memory enabled after the fact) gets one now.
+ * Returns how many rows were touched; zero when the task has no completed run.
+ */
+export async function requeueBrainMemoryEventsForTasks(
+  database: DatabaseOrTransaction,
+  taskIds: string[],
+): Promise<number> {
+  if (taskIds.length === 0) {
+    return 0;
+  }
+
+  const rows = (await database.execute(
+    sql`INSERT INTO ${brainMemoryEvents} (run_id)
+        SELECT id FROM ${taskRuns}
+        WHERE task_id IN (${sql.join(
+          taskIds.map((taskId) => sql`${taskId}`),
+          sql`, `,
+        )}) AND status = ${RunStatus.Completed}
+        ON CONFLICT (run_id) DO UPDATE SET
+          revision = ${brainMemoryEvents}.revision + 1,
+          status = CASE WHEN ${brainMemoryEvents}.status = 'processing' THEN 'processing' ELSE 'pending' END,
+          attempts = CASE WHEN ${brainMemoryEvents}.status = 'processing' THEN ${brainMemoryEvents}.attempts ELSE 0 END,
+          last_error = NULL,
+          updated_at = now()
+        RETURNING id`,
+  )) as unknown as Array<{ id: string }>;
+
+  return rows.length;
+}
+
+/**
  * Backfill: enqueue outbox events for every already-completed run, so
  * connecting the brain sucks in the deployment's task history rather than
  * only learning from tasks completed after enablement. Idempotent via the

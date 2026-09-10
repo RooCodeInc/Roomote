@@ -200,6 +200,7 @@ describe('buildOpenCodeCliEnv', () => {
           agent: {
             unsafe: { mode: 'subagent', tools: { bash: true } },
           },
+          subagent_depth: 10,
         }),
       },
       { preserveReasoning: true, promptOnlySubagents: true },
@@ -209,6 +210,7 @@ describe('buildOpenCodeCliEnv', () => {
     // Fast intentionally leaves OpenCode 1.18.10's 50 KiB / 2,000-line
     // defaults in force; the bridge takeover predicate shares those defaults.
     expect(config).not.toHaveProperty('tool_output');
+    expect(config.subagent_depth).toBe(2);
     expect(config.permission).toEqual({
       ...NON_TASK_TOOL_PERMISSION_DENIALS,
       task: 'allow',
@@ -227,6 +229,7 @@ describe('buildOpenCodeCliEnv', () => {
           '*': true,
           task: false,
           roomote_manage_custom_automations: false,
+          roomote_create_custom_skill: false,
           send_chat_reply: false,
         },
       });

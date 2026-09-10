@@ -28,7 +28,10 @@ import {
   renewFastSessionRespondingLease,
 } from '../fast-agent-conversation-repository';
 import { FAST_AGENT_REACTION_INPUT_TYPE } from '../fast-agent-conversation';
-import { hasFastAgentSession } from '../fast-agent-session';
+import {
+  getOrCreateFastAgentSession,
+  hasFastAgentSession,
+} from '../fast-agent-session';
 
 const createdUserIds: string[] = [];
 
@@ -55,6 +58,52 @@ afterEach(async () => {
 });
 
 describe('Fast conversation repository', () => {
+  it.each([true, false])(
+    'seeds model settings only on insert (initial overrides: %s)',
+    async (withOverrides) => {
+      const user = await createUser();
+      const conversation = {
+        surface: 'automation' as const,
+        workspaceId: 'model-settings-test',
+        conversationId: crypto.randomUUID(),
+      };
+      const expected = {
+        model: withOverrides ? 'openai/gpt-5.6' : null,
+        reasoningEffort: withOverrides ? 'high' : null,
+      };
+      const created = await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        ...(withOverrides
+          ? {
+              initialModel: 'openai/gpt-5.6',
+              initialReasoningEffort: 'high' as const,
+            }
+          : {}),
+      });
+      expect(created).toMatchObject({ created: true, ...expected });
+
+      const reused = await getOrCreateFastAgentSession({
+        userId: user.id,
+        conversation,
+        initialModel: 'anthropic/claude-sonnet-5',
+        initialReasoningEffort: 'low',
+      });
+      expect(reused).toMatchObject({
+        id: created.id,
+        created: false,
+        ...expected,
+      });
+      await expect(
+        fastAgentConversationRepository.findById({ id: created.id }),
+      ).resolves.toMatchObject(expected);
+      const row = await db.query.fastAgentConversations.findFirst({
+        where: eq(fastAgentConversations.id, created.id),
+      });
+      expect(row).toMatchObject(expected);
+    },
+  );
+
   it('persists a channel-less automation conversation', async () => {
     const user = await createUser();
     const conversation = {
@@ -1397,7 +1446,11 @@ describe('Fast conversation repository', () => {
       eventType: 'roomote_runtime.assistant_message',
       role: 'assistant',
       contentBlocks: [{ type: 'text', text: 'Starting on it.' }],
-      metadata: { visibleInTranscript: true, purpose: 'progress' },
+      metadata: {
+        visibleInTranscript: true,
+        purpose: 'progress',
+        inferenceRetryNotice: true,
+      },
       payload: { purpose: 'progress' },
       source: 'slack',
     });
@@ -1483,7 +1536,12 @@ describe('Fast conversation repository', () => {
     ).resolves.toEqual({
       // Transcript order: the reply, then each call with its outcome.
       events: [
-        { kind: 'reply', text: 'Starting on it.', purpose: 'progress' },
+        {
+          kind: 'reply',
+          text: 'Starting on it.',
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+        },
         {
           kind: 'action',
           tool: 'launch_task',
@@ -1773,16 +1831,122 @@ describe('Fast conversation repository', () => {
     await reconcileExpiredFastAgentInferenceRetryNotices();
     expect(await readNotice()).toMatchObject({ inferenceRetryActive: true });
 
-    // Once the row is settled, the same notice is an orphan again.
+    // A hand-off whose claim was released and whose retry time has passed
+    // is only owned while its queue wakeup runs; the expired-lease sweep is
+    // the backstop for one that never does, so such a row does not block it.
     await db
       .update(fastAgentParentEvents)
-      .set({ deliveredAt: new Date() })
+      .set({ retryAt: new Date(Date.now() - 1_000), claimedUntil: null })
       .where(eq(fastAgentParentEvents.conversationId, session.id));
     await reconcileExpiredFastAgentInferenceRetryNotices();
     expect(await readNotice()).toMatchObject({
       inferenceRetryActive: false,
       purpose: 'closeout',
       interruptionReason: 'expired_lease_reconcile',
+    });
+  });
+
+  it('does not stamp a retry notice whose turn still has a pending durable row', async () => {
+    const user = await createUser();
+    const conversation = {
+      surface: 'web' as const,
+      workspaceId: user.id,
+      conversationId: crypto.randomUUID(),
+    };
+    const session = await fastAgentConversationRepository.getOrCreate({
+      userId: user.id,
+      conversation,
+    });
+    await fastAgentConversationRepository.upsertMessage({
+      conversationId: session.id,
+      message: {
+        eventId: 'turn-parked:retry-notice:0',
+        turnId: 'turn-parked',
+        turnSeq: 1,
+        ts: 100,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Retrying in 45s' }],
+        metadata: {
+          visibleInTranscript: true,
+          purpose: 'progress',
+          inferenceRetryNotice: true,
+          inferenceRetryActive: true,
+        },
+        payload: { purpose: 'progress' },
+        source: 'web',
+      },
+    });
+    const parent = { sessionId: session.id, conversation };
+    // The parked turn that owns the notice: claim released, retry scheduled.
+    const [parked] = await db
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: session.id,
+        eventKey: `parked-${session.id}`,
+        parent,
+        event: { type: 'human_follow_up', eventId: 'parked' },
+        admission: 'inline',
+        retryAt: new Date(Date.now() + 60_000),
+      })
+      .returning({ id: fastAgentParentEvents.id });
+    // A reaction turn admitted beside it, under its own claim.
+    const [reaction] = await db
+      .insert(fastAgentParentEvents)
+      .values({
+        conversationId: session.id,
+        eventKey: `reaction-${session.id}`,
+        parent,
+        event: { type: 'human_follow_up', eventId: 'reaction' },
+        admission: 'inline',
+        claimedUntil: new Date(Date.now() + 60_000),
+      })
+      .returning({ id: fastAgentParentEvents.id });
+    const readNotice = async () => {
+      const [notice] = await db
+        .select({ metadata: fastAgentMessages.metadata })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(fastAgentMessages.conversationId, session.id),
+            eq(fastAgentMessages.eventId, 'turn-parked:retry-notice:0'),
+          ),
+        );
+      return notice!.metadata;
+    };
+
+    // The reaction turn's entry reconcile sees the parked row and leaves the
+    // notice for the parked turn's resumed run to edit.
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+        {
+          excludeEventId: reaction!.id,
+        },
+      ),
+    ).resolves.toBe(0);
+    expect(await readNotice()).toMatchObject({ inferenceRetryActive: true });
+
+    // Once the parked turn settles, only the caller's own row remains, and
+    // that never counts as a pending turn that owns the notice.
+    await db
+      .update(fastAgentParentEvents)
+      .set({ deliveredAt: new Date() })
+      .where(eq(fastAgentParentEvents.id, parked!.id));
+    await expect(
+      reconcileFastAgentInferenceRetryNotices(
+        session.id,
+        'next_turn_reconcile',
+        {
+          excludeEventId: reaction!.id,
+        },
+      ),
+    ).resolves.toBe(1);
+    expect(await readNotice()).toMatchObject({
+      inferenceRetryActive: false,
+      purpose: 'closeout',
+      interruptionReason: 'next_turn_reconcile',
     });
   });
 

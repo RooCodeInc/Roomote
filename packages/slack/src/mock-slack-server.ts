@@ -88,6 +88,12 @@ export type MockSlackState = {
   channels: MockSlackChannel[];
   users: MockSlackUser[];
   messages?: MockSlackStoredMessage[];
+  agentSessions?: Array<{
+    channel: string;
+    threadTs: string;
+    status: string;
+    title?: string;
+  }>;
   /**
    * Bearer tokens accepted by app-config endpoints (`apps.manifest.create`).
    * Slack app configuration tokens live in a different token space than bot
@@ -919,6 +925,22 @@ export class MockSlackServer {
           },
           ephemeral: false,
         });
+        // Slack starts (or resumes) the thread's agent session with each stream.
+        const threadTs = String(jsonBody.thread_ts ?? '');
+        const sessions = (this.state.agentSessions ??= []);
+        const session = sessions.find(
+          (entry) =>
+            entry.channel === message.channel && entry.threadTs === threadTs,
+        );
+        if (session) {
+          session.status = 'processing';
+        } else {
+          sessions.push({
+            channel: message.channel,
+            threadTs,
+            status: 'processing',
+          });
+        }
         json(response, 200, { ok: true, channel: message.channel, ts });
         return;
       }
@@ -939,6 +961,16 @@ export class MockSlackServer {
         message.text += String(jsonBody.markdown_text ?? '');
         if (Array.isArray(jsonBody.blocks)) {
           message.blocks = [...(message.blocks ?? []), ...jsonBody.blocks];
+        }
+        if (path === 'chat.stopStream') {
+          const session = this.state.agentSessions?.find(
+            (entry) =>
+              entry.channel === channel && entry.threadTs === message.thread_ts,
+          );
+          if (session) {
+            // Finishing a message clears Working unless the caller opts to keep it.
+            session.status = String(jsonBody.session_status ?? 'active');
+          }
         }
         json(response, 200, { ok: true, channel, ts });
         return;
@@ -1047,9 +1079,31 @@ export class MockSlackServer {
         return;
       }
 
-      case 'POST reactions.add':
       case 'POST agents.sessions.setStatus':
-      case 'POST agents.sessions.rename':
+      case 'POST agents.sessions.rename': {
+        const channel = String(jsonBody.channel_id ?? '');
+        const threadTs = String(jsonBody.thread_ts ?? '');
+        const sessions = (this.state.agentSessions ??= []);
+        let session = sessions.find(
+          (entry) => entry.channel === channel && entry.threadTs === threadTs,
+        );
+        if (!session) {
+          if (path === 'agents.sessions.rename') {
+            json(response, 200, { ok: false, error: 'session_not_found' });
+            return;
+          }
+          session = { channel, threadTs, status: String(jsonBody.status) };
+          sessions.push(session);
+        }
+        if (path === 'agents.sessions.setStatus') {
+          session.status = String(jsonBody.status);
+        } else {
+          session.title = String(jsonBody.title);
+        }
+        json(response, 200, { ok: true, title: session.title });
+        return;
+      }
+      case 'POST reactions.add':
       case 'POST agents.sessions.setTitle':
       case 'POST assistant.threads.setStatus':
       case 'POST assistant.threads.setTitle':

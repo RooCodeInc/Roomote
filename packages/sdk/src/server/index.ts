@@ -1,4 +1,8 @@
 export {
+  resolveAutomationRepositoryDestination,
+  isCiFailureTriageRepositoryEnabled,
+} from './automations/ci-failure-triage-routing';
+export {
   type AppRouter,
   type AppRouterInput,
   type AppRouterOutput,
@@ -40,6 +44,7 @@ export {
   type RecordLlmUsageInput,
 } from './lib/task-runs/record-task-inference-usage';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
+export { stopTaskRun } from './lib/task-runs/stop-task-run';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
 export {
   enqueueTaskSleep,
@@ -202,6 +207,7 @@ export {
 } from './lib/discord-persistence';
 
 export { createDiscordCommunicationProviderFromRuntimeCredentials } from './lib/discord-communication';
+export { refreshCurrentThreadFooters } from './lib/thread-footer-refresh';
 
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
@@ -209,6 +215,7 @@ export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
+export { requireFastSuggestionOriginSessionId } from './lib/fast-automation-suggestions';
 
 export {
   buildFastAgentParentEventKey,
@@ -222,16 +229,83 @@ export {
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {
+  SESSION_WAKEUP_FIRE_JOB_NAME,
+  SESSION_WAKEUP_QUEUE_NAME,
+  SESSION_WAKEUP_RECOVERY_LOOKAHEAD_MS,
+  fireSessionWakeup,
+  recoverPendingSessionWakeups,
+  type FireSessionWakeupResult,
+  type SessionWakeupFireJob,
+} from './lib/session-wakeups';
+export {
   admitFastAgentHumanFollowUp,
+  admitFastAgentInlineHumanTurn,
   persistFastAgentInlineHumanTurn,
   type FastAgentDurableTurn,
+  type FastAgentInlineHumanTurnAdmission,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
+export {
+  resolveFastAgentSessionImages,
+  type FastAgentReplyImage,
+} from './lib/fast-agent-session-images';
+export { deliverFastAgentSessionVideos } from './lib/fast-agent-session-videos';
 
 export {
   getCommunicationProviderAdapter,
   type RuntimeCommunicationProviderAdapter,
 } from './lib/communication-providers';
+
+export { createAgentMailCommunicationProviderFromRuntimeCredentials } from './lib/agentmail-communication';
+
+export {
+  advanceAgentMailInboundAnchor,
+  normalizeEmailAddress,
+  recordAgentMailOutboundMessage,
+  resolveAgentMailReplyRoute,
+  resolveAgentMailSenderUserId,
+  resolveOrCreateAgentMailConversation,
+  type AgentMailConversationRow,
+  type AgentMailReplyRouteData,
+} from './lib/agentmail/conversation-store';
+
+export {
+  buildAgentMailRuiAnswerToken,
+  buildAgentMailRuiAnswerUrl,
+  verifyAgentMailRuiAnswerToken,
+} from './lib/agentmail/rui-answer-links';
+
+export {
+  buildAgentMailEmailLinkToken,
+  buildAgentMailEmailLinkUrl,
+  buildAgentMailUnsubscribeToken,
+  buildAgentMailUnsubscribeUrl,
+  verifyAgentMailEmailLinkToken,
+  verifyAgentMailUnsubscribeToken,
+} from './lib/agentmail/email-link-tokens';
+
+export {
+  canStartAgentMailConversationWithUser,
+  isAgentMailAddressSuppressed,
+  resolveAgentMailOutboundAddress,
+  sendAgentMailSystemEmail,
+  startAgentMailConversation,
+  suppressAgentMailAddress,
+  type AgentMailOutboundAddressResolution,
+  type AgentMailSystemEmailResult,
+  type AgentMailSuppressionReason,
+} from './lib/agentmail/outbound';
+
+export {
+  AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME,
+  AgentMailConversationBusyError,
+  drainAgentMailInboundTurns,
+  processAgentMailWebhookEvent,
+  recordAgentMailWebhookEvent,
+  recoverPendingAgentMailWork,
+  redispatchAgentMailEventsForSender,
+  type AgentMailWebhookEventJob,
+} from './lib/agentmail/inbound';
 
 export {
   findTelegramPrimaryChatId,

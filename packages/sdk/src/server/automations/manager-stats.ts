@@ -8,7 +8,10 @@ import {
   slackInstallations,
   eq,
 } from '@roomote/db/server';
-import { MANAGER_STATS_SETTINGS_HASH } from '@roomote/types';
+import {
+  buildDataVisualizationBlocks,
+  MANAGER_STATS_SETTINGS_HASH,
+} from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 import type { SlackMessage } from '@roomote/slack';
 
@@ -18,7 +21,10 @@ import {
   buildManagerSlackSettingsUrl,
   degradeSlackMrkdwnToMarkdown,
 } from '../lib/manager-slack';
-import { buildManagerStatsDigest } from '../lib/manager-stats';
+import {
+  buildManagerStatsDigest,
+  getManagerStatsWindowStart,
+} from '../lib/manager-stats';
 import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
@@ -36,7 +42,6 @@ import {
 const LOG_PREFIX = '[managerStats]';
 const SCHEDULE_DAY_LOCAL = 5; // Friday.
 const SCHEDULE_HOUR_LOCAL = 16;
-const WINDOW_DAYS = 7;
 const numberFormatter = new Intl.NumberFormat('en-US');
 
 function formatNumber(value: number) {
@@ -106,8 +111,54 @@ export function formatManagerStatsMessage({
   stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>;
 }): Pick<SlackMessage, 'text' | 'blocks'> {
   const text = formatManagerStatsText({ stats });
+  const categories = stats.dailyPullRequestActivity.map((day) => day.label);
+  const chartBlocks = buildDataVisualizationBlocks([
+    {
+      title: 'Daily PR activity',
+      chart: {
+        type: 'line',
+        series: [
+          {
+            name: 'Created PRs',
+            data: stats.dailyPullRequestActivity.map((day) => ({
+              label: day.label,
+              value: day.createdPullRequests,
+            })),
+          },
+          {
+            name: 'Merged PRs',
+            data: stats.dailyPullRequestActivity.map((day) => ({
+              label: day.label,
+              value: day.mergedPullRequests,
+            })),
+          },
+        ],
+        axis_config: { categories },
+      },
+    },
+  ]);
 
-  return buildAutomationSettingsMessage(text, MANAGER_STATS_SETTINGS_HASH);
+  return buildAutomationSettingsMessage(text, MANAGER_STATS_SETTINGS_HASH, {
+    contentBlocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text },
+      },
+      ...chartBlocks,
+    ],
+  });
+}
+
+export function hasManagerStatsActivity(
+  stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>,
+) {
+  return (
+    stats.activeUsers > 0 ||
+    stats.totalPullRequests > 0 ||
+    stats.dailyPullRequestActivity.some(
+      (day) => day.createdPullRequests > 0 || day.mergedPullRequests > 0,
+    )
+  );
 }
 
 async function findEligibleDeployments(): Promise<DeploymentContext[]> {
@@ -233,6 +284,15 @@ export async function managerStatsJob(
         continue;
       }
 
+      if (
+        destination.provider === 'slack' &&
+        destination.teamId &&
+        destination.teamId !== deployment.slackTeamId
+      ) {
+        skipped++;
+        continue;
+      }
+
       const channelId = destination.channelId;
       const timezone = (await resolveDeploymentTimeZone()).timeZone;
 
@@ -251,13 +311,15 @@ export async function managerStatsJob(
         continue;
       }
 
-      const since = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const since = getManagerStatsWindowStart(now, timezone);
       const stats = await buildManagerStatsDigest({
         actorUserId: deployment.actorUserId,
         since,
+        until: now,
+        timeZone: timezone,
       });
 
-      if (stats.activeUsers === 0 && stats.totalPullRequests === 0) {
+      if (!hasManagerStatsActivity(stats)) {
         await recordAutomationRunOutcome(db, {
           key: 'manager_stats',
           status: 'skipped',

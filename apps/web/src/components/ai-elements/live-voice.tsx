@@ -93,9 +93,7 @@ export const LiveVoiceStatusBar = ({
             {interimTranscript}
           </span>
         ) : (
-          <Shimmer className="font-light" duration={2}>
-            {label ?? 'Listening'}
-          </Shimmer>
+          <Shimmer className="font-light">{label ?? 'Listening'}</Shimmer>
         )}
       </div>
       <button

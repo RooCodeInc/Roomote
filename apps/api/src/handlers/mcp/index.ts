@@ -13,9 +13,11 @@ import {
 import type { Variables } from '../../types';
 
 import { asanaMcp } from './asana';
+import { bitbucketMcp } from './bitbucket';
 import { communicationMcp } from './communication';
 import { environmentsRouter } from '../environments';
 import { customAutomationsRouter } from '../custom-automations';
+import { customSkillsRouter } from '../custom-skills';
 import { tasksRouter } from '../tasks';
 import { sessionsRouter } from '../sessions';
 import { createCustomMcpProxy } from './custom-mcp';
@@ -71,6 +73,9 @@ mcp.route('/custom/:serverId', createCustomMcpProxy());
 mcp.route('/gbrain', createGbrainMcpProxy({ allowAuthTokens: true }));
 
 mcp.route('/asana', asanaMcp);
+mcp.use('/bitbucket', requireCuratedIntegrations);
+mcp.use('/bitbucket/*', requireCuratedIntegrations);
+mcp.route('/bitbucket', bitbucketMcp);
 mcp.route('/granola', granolaMcp);
 mcp.route('/grafana', grafanaMcp);
 mcp.route('/linear', createLinearMcp({ allowAuthTokens: true }));
@@ -110,6 +115,8 @@ mcp.use('/environments/*', mcpAuthMiddleware);
 mcp.use('/environments', mcpAuthMiddleware);
 mcp.use('/custom-automations/*', mcpAuthMiddleware);
 mcp.use('/custom-automations', mcpAuthMiddleware);
+mcp.use('/custom-skills/*', mcpAuthMiddleware);
+mcp.use('/custom-skills', mcpAuthMiddleware);
 
 mcp.route('/slack', slackMcp);
 mcp.route('/communication', communicationMcp);
@@ -117,3 +124,4 @@ mcp.route('/tasks', tasksRouter);
 mcp.route('/sessions', sessionsRouter);
 mcp.route('/environments', environmentsRouter);
 mcp.route('/custom-automations', customAutomationsRouter);
+mcp.route('/custom-skills', customSkillsRouter);

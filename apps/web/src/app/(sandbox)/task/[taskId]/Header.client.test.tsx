@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NO_REPOSITORIES } from '@roomote/types';
 
 const {
   useSandboxLayoutMock,
@@ -117,6 +118,18 @@ describe('Header', () => {
             enabled: options?.enabled,
           }),
         },
+        byId: {
+          queryOptions: (
+            _input: { sessionId: string },
+            options?: { enabled?: boolean },
+          ) => ({
+            queryKey: ['sessions.byId'],
+            queryFn: async () => ({
+              tasks: [{ taskId: 'task-123' }, { taskId: 'task-456' }],
+            }),
+            enabled: options?.enabled,
+          }),
+        },
       },
       tasks: {
         updateTitle: {
@@ -138,6 +151,9 @@ describe('Header', () => {
     renderHeader();
 
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
   });
 
   it('keeps the header clean when the task uses OpenCode', () => {
@@ -214,6 +230,18 @@ describe('Header', () => {
       await screen.findByText('RooCodeInc/Roomote#42'),
     ).toBeInTheDocument();
     expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
+  });
+
+  it('hides the workspace badge for no-repository tasks', () => {
+    renderHeader({
+      taskRun: {
+        payload: { repo: NO_REPOSITORIES },
+      } as never,
+    });
+
+    expect(
+      screen.queryByText(`Repo ${NO_REPOSITORIES}`),
+    ).not.toBeInTheDocument();
   });
 
   it('refreshes task lists after renaming a task', async () => {

@@ -3,6 +3,7 @@
 import { getModelProviderLabel, getTaskModelDisplayName } from '@roomote/types';
 
 import type { AnalyticsCostBreakdownRow } from '@/types';
+import { formatCurrency, formatTokens } from '@/lib/formatters';
 
 function getTitle(rawValue: string, displayValue: string) {
   return rawValue === displayValue ? undefined : rawValue;
@@ -19,15 +20,19 @@ export function CostBreakdownTable({
 
   return (
     <div className="mt-4 overflow-x-auto rounded-lg border border-border/60">
-      <table className="w-full min-w-[720px] text-sm">
+      <table className="w-full min-w-[960px] text-sm">
         <thead className="bg-muted/40 text-left text-muted-foreground">
           <tr>
             <th className="px-4 py-3 font-medium">Provider</th>
             <th className="px-4 py-3 font-medium">Model</th>
             <th className="px-4 py-3 text-right font-medium">Total cost</th>
+            <th className="px-4 py-3 text-right font-medium">Total tokens</th>
             <th className="px-4 py-3 text-right font-medium">Share</th>
             <th className="px-4 py-3 text-right font-medium">Tasks</th>
             <th className="px-4 py-3 text-right font-medium">Avg / task</th>
+            <th className="px-4 py-3 text-right font-medium">
+              Avg tokens / task
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -50,7 +55,10 @@ export function CostBreakdownTable({
                   {modelLabel}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
-                  ${row.totalCost.toFixed(2)}
+                  {formatCurrency(Number(row.totalCost.toFixed(2)))}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {formatTokens(row.totalTokens)}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
                   {row.costShare.toFixed(1)}%
@@ -59,7 +67,10 @@ export function CostBreakdownTable({
                   {row.taskCount}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
-                  ${row.averageCostPerTask.toFixed(2)}
+                  {formatCurrency(Number(row.averageCostPerTask.toFixed(2)))}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {formatTokens(row.averageTokensPerTask)}
                 </td>
               </tr>
             );

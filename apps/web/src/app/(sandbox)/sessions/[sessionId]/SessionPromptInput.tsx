@@ -34,6 +34,7 @@ import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
+import { SessionWakeups } from './SessionWakeups';
 
 export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
@@ -242,6 +243,7 @@ export function SessionPromptInput({
 
   return (
     <div className="mx-auto w-full max-w-4xl">
+      <SessionWakeups key={sessionId} sessionId={sessionId} />
       <PromptInputRoot
         key={`composer-${resetKey}`}
         onSubmit={handleSubmit}
@@ -251,8 +253,9 @@ export function SessionPromptInput({
       >
         <AttachmentsDisplay />
         <PromptInputBody>
-          <div className="relative">
+          <div className="flex items-start">
             <PromptInputTextarea
+              className="min-w-0 flex-1"
               ref={textareaRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
@@ -277,9 +280,10 @@ export function SessionPromptInput({
                     aria-label="Insert suggested message"
                     onPointerDown={(event) => event.preventDefault()}
                     onClick={acceptGhostSuggestion}
-                    className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                    className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
                   >
-                    Tab to accept
+                    <span className="md:hidden">Accept</span>
+                    <span className="hidden md:inline">Tab to accept</span>
                   </button>
                 )}
               </>

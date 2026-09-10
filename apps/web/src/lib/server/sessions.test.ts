@@ -1,13 +1,19 @@
 import {
   automations,
+  customAutomations,
   db,
   eq,
   ensureSessionForFastConversation,
+  ensureSessionForTask,
   fastAgentConversations,
   fastAgentMessages,
+  fastAgentParentEvents,
+  inArray,
   llmUsageEvents,
   runFactory,
   sessionFactory,
+  sessionParticipants,
+  sessions,
   sessionTasks,
   taskArtifacts,
   taskFactory,
@@ -15,6 +21,7 @@ import {
   taskPullRequests,
   tasks,
   userFactory,
+  users,
 } from '@roomote/db/server';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -30,6 +37,8 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import {
   findAccessibleSession,
+  findAccessibleSessionByFastConversationId,
+  findReadableSession,
   getLatestExternalSessionEvent,
   getSessionById,
   getSessionForTask,
@@ -41,6 +50,345 @@ import {
 } from './sessions';
 
 describe('unified Session queries', () => {
+  it.each(['task', 'fast'] as const)(
+    'requires ownership of every %s provenance row, including missing IDs',
+    async (provenance) => {
+      const owner = await userFactory.create();
+      const other = await userFactory.create();
+      await db
+        .insert(automations)
+        .values({ key: 'custom_automation' })
+        .onConflictDoNothing();
+      const [owned, unowned] = await db
+        .insert(customAutomations)
+        .values(
+          [owner, other].map((user) => ({
+            name: `Mixed provenance ${user.id}`,
+            prompt: 'Private report',
+            createdByUserId: user.id,
+          })),
+        )
+        .returning();
+      const [conversation] = await db
+        .insert(fastAgentConversations)
+        .values({
+          userId: other.id,
+          surface: 'web',
+          workspaceId: other.id,
+          conversationId: crypto.randomUUID(),
+        })
+        .returning();
+      const session = await sessionFactory.create({
+        ownerKind: 'automation',
+        ownerAutomation: 'custom_automation',
+        fastConversationId: provenance === 'fast' ? conversation!.id : null,
+      });
+      const ownerAuth = { userId: owner.id, isAdmin: false };
+      const adminAuth = { userId: other.id, isAdmin: true };
+      const taskIds: string[] = [];
+
+      try {
+        // One valid row must not mask another owner's or an invalid row.
+        for (const automationId of [
+          owned!.id,
+          unowned!.id,
+          null,
+          'not-a-uuid',
+          crypto.randomUUID(),
+        ]) {
+          if (provenance === 'task') {
+            for (const actorExternalId of [owned!.id, automationId]) {
+              const task = await taskFactory.create({
+                initiatorKind: 'automation',
+                initiatorAutomation: 'custom_automation',
+                actorExternalId,
+              });
+              taskIds.push(task.id);
+              if (actorExternalId === null) {
+                // The factory supplies a default for null actorExternalId.
+                await db
+                  .update(tasks)
+                  .set({ actorExternalId: null })
+                  .where(eq(tasks.id, task.id));
+              }
+              await db.insert(sessionTasks).values({
+                sessionId: session.id,
+                taskId: task.id,
+                origin: 'direct_launch',
+              });
+            }
+          } else {
+            await db.insert(fastAgentParentEvents).values(
+              [owned!.id, automationId].map((id) => ({
+                conversationId: conversation!.id,
+                eventKey: crypto.randomUUID(),
+                parent: {
+                  sessionId: conversation!.id,
+                  conversation: {
+                    surface: 'web' as const,
+                    workspaceId: other.id,
+                    conversationId: conversation!.conversationId,
+                  },
+                },
+                event: { type: 'automation_triggered', automationId: id },
+              })),
+            );
+          }
+          expect(await findAccessibleSession(ownerAuth, session.id)).toEqual(
+            automationId === owned!.id
+              ? expect.objectContaining({ id: session.id })
+              : null,
+          );
+          await expect(
+            findAccessibleSession(
+              { userId: other.id, isAdmin: false },
+              session.id,
+            ),
+          ).resolves.toBeNull();
+          await expect(
+            findAccessibleSession(adminAuth, session.id),
+          ).resolves.toMatchObject({ id: session.id });
+          if (provenance === 'task') {
+            await db
+              .delete(sessionTasks)
+              .where(eq(sessionTasks.sessionId, session.id));
+          } else {
+            await db
+              .delete(fastAgentParentEvents)
+              .where(
+                eq(fastAgentParentEvents.conversationId, conversation!.id),
+              );
+          }
+        }
+      } finally {
+        await db.delete(sessions).where(eq(sessions.id, session.id));
+        await db.delete(tasks).where(inArray(tasks.id, taskIds));
+        await db
+          .delete(fastAgentConversations)
+          .where(eq(fastAgentConversations.id, conversation!.id));
+        await db
+          .delete(customAutomations)
+          .where(inArray(customAutomations.id, [owned!.id, unowned!.id]));
+        await db.delete(users).where(inArray(users.id, [owner.id, other.id]));
+      }
+    },
+  );
+
+  it('lists a task-only automation Session for its owner without requiring participation', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    await db
+      .insert(automations)
+      .values({ key: 'custom_automation' })
+      .onConflictDoNothing();
+    const [automation] = await db
+      .insert(customAutomations)
+      .values({
+        name: `Task-only ${owner.id}`,
+        prompt: 'Private report',
+        createdByUserId: owner.id,
+      })
+      .returning();
+    const task = await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: automation!.id,
+    });
+    const session = await ensureSessionForTask(db, { taskId: task.id });
+    expect(session).toMatchObject({
+      ownerKind: 'automation',
+      ownerUserId: null,
+      ownerAutomation: 'custom_automation',
+      fastConversationId: null,
+    });
+    const ownerAuth = { userId: owner.id, isAdmin: false };
+    const otherAuth = { userId: other.id, isAdmin: false };
+    expect(
+      (await getSessions(ownerAuth, { ids: [session.id] })).sessions.map(
+        (row) => row.id,
+      ),
+    ).toEqual([session.id]);
+    expect(
+      (await getSessions(otherAuth, { ids: [session.id] })).sessions,
+    ).toEqual([]);
+    await expect(getSessionById(otherAuth, session.id)).resolves.toMatchObject({
+      id: session.id,
+    });
+    await db
+      .delete(customAutomations)
+      .where(eq(customAutomations.id, automation!.id));
+    expect(
+      (await getSessions(ownerAuth, { ids: [session.id] })).sessions,
+    ).toEqual([]);
+    await expect(getSessionById(ownerAuth, session.id)).resolves.toMatchObject({
+      id: session.id,
+    });
+    await expect(
+      getSessionById({ ...otherAuth, isAdmin: true }, session.id),
+    ).resolves.toMatchObject({ id: session.id });
+  });
+
+  it.each(['task', 'fast'] as const)(
+    'shares custom automation %s reads but preserves list and action gates',
+    async (provenance) => {
+      const owner = await userFactory.create();
+      const other = await userFactory.create();
+      const [automation] = await db
+        .insert(customAutomations)
+        .values({
+          name: `Session access ${owner.id}`,
+          prompt: 'Private report',
+          createdByUserId: owner.id,
+        })
+        .returning();
+      const [conversation] = await db
+        .insert(fastAgentConversations)
+        .values({
+          userId: owner.id,
+          surface: 'slack',
+          workspaceId: `workspace-${owner.id}`,
+          conversationId:
+            provenance === 'fast'
+              ? `${automation!.id}:${new Date().toISOString()}`
+              : `ordinary-${owner.id}`,
+        })
+        .returning();
+      const session = await ensureSessionForFastConversation(
+        db,
+        conversation!.id,
+      );
+      await db
+        .insert(automations)
+        .values({ key: 'custom_automation' })
+        .onConflictDoNothing();
+      const task = await taskFactory.create(
+        provenance === 'task'
+          ? {
+              initiatorKind: 'automation',
+              initiatorAutomation: 'custom_automation',
+              actorExternalId: automation!.id,
+            }
+          : { initiatorUserId: owner.id },
+      );
+      await db.insert(sessionTasks).values({
+        sessionId: session.id,
+        taskId: task.id,
+        origin: 'direct_launch',
+      });
+      await db.insert(sessionParticipants).values({
+        sessionId: session.id,
+        userId: other.id,
+        role: 'member',
+      });
+      await db.insert(fastAgentMessages).values({
+        conversationId: conversation!.id,
+        eventId: 'private-report',
+        turnId: 'turn',
+        turnSeq: 1,
+        ts: 1,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'confidential report' }],
+        metadata: { userId: other.id, visibleInTranscript: true },
+        payload: {},
+      });
+      const ownerAuth = { userId: owner.id, isAdmin: false };
+      const denied = { userId: other.id, isAdmin: false };
+      const adminAuth = { userId: other.id, isAdmin: true };
+      await expect(
+        findAccessibleSession(denied, session.id),
+      ).resolves.toBeNull();
+      await expect(
+        findAccessibleSessionByFastConversationId(denied, conversation!.id),
+      ).resolves.toBeNull();
+      for (const id of [session.id, conversation!.id]) {
+        await expect(findReadableSession(denied, id)).resolves.toMatchObject({
+          id: session.id,
+        });
+        await expect(getSessionById(denied, id)).resolves.toMatchObject({
+          id: session.id,
+        });
+        await expect(getSessionTimeline(denied, id)).resolves.toMatchObject({
+          events: expect.arrayContaining([
+            expect.objectContaining({ id: 'fast:private-report' }),
+            expect.objectContaining({ id: `task:${task.id}:delegated` }),
+          ]),
+        });
+      }
+      await expect(getSessionForTask(denied, task.id)).resolves.toMatchObject({
+        sessionId: session.id,
+      });
+      await expect(
+        setSessionPinned(denied, { sessionId: session.id, pinned: true }),
+      ).resolves.toMatchObject({ success: false });
+      await expect(
+        updateSessionMetadata(denied, session.id, {
+          title: 'Forbidden',
+          archivedAt: new Date(),
+        }),
+      ).resolves.toBeNull();
+      await expect(
+        getLatestExternalSessionEvent(denied, session.id),
+      ).resolves.toBeNull();
+      for (const q of [undefined, 'confidential']) {
+        expect(
+          (await getSessions(denied, { ids: [session.id], q })).sessions,
+        ).toEqual([]);
+      }
+      for (const auth of [ownerAuth, adminAuth]) {
+        expect(
+          (await getSessions(auth, { ids: [session.id] })).sessions.map(
+            (s) => s.id,
+          ),
+        ).toEqual([session.id]);
+        await expect(getSessionById(auth, session.id)).resolves.toMatchObject({
+          id: session.id,
+        });
+        await expect(
+          getSessionTimeline(auth, session.id),
+        ).resolves.not.toBeNull();
+      }
+      await db
+        .update(customAutomations)
+        .set({ createdByUserId: null })
+        .where(eq(customAutomations.id, automation!.id));
+      await expect(
+        findAccessibleSession(ownerAuth, session.id),
+      ).resolves.toBeNull();
+      await expect(getSessionById(denied, session.id)).resolves.toMatchObject({
+        id: session.id,
+      });
+      await db
+        .delete(customAutomations)
+        .where(eq(customAutomations.id, automation!.id));
+      await expect(
+        findAccessibleSession(ownerAuth, session.id),
+      ).resolves.toBeNull();
+      await expect(
+        findAccessibleSession(adminAuth, session.id),
+      ).resolves.not.toBeNull();
+      await expect(getSessionById(denied, session.id)).resolves.toMatchObject({
+        id: session.id,
+      });
+    },
+  );
+
+  it('requires authenticated context and returns null for missing direct links', async () => {
+    const owner = await userFactory.create();
+    const session = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+    });
+    for (const [auth, id] of [
+      [{ userId: '', isAdmin: false }, session.id],
+      [{ userId: owner.id, isAdmin: false }, crypto.randomUUID()],
+    ] as const) {
+      await expect(findReadableSession(auth, id)).resolves.toBeNull();
+      await expect(getSessionById(auth, id)).resolves.toBeNull();
+      await expect(getSessionTimeline(auth, id)).resolves.toBeNull();
+    }
+  });
+
   beforeEach(() => {
     syncFastSlackTitle.mockReset();
     syncFastSlackTitle.mockResolvedValue(undefined);
@@ -85,6 +433,23 @@ describe('unified Session queries', () => {
       { scope: 'all' },
     );
     expect(adminList.sessions.map((row) => row.id)).toContain(session.id);
+    await db.insert(sessionParticipants).values({
+      sessionId: session.id,
+      userId: stranger.id,
+      role: 'member',
+    });
+    const participantAuth = { userId: stranger.id, isAdmin: false };
+    expect(
+      (await getSessions(participantAuth, { ids: [session.id] })).sessions.map(
+        (row) => row.id,
+      ),
+    ).toEqual([session.id]);
+    await expect(
+      getSessionById(participantAuth, session.id),
+    ).resolves.toMatchObject({ id: session.id });
+    await expect(
+      getSessionTimeline(participantAuth, session.id),
+    ).resolves.not.toBeNull();
   });
 
   it('filters recent-session lookups by id without bypassing list scope', async () => {

@@ -1,10 +1,17 @@
 import {
   db,
+  and,
+  desc,
   environments,
   eq,
+  getSessionForTask,
+  inArray,
+  isNull,
   resolveEffectivePreviewRuntimeConfig,
   taskPullRequests,
   taskRuns,
+  sessionTasks,
+  tasks,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import type { PullRequestStatus } from '@roomote/types';
@@ -13,10 +20,16 @@ import {
   buildPreviewProxyUrl,
   getPrimaryPortFromConfig,
   hasConfiguredPreviewPorts,
+  isExitedRunStatus,
+  isTaskExecutingTurn,
   portNameToSlug,
+  SYSTEM_PORT_NAMES,
 } from '@roomote/types';
 
-import type { ThreadReplyLinkedPr } from './chat-messages';
+import type {
+  ThreadReplyLinkedPr,
+  ThreadReplyRunningTasks,
+} from './chat-messages';
 
 const TERMINAL_LINKED_TASK_PR_STATUSES = new Set<PullRequestStatus>([
   'closed',
@@ -26,6 +39,48 @@ const TERMINAL_LINKED_TASK_PR_STATUSES = new Set<PullRequestStatus>([
 export interface ThreadReplyFooterContext {
   linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
+  webAppUrl?: string | null;
+}
+
+export async function resolveSessionRunningTasks(
+  sessionId: string,
+  linkedTaskIds?: string[],
+): Promise<ThreadReplyRunningTasks | null> {
+  const taskIds =
+    linkedTaskIds ??
+    (
+      await db
+        .select({ taskId: sessionTasks.taskId })
+        .from(sessionTasks)
+        .innerJoin(tasks, eq(tasks.id, sessionTasks.taskId))
+        .where(
+          and(eq(sessionTasks.sessionId, sessionId), isNull(tasks.deletedAt)),
+        )
+    ).map(({ taskId }) => taskId);
+  if (taskIds.length === 0) return null;
+  // One query for every task's latest run; this runs on each reply and refresh.
+  const latestRuns = await db
+    .selectDistinctOn([taskRuns.taskId], {
+      taskId: taskRuns.taskId,
+      status: taskRuns.status,
+      taskPhase: taskRuns.taskPhase,
+    })
+    .from(taskRuns)
+    .where(inArray(taskRuns.taskId, taskIds))
+    .orderBy(taskRuns.taskId, desc(taskRuns.createdAt), desc(taskRuns.id));
+  const latestRunByTaskId = new Map(latestRuns.map((run) => [run.taskId, run]));
+  const runningTaskIds = taskIds.filter((taskId) => {
+    const run = latestRunByTaskId.get(taskId);
+    return isTaskExecutingTurn(run?.status, run?.taskPhase);
+  });
+  // Session's task-list panel has no URL state; /tasks is the supported list route.
+  const url = new URL(`${Env.R_APP_URL}/tasks`);
+  if (runningTaskIds.length === 1) {
+    url.pathname = `/sessions/${sessionId}`;
+    url.searchParams.set('task', runningTaskIds[0]!);
+  }
+  return { count: runningTaskIds.length, url: url.toString() };
 }
 
 export function buildThreadReplyPrUrl(params: {
@@ -142,10 +197,27 @@ export async function resolveThreadReplyLivePreviewUrl(
     columns: {
       payload: true,
       primaryPortName: true,
+      status: true,
+      sleepRequestedAt: true,
+      snapshotRequestedAt: true,
+      snapshotCreatedAt: true,
+      snapshotFailedAt: true,
+      snapshotId: true,
     },
     where: eq(taskRuns.taskId, taskId),
-    orderBy: (table, { desc }) => [desc(table.createdAt)],
+    orderBy: (table, { desc }) => [desc(table.createdAt), desc(table.id)],
   });
+
+  if (
+    !taskRun ||
+    isExitedRunStatus(taskRun.status) ||
+    taskRun.snapshotId ||
+    ((taskRun.sleepRequestedAt || taskRun.snapshotRequestedAt) &&
+      !taskRun.snapshotCreatedAt &&
+      !taskRun.snapshotFailedAt)
+  ) {
+    return null;
+  }
 
   const environmentId = (
     taskRun?.payload as { environmentId?: string } | undefined
@@ -166,9 +238,12 @@ export async function resolveThreadReplyLivePreviewUrl(
     return null;
   }
 
+  const ports = environment?.config?.ports?.filter(
+    (port) => !SYSTEM_PORT_NAMES.has(port.name.toUpperCase()),
+  );
   const primaryPortName =
-    taskRun?.primaryPortName ??
-    getPrimaryPortFromConfig(environment?.config?.ports)?.name;
+    ports?.find((port) => port.name === taskRun.primaryPortName)?.name ??
+    getPrimaryPortFromConfig(ports)?.name;
 
   if (!primaryPortName) {
     return null;
@@ -208,14 +283,28 @@ export async function resolveThreadReplyFooterContext(params: {
   taskId: string | null | undefined;
   prRepo: string | null | undefined;
   prNumber: number | null | undefined;
+  /** Fast resolves status once for the entire Session, not once per task. */
+  includeRunningTasks?: boolean;
 }): Promise<ThreadReplyFooterContext> {
   const [linkedPrs, livePreviewUrl] = await Promise.all([
     resolveThreadReplyLinkedPrs(params),
     resolveThreadReplyLivePreviewUrl(params.taskId),
   ]);
 
+  const session =
+    params.taskId && params.includeRunningTasks !== false
+      ? await getSessionForTask(db, params.taskId)
+      : null;
+  const runningTasks = session
+    ? await resolveSessionRunningTasks(session.id)
+    : null;
+
   return {
     linkedPrs,
     livePreviewUrl,
+    ...(session
+      ? { webAppUrl: `${Env.R_APP_URL}/sessions/${session.id}` }
+      : {}),
+    ...(runningTasks ? { runningTasks } : {}),
   };
 }

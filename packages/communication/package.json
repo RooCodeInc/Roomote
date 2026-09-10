@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agentmail-event": "./src/agentmail-event.ts",
+    "./agentmail-provider": "./src/agentmail-provider.ts",
     "./chat-messages": "./src/chat-messages.ts",
     "./discord-event": "./src/discord-event.ts",
     "./discord-provider": "./src/discord-provider.ts",
@@ -24,7 +26,9 @@
     "./teams-provider": "./src/teams-provider.ts",
     "./telegram-provider": "./src/telegram-provider.ts",
     "./telegram-update": "./src/telegram-update.ts",
-    "./thread-reply-footer-state": "./src/thread-reply-footer-state.ts"
+    "./thread-reply-footer-state": "./src/thread-reply-footer-state.ts",
+    "./thread-reply-footer-delivery": "./src/thread-reply-footer-delivery.ts",
+    "./thread-footer-refresh": "./src/thread-footer-refresh.ts"
   },
   "scripts": {
     "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
@@ -34,6 +38,7 @@
     "check-types:fast": "tsgo --noEmit",
     "mock:telegram": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-telegram.ts",
     "mock:discord": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-discord.ts",
+    "mock:agentmail": "dotenvx run -f ../../.env.local -- tsx scripts/run-mock-agentmail.ts",
     "test": "dotenvx run -f ../../.env.test -- vitest",
     "clean": "rimraf .turbo",
     "eval:telegram-scenario": "dotenvx run -f ../../.env.local -- tsx evals/run-telegram-scenario.ts",

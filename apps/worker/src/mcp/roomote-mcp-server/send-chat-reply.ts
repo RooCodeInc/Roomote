@@ -1,4 +1,8 @@
 import { replyToChatThread } from './chat-api-client.js';
+import {
+  buildDataVisualizationBlocks,
+  type DataVisualizationInput,
+} from '@roomote/types';
 import { describeChatDeliveryFailure } from './chat-delivery-error.js';
 import {
   errorResultWithArtifacts,
@@ -14,7 +18,13 @@ import {
 } from './tasks-api-client.js';
 import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
 
-type ChatReplySurface = 'Slack' | 'Teams' | 'Telegram' | 'Discord' | 'chat';
+type ChatReplySurface =
+  | 'Slack'
+  | 'Teams'
+  | 'Telegram'
+  | 'Discord'
+  | 'email thread'
+  | 'chat';
 
 const SUGGESTION_START_INSTRUCTIONS: Record<ChatReplySurface, string> = {
   Slack:
@@ -25,6 +35,8 @@ const SUGGESTION_START_INSTRUCTIONS: Record<ChatReplySurface, string> = {
     "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
   Teams:
     "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
+  'email thread':
+    "Want me to take one of these on? Reply to this email naming the suggested task and I'll start it.",
   chat: 'Want me to take one of these on? Use the Start action on a suggested task below.',
 };
 
@@ -51,6 +63,7 @@ export async function handleSendChatReply(
     summary?: string;
     imagePaths?: string[];
     imageArtifactIds?: string[];
+    charts?: DataVisualizationInput[];
     suggestions?: TaskSuggestionInput[];
     chatReplySurface?: ChatReplySurface;
   },
@@ -96,6 +109,12 @@ export async function handleSendChatReply(
     reachedDeliveryCall = true;
     const reply = await replyToChatThread(roomoteConfig, {
       ...(summary && { text: summary }),
+      ...(input.charts?.length && {
+        blocks: [
+          ...(summary ? [{ type: 'markdown', text: summary }] : []),
+          ...buildDataVisualizationBlocks(input.charts),
+        ],
+      }),
       ...(allArtifactIds.length > 0 && {
         images: allArtifactIds.map((artifactId) => ({ artifactId })),
       }),

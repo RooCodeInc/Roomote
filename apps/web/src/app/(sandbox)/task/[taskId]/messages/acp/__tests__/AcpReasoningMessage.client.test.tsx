@@ -11,7 +11,9 @@ vi.mock('@/components/ai-elements', () => ({
   Reasoning: ({ children, open }: { children: ReactNode; open?: boolean }) => (
     <div data-reasoning-open={String(open)}>{children}</div>
   ),
-  ReasoningTrigger: () => <div data-testid="reasoning-trigger">Thought</div>,
+  ReasoningTrigger: () => (
+    <div data-testid="reasoning-trigger">Thought for a bit</div>
+  ),
   ReasoningContent: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
   ),
@@ -138,7 +140,7 @@ describe('AcpReasoningMessage', () => {
       <AcpReasoningMessage msg={reasoningMessage('Narrated thought', false)} />,
     );
 
-    expect(queryByText('Thought')).toBeInTheDocument();
+    expect(queryByText('Thought for a bit')).toBeInTheDocument();
     expect(queryByText('Narrated thought')).toBeInTheDocument();
     expect(queryByTestId('reasoning-trigger')).not.toBeInTheDocument();
   });

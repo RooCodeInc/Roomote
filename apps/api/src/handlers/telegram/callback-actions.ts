@@ -31,6 +31,7 @@ import { apiLogger } from '../../logging.js';
 import { startAcceptedFastAgentTurn } from '../fast-agent-entry.js';
 import {
   launchClaimedSuggestedTask,
+  resolveSuggestionFastConversation,
   resolveSuggestionOriginSessionId,
 } from '../tasks/suggestion-launch.js';
 import {
@@ -283,6 +284,10 @@ async function handleSuggestionLaunchCallback(params: {
   const claimedAt = suggestion.launchClaimedAt;
 
   try {
+    const originSessionId = await resolveSuggestionOriginSessionId(
+      suggestion.sourceTaskId,
+      suggestion.originSessionId,
+    );
     const launchTarget = resolveSuggestedTaskLaunchTarget(suggestion);
     const pinnedEnvironmentId = resolveSuggestedTaskPinnedEnvironmentId(
       launchTarget,
@@ -343,7 +348,11 @@ async function handleSuggestionLaunchCallback(params: {
         if (mode === 'fast') {
           const session = await getOrCreateFastAgentSession({
             userId: senderUserId,
-            conversation,
+            conversation: await resolveSuggestionFastConversation({
+              userId: senderUserId,
+              originSessionId,
+              conversation,
+            }),
           });
           // Resolve on admission, not on turn completion: the claim is
           // finalized as soon as the Fast session accepts the follow-up, and
@@ -386,9 +395,6 @@ async function handleSuggestionLaunchCallback(params: {
           threadId,
           forceNewTopic: true,
         });
-        const originSessionId = await resolveSuggestionOriginSessionId(
-          suggestion.sourceTaskId,
-        );
         let launchedRunId: number | null = null;
         const pinned = await launchPinnedFastSessionTask({
           userId: senderUserId,

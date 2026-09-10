@@ -15,7 +15,14 @@ interface WorkspaceBadgeProps {
   fallbackLabel?: string;
   className?: string;
   iconClassName?: string;
+  showIcon?: boolean;
+  size?: 'xs' | 'sm';
 }
+
+const BADGE_SIZES = {
+  xs: { icon: 'size-3', gap: 'gap-1' },
+  sm: { icon: 'size-3.5', gap: 'gap-1.5' },
+} as const;
 
 function useWorkspaceSelection(
   environmentId?: string,
@@ -32,7 +39,7 @@ function useWorkspaceSelection(
   }
 
   if (repo === ALL_REPOSITORIES) {
-    return { icon: BookCopy, label: 'All Repos' };
+    return { icon: BookCopy, label: 'All repositories' };
   }
 
   if (repo) {
@@ -49,6 +56,8 @@ export function WorkspaceBadge({
   fallbackLabel,
   className,
   iconClassName,
+  showIcon = true,
+  size = 'sm',
 }: WorkspaceBadgeProps) {
   const selection = useWorkspaceSelection(environmentId, repo, fallbackLabel);
 
@@ -63,8 +72,18 @@ export function WorkspaceBadge({
   }
 
   return (
-    <span className={cn('inline-flex items-center gap-1.5', className)}>
-      <Icon className={cn('size-3.5 shrink-0', iconClassName)} />
+    <span
+      className={cn(
+        'inline-flex cursor-default items-center',
+        BADGE_SIZES[size].gap,
+        className,
+      )}
+    >
+      {showIcon ? (
+        <Icon
+          className={cn(BADGE_SIZES[size].icon, 'shrink-0', iconClassName)}
+        />
+      ) : null}
       <span className="truncate">{label}</span>
     </span>
   );

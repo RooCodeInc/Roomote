@@ -33,7 +33,7 @@
     "chokidar": "^4.0.3",
     "commander": "^14.0.2",
     "execa": "9.6.1",
-    "hono": "4.12.34",
+    "hono": "4.13.5",
     "http-proxy": "^1.18.1",
     "ignore": "^7.0.5",
     "jsonwebtoken": "^9.0.3",

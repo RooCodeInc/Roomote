@@ -134,7 +134,6 @@ function logPrReviewNotificationTriage(input: {
 type PrReviewNotificationAction = {
   /** Summary text in the route provider's link syntax, without the question. */
   summaryText: string;
-  question: string;
   followUpPrompt: string;
   repository: string;
   prNumber: number;
@@ -309,12 +308,11 @@ async function postPrReviewNotification({
       channel: route.channelId,
       threadTs: route.threadId,
       taskId,
-      text,
+      text: action ? action.summaryText : text,
       ...(action && nonce
         ? {
             blocks: buildSlackPrReviewActionBlocks({
               text: action.summaryText,
-              question: action.question,
               nonce,
             }),
           }
@@ -334,10 +332,9 @@ async function postPrReviewNotification({
         );
       if (canonicalDeliveryId && !attached) {
         if (pendingAction) {
-          await retirePrReviewActionMessagesBestEffort(
-            [{ ...pendingAction, messageId: messageTs }],
-            'Superseded by newer PR activity.',
-          );
+          await retirePrReviewActionMessagesBestEffort([
+            { ...pendingAction, messageId: messageTs },
+          ]);
         }
         throw new Error('Canonical PR review prompt lost its posting fence');
       }
@@ -393,15 +390,12 @@ async function postPrReviewNotification({
       );
     if (canonicalDeliveryId && !attached) {
       if (pendingAction) {
-        await retirePrReviewActionMessagesBestEffort(
-          [
-            {
-              ...pendingAction,
-              messageId: posted.lastTextMessageId ?? posted.messageId,
-            },
-          ],
-          'Superseded by newer PR activity.',
-        );
+        await retirePrReviewActionMessagesBestEffort([
+          {
+            ...pendingAction,
+            messageId: posted.lastTextMessageId ?? posted.messageId,
+          },
+        ]);
       }
       throw new Error('Canonical PR review prompt lost its posting fence');
     }
@@ -528,6 +522,7 @@ export const prReviewNotificationJob = async (
 
   const deliveryStartedAt = Date.now();
   const telemetry = createPrReviewNotificationTelemetry(events.length);
+  let preparationCompleted = false;
 
   try {
     const delivery = await preparePrReviewNotificationDelivery({
@@ -536,6 +531,7 @@ export const prReviewNotificationJob = async (
       events,
       telemetry,
     });
+    preparationCompleted = true;
 
     logPrReviewNotificationTriage({
       data,
@@ -635,11 +631,6 @@ export const prReviewNotificationJob = async (
             prompt: delivery.followUpPrompt,
           }
         : null;
-    // Surfaces without buttons (and the task-history record) carry the offer
-    // as a trailing question, preserving the pre-elicitation message shape.
-    const textWithQuestion = followUp
-      ? `${delivery.text}\n${followUp.question}`
-      : delivery.text;
     const roomoteReviewIdentity = events.find(
       (event) => event.reviewTaskId && event.reviewHeadSha,
     );
@@ -949,7 +940,7 @@ ${delivery.text}`;
             runId: latestJob.id,
             taskId: data.taskId,
             route: null,
-            text: textWithQuestion,
+            text: delivery.text,
           });
           return;
         }
@@ -961,7 +952,7 @@ ${delivery.text}`;
         runId: latestJob.id,
         taskId: data.taskId,
         route: null,
-        text: autoHandledText ?? textWithQuestion,
+        text: autoHandledText ?? delivery.text,
       });
       if (!webReviewActionDeliveryId) {
         await finalizePrReviewNotificationRequest(data);
@@ -1013,12 +1004,11 @@ ${delivery.text}`;
       messageTs = await postPrReviewNotification({
         taskId: data.taskId,
         route: delivery.route,
-        text: textWithQuestion,
+        text: delivery.text,
         ...(followUp && isButtonRouteProvider(delivery.route.provider)
           ? {
               action: {
                 summaryText: delivery.text,
-                question: followUp.question,
                 followUpPrompt: followUp.prompt,
                 repository: data.repository,
                 prNumber: data.prNumber,
@@ -1072,7 +1062,7 @@ ${delivery.text}`;
       runId: latestJob.id,
       taskId: data.taskId,
       route: delivery.route,
-      text: textWithQuestion,
+      text: delivery.text,
       ...(messageTs ? { messageTs } : {}),
       ...(taskReviewActionDeliveryId && followUp
         ? {
@@ -1171,11 +1161,22 @@ ${delivery.text}`;
       telemetry,
     });
 
-    // Put the drained events back so a retried job can deliver them.
+    // BullMQ retries carry the same token. Releasing it here makes that retry
+    // look superseded and forces preparation to wait for the scheduled drain.
+    if (
+      !preparationCompleted &&
+      data.ownershipVersion === 'canonical' &&
+      data.deliveryState === 'claimed' &&
+      job.attemptsMade + 1 < Math.max(job.opts.attempts ?? 1, 1)
+    ) {
+      throw error;
+    }
+
+    // Exhausted retries and failures after preparation need a fresh durable claim.
     try {
       await requeuePendingPrReviewActivity({ target, events });
     } catch {
-      // Best effort; the events are lost if Redis is unavailable too.
+      // Best effort; lease expiry remains the recovery backstop.
     }
 
     throw error;

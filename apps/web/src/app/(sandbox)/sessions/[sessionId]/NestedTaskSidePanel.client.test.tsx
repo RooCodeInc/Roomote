@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { RunStatus } from '@roomote/types';
+import { NO_REPOSITORIES, RunStatus } from '@roomote/types';
 
 const useTaskSessionMock = vi.fn();
 const useTaskMessageEnvelopesMock = vi.fn();
@@ -214,6 +214,9 @@ describe('NestedTaskSidePanel', () => {
 
     expect(screen.getByText('Task:')).toHaveClass('font-semibold');
     expect(screen.getByText('Fix checkout')).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-task-robot-icon]'),
+    ).toBeInTheDocument();
     expect(screen.getByText('Workspace env-1')).toBeInTheDocument();
     expect(screen.getByTestId('live-provider')).toBeInTheDocument();
     expect(screen.getByText('Child transcript')).toBeInTheDocument();
@@ -249,6 +252,22 @@ describe('NestedTaskSidePanel', () => {
     expect(useSleepInvalidationMock).toHaveBeenCalledWith(baseSession.taskRun);
   });
 
+  it('hides the workspace badge for no-repository tasks', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      taskRun: {
+        ...baseSession.taskRun,
+        payload: { environmentId: NO_REPOSITORIES },
+      },
+    });
+
+    render(<NestedTaskSidePanel taskId="child-1" onClose={vi.fn()} />);
+
+    expect(
+      screen.queryByText(`Workspace ${NO_REPOSITORIES}`),
+    ).not.toBeInTheDocument();
+  });
+
   it('switches among tasks from the title dropdown', async () => {
     const onSelectTask = vi.fn();
     render(
@@ -264,7 +283,7 @@ describe('NestedTaskSidePanel', () => {
     );
 
     const trigger = screen.getByRole('button', {
-      name: /Task:.*Fix checkout/,
+      name: 'Fix checkout',
     });
     fireEvent.keyDown(trigger, { key: 'Enter' });
     expect(

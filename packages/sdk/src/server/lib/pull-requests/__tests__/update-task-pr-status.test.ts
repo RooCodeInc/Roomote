@@ -3,6 +3,7 @@ const {
   mockDbSelect,
   mockEnqueueTaskSleep,
   mockReturning,
+  mockRequeueBrainMemoryEventsForTasks,
   mockSyncTaskStateFromRuns,
   mockTransaction,
 } = vi.hoisted(() => {
@@ -10,9 +11,19 @@ const {
   const mockDbSelect = vi.fn();
   const mockEnqueueTaskSleep = vi.fn();
   const mockReturning = vi.fn();
+  const mockRequeueBrainMemoryEventsForTasks = vi.fn();
   const mockSyncTaskStateFromRuns = vi.fn();
   const mockTransaction = vi.fn(async (callback: (tx: unknown) => unknown) =>
     callback({
+      query: {
+        taskPullRequests: {
+          findMany: vi
+            .fn()
+            .mockResolvedValue([
+              { id: 'association', host: 'github.com', repositoryId: null },
+            ]),
+        },
+      },
       select: () => ({
         from: () => ({ where: mockLinkedTasks }),
       }),
@@ -29,6 +40,7 @@ const {
     mockDbSelect,
     mockEnqueueTaskSleep,
     mockReturning,
+    mockRequeueBrainMemoryEventsForTasks,
     mockSyncTaskStateFromRuns,
     mockTransaction,
   };
@@ -43,6 +55,8 @@ vi.mock('@roomote/db/server', async () => {
   return {
     ...actual,
     db: { transaction: mockTransaction, select: mockDbSelect },
+    requeueBrainMemoryEventsForTasks: (...args: unknown[]) =>
+      mockRequeueBrainMemoryEventsForTasks(...args),
     syncTaskStateFromRuns: (...args: unknown[]) =>
       mockSyncTaskStateFromRuns(...args),
   };
@@ -70,6 +84,7 @@ describe('updateTaskPrStatus', () => {
     mockReturning.mockResolvedValue([]);
     mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
     mockEnqueueTaskSleep.mockResolvedValue(true);
+    mockRequeueBrainMemoryEventsForTasks.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -96,7 +111,9 @@ describe('updateTaskPrStatus', () => {
         }),
       });
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+    });
 
     await vi.waitFor(() => {
       expect(mockEnqueueTaskSleep).toHaveBeenCalledWith({
@@ -127,7 +144,9 @@ describe('updateTaskPrStatus', () => {
     mockEnqueueTaskSleep.mockReturnValue(new Promise(() => {}));
 
     await expect(
-      updateTaskPrStatus('github', 'owner/repo', 42, 'merged'),
+      updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+        host: 'github.com',
+      }),
     ).resolves.toBeUndefined();
     await vi.waitFor(() => {
       expect(mockEnqueueTaskSleep).toHaveBeenCalled();
@@ -155,7 +174,9 @@ describe('updateTaskPrStatus', () => {
     mockEnqueueTaskSleep.mockRejectedValue(new Error('queue unavailable'));
 
     await expect(
-      updateTaskPrStatus('gitlab', 'owner/repo', 42, 'merged'),
+      updateTaskPrStatus('gitlab', 'owner/repo', 42, 'merged', {
+        host: 'github.com',
+      }),
     ).resolves.toBeUndefined();
     await vi.waitFor(() => {
       expect(errorSpy).toHaveBeenCalledWith(
@@ -173,7 +194,9 @@ describe('updateTaskPrStatus', () => {
       { taskId: 'task-1' },
     ]);
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+    });
 
     const tx = expect.any(Object);
     expect(mockSyncTaskStateFromRuns).toHaveBeenCalledTimes(2);
@@ -185,7 +208,9 @@ describe('updateTaskPrStatus', () => {
     mockLinkedTasks.mockResolvedValue([{ taskId: 'task-1' }]);
     mockReturning.mockResolvedValue([]);
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+    });
 
     expect(mockSyncTaskStateFromRuns).toHaveBeenCalledWith(
       expect.any(Object),
@@ -198,10 +223,86 @@ describe('updateTaskPrStatus', () => {
       { taskId: 'task-1', createdByRoomote: false },
     ]);
 
-    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed');
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+      host: 'github.com',
+    });
 
     expect(mockSyncTaskStateFromRuns).not.toHaveBeenCalled();
     expect(mockLinkedTasks).not.toHaveBeenCalled();
+  });
+  it('re-ingests the memories of every task whose PR just merged', async () => {
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-2', createdByRoomote: false },
+      { taskId: 'task-1', createdByRoomote: true },
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+    // The originating-task workflow lookup that follows a merge.
+    mockDbSelect.mockReturnValue({
+      from: () => ({ where: () => Promise.resolve([]) }),
+    });
+
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'merged', {
+      host: 'github.com',
+    });
+
+    expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledTimes(1);
+    expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledWith(
+      expect.any(Object),
+      ['task-1', 'task-2'],
+    );
+  });
+
+  it('re-ingests memories when a PR closes unmerged', async () => {
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+      host: 'github.com',
+    });
+
+    expect(mockRequeueBrainMemoryEventsForTasks).toHaveBeenCalledWith(
+      expect.any(Object),
+      ['task-1'],
+    );
+  });
+
+  it('does not re-ingest when nothing transitioned or the PR is still open', async () => {
+    mockReturning.mockResolvedValue([]);
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+      host: 'github.com',
+    });
+
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+    await updateTaskPrStatus('github', 'owner/repo', 42, 'open', {
+      host: 'github.com',
+    });
+
+    expect(mockRequeueBrainMemoryEventsForTasks).not.toHaveBeenCalled();
+  });
+
+  it('keeps the webhook healthy when the memory requeue fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockReturning.mockResolvedValue([
+      { taskId: 'task-1', createdByRoomote: false },
+    ]);
+    mockRequeueBrainMemoryEventsForTasks.mockRejectedValue(
+      new Error('brain db down'),
+    );
+
+    await expect(
+      updateTaskPrStatus('github', 'owner/repo', 42, 'closed', {
+        host: 'github.com',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to requeue memories'),
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
   });
 });
 

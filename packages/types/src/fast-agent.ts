@@ -7,6 +7,7 @@ export const fastAgentSurfaces = [
   'discord',
   'teams',
   'telegram',
+  'agentmail',
   'linear',
   'github',
   'gitlab',
@@ -66,6 +67,18 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
   }),
   z.object({
     surface: z.literal('telegram'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('agentmail'),
+    /**
+     * conversationId is the internal agentmail_conversations id, not the
+     * provider thread id: forwarded threads fork into a second conversation
+     * on the same provider thread, and the fork must be a distinct identity.
+     * The durable reply route (anchor, recipient) lives on the conversation
+     * row; replyTarget carries the inbox as channelId for display/context.
+     */
     ...fastAgentConversationIdentitySchema,
     replyTarget: fastAgentReplyTargetSchema,
   }),
@@ -148,7 +161,7 @@ export function isFastAgentSourceControlConversation(
 
 export type FastAgentCommunicationConversation = Extract<
   FastAgentConversation,
-  { surface: 'slack' | 'discord' | 'teams' | 'telegram' }
+  { surface: 'slack' | 'discord' | 'teams' | 'telegram' | 'agentmail' }
 >;
 
 export function isFastAgentCommunicationConversation(
@@ -158,7 +171,8 @@ export function isFastAgentCommunicationConversation(
     conversation.surface === 'slack' ||
     conversation.surface === 'discord' ||
     conversation.surface === 'teams' ||
-    conversation.surface === 'telegram'
+    conversation.surface === 'telegram' ||
+    conversation.surface === 'agentmail'
   );
 }
 
@@ -223,6 +237,7 @@ export const fastAgentPlatformEventKindSchema = z.enum([
   'automation',
   'setup',
   'input_response',
+  'scheduled_wakeup',
 ]);
 
 export const fastAgentPlatformEventVisibilitySchema = z.enum([

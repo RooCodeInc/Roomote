@@ -12,6 +12,9 @@ const {
   mockRetireCanonicalForPullRequest,
   mockAttachCanonical,
   mockGetCommunicationProviderAdapter,
+  mockSlackInstallation,
+  mockSlackBlocks,
+  mockSlackUpdate,
 } = vi.hoisted(() => {
   const mockUpdateReturning = vi.fn();
   const mockUpdateWhere = vi.fn(() => ({ returning: mockUpdateReturning }));
@@ -30,8 +33,19 @@ const {
     mockRetireCanonicalForPullRequest: vi.fn(),
     mockAttachCanonical: vi.fn(),
     mockGetCommunicationProviderAdapter: vi.fn(),
+    mockSlackInstallation: vi.fn(),
+    mockSlackBlocks: vi.fn(),
+    mockSlackUpdate: vi.fn(),
   };
 });
+
+vi.mock('@roomote/slack', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/slack')>()),
+  SlackNotifier: class {
+    getMessageBlocks = mockSlackBlocks;
+    updateMessage = mockSlackUpdate;
+  },
+}));
 
 vi.mock('../../communication-providers', () => ({
   getCommunicationProviderAdapter: (...args: unknown[]) =>
@@ -69,6 +83,7 @@ vi.mock('@roomote/db/server', async () => {
       update: mockUpdate,
       query: {
         slackInstallations: {
+          findFirst: mockSlackInstallation,
           findMany: (...args: unknown[]) =>
             mockFindManySlackInstallations(...args),
         },
@@ -87,6 +102,7 @@ import {
   claimPendingPrReviewActionsForThread,
   enableAutoHandlePrReviewFeedback,
   retirePendingPrReviewActionsForPullRequest,
+  retirePrReviewActionMessagesBestEffort,
   setPendingPrReviewAction,
   findAutoHandlePrReviewFeedbackPreference,
 } from '../pr-review-action';
@@ -473,6 +489,31 @@ describe('PR review action state', () => {
     expect(editMessageReplyMarkup).toHaveBeenCalledWith({
       channelId: 'chat-1',
       messageId: '456',
+    });
+  });
+
+  it('retires superseded Slack controls without adding a notice', async () => {
+    const summary = { type: 'markdown', text: 'Review findings.' };
+    mockSlackInstallation.mockResolvedValue({ botAccessToken: 'test-token' });
+    mockSlackBlocks.mockResolvedValue([
+      summary,
+      { type: 'actions', block_id: 'pr_review_action', elements: [] },
+    ]);
+
+    await retirePrReviewActionMessagesBestEffort([
+      {
+        provider: 'slack',
+        slackTeamId: 'T1',
+        channelId: 'C1',
+        threadId: '1.0',
+        messageId: '2.0',
+      },
+    ]);
+
+    expect(mockSlackUpdate).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '2.0',
+      message: { blocks: [summary] },
     });
   });
 

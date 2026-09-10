@@ -30,6 +30,12 @@ Good handoffs include:
   behind the existing feature flag"
 - how you want the result returned, such as a plan, explanation, patch, or PR
 
+Roomote acts autonomously on authorized work when the next step is clear, but
+that autonomy does not give it authority over people. Unless you explicitly ask
+it to coordinate teammates, Roomote leaves human ownership open instead of
+assigning work, setting deadlines, or presenting proposed commitments as
+accepted.
+
 ## Work that starts itself
 
 Some work starts from repository events instead of a manual prompt. For
@@ -55,6 +61,7 @@ Session lives.
 | Teams         | Mention the bot in a channel or group chat, or message it directly in a personal chat | Teams thread and task view              |
 | Telegram      | Mention the bot in a group chat, or message it directly in a private chat            | Telegram chat and task view             |
 | Discord       | Mention the bot in a server or send it a direct message    | Discord thread, forum post, or DM       |
+| Email         | Email the deployment's AgentMail inbox from a verified account address | Replies in the same email thread and task view |
 | Web dashboard | Submit a prompt from **Home**                              | Task view in Roomote                    |
 | Linear        | Start an agent session or mention Roomote on an issue      | Agent session replies and Session view  |
 | GitHub        | Pull request events or `@`-mentions in PR and issue comments | GitHub comments, reviews, and task view |

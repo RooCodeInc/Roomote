@@ -15,6 +15,15 @@ import {
   pendingResponseReducer,
 } from './FastSessionTranscript';
 import { SessionRunningTaskCountContext } from './session-task-panel-context';
+import {
+  clearPendingFastSessionLaunch,
+  stagePendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  usePathname: () => '/sessions/session-1',
+}));
 
 const {
   replyMutate,
@@ -105,6 +114,18 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
   useQuery: () => ({ data: composerSuggestionState.data }),
+}));
+
+// Wakeup polling has dedicated provider-backed tests. Keep this suite's query
+// mocks scoped to composer suggestions rather than mounting the live poller.
+vi.mock('./SessionWakeups', () => ({
+  SessionWakeups: () => null,
+}));
+
+vi.mock('../../task/[taskId]/messages/acp/AcpDataVisualizations', () => ({
+  AcpDataVisualizations: ({ charts }: { charts: Array<{ title: string }> }) => (
+    <div data-testid="session-chart">{charts[0]?.title}</div>
+  ),
 }));
 
 vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
@@ -235,6 +256,7 @@ beforeEach(() => {
   liveVoiceState.start.mockReset();
   liveVoiceState.stop.mockReset();
   liveVoiceState.speak.mockReset();
+  clearPendingFastSessionLaunch('session-1');
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -293,6 +315,41 @@ describe('FastSessionTranscript', () => {
     userEmail,
     userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('renders charts restored from persisted Session messages', () => {
+    const message = textMessage({
+      id: 'assistant-chart',
+      role: 'assistant',
+      text: 'Search accounts for most visits.',
+      ts: 10,
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...message,
+            contentBlocks: [
+              ...message.contentBlocks,
+              {
+                type: 'data_visualization',
+                title: 'Traffic sources',
+                chart: {
+                  type: 'pie',
+                  segments: [{ label: 'Search', value: 65 }],
+                },
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('session-chart')).toHaveTextContent(
+      'Traffic sources',
+    );
   });
 
   describe('pendingResponseReducer', () => {
@@ -832,6 +889,67 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('Thinking')).toBeInTheDocument();
   });
 
+  it('shows a staged initial prompt immediately and reconciles its canonical event', () => {
+    stagePendingFastSessionLaunch('session-1', {
+      fastConversationId: 'fast-session-1',
+      text: 'Initial question',
+      images: ['data:image/png;base64,aGVsbG8='],
+    });
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.getByText('Initial question')).toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'canonical-user',
+              role: 'user',
+              text: 'Initial question',
+              ts: Date.now(),
+            }),
+            eventId: 'web-kickoff:fast-session-1:user',
+            contentBlocks: [
+              { type: 'text', text: 'Initial question' },
+              { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' },
+            ],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getAllByText('Initial question')).toHaveLength(1);
+  });
+
+  it('does not duplicate a staged prompt already present in initial messages', () => {
+    stagePendingFastSessionLaunch('session-1', {
+      fastConversationId: 'fast-session-1',
+      text: 'Already persisted',
+    });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'canonical-user',
+              role: 'user',
+              text: 'Already persisted',
+              ts: Date.now(),
+            }),
+            eventId: 'web-kickoff:fast-session-1:user',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByText('Already persisted')).toHaveLength(1);
+  });
+
   it('waits for the first visible assistant message before showing timeline extras', () => {
     render(
       <FastSessionTranscript
@@ -1093,6 +1211,11 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
+    expect(
+      screen.queryByText('Would you like me to resolve these issues?'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeInTheDocument();
+    expect(reviewActionMutate).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Resolve these issues' }),
     );
@@ -1410,74 +1533,124 @@ describe('FastSessionTranscript', () => {
     expect(openTaskPanel).toHaveBeenCalledWith('child-1');
   });
 
-  it('cold-loads one completed tool row before an intervening kickoff', () => {
-    render(
-      <FastSessionTranscript
-        sessionId="session-1"
-        initialMessages={[
-          {
-            id: 'tool-1',
-            eventId: 'turn-1:tool:0',
-            turnId: 'turn-1',
-            turnSeq: 1,
-            ts: 2,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
-            role: 'tool',
-            contentBlocks: [{ type: 'text', text: '{"success":true}' }],
-            metadata: { visibleInTranscript: true },
-            payload: {
-              toolCallId: 'turn-1:tool:0',
-              title: 'launch_task',
-              kind: 'tool',
-              status: 'completed',
-              isExecute: false,
-              isMcp: false,
-              mcpServerName: null,
-              mcpToolName: null,
-              toolName: 'launch_task',
-              command: null,
-              exitCode: null,
-              output: '{"success":true}',
-              rawInput: { arguments: { prompt: 'Fix checkout' } },
-            },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:01.000Z'),
-          },
-          {
-            id: 'kickoff-1',
-            eventId: 'turn-1:assistant:0',
-            turnId: 'turn-1',
-            turnSeq: 2,
-            ts: 3,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-            role: 'assistant',
-            contentBlocks: [
-              {
-                type: 'text',
-                text: 'I started the checkout fix.\n\n[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)',
+  it.each([false, true])(
+    'keeps the task card while hiding runtime navigation (standalone: %s)',
+    (standalone) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'tool-1',
+              eventId: 'turn-1:tool:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 2,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+              role: 'tool',
+              contentBlocks: [{ type: 'text', text: '{"success":true}' }],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                toolCallId: 'turn-1:tool:0',
+                title: 'launch_task',
+                kind: 'tool',
+                status: 'completed',
+                isExecute: false,
+                isMcp: false,
+                mcpServerName: null,
+                mcpToolName: null,
+                toolName: 'launch_task',
+                command: null,
+                exitCode: null,
+                output: '{"success":true}',
+                rawInput: { arguments: { prompt: 'Fix checkout' } },
               },
-            ],
-            metadata: { visibleInTranscript: true },
-            payload: { purpose: 'progress', kickoff: true },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:02.000Z'),
-          },
-        ]}
-      />,
-    );
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:01.000Z'),
+            },
+            {
+              id: 'kickoff-1',
+              eventId: 'turn-1:assistant:0',
+              turnId: 'turn-1',
+              turnSeq: 2,
+              ts: 3,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+              role: 'assistant',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: `${standalone ? '' : 'I started the checkout fix.\n\n'}[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)`,
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                purpose: 'progress',
+                ...(standalone ? { taskNavigation: true } : { kickoff: true }),
+              },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:02.000Z'),
+            },
+          ]}
+        />,
+      );
 
-    expect(
-      screen.getByRole('button', { name: /Started coding task Completed/ }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
-    expect(
-      screen.queryByRole('link', { name: 'Open in Roomote' }),
-    ).not.toBeInTheDocument();
-  });
+      expect(
+        screen.getByRole('button', { name: /Started coding task Completed/ }),
+      ).toBeInTheDocument();
+      if (!standalone) {
+        expect(
+          screen.getByText('I started the checkout fix.'),
+        ).toBeInTheDocument();
+      }
+      expect(
+        screen.queryByRole('link', { name: 'Open in Roomote' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(['', 'You can follow the work here.\n\n'])(
+    'preserves ordinary assistant links with prefix %j',
+    (prefix) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'ordinary-link',
+              eventId: 'turn-1:assistant:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 1,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+              role: 'assistant',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: `${prefix}[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)`,
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: { purpose: 'progress' },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ]}
+        />,
+      );
+      expect(
+        screen.getByRole('link', { name: 'Open in Roomote' }),
+      ).toHaveAttribute(
+        'href',
+        'https://roomote.example/sessions/session-1?task=child-1',
+      );
+    },
+  );
 
   it('shows a reply composer for web sessions and sends replies optimistically', async () => {
     replyMutate.mockResolvedValue({ success: true });
@@ -1505,6 +1678,73 @@ describe('FastSessionTranscript', () => {
       reasoningEffort: null,
     });
   });
+
+  it.each(['Tab', 'Escape', 'mouse', 'touch'])(
+    'preserves focus-only hints and %s interaction for a long suggestion',
+    (action) => {
+      const suggestion =
+        'Implement the marker fix and add regression coverage.';
+      composerSuggestionState.data = { suggestion, messageCount: 2 };
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Question',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Answer',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />,
+      );
+      const input = screen.getByPlaceholderText(suggestion);
+      act(() => input.blur());
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+      act(() => input.focus());
+      const hint = screen.getByRole('button', {
+        name: 'Insert suggested message',
+      });
+      expect(hint).toHaveTextContent('Tab to accept');
+      expect(input).toHaveAccessibleDescription(
+        `Suggested message: ${suggestion}. Press Tab to accept or Escape to dismiss.`,
+      );
+      act(() => input.blur());
+      expect(hint).not.toBeInTheDocument();
+      act(() => input.focus());
+
+      if (action === 'mouse' || action === 'touch') {
+        const focusedHint = screen.getByRole('button', {
+          name: 'Insert suggested message',
+        });
+        expect(
+          fireEvent.pointerDown(focusedHint, {
+            pointerType: action,
+            cancelable: true,
+          }),
+        ).toBe(false);
+        expect(input).toHaveFocus();
+        fireEvent.click(focusedHint);
+      } else {
+        fireEvent.keyDown(input, { key: action, code: action });
+      }
+
+      expect(input).toHaveValue(action === 'Escape' ? '' : suggestion);
+      expect(input).toHaveFocus();
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it('keeps a later suggestion hint hidden after a successful send remounts the composer', async () => {
     composerSuggestionState.data = {
@@ -1795,7 +2035,9 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.getByText('New session')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'New session' }),
+    ).toHaveAttribute('title', 'New session');
 
     act(() => {
       FakeEventSource.instances[0]!.emit('session', {
@@ -1805,37 +2047,44 @@ describe('FastSessionTranscript', () => {
     });
 
     expect(
-      screen.getByText(
-        'Rotate the API keys across every production environment without downtime',
-      ),
-    ).toBeInTheDocument();
+      screen.getByRole('heading', {
+        name: 'Rotate the API keys across every production environment without downtime',
+      }),
+    ).toHaveAttribute(
+      'title',
+      'Rotate the API keys across every production environment without downtime',
+    );
     expect(document.title).toBe(
       'Rotate the API keys across every production environment with... | Roomote',
     );
   });
 
-  it('uses content-driven wrapping for header extras', () => {
+  it('renders header extras and actions while preserving the Fast stream ID', () => {
     render(
       <FastSessionTranscript
-        sessionId="session-1"
+        sessionId="fast-conversation-1"
         initialMessages={[]}
         initialTitle="Short session title"
         headerExtras={
           <a href="https://github.com/acme/widgets/pull/42">widgets#42</a>
         }
+        headerActions={<button type="button">Session viewers</button>}
       />,
     );
 
     const heading = screen.getByRole('heading', {
       name: 'Short session title',
     });
-    expect(heading).toHaveClass('max-w-full', 'flex-[0_1_auto]');
-    expect(heading.parentElement).toHaveClass(
-      'flex-row',
-      'flex-wrap',
-      'items-center',
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('link', { name: 'widgets#42' }),
     );
-    expect(heading.parentElement?.className).not.toContain('@[480px]');
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('button', { name: 'Session viewers' }),
+    );
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toBe(
+      '/api/sessions/fast-conversation-1/stream',
+    );
   });
 
   it('hides the reply composer for non-web sessions', () => {

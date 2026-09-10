@@ -3,7 +3,6 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   fastAgentConversationRepository,
-  hasFastAgentSession,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -22,6 +21,7 @@ import {
   type SlackNotifier,
 } from '@roomote/slack';
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
+import { buildDataVisualizationBlocks } from '@roomote/types';
 import {
   admitFastAgentHumanFollowUp,
   createFastAgentConversationArtifact,
@@ -31,54 +31,16 @@ import {
   type FastAgentDurableTurn,
   createSlackFastReplyStream,
   recordFastAgentConversationMessageBestEffort,
+  resolveFastAgentSessionImages,
+  deliverFastAgentSessionVideos,
   resolveUserMcpServerConfigs,
 } from '@roomote/sdk/server';
 
-import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import {
   postSlackThreadMarkdownMessage,
   guardReplyStreamBySourceMessage,
 } from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
-
-export function stripLeadingFastCommandMention(text: string): string {
-  return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
-}
-
-export function isFastCommandInvocation(text: string): boolean {
-  const mentionStrippedText = stripLeadingFastCommandMention(text);
-  return /^!fast(?:\s|$)/i.test(mentionStrippedText);
-}
-
-export function extractFastQuestion(
-  mentionStrippedText: string,
-  continuation = false,
-): string | null {
-  if (continuation) {
-    const trimmedQuestion = mentionStrippedText.trim();
-    return trimmedQuestion.length > 0 ? trimmedQuestion : null;
-  }
-
-  const match = mentionStrippedText.match(/^!fast\s*(.*)$/is);
-  if (!match) {
-    return null;
-  }
-
-  const [, question = ''] = match;
-  const trimmedQuestion = question.trim();
-
-  return trimmedQuestion.length > 0 ? trimmedQuestion : null;
-}
-
-/**
- * Registers a no-op rejection handler so a promise started ahead of its await
- * cannot surface as an unhandled rejection while other work runs. Awaiting the
- * returned promise later still throws.
- */
-function keepRejectionForLater<T>(promise: Promise<T>): Promise<T> {
-  promise.catch(() => undefined);
-  return promise;
-}
 
 export async function processFastAgentMessage(params: {
   event: SlackEvent;
@@ -86,12 +48,9 @@ export async function processFastAgentMessage(params: {
   userId: string;
   teamId: string;
   apiBaseUrl?: string;
-  continuation?: boolean;
   activeTasks?: FastAgentActiveTask[];
   resolveActiveTasks?: () => Promise<FastAgentActiveTask[]>;
   launchTask: LaunchFastAgentTask;
-  processingReactionName?: string;
-  isExistingConversation?: boolean;
   directedAtRoomote?: boolean;
   roomoteSlackUserId?: string;
   onAccepted?: (abort: () => Promise<void>) => void;
@@ -103,12 +62,9 @@ export async function processFastAgentMessage(params: {
     userId,
     teamId,
     apiBaseUrl,
-    continuation = false,
     activeTasks = [],
     resolveActiveTasks,
     launchTask,
-    processingReactionName = 'eyes',
-    isExistingConversation = false,
     directedAtRoomote = false,
     roomoteSlackUserId,
   } = params;
@@ -127,17 +83,11 @@ export async function processFastAgentMessage(params: {
     maxWaitMs: 0,
   });
 
-  const authoredText = event.authoredText ?? event.text;
-  const questionText = continuation
-    ? authoredText
-    : stripLeadingFastCommandMention(authoredText);
-  const baseQuestion = extractFastQuestion(questionText, continuation) ?? '';
+  const baseQuestion = (event.authoredText ?? event.text).trim();
 
   // Every Slack round trip from the control plane costs a few hundred
-  // milliseconds, and the thread history, processing reaction, attachments,
-  // and session lookups do not depend on one another. Start the independent
-  // ones as soon as the turn is serialized so they overlap instead of adding
-  // up before inference can begin.
+  // milliseconds. Start the thread history lookup as soon as the turn is
+  // serialized so it overlaps with session resolution.
   const threadContextPromise: Promise<
     Awaited<ReturnType<typeof slack.fetchThreadMessages>>
   > = slack
@@ -152,9 +102,6 @@ export async function processFastAgentMessage(params: {
       return [];
     });
 
-  let didAddProcessingReaction = false;
-  let processingReactionPromise: Promise<boolean> | null = null;
-  let processingReactionSettled = false;
   let releaseCanonicalFastAgentLock: Awaited<
     ReturnType<typeof acquireFastAgentTurnLock>
   > = null;
@@ -167,31 +114,17 @@ export async function processFastAgentMessage(params: {
       teamId,
       channelId: event.channel,
     });
-    const { hasExistingConversation, session } = await (async () => {
+    const session = await (async () => {
       try {
-        return {
-          hasExistingConversation:
-            isExistingConversation ||
-            (await hasFastAgentSession(incomingConversation)),
-          session: await getOrCreateFastAgentSession({
-            userId,
-            conversation: incomingConversation,
-          }),
-        };
+        return await getOrCreateFastAgentSession({
+          userId,
+          conversation: incomingConversation,
+        });
       } finally {
         await releaseRootBindingLock().catch(() => {});
       }
     })();
     const conversation = session.conversation;
-    if (!hasExistingConversation) {
-      processingReactionPromise = keepRejectionForLater(
-        slack.addReaction({
-          channel: event.channel,
-          timestamp: event.ts,
-          name: processingReactionName,
-        }),
-      );
-    }
 
     const threadContext = await threadContextPromise;
 
@@ -213,10 +146,6 @@ export async function processFastAgentMessage(params: {
       }),
       resolveFastSessionReplyFooterContext({ sessionId: session.id }),
     ]);
-    if (processingReactionPromise) {
-      didAddProcessingReaction = await processingReactionPromise;
-      processingReactionSettled = true;
-    }
     const attachmentTexts = [
       ...attachments.attachmentTexts,
       ...attachments.videoDescriptions,
@@ -389,6 +318,11 @@ export async function processFastAgentMessage(params: {
                     recipientUserId: event.user,
                     sessionId: session.id,
                     footerContext,
+                    resolveImages: (artifactIds) =>
+                      resolveFastAgentSessionImages({
+                        artifactIds,
+                        sessionId: session.id,
+                      }),
                     onDelivered: () => {
                       didSendVisibleResponse = true;
                     },
@@ -402,19 +336,43 @@ export async function processFastAgentMessage(params: {
                 ),
             }
           : {}),
-        postReply: async ({ message, kickoff }) => {
+        postReply: async ({
+          message,
+          kickoff,
+          imageArtifactIds = [],
+          videoArtifactIds = [],
+          charts = [],
+        }) => {
+          const replyImages = await resolveFastAgentSessionImages({
+            artifactIds: imageArtifactIds,
+            sessionId: session.id,
+          });
           const posted = await postSlackThreadMarkdownMessage({
             slack,
             channel: event.channel,
             threadTs: threadId,
             text: message,
+            charts,
             sourceMessageTs: event.ts,
+            deliverVideos: videoArtifactIds.length
+              ? () =>
+                  deliverFastAgentSessionVideos({
+                    artifactIds: videoArtifactIds,
+                    sessionId: session.id,
+                    channelId: event.channel,
+                    threadTs: threadId,
+                  })
+              : undefined,
             conversationLog: {
               userId,
               slackTeamId: teamId,
               source: 'fast_agent',
             },
             fastSessionFooter: { sessionId: session.id, ...footerContext },
+            images: replyImages.map((image) => ({
+              url: image.url,
+              altText: image.altText,
+            })),
           });
           if (posted === 'failed') {
             throw new Error('Slack did not accept the Fast parent reply.');
@@ -441,7 +399,7 @@ export async function processFastAgentMessage(params: {
           });
           return { messageId: posted.messageId };
         },
-        replaceReply: async ({ messageId }, { message }) => {
+        replaceReply: async ({ messageId }, { message, charts }) => {
           // Keep the sticky footer when the edited message is its current
           // carrier; the lookup and edit share the footer lock so a
           // concurrent relocation cannot slip in between them.
@@ -460,6 +418,7 @@ export async function processFastAgentMessage(params: {
                   text: message,
                   blocks: [
                     { type: 'markdown', text: message },
+                    ...buildDataVisualizationBlocks(charts),
                     ...(footerMessageTs === messageId
                       ? [
                           buildSlackThreadReplyFooterBlock({
@@ -487,19 +446,7 @@ export async function processFastAgentMessage(params: {
           didSendVisibleResponse = true;
           return { messageId };
         },
-        postReaction: async ({ name, purpose, messageId }) => {
-          if (
-            didAddProcessingReaction &&
-            name === processingReactionName &&
-            messageId === event.ts
-          ) {
-            if (purpose === 'closeout') {
-              didAddProcessingReaction = false;
-            }
-            didSendVisibleResponse = true;
-            return;
-          }
-
+        postReaction: async ({ name, messageId }) => {
           const added = await slack.addReaction({
             channel: event.channel,
             timestamp: messageId,
@@ -536,22 +483,6 @@ export async function processFastAgentMessage(params: {
       }
     }
   } finally {
-    // A failure before the reaction result was read must still clear a
-    // reaction that landed on the message.
-    if (processingReactionPromise && !processingReactionSettled) {
-      didAddProcessingReaction = await processingReactionPromise.catch(
-        () => false,
-      );
-    }
-    if (didAddProcessingReaction) {
-      await slack
-        .removeReaction({
-          channel: event.channel,
-          timestamp: event.ts,
-          name: processingReactionName,
-        })
-        .catch(() => {});
-    }
     await releaseCanonicalFastAgentLock?.().catch(() => {});
     await releaseFastAgentLock?.().catch(() => {});
   }

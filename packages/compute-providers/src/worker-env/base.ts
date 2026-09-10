@@ -137,6 +137,10 @@ export function buildBaseWorkerEnv({
 
   return {
     AUTH_TOKEN: authToken,
+    // Deployment identity metadata, independent of the worker's operational env.
+    ...(Env.R_APP_ENV !== undefined && {
+      ROOMOTE_RELEASE_APP_ENV: Env.R_APP_ENV,
+    }),
     // Intentionally reads process.env.APP_ENV (not the resolved `appEnv`)
     // so we only forward an explicit APP_ENV setting. resolveAppEnv() may
     // derive a value from other env vars that reflect the *controller's*

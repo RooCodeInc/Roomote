@@ -14,7 +14,33 @@ vi.mock('@/components/system', async (importOriginal) => {
 });
 
 describe('ToolHeader', () => {
-  it('shows running and failed states textually while success stays implied', () => {
+  it.each(['input-streaming', 'input-available'] as const)(
+    'keeps the spinner and accessible %s status without redundant visible text',
+    (state) => {
+      render(
+        <ToolHeader
+          action="Sending"
+          object="message to task"
+          icon={Search}
+          iconElement={<span data-testid="task-icon" />}
+          state={state}
+          collapsible={false}
+        />,
+      );
+
+      expect(screen.getByTestId('task-icon')).toBeInTheDocument();
+      expect(screen.getByTestId('spinner')).toBeInTheDocument();
+      expect(screen.getByText('Sending')).toBeInTheDocument();
+      expect(screen.getByText('message to task')).toBeInTheDocument();
+      expect(screen.getByText('Running')).toHaveClass('sr-only');
+      expect(screen.getByText('Running')).toHaveAttribute(
+        'aria-live',
+        'polite',
+      );
+    },
+  );
+
+  it('announces running and success accessibly while failures stay visible', () => {
     const { rerender } = render(
       <ToolHeader
         action="Using"
@@ -25,7 +51,7 @@ describe('ToolHeader', () => {
       />,
     );
 
-    expect(screen.getByText('Running')).not.toHaveClass('sr-only');
+    expect(screen.getByText('Running')).toHaveClass('sr-only');
     expect(screen.getByTestId('spinner')).toBeInTheDocument();
 
     rerender(
@@ -83,6 +109,36 @@ describe('ToolHeader', () => {
       </Tool>,
     );
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('keeps a custom icon action separate from the expansion trigger', () => {
+    const onIconClick = vi.fn();
+    render(
+      <Tool>
+        <ToolHeader
+          action="Sent"
+          object="message to task"
+          icon={Search}
+          iconElement={<span data-testid="task-icon" />}
+          iconAction={{ label: 'Focus task prompt', onClick: onIconClick }}
+          state="output-available"
+        />
+      </Tool>,
+    );
+
+    const iconButton = screen.getByRole('button', {
+      name: 'Focus task prompt',
+    });
+    const expansionTrigger = screen.getByRole('button', {
+      name: 'Sent message to task Completed',
+    });
+
+    fireEvent.click(iconButton);
+    expect(onIconClick).toHaveBeenCalledOnce();
+    expect(expansionTrigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(expansionTrigger);
+    expect(expansionTrigger).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('keeps long action-only labels truncatable inside the header row', () => {

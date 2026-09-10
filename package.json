@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "1.2.4",
+  "version": "1.6.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -107,12 +107,12 @@
       "better-auth>zod": "^4.3.6",
       "@better-auth/core>zod": "^4.3.6",
       "js-cookie": "3.0.7",
-      "js-yaml": "4.3.1",
-      "gray-matter>js-yaml": "3.15.1",
-      "read-yaml-file@1>js-yaml": "3.15.1",
+      "js-yaml": "4.3.2",
+      "gray-matter>js-yaml": "3.15.2",
+      "read-yaml-file@1>js-yaml": "3.15.2",
       "nise>path-to-regexp": "8.4.0",
       "protobufjs": "7.6.5",
-      "qs": "6.15.2",
+      "qs": "6.16.0",
       "router>path-to-regexp": "8.4.0",
       "socket.io>socket.io-adapter": "2.5.8",
       "socket.io-adapter>ws": "8.21.0",
@@ -148,7 +148,10 @@
       "ip-address": "10.3.1",
       "immutable": "5.1.8",
       "postcss": "8.5.23",
-      "sharp": "0.35.0",
+      "sharp": "0.35.4",
+      "hono": "4.13.5",
+      "vitest": "4.1.11",
+      "@ai-sdk/provider-utils@4": "4.0.33",
       "toml": "4.2.0"
     },
     "patchedDependencies": {

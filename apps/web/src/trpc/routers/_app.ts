@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { instanceSkillsRouter } from './instance-skills';
 import {
   publicAuthTokenTimeoutMsSchema,
   runTokenTimeoutMsSchema,
@@ -9,6 +10,7 @@ import {
   SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   computeProviders,
   environmentConfigSchema,
@@ -65,6 +67,10 @@ import {
   updateSessionMetadata,
 } from '../commands/sessions';
 import {
+  cancelSessionWakeupCommand,
+  getSessionWakeupsCommand,
+} from '../commands/sessions/wakeups';
+import {
   analyticsChartInputSchema,
   analyticsDetailsInputSchema,
   analyticsExportInputSchema,
@@ -109,7 +115,6 @@ import {
 import {
   getGitHubInstallationsCommand,
   getGitHubPendingInstallationsCommand,
-  getBranchesCommand,
   getCollaboratorsCommand,
   getIssuesCommand,
   getPullRequestsCommand,
@@ -183,6 +188,8 @@ import {
   createDiscordLinkCodeCommand,
   unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
+  previewEmailLinkCommand,
+  linkEmailAddressCommand,
 } from '../commands/linked-accounts';
 import {
   getPersonalAccountCapabilitiesCommand,
@@ -197,7 +204,6 @@ import {
   getEnvironmentsCommand,
   getWorkspaceRoutingSettingsCommand,
   updateWorkspaceRoutingSettingsCommand,
-  getAvailableEnvironmentsCommand,
   getEnvironmentNamesByIdsCommand,
   getEnvironmentByIdCommand,
   getEnvironmentConfigVersionCommand,
@@ -356,6 +362,7 @@ import {
   saveCommsAuthConfigCommand,
   clearCommsAuthConfigCommand,
   diagnoseDiscordPermissionsCommand,
+  listAgentMailInboxesCommand,
   listDiscordChannelsCommand,
   listDiscordGuildsCommand,
   registerDiscordCommandsCommand,
@@ -385,6 +392,7 @@ import {
   getBackgroundAgentSettingsCommand,
   listAutomationDiscordChannelsCommand,
   listCustomAutomationsCommand,
+  getCustomAutomationOptionsCommand,
   resolveCustomAutomationScheduleCommand,
   listSlackChannelsCommand,
   triggerCustomAutomationCommand,
@@ -467,6 +475,10 @@ import {
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
+import {
+  getExperimentalSettingsCommand,
+  setOpenCodeCodeModeCommand,
+} from '../commands/experimental-settings';
 import {
   backfillBrainTaskMemoriesCommand,
   getBrainPageCommand,
@@ -746,6 +758,7 @@ const automationsRouter = createRouter({
          */
         suggesterUseTeams: z.boolean().optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
+        suggesterAdditionalRules: z.string().max(8000).nullable().optional(),
         announcerFrequency: z.enum(['off', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         announcerDiscordChannel: z
@@ -756,6 +769,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         announcerInstructions: z.string().max(8_000).nullable(),
+        announcerAdditionalRules: z.string().max(8000).nullable().optional(),
         platformIssueAlertsEnabled: z.boolean().optional(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
         platformIssueDiscordChannel: z
@@ -777,6 +791,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        securityAuditorAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         codeQualityAuditorSlackChannel: z
           .string()
           .trim()
@@ -789,18 +808,33 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        codeQualityAuditorAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         ciFailureTriageSlackChannel: z
           .string()
           .trim()
           .min(1)
           .max(160)
           .nullable(),
+        ciFailureTriageAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         ciFailureTriageDiscordChannel: z
           .string()
           .trim()
           .min(1)
           .max(160)
           .nullable(),
+        mergeAnnouncerAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -821,6 +855,10 @@ const automationsRouter = createRouter({
 
   listCustomAutomations: protectedProcedure.query(({ ctx: { auth } }) =>
     listCustomAutomationsCommand(auth),
+  ),
+
+  getCustomAutomationOptions: protectedProcedure.query(({ ctx: { auth } }) =>
+    getCustomAutomationOptionsCommand(auth),
   ),
 
   createCustomAutomation: protectedProcedure
@@ -850,6 +888,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
@@ -891,6 +930,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
@@ -993,11 +1033,15 @@ export const appRouter = createRouter({
 
     messageEnvelopes: protectedProcedure
       .input(z.object({ taskId: z.string() }))
-      .query(({ input }) => getTaskMessageEnvelopesCommand(input)),
+      .query(({ ctx: { auth }, input }) =>
+        getTaskMessageEnvelopesCommand(auth, input),
+      ),
 
     runEvents: protectedProcedure
       .input(z.object({ taskId: z.string() }))
-      .query(({ input }) => getTaskRunEventsCommand(input)),
+      .query(({ ctx: { auth }, input }) =>
+        getTaskRunEventsCommand(auth, input),
+      ),
 
     generateSummary: protectedProcedure
       .input(z.object({ taskId: z.string() }))
@@ -1074,6 +1118,7 @@ export const appRouter = createRouter({
             sessionId: z.string().uuid().optional(),
             path: z.string(),
             version: z.number().optional(),
+            preview: z.boolean().optional(),
           })
           .refine(
             (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
@@ -1155,10 +1200,6 @@ export const appRouter = createRouter({
     resolvePendingInstallations: protectedProcedure.mutation(
       ({ ctx: { auth } }) => resolvePendingGitHubInstallationsCommand(auth),
     ),
-
-    branches: protectedProcedure
-      .input(z.object({ fullName: z.string() }))
-      .query(({ ctx: { auth }, input }) => getBranchesCommand(auth, input)),
 
     collaborators: protectedProcedure.query(({ ctx: { auth } }) =>
       getCollaboratorsCommand(auth),
@@ -1529,6 +1570,18 @@ export const appRouter = createRouter({
     unlinkDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
       unlinkLinkedDiscordAccountCommand(auth),
     ),
+
+    previewEmailLink: protectedProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .query(({ ctx: { auth }, input }) =>
+        previewEmailLinkCommand(auth, input.token),
+      ),
+
+    linkEmailAddress: protectedProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        linkEmailAddressCommand(auth, input.token),
+      ),
   }),
 
   preferences: createRouter({
@@ -1584,12 +1637,6 @@ export const appRouter = createRouter({
       .input(workspaceRoutingSettingsSchema)
       .mutation(({ ctx: { auth }, input }) =>
         updateWorkspaceRoutingSettingsCommand(auth, input),
-      ),
-
-    available: protectedProcedure
-      .input(z.object({ repository: z.string().optional() }).optional())
-      .query(({ ctx: { auth }, input }) =>
-        getAvailableEnvironmentsCommand(auth, input),
       ),
 
     namesByIds: protectedProcedure
@@ -2079,6 +2126,20 @@ export const appRouter = createRouter({
     repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       repairTelegramWebhookCommand(auth),
     ),
+
+    // A mutation, not a query: the input can carry a freshly typed API key,
+    // and query inputs serialize into the GET URL (browser history, proxy
+    // and access logs, tracing). Mutations POST the input in the body.
+    listAgentMailInboxes: protectedProcedure
+      .input(
+        z.object({
+          apiKey: z.string().trim().optional(),
+          podId: z.string().trim().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        listAgentMailInboxesCommand(auth, input),
+      ),
 
     listDiscordGuilds: protectedProcedure.query(({ ctx: { auth } }) =>
       listDiscordGuildsCommand(auth),
@@ -2972,6 +3033,16 @@ export const appRouter = createRouter({
   }),
 
   sessions: createRouter({
+    wakeups: protectedProcedure
+      .input(sessionIdInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getSessionWakeupsCommand(auth, input.sessionId),
+      ),
+    cancelWakeup: protectedProcedure
+      .input(sessionIdInputSchema.extend({ wakeupId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        cancelSessionWakeupCommand(auth, input),
+      ),
     list: protectedProcedure
       .input(sessionsListInputSchema)
       .query(({ ctx: { auth }, input }) => getSessions(auth, input)),
@@ -3140,6 +3211,8 @@ export const appRouter = createRouter({
       ),
   }),
 
+  instanceSkills: instanceSkillsRouter,
+
   customSkills: createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       listCustomSkillsCommand(auth),
@@ -3244,6 +3317,17 @@ export const appRouter = createRouter({
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentTimeZoneCommand(auth, input),
+      ),
+  }),
+
+  experimentalSettings: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getExperimentalSettingsCommand(auth),
+    ),
+    setOpenCodeCodeMode: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setOpenCodeCodeModeCommand(auth, input),
       ),
   }),
 

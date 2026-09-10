@@ -7,6 +7,7 @@ import {
   eq,
   fastAgentConversations,
   getDeploymentTaskModelOptions,
+  getBackgroundAgentSettingsForDeployment,
   getCustomAutomationById,
   listCustomAutomations,
   inArray,
@@ -24,6 +25,7 @@ import {
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   getCommunicationAutomationTargetKind,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
@@ -37,7 +39,16 @@ import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
 
-import { assertAdmin } from './feature-gates';
+async function getOwnedAutomation(auth: UserAuthSuccess, id: string) {
+  const automation = await getCustomAutomationById(id);
+  if (
+    !automation ||
+    (!auth.isAdmin && automation.createdByUserId !== auth.userId)
+  ) {
+    throw new Error('Custom automation was not found.');
+  }
+  return automation;
+}
 
 export type CustomAutomationListItem = {
   id: string;
@@ -132,7 +143,9 @@ function toListItem(
         ? FAST_EXECUTION
         : row.allRepositories
           ? ALL_REPOSITORIES
-          : row.environmentId,
+          : row.noRepositories
+            ? NO_REPOSITORIES
+            : row.environmentId,
     target: row.target,
     lastRunAt: row.lastRunAt,
     lastSucceededAt: row.lastSucceededAt,
@@ -222,8 +235,9 @@ async function assertAutomationModelSelection(
 export async function listCustomAutomationsCommand(
   auth: UserAuthSuccess,
 ): Promise<CustomAutomationListItem[]> {
-  assertAdmin(auth);
-  const rows = await listCustomAutomations();
+  const rows = (await listCustomAutomations()).filter(
+    (row) => auth.isAdmin || row.createdByUserId === auth.userId,
+  );
   const automationIds = rows.map((row) => row.id);
   const conversations = automationIds.length
     ? await db
@@ -256,11 +270,31 @@ export async function listCustomAutomationsCommand(
   );
 }
 
+export async function getCustomAutomationOptionsCommand(auth: UserAuthSuccess) {
+  const [providers, { timeZone }, settings] = await Promise.all([
+    listConnectedCommunicationProviders(),
+    resolveDeploymentTimeZone(),
+    auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
+  ]);
+
+  return {
+    capabilities: {
+      slackConnected: providers.includes('slack'),
+      discordConnected: providers.includes('discord'),
+      telegramConnected: providers.includes('telegram'),
+      teamsConnected: providers.includes('teams'),
+    },
+    // Channel catalogs are bot-scoped, not evidence of a member's access.
+    managerSlackChannelId: settings?.managerSlackChannelId ?? null,
+    managerDiscordChannelId: settings?.managerDiscordChannelId ?? null,
+    effectiveTimeZone: timeZone,
+  };
+}
+
 export async function createCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: CustomAutomationWriteInput,
 ): Promise<CustomAutomationListItem> {
-  assertAdmin(auth);
   assertScheduleMode(input.scheduleMode);
   const cronExpression =
     input.scheduleMode === 'cron'
@@ -299,7 +333,7 @@ export async function updateCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: CustomAutomationWriteInput & { id: string },
 ): Promise<CustomAutomationListItem> {
-  assertAdmin(auth);
+  const existing = await getOwnedAutomation(auth, input.id);
   assertScheduleMode(input.scheduleMode);
   const cronExpression =
     input.scheduleMode === 'cron'
@@ -312,11 +346,6 @@ export async function updateCustomAutomationCommand(
     await assertDestinationConnected(input.targetProvider);
   }
   await assertAutomationModelSelection(input.model, input.reasoningEffort);
-
-  const existing = await getCustomAutomationById(input.id);
-  if (!existing) {
-    throw new Error('Custom automation was not found.');
-  }
 
   const updated = await updateCustomAutomation(input.id, {
     name: input.name,
@@ -337,12 +366,7 @@ export async function deleteCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: { id: string },
 ): Promise<{ success: true }> {
-  assertAdmin(auth);
-
-  const existing = await getCustomAutomationById(input.id);
-  if (!existing) {
-    throw new Error('Custom automation was not found.');
-  }
+  const existing = await getOwnedAutomation(auth, input.id);
 
   await deleteCustomAutomation(input.id);
   void captureActivationCustomAutomationChanged(
@@ -356,7 +380,7 @@ export async function triggerCustomAutomationCommand(
   auth: UserAuthSuccess,
   input: { id: string },
 ): Promise<AutomationRunNowResult> {
-  assertAdmin(auth);
+  await getOwnedAutomation(auth, input.id);
   return runCustomAutomationNow(input.id);
 }
 
@@ -364,7 +388,6 @@ export async function resolveCustomAutomationScheduleCommand(
   auth: UserAuthSuccess,
   input: { schedule: string },
 ) {
-  assertAdmin(auth);
   return resolveCustomAutomationSchedule({
     schedule: input.schedule,
     userId: auth.userId,

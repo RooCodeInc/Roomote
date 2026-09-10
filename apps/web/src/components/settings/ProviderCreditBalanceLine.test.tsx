@@ -19,6 +19,33 @@ function balance(
 }
 
 describe('ProviderCreditBalanceLine', () => {
+  it.each([
+    [999.99, '$999.99'],
+    [1000, '$1,000.00'],
+    [1234.56, '$1,234.56'],
+    [0, '$0.00'],
+    [0.001, '$0.00'],
+    [0.01, '$0.01'],
+  ])('formats USD balances of %s as %s', (amount, expected) => {
+    const { rerender } = render(
+      <ProviderCreditBalanceLine
+        balance={balance({ remaining: amount, limit: amount })}
+      />,
+    );
+
+    expect(
+      screen.getByText(`${expected} of ${expected} left`),
+    ).toBeInTheDocument();
+
+    rerender(
+      <ProviderCreditBalanceLine
+        balance={balance({ remaining: amount, limit: undefined })}
+      />,
+    );
+
+    expect(screen.getByText(`${expected} left`)).toBeInTheDocument();
+  });
+
   it('renders nothing without a remaining figure', () => {
     const { container } = render(
       <ProviderCreditBalanceLine balance={undefined} />,

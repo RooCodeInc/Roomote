@@ -22,6 +22,7 @@ import {
 import {
   ADMIN_REQUIRED_LAUNCH_TYPES,
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   buildTaskTypePromptAndWorkspacePayload,
   type ComputeProvider,
   getEnvironmentRepositoryInstallationError,
@@ -43,12 +44,20 @@ import { getMembershipRole } from './membership';
 import { logHandlerError } from '../utils';
 
 function normalizeRepositoryFullNames(body: TaskLaunchRequest): string[] {
+  if (body.repo === NO_REPOSITORIES) {
+    return [];
+  }
+
   return [
     ...new Set(
       [
         ...(body.repositoryFullNames ?? []),
         ...(body.selectedRepositories ?? []),
-        body.repo && body.repo !== ALL_REPOSITORIES ? body.repo : null,
+        body.repo &&
+        body.repo !== ALL_REPOSITORIES &&
+        body.repo !== NO_REPOSITORIES
+          ? body.repo
+          : null,
       ].filter((value): value is string => Boolean(value)),
     ),
   ];
@@ -246,7 +255,12 @@ export async function launchTask(
     // The review pipeline has its own target resolution (a PR, not a prompt
     // and workspace), so it branches before the standard launch machinery.
     if (requestedType === 'pr-review') {
-      return await handlePrReviewLaunch(c, { userId: auth.userId }, body);
+      return await handlePrReviewLaunch(
+        c,
+        { userId: auth.userId },
+        body,
+        harnessSelection.harnessModelOverrides,
+      );
     }
 
     const repositoryValidationError = shouldValidateRepositorySelection
@@ -264,7 +278,7 @@ export async function launchTask(
 
     let environmentName: string | undefined;
 
-    if (body.environmentId) {
+    if (body.environmentId && body.repo !== NO_REPOSITORIES) {
       const environment = await db.query.environments.findFirst({
         where: eq(environments.id, body.environmentId),
         columns: { id: true, name: true },
@@ -296,22 +310,26 @@ export async function launchTask(
           ? false
           : taskTypePayload.visibleInTranscript;
 
-    const workspacePayload = body.environmentId
-      ? {
-          repo:
-            body.repo ??
-            repositoryFullNames[0] ??
-            taskTypePayload.workspacePayload.repo,
-          environmentId: body.environmentId,
-        }
-      : taskTypePayload.workspacePayload;
+    const workspacePayload =
+      body.repo === NO_REPOSITORIES
+        ? { repo: NO_REPOSITORIES }
+        : body.environmentId
+          ? {
+              repo:
+                body.repo ??
+                repositoryFullNames[0] ??
+                taskTypePayload.workspacePayload.repo,
+              environmentId: body.environmentId,
+            }
+          : taskTypePayload.workspacePayload;
 
     let sourceControlProvider: SourceControlProvider | undefined;
 
     try {
       sourceControlProvider = await resolveLaunchSourceControlProvider({
         repositoryFullNames,
-        environmentId: body.environmentId,
+        environmentId:
+          body.repo === NO_REPOSITORIES ? undefined : body.environmentId,
       });
     } catch (error) {
       return c.json(

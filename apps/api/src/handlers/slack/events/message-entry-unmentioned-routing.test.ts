@@ -5,7 +5,6 @@ const {
   hasPendingRoutingConfirmationMock,
   findRoomoteOwnedSlackThreadMock,
   markSlackThreadExplicitMentionRequiredMock,
-  getSlackThreadReplyFooterMessageTsMock,
   acquireRootBindingLockMock,
   releaseRootBindingLockMock,
   hasFastAgentSessionMock,
@@ -16,7 +15,6 @@ const {
   hasPendingRoutingConfirmationMock: vi.fn(),
   findRoomoteOwnedSlackThreadMock: vi.fn(),
   markSlackThreadExplicitMentionRequiredMock: vi.fn(),
-  getSlackThreadReplyFooterMessageTsMock: vi.fn(),
   acquireRootBindingLockMock: vi.fn(),
   releaseRootBindingLockMock: vi.fn(),
   hasFastAgentSessionMock: vi.fn(),
@@ -45,7 +43,6 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
   hasPendingRoutingConfirmation: hasPendingRoutingConfirmationMock,
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
-  getSlackThreadReplyFooterMessageTs: getSlackThreadReplyFooterMessageTsMock,
   findActiveSlackTaskRun: findActiveSlackTaskRunMock,
   findCompletedSlackTaskRunWithSnapshot:
     findCompletedSlackTaskRunWithSnapshotMock,
@@ -132,7 +129,6 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       slackUserId: 'U111',
     });
     markSlackThreadExplicitMentionRequiredMock.mockResolvedValue(undefined);
-    getSlackThreadReplyFooterMessageTsMock.mockResolvedValue(null);
     acquireRootBindingLockMock.mockResolvedValue(releaseRootBindingLockMock);
     releaseRootBindingLockMock.mockResolvedValue(undefined);
     hasFastAgentSessionMock.mockResolvedValue(false);
@@ -145,7 +141,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
     ]);
 
@@ -201,7 +197,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('UDAN', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('UDAN', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi Dan.'),
     ]);
 
@@ -220,7 +216,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U111', '102.000', 'One more detail'),
     ]);
@@ -240,7 +236,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U111', '102.000', '<@U222> what do you think?'),
     ]);
@@ -264,7 +260,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U111', '102.000', '<@U111> note to self'),
     ]);
@@ -301,7 +297,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> hi'),
       botMessage('101.000', 'Hi there.'),
       humanMessage('U222', '102.000', 'I think that is probably right'),
     ]);

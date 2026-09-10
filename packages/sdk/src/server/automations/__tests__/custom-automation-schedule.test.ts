@@ -19,11 +19,11 @@ describe('custom automation schedule helpers', () => {
   it('uses the configured timezone for the next occurrence', () => {
     const next = getCronOccurrence(
       '0 9 * * *',
-      'America/Los_Angeles',
+      'America/New_York',
       'next',
-      new Date('2026-08-02T12:00:00Z'),
+      new Date('2026-08-01T00:00:00Z'),
     );
-    expect(next.toISOString()).toBe('2026-08-02T16:00:00.000Z');
+    expect(next.toISOString()).toBe('2026-08-01T13:00:00.000Z');
   });
 
   it('launches once when the latest occurrence is newer than the baseline', () => {

@@ -59,6 +59,7 @@ function createDependencies() {
     postMessage,
     dependencies: {
       findRepository: vi.fn().mockResolvedValue({
+        id: '11111111-1111-4111-8111-111111111111',
         defaultBranch: 'main',
         fullName: 'acme/widgets',
       }),
@@ -76,14 +77,69 @@ function createDependencies() {
         channelId: 'C123',
         source: 'automation_target',
       }),
+      resolveRepositoryDestination: vi.fn(
+        async ({ destination }) => destination ?? null,
+      ),
     },
   };
 }
 
 describe('handleMergeAnnouncerPush', () => {
+  it('fails closed when Additional rules exclude the tracked repository', async () => {
+    const { dependencies } = createDependencies();
+    const text = 'Do not announce any repositories.';
+    dependencies.getRuntime.mockResolvedValue({
+      ...runtime,
+      settings: {
+        additionalRules: text,
+        compiledRules: {
+          text,
+          repositoryIds: [],
+          destinations: [],
+          instructions: '',
+        },
+      },
+    });
+
+    const result = await handleMergeAnnouncerPush(
+      createPayload(),
+      dependencies,
+    );
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'Repository is outside configured scope',
+    });
+    expect(dependencies.generateAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it('passes residual Additional rules guidance to summary generation', async () => {
+    const { dependencies } = createDependencies();
+    const text = 'Keep the announcement focused on operational impact.';
+    dependencies.getRuntime.mockResolvedValue({
+      ...runtime,
+      settings: {
+        additionalRules: text,
+        compiledRules: {
+          text,
+          repositoryIds: null,
+          destinations: [],
+          instructions: 'Focus on operational impact.',
+        },
+      },
+    });
+
+    await handleMergeAnnouncerPush(createPayload(), dependencies);
+
+    expect(dependencies.generateAnnouncement).toHaveBeenCalledWith(
+      expect.stringContaining('Focus on operational impact.'),
+    );
+  });
+
   it('summarizes default-branch commits with pusher and author attribution', async () => {
     const { dependencies, postMessage } = createDependencies();
     dependencies.findRepository.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
       defaultBranch: 'develop',
       fullName: 'acme/widgets',
     });
@@ -162,6 +218,7 @@ describe('handleMergeAnnouncerPush', () => {
   it('grounds the artifact announcement in verified PR context and links the PR', async () => {
     const { dependencies, postMessage } = createDependencies();
     dependencies.findRepository.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
       defaultBranch: 'develop',
       fullName: 'RooCodeInc/Roomote',
     });
@@ -283,6 +340,100 @@ describe('handleMergeAnnouncerPush', () => {
     ).toHaveLength(1);
     expect(dependencies.getAnonymousMediaType).toHaveBeenCalledWith(imageUrl);
   });
+
+  it.each(['Markdown', 'HTML'])(
+    'restores a signed %s image without exposing its signature to the model',
+    async (format) => {
+      const { dependencies, postMessage } = createDependencies();
+      const signature = 'abcdef12'.repeat(8);
+      const imageUrl = `https://cdn.example.com/api/artifacts/screenshot/raw?sig=${signature}&ts=1788599339&version=1`;
+      const selectedUrl = imageUrl.replace(signature, 'abcdef12…[redacted]');
+      dependencies.generateAnnouncement.mockResolvedValue({
+        summary: 'Updates settings.',
+        imageUrl: selectedUrl,
+      });
+      const body =
+        format === 'Markdown'
+          ? `![Screenshot](${imageUrl})`
+          : `<img alt="Screenshot" src="${imageUrl.replaceAll('&', '&amp;')}">`;
+
+      await handleMergeAnnouncerPush(
+        createPayload({
+          pullRequest: {
+            number: 7,
+            url: 'https://github.com/acme/widgets/pull/7',
+            title: 'Update settings',
+            body,
+            changedFileCount: 1,
+            additions: 10,
+            deletions: 2,
+          },
+        }),
+        dependencies,
+      );
+
+      expect(
+        dependencies.generateAnnouncement.mock.calls[0]?.[0],
+      ).not.toContain(signature);
+      expect(dependencies.generateAnnouncement.mock.calls[0]?.[0]).toContain(
+        'abcdef12…[redacted]',
+      );
+      expect(
+        dependencies.getAnonymousMediaType,
+      ).toHaveBeenCalledExactlyOnceWith(imageUrl);
+      expect(
+        postMessage.mock.calls[0]?.[0]?.blocks?.[0]?.child_blocks,
+      ).toContainEqual({
+        type: 'image',
+        image_url: imageUrl,
+        alt_text: 'Screenshot',
+      });
+    },
+  );
+
+  it.each(['ambiguous', 'unshown original', 'truncated', 'oversized raw body'])(
+    'does not fetch a signed image with %s selection',
+    async (scenario) => {
+      const { dependencies, postMessage } = createDependencies();
+      const signature = 'abcdef12'.repeat(8);
+      const imageUrl = `https://cdn.example.com/screenshot?sig=${signature}`;
+      const selectedUrl = imageUrl.replace(signature, 'abcdef12…[redacted]');
+      let body = `![Screenshot](${imageUrl})`;
+      if (scenario === 'ambiguous')
+        body += `\n![Other](${imageUrl.replace(signature, `abcdef12${'b'.repeat(56)}`)})`;
+      if (scenario === 'truncated')
+        body = `${'description '.repeat(400)}${body}`;
+      if (scenario === 'oversized raw body')
+        body += `\nAPI_TOKEN=${'x'.repeat(16_000)}`;
+      dependencies.generateAnnouncement.mockResolvedValue({
+        summary: 'Updates settings.',
+        imageUrl: scenario === 'unshown original' ? imageUrl : selectedUrl,
+      });
+
+      await handleMergeAnnouncerPush(
+        createPayload({
+          pullRequest: {
+            number: 7,
+            url: 'https://github.com/acme/widgets/pull/7',
+            title: 'Update settings',
+            body,
+            changedFileCount: 1,
+            additions: 10,
+            deletions: 2,
+          },
+        }),
+        dependencies,
+      );
+
+      expect(dependencies.getAnonymousMediaType).not.toHaveBeenCalled();
+      expect(postMessage).toHaveBeenCalledOnce();
+      expect(
+        postMessage.mock.calls[0]?.[0]?.blocks?.[0]?.child_blocks?.some(
+          (block: { type?: string }) => block.type === 'image',
+        ),
+      ).toBe(false);
+    },
+  );
 
   it('accepts a model-selected HTML image reference', async () => {
     const { dependencies, postMessage } = createDependencies();

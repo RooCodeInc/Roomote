@@ -179,6 +179,39 @@ describe('handlePrReviewLaunch', () => {
       prUrl: 'https://github.com/acme/api/pull/42',
       prTitle: 'Ship it',
     });
+    const launchedPayload = mocks.enqueueTask.mock.calls[0]?.[0].task.payload;
+    expect(launchedPayload.reasoningEffort).toBeUndefined();
+    expect(launchedPayload.harnessModelOverrides).toBeUndefined();
+  });
+
+  it('stamps model and reasoning overrides into the review payload', async () => {
+    const { c } = makeContext();
+
+    await handlePrReviewLaunch(
+      c,
+      { userId: 'user-1' },
+      {
+        repo: 'acme/api',
+        prNumber: 42,
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      },
+      { 'opencode-server': 'anthropic/claude-sonnet-5' },
+    );
+
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: {
+          type: 'github_pr_review',
+          payload: expect.objectContaining({
+            harnessModelOverrides: {
+              'opencode-server': 'anthropic/claude-sonnet-5',
+            },
+            reasoningEffort: 'high',
+          }),
+        },
+      }),
+    );
   });
 
   it("rejects binding to another user's web Session", async () => {

@@ -36,7 +36,7 @@ describe('Capture visual proof skill', () => {
     expect(skillContent).not.toContain('proof-runner');
     expect(skillContent).not.toContain('<subagent_contract>');
     expect(skillContent).not.toContain('<background_delegation>');
-    expect(skillContent).not.toContain('Task tool');
+    expect(skillContent).toContain('before the Task tool invokes `judge`');
     expect(skillContent).not.toContain('proof brief');
   });
 
@@ -81,24 +81,26 @@ describe('Capture visual proof skill', () => {
     );
   });
 
-  it('keeps the proof package classification contract', () => {
+  it('leaves proof selection to agent judgment while keeping package labels', () => {
     expect(skillContent).toContain(
-      'Classify the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`.',
+      'Report the proof package as `screenshot-only`, `screencast-only`, `both`, or `not applicable`.',
     );
     expect(skillContent).toContain(
-      "Only consider `screencast-only` or `both` when either the harness reports that screencast auto-classification is enabled for this task or the user's task request explicitly asks for a screencast, recording, or video. Otherwise restrict the choice to `screenshot-only` or `not applicable`.",
+      'Use your judgment to choose screenshots, video, both, or no visual proof',
     );
     expect(skillContent).toContain(
-      'Use `screenshot-only` when one or more stable visible browser states are enough to prove the claim',
+      'video is useful for motion and interactions and need not be explicitly requested',
     );
     expect(skillContent).toContain(
-      'Use `screencast-only` when the claim depends on interaction, timing, animation, navigation, redirect, persistence, revisit, resume, replay, or another temporal sequence',
+      'Skip visual proof when it would not add useful evidence.',
     );
-    expect(skillContent).toContain('coverage checklist');
     expect(skillContent).toContain(
-      'Do not silently narrow a broad claim to the first easy visible example.',
+      'coverage checklist listing every materially distinct visible state or treatment the stated claim spans',
     );
-    expect(skillContent).toContain('When in doubt, capture one screenshot.');
+    expect(skillContent).not.toContain('screencast auto-classification');
+    expect(skillContent).not.toContain(
+      'When in doubt, capture one screenshot.',
+    );
   });
 
   it('prefers real state but allows disclosed simulation without permitting fabricated evidence', () => {
@@ -143,6 +145,66 @@ describe('Capture visual proof skill', () => {
       'return a blocked proof result with blocker type `proof capture timed out`',
     );
     expect(skillContent).toContain('proof_capture_timed_out');
+  });
+
+  it('ends proof at the judge handoff, not at artifact upload', () => {
+    expect(skillContent).toContain(
+      'Finish the report (including no-op or blocked results)',
+    );
+    expect(skillContent).toContain('this ends the proof deadline, not uploads');
+    expect(skillContent).toContain(
+      'Without a judge, load the next workflow skill before continuing.',
+    );
+    expect(skillContent).toContain(
+      'Reload `capture-visual-proof` after judge-driven source changes.',
+    );
+  });
+
+  it('offers native high-FPS motion capture without claiming encoded rate proves capture rate', () => {
+    expect(skillContent).toContain('resources/high-fps-recording.md');
+    const recordingGuide = read(
+      '../skills/standard/capture-visual-proof/resources/high-fps-recording.md',
+    ).replace(/\s+/g, ' ');
+    expect(recordingGuide).toContain(
+      'Keep ordinary screencasts at the native default',
+    );
+    expect(recordingGuide).toContain('motion.mp4 --fps 60');
+    expect(recordingGuide).toContain(
+      'VP8 WebM encoding can throttle incoming frames',
+    );
+    expect(recordingGuide).toContain(
+      '-c copy -movflags +faststart motion-faststart.mp4',
+    );
+    expect(recordingGuide).toContain('requires agent-browser 0.37.0 or newer');
+    expect(recordingGuide).toContain('agent-browser record --help');
+    expect(recordingGuide).toContain('capturedFrames');
+    expect(recordingGuide).toContain('elapsed wall-clock time');
+    expect(recordingGuide).toContain('Encoded FPS alone is not evidence');
+    expect(recordingGuide).toContain(
+      'must never be presented as higher capture FPS',
+    );
+  });
+
+  it('prefers compatible MP4 for local screencasts with a bounded native fallback', () => {
+    expect(skillContent).toContain('For locally produced screencasts only');
+    expect(skillContent).toContain(
+      '-c:v libx264 -pix_fmt yuv420p -preset veryfast -movflags +faststart',
+    );
+    expect(skillContent).toContain('Keep the native WebM source');
+    expect(skillContent).toContain('remaining five-minute budget');
+    expect(skillContent).toContain(
+      'do not install tools or extend the deadline',
+    );
+    expect(skillContent).toContain(
+      'If conversion is unavailable, fails, or would leave insufficient time, upload the native WebM instead',
+    );
+    expect(skillContent).toContain(
+      'no retiming, cuts, overlays, or fabricated pixels',
+    );
+    expect(skillContent).toContain('extract keyframes from that clip');
+    expect(skillContent).toContain(
+      'not a rule to convert arbitrary uploads or existing artifacts',
+    );
   });
 
   it('treats manage_artifacts upload results as the only canonical proof links', () => {

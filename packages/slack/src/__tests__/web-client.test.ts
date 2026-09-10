@@ -97,4 +97,28 @@ describe('createSlackWebClient', () => {
     await expect(client.apiCall('chat.postMessage')).rejects.toBe(error);
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
+
+  it('accepts bounded client options and can suppress timeout diagnostics', async () => {
+    apiCallMock.mockRejectedValue(new Error('timeout secret-token'));
+    const consoleErrorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    const options = {
+      timeout: 5_000,
+      retryConfig: { retries: 0 },
+      rejectRateLimitedCalls: true,
+    };
+    const client = createSlackWebClient('bot-token', {
+      ...options,
+      suppressTimeoutLog: true,
+    });
+    await expect(client.apiCall('conversations.list')).rejects.toMatchObject({
+      timeoutMs: 5_000,
+    });
+    expect(WebClientMock).toHaveBeenCalledWith('bot-token', {
+      ...options,
+      slackApiUrl: 'https://slack.com/api/',
+    });
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
 });

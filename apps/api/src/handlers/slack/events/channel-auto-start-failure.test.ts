@@ -114,7 +114,6 @@ async function runHandler(
       updatedAt: new Date(),
     },
     teamId: 'T123',
-    ackEmoji: 'eyes',
     ...(launchCriteria ? { launchCriteria } : {}),
   });
 }
@@ -237,7 +236,6 @@ describe('Slack channel auto-start failures', () => {
     expect(mocks.processFastAgentMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'installer-1',
-        continuation: true,
         event: expect.objectContaining({ user: 'UBOT' }),
       }),
     );

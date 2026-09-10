@@ -41,7 +41,6 @@ const PRIMARY_NAV_ITEMS: PrimaryNavItem[] = [
     description: 'Configure background work that runs for your team',
     matchExact: false,
     matchPaths: ['/automations'],
-    adminOnly: true,
     requiresSetup: true,
   },
   {

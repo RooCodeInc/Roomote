@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 describe('implement-changes PR fixer appendix', () => {
-  it('keeps the PR feedback fixer guidance consolidated in the appendix', () => {
+  it('keeps the PR feedback appendix as a handoff to the canonical fixer', () => {
     const thisFilePath = fileURLToPath(import.meta.url);
     const thisDirPath = path.dirname(thisFilePath);
     const skillPath = path.resolve(
@@ -15,17 +15,12 @@ describe('implement-changes PR fixer appendix', () => {
     expect(skillContent).toContain(
       '<appendix name="fix-github-pr-feedback" id="appendix-fix-github-pr-feedback">',
     );
+    expect(skillContent).toContain('Load `fix-pr` for review-thread fixes');
     expect(skillContent).toContain(
-      'Fetch the live PR state with `gh pr view [PR_NUMBER] --repo [owner]/[repo] --json title,body,url,author,headRefName,headRefOid,mergeable,mergeStateStatus,closingIssuesReferences,files`, `gh pr diff [PR_NUMBER] --repo [owner]/[repo]`, `gh api repos/[owner]/[repo]/pulls/[PR_NUMBER]/comments --paginate`, and `gh api repos/[owner]/[repo]/issues/[PR_NUMBER]/comments --paginate` before classifying the trigger.',
+      'It owns live-state retrieval and mergeability preflight, delegation to `resolve-github-pr-merge-conflicts` when needed, and resuming the fixer on refreshed PR state.',
     );
     expect(skillContent).toContain(
-      '`fix-pr` owns the mergeability preflight for this path. When the target PR is conflicted, it should delegate to `resolve-github-pr-merge-conflicts`, re-fetch live PR state, and only then continue the main fixer flow on the refreshed PR branch.',
-    );
-    expect(skillContent).toContain(
-      'For broad requests, reuse the latest Roomote review summary whose first line starts with `<!-- roomote-review-summary` as the canonical issue inventory when available, but treat only unchecked checklist items (`- [ ]`) as unresolved fix targets; ignore checked items and struck-through dismissed bullets, and revalidate each candidate against the live review-thread context and current code before acting.',
-    );
-    expect(skillContent).toContain(
-      'When a candidate finding is dismissed as invalid, stale, or out of scope, patch the canonical summary entry into a struck-through bullet with a brief factual reason, reply on the corresponding GitHub review thread or comment, do not describe it as fixed, and leave the thread unresolved by default.',
+      'revalidating unresolved review-summary candidates, dismissal bookkeeping (not claiming dismissed findings as fixed or resolving their threads by default)',
     );
     expect(skillContent).toContain(
       'Let `fix-pr` own any required `capture-visual-proof` step after repository-file-changing fixes and before PR metadata refresh so this parent path never runs proof for PR feedback runs itself.',
@@ -34,24 +29,19 @@ describe('implement-changes PR fixer appendix', () => {
       'Pass through any supplied PR, review-thread, `fixId`, `review_comment_id`, `review_comment_url`, `task_link_follow`, `task_link_see`, or `revert_commit_base_url` context so `fix-pr` can recover the live target cleanly.',
     );
     expect(skillContent).toContain(
-      'Patch the canonical fixer comment through the same endpoint family it was created with, keeping the hidden marker first, keeping `task_link_see` inline on the final summary when it is available, and including the real commit link in the final comment.',
-    );
-    expect(skillContent).toContain(
       "Let `fix-pr` own the post-push PR metadata refresh using its shared `pr-metadata-update-recipe` block and the `fix-pr` skill's `pr-writing-guide` section.",
     );
-    expect(skillContent).toContain(
-      'Let `fix-pr` own the existing PR branch, mergeability preflight, and thread-management flow end to end; do not restate `gh pr view`, `gh pr diff`, `gh api`, `gh pr edit`, or canonical fixer comment mechanics in this appendix.',
-    );
+    expect(skillContent).not.toContain('`gh pr view');
+    expect(skillContent).not.toContain('`gh api');
     expect(skillContent).not.toContain(
       "Immediately after the successful push, re-read the final shipped diff, derive a refreshed PR title and body from that final state using the `fix-pr` skill's `pr-writing-guide` section, and run `gh pr edit [PR_NUMBER] --repo [owner]/[repo] --title '...' --body '...'` so the existing PR metadata matches what now ships.",
     );
     expect(skillContent).toContain(
-      'Enter `fix-pr` even when the PR may be conflicted. Let `fix-pr` decide whether it must hand off to `resolve-github-pr-merge-conflicts` first, then resume the same PR-fixer run instead of bypassing the fixer entrypoint.',
+      'Enter `fix-pr` even when the PR may be conflicted.',
     );
     expect(skillContent).toContain(
-      '`task_link_see` inline on the final summary',
+      "Its result is the canonical fixer outcome, not a trigger for the parent's default PR-delivery finish.",
     );
-    expect(skillContent).toContain('real commit link');
   });
 
   it('allows the PR fixer appendix to be selected explicitly from implement-changes', () => {
@@ -64,10 +54,10 @@ describe('implement-changes PR fixer appendix', () => {
     const skillContent = fs.readFileSync(skillPath, 'utf8');
 
     expect(skillContent).toContain(
-      'Aliases include “PR fixer”, “fix PR feedback”, “address review comments”, and “run the GitHub PR fixer”.',
+      'Aliases: "PR fixer", "fix PR feedback", "address review comments", "run the GitHub PR fixer".',
     );
     expect(skillContent).toContain(
-      'When an appendix is explicitly selected by the user, behave as though this skill has direct access to that appendix as an internal tool',
+      'Explicitly naming a child path or clear alias while `implement-changes` is active is authoritative: enter it immediately without waiting for an external wrapper to restate the selection.',
     );
   });
 
@@ -109,6 +99,9 @@ describe('implement-changes PR fixer appendix', () => {
     );
     expect(skillContent).toContain(
       'Do not manually edit previous review comments with `update_pull_request_comment`. Replying with `reply_to_pull_request_comment` or adding a new comment with `create_pull_request_comment` is the correct way to respond on earlier review discussion.',
+    );
+    expect(skillContent).toContain(
+      'using the recorded `commentId` (and `threadId` for review-thread surfaces), keeping the hidden marker first, keeping `task_link_see` inline on the final summary when it is available, and including the real commit link in the final comment.',
     );
   });
 

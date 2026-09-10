@@ -4,18 +4,21 @@ import type { SlackFile, WorkObjectMetadata, WorkObjectUnfurl } from '../types';
 import { SlackNotifier } from '../slack-notifier';
 import { Env } from '@roomote/env';
 
-const { apiCallMock, chatUnfurlMock, WebClientMock } = vi.hoisted(() => ({
-  apiCallMock: vi.fn(),
-  chatUnfurlMock: vi.fn(),
-  WebClientMock: vi.fn().mockImplementation(function () {
-    return {
-      apiCall: apiCallMock,
-      chat: {
-        unfurl: chatUnfurlMock,
-      },
-    };
-  }),
-}));
+const { apiCallMock, chatUnfurlMock, chatStopStreamMock, WebClientMock } =
+  vi.hoisted(() => ({
+    apiCallMock: vi.fn(),
+    chatUnfurlMock: vi.fn(),
+    chatStopStreamMock: vi.fn(),
+    WebClientMock: vi.fn().mockImplementation(function () {
+      return {
+        apiCall: apiCallMock,
+        chat: {
+          unfurl: chatUnfurlMock,
+          stopStream: chatStopStreamMock,
+        },
+      };
+    }),
+  }));
 
 type GlobalWithFetchMock = {
   fetch: ReturnType<typeof vi.fn>;
@@ -49,6 +52,29 @@ describe('SlackNotifier', () => {
     }
 
     process.env.SLACK_API_BASE_URL = originalBaseUrl;
+  });
+
+  describe('stopMessageStream', () => {
+    it('passes explicit processing to Slack without changing unspecified caller defaults', async () => {
+      chatStopStreamMock.mockResolvedValue({ ok: true });
+      await expect(
+        notifier.stopMessageStream({
+          channel: 'C123',
+          ts: '100.001',
+          sessionStatus: 'processing',
+        }),
+      ).resolves.toBe(true);
+      expect(chatStopStreamMock).toHaveBeenLastCalledWith({
+        channel: 'C123',
+        ts: '100.001',
+        session_status: 'processing',
+      });
+      await notifier.stopMessageStream({ channel: 'C123', ts: '100.001' });
+      expect(chatStopStreamMock).toHaveBeenLastCalledWith({
+        channel: 'C123',
+        ts: '100.001',
+      });
+    });
   });
 
   describe('setAgentSessionStatus', () => {
@@ -843,6 +869,21 @@ describe('SlackNotifier', () => {
       });
 
       expect(result).toBe(false);
+    });
+
+    it('treats an existing reaction as a successful acknowledgement', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ ok: false, error: 'already_reacted' }),
+      });
+
+      const result = await notifier.addReaction({
+        channel: 'C123',
+        timestamp: '123.000',
+        name: 'eyes',
+      });
+
+      expect(result).toBe(true);
     });
   });
 

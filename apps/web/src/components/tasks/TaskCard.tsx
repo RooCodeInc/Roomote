@@ -60,10 +60,11 @@ export const TaskCard = ({
     PRODUCT_NAME;
   const activityAt = task.activityAt ?? task.timestamp;
   const activityDate = new Date(activityAt * 1000);
-  const inferenceCostLabel = formatInferenceCost(
-    task.inferenceUsage?.costMicroUsd,
-  );
-  const hasInferenceCost = Number(inferenceCostLabel) > 0;
+  const inferenceCostMicroUsd = task.inferenceUsage?.costMicroUsd ?? 0;
+  const inferenceCostLabel = formatInferenceCost(inferenceCostMicroUsd);
+  // Half a cent is the smallest cost that rounds above zero at two decimals.
+  const hasInferenceCost =
+    Number.isFinite(inferenceCostMicroUsd) && inferenceCostMicroUsd >= 5_000;
 
   return (
     <div
@@ -105,7 +106,14 @@ export const TaskCard = ({
           {showAgentAvatar && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="size-8 flex items-center justify-center rounded-full border border-border bg-muted ring-1 ring-background">
+                <div
+                  className={cn(
+                    'size-8 flex items-center justify-center overflow-clip rounded-full border border-border ring-1 ring-background',
+                    task.attributionKind === 'automation'
+                      ? 'bg-white dark:bg-muted'
+                      : 'bg-muted',
+                  )}
+                >
                   {task.attributionKind === 'automation' ? (
                     <TaskAutomationIcon
                       automationKey={task.initiatorAutomation}

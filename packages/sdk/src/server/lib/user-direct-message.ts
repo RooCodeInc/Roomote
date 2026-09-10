@@ -11,6 +11,10 @@ import {
 import type { CommunicationProvider } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 
+import {
+  canStartAgentMailConversationWithUser,
+  startAgentMailConversation,
+} from './agentmail/outbound';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
@@ -20,7 +24,8 @@ export type UserDirectMessageProvider =
   | 'slack'
   | 'teams'
   | 'telegram'
-  | 'discord';
+  | 'discord'
+  | 'agentmail';
 
 export type UserDirectMessageDestination = {
   channelId: string;
@@ -145,6 +150,11 @@ export async function findUserDirectMessageDestination(
       return findTelegramUserDirectMessageDestination(userId);
     case 'discord':
       return findDiscordUserDirectMessageDestination(userId);
+    case 'agentmail':
+      // Email conversations are created at send time (there is no standing
+      // DM channel), so email cannot be a pre-resolved task destination;
+      // automation destinations over email are a follow-up.
+      return null;
   }
 
   return null;
@@ -193,6 +203,10 @@ export async function hasUserDirectMessageIdentity(
           columns: { discordUserId: true },
         }),
       );
+    case 'agentmail':
+      // True when a consent-checked address exists (verified account email
+      // or explicitly linked mailbox, not suppressed) and email is set up.
+      return canStartAgentMailConversationWithUser(userId);
   }
 }
 
@@ -310,6 +324,39 @@ async function sendTelegramUserDirectMessage(
   }
 }
 
+/**
+ * Email needs a subject line the chat providers never supply; derive one
+ * from the first content line so the inbox row is meaningful.
+ */
+function deriveEmailSubject(text: string): string {
+  const firstLine = text
+    .split('\n')
+    .map((line) => line.replace(/^[#>\s*-]+/, '').trim())
+    .find(Boolean);
+  const subject = firstLine ?? 'Notification';
+  return subject.length > 80 ? `${subject.slice(0, 77)}...` : subject;
+}
+
+async function sendAgentMailUserDirectMessage(
+  userId: string,
+  text: string,
+  logContext: string,
+): Promise<boolean> {
+  try {
+    return await startAgentMailConversation({
+      userId,
+      subject: deriveEmailSubject(text),
+      text,
+      logContext,
+    });
+  } catch (error) {
+    console.warn(
+      `[${logContext}] Failed to send email DM: ${formatError(error)}`,
+    );
+    return false;
+  }
+}
+
 async function sendDiscordUserDirectMessage(
   userId: string,
   text: string,
@@ -363,6 +410,8 @@ export async function sendUserDirectMessage({
       return sendTelegramUserDirectMessage(userId, text, logContext);
     case 'discord':
       return sendDiscordUserDirectMessage(userId, text, logContext);
+    case 'agentmail':
+      return sendAgentMailUserDirectMessage(userId, text, logContext);
   }
 }
 
@@ -387,10 +436,20 @@ export async function sendUserDirectMessageBestEffort({
     sendDiscordUserDirectMessage(userId, text, logContext),
   ]);
 
+  const chatDelivered = slack || teams || telegram || discord;
+
+  // Email is the fallback reach, not another parallel copy: emailing a user
+  // who already got the message in chat violates the email-cadence contract
+  // (email is low-frequency by design).
+  const agentmail = chatDelivered
+    ? false
+    : await sendAgentMailUserDirectMessage(userId, text, logContext);
+
   return [
     ...(slack ? (['slack'] as const) : []),
     ...(teams ? (['teams'] as const) : []),
     ...(telegram ? (['telegram'] as const) : []),
     ...(discord ? (['discord'] as const) : []),
+    ...(agentmail ? (['agentmail'] as const) : []),
   ];
 }

@@ -13,7 +13,6 @@ import {
   acquireSlackFastRootBindingLock,
   createFastAgentSlackLiveTaskLauncher,
   findActiveSlackTaskRun,
-  getSlackThreadReplyFooterMessageTs,
   isTargetSlackBotMessage,
   markSlackThreadExplicitMentionRequired,
   resolveSlackReactionNames,
@@ -42,10 +41,7 @@ import {
 } from '../constants.js';
 import type { AutomatedSlackAppMentionEvent } from '../types.js';
 import { processActiveRunMessage } from './active-run.js';
-import {
-  isFastCommandInvocation,
-  processFastAgentMessage,
-} from './fast-agent.js';
+import { processFastAgentMessage } from './fast-agent.js';
 import {
   resolveFastAgentEntryMode,
   startAcceptedFastAgentTurn,
@@ -150,110 +146,6 @@ type UnmentionedSlackThreadReplyRoutingDecision =
       taskId?: string;
     };
 
-function getGroupSlackThreadReplyFooterText(text: string): string {
-  const genericMatch = text.match(
-    /^_Reply(?: with @-mention)? or use the (<[^>]+\|web app>)\._$/,
-  );
-
-  if (genericMatch?.[1]) {
-    return `_Reply with @-mention or use the ${genericMatch[1]}._`;
-  }
-
-  return text.replace(
-    /^_(Working on (?:<[^>]+\|PR(?:\s+#)?\d+>(?:, <[^>]+\|live preview>)?|a <[^>]+\|live preview>)), reply(?: with @-mention)? or use the (<[^>]+\|web app>)\._$/,
-    '_$1, reply with @-mention or use the $2._',
-  );
-}
-
-function updateSlackThreadReplyFooterBlocksForGroupThread(
-  blocks: unknown[] | null,
-): { blocks: unknown[]; updated: boolean } | null {
-  if (!blocks) {
-    return null;
-  }
-
-  let updated = false;
-  const nextBlocks = blocks.map((block) => {
-    if (!block || typeof block !== 'object' || Array.isArray(block)) {
-      return block;
-    }
-
-    const record = block as {
-      block_id?: unknown;
-      elements?: unknown;
-      text?: unknown;
-    };
-
-    if (record.block_id !== 'roomote_thread_reply_footer') {
-      return block;
-    }
-
-    if (!Array.isArray(record.elements)) {
-      return block;
-    }
-
-    const nextElements = record.elements.map((element) => {
-      if (!element || typeof element !== 'object' || Array.isArray(element)) {
-        return element;
-      }
-
-      const elementRecord = element as { text?: unknown };
-      if (typeof elementRecord.text !== 'string') {
-        return element;
-      }
-
-      const nextText = getGroupSlackThreadReplyFooterText(elementRecord.text);
-
-      if (nextText === elementRecord.text) {
-        return element;
-      }
-
-      updated = true;
-      return { ...elementRecord, text: nextText };
-    });
-
-    return { ...record, elements: nextElements };
-  });
-
-  return { blocks: nextBlocks, updated };
-}
-
-async function updateSlackThreadReplyFooterForGroupThread(params: {
-  event: SlackEvent;
-  slack: SlackNotifier;
-}): Promise<void> {
-  if (!params.event.thread_ts) {
-    return;
-  }
-
-  const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
-    params.event.channel,
-    params.event.thread_ts,
-  );
-
-  if (!footerMessageTs) {
-    return;
-  }
-
-  const footerBlocks = updateSlackThreadReplyFooterBlocksForGroupThread(
-    await params.slack.getMessageBlocks({
-      channel: params.event.channel,
-      messageTs: footerMessageTs,
-      threadTs: params.event.thread_ts,
-    }),
-  );
-
-  if (!footerBlocks?.updated) {
-    return;
-  }
-
-  await params.slack.updateMessage({
-    channel: params.event.channel,
-    ts: footerMessageTs,
-    message: { blocks: footerBlocks.blocks },
-  });
-}
-
 async function markExplicitMentionRequiredSlackThread(params: {
   event: SlackEvent;
   slack: SlackNotifier;
@@ -266,18 +158,6 @@ async function markExplicitMentionRequiredSlackThread(params: {
     params.event.channel,
     params.event.thread_ts,
   );
-
-  try {
-    await updateSlackThreadReplyFooterForGroupThread({
-      event: params.event,
-      slack: params.slack,
-    });
-  } catch (error) {
-    console.error(
-      `[SlackWebhook] Failed to update thread reply footer after human mention in ${params.event.channel}:${params.event.thread_ts}:`,
-      error instanceof Error ? error.message : String(error),
-    );
-  }
 }
 
 async function markHumanMentionedSlackThread(params: {
@@ -575,7 +455,6 @@ export async function processSlackChannelAutoStartTask(params: {
   slack: SlackNotifier;
   userMapping: SlackUserMapping | null;
   teamId: string;
-  ackEmoji: string;
   agentPromptPrefix?: string;
   launchCriteria?: string | null;
 }): Promise<boolean> {
@@ -586,7 +465,6 @@ export async function processSlackChannelAutoStartTask(params: {
     slack,
     userMapping,
     teamId,
-    ackEmoji,
     agentPromptPrefix,
     launchCriteria,
   } = params;
@@ -709,7 +587,6 @@ export async function processSlackChannelAutoStartTask(params: {
         slack,
         userId: launchIdentity.launchUserId,
         teamId,
-        continuation: true,
         directedAtRoomote:
           !isBotAuthored ||
           mentionsSlackBot(event, slackInstallation.botUserId),
@@ -724,7 +601,6 @@ export async function processSlackChannelAutoStartTask(params: {
               },
             }
           : {}),
-        processingReactionName: ackEmoji,
         errorLogPrefix: `❌ Background fast-agent response failed for configured channel auto-start thread ${threadId}:`,
       });
 
@@ -882,8 +758,6 @@ async function maybeHandleChannelAutoStart(params: {
     return true;
   }
 
-  const { ackEmoji } = await resolveSlackReactionNames();
-
   if (
     userMapping &&
     typeof channelAutoStartEvent.user === 'string' &&
@@ -912,7 +786,6 @@ async function maybeHandleChannelAutoStart(params: {
     slack: context.slack,
     userMapping,
     teamId: context.teamId,
-    ackEmoji,
     agentPromptPrefix: channelAutoStartLaunchConfig.agentPromptPrefix,
     launchCriteria: matchedChannelAutoStart?.launchCriteria ?? null,
   });
@@ -1062,7 +935,6 @@ async function processAutomatedAppMentionTask(params: {
       // automation launch identity and let it delegate coding work itself.
       // The direct task launch below stays as the fallback so an automated
       // ticket is never dropped when the Fast turn cannot start.
-      const { ackEmoji } = await resolveSlackReactionNames();
       const { activeMapping: launchUserMapping } =
         launchIdentity.slackUserId === slackInstallation.botUserId
           ? { activeMapping: null }
@@ -1077,7 +949,6 @@ async function processAutomatedAppMentionTask(params: {
         slack,
         userId: launchIdentity.launchUserId,
         teamId,
-        continuation: true,
         directedAtRoomote: true,
         delegatedTaskInitiator: {
           kind: 'automation',
@@ -1093,7 +964,6 @@ async function processAutomatedAppMentionTask(params: {
             channelId: event.channel,
             threadTs: threadId,
           }),
-        processingReactionName: ackEmoji,
         errorLogPrefix: `❌ Background fast-agent response failed for automated mention thread ${threadId}:`,
       });
 
@@ -1169,11 +1039,8 @@ export function startFastAgentResponse(params: {
   slack: SlackNotifier;
   userId: string;
   teamId: string;
-  continuation?: boolean;
   activeTasks?: { taskId: string }[];
   resolveActiveTasks?: () => Promise<{ taskId: string }[]>;
-  processingReactionName: string;
-  isExistingConversation?: boolean;
   directedAtRoomote?: boolean;
   /** Attribution for tasks Fast delegates from this turn; automation-identity
    * turns pass their automation initiator so delegated work keeps automation
@@ -1226,7 +1093,6 @@ async function handleSlackEntryEvent(params: {
   slackInstallation: SlackInstallation;
   slack: SlackNotifier;
   teamId: string;
-  ackEmoji: string;
   skipThreadFollowupHandling?: boolean;
   threadTaskId?: string;
 }): Promise<void> {
@@ -1235,7 +1101,6 @@ async function handleSlackEntryEvent(params: {
     slackInstallation,
     slack,
     teamId,
-    ackEmoji,
     skipThreadFollowupHandling = false,
     threadTaskId,
   } = params;
@@ -1322,7 +1187,6 @@ async function handleSlackEntryEvent(params: {
 
   const authoredEventText = event.authoredText ?? event.text;
   const fastAgentEntryMode = resolveFastAgentEntryMode({
-    explicitInvocation: isFastCommandInvocation(authoredEventText),
     userDefaultEnabled: !isRemovedEvalCommandInvocation(authoredEventText),
   });
 
@@ -1342,11 +1206,7 @@ async function handleSlackEntryEvent(params: {
           threadTs: threadId,
           activeTaskId: activeRun?.taskId,
         }),
-      continuation: fastAgentEntryMode === 'default',
-      directedAtRoomote:
-        fastAgentEntryMode === 'explicit' ||
-        mentionsSlackBot(event, slackInstallation.botUserId),
-      processingReactionName: ackEmoji,
+      directedAtRoomote: mentionsSlackBot(event, slackInstallation.botUserId),
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });
 
@@ -1451,14 +1311,11 @@ export async function handleMessageOrAppMentionEvent(params: {
     return;
   }
 
-  const { ackEmoji } = await resolveSlackReactionNames();
-
   await handleSlackEntryEvent({
     event,
     slackInstallation: context.slackInstallation,
     slack: context.slack,
     teamId: context.teamId,
-    ackEmoji,
     threadTaskId: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.taskId
       : (mentionedThreadAliasTaskId ?? undefined),

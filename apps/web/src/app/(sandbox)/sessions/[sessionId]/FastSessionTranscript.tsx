@@ -9,7 +9,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useReducedMotion } from 'motion/react';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   SETUP_RECEIPT_INPUT_KIND,
@@ -17,6 +16,7 @@ import {
   getTextFromContentBlocks,
   inferAcpMessageKind,
   parsePrReviewActionOffer,
+  getTaskModelDisplayName,
   type AcpMessage,
   type PrReviewActionChoice,
   type AcpEventType,
@@ -57,21 +57,23 @@ import {
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
+import {
+  clearPendingFastSessionLaunch,
+  getPendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import {
   findPendingSessionInputRequest,
   SessionUserInputCard,
 } from './SessionUserInputCard';
 import { SetupStarterTasksCard } from './setup/SetupStarterTasksCard';
-import {
-  SESSION_HEADER_CONTENT_CLASS_NAME,
-  SESSION_HEADER_TITLE_CLASS_NAME,
-} from './session-header-layout';
+import { SESSION_HEADER_CONTENT_CLASS_NAME } from './session-header-layout';
 
 import {
   AcpTranscriptBlockList,
   useAcpTranscriptBlocks,
 } from '../../task/[taskId]/messages/acp';
+import { ModelBadge } from '@/components/sandbox';
 import {
   AcpProtocolService,
   toAcpUiMessage,
@@ -138,6 +140,53 @@ function getUserMessageIdentity(message: TranscriptMessage) {
     getTextFromContentBlocks(message.contentBlocks)?.trim() ?? '',
     getImageUrisFromContentBlocks(message.contentBlocks),
   ]);
+}
+
+function buildOptimisticContentBlocks(text: string, images: string[] = []) {
+  const imageBlocks: TranscriptMessage['contentBlocks'] = images.flatMap(
+    (image) => {
+      const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(image.trim());
+      return match?.[1] && match[2]
+        ? [{ type: 'image', mimeType: match[1], data: match[2] }]
+        : [];
+    },
+  );
+
+  return [{ type: 'text' as const, text }, ...imageBlocks];
+}
+
+function getInitialOptimisticMessage(
+  sessionId: string,
+  initialMessages: FastSessionMessage[],
+): TranscriptMessage | null {
+  const launch = getPendingFastSessionLaunch(sessionId);
+  if (!launch) return null;
+
+  const eventId = `web-kickoff:${launch.fastConversationId}:user`;
+  if (initialMessages.some((message) => message.eventId === eventId)) {
+    clearPendingFastSessionLaunch(sessionId);
+    return null;
+  }
+
+  return {
+    id: eventId,
+    eventId,
+    turnId: `web-kickoff:${launch.fastConversationId}`,
+    turnSeq: 0,
+    ts: launch.createdAt,
+    eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+    role: 'user',
+    contentBlocks: buildOptimisticContentBlocks(launch.text, launch.images),
+    metadata: { visibleInTranscript: true },
+    payload: {},
+    source: 'web',
+    nativeSessionId: null,
+    nativeMessageId: null,
+    userName: null,
+    userEmail: null,
+    userImageUrl: null,
+    createdAt: new Date(launch.createdAt),
+  };
 }
 
 function isVisibleResponseActivity(message: TranscriptMessage) {
@@ -230,9 +279,7 @@ function ThinkingMessage() {
   return (
     <Message from="assistant" className="chat-reasoning-message">
       <MessageContent>
-        <Shimmer className="text-sm font-light" direction="rl" duration={1}>
-          Thinking
-        </Shimmer>
+        <Shimmer className="text-sm font-light">Thinking</Shimmer>
       </MessageContent>
     </Message>
   );
@@ -245,7 +292,6 @@ function RunningTasksMessage({
   count: number;
   onOpenTasks: () => void;
 }) {
-  const shouldReduceMotion = useReducedMotion();
   const label = `${count} ${count === 1 ? 'task' : 'tasks'} running`;
 
   return (
@@ -258,20 +304,9 @@ function RunningTasksMessage({
             aria-label={`${label}. Open ${count === 1 ? 'task' : 'tasks'}`}
             onClick={onOpenTasks}
           >
-            {shouldReduceMotion ? (
-              <span className="text-sm font-light text-muted-foreground">
-                {label}
-              </span>
-            ) : (
-              <Shimmer
-                as="span"
-                className="text-sm font-light"
-                duration={3}
-                spread={1}
-              >
-                {label}
-              </Shimmer>
-            )}
+            <Shimmer as="span" className="text-sm font-light" spread={1}>
+              {label}
+            </Shimmer>
           </button>
         </span>
       </MessageContent>
@@ -292,6 +327,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort = null,
   owner,
   headerExtras,
+  headerActions,
   timelineExtras,
   autoStartVoice = false,
 }: {
@@ -307,6 +343,7 @@ export function FastSessionTranscript({
   defaultReasoningEffort?: ReasoningEffort | null;
   owner?: TranscriptOwner;
   headerExtras?: ReactNode;
+  headerActions?: ReactNode;
   timelineExtras?: ReactNode;
   /**
    * Begin a voice conversation as soon as the page loads: set when the
@@ -322,6 +359,7 @@ export function FastSessionTranscript({
   const taskStateRevision = useSessionTaskStateRevision();
   const { enabled: narrationModeEnabled } = useNarrationMode();
   const displayMode = narrationModeEnabled ? 'narration' : 'default';
+  const effectiveSessionModel = sessionModel ?? defaultModelId;
   const slackMentionScope = useMemo<SlackMentionScope>(
     () => ({ kind: 'session', sessionId }),
     [sessionId],
@@ -333,13 +371,18 @@ export function FastSessionTranscript({
   );
   const serverMessagesRef = useRef(serverMessages);
   const hasReceivedInitialSessionStateRef = useRef(false);
+  const [initialOptimisticMessage] = useState(() =>
+    getInitialOptimisticMessage(sessionId, initialMessages),
+  );
   const [optimisticMessages, setOptimisticMessages] = useState<
     TranscriptMessage[]
-  >([]);
+  >(() => (initialOptimisticMessage ? [initialOptimisticMessage] : []));
   const [isSending, setIsSending] = useState(false);
   const [pendingResponseState, dispatchPendingResponse] = useReducer(
     pendingResponseReducer,
-    initialMessages,
+    initialOptimisticMessage
+      ? [...initialMessages, initialOptimisticMessage]
+      : initialMessages,
     (messages) =>
       pendingResponseReducer(
         {
@@ -439,6 +482,7 @@ export function FastSessionTranscript({
         });
 
         if (canonicalUserMessages.length > 0) {
+          clearPendingFastSessionLaunch(sessionId);
           setOptimisticMessages((current) => {
             const pending = [...current];
             for (const canonical of canonicalUserMessages) {
@@ -564,6 +608,11 @@ export function FastSessionTranscript({
       messages
         .filter(
           (message) =>
+            !(
+              message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+              (message.payload as { taskNavigation?: unknown } | null)
+                ?.taskNavigation === true
+            ) &&
             message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput &&
             message.eventType !==
               ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
@@ -668,16 +717,6 @@ export function FastSessionTranscript({
         }
 
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
-        const imageBlocks: TranscriptMessage['contentBlocks'] = images.flatMap(
-          (image) => {
-            const match = /^data:(image\/[^;,]+);base64,(.+)$/i.exec(
-              image.trim(),
-            );
-            return match?.[1] && match[2]
-              ? [{ type: 'image', mimeType: match[1], data: match[2] }]
-              : [];
-          },
-        );
         const optimistic: TranscriptMessage = {
           id: optimisticId,
           eventId: optimisticId,
@@ -686,10 +725,7 @@ export function FastSessionTranscript({
           ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
           role: 'user',
-          contentBlocks: [
-            { type: 'text', text: prepared.text },
-            ...imageBlocks,
-          ],
+          contentBlocks: buildOptimisticContentBlocks(prepared.text, images),
           metadata: { visibleInTranscript: true },
           payload: {},
           source: 'web',
@@ -896,13 +932,31 @@ export function FastSessionTranscript({
     >
       <SlackMentionProvider scope={slackMentionScope}>
         <WorkspaceHeader
-          className="py-4.25"
-          contentClassName={SESSION_HEADER_CONTENT_CLASS_NAME}
+          className="py-3.25"
+          contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
+          actions={headerActions}
         >
-          <h1 className={`ph-no-capture ${SESSION_HEADER_TITLE_CLASS_NAME}`}>
-            {title ?? fallbackTitle}
-          </h1>
-          {headerExtras}
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <h1
+              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+              title={title ?? fallbackTitle}
+            >
+              {title ?? fallbackTitle}
+            </h1>
+            {(effectiveSessionModel || headerExtras) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                {effectiveSessionModel ? (
+                  <ModelBadge
+                    model={effectiveSessionModel}
+                    displayName={getTaskModelDisplayName(effectiveSessionModel)}
+                    showIcon={false}
+                    iconClassName="text-muted-foreground"
+                  />
+                ) : null}
+                {headerExtras}
+              </div>
+            )}
+          </div>
         </WorkspaceHeader>
         <Conversation className="min-h-0 flex-1" initial="instant">
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
@@ -939,9 +993,7 @@ export function FastSessionTranscript({
             {reviewOffers.map((offer) => (
               <PrReviewActionOffer
                 key={offer.deliveryId}
-                className="mt-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-3"
                 offer={offer}
-                showQuestion
                 onAction={(choice) =>
                   handleReviewAction(offer.deliveryId, choice)
                 }

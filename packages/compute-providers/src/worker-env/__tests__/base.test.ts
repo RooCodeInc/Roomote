@@ -1,9 +1,12 @@
-vi.mock('@roomote/env', () => ({
-  Env: {
+const { mockEnv } = vi.hoisted(() => ({
+  mockEnv: {
+    R_APP_ENV: undefined as string | undefined,
     R_APP_URL: 'https://web.roomote.example.com',
     TRPC_URL: 'https://api.roomote.example.com',
   },
 }));
+
+vi.mock('@roomote/env', () => ({ Env: mockEnv }));
 
 import { buildBaseWorkerEnv } from '../base';
 
@@ -12,6 +15,8 @@ describe('buildBaseWorkerEnv', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    mockEnv.R_APP_ENV = undefined;
+    delete process.env.APP_ENV;
     delete process.env.PREVIEW_PROXY_BASE_URL;
     delete process.env.JOB_AUTH_PRIVATE_KEY;
     delete process.env.JOB_AUTH_PUBLIC_KEY;
@@ -35,6 +40,37 @@ describe('buildBaseWorkerEnv', () => {
 
   afterEach(() => {
     process.env = originalEnv;
+  });
+
+  it('keeps deployment identity separate from the explicit worker operational env', () => {
+    mockEnv.R_APP_ENV = 'production';
+    process.env.APP_ENV = 'development';
+
+    const env = buildBaseWorkerEnv({ authToken: 'auth-token' });
+
+    expect(env.ROOMOTE_RELEASE_APP_ENV).toBe('production');
+    expect(env.R_APP_ENV).toBe('development');
+    expect(env.ROOMOTE_APP_ENV).toBe('development');
+  });
+
+  it('does not use deployment identity as the worker operational env', () => {
+    mockEnv.R_APP_ENV = 'production';
+
+    const env = buildBaseWorkerEnv({ authToken: 'auth-token' });
+
+    expect(env.ROOMOTE_RELEASE_APP_ENV).toBe('production');
+    expect(env).not.toHaveProperty('R_APP_ENV');
+    expect(env).not.toHaveProperty('ROOMOTE_APP_ENV');
+  });
+
+  it('omits missing deployment identity even when the worker env is explicit', () => {
+    process.env.APP_ENV = 'development';
+
+    const env = buildBaseWorkerEnv({ authToken: 'auth-token' });
+
+    expect(env).not.toHaveProperty('ROOMOTE_RELEASE_APP_ENV');
+    expect(env.R_APP_ENV).toBe('development');
+    expect(env.ROOMOTE_APP_ENV).toBe('development');
   });
 
   it('does not synthesize a preview proxy base URL when explicit config is absent', () => {

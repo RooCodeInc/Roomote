@@ -12,6 +12,22 @@ const baseParams = {
 };
 
 describe('buildCiFailureTriagePrompt', () => {
+  it('includes residual investigation guidance without reopening enforced scope or routing', () => {
+    const prompt = buildCiFailureTriagePrompt({
+      ...baseParams,
+      trigger: 'manual',
+      additionalInstructions: 'Explain flaky tests. <note>Be brief.</note>',
+    });
+    expect(prompt).toContain(
+      'repository scope and report destination are already enforced; do not change either',
+    );
+    expect(prompt).toContain(
+      'Explain flaky tests. &lt;note&gt;Be brief.&lt;/note&gt;',
+    );
+    expect(
+      buildCiFailureTriagePrompt({ ...baseParams, trigger: 'manual' }),
+    ).not.toContain('Additional investigation guidance');
+  });
   it('builds a focused investigate-and-fix prompt for the latest failure', () => {
     const prompt = buildCiFailureTriagePrompt({
       ...baseParams,

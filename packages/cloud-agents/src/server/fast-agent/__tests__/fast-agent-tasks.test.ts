@@ -1,6 +1,9 @@
 import {
+  cancelFastAgentTask,
+  launchFastAgentPrReview,
   sendFastAgentTaskMessage,
   sendFastAgentTaskMessageOnce,
+  stopFastAgentTask,
 } from '../fast-agent-tasks';
 
 describe('fast-agent task operations', () => {
@@ -53,6 +56,92 @@ describe('fast-agent task operations', () => {
     );
   });
 
+  it('reports successful steering as accepted while the task response is pending', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ success: true, result: { success: true } }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      sendFastAgentTaskMessage(
+        {
+          userId: 'user-1',
+          apiBaseUrl: 'https://app.example.test/_roomote-api',
+          getAuthToken: async () => 'auth-token',
+        },
+        { taskId: 'task-42', message: 'Also add a test.' },
+      ),
+    ).resolves.toEqual({
+      success: true,
+      result: { success: true },
+      delivery: 'accepted',
+      responsePending: true,
+    });
+  });
+
+  it('cancels tasks through the terminal cancel endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      cancelFastAgentTask(
+        {
+          userId: 'user-1',
+          apiBaseUrl: 'https://app.example.test/_roomote-api',
+          getAuthToken: async () => 'auth-token',
+        },
+        'task-42',
+      ),
+    ).resolves.toEqual({ success: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://app.example.test/_roomote-api/api/mcp/tasks/task-42/cancel',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('stops tasks through the resumable stop endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      stopFastAgentTask(
+        {
+          userId: 'user-1',
+          apiBaseUrl: 'https://app.example.test/_roomote-api',
+          getAuthToken: async () => 'auth-token',
+        },
+        { taskId: 'task-42', userInitiated: false },
+      ),
+    ).resolves.toEqual({ success: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://app.example.test/_roomote-api/api/mcp/tasks/task-42/stop',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ userInitiated: false }),
+      }),
+    );
+  });
+
   it('sends retry-safe task messages with a stable client id', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true }), {
@@ -81,6 +170,94 @@ describe('fast-agent task operations', () => {
         body: JSON.stringify({
           message: 'Resolve the review feedback.',
           clientMessageId: 'pr-review-delivery:delivery-1',
+        }),
+      }),
+    );
+  });
+
+  it('marks auth preflight failures as not accepted without sending a request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await sendFastAgentTaskMessageOnce(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://app.example.test/_roomote-api',
+        getAuthToken: async () => {
+          throw new Error('Auth token unavailable.');
+        },
+      },
+      {
+        taskId: 'task-42',
+        message: 'Resolve the review feedback.',
+        clientMessageId: 'pr-review-delivery:delivery-1',
+      },
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Auth token unavailable.',
+      delivery: 'not_accepted',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves transport failures without a delivery marker', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('Connection lost.'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await sendFastAgentTaskMessageOnce(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://app.example.test/_roomote-api',
+        getAuthToken: async () => 'auth-token',
+      },
+      {
+        taskId: 'task-42',
+        message: 'Resolve the review feedback.',
+        clientMessageId: 'pr-review-delivery:delivery-1',
+      },
+    );
+
+    expect(result).toEqual({ success: false, error: 'Connection lost.' });
+    expect(result).not.toHaveProperty('delivery');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards model and reasoning overrides for pull request reviews', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, taskId: 'review-task' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await launchFastAgentPrReview(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://app.example.test/_roomote-api',
+        getAuthToken: async () => 'auth-token',
+      },
+      {
+        repository: 'acme/api',
+        pullRequestNumber: 42,
+        fastConversationId: '33333333-3333-4333-8333-333333333333',
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://app.example.test/_roomote-api/api/mcp/tasks',
+      expect.objectContaining({
+        body: JSON.stringify({
+          type: 'pr-review',
+          repo: 'acme/api',
+          prNumber: 42,
+          fastConversationId: '33333333-3333-4333-8333-333333333333',
+          model: 'anthropic/claude-sonnet-5',
+          reasoningEffort: 'high',
         }),
       }),
     );

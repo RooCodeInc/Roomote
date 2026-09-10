@@ -25,14 +25,20 @@ describe('getVisiblePrimaryNavItems', () => {
       isAdmin: false,
     });
 
-    expect(items.map((item) => item.href)).toEqual(['/', '/sessions']);
+    expect(items.map((item) => item.href)).toEqual([
+      '/',
+      '/sessions',
+      '/automations',
+    ]);
   });
 
-  it('hides automations from non-admins', () => {
+  it('shows setup-gated automations to members', () => {
     const items = getVisiblePrimaryNavItems({
       isAdmin: false,
     });
 
-    expect(items.map((item) => item.href)).toEqual(['/', '/sessions']);
+    expect(items.find((item) => item.href === '/automations')).toMatchObject({
+      requiresSetup: true,
+    });
   });
 });

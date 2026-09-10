@@ -552,7 +552,7 @@ describe('prReviewNotificationJob', () => {
       runId: 1,
       taskId: 'task-1',
       route: null,
-      text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
+      text: 'Alice requested changes on owner/repo#42.',
     });
   });
 
@@ -702,7 +702,7 @@ describe('prReviewNotificationJob', () => {
       runId: 1,
       taskId: 'task-1',
       route: null,
-      text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
+      text: 'Alice requested changes on owner/repo#42.',
     });
     expect(mockFinalize).toHaveBeenCalled();
   });
@@ -783,7 +783,7 @@ describe('prReviewNotificationJob', () => {
     );
 
     const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
-    expect(postedCall.text).toBe('formatted-message\nWant me to take a look?');
+    expect(postedCall.text).toBe('formatted-message');
     const blocks = postedCall.blocks as Array<Record<string, unknown>>;
     expect(blocks).toEqual([
       expect.objectContaining({
@@ -791,17 +791,13 @@ describe('prReviewNotificationJob', () => {
         text: 'formatted-message',
       }),
       expect.objectContaining({
-        block_id: 'pr_review_action_question',
-        text: expect.objectContaining({ text: 'Want me to take a look?' }),
-      }),
-      expect.objectContaining({
         type: 'actions',
         block_id: 'pr_review_action',
       }),
     ]);
-    // Both buttons carry the stored nonce so the click handler can claim it.
+    // All buttons carry the stored nonce so the click handler can claim it.
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
-    const actionsBlock = blocks[2] as {
+    const actionsBlock = blocks[1] as {
       elements: Array<{ action_id: string; value: string }>;
     };
     expect(actionsBlock.elements.map((element) => element.action_id)).toEqual([
@@ -821,10 +817,10 @@ describe('prReviewNotificationJob', () => {
     );
     expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith([superseded]);
 
-    // The task-history record carries the question as trailing text.
+    // Newly recorded history contains only the summary, not the action question.
     expect(mockRecordDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
       }),
     );
   });
@@ -942,10 +938,9 @@ describe('prReviewNotificationJob', () => {
         }) as never,
       ),
     ).rejects.toThrow('Canonical PR review prompt lost its posting fence');
-    expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith(
-      [expect.objectContaining({ nonce: deliveryId, messageId: '999.888' })],
-      'Superseded by newer PR activity.',
-    );
+    expect(mockRetirePrReviewActionMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ nonce: deliveryId, messageId: '999.888' }),
+    ]);
   });
 
   it('posts callback buttons and stores the pending offer for Telegram routes', async () => {
@@ -975,7 +970,7 @@ describe('prReviewNotificationJob', () => {
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
     expect(mockTelegramPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
         buttons: [
           [
             expect.objectContaining({
@@ -1019,6 +1014,24 @@ describe('prReviewNotificationJob', () => {
     await prReviewNotificationJob(makeJob() as never);
 
     const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'formatted-message',
+        buttons: [
+          [
+            {
+              text: 'Resolve these issues',
+              callbackData: `prr:y:${storedNonce}`,
+            },
+            {
+              text: 'Auto-resolve on this PR',
+              callbackData: `prr:a:${storedNonce}`,
+            },
+            { text: 'Dismiss', callbackData: `prr:d:${storedNonce}` },
+          ],
+        ],
+      }),
+    );
     expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
       storedNonce,
       'message-with-actions',
@@ -1028,7 +1041,7 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('keeps Teams routes on the plain trailing-question text', async () => {
+  it('posts only the summary for Teams routes without adding controls', async () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: {
@@ -1047,7 +1060,7 @@ describe('prReviewNotificationJob', () => {
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     expect(mockTeamsPostMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'formatted-message\nWant me to take a look?',
+        text: 'formatted-message',
       }),
     );
     expect(mockTeamsPostMessage.mock.calls[0]?.[0]?.buttons).toBeUndefined();
@@ -1741,6 +1754,7 @@ describe('prReviewNotificationJob', () => {
           deliveryId,
           question: 'Would you like me to resolve these issues?',
         },
+        text: 'Review feedback remains.',
       }),
     );
     expect(mockAttachPendingPrReviewActionMessage).toHaveBeenCalledWith(
@@ -1867,6 +1881,54 @@ describe('prReviewNotificationJob', () => {
       countDeferral: false,
     });
     expect(mockRequeuePending).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 1, 2])(
+    'retains a canonical preparation claim only while queue retries remain (prior failures: %s)',
+    async (attemptsMade) => {
+      mockPrepareDelivery.mockRejectedValue(new Error('model unavailable'));
+      const job = {
+        ...makeJob({
+          ownershipVersion: 'canonical',
+          deliveryId: '11111111-1111-4111-8111-111111111111',
+          deliveryState: 'claimed',
+          deliveryIds: ['11111111-1111-4111-8111-111111111111'],
+          leaseToken: '22222222-2222-4222-8222-222222222222',
+          events,
+        }),
+        attemptsMade,
+        opts: { attempts: 3 },
+      };
+
+      await expect(prReviewNotificationJob(job as never)).rejects.toThrow(
+        'model unavailable',
+      );
+      expect(mockRequeuePending).toHaveBeenCalledTimes(
+        attemptsMade === 2 ? 1 : 0,
+      );
+      expect(mockPostMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('releases a canonical claim when its preparation transition fails despite remaining retries', async () => {
+    mockPrepareCanonical.mockRejectedValue(new Error('transition failed'));
+    const job = {
+      ...makeJob({
+        ownershipVersion: 'canonical',
+        deliveryId: '11111111-1111-4111-8111-111111111111',
+        deliveryState: 'claimed',
+        deliveryIds: ['11111111-1111-4111-8111-111111111111'],
+        leaseToken: '22222222-2222-4222-8222-222222222222',
+        events,
+      }),
+      attemptsMade: 0,
+      opts: { attempts: 3 },
+    };
+
+    await expect(prReviewNotificationJob(job as never)).rejects.toThrow(
+      'transition failed',
+    );
+    expect(mockRequeuePending).toHaveBeenCalledOnce();
   });
 
   it('uses the canonical delivery id as the sole interactive action owner', async () => {

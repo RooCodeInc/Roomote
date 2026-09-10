@@ -88,6 +88,18 @@
 
   --animate-hop: hop 0.8s ease-in-out infinite;
 
+  --animate-shimmer: shimmer 4s linear infinite;
+
+  @keyframes shimmer {
+    /* Oversized backgrounds move right as their position percentage decreases. */
+    from {
+      background-position: 100% center;
+    }
+    to {
+      background-position: 0% center;
+    }
+  }
+
   @keyframes skeleton-dash {
     to {
       stroke-dashoffset: calc(-1 * var(--skeleton-cycle, 6) * 1px);
@@ -708,6 +720,33 @@ html[data-status-banner-visible='true'] {
   /* Prefer the viewport utilities above over raw Tailwind screen heights in app shells. */
 }
 
+@utility text-shimmer {
+  color: transparent;
+  background-clip: text;
+  background-repeat: no-repeat;
+  background-size:
+    250% 100%,
+    auto;
+  background-image:
+    linear-gradient(
+      90deg,
+      #0000 calc(50% - var(--spread)),
+      var(--color-background),
+      #0000 calc(50% + var(--spread))
+    ),
+    linear-gradient(
+      var(--color-muted-foreground),
+      var(--color-muted-foreground)
+    );
+  animation: var(--animate-shimmer);
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    background-image: none;
+    color: var(--color-muted-foreground);
+  }
+}
+
 @utility z-base {
   z-index: var(--z-base);
 }
@@ -970,6 +1009,81 @@ html[data-status-banner-visible='true'] {
 [data-streamdown='superscript'] {
 }
 [data-streamdown='subscript'] {
+}
+
+/* A static, photographed-paper treatment for Markdown gallery thumbnails. */
+.markdown-artifact-preview {
+  @apply relative flex aspect-video w-full items-start justify-center overflow-hidden bg-zinc-200 dark:bg-zinc-800;
+  perspective: 520px;
+  isolation: isolate;
+}
+
+.markdown-artifact-paper-shadow {
+  @apply pointer-events-none absolute left-[3%] top-[9%] h-[118%] w-[98%] rounded-sm bg-black/25 blur-[6px];
+  transform: rotateX(8deg) rotateZ(-1.75deg) skewX(-0.75deg) scale(1.03);
+  transform-origin: left top;
+}
+
+.markdown-artifact-paper {
+  @apply pointer-events-none absolute left-[2%] top-[3%] h-[150%] w-full overflow-hidden rounded-[2px] border border-zinc-300/80 bg-white px-[8%] py-[7%] text-zinc-800 shadow-[0_8px_16px_rgba(0,0,0,0.16)];
+  transform-origin: left top;
+  transform: rotateX(8deg) rotateZ(-1.75deg) skewX(-0.75deg) scale(1.03);
+}
+
+.markdown-artifact-preview::after {
+  @apply pointer-events-none absolute -inset-1 z-10 blur-[2px];
+  content: '';
+  background:
+    linear-gradient(
+      to bottom,
+      rgb(0 0 0 / 0.06),
+      transparent 18%,
+      transparent 75%,
+      rgb(0 0 0 / 0.1)
+    ),
+    radial-gradient(
+      ellipse at center,
+      transparent 58%,
+      rgb(24 24 27 / 0.08) 100%
+    );
+}
+
+.markdown-artifact-content {
+  @apply size-full overflow-hidden text-[7px] leading-[1.35] text-zinc-700 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0;
+}
+
+.markdown-artifact-content [data-streamdown='heading-1'] {
+  @apply mb-[0.35em]! mt-[0.65em]! text-[11px]! font-bold! leading-tight! text-zinc-950!;
+}
+
+.markdown-artifact-content [data-streamdown='heading-2'] {
+  @apply mb-[0.3em]! mt-[0.6em]! text-[9px]! font-bold! leading-tight! text-zinc-950!;
+}
+
+.markdown-artifact-content [data-streamdown='heading-3'],
+.markdown-artifact-content [data-streamdown='heading-4'] {
+  @apply mb-[0.25em]! mt-[0.5em]! text-[8px]! font-semibold! leading-tight! text-zinc-900!;
+}
+
+.markdown-artifact-content [data-streamdown='paragraph'] {
+  @apply my-[0.45em]!;
+}
+
+.markdown-artifact-content [data-streamdown='ordered-list'],
+.markdown-artifact-content [data-streamdown='unordered-list'] {
+  @apply my-[0.45em]! ml-[1.25em]!;
+}
+
+.markdown-artifact-content [data-streamdown='link'] {
+  @apply text-zinc-700 no-underline;
+}
+
+.markdown-artifact-placeholder {
+  @apply flex flex-col gap-1 pt-0.5;
+}
+
+.markdown-artifact-placeholder > span {
+  @apply block h-1 rounded-full bg-zinc-300;
 }
 
 /* ==========================================================================

@@ -7,11 +7,7 @@ import {
   slackInstallations,
 } from '@roomote/db/server';
 import { acquireRedisLock } from '@roomote/redis';
-import {
-  resolveSlackReactionNames,
-  SlackNotifier,
-  shouldResumeSlackAuthThread,
-} from '@roomote/slack';
+import { SlackNotifier, shouldResumeSlackAuthThread } from '@roomote/slack';
 
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 import { startFastAgentResponse } from './message-entry.js';
@@ -82,7 +78,6 @@ export async function resumePendingSlackAuthRequest(
     });
 
     const messageTs = authToken.messageTs ?? authToken.threadTs;
-    const { ackEmoji } = await resolveSlackReactionNames();
     const fastStart = await startFastAgentResponse({
       event: {
         type: 'app_mention',
@@ -99,9 +94,7 @@ export async function resumePendingSlackAuthRequest(
       slack,
       userId: activeMapping.userId,
       teamId: authToken.slackTeamId,
-      continuation: true,
       directedAtRoomote: true,
-      processingReactionName: ackEmoji,
       errorLogPrefix: `Failed to resume pending Slack request in thread ${authToken.threadTs}:`,
     });
 

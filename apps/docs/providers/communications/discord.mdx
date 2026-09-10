@@ -136,15 +136,24 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 
 Fast can read bounded context from the current Discord thread or channel, use
 MCP servers and user-scoped integrations that you are allowed to access, and
-delegate repository work to Roomote tasks. Deployment admins can also manage
-custom automations through Fast. Fast does not read other channels implicitly
+delegate repository work to Roomote tasks. Members can create and manage their
+own [custom automations](/automations#custom-automations) through Fast; deployment
+admins can manage all custom automations, including those without a creator.
+Built-in automations and deployment settings remain admin-only.
+Fast does not read other channels implicitly
 or inspect repository contents without delegating the work to a task. When the
 request spans every repository, Fast can delegate it to the deployment's
 all-repositories environment.
 
 Fast automation reports can be delivered to configured Discord channels or the
-automation owner's DM. Replies continue the report's Fast session in Discord,
-and the footer also links to the same session in the web app.
+automation owner's DM. Replies continue the report's Fast session in Discord.
+
+Every Fast reply ends with a compact footer: **Reply anytime**, a plain
+running-task count when at least one task is running, links to pull requests the
+Session is working on, and **Open in Roomote**, which opens the Session transcript.
+Roomote keeps the footer on the latest reply current as delegated tasks start
+and finish (checking about every 30 seconds while work is running), and
+earlier replies drop their footer when a new reply posts.
 
 Roomote does not quote every message it answers. In a task thread, the
 conversation itself supplies the context. When you start a task by tagging

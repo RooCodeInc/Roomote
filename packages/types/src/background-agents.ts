@@ -192,18 +192,27 @@ export function isBackgroundAutomationUserTargetKind(
   );
 }
 
+/**
+ * Communication providers that can act as automation destinations. Email
+ * (agentmail) is inbound-initiated only and never receives automation posts.
+ */
+export type AutomationCapableCommunicationProvider = Exclude<
+  CommunicationProvider,
+  'agentmail'
+>;
+
 export const communicationAutomationTargetKinds = {
   slack: { channel: 'slack_channel', direct_message: 'slack_user' },
   discord: { channel: 'discord_channel', direct_message: 'discord_user' },
   teams: { channel: 'teams_channel', direct_message: 'teams_user' },
   telegram: { channel: 'telegram_chat', direct_message: 'telegram_user' },
 } as const satisfies Record<
-  CommunicationProvider,
+  AutomationCapableCommunicationProvider,
   Record<'channel' | 'direct_message', BackgroundAutomationTargetKind>
 >;
 
 export function getCommunicationAutomationTargetKind(
-  provider: CommunicationProvider,
+  provider: AutomationCapableCommunicationProvider,
   mode: 'channel' | 'direct_message',
 ): BackgroundAutomationTargetKind {
   return communicationAutomationTargetKinds[provider][mode];
@@ -212,14 +221,14 @@ export function getCommunicationAutomationTargetKind(
 export function isCommunicationAutomationTarget(
   target: Pick<AutomationTarget, 'provider' | 'targetKind'>,
 ): target is Pick<AutomationTarget, 'provider' | 'targetKind'> & {
-  provider: CommunicationProvider;
+  provider: AutomationCapableCommunicationProvider;
 } {
   if (!(target.provider in communicationAutomationTargetKinds)) {
     return false;
   }
   const kinds =
     communicationAutomationTargetKinds[
-      target.provider as CommunicationProvider
+      target.provider as AutomationCapableCommunicationProvider
     ];
   return (
     target.targetKind === kinds.channel ||
