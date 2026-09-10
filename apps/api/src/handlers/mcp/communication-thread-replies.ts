@@ -30,6 +30,7 @@ import {
   createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
   getCommunicationProviderAdapter,
 } from '@roomote/sdk/server';
+import { createHash } from 'node:crypto';
 
 import { THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE } from './chat-reply-helpers';
 import {
@@ -556,6 +557,104 @@ async function sendTelegramThreadReply(params: {
   });
 }
 
+/**
+ * Email replies must be delivered at most once per logical reply. The worker
+ * mints a clientSendId per tool invocation and every HTTP retry of that call
+ * carries it, so the key is stable across the whole logical send without
+ * depending on mutable route state; a fresh tool call (including an agent's
+ * own deliberate retry) is a new send. The text digest is only the legacy
+ * fallback for callers that predate clientSendId.
+ */
+function buildAgentMailThreadReplyIdempotencyKey(params: {
+  conversationId: string;
+  runId: number;
+  text: string;
+  clientSendId?: string;
+}): string {
+  const sendId =
+    params.clientSendId ??
+    createHash('sha256').update(params.text).digest('hex').slice(0, 16);
+  return `agentmail:${params.conversationId}:${params.runId}-${sendId}:thread-reply`;
+}
+
+async function sendAgentMailThreadReply(params: {
+  taskRun: CommunicationReplyTaskRun;
+  parsedBody: ParsedThreadReplyBody;
+}): Promise<Response> {
+  const channelId = getCommunicationChannelFromTaskPayload(
+    params.taskRun.payload,
+  );
+  // For email tasks the payload thread id is the INTERNAL AgentMail
+  // conversation id; the adapter resolves the actual reply anchor and
+  // recipient from the durable conversation row at send time.
+  const conversationId = getCommunicationThreadIdFromTaskPayload(
+    params.taskRun.payload,
+  );
+
+  if (!channelId || !conversationId) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Email thread reply is only available for jobs with an email conversation context',
+      }),
+      { status: 403 },
+    );
+  }
+
+  const provider = await getCommunicationProviderAdapter('agentmail');
+  if (!provider) {
+    return new Response(
+      JSON.stringify({
+        error: 'AgentMail credentials are not configured for outbound replies',
+      }),
+      { status: 503 },
+    );
+  }
+
+  const text = params.parsedBody.text?.trim();
+  if (!text) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Email thread replies require text; image attachments are not supported over email yet',
+      }),
+      { status: 400 },
+    );
+  }
+
+  // Email is not live: no typing heartbeat, no reactions, and no managed
+  // footer edits (a sent email cannot be updated). The reply text is already
+  // composed by the worker; delivery only needs the durable conversation
+  // route plus an Idempotency-Key so retries never double-send.
+  const reply = await provider.postMessage({
+    channelId,
+    threadId: conversationId,
+    text,
+    textFormat: 'markdown',
+    idempotencyKey: buildAgentMailThreadReplyIdempotencyKey({
+      conversationId,
+      runId: params.taskRun.id,
+      text,
+      ...(params.parsedBody.clientSendId
+        ? { clientSendId: params.parsedBody.clientSendId }
+        : {}),
+    }),
+  });
+
+  return new Response(
+    JSON.stringify({
+      messageTs: reply.messageId,
+      ...(params.parsedBody.images.length > 0
+        ? {
+            warning:
+              'Email replies do not support image attachments yet; the reply was sent without them.',
+          }
+        : {}),
+    }),
+    { headers: { 'content-type': 'application/json' } },
+  );
+}
+
 async function sendDiscordThreadReply(params: {
   taskRun: CommunicationReplyTaskRun;
   parsedBody: ParsedThreadReplyBody;
@@ -911,6 +1010,21 @@ async function addTeamsReaction(params: {
   }
 }
 
+/**
+ * Email has no reactions. Report the limitation gracefully (mirroring the
+ * UnsupportedCommunicationOperationError shape other providers surface)
+ * instead of erroring at the provider.
+ */
+function addAgentMailReaction(): Response {
+  return new Response(
+    JSON.stringify({
+      error:
+        'AgentMail does not support reactions. Email has no reactions; send a reply instead.',
+    }),
+    { status: 400 },
+  );
+}
+
 async function addSlackReaction(params: {
   taskRun: { id: number; payload: unknown };
   parsedBody: { channel: string; messageTs: string; name: string };
@@ -977,6 +1091,8 @@ export async function maybeSendCommunicationThreadReply(params: {
       return sendTelegramThreadReply(params);
     case 'discord':
       return sendDiscordThreadReply(params);
+    case 'agentmail':
+      return sendAgentMailThreadReply(params);
     default:
       return null;
   }
@@ -995,6 +1111,8 @@ export async function maybeAddCommunicationReaction(params: {
       return addTelegramReaction(params);
     case 'discord':
       return addDiscordReaction(params);
+    case 'agentmail':
+      return addAgentMailReaction();
     default:
       return null;
   }

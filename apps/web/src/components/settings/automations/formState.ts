@@ -1,8 +1,8 @@
 import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
+  type AutomationCapableCommunicationProvider,
   type ChannelAutoStartLaunchMode,
-  type CommunicationProvider,
   type ConflictResolverMaxPrAgeDays,
   type ScheduleOnlyBackgroundAutomationFrequency,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
@@ -119,7 +119,7 @@ export type FormState = {
   announcerFrequency: AnnouncerFrequency;
   announcerInstructions: string;
   platformIssueAlertsEnabled: boolean;
-  mergeAnnouncerTargetProvider: 'none' | CommunicationProvider;
+  mergeAnnouncerTargetProvider: 'none' | AutomationCapableCommunicationProvider;
   mergeAnnouncerTargetMode: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId: string;
 } & DestinationChannelFormFields &

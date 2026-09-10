@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import { getRedis } from '@roomote/redis';
 
-type CommunicationLinkProvider = 'discord' | 'telegram';
+type CommunicationLinkProvider = 'discord' | 'telegram' | 'agentmail';
 
 const LINK_CODE_PREFIX = 'link-';
 const LINK_CODE_PATTERN = /^link-[A-Za-z0-9_-]{16,}$/;

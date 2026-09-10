@@ -1,5 +1,6 @@
 import type {
   AnnouncerFrequency,
+  AutomationCapableCommunicationProvider,
   BackgroundAutomationKey,
   ChannelAutoStartLaunchMode,
   CommunicationProvider,
@@ -327,7 +328,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   codeQualityAuditorDiscordChannel?: string | null;
   ciFailureTriageSlackChannel?: string | null;
   ciFailureTriageDiscordChannel?: string | null;
-  mergeAnnouncerTargetProvider?: CommunicationProvider | null;
+  mergeAnnouncerTargetProvider?: AutomationCapableCommunicationProvider | null;
   mergeAnnouncerTargetMode?: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId?: string | null;
 }

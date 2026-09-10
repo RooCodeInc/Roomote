@@ -23,6 +23,7 @@ export type FastSessionFooterProvider =
   | 'discord'
   | 'teams'
   | 'telegram'
+  | 'agentmail'
   | 'github'
   | 'gitlab'
   | 'bitbucket'

@@ -108,6 +108,7 @@
             "expanded": false,
             "pages": [
               "communications",
+              "providers/communications/agentmail",
               "providers/communications/discord",
               "providers/communications/microsoft-teams",
               "providers/communications/slack",

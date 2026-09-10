@@ -68,6 +68,11 @@ export async function handleSendChatReactionEmoji(
 ): Promise<ToolResult> {
   const communicationProvider =
     process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim();
+  if (communicationProvider === 'agentmail') {
+    return errorResult(
+      'Email has no reactions; reply with send_chat_reply when a response is needed',
+    );
+  }
   const isCommunicationReactionContext =
     communicationProvider === 'telegram' ||
     communicationProvider === 'teams' ||

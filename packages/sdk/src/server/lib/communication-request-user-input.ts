@@ -18,15 +18,23 @@ import {
   type CommunicationProvider,
 } from '@roomote/types';
 
+import { buildAgentMailRequestUserInputMessage } from './agentmail/request-user-input';
 import { getCommunicationProviderAdapter } from './communication-providers';
 
-type SupportedCommunicationRuiProvider = 'discord' | 'telegram' | 'teams';
+type SupportedCommunicationRuiProvider =
+  | 'discord'
+  | 'telegram'
+  | 'teams'
+  | 'agentmail';
 
 function isSupportedCommunicationRuiProvider(
   provider: CommunicationProvider | null | undefined,
 ): provider is SupportedCommunicationRuiProvider {
   return (
-    provider === 'discord' || provider === 'telegram' || provider === 'teams'
+    provider === 'discord' ||
+    provider === 'telegram' ||
+    provider === 'teams' ||
+    provider === 'agentmail'
   );
 }
 
@@ -91,10 +99,24 @@ export async function publishCommunicationRequestUserInput(params: {
     answers: existingForEdit?.answers,
   });
 
-  const promptText = buildDiscordRequestUserInputPromptText(promptState);
-  // Teams has no callback-button intake yet; keep options in the text body.
-  const buttons =
-    provider === 'teams'
+  // Email renders options as signed one-click answer links; chat providers
+  // use callback buttons. Teams has no callback-button intake yet and keeps
+  // options in the text body.
+  const agentMailMessage =
+    provider === 'agentmail'
+      ? await buildAgentMailRequestUserInputMessage({
+          conversationId,
+          requestId: params.request.requestId,
+          questions: params.request.questions,
+          currentQuestionIndex,
+        })
+      : null;
+  const promptText =
+    agentMailMessage?.text ??
+    buildDiscordRequestUserInputPromptText(promptState);
+  const buttons = agentMailMessage
+    ? agentMailMessage.buttons
+    : provider === 'teams'
       ? undefined
       : buildDiscordRequestUserInputButtons({
           runId: params.runId,
@@ -131,7 +153,12 @@ export async function publishCommunicationRequestUserInput(params: {
     // only reply/topic scope (Telegram topics, Discord threads, Teams reply).
     const posted = await adapter.postMessage({
       channelId,
-      ...(threadId && (provider === 'discord' || provider === 'telegram')
+      // For agentmail, threadId carries the internal conversation id the
+      // adapter resolves its durable reply route from.
+      ...(threadId &&
+      (provider === 'discord' ||
+        provider === 'telegram' ||
+        provider === 'agentmail')
         ? { threadId }
         : {}),
       ...(provider === 'teams' && threadId
@@ -139,7 +166,16 @@ export async function publishCommunicationRequestUserInput(params: {
         : {}),
       ...(serviceUrl ? { serviceUrl } : {}),
       text: promptText,
-      ...(provider === 'teams' ? { textFormat: 'markdown' as const } : {}),
+      ...(provider === 'teams' || provider === 'agentmail'
+        ? { textFormat: 'markdown' as const }
+        : {}),
+      // A re-publish of the same question (worker restart, snapshot resume)
+      // must not send the recipient a second question email.
+      ...(provider === 'agentmail'
+        ? {
+            idempotencyKey: `agentmail:${conversationId}:rui:${params.request.requestId}:${currentQuestionIndex}`,
+          }
+        : {}),
       ...(buttons ? { buttons } : {}),
     });
     promptMessageId = posted.messageId;

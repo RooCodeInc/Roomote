@@ -504,6 +504,7 @@ function parseRequestBody(body: unknown): {
   text?: string;
   blocks?: unknown[];
   images: Array<{ artifactId: string }>;
+  clientSendId?: string;
 } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('Invalid request body');
@@ -513,6 +514,11 @@ function parseRequestBody(body: unknown): {
   const text =
     typeof record.text === 'string' && record.text.trim().length > 0
       ? record.text.trim()
+      : undefined;
+  const clientSendId =
+    typeof record.clientSendId === 'string' &&
+    /^[A-Za-z0-9_-]{8,64}$/.test(record.clientSendId)
+      ? record.clientSendId
       : undefined;
   const blocks =
     record.blocks === undefined
@@ -551,7 +557,7 @@ function parseRequestBody(body: unknown): {
     throw new Error('At least one of text, blocks, or images is required');
   }
 
-  return { text, blocks, images };
+  return { text, blocks, images, clientSendId };
 }
 
 /**

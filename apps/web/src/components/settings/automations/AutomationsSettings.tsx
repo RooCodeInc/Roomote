@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   AUTOMATION_DESTINATION_DESCRIPTORS,
+  type AutomationCapableCommunicationProvider,
   type BackgroundAutomationKey,
   type CommunicationProvider,
   communicationProviders,
@@ -368,8 +369,13 @@ function getAutomationCapabilityBadges(
 
   const comms: readonly CommunicationProvider[] =
     descriptor.supportedCommunicationProviders;
+  // Email (agentmail) never receives automation posts, so full coverage is
+  // measured against the automation-capable providers only.
+  const automationCapableProviderCount = communicationProviders.filter(
+    (provider) => provider !== 'agentmail',
+  ).length;
   const commsLimited =
-    comms.length > 0 && comms.length < communicationProviders.length;
+    comms.length > 0 && comms.length < automationCapableProviderCount;
   const commsBadge = commsLimited
     ? comms.length === 1 && comms[0] === 'slack'
       ? 'Slack only'
@@ -818,7 +824,7 @@ function mapSettingsToFormState(
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
     ciFailureTriageAdditionalRules?: string;
-    mergeAnnouncerTargetProvider: CommunicationProvider | null;
+    mergeAnnouncerTargetProvider: AutomationCapableCommunicationProvider | null;
     mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
     mergeAnnouncerTargetChannelId: string | null;
     mergeAnnouncerAdditionalRules?: string;
@@ -3376,7 +3382,12 @@ export function AutomationsSettings({
                                 formState.mergeAnnouncerTargetChannelId,
                             }}
                             availableProviders={communicationProviders.filter(
-                              (provider) =>
+                              (
+                                provider,
+                              ): provider is AutomationCapableCommunicationProvider =>
+                                // Email (agentmail) never receives automation
+                                // posts, so it is not offered as a destination.
+                                provider !== 'agentmail' &&
                                 settingsQuery.data?.capabilities[
                                   `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
                                 ] === true,

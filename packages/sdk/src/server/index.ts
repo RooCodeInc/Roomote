@@ -238,8 +238,10 @@ export {
 } from './lib/session-wakeups';
 export {
   admitFastAgentHumanFollowUp,
+  admitFastAgentInlineHumanTurn,
   persistFastAgentInlineHumanTurn,
   type FastAgentDurableTurn,
+  type FastAgentInlineHumanTurnAdmission,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
 export {
@@ -252,6 +254,57 @@ export {
   getCommunicationProviderAdapter,
   type RuntimeCommunicationProviderAdapter,
 } from './lib/communication-providers';
+
+export { createAgentMailCommunicationProviderFromRuntimeCredentials } from './lib/agentmail-communication';
+
+export {
+  advanceAgentMailInboundAnchor,
+  normalizeEmailAddress,
+  recordAgentMailOutboundMessage,
+  resolveAgentMailReplyRoute,
+  resolveAgentMailSenderUserId,
+  resolveOrCreateAgentMailConversation,
+  type AgentMailConversationRow,
+  type AgentMailReplyRouteData,
+} from './lib/agentmail/conversation-store';
+
+export {
+  buildAgentMailRuiAnswerToken,
+  buildAgentMailRuiAnswerUrl,
+  verifyAgentMailRuiAnswerToken,
+} from './lib/agentmail/rui-answer-links';
+
+export {
+  buildAgentMailEmailLinkToken,
+  buildAgentMailEmailLinkUrl,
+  buildAgentMailUnsubscribeToken,
+  buildAgentMailUnsubscribeUrl,
+  verifyAgentMailEmailLinkToken,
+  verifyAgentMailUnsubscribeToken,
+} from './lib/agentmail/email-link-tokens';
+
+export {
+  canStartAgentMailConversationWithUser,
+  isAgentMailAddressSuppressed,
+  resolveAgentMailOutboundAddress,
+  sendAgentMailSystemEmail,
+  startAgentMailConversation,
+  suppressAgentMailAddress,
+  type AgentMailOutboundAddressResolution,
+  type AgentMailSystemEmailResult,
+  type AgentMailSuppressionReason,
+} from './lib/agentmail/outbound';
+
+export {
+  AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME,
+  AgentMailConversationBusyError,
+  drainAgentMailInboundTurns,
+  processAgentMailWebhookEvent,
+  recordAgentMailWebhookEvent,
+  recoverPendingAgentMailWork,
+  redispatchAgentMailEventsForSender,
+  type AgentMailWebhookEventJob,
+} from './lib/agentmail/inbound';
 
 export {
   findTelegramPrimaryChatId,

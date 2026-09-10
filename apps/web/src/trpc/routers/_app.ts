@@ -184,6 +184,8 @@ import {
   createDiscordLinkCodeCommand,
   unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
+  previewEmailLinkCommand,
+  linkEmailAddressCommand,
 } from '../commands/linked-accounts';
 import {
   getPersonalAccountCapabilitiesCommand,
@@ -356,6 +358,7 @@ import {
   saveCommsAuthConfigCommand,
   clearCommsAuthConfigCommand,
   diagnoseDiscordPermissionsCommand,
+  listAgentMailInboxesCommand,
   listDiscordChannelsCommand,
   listDiscordGuildsCommand,
   registerDiscordCommandsCommand,
@@ -1563,6 +1566,18 @@ export const appRouter = createRouter({
     unlinkDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
       unlinkLinkedDiscordAccountCommand(auth),
     ),
+
+    previewEmailLink: protectedProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .query(({ ctx: { auth }, input }) =>
+        previewEmailLinkCommand(auth, input.token),
+      ),
+
+    linkEmailAddress: protectedProcedure
+      .input(z.object({ token: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        linkEmailAddressCommand(auth, input.token),
+      ),
   }),
 
   preferences: createRouter({
@@ -2107,6 +2122,20 @@ export const appRouter = createRouter({
     repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       repairTelegramWebhookCommand(auth),
     ),
+
+    // A mutation, not a query: the input can carry a freshly typed API key,
+    // and query inputs serialize into the GET URL (browser history, proxy
+    // and access logs, tracing). Mutations POST the input in the body.
+    listAgentMailInboxes: protectedProcedure
+      .input(
+        z.object({
+          apiKey: z.string().trim().optional(),
+          podId: z.string().trim().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        listAgentMailInboxesCommand(auth, input),
+      ),
 
     listDiscordGuilds: protectedProcedure.query(({ ctx: { auth } }) =>
       listDiscordGuildsCommand(auth),

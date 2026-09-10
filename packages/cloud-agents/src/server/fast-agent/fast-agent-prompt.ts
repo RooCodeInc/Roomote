@@ -178,21 +178,27 @@ export function buildFastAgentSystemPrompt({
           ? 'Microsoft Teams'
           : surface === 'telegram'
             ? 'Telegram'
-            : surface === 'linear'
-              ? 'a Linear agent session'
-              : surface === 'github'
-                ? 'a GitHub pull request or issue discussion'
-                : surface === 'gitlab'
-                  ? 'a GitLab merge request or issue discussion'
-                  : surface === 'bitbucket'
-                    ? 'a Bitbucket pull request discussion'
-                    : surface === 'ado'
-                      ? 'an Azure DevOps pull request or work item discussion'
-                      : surface === 'gitea'
-                        ? 'a Gitea pull request or issue discussion'
-                        : surface === 'web'
-                          ? 'the Roomote web app'
-                          : 'a stored automation conversation';
+            : surface === 'agentmail'
+              ? 'an email thread'
+              : surface === 'linear'
+                ? 'a Linear agent session'
+                : surface === 'github'
+                  ? 'a GitHub pull request or issue discussion'
+                  : surface === 'gitlab'
+                    ? 'a GitLab merge request or issue discussion'
+                    : surface === 'bitbucket'
+                      ? 'a Bitbucket pull request discussion'
+                      : surface === 'ado'
+                        ? 'an Azure DevOps pull request or work item discussion'
+                        : surface === 'gitea'
+                          ? 'a Gitea pull request or issue discussion'
+                          : surface === 'web'
+                            ? 'the Roomote web app'
+                            : 'a stored automation conversation';
+  const emailCadenceGuidance =
+    surface === 'agentmail'
+      ? "- Every reply you send becomes a new email in the sender's inbox. Email is low-frequency: send one substantive, self-contained reply per turn — no play-by-play, no separate acknowledgement followed by the answer moments later. When you delegate a task, one brief confirmation reply is enough; the task result will arrive in the thread on its own.\n"
+      : '';
   const reactionGuidance =
     surface === 'slack' && currentMessageReactable
       ? '- Use `send_chat_reaction` only for an optional meaningful reaction or an emoji-only terminal answer. It does not satisfy the turn-start acknowledgement required before continuing work. Put the Slack emoji name without colons in `name`. Use "thumbsup" for acknowledgement or agreement and "white_check_mark" for completion; do not use "eyes" as an automatic processing or working-status acknowledgement.'
@@ -312,7 +318,7 @@ ${surface === 'slack' ? '- Charts supplied to "send_chat_reply" render as Slack 
 - If the answer is immediate, call the closeout tool directly.
 - Use \`request_user_input\` when the next step needs structured choices (for example a multi-select). Write self-contained questions with concrete options, or pass only the required trusted preset when setup instructions name one. The input request is user-visible, ends the turn in needs_input without a separate reply, and resumes automatically with the submitted answers. For a single free-text or choice question, prefer a clarification reply instead.
 ${reactionGuidance}
-- Prefer one direct closeout over an acknowledgement followed immediately by the same answer.
+${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement followed immediately by the same answer.
 - After a closeout, clarification, closeout reaction, input request, or ignored event, do not call another tool and do not add user-facing prose.
 
 ## User-Facing Communication

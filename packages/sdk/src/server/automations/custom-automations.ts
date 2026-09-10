@@ -64,7 +64,12 @@ class CustomAutomationClaimSettlementError extends Error {
   }
 }
 
-const PROVIDER_LABELS: Record<CommunicationProvider, string> = {
+// Email (agentmail) is inbound-initiated only and never an automation
+// destination, so it is deliberately absent here.
+const PROVIDER_LABELS: Record<
+  Exclude<CommunicationProvider, 'agentmail'>,
+  string
+> = {
   discord: 'Discord',
   slack: 'Slack',
   teams: 'Teams',
@@ -559,7 +564,7 @@ async function launchCustomAutomationRow(
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
     if (!isFastDeliveryTarget(automation.target)) {
-      const message = `${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} report destinations of this type are not supported.`;
+      const message = `${PROVIDER_LABELS[automation.target.provider as Exclude<CommunicationProvider, 'agentmail'>]} report destinations of this type are not supported.`;
       result.skippedReason = message;
       result.errors.push(message);
       await recordCustomAutomationRunOutcome(db, {
@@ -575,7 +580,7 @@ async function launchCustomAutomationRow(
       const message = isBackgroundAutomationUserTargetKind(
         automation.target.targetKind,
       )
-        ? `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} account that can receive direct messages.`
+        ? `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as Exclude<CommunicationProvider, 'agentmail'>]} account that can receive direct messages.`
         : automation.target.provider === 'teams'
           ? 'Teams report destination is missing a resolvable service URL.'
           : 'Report destination could not be resolved.';

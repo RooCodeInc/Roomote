@@ -9,6 +9,7 @@ import {
   isConflictResolverMaxPrAgeDays,
   isProviderUsageLimitThreshold,
   type AutomationTarget,
+  type CommunicationProvider,
   type PrReviewSettings,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
@@ -1170,7 +1171,7 @@ export async function updateBackgroundAgentSettingsCommand(
       const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
         validation.key,
       );
-      const nonSlackProviders =
+      const nonSlackProviders: readonly CommunicationProvider[] =
         descriptor?.supportedCommunicationProviders.filter(
           (provider) => provider !== 'slack',
         ) ?? [];

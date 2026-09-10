@@ -24,6 +24,8 @@ function getChatSurfaceLabel() {
   if (provider === 'discord') {
     return 'Discord';
   }
+  // agentmail deliberately has no arm here: email tasks never configure the
+  // reply-satisfaction state file, so these hooks exit before labeling.
   return (process.env.ROOMOTE_SLACK_CHANNEL || '').trim() ? 'Slack' : 'chat';
 }
 
