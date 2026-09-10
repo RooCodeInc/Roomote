@@ -334,6 +334,21 @@ describe('optional setup integration discovery', () => {
     expect(response?.metadata).toMatchObject({ userId: auth.userId });
   });
 
+  it('rejects setup replies from a collaborator instead of dropping setup guards', async () => {
+    const collaborator = await userFactory.create({ role: 'admin' });
+    const collaboratorAuth = {
+      userId: collaborator.id,
+      isAdmin: true,
+    } as UserAuthSuccess;
+    try {
+      await expect(
+        resolveSetupSessionTurnContext(collaboratorAuth, sessionId),
+      ).rejects.toThrow('Only the setup Session owner can reply during setup.');
+    } finally {
+      await db.delete(users).where(eq(users.id, collaborator.id));
+    }
+  });
+
   it('resumes persisted category answers and exactly matches catalog options in homepage order', async () => {
     await answeredCategory('communication', ['Discord', 'slack']);
     await answeredCategory('monitoring', ['Grafana', 'Sentry', 'Datadog']);
@@ -513,7 +528,7 @@ describe('optional setup integration discovery', () => {
         { ...auth, userId: 'other-admin' },
         sessionId,
       ),
-    ).resolves.toBeNull();
+    ).rejects.toThrow('Only the setup Session owner can reply during setup.');
     expect(mocks.submit).not.toHaveBeenCalled();
   });
 });
