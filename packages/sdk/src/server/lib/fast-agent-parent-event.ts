@@ -2225,6 +2225,8 @@ type FastAgentParentEventDeliveryParams = {
    * immediately after an interruption, or at a scheduled retry time. */
   requestDurableResume?: () => Promise<void>;
   requestDurableRetry?: (retryAt: Date) => Promise<void>;
+  /** Schedule the next setup state turn after a server-only preset completion. */
+  onSetupIntegrationDiscoveryCompleted?: () => Promise<void>;
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -2527,7 +2529,14 @@ export async function deliverFastAgentParentEventWithLock(
         ...parentTurn.adapter,
         launchTask: parentTurn.adapter.launchTask,
         ...(humanFollowUp?.setupContext
-          ? buildFastAgentSetupAdapter(humanFollowUp.setupContext)
+          ? buildFastAgentSetupAdapter(humanFollowUp.setupContext, {
+              ...(params.onSetupIntegrationDiscoveryCompleted
+                ? {
+                    onIntegrationDiscoveryCompleted:
+                      params.onSetupIntegrationDiscoveryCompleted,
+                  }
+                : {}),
+            })
           : {}),
         ...(wakeupGuard
           ? {
