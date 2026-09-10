@@ -175,6 +175,7 @@ type TaskSuggestionType =
 
 type SuggestionCardMessageRow = {
   suggestionType: TaskSuggestionType;
+  originSessionId?: string;
   launchRouting?: 'router';
   messageTs: string;
   channelId: string;
@@ -196,6 +197,7 @@ function registerSlackSuggestionMessageRows(
       createdByUserId: row.createdByUserId,
       suggestionType: row.suggestionType,
       suggestionKey: row.suggestionKey,
+      originSessionId: row.originSessionId,
       launchRouting: row.launchRouting,
     })),
     executor,
@@ -614,6 +616,7 @@ function getSuggestionFooterKind(category: SuggestionCategory): string {
 
 async function postTaskSuggestionsThreadToSlack(params: {
   sourceTaskId: string;
+  originSessionId?: string;
   slackBotAccessToken: string;
   slackChannelId: string;
   createdByUserId: string | null;
@@ -785,6 +788,9 @@ async function postTaskSuggestionsThreadToSlack(params: {
 
     suggestionMessageRows.push({
       suggestionType: params.suggestionType,
+      ...(params.originSessionId
+        ? { originSessionId: params.originSessionId }
+        : {}),
       ...(params.launchRouting ? { launchRouting: params.launchRouting } : {}),
       messageTs,
       channelId: params.slackChannelId,
@@ -1008,6 +1014,27 @@ export async function postSuggestedTasksSummaryToSlack(params: {
   }
   const { slackInstallation } = target;
 
+  const session = await getSessionForTask(db, params.sourceTaskId);
+  if (!session) {
+    throw new Error(
+      `Task ${params.sourceTaskId} does not have an origin Session.`,
+    );
+  }
+  const owner =
+    session.ownerKind === 'automation' && session.ownerAutomation
+      ? {
+          kind: 'automation' as const,
+          automationKey: session.ownerAutomation,
+        }
+      : session.ownerKind === 'user' && session.ownerUserId
+        ? { kind: 'user' as const, userId: session.ownerUserId }
+        : null;
+  if (!owner) {
+    throw new Error(
+      `Task ${params.sourceTaskId} has an unsupported origin Session owner.`,
+    );
+  }
+
   const automationLabel =
     getScheduledSuggestionBackgroundAutomationDescriptor(
       params.suggestionSource,
@@ -1088,6 +1115,7 @@ export async function postSuggestedTasksSummaryToSlack(params: {
 
     const postResult = await postTaskSuggestionsThreadToSlack({
       sourceTaskId: params.sourceTaskId,
+      originSessionId: session.id,
       slackBotAccessToken: slackInstallation.botAccessToken,
       slackChannelId: channelId,
       existingRootMessageTs: receipt?.threadTs ?? undefined,
@@ -1168,38 +1196,32 @@ export async function postSuggestedTasksSummaryToSlack(params: {
   });
 
   if (publication.rootMessageTs && publication.channelId) {
-    try {
-      const session = await getSessionForTask(db, params.sourceTaskId);
-      if (session && !session.fastConversationId) {
-        const owner =
-          session.ownerKind === 'automation' && session.ownerAutomation
-            ? {
-                kind: 'automation' as const,
-                automationKey: session.ownerAutomation,
-              }
-            : session.ownerKind === 'user' && session.ownerUserId
-              ? { kind: 'user' as const, userId: session.ownerUserId }
-              : null;
-        if (owner) {
-          await fastAgentConversationRepository.getOrCreate({
-            sessionId: session.id,
-            owner,
-            conversation: {
-              surface: 'slack',
-              workspaceId: slackInstallation.teamId,
-              conversationId: publication.rootMessageTs,
-              replyTarget: {
-                channelId: publication.channelId,
-                threadId: publication.rootMessageTs,
-              },
-            },
-          });
-        }
-      }
-    } catch (error) {
-      // Delivery already committed; binding failure must not trigger a repost.
-      apiLogger.warn(
-        `[submitTaskSuggestions] Slack report published but Session binding failed for task ${params.sourceTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+    // Binding is part of publication success. If it fails, the caller retries;
+    // the committed receipt and cards above keep that retry from reposting.
+    const expectedConversation = {
+      surface: 'slack' as const,
+      workspaceId: slackInstallation.teamId,
+      conversationId: publication.rootMessageTs,
+      replyTarget: {
+        channelId: publication.channelId,
+        threadId: publication.rootMessageTs,
+      },
+    };
+    const bound = await fastAgentConversationRepository.getOrCreate({
+      sessionId: session.id,
+      owner,
+      conversation: expectedConversation,
+    });
+    if (
+      bound.conversation.surface !== 'slack' ||
+      bound.conversation.workspaceId !== expectedConversation.workspaceId ||
+      bound.conversation.replyTarget.channelId !==
+        expectedConversation.replyTarget.channelId ||
+      bound.conversation.replyTarget.threadId !==
+        expectedConversation.replyTarget.threadId
+    ) {
+      throw new Error(
+        `Task ${params.sourceTaskId} origin Session is bound to a different conversation.`,
       );
     }
   }
