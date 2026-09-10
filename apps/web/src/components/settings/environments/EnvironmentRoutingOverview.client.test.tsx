@@ -34,6 +34,10 @@ describe('EnvironmentRoutingOverview', () => {
     expect(textarea).toHaveValue(
       'Use Hospital app for messages from hospital-bugs.',
     );
+    expect(textarea).toHaveAttribute(
+      'placeholder',
+      'Use the Web environment for frontend work.\n\nUse the Astra model on high reasoning for complicated work or Luna if the task is straightforward.',
+    );
     fireEvent.change(textarea, {
       target: { value: 'Use Hospital app for frontend work. Prefer GPT-5.6.' },
     });

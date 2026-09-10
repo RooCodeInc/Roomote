@@ -70,10 +70,8 @@ export function EnvironmentRoutingOverview() {
     <Section icon={GitBranch} title="Routing Rules" footer={footer}>
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          Describe how Roomote should choose environments and models. For
-          example: “Use the Web environment for frontend work” or “Prefer Claude
-          Sonnet for code reviews.” Explicit choices in a request always take
-          priority.
+          Describe how Roomote should choose environments and models. Explicit
+          choices in a request always take priority.
         </p>
         <Label htmlFor="workspace-routing-guidance" className="sr-only">
           Routing guidance
@@ -85,7 +83,7 @@ export function EnvironmentRoutingOverview() {
           maxLength={MAX_WORKSPACE_ROUTING_GUIDANCE_LENGTH}
           className="min-h-48"
           placeholder={
-            'Use the Web environment for frontend work.\nPrefer Claude Sonnet for code reviews.'
+            'Use the Web environment for frontend work.\n\nUse the Astra model on high reasoning for complicated work or Luna if the task is straightforward.'
           }
           disabled={updateSettings.isPending}
           onChange={(event) => setGuidance(event.target.value)}
