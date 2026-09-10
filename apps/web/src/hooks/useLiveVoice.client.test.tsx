@@ -363,6 +363,50 @@ describe('useLiveVoice', () => {
     expect(onUtterance).not.toHaveBeenCalled();
   });
 
+  it('streams both sides of the call as they are spoken', async () => {
+    const onSpokenTurnDelta = vi.fn();
+    const onHeardTurnDelta = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({
+        onUtterance: vi.fn(),
+        onSpokenTurnDelta,
+        onHeardTurnDelta,
+      }),
+    );
+
+    await act(async () => result.current.start());
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.output_transcript.delta',
+        delta: 'Roo-Code has ',
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.output_transcript.delta',
+        delta: 'about 452,000 lines.',
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Wow, ',
+        start_ms: 0,
+        end_ms: 200,
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'that is a lot',
+        start_ms: 200,
+        end_ms: 600,
+      });
+    });
+    expect(onSpokenTurnDelta.mock.calls.map(([text]) => text)).toEqual([
+      'Roo-Code has ',
+      'Roo-Code has about 452,000 lines.',
+    ]);
+    expect(onHeardTurnDelta.mock.calls.map(([text]) => text)).toEqual([
+      'Wow, ',
+      'Wow, that is a lot',
+    ]);
+  });
+
   it('flushes the spoken turn when the person starts talking again', async () => {
     const onSpokenTurn = vi.fn();
     const { result } = renderHook(() =>

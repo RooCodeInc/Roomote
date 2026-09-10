@@ -45,6 +45,10 @@ interface UseLiveVoiceOptions {
    * it. Delegated utterances reach the Session through `onUtterance`.
    */
   onHeardTurn?: (text: string) => void;
+  /** Called with GPT-Live's words so far while it is speaking a turn. */
+  onSpokenTurnDelta?: (text: string) => void;
+  /** Called with the person's words so far while they are speaking. */
+  onHeardTurnDelta?: (text: string) => void;
   disabled?: boolean;
 }
 
@@ -106,6 +110,8 @@ export function useLiveVoice({
   onUtterance,
   onSpokenTurn,
   onHeardTurn,
+  onSpokenTurnDelta,
+  onHeardTurnDelta,
   disabled = false,
 }: UseLiveVoiceOptions): UseLiveVoiceReturn {
   const trpcClient = useTRPCClient();
@@ -119,6 +125,10 @@ export function useLiveVoice({
   onSpokenTurnRef.current = onSpokenTurn;
   const onHeardTurnRef = useRef(onHeardTurn);
   onHeardTurnRef.current = onHeardTurn;
+  const onSpokenTurnDeltaRef = useRef(onSpokenTurnDelta);
+  onSpokenTurnDeltaRef.current = onSpokenTurnDelta;
+  const onHeardTurnDeltaRef = useRef(onHeardTurnDelta);
+  onHeardTurnDeltaRef.current = onHeardTurnDelta;
   // GPT-Live's own words for the turn it is speaking now, flushed to the
   // Session once it goes quiet or the person speaks again.
   const outputTranscriptRef = useRef('');
@@ -244,6 +254,7 @@ export function useLiveVoice({
             // The person is talking again: whatever GPT-Live said is done.
             if (outputTranscriptRef.current) flushSpokenTurn();
             inputTranscriptRef.current += event.delta;
+            onHeardTurnDeltaRef.current?.(inputTranscriptRef.current);
             setStatus('listening');
             if (pendingDelegationsRef.current.length > 0) {
               scheduleDelegationFlush();
@@ -254,7 +265,10 @@ export function useLiveVoice({
           break;
         case 'session.output_transcript.delta':
           setStatus('speaking');
-          if (event.delta) outputTranscriptRef.current += event.delta;
+          if (event.delta) {
+            outputTranscriptRef.current += event.delta;
+            onSpokenTurnDeltaRef.current?.(outputTranscriptRef.current);
+          }
           if (speakingTimerRef.current !== null) {
             window.clearTimeout(speakingTimerRef.current);
           }

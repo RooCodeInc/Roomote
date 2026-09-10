@@ -539,6 +539,11 @@ export function FastSessionTranscript({
           return;
         }
         const service = getStreamService();
+        const fastTurnId = (chunk.metadata as { fastTurnId?: unknown } | null)
+          ?.fastTurnId;
+        if (typeof fastTurnId === 'string' && fastTurnId) {
+          streamTurnIdsRef.current.set(`assistant:${chunk.id}`, fastTurnId);
+        }
         let current = streamMessagesRef.current;
         if (
           !current.some((message) => message.id === `assistant:${chunk.id}`)
@@ -691,18 +696,6 @@ export function FastSessionTranscript({
         }),
     [messages, owner],
   );
-  const persistedAssistantTurnIds = useMemo(() => {
-    const turnIds = new Map<string, string>();
-    for (const message of serverMessages.values()) {
-      if (
-        message.role === 'assistant' &&
-        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage
-      ) {
-        turnIds.set(`assistant:${message.eventId}`, message.turnId);
-      }
-    }
-    return turnIds;
-  }, [serverMessages]);
   const hasVisibleAssistantMessage = useMemo(
     () =>
       messages.some(
@@ -725,12 +718,73 @@ export function FastSessionTranscript({
       }),
     [messages],
   );
+  // Words on the call show up as they are spoken, on both sides, and hand
+  // over to the persisted voice-turn row once it arrives. A delegated
+  // request hands over to the reply's optimistic row instead.
+  const [liveVoiceTurns, setLiveVoiceTurns] = useState<{
+    user: { text: string; eventId: string | null } | null;
+    assistant: { text: string; eventId: string | null } | null;
+  }>({ user: null, assistant: null });
+  useEffect(() => {
+    const settled = (turn: { eventId: string | null } | null) =>
+      turn?.eventId !== null &&
+      turn?.eventId !== undefined &&
+      serverMessages.has(turn.eventId);
+    if (settled(liveVoiceTurns.user) || settled(liveVoiceTurns.assistant)) {
+      setLiveVoiceTurns((current) => ({
+        user: settled(current.user) ? null : current.user,
+        assistant: settled(current.assistant) ? null : current.assistant,
+      }));
+    }
+  }, [serverMessages, liveVoiceTurns]);
+  const liveVoiceUiMessages = useMemo(() => {
+    const turns: AcpUiMessage[] = [];
+    const now = Date.now();
+    if (liveVoiceTurns.user?.text) {
+      turns.push({
+        ...toAcpUiMessage({
+          id: 'voice-live:user',
+          ts: now,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt as AcpEventType,
+          role: 'user',
+          kind: 'text',
+          contentBlocks: [{ type: 'text', text: liveVoiceTurns.user.text }],
+          metadata: { visibleInTranscript: true, voiceTurn: 'heard' },
+          payload: {},
+          text: liveVoiceTurns.user.text,
+          userName: owner?.name ?? null,
+          userEmail: owner?.email ?? null,
+          userImageUrl: owner?.imageUrl ?? null,
+        }),
+        partial: liveVoiceTurns.user.eventId === null,
+      });
+    }
+    if (liveVoiceTurns.assistant?.text) {
+      turns.push({
+        ...toAcpUiMessage({
+          id: 'voice-live:assistant',
+          ts: now + 1,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage as AcpEventType,
+          role: 'assistant',
+          kind: 'text',
+          contentBlocks: [
+            { type: 'text', text: liveVoiceTurns.assistant.text },
+          ],
+          metadata: { visibleInTranscript: true, voiceTurn: 'spoken' },
+          payload: {},
+          text: liveVoiceTurns.assistant.text,
+          userName: null,
+          userEmail: null,
+          userImageUrl: null,
+        }),
+        partial: liveVoiceTurns.assistant.eventId === null,
+      });
+    }
+    return turns;
+  }, [liveVoiceTurns, owner]);
   const uiMessages = useMemo(
-    () =>
-      streamMessages.length === 0
-        ? persistedUiMessages
-        : [...persistedUiMessages, ...streamMessages],
-    [persistedUiMessages, streamMessages],
+    () => [...persistedUiMessages, ...streamMessages, ...liveVoiceUiMessages],
+    [persistedUiMessages, streamMessages, liveVoiceUiMessages],
   );
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
@@ -744,14 +798,14 @@ export function FastSessionTranscript({
     resetKey: `${messages.length}:${messages[0]?.eventId ?? ''}:${messages.at(-1)?.eventId ?? ''}`,
   });
 
-  const voiceDelegationByTurnIdRef = useRef(new Map<string, string>());
-  // The delegation of the most recent spoken request; streamed reply pieces
-  // are attributed to it until their persisted row pins the exact turn.
-  const lastVoiceDelegationIdRef = useRef<string | null>(null);
-  // True from a spoken request until Fast finishes responding to it. Streamed
-  // reply chunks arriving in that window are voice commentary.
-  const voiceTurnActiveRef = useRef(false);
-  const voiceTurnRespondingSeenRef = useRef(false);
+  // Every Fast turn started by the call, keyed by its turn id (the client
+  // message id), with the GPT-Live delegation it answers (null for a turn
+  // the voice did not delegate, such as a typed kickoff). Both streamed
+  // chunks and persisted rows carry the turn id, so each piece of a reply is
+  // attributed to exactly the delegation that asked for it.
+  const voiceDelegationByTurnIdRef = useRef(new Map<string, string | null>());
+  // Fast turn id of each streamed reply, from the chunk envelope.
+  const streamTurnIdsRef = useRef(new Map<string, string>());
   const sendReply = useCallback(
     async (
       message: SessionPromptSubmission,
@@ -777,13 +831,10 @@ export function FastSessionTranscript({
 
         if (options?.voiceDelegationId !== undefined) {
           clientMessageId = crypto.randomUUID();
-          lastVoiceDelegationIdRef.current = options.voiceDelegationId;
-          if (options.voiceDelegationId) {
-            voiceDelegationByTurnIdRef.current.set(
-              clientMessageId,
-              options.voiceDelegationId,
-            );
-          }
+          voiceDelegationByTurnIdRef.current.set(
+            clientMessageId,
+            options.voiceDelegationId,
+          );
         }
         optimisticId = `optimistic:${Date.now()}:${Math.random().toString(36).slice(2)}`;
         const optimistic: TranscriptMessage = {
@@ -807,9 +858,6 @@ export function FastSessionTranscript({
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);
         dispatchPendingResponse({ type: 'optimistic', message: optimistic });
-        if (options?.voiceDelegationId !== undefined) {
-          voiceTurnActiveRef.current = true;
-        }
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
           ...(clientMessageId ? { clientMessageId } : {}),
@@ -886,6 +934,8 @@ export function FastSessionTranscript({
 
   const enqueueVoiceUtterance = useCallback(
     (text: string, delegationId: string | null) => {
+      // The reply's optimistic row takes over from the live speech bubble.
+      setLiveVoiceTurns((current) => ({ ...current, user: null }));
       pendingUtterancesRef.current.push({ text, delegationId });
       setUtteranceQueueVersion((version) => version + 1);
     },
@@ -899,6 +949,16 @@ export function FastSessionTranscript({
     onUtterance: enqueueVoiceUtterance,
     onHeardTurn: (text) => recordVoiceTurnRef.current('user', text),
     onSpokenTurn: (text) => recordVoiceTurnRef.current('assistant', text),
+    onHeardTurnDelta: (text) =>
+      setLiveVoiceTurns((current) => ({
+        ...current,
+        user: { text, eventId: null },
+      })),
+    onSpokenTurnDelta: (text) =>
+      setLiveVoiceTurns((current) => ({
+        ...current,
+        assistant: { text, eventId: null },
+      })),
   });
 
   // Utterances queue rather than dropping when one lands while the previous
@@ -949,6 +1009,7 @@ export function FastSessionTranscript({
       ts: number;
       text: string;
       partial: boolean;
+      delegationId: string | null;
     }> = [];
     for (const message of messages) {
       if (
@@ -964,26 +1025,35 @@ export function FastSessionTranscript({
             ts: message.ts,
             text,
             partial: false,
+            delegationId:
+              voiceDelegationByTurnIdRef.current.get(message.turnId) ?? null,
           });
         }
       }
     }
-    if (voiceTurnActiveRef.current) {
-      for (const message of streamMessages) {
-        if (
-          message.role === 'assistant' &&
-          message.partial &&
-          message.text &&
-          message.kind === 'text'
-        ) {
-          commentary.push({
-            id: message.id,
-            ts: message.ts,
-            text: message.text,
-            partial: true,
-          });
-        }
+    // A streamed reply is commentary only when its turn was started by the
+    // call; that turn's delegation is known from the moment the request was
+    // sent, so no sentence is ever attributed to a later request.
+    for (const message of streamMessages) {
+      if (
+        message.role !== 'assistant' ||
+        !message.partial ||
+        !message.text ||
+        message.kind !== 'text'
+      ) {
+        continue;
       }
+      const turnId = streamTurnIdsRef.current.get(message.id);
+      if (!turnId || !voiceDelegationByTurnIdRef.current.has(turnId)) {
+        continue;
+      }
+      commentary.push({
+        id: message.id,
+        ts: message.ts,
+        text: message.text,
+        partial: true,
+        delegationId: voiceDelegationByTurnIdRef.current.get(turnId) ?? null,
+      });
     }
 
     for (const message of commentary) {
@@ -1000,38 +1070,37 @@ export function FastSessionTranscript({
       spokenSentenceCountsRef.current.set(message.id, readyCount);
       speakRef.current(
         sentences.slice(spokenCount, readyCount).join(' '),
-        voiceDelegationByTurnIdRef.current.get(
-          persistedAssistantTurnIds.get(message.id) ?? '',
-        ) ??
-          lastVoiceDelegationIdRef.current ??
-          null,
+        message.delegationId,
       );
     }
-  }, [messages, streamMessages, liveVoiceActive, persistedAssistantTurnIds]);
-
-  // A spoken request's turn is over once Fast stops responding; streamed
-  // chunks after that belong to typed messages and are not spoken.
-  useEffect(() => {
-    if (conversationResponding === true) {
-      voiceTurnRespondingSeenRef.current = true;
-    } else if (
-      conversationResponding === false &&
-      voiceTurnRespondingSeenRef.current
-    ) {
-      voiceTurnRespondingSeenRef.current = false;
-      voiceTurnActiveRef.current = false;
-    }
-  }, [conversationResponding]);
+  }, [messages, streamMessages, liveVoiceActive]);
 
   // The call is transcribed into the Session: what the person said when the
   // voice answered directly, what the voice said, and where the call started
   // and ended. Delegated requests are recorded by the Fast turn they start.
   const recordVoiceTurn = useCallback(
     (role: 'user' | 'assistant', text: string) => {
+      // The finished words stay on screen until their persisted row arrives.
+      setLiveVoiceTurns((current) => ({
+        ...current,
+        [role]: { text, eventId: null },
+      }));
       void trpcClient.voice.recordTurn
         .mutate({ sessionId, role, text })
+        .then(({ eventId }) => {
+          setLiveVoiceTurns((current) =>
+            current[role]?.text === text
+              ? { ...current, [role]: { text, eventId } }
+              : current,
+          );
+        })
         .catch((error: unknown) => {
           console.error('[voice] Failed to record a voice turn', error);
+          setLiveVoiceTurns((current) =>
+            current[role]?.text === text
+              ? { ...current, [role]: null }
+              : current,
+          );
         });
     },
     [sessionId, trpcClient],
@@ -1042,7 +1111,6 @@ export function FastSessionTranscript({
     if (liveVoice.active && liveVoice.startedAt !== null) {
       if (callStartedAtRef.current === liveVoice.startedAt) return;
       callStartedAtRef.current = liveVoice.startedAt;
-      voiceTurnActiveRef.current = false;
       void trpcClient.voice.recordCallEvent
         .mutate({ sessionId, phase: 'started' })
         .catch((error: unknown) => {
@@ -1101,6 +1169,13 @@ export function FastSessionTranscript({
     voiceCutoffTsRef.current = 0;
     spokenSentenceCountsRef.current.clear();
     voiceDelegationByTurnIdRef.current.clear();
+    // The Session was opened for this call, so a kickoff already in it (text
+    // typed before the call) is the voice's turn too, with no delegation.
+    for (const message of serverMessagesRef.current.values()) {
+      if (message.role === 'user') {
+        voiceDelegationByTurnIdRef.current.set(message.turnId, null);
+      }
+    }
     pendingUtterancesRef.current = [];
     void startLiveVoiceRef.current();
 

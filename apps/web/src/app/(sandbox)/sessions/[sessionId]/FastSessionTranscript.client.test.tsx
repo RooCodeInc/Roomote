@@ -71,6 +71,8 @@ const {
       | undefined,
     onHeardTurn: undefined as ((text: string) => void) | undefined,
     onSpokenTurn: undefined as ((text: string) => void) | undefined,
+    onHeardTurnDelta: undefined as ((text: string) => void) | undefined,
+    onSpokenTurnDelta: undefined as ((text: string) => void) | undefined,
   },
 }));
 
@@ -79,14 +81,20 @@ vi.mock('@/hooks/useLiveVoice', () => ({
     onUtterance,
     onHeardTurn,
     onSpokenTurn,
+    onHeardTurnDelta,
+    onSpokenTurnDelta,
   }: {
     onUtterance: (text: string, delegationId: string | null) => void;
     onHeardTurn?: (text: string) => void;
     onSpokenTurn?: (text: string) => void;
+    onHeardTurnDelta?: (text: string) => void;
+    onSpokenTurnDelta?: (text: string) => void;
   }) => {
     liveVoiceState.onUtterance = onUtterance;
     liveVoiceState.onHeardTurn = onHeardTurn;
     liveVoiceState.onSpokenTurn = onSpokenTurn;
+    liveVoiceState.onHeardTurnDelta = onHeardTurnDelta;
+    liveVoiceState.onSpokenTurnDelta = onSpokenTurnDelta;
     return {
       active: liveVoiceState.active,
       status: liveVoiceState.status,
@@ -2132,7 +2140,12 @@ describe('FastSessionTranscript', () => {
 
     expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
   });
-  const chunkEvent = (eventId: string, text: string, ts = 2) => ({
+  const chunkEvent = (
+    eventId: string,
+    text: string,
+    ts = 2,
+    fastTurnId?: string,
+  ) => ({
     event: {
       id: eventId,
       kind: 'text',
@@ -2140,7 +2153,11 @@ describe('FastSessionTranscript', () => {
       eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
       role: 'assistant',
       contentBlocks: [{ type: 'text', text }],
-      metadata: { sessionId: 'opencode-1', turnId: 'msg-1' },
+      metadata: {
+        sessionId: 'opencode-1',
+        turnId: 'msg-1',
+        ...(fastTurnId ? { fastTurnId } : {}),
+      },
       payload: { sessionId: 'opencode-1', turnId: 'msg-1', text },
       text,
     },
@@ -2319,11 +2336,12 @@ describe('FastSessionTranscript', () => {
       const turnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
 
       // A completed sentence is read while the reply is still streaming; the
-      // growing tail waits.
+      // growing tail waits. The chunk names its Fast turn, so it is attributed
+      // to the delegation that asked for it.
       act(() => {
         FakeEventSource.instances[0]!.emit(
           'chunk',
-          chunkEvent('assistant-1:event', 'First sentence. Second', 11),
+          chunkEvent('assistant-1:event', 'First sentence. Second', 11, turnId),
         );
       });
       expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
@@ -2358,14 +2376,18 @@ describe('FastSessionTranscript', () => {
       );
       expect(screen.getByText(/result to voice/i)).toBeInTheDocument();
 
-      // A typed message's written reply stays on screen and is not spoken.
+      // A typed message's written reply stays on screen and is not spoken,
+      // streamed or persisted.
       act(() => {
-        FakeEventSource.instances[0]!.emit('session', {
-          conversationResponding: true,
-        });
-        FakeEventSource.instances[0]!.emit('session', {
-          conversationResponding: false,
-        });
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent(
+            'assistant-2:event',
+            'Typed answer stays written.',
+            12,
+            'typed-turn',
+          ),
+        );
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
             textMessage({
@@ -2381,6 +2403,69 @@ describe('FastSessionTranscript', () => {
       expect(
         screen.getByText('Typed answer stays written.'),
       ).toBeInTheDocument();
+    });
+
+    it('shows what is being said on the call as it is spoken, then hands over to the persisted row', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      recordVoiceTurnMutate.mockResolvedValue({ eventId: 'voice:spoken-1' });
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onSpokenTurnDelta?.('Roo-Code has about');
+      });
+      expect(screen.getByText('Roo-Code has about')).toBeInTheDocument();
+      act(() => {
+        liveVoiceState.onSpokenTurnDelta?.('Roo-Code has about 452,000 lines.');
+      });
+      expect(
+        screen.getByText('Roo-Code has about 452,000 lines.'),
+      ).toBeInTheDocument();
+
+      // The finished turn stays on screen while its row is written, then the
+      // persisted row replaces it without a flash.
+      act(() => {
+        liveVoiceState.onSpokenTurn?.('Roo-Code has about 452,000 lines.');
+      });
+      await waitFor(() =>
+        expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          role: 'assistant',
+          text: 'Roo-Code has about 452,000 lines.',
+        }),
+      );
+      expect(
+        screen.getByText('Roo-Code has about 452,000 lines.'),
+      ).toBeInTheDocument();
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'spoken-1',
+                role: 'assistant',
+                text: 'Roo-Code has about 452,000 lines.',
+                ts: 9,
+              }),
+              eventId: 'voice:spoken-1',
+              metadata: { visibleInTranscript: true, voiceTurn: 'spoken' },
+            },
+          ],
+        });
+      });
+      await waitFor(() =>
+        expect(
+          screen.getAllByText('Roo-Code has about 452,000 lines.'),
+        ).toHaveLength(1),
+      );
     });
 
     it('transcribes the call into the Session: markers, heard turns, and spoken turns', async () => {
@@ -2452,6 +2537,51 @@ describe('FastSessionTranscript', () => {
         expect(recordVoiceCallEventMutate).toHaveBeenCalledWith(
           expect.objectContaining({ sessionId: 'session-1', phase: 'ended' }),
         ),
+      );
+    });
+
+    it('attributes a streamed first reply to its own delegation even after a second request', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+      replyMutate.mockResolvedValue({ success: true });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the first build', 'item_first');
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
+      const firstTurnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
+      act(() => {
+        liveVoiceState.onUtterance?.(
+          'Actually check the second',
+          'item_second',
+        );
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(2));
+
+      // The first reply starts streaming only now, after the second request.
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent(
+            'assistant-first:event',
+            'First build passed. More',
+            5,
+            firstTurnId,
+          ),
+        );
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledWith(
+        'First build passed.',
+        'item_first',
       );
     });
 

@@ -2120,6 +2120,7 @@ export async function answerFastAgentQuestion({
       eventId: streamedReply.eventId,
       sessionId: activeOpenCodeSessionId,
       turnId: update.messageId,
+      fastTurnId: turnId,
       ts: Date.now(),
       text: delta,
     });

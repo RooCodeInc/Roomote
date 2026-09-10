@@ -476,6 +476,8 @@ export async function startFastSessionCommand(
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
       durableSessionId: session.id,
+      // A call opened with typed text: its first reply belongs to the voice.
+      ...(input.voiceCall ? { voiceMode: true } : {}),
       ...(kickoffTurnId && kickoffPromptEventId
         ? {
             currentMessageId: kickoffTurnId,

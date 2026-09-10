@@ -284,6 +284,45 @@ describe('startFastSessionCommand', () => {
     expect(mocks.after).toHaveBeenCalledOnce();
   });
 
+  it('runs a typed kickoff in voice mode when the Session is opened for a call', async () => {
+    let scheduled: (() => Promise<void>) | undefined;
+    mocks.after.mockImplementation((callback) => {
+      scheduled = callback;
+    });
+    const release = Object.assign(vi.fn().mockResolvedValue(undefined), {
+      signal: new AbortController().signal,
+    });
+    mocks.acquireTurnLock.mockResolvedValue(release);
+
+    await startFastSessionCommand(auth, {
+      text: 'Summarize open pull requests',
+      conversationId: '22222222-2222-4222-8222-222222222222',
+      voiceCall: true,
+    });
+    await scheduled?.();
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Summarize open pull requests',
+        voiceMode: true,
+      }),
+    );
+  });
+
+  it('opens an empty Session for a call without scheduling a turn', async () => {
+    await expect(
+      startFastSessionCommand(auth, {
+        text: '',
+        conversationId: '33333333-3333-4333-8333-333333333333',
+        voiceCall: true,
+      }),
+    ).resolves.toEqual({
+      sessionId: 'unified-session-1',
+      fastConversationId: 'fast-session-1',
+    });
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+
   it('recovers a deterministic Session kickoff lost after creation', async () => {
     mocks.getOrCreateSession.mockResolvedValue({
       id: 'fast-session-1',
