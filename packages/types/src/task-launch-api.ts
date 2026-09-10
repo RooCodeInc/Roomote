@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { launchCodingHarnesses, REASONING_EFFORT_VALUES } from './task-runs';
 import { computeProviders } from './compute-providers';
-import { ALL_REPOSITORIES } from './constants';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from './constants';
 import { gitBranchNameSchema } from './git-ref';
 import {
   appendEnvironmentDefinitionGuidance,
@@ -58,7 +58,7 @@ export function buildTaskTypePromptAndWorkspacePayload({
   if (
     type === 'environment-definition' &&
     (!repositoryFullNames || repositoryFullNames.length === 0) &&
-    (!repo || repo === ALL_REPOSITORIES)
+    (!repo || repo === ALL_REPOSITORIES || repo === NO_REPOSITORIES)
   ) {
     throw new TaskTypePromptAndWorkspacePayloadError(
       ENVIRONMENT_DEFINITION_REPOSITORY_SELECTION_REQUIRED_ERROR,

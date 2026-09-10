@@ -1,4 +1,4 @@
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 
 import { handleLaunchTask } from '../launch-task.js';
 import * as tasksApiClient from '../tasks-api-client.js';
@@ -148,6 +148,27 @@ describe('handleLaunchTask', () => {
     expect(vi.mocked(tasksApiClient.launchTask)).toHaveBeenCalledWith(config, {
       prompt: 'Run this everywhere',
       repo: ALL_REPOSITORIES,
+      branch: undefined,
+      environmentId: undefined,
+      type: 'standard',
+    });
+  });
+
+  it('maps the Blank slate sentinel to a no-repositories launch', async () => {
+    vi.mocked(tasksApiClient.launchTask).mockResolvedValueOnce({
+      success: true,
+      runId: 43,
+      taskId: 'task-blank',
+    });
+
+    await handleLaunchTask(
+      { prompt: 'Build an artifact', environmentId: NO_REPOSITORIES },
+      config,
+    );
+
+    expect(vi.mocked(tasksApiClient.launchTask)).toHaveBeenCalledWith(config, {
+      prompt: 'Build an artifact',
+      repo: NO_REPOSITORIES,
       branch: undefined,
       environmentId: undefined,
       type: 'standard',

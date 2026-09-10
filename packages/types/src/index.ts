@@ -15,6 +15,7 @@ export * from './task-runs';
 export * from './sessions';
 export * from './session-wakeups';
 export * from './fast-agent';
+export * from './data-visualization';
 export * from './fast-agent-tool-catalog';
 export * from './integration-tool-lookup';
 export * from './chatgpt-subscription';

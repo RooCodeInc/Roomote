@@ -140,6 +140,32 @@ describe('initializeRepositories', () => {
     );
   });
 
+  it('creates a shared Blank slate workspace without listing or preparing repositories', async () => {
+    const configureSpy = vi
+      .spyOn(WorkspaceManager.prototype, 'configure')
+      .mockResolvedValue(undefined);
+    const prepareRepositorySpy = vi.spyOn(
+      WorkspaceManager.prototype,
+      'prepareRepository',
+    );
+
+    const result = await initializeRepositories(createLogger(), {
+      workspace: { type: 'no_repositories' },
+      envVars: {},
+      taskRunType: TaskPayloadKind.StandardTask,
+    });
+
+    expect(result).toMatchObject({
+      workspacePath: expect.any(String),
+      repoPaths: {},
+      repoLocalSkills: [],
+      usesSharedWorkspaceRoot: true,
+    });
+    expect(configureSpy).not.toHaveBeenCalled();
+    expect(mockListRepositories).not.toHaveBeenCalled();
+    expect(prepareRepositorySpy).not.toHaveBeenCalled();
+  });
+
   it('resolves repository providers from the map before the scalar fallback', async () => {
     vi.spyOn(WorkspaceManager.prototype, 'configure').mockResolvedValue(
       undefined,

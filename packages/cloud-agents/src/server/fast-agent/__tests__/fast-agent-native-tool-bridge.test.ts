@@ -8,7 +8,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 import {
   SHOW_WIDGET_FIXED_CANVAS_GUIDANCE,
   SHOW_WIDGET_HEIGHT_DESCRIPTION,
@@ -152,6 +152,13 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain(
       'explicitly selected for native Slack delivery',
     );
+    expect(replySource).toContain('charts: z.array(chartInput).max(2)');
+    expect(replySource).toContain(
+      'every series must contain exactly one point for every category',
+    );
+    expect(replySource).toContain(
+      'native Block Kit data visualization blocks on Slack',
+    );
     expect(launchTaskSource).toContain('model: z.string().min(1)');
     expect(createArtifactSource).toContain('invoke("create_artifact"');
     expect(createArtifactSource).toContain('maximum 128 KiB');
@@ -174,8 +181,10 @@ describe('Fast native OpenCode tool bridge', () => {
       'explanation of what is being delegated',
     );
     expect(launchTaskSource).toContain(ALL_REPOSITORIES);
+    expect(launchTaskSource).toContain(NO_REPOSITORIES);
+    expect(launchTaskSource).toContain('for all active repositories');
     expect(launchTaskSource).toContain(
-      'to run against all active repositories',
+      'for a Blank slate sandbox without repositories',
     );
     expect(sendTaskMessageSource).toContain(
       'includeAttachments: z.boolean().optional()',
@@ -946,11 +955,41 @@ describe('Fast native OpenCode tool bridge', () => {
       [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: true,
     });
     expect(namespacedMemberTool).toBe('roomote_manage_tasks');
     expect(Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)).not.toContain(
       namespacedMemberTool,
     );
+  });
+
+  it('does not mount scheduling schemas directly during the pilot', async () => {
+    const runtime = await getFastAgentNativeToolRuntime(
+      'deferred-scheduling',
+      [
+        {
+          id: 'roomote',
+          name: 'Roomote',
+          description: 'Deployment access',
+          tools: [
+            { name: 'manage_tasks' },
+            { name: 'manage_custom_automations' },
+          ],
+        },
+      ],
+      { schedulingProgressiveDisclosureEnabled: true },
+    );
+    const config = JSON.parse(
+      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
+    ) as { agent: { build: { tools: Record<string, boolean> } } };
+
+    expect(config.agent.build.tools).toMatchObject({
+      'roomote_*': true,
+      roomote_manage_custom_automations: false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: false,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: true,
+    });
   });
 
   it('spills oversized MCP results for direct parent recovery', async () => {

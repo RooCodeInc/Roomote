@@ -50,7 +50,10 @@ export function isFastAgentNativeIntegration(integrationId: string): boolean {
 
 export function buildFastAgentToolFilter(
   integrationIds: string[],
-  options: { surface?: FastAgentSurface } = {},
+  options: {
+    surface?: FastAgentSurface;
+    schedulingProgressiveDisclosureEnabled?: boolean;
+  } = {},
 ): Record<string, boolean> {
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
@@ -58,6 +61,12 @@ export function buildFastAgentToolFilter(
       ? { [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false }
       : {}),
     ...Object.fromEntries(integrationIds.map((id) => [`${id}_*`, true])),
+    ...(options.schedulingProgressiveDisclosureEnabled
+      ? {
+          [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: false,
+          roomote_manage_custom_automations: false,
+        }
+      : {}),
   };
 }
 

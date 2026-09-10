@@ -7,6 +7,7 @@ import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-o
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
   CHAT_CHANNELS_TOOL,
@@ -16,6 +17,8 @@ import {
   CREATE_CUSTOM_SKILL_TOOL,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
+  dataVisualizationInputsSchema,
+  type DataVisualizationInput,
   PRODUCT_NAME,
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
   ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
@@ -557,7 +560,7 @@ const manageTasksToolDescription =
   ' ' +
   `When the user provides an existing ${PRODUCT_NAME} task URL, extract its task ID and pass taskId to get_summary or get_messages before resorting to browser navigation. ` +
   'Always call action "list_environments" immediately before action "launch" so you can copy a valid environmentId. ' +
-  'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
+  'Use action "list_environments" to list launch targets (named environments, Blank slate, and the org-wide target). ' +
   'Use action "search_tasks" only to search direct tasks by query or status. ' +
   `Use action "get_summary" with taskId to inspect a specific task's latest status, failure details, and uploaded image artifact IDs and viewer links. Use those stable IDs to attach a delegated task's images to a later reply. ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
@@ -777,10 +780,11 @@ roomoteMcpServer.registerTool(
         }
         if (
           environmentId !== ALL_REPOSITORIES &&
+          environmentId !== NO_REPOSITORIES &&
           !ENVIRONMENT_ID_PATTERN.test(environmentId)
         ) {
           return errorResult(
-            `environmentId must be a UUID returned by "list_environments" or "${ALL_REPOSITORIES}".`,
+            `environmentId must be a value returned by "list_environments", a UUID, "${NO_REPOSITORIES}", or "${ALL_REPOSITORIES}".`,
           );
         }
 
@@ -1545,6 +1549,8 @@ if (
     chatReplySurfaceLabel === 'Slack'
       ? 'Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.'
       : 'Use Markdown when it makes the reply clearer.';
+  const supportsDataVisualizations =
+    reportsToParentSession || chatReplySurfaceLabel === 'Slack';
   const chatReplySuggestionGuidance = supportsChatReplySuggestions
     ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
@@ -1585,6 +1591,17 @@ if (
           .describe(
             'Optional already-uploaded artifact IDs for images to attach. A reply must not claim an image or screenshot is attached, shown, or included unless the matching imageArtifactIds or imagePaths are supplied. If attachment delivery fails, provide an accessible artifact viewer link and say that the image could not be attached.',
           ),
+        ...(supportsDataVisualizations
+          ? {
+              charts: dataVisualizationInputsSchema
+                .optional()
+                .describe(
+                  reportsToParentSession
+                    ? 'Optional validated charts for the parent Session to preserve and present with this report. Supports at most two pie, bar, area, or line charts. Keep the Markdown message as the plain-text fallback.'
+                    : 'Optional validated charts to render as native Slack data visualization blocks. Supports at most two pie, bar, area, or line charts. Keep the Markdown message as the notification and accessibility fallback.',
+                ),
+            }
+          : {}),
         ...(supportsChatReplySuggestions && !reportsToParentSession
           ? {
               suggestions: z
@@ -1632,6 +1649,7 @@ if (
               message: params.message,
               imagePaths: params.imagePaths,
               imageArtifactIds: params.imageArtifactIds,
+              charts: params.charts as DataVisualizationInput[] | undefined,
             },
             artifactConfig,
           )
@@ -1648,6 +1666,7 @@ if (
                 summary: params.message,
                 imagePaths: params.imagePaths,
                 imageArtifactIds: params.imageArtifactIds,
+                charts: params.charts as DataVisualizationInput[] | undefined,
                 suggestions: params.suggestions,
                 chatReplySurface: chatReplySurfaceLabel,
               },
