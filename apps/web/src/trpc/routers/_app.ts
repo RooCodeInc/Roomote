@@ -49,6 +49,13 @@ import {
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
+  cleanVoiceTranscriptCommand,
+  createVoiceLiveSessionCommand,
+  getVoiceStatusCommand,
+  recordVoiceCallEventCommand,
+  recordVoiceTurnCommand,
+} from '../commands/voice';
+import {
   getSessionByIdCommand,
   getSessionForTask,
   getSessions,
@@ -3003,6 +3010,44 @@ export const appRouter = createRouter({
         getFastSessionComposerSuggestionCommand(auth, {
           sessionId: input.sessionId,
         }),
+      ),
+  }),
+
+  voice: createRouter({
+    status: protectedProcedure.query(() => getVoiceStatusCommand()),
+    createLiveSession: protectedProcedure
+      // Never trim the SDP: it must keep its trailing CRLF or GPT-Live
+      // rejects the offer with "failed to unmarshal SDP: EOF".
+      .input(z.object({ sdp: z.string().min(1).max(65_536) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createVoiceLiveSessionCommand(auth, input),
+      ),
+    cleanTranscript: protectedProcedure
+      .input(z.object({ text: z.string().trim().min(1).max(8_000) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        cleanVoiceTranscriptCommand(auth, input),
+      ),
+    recordTurn: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          role: z.enum(['user', 'assistant']),
+          text: z.string().trim().min(1).max(20_000),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        recordVoiceTurnCommand(auth, input),
+      ),
+    recordCallEvent: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          phase: z.enum(['started', 'ended']),
+          durationMs: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        recordVoiceCallEventCommand(auth, input),
       ),
   }),
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -14,21 +14,29 @@ import {
   useGhostSuggestion,
 } from '@/hooks/useGhostSuggestion';
 import {
-  type PromptInputMessage,
+  LiveVoiceButton,
   PromptInput as PromptInputRoot,
   PromptInputActionAddAttachments,
   PromptInputActionMenu,
   PromptInputActionMenuContent,
   PromptInputActionMenuTrigger,
   PromptInputBody,
+  PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
   VoiceDictationButton,
   usePromptInputAttachments,
+  type PromptInputMessage,
 } from '@/components/ai-elements';
-import { BasicTooltip } from '@/components/system';
+import {
+  BasicTooltip,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+} from '@/components/system';
 import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
@@ -39,6 +47,51 @@ export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
 };
+
+export type SessionModelSelection = {
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
+};
+
+type SessionVoiceControls = {
+  /** Whether the deployment has voice configured at all. */
+  enabled: boolean;
+  /** Whether a voice conversation is currently running. */
+  active: boolean;
+  onToggle: () => void;
+  /** In-call controls, present while the call is connected. */
+  call?: {
+    startedAt: number | null;
+    micMuted: boolean;
+    onToggleMic: () => void;
+    outputMuted: boolean;
+    onToggleOutput: () => void;
+  };
+};
+
+function formatCallTimer(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+/** Elapsed call time, ticking once a second while the call is connected. */
+function CallTimer({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+  return (
+    <span
+      className="tabular-nums text-xs text-muted-foreground"
+      aria-label="Call duration"
+    >
+      {formatCallTimer(now - startedAt)}
+    </span>
+  );
+}
 
 function SessionSubmit({
   sending,
@@ -71,6 +124,8 @@ export function SessionPromptInput({
   initialReasoningEffort = null,
   defaultModelId = null,
   defaultReasoningEffort = null,
+  voice,
+  onModelSelectionChange,
 }: {
   sessionId: string;
   isBusy: boolean;
@@ -90,6 +145,10 @@ export function SessionPromptInput({
   initialReasoningEffort?: ReasoningEffort | null;
   defaultModelId?: string | null;
   defaultReasoningEffort?: ReasoningEffort | null;
+  voice?: SessionVoiceControls;
+  /** Keeps the parent's view of the picker current, so voice utterances
+   * round-trip the same model selection a typed reply would. */
+  onModelSelectionChange?: (selection: SessionModelSelection) => void;
 }) {
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
@@ -191,9 +250,14 @@ export function SessionPromptInput({
   const handleModelChange = (nextModel: string) => {
     const previousModel = model;
     setModel(nextModel);
-    void updateModelSelection({ model: nextModel || null }, () =>
-      setModel(previousModel),
-    );
+    onModelSelectionChange?.({ model: nextModel || null, reasoningEffort });
+    void updateModelSelection({ model: nextModel || null }, () => {
+      setModel(previousModel);
+      onModelSelectionChange?.({
+        model: previousModel || null,
+        reasoningEffort,
+      });
+    });
   };
 
   const handleReasoningEffortChange = (
@@ -201,9 +265,17 @@ export function SessionPromptInput({
   ) => {
     const previousReasoningEffort = reasoningEffort;
     setReasoningEffort(nextReasoningEffort);
-    void updateModelSelection({ reasoningEffort: nextReasoningEffort }, () =>
-      setReasoningEffort(previousReasoningEffort),
-    );
+    onModelSelectionChange?.({
+      model: model || null,
+      reasoningEffort: nextReasoningEffort,
+    });
+    void updateModelSelection({ reasoningEffort: nextReasoningEffort }, () => {
+      setReasoningEffort(previousReasoningEffort);
+      onModelSelectionChange?.({
+        model: model || null,
+        reasoningEffort: previousReasoningEffort,
+      });
+    });
   };
 
   const controlsDisabled = isBusy || isUpdatingModelSelection;
@@ -281,6 +353,68 @@ export function SessionPromptInput({
             />
           </PromptInputTools>
           <div className="flex items-center gap-2">
+            {voice?.enabled && voice.active && voice.call ? (
+              <>
+                {voice.call.startedAt !== null ? (
+                  <CallTimer startedAt={voice.call.startedAt} />
+                ) : null}
+                <BasicTooltip
+                  content={
+                    voice.call.micMuted
+                      ? 'Unmute microphone'
+                      : 'Mute microphone'
+                  }
+                >
+                  <PromptInputButton
+                    aria-label={
+                      voice.call.micMuted
+                        ? 'Unmute microphone'
+                        : 'Mute microphone'
+                    }
+                    aria-pressed={voice.call.micMuted}
+                    onClick={voice.call.onToggleMic}
+                    className="rounded-full"
+                  >
+                    {voice.call.micMuted ? (
+                      <MicOff className="size-4" />
+                    ) : (
+                      <Mic className="size-4" />
+                    )}
+                  </PromptInputButton>
+                </BasicTooltip>
+                <BasicTooltip
+                  content={
+                    voice.call.outputMuted
+                      ? 'Unsilence Roomote'
+                      : 'Silence Roomote'
+                  }
+                >
+                  <PromptInputButton
+                    aria-label={
+                      voice.call.outputMuted
+                        ? 'Unsilence Roomote'
+                        : 'Silence Roomote'
+                    }
+                    aria-pressed={voice.call.outputMuted}
+                    onClick={voice.call.onToggleOutput}
+                    className="rounded-full"
+                  >
+                    {voice.call.outputMuted ? (
+                      <VolumeX className="size-4" />
+                    ) : (
+                      <Volume2 className="size-4" />
+                    )}
+                  </PromptInputButton>
+                </BasicTooltip>
+              </>
+            ) : null}
+            {voice?.enabled ? (
+              <LiveVoiceButton
+                active={voice.active}
+                onClick={voice.onToggle}
+                disabled={isBusy && !voice.active}
+              />
+            ) : null}
             <VoiceDictationButton
               isRecording={voiceDictation.isRecording}
               isSupported={voiceDictation.isSupported}

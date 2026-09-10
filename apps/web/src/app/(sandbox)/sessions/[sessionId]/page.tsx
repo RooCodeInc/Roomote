@@ -22,6 +22,7 @@ import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
 
 import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
+import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
 import {
@@ -71,6 +72,7 @@ const getSessionPageData = cache(async (sessionId: string) => {
 
 type SessionDetailPageProps = {
   params: Promise<{ sessionId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export async function generateMetadata({
@@ -93,10 +95,12 @@ export async function generateMetadata({
 
 export default async function SessionDetailPage({
   params,
+  searchParams,
 }: SessionDetailPageProps) {
   const { sessionId } = await params;
   const { authorizedUser, unifiedSession, session } =
     await getSessionPageData(sessionId);
+  const autoStartVoice = hasVoiceAutostartFlag(await searchParams);
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
   const modelEnv: Record<string, string> =
@@ -164,6 +168,7 @@ export default async function SessionDetailPage({
                   sessionReasoningEffort={session.reasoningEffort}
                   defaultModelId={defaultModelId}
                   defaultReasoningEffort={defaultReasoningEffort}
+                  autoStartVoice={autoStartVoice}
                   {...(unifiedSession.ownerUserId
                     ? {
                         owner: {
@@ -262,6 +267,7 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
+          autoStartVoice={autoStartVoice}
           {...(session.userId
             ? {
                 owner: {

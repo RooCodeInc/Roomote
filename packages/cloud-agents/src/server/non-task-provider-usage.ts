@@ -127,6 +127,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   slackQuestionChannelSuggestions: 'slack_question_channel_suggestions',
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
+  voiceTranscriptCleanup: 'voice_transcript_cleanup',
 } as const;
 
 const NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS = 15_000;

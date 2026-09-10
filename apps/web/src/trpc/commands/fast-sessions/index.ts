@@ -158,6 +158,9 @@ type WebFastAgentTurnInput = {
   skipIfTurnCompleted?: { conversationId: string; turnId: string };
   setupSnapshot?: string;
   setupSession?: boolean;
+  /** Spoken on a voice call: Fast returns its result to the voice instead
+   * of writing a chat reply. */
+  voiceMode?: boolean;
   adapterExtensions?: Partial<FastAgentTurnAdapter>;
 };
 
@@ -208,6 +211,7 @@ async function runWebFastAgentTurn({
   platformEventVisibility,
   setupSnapshot,
   setupSession,
+  voiceMode,
   adapterExtensions,
   durableSessionId,
 }: WebFastAgentTurnInput): Promise<void> {
@@ -281,6 +285,7 @@ async function runWebFastAgentTurn({
                   }
                 : {}),
               ...(setupSession ? { setupSession: true } : {}),
+              ...(voiceMode ? { voiceMode: true } : {}),
             },
           }).catch((error) => {
             console.error(
@@ -323,6 +328,7 @@ async function runWebFastAgentTurn({
         : {}),
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
+      ...(voiceMode ? { voiceMode: true } : {}),
       adapter: {
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
@@ -382,6 +388,7 @@ export async function startFastSessionCommand(
     reasoningEffort?: ReasoningEffort | null;
     conversationId?: string;
     pinnedLaunch?: PinnedFastSessionLaunchInput;
+    voiceCall?: boolean;
   },
 ): Promise<{
   sessionId: string;
@@ -421,8 +428,13 @@ export async function startFastSessionCommand(
   const kickoffPromptEventId = kickoffTurnId
     ? `${kickoffTurnId}:user`
     : undefined;
-  let scheduleKickoff = session.created;
-  if (!scheduleKickoff && kickoffPromptEventId) {
+  // A voice call with nothing pre-typed opens an empty Session; the first
+  // thing the person says arrives as an ordinary reply once the call is up.
+  const hasKickoffContent = Boolean(
+    input.text.trim() || input.images?.length || input.attachmentTexts?.length,
+  );
+  let scheduleKickoff = session.created && hasKickoffContent;
+  if (!scheduleKickoff && hasKickoffContent && kickoffPromptEventId) {
     const [existingKickoff] = await db
       .select({ id: fastAgentMessages.id })
       .from(fastAgentMessages)
@@ -464,6 +476,8 @@ export async function startFastSessionCommand(
       model: settings.model,
       reasoningEffort: settings.reasoningEffort,
       durableSessionId: session.id,
+      // A call opened with typed text: its first reply belongs to the voice.
+      ...(input.voiceCall ? { voiceMode: true } : {}),
       ...(kickoffTurnId && kickoffPromptEventId
         ? {
             currentMessageId: kickoffTurnId,
@@ -655,6 +669,8 @@ export async function replyToFastSessionCommand(
   auth: UserAuthSuccess,
   input: {
     sessionId: string;
+    clientMessageId?: string;
+    voiceMode?: boolean;
     text: string;
     images?: string[];
     attachmentTexts?: string[];
@@ -707,7 +723,9 @@ export async function replyToFastSessionCommand(
     model: settings.model,
     reasoningEffort: settings.reasoningEffort,
     ...(senderDisplayName ? { senderDisplayName } : {}),
+    currentMessageId: input.clientMessageId,
     durableSessionId: session.id,
+    ...(input.voiceMode ? { voiceMode: true } : {}),
   });
 
   return { success: true };

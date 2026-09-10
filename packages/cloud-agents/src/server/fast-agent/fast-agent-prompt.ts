@@ -24,6 +24,21 @@ import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
 import { buildTherapistModeInstructions } from '../therapist-mode';
 
+/**
+ * The person is on a voice call. A voice layer acknowledged them already and
+ * will report this reply aloud in its own words, so the reply is written for
+ * the ear: the facts, complete and exact, without chat-surface dressing.
+ */
+function buildVoiceModeInstructions(): string {
+  return `## Voice Call
+This message was spoken on a voice call, and your reply will be reported aloud by the call's voice rather than shown as a chat message.
+- Write for the ear: short plain-prose sentences. No Markdown, headings, bullet lists, tables, code blocks, or emoji.
+- Lead with the answer or outcome. Include every number, name, branch, file path, and link label the person needs, exactly; the voice keeps them verbatim. Prefer "the pull request Fix login redirect" to a raw URL.
+- Do not open with an acknowledgement; the voice already said one. Do not describe what you are about to do; do it and report.
+- When you launch a task, say so in one sentence and say what the person will hear when it finishes. Progress narration stays in the transcript's tool activity, not in the reply.
+- If you need a decision from the person, ask one clear question.`;
+}
+
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
 ): string {
@@ -155,6 +170,7 @@ export function buildFastAgentSystemPrompt({
   appEnv,
   setupSnapshot,
   setupSession = false,
+  voiceMode = false,
   therapistModeEnabled = false,
   globalAgentInstructions,
   workspaceRoutingRules = [],
@@ -184,6 +200,8 @@ export function buildFastAgentSystemPrompt({
   setupSnapshot?: string;
   /** True only for the active conversational setup session. */
   setupSession?: boolean;
+  /** The message was spoken on a voice call and the reply will be spoken. */
+  voiceMode?: boolean;
   therapistModeEnabled?: boolean;
   globalAgentInstructions?: string | null;
   workspaceRoutingRules?: WorkspaceRoutingSettings['rules'];
@@ -300,6 +318,7 @@ ${formatActiveTasksForPrompt(activeTasks)}
 ## Deployment MCP Servers
 ${formatIntegrationsForPrompt(availableIntegrations)}
 ${therapistModeInstructions ? `\n${therapistModeInstructions}\n` : ''}
+${voiceMode ? `\n${buildVoiceModeInstructions()}\n` : ''}
 ${
   setupSession
     ? `

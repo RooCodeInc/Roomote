@@ -366,6 +366,11 @@ function resolveReceiptLanguage(
       verb: byPhase('Receiving', 'Received', 'Failed to Receive'),
       object: 'task report',
     };
+  if (toolName === 'report_to_voice')
+    return {
+      verb: byPhase('Reporting', 'Reported', 'Failed to Report'),
+      object: 'result to voice',
+    };
   if (toolName === 'post_to_channel')
     return {
       verb: byPhase('Posting', 'Posted', 'Failed to Post'),
