@@ -591,7 +591,7 @@ export function AnalyticsStackedBarChart({
                 name="Total tokens"
                 unit="tokens"
                 yAxisId="tokens"
-                stroke="var(--color-chart-6)"
+                stroke="var(--color-foreground)"
                 strokeWidth={3}
                 connectNulls
                 dot={{ r: 3 }}

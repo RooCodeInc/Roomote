@@ -417,7 +417,7 @@ describe('AnalyticsStackedBarChart', () => {
       expect.objectContaining({
         dataKey: 'tokenTotal',
         name: 'Total tokens',
-        stroke: 'var(--color-chart-6)',
+        stroke: 'var(--color-foreground)',
         strokeWidth: 3,
         type: 'linear',
         unit: 'tokens',
