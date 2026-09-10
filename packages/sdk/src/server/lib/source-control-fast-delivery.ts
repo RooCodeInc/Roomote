@@ -895,8 +895,10 @@ function isCommentGoneError(error: unknown): boolean {
  *
  * The restoration runs under the destination lock (the caller's lease when it
  * still holds it, otherwise a fresh one) and re-reads the record under it, so
- * a further owner cannot persist newer content between the read and the edit
- * and then have this recovery paint over it.
+ * a further owner cannot persist newer content between the read and the edit.
+ * A provider edit can still outlive the lease, so only a lease that is still
+ * held after the edit proves nothing newer landed meanwhile; otherwise the
+ * restoration starts over under a fresh lock, a bounded number of times.
  */
 async function restoreCompetingCarrier(params: {
   channelId: string;
@@ -906,37 +908,58 @@ async function restoreCompetingCarrier(params: {
   assertLock: () => Promise<void>;
   update: (body: string) => Promise<void>;
 }): Promise<void> {
-  const restore = async (assertLock: () => Promise<void>) => {
+  // What this recovery believes the comment currently shows.
+  let onComment = {
+    body: params.mine.body,
+    footerText: params.mine.footerText,
+  };
+  const restore = async (
+    assertLock: () => Promise<void>,
+  ): Promise<'done' | 'retry'> => {
     const current = await getSourceControlFooterRecord(
       params.channelId,
       params.threadId,
     );
-    let body: string | null = null;
-    if (!current || current.messageId !== params.mine.messageId) {
-      body = params.mine.body;
-    } else if (
-      current.body !== params.mine.body ||
-      current.footerText !== params.mine.footerText
-    ) {
-      body = `${current.body}\n\n${current.footerText}`;
-    }
-    if (body === null) return;
+    const desired =
+      !current || current.messageId !== params.mine.messageId
+        ? { body: params.mine.body, footerText: '' }
+        : { body: current.body, footerText: current.footerText };
+    if (
+      desired.body === onComment.body &&
+      desired.footerText === onComment.footerText
+    )
+      return 'done';
     await assertLock();
-    await params.update(body);
+    await params.update(
+      desired.footerText
+        ? `${desired.body}\n\n${desired.footerText}`
+        : desired.body,
+    );
+    onComment = desired;
+    try {
+      await assertLock();
+      return 'done';
+    } catch {
+      // The edit outlived the lease: a newer owner may have written since.
+      return 'retry';
+    }
   };
+  const lockKey = `source_control:thread_reply_footer_lock:${params.channelId}:${params.threadId}`;
   try {
     let heldLease = true;
     await params.assertLock().catch(() => {
       heldLease = false;
     });
-    if (heldLease) {
-      await restore(params.assertLock);
-      return;
+    let outcome: 'done' | 'retry' = heldLease
+      ? await restore(params.assertLock)
+      : 'retry';
+    for (let attempt = 0; outcome === 'retry' && attempt < 3; attempt += 1) {
+      outcome = await withThreadReplyFooterLock({ lockKey, fn: restore });
     }
-    await withThreadReplyFooterLock({
-      lockKey: `source_control:thread_reply_footer_lock:${params.channelId}:${params.threadId}`,
-      fn: restore,
-    });
+    if (outcome === 'retry')
+      console.warn(
+        `[Fast Agent] Gave up restoring comment ${params.mine.messageId} after repeated lease loss`,
+      );
   } catch (error) {
     console.warn(
       `[Fast Agent] Could not restore the comment a lost footer lease edited: ${formatErrorForLog(error)}`,

@@ -545,6 +545,46 @@ describe('source-control current footer refresh', () => {
     warning.mockRestore();
   });
 
+  it('restores again when the restoring edit itself outlives the lease', async () => {
+    const first = adapter('123');
+    await first.postReply({ message: 'Original' });
+    mocks.context.mockResolvedValue({ runningTasks: { count: 1 } });
+    const lockKey = `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`;
+    mocks.update
+      .mockImplementationOnce(async () => {
+        mocks.store.delete(lockKey);
+        await adapter('123').replaceReply!(
+          { messageId: '123' },
+          { message: 'Updated B' },
+        );
+      })
+      .mockImplementationOnce(async () => {}) // The competitor's own edit.
+      .mockImplementationOnce(async () => {
+        // The restoring edit outlives its lease; a third owner rewrites the
+        // comment and records it before the edit completes.
+        mocks.store.delete(lockKey);
+        await adapter('123').replaceReply!(
+          { messageId: '123' },
+          { message: 'Updated C' },
+        );
+      });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await first.replaceReply!({ messageId: '123' }, { message: 'Updated A' });
+    // The stale restoration wrote B over C; the post-edit lease check caught
+    // it and a fresh, fenced pass put C back.
+    expect(mocks.update).toHaveBeenLastCalledWith({
+      messageId: '123',
+      body: 'Updated C\n\n1 running; preview=none',
+    });
+    expect(mocks.update).toHaveBeenCalledTimes(5);
+    expect(await record()).toMatchObject({
+      messageId: '123',
+      body: 'Updated C',
+    });
+    expect(mocks.store.has(lockKey)).toBe(false);
+    warning.mockRestore();
+  });
+
   it('does not fail an accepted reply or refresh an old body when pointer persistence fails', async () => {
     await adapter('123').postReply({ message: 'Old body' });
     mocks.failRemember = true;
