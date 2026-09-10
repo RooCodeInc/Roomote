@@ -159,6 +159,22 @@ describe('FastAgentSkillStore', () => {
     });
   });
 
+  it('ships scheduling safety as on-demand guidance rather than authorization', async () => {
+    const store = new FastAgentSkillStore();
+    const skill = await store.read('packaged:scheduling');
+
+    expect(skill.description).toContain('conversation reminders');
+    expect(skill.content).toContain('Loading it supplies guidance only');
+    expect(skill.content).toContain(
+      'Ongoing-process monitors must always be finite',
+    );
+    expect(skill.content).toContain('obtain explicit confirmation');
+    expect(skill.content).toContain('Members may manage their own');
+    expect(skill.content).toContain('call `manage_wakeups` with `cancel`');
+    expect(skill.content).toContain('A `run_now` result of `queued`');
+    expect(skill.content).toContain('Automation and wakeup platform events');
+  });
+
   it('combines packaged and repository-defined skill catalogs', async () => {
     const repositorySkills = {
       list: vi.fn().mockResolvedValue({

@@ -15,6 +15,10 @@ import {
   removeSlackThreadReplyFooter,
   type SlackNotifier,
 } from '@roomote/slack';
+import {
+  buildDataVisualizationBlocks,
+  type DataVisualizationInput,
+} from '@roomote/types';
 
 import { apiLogger } from '../../../logging.js';
 
@@ -22,6 +26,8 @@ type SlackThreadMarkdownPostResult =
   | { status: 'posted'; messageId: string }
   | 'suppressed'
   | 'failed';
+
+const SLACK_MAX_MESSAGE_BLOCKS = 50;
 
 export async function postSlackThreadMarkdownMessage({
   slack,
@@ -32,6 +38,7 @@ export async function postSlackThreadMarkdownMessage({
   conversationLog,
   fastSessionFooter,
   images = [],
+  charts = [],
   deliverVideos,
 }: {
   slack: SlackNotifier;
@@ -47,9 +54,32 @@ export async function postSlackThreadMarkdownMessage({
   /** Attach the sticky Fast session reply footer to this message. */
   fastSessionFooter?: { sessionId: string } & FastSessionReplyFooterContext;
   images?: Array<{ url: string; altText: string }>;
+  /** Native Block Kit charts rendered after the Markdown body. */
+  charts?: DataVisualizationInput[];
   /** Upload only after the source guard permits a successful text post. */
   deliverVideos?: () => Promise<string>;
 }): Promise<SlackThreadMarkdownPostResult> {
+  const buildBodyBlocks = (bodyText: string) => {
+    const leadingBlocks = [
+      { type: 'markdown' as const, text: bodyText },
+      ...buildDataVisualizationBlocks(charts),
+    ];
+    const imageCapacity = Math.max(
+      0,
+      SLACK_MAX_MESSAGE_BLOCKS -
+        leadingBlocks.length -
+        (fastSessionFooter ? 1 : 0),
+    );
+
+    return [
+      ...leadingBlocks,
+      ...images.slice(0, imageCapacity).map((image) => ({
+        type: 'image' as const,
+        image_url: image.url,
+        alt_text: image.altText,
+      })),
+    ];
+  };
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
       channel,
@@ -73,14 +103,7 @@ export async function postSlackThreadMarkdownMessage({
         channel,
         threadTs,
         text,
-        bodyBlocks: [
-          { type: 'markdown', text },
-          ...images.map((image) => ({
-            type: 'image' as const,
-            image_url: image.url,
-            alt_text: image.altText,
-          })),
-        ],
+        bodyBlocks: buildBodyBlocks(text),
         footerText: buildFastSessionReplyFooterText({
           provider: 'slack',
           ...fastSessionFooter,
@@ -90,17 +113,7 @@ export async function postSlackThreadMarkdownMessage({
         channel,
         thread_ts: threadTs,
         text,
-        blocks: [
-          {
-            type: 'markdown',
-            text,
-          },
-          ...images.map((image) => ({
-            type: 'image' as const,
-            image_url: image.url,
-            alt_text: image.altText,
-          })),
-        ],
+        blocks: buildBodyBlocks(text),
       });
 
   if (!messageTs) {
@@ -125,12 +138,7 @@ export async function postSlackThreadMarkdownMessage({
           message: {
             text,
             blocks: [
-              { type: 'markdown', text },
-              ...images.map((image) => ({
-                type: 'image' as const,
-                image_url: image.url,
-                alt_text: image.altText,
-              })),
+              ...buildBodyBlocks(text),
               ...(fastSessionFooter && footerMessageTs === messageTs
                 ? [
                     buildSlackThreadReplyFooterBlock({

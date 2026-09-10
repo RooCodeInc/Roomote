@@ -10,6 +10,11 @@ export interface RepositoryWorkspace {
   sha?: string;
 }
 
+/** Workspace configuration for a sandbox with no repositories. */
+export interface NoRepositoriesWorkspace {
+  type: 'no_repositories';
+}
+
 /**
  * Workspace configuration for a scoped multi-repository shared root.
  */
@@ -42,6 +47,7 @@ export interface EnvironmentWorkspace {
 }
 
 export type WorkspaceConfig =
+  | NoRepositoriesWorkspace
   | RepositoryWorkspace
   | RepositorySetWorkspace
   | AllRepositoriesWorkspace

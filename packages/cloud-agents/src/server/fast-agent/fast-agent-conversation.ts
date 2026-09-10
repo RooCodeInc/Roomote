@@ -1,4 +1,5 @@
 import type {
+  DataVisualizationInput,
   FastAgentConversation,
   FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
   ReasoningEffort,
@@ -65,6 +66,7 @@ export type FastAgentReply = {
   message: string;
   imageArtifactIds?: string[];
   videoArtifactIds?: string[];
+  charts?: DataVisualizationInput[];
   /** Launchable follow-ups attached to a Fast automation report. */
   suggestions?: FastAgentSuggestedTask[];
   /** True for the parent-owned task kickoff. Deliverers must treat anything

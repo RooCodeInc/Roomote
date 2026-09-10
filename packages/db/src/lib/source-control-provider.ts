@@ -232,6 +232,8 @@ export async function resolveWorkspaceRepositoryProviders(
   workspace: TaskWorkspace,
 ): Promise<Record<string, SourceControlProvider>> {
   switch (workspace.type) {
+    case 'no_repositories':
+      return {};
     case 'repository':
       return resolveProvidersByFullNames(
         dbOrTx,
@@ -255,6 +257,10 @@ async function resolveWorkspaceRepositoryRows(
   dbOrTx: DatabaseOrTransaction,
   workspace: TaskWorkspace,
 ): Promise<RepositoryProviderRow[] | null> {
+  if (workspace.type === 'no_repositories') {
+    return null;
+  }
+
   if (workspace.type === 'environment') {
     const environment = await dbOrTx.query.environments.findFirst({
       where: eq(environments.id, workspace.environmentId),

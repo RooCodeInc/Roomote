@@ -50,12 +50,15 @@ import {
 } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
+  buildDataVisualizationBlocks,
   buildPrReviewActionCallbackData,
   PR_REVIEW_ACTION_LABELS,
   TaskPayloadKind,
   exitedRunStatuses,
   type FastAgentConversation,
+  type DataVisualizationInput,
   type FastAgentHumanFollowUpEvent,
   type FastAgentScheduledWakeupEvent,
   type FastAgentSourceControlReplyTarget,
@@ -113,6 +116,7 @@ import {
   createTeamsFastReplyReplacer,
   createTelegramFastReplyReplacer,
 } from './fast-agent-reply-replacement';
+import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
 import {
   attachPendingPrReviewActionMessageWithRetirement,
   retirePrReviewActionMessagesBestEffort,
@@ -195,6 +199,7 @@ export type FastAgentParentEvent =
       purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
       message: string;
       imageArtifactIds?: string[];
+      charts?: DataVisualizationInput[];
     }
   | {
       type: 'artifact_published';
@@ -541,6 +546,21 @@ function buildFastAutomationLaunchOptions(params: {
   };
 }
 
+function resolveFastAgentChildWorkspace(environmentId: string | null): {
+  repo: string;
+  environmentId?: string;
+} {
+  if (environmentId === NO_REPOSITORIES) {
+    return { repo: NO_REPOSITORIES };
+  }
+
+  if (environmentId && environmentId !== ALL_REPOSITORIES) {
+    return { repo: ALL_REPOSITORIES, environmentId };
+  }
+
+  return { repo: ALL_REPOSITORIES };
+}
+
 function createFastAgentAutomationTaskLauncher(params: {
   userId: string;
   conversation: FastAgentConversation;
@@ -573,16 +593,13 @@ function createFastAgentAutomationTaskLauncher(params: {
     }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        ...resolveFastAgentChildWorkspace(environmentId),
         description: prompt,
         ...payload,
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: params.conversation,
         }),
-        ...(environmentId && environmentId !== ALL_REPOSITORIES
-          ? { environmentId }
-          : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
@@ -816,6 +833,7 @@ async function createSlackFastAgentParentTurn(
         message,
         imageArtifactIds = [],
         videoArtifactIds = [],
+        charts = [],
         suggestions = [],
         kickoff,
         purpose,
@@ -859,14 +877,11 @@ async function createSlackFastAgentParentTurn(
                 suggestions.length > 0,
               )
             : message;
-        const contentBlocks = [
-          { type: 'markdown' as const, text: reportMessage },
-          ...images.map((image) => ({
-            type: 'image' as const,
-            image_url: image.url,
-            alt_text: image.altText,
-          })),
-        ];
+        const contentBlocks = buildFastAgentSlackReplyBodyBlocks({
+          message: reportMessage,
+          charts,
+          images,
+        });
         if (pendingAutomationRoot) {
           const shouldPostResult =
             !kickoff && (purpose === 'closeout' || purpose === 'clarification');
@@ -1050,18 +1065,18 @@ async function createSlackFastAgentParentTurn(
           threadTs: threadId!,
           text: message,
           bodyBlocks: action
-            ? buildSlackPrReviewActionBlocks({
-                text: message,
-                nonce: action.nonce,
-              })
-            : [
-                { type: 'markdown', text: message },
-                ...images.map((image) => ({
-                  type: 'image' as const,
-                  image_url: image.url,
-                  alt_text: image.altText,
-                })),
-              ],
+            ? [
+                ...buildSlackPrReviewActionBlocks({
+                  text: message,
+                  nonce: action.nonce,
+                }),
+                ...buildDataVisualizationBlocks(charts),
+              ]
+            : buildFastAgentSlackReplyBodyBlocks({
+                message,
+                charts,
+                images,
+              }),
           footerText: buildFastSessionReplyFooterText({
             provider: 'slack',
             sessionId: params.parent.sessionId,
@@ -1143,7 +1158,7 @@ export function createFastAgentDiscordTaskLauncher(params: {
       return {
         type: TaskPayloadKind.StandardTask,
         payload: {
-          repo: ALL_REPOSITORIES,
+          ...resolveFastAgentChildWorkspace(environmentId),
           description: prompt,
           ...automationPayload,
           communicationProvider: 'discord',
@@ -1171,9 +1186,6 @@ export function createFastAgentDiscordTaskLauncher(params: {
             sessionId: parentSessionId,
             conversation: params.conversation,
           }),
-          ...(environmentId && environmentId !== ALL_REPOSITORIES
-            ? { environmentId }
-            : {}),
           ...(model
             ? { harnessModelOverrides: { 'opencode-server': model } }
             : {}),
@@ -1215,7 +1227,7 @@ export function createFastAgentCommunicationTaskLauncher(params: {
     }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        ...resolveFastAgentChildWorkspace(environmentId),
         description: prompt,
         ...automationPayload,
         communicationProvider: params.conversation.surface,
@@ -1233,9 +1245,6 @@ export function createFastAgentCommunicationTaskLauncher(params: {
           sessionId: parentSessionId,
           conversation: params.conversation,
         }),
-        ...(environmentId && environmentId !== ALL_REPOSITORIES
-          ? { environmentId }
-          : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
@@ -2518,6 +2527,9 @@ export async function deliverFastAgentParentEventWithLock(
       ...(params.event.type === 'child_message' &&
       params.event.imageArtifactIds?.length
         ? { defaultImageArtifactIds: params.event.imageArtifactIds }
+        : {}),
+      ...(params.event.type === 'child_message' && params.event.charts?.length
+        ? { defaultCharts: params.event.charts }
         : {}),
       ...(params.event.type === 'pull_request_feedback' &&
       params.event.reviewActionDeliveryId &&

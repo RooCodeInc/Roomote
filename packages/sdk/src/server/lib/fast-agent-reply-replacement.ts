@@ -26,6 +26,7 @@ import {
 } from '@roomote/slack';
 
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
 
 /**
  * Edit-in-place reply replacement per surface. A Fast turn edits its own
@@ -44,7 +45,7 @@ export function createSlackFastReplyReplacer(params: {
   sessionId: string;
   footerContext: FastSessionReplyFooterContext;
 }): FastAgentReplyReplacer {
-  return async (handle, { message }) => {
+  return async (handle, { message, charts }) => {
     // Keep the sticky footer when the edited message is its current
     // carrier; the lookup and edit share the footer lock so a concurrent
     // relocation cannot slip in between them.
@@ -63,7 +64,7 @@ export function createSlackFastReplyReplacer(params: {
           message: {
             text: message,
             blocks: [
-              { type: 'markdown', text: message },
+              ...buildFastAgentSlackReplyBodyBlocks({ message, charts }),
               ...(footerMessageTs === handle.messageId
                 ? [
                     buildSlackThreadReplyFooterBlock({

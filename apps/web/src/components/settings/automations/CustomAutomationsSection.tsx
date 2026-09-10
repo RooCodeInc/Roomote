@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
@@ -340,6 +341,7 @@ export function CustomAutomationsSection() {
     () => [
       { id: FAST_EXECUTION, name: 'Let Roomote decide' },
       { id: ALL_REPOSITORIES, name: 'All repositories' },
+      { id: NO_REPOSITORIES, name: 'Blank slate' },
       ...(environmentsQuery.data ?? []).map((environment) => ({
         id: environment.id,
         name: environment.name,

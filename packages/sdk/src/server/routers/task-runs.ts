@@ -21,6 +21,7 @@ import {
   computeProviderUsageLifecycleActions,
   environmentSetupStates,
   doneRunStatuses,
+  dataVisualizationInputsSchema,
   queuedCommunicationMessageSchema,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   LLM_USAGE_COST_SOURCES,
@@ -116,6 +117,7 @@ const parentSessionReportSchema = z.object({
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   message: z.string().trim().min(1),
   imageArtifactIds: z.array(z.string().min(1)).optional(),
+  charts: dataVisualizationInputsSchema.optional(),
 });
 
 const runtimePersistedEnvelopeSchema = z

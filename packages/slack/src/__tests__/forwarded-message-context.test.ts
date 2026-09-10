@@ -12,6 +12,38 @@ import {
 import type { SlackFile } from '../types';
 
 describe('forwarded-message-context', () => {
+  it('includes native chart data in agent-visible Slack context', () => {
+    expect(
+      formatSlackBlockTextContext([
+        {
+          type: 'data_visualization',
+          title: 'Weekly sales',
+          chart: {
+            type: 'line',
+            series: [
+              {
+                name: 'Online',
+                data: [
+                  { label: 'Week 1', value: 12 },
+                  { label: 'Week 2', value: 18 },
+                ],
+              },
+            ],
+            axis_config: { categories: ['Week 1', 'Week 2'] },
+          },
+        },
+      ]),
+    ).toBe(
+      [
+        'Slack block text:',
+        'Chart: Weekly sales',
+        'Category | Online',
+        'Week 1 | 12',
+        'Week 2 | 18',
+      ].join('\n'),
+    );
+  });
+
   it('formats Slack forwarded message attachments for agent context', () => {
     const context = formatSlackForwardedMessageContext([
       {

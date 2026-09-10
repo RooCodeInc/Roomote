@@ -1335,6 +1335,9 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('option', { name: 'All repositories' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: 'Blank slate' }),
+    ).toBeInTheDocument();
   });
 
   it('offers no preference in the environment menu and explains channel-less output', async () => {

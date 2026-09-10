@@ -1,4 +1,4 @@
-import { ALL_REPOSITORIES, RunStatus } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES, RunStatus } from '@roomote/types';
 
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
@@ -70,6 +70,35 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('includes shared agent guidance as supplemental system instructions', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      globalAgentInstructions: 'Prefer concise implementation summaries.',
+    });
+
+    expect(prompt).toContain('## Shared Agent Guidance');
+    expect(prompt).toContain('Prefer concise implementation summaries.');
+    expect(prompt).toContain(
+      "when it does not conflict with Roomote's system policies",
+    );
+    expect(prompt.indexOf('## Orchestration Policy')).toBeLessThan(
+      prompt.indexOf('## Shared Agent Guidance'),
+    );
+  });
+
+  it.each([undefined, null, '   '])(
+    'omits shared agent guidance when the setting is %s',
+    (globalAgentInstructions) => {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        globalAgentInstructions,
+      });
+
+      expect(prompt).not.toContain('## Shared Agent Guidance');
+      expect(prompt).not.toContain('<shared_agent_guidance>');
+    },
+  );
+
   it('keeps supported Bitbucket reads API-first without a checkout or task', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
     expect(prompt).toContain(
@@ -240,6 +269,46 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('provide a copy-pasteable draft');
   });
 
+  it('keeps only the scheduling distinction and discovery route upfront in the pilot', () => {
+    const baseline = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+    const pilot = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      schedulingProgressiveDisclosureEnabled: true,
+    });
+
+    expect(pilot).toContain('Conversation reminders and checks');
+    expect(pilot).toContain('deployment custom automations');
+    expect(pilot).toContain('`find_integration_tools`');
+    expect(pilot).toContain('`query: "scheduling"`');
+    expect(pilot).toContain('exact packaged scheduling skill to load');
+    expect(pilot).toContain('Loading guidance never grants authorization');
+    expect(pilot).toContain('Ongoing-process monitoring must be finite');
+    expect(pilot).not.toContain('Use `resolve_schedule` before creation');
+    expect(pilot).not.toContain(
+      'use `list` to check for an equivalent automation',
+    );
+    // Static prompt-size comparison only; this is not a latency or reliability
+    // evaluation. Tool-schema savings are measured separately from runtime.
+    expect(
+      Buffer.byteLength(baseline) - Buffer.byteLength(pilot),
+    ).toBeGreaterThan(2_000);
+  });
+
+  it('keeps deferred wakeup cancellation available on scheduled events', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      schedulingProgressiveDisclosureEnabled: true,
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+    });
+
+    expect(prompt).toContain('Scheduled Wakeup Event');
+    expect(prompt).toContain('use the discovered scheduling capability');
+    expect(prompt).toContain('`manage_wakeups`');
+    expect(prompt).toContain('action "cancel"');
+    expect(prompt).toContain('`reportPolicy` governs whether to speak');
+  });
+
   it('suppresses implicit offers for automation events and the deployment kill switch', () => {
     const eventPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -300,6 +369,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain("as you would a teammate's request");
     expect(eventPrompt).toContain('`preferredEnvironmentId`');
     expect(eventPrompt).toContain('unless the prompt names a different one');
+    expect(eventPrompt).toContain(
+      `A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution`,
+    );
   });
 
   it('offers suggestions on an automation task-settled report only', () => {
@@ -360,6 +432,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Roomote/example-app [id: repo-1]');
     expect(prompt).toContain(
       `All repositories [id: ${ALL_REPOSITORIES}]: Run against all active repositories.`,
+    );
+    expect(prompt).toContain(
+      `Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox without repositories.`,
     );
     expect(prompt).toContain('conversational orchestrator');
     const turnStartupIndex = prompt.indexOf(
@@ -517,7 +592,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Communicate first on a human-authored turn; platform events remain exempt',
     );
     expect(prompt).toContain(
-      'Keep using "launch_task", "send_task_message", or "cancel_task" for task changes',
+      'Keep using "launch_task", "send_task_message", "stop_task", or "cancel_task" for task changes',
     );
     expect(prompt).toContain(
       'Slack channel history defaults to the previous 24 hours',
@@ -532,6 +607,24 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
+    );
+    expect(prompt).toContain(
+      'A successful call means the task accepted the instruction, not that it has responded or completed it',
+    );
+    expect(prompt).toContain(
+      'same resumable soft stop as the running-task UI Stop control',
+    );
+    expect(prompt).toContain(
+      'Cancellation ends the current run and is distinct from the resumable Stop action',
+    );
+    expect(prompt).toContain(
+      'An accepted or response-pending delivery, silence alone, and a normal long-running command are not evidence of a stall',
+    );
+    expect(prompt).toContain(
+      'do not duplicate messages or enter repeated stop/resume loops',
+    );
+    expect(prompt).toContain(
+      'set "userInitiated" to false so the task transcript does not attribute the recovery interruption to the user',
     );
     expect(prompt).toContain('Its "kickoffMessage" should describe the review');
     expect(prompt).toContain(
@@ -570,7 +663,17 @@ describe('buildFastAgentSystemPrompt', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
     expect(prompt).toContain(
-      'ongoing process has a concrete unresolved outcome',
+      'eligible under the exclusions below reports an outcome and is about to close, make one silent decision before the closeout',
+    );
+    expect(prompt).toContain(
+      'leave an ongoing process with a concrete unresolved outcome',
+    );
+    expect(prompt).toContain(
+      'include one specific bounded-check offer after the outcome in that same closeout',
+    );
+    expect(prompt).toContain('close normally without mentioning monitoring');
+    expect(prompt).toContain(
+      'not a blanket offer after every tool call, fix, or update',
     );
     expect(prompt).toContain('Verify capability before offering');
     expect(prompt).toContain(
@@ -625,6 +728,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('do not inspect or schedule from them');
     expect(prompt).toContain(
       'not an offer to save work as a deployment automation',
+    );
+    expect(prompt).toContain(
+      "the automation rule against pitching one-off fixes does not suppress an otherwise eligible check of a deployed fix's unresolved observable outcome",
     );
   });
 
@@ -824,8 +930,18 @@ describe('buildFastAgentSystemPrompt', () => {
       );
       const explorationGuidance = prompt
         .split('- Repository code exploration')[1]!
-        .split('- For requested GitHub updates')[0]!;
+        .split('- For GitHub,')[0]!;
       expect(explorationGuidance).not.toMatch(/GitHub|GitLab|Bitbucket/);
+      for (const guidance of [
+        'an eligible deployment GitHub App installation with an active connected repository is required',
+        'without connecting the public target or linking a personal GitHub account',
+        'including source, code search, issues, and pull requests',
+        'exactly one positive `repo:owner/name` qualifier',
+        'Respect upstream pagination and search-index limits and disclose incomplete results',
+        'Private reads and all writes still require an eligible connection to the target repository',
+        'never retry an authorization denial anonymously or through a task',
+      ])
+        expect(prompt).toContain(guidance);
       expect(prompt).toContain(
         'Use only the methods and arguments exposed by the discovered schemas',
       );
@@ -1229,6 +1345,12 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'The reacted-to message is context, not the current message surface',
+    );
+    expect(prompt).toContain(
+      'render as Slack native Block Kit data visualization blocks',
+    );
+    expect(prompt).toContain(
+      'Do not describe them as web-only, claim that Slack lacks native chart blocks',
     );
     expect(prompt).toContain(
       'Do not call `send_chat_reaction` or `retry_task_start`',

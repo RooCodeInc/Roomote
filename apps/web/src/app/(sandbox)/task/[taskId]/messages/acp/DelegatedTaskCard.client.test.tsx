@@ -34,7 +34,7 @@ describe('DelegatedTaskCard', () => {
       isPending: false,
       refetch: refetchMock,
       data: {
-        task: { title: 'Fix checkout' },
+        task: { title: 'Fix checkout', workflow: 'standard' },
         taskRun: {
           id: 42,
           status: RunStatus.Running,
@@ -91,6 +91,57 @@ describe('DelegatedTaskCard', () => {
       { taskId: 'child-1' },
       expect.any(Object),
     );
+  });
+
+  it('labels persisted PR review workflows as code review agents', () => {
+    useQueryMock.mockReturnValue({
+      isPending: false,
+      refetch: refetchMock,
+      data: {
+        task: { title: 'Check the latest changes', workflow: 'pr_review' },
+        taskRun: { id: 42, status: RunStatus.Running },
+      },
+    });
+
+    render(
+      <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Code review agent')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'View code review task: Check the latest changes',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Stop code review task' }),
+    ).toBeEnabled();
+  });
+
+  it('does not classify linked PRs or review-like titles as review tasks', () => {
+    useQueryMock.mockReturnValue({
+      isPending: false,
+      refetch: refetchMock,
+      data: {
+        task: {
+          title: 'Review PR #9112: Support host-backed tests',
+          workflow: 'standard',
+          taskRun: {
+            pullRequests: [
+              { repository: 'RooCodeInc/Roomote', prNumber: 9112 },
+            ],
+          },
+        },
+        taskRun: { id: 42, status: RunStatus.Completed },
+      },
+    });
+
+    render(
+      <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Coding agent')).toBeInTheDocument();
+    expect(screen.queryByText('Code review agent')).not.toBeInTheDocument();
   });
 
   it('updates when the child transitions to a terminal state', () => {

@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 
 import { and, db, eq, taskRuns } from '@roomote/db/server';
-import { getFastAgentParentFromPayload, isPrReviewRun } from '@roomote/types';
+import {
+  getFastAgentParentFromPayload,
+  isPrReviewRun,
+  type DataVisualizationInput,
+} from '@roomote/types';
 
 import { enqueueFastAgentParentEvent } from '../fast-agent-parent-event-queue';
 
@@ -19,6 +23,7 @@ export async function reportToParentSession(input: {
   purpose: ParentSessionReportPurpose;
   message: string;
   imageArtifactIds?: string[];
+  charts?: DataVisualizationInput[];
 }): Promise<{ relayed: boolean }> {
   const run = await db.query.taskRuns.findFirst({
     where: and(eq(taskRuns.id, input.runId), eq(taskRuns.taskId, input.taskId)),
@@ -52,6 +57,7 @@ export async function reportToParentSession(input: {
       ...(input.imageArtifactIds?.length
         ? { imageArtifactIds: [...new Set(input.imageArtifactIds)] }
         : {}),
+      ...(input.charts?.length ? { charts: input.charts } : {}),
     },
   });
 

@@ -84,6 +84,17 @@ vi.mock('@/components/settings/SettingsShell', () => ({
     </>
   ),
 }));
+vi.mock('@/components/settings/CustomSkills', () => ({
+  CustomSkills: () => (
+    <section aria-labelledby="environment-specific-skills-heading">
+      <h2 id="environment-specific-skills-heading">
+        Environment-specific Skills
+      </h2>
+      <button type="button">Add Skill</button>
+      <div data-testid="environment-skills-catalog" />
+    </section>
+  ),
+}));
 
 import { SkillsSettingsPage } from './pages/SkillsSettingsPage';
 import { getAccessibleSettingsNavigation } from './settings-navigation';
@@ -120,10 +131,9 @@ it('makes Skills navigation and creation available to members without environmen
     screen.queryByText(/marketplace|environment/i),
   ).not.toBeInTheDocument();
   expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(1);
+  const sharedSection = screen.getByRole('region', { name: 'Shared Skills' });
   expect(
-    within(screen.getByRole('banner')).getByRole('button', {
-      name: 'Add Skill',
-    }),
+    within(sharedSection).getByRole('button', { name: 'Add Skill' }),
   ).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Add Skill' }));
   const dialog = screen.getByRole('dialog');
@@ -244,18 +254,31 @@ it('requires confirmation before deleting and refreshes the catalog', async () =
   );
 });
 
-it('shows only shared skills for admins with one add action in the header', async () => {
+it('shows the admin-only environment section below the shared catalog', async () => {
   state.isAdmin = true;
   renderSkills();
   await screen.findByText('my-skill');
-  expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(1);
+  expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(2);
   expect(
-    within(screen.getByRole('banner')).getByRole('button', {
-      name: 'Add Skill',
-    }),
+    within(screen.getByRole('region', { name: 'Shared Skills' })).getByRole(
+      'button',
+      { name: 'Add Skill' },
+    ),
   ).toBeVisible();
+  const sharedSkills = screen.getByRole('list', { name: 'Shared skills' });
+  const environmentHeading = screen.getByRole('heading', {
+    name: 'Environment-specific Skills',
+  });
+  expect(sharedSkills).toBeVisible();
+  expect(environmentHeading).toBeVisible();
   expect(
-    screen.queryByText(/marketplace|environment/i),
-  ).not.toBeInTheDocument();
-  expect(screen.getByRole('list', { name: 'Shared skills' })).toBeVisible();
+    within(
+      screen.getByRole('region', { name: 'Environment-specific Skills' }),
+    ).getByRole('button', { name: 'Add Skill' }),
+  ).toBeVisible();
+  expect(screen.getByTestId('environment-skills-catalog')).toBeVisible();
+  expect(
+    sharedSkills.compareDocumentPosition(environmentHeading) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
 });
