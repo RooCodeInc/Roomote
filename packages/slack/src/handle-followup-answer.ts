@@ -210,13 +210,13 @@ function buildRequestUserInputPromptClientMessageId(
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-${((parseInt(digest[16]!, 16) & 0x3) | 0x8).toString(16)}${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 
-async function deliverPendingSlackRequestUserInputQuestion(params: {
+export async function deliverPendingSlackRequestUserInputQuestion(params: {
   slack: SlackNotifier;
   channel: string;
   threadId: string;
   request: PendingSlackRequestUserInput;
-  previousQuestion: AcpRequestUserInputQuestion;
-  previousAnswer: string;
+  previousQuestion?: AcpRequestUserInputQuestion;
+  previousAnswer?: string;
   taskUrl: string;
 }): Promise<void> {
   const nextPromptMessage = {
@@ -260,7 +260,11 @@ async function deliverPendingSlackRequestUserInputQuestion(params: {
     );
   }
 
-  if (params.request.promptMessageTs) {
+  if (
+    params.request.promptMessageTs &&
+    params.previousQuestion &&
+    params.previousAnswer
+  ) {
     await params.slack
       .updateMessage({
         channel: params.channel,
