@@ -1,5 +1,6 @@
-import type { RunStatus } from '@roomote/types';
+import { isTaskExecutingTurn, type RunStatus } from '@roomote/types';
 import { db, taskRuns, eq } from '@roomote/db/server';
+import { refreshTaskRunThreadFooter } from '../thread-footer-refresh';
 
 type UpdateTaskRunRuntimeState = {
   taskPhase: string | null;
@@ -51,6 +52,17 @@ export async function updateTaskRunRuntimeState(
       .update(taskRuns)
       .set({ taskPhase: values.taskPhase, sleepAt: values.sleepAt })
       .where(eq(taskRuns.id, runId));
+
+    if (
+      isTaskExecutingTurn(current.status, current.taskPhase) !==
+      isTaskExecutingTurn(current.status, values.taskPhase)
+    ) {
+      void refreshTaskRunThreadFooter(runId).catch((error) => {
+        console.warn(
+          `[updateTaskRunRuntimeState] Failed to refresh the communication footer for task run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }
 
     return { updated: true };
   } catch (error) {

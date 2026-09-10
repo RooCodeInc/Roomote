@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   discordEdit: vi.fn(),
   textEdit: vi.fn(),
   installation: vi.fn(),
+  taskRun: vi.fn(),
+  task: vi.fn(),
   redisGet: vi.fn(),
   forget: vi.fn(),
   reschedule: vi.fn(),
@@ -20,10 +22,18 @@ vi.mock('@roomote/communication', () => ({
   rescheduleThreadFooterRefresh: mocks.reschedule,
 }));
 vi.mock('@roomote/db/server', () => ({
-  db: { query: { slackInstallations: { findFirst: mocks.installation } } },
+  db: {
+    query: {
+      slackInstallations: { findFirst: mocks.installation },
+      taskRuns: { findFirst: mocks.taskRun },
+      tasks: { findFirst: mocks.task },
+    },
+  },
   and: vi.fn(),
   eq: vi.fn(),
   slackInstallations: {},
+  taskRuns: {},
+  tasks: {},
 }));
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({ get: mocks.redisGet }),
@@ -61,6 +71,7 @@ vi.mock('./source-control-fast-delivery', () => ({
 
 import {
   refreshCurrentThreadFooters,
+  refreshTaskRunThreadFooter,
   refreshThreadFooterTarget,
 } from './thread-footer-refresh';
 
@@ -70,6 +81,14 @@ describe('footer refresh control-plane dispatch', () => {
     mocks.claim.mockResolvedValue([]);
     mocks.redisGet.mockResolvedValue('team');
     mocks.installation.mockResolvedValue({ botAccessToken: 'test-token' });
+    mocks.taskRun.mockResolvedValue({
+      taskId: 'task-1',
+      payload: {
+        communicationProvider: 'slack',
+        communicationChannelId: 'C',
+        communicationThreadId: 'T',
+      },
+    });
     mocks.managed.mockResolvedValue('active');
     mocks.slackRefresh.mockResolvedValue('active');
     mocks.sourceRefresh.mockResolvedValue('active');
@@ -149,6 +168,23 @@ describe('footer refresh control-plane dispatch', () => {
       channel: 'C',
       threadTs: 'T',
     });
+  });
+
+  it('refreshes and re-registers a settled Slack footer when its task starts again', async () => {
+    await refreshTaskRunThreadFooter(42);
+
+    expect(mocks.taskRun).toHaveBeenCalled();
+    expect(mocks.task).not.toHaveBeenCalled();
+    expect(mocks.slackRefresh).toHaveBeenCalledWith({
+      slack: expect.objectContaining({ token: 'test-token' }),
+      channel: 'C',
+      threadTs: 'T',
+    });
+    expect(mocks.reschedule).toHaveBeenCalledWith(
+      { provider: 'slack', channelId: 'C', threadId: 'T' },
+      'active',
+    );
+    expect(mocks.claim).not.toHaveBeenCalled();
   });
 
   it('preserves Discord controls and uses the carrier destination rather than the parent channel', async () => {
