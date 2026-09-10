@@ -13,7 +13,6 @@ import {
   acquireSlackFastRootBindingLock,
   createFastAgentSlackLiveTaskLauncher,
   findActiveSlackTaskRun,
-  getSlackThreadReplyFooterMessageTs,
   isTargetSlackBotMessage,
   markSlackThreadExplicitMentionRequired,
   resolveSlackReactionNames,
@@ -147,110 +146,6 @@ type UnmentionedSlackThreadReplyRoutingDecision =
       taskId?: string;
     };
 
-function getGroupSlackThreadReplyFooterText(text: string): string {
-  const genericMatch = text.match(
-    /^_Reply(?: with @-mention)? or use the (<[^>]+\|web app>)\._$/,
-  );
-
-  if (genericMatch?.[1]) {
-    return `_Reply with @-mention or use the ${genericMatch[1]}._`;
-  }
-
-  return text.replace(
-    /^_(Working on (?:<[^>]+\|PR(?:\s+#)?\d+>(?:, <[^>]+\|live preview>)?|a <[^>]+\|live preview>)), reply(?: with @-mention)? or use the (<[^>]+\|web app>)\._$/,
-    '_$1, reply with @-mention or use the $2._',
-  );
-}
-
-function updateSlackThreadReplyFooterBlocksForGroupThread(
-  blocks: unknown[] | null,
-): { blocks: unknown[]; updated: boolean } | null {
-  if (!blocks) {
-    return null;
-  }
-
-  let updated = false;
-  const nextBlocks = blocks.map((block) => {
-    if (!block || typeof block !== 'object' || Array.isArray(block)) {
-      return block;
-    }
-
-    const record = block as {
-      block_id?: unknown;
-      elements?: unknown;
-      text?: unknown;
-    };
-
-    if (record.block_id !== 'roomote_thread_reply_footer') {
-      return block;
-    }
-
-    if (!Array.isArray(record.elements)) {
-      return block;
-    }
-
-    const nextElements = record.elements.map((element) => {
-      if (!element || typeof element !== 'object' || Array.isArray(element)) {
-        return element;
-      }
-
-      const elementRecord = element as { text?: unknown };
-      if (typeof elementRecord.text !== 'string') {
-        return element;
-      }
-
-      const nextText = getGroupSlackThreadReplyFooterText(elementRecord.text);
-
-      if (nextText === elementRecord.text) {
-        return element;
-      }
-
-      updated = true;
-      return { ...elementRecord, text: nextText };
-    });
-
-    return { ...record, elements: nextElements };
-  });
-
-  return { blocks: nextBlocks, updated };
-}
-
-async function updateSlackThreadReplyFooterForGroupThread(params: {
-  event: SlackEvent;
-  slack: SlackNotifier;
-}): Promise<void> {
-  if (!params.event.thread_ts) {
-    return;
-  }
-
-  const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
-    params.event.channel,
-    params.event.thread_ts,
-  );
-
-  if (!footerMessageTs) {
-    return;
-  }
-
-  const footerBlocks = updateSlackThreadReplyFooterBlocksForGroupThread(
-    await params.slack.getMessageBlocks({
-      channel: params.event.channel,
-      messageTs: footerMessageTs,
-      threadTs: params.event.thread_ts,
-    }),
-  );
-
-  if (!footerBlocks?.updated) {
-    return;
-  }
-
-  await params.slack.updateMessage({
-    channel: params.event.channel,
-    ts: footerMessageTs,
-    message: { blocks: footerBlocks.blocks },
-  });
-}
-
 async function markExplicitMentionRequiredSlackThread(params: {
   event: SlackEvent;
   slack: SlackNotifier;
@@ -263,18 +158,6 @@ async function markExplicitMentionRequiredSlackThread(params: {
     params.event.channel,
     params.event.thread_ts,
   );
-
-  try {
-    await updateSlackThreadReplyFooterForGroupThread({
-      event: params.event,
-      slack: params.slack,
-    });
-  } catch (error) {
-    console.error(
-      `[SlackWebhook] Failed to update thread reply footer after human mention in ${params.event.channel}:${params.event.thread_ts}:`,
-      error instanceof Error ? error.message : String(error),
-    );
-  }
 }
 
 async function markHumanMentionedSlackThread(params: {

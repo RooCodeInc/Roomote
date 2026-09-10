@@ -207,6 +207,7 @@ export {
 } from './lib/discord-persistence';
 
 export { createDiscordCommunicationProviderFromRuntimeCredentials } from './lib/discord-communication';
+export { refreshCurrentThreadFooters } from './lib/thread-footer-refresh';
 
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 

@@ -24,6 +24,7 @@ import {
   deliverManagedThreadReplyFooter,
   getDiscordFooterlessFinalChunk,
   resolveFastSessionReplyFooterContext,
+  postTextThreadReplyWithFooter,
 } from '@roomote/communication';
 import {
   createFastAgentSlackLiveTaskLauncher,
@@ -450,6 +451,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
                 textWithFooter,
                 footerText,
               }),
+              refresh: { footerText, channelId: footerMessageChannelId },
             };
           },
           clearPreviousFooter: async (previousFooterRecord) => {
@@ -508,17 +510,25 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           serviceUrl,
         }),
         postReply: async ({ message }) => {
-          const posted = await provider.postMessage({
-            channelId: conversation.replyTarget.channelId,
-            serviceUrl,
-            ...(conversation.replyTarget.threadId
-              ? {
-                  threadId: conversation.replyTarget.threadId,
-                  replyToMessageId: conversation.replyTarget.threadId,
-                }
-              : {}),
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: session.id, ...footerContext })}`,
-            textFormat: 'markdown',
+          const posted = await postTextThreadReplyWithFooter({
+            provider,
+            input: {
+              channelId: conversation.replyTarget.channelId,
+              serviceUrl,
+              ...(conversation.replyTarget.threadId
+                ? {
+                    threadId: conversation.replyTarget.threadId,
+                    replyToMessageId: conversation.replyTarget.threadId,
+                  }
+                : {}),
+              text: message,
+              textFormat: 'markdown',
+            },
+            footerText: buildFastSessionReplyFooterText({
+              provider: 'teams',
+              sessionId: session.id,
+              ...footerContext,
+            }),
           });
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
@@ -619,14 +629,22 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
           conversation,
         }),
         postReply: async ({ message }) => {
-          const posted = await provider.postMessage({
-            channelId: conversation.replyTarget.channelId,
-            ...(conversation.replyTarget.threadId
-              ? { threadId: conversation.replyTarget.threadId }
-              : {}),
-            ...(replyToMessageId ? { replyToMessageId } : {}),
-            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: session.id, ...footerContext })}`,
-            textFormat: 'markdown',
+          const posted = await postTextThreadReplyWithFooter({
+            provider,
+            input: {
+              channelId: conversation.replyTarget.channelId,
+              ...(conversation.replyTarget.threadId
+                ? { threadId: conversation.replyTarget.threadId }
+                : {}),
+              ...(replyToMessageId ? { replyToMessageId } : {}),
+              text: message,
+              textFormat: 'markdown',
+            },
+            footerText: buildFastSessionReplyFooterText({
+              provider: 'telegram',
+              sessionId: session.id,
+              ...footerContext,
+            }),
           });
           activity.reassert();
           await recordFastAgentConversationMessageBestEffort({

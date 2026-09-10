@@ -87,7 +87,18 @@ vi.mock('@roomote/communication', () => ({
     linkedPrs: [],
     livePreviewUrl: null,
   }),
-  setThreadReplyFooterRecord: vi.fn(),
+  setThreadReplyFooterRecord: vi.fn().mockResolvedValue(true),
+  postTextThreadReplyWithFooter: async ({
+    input,
+    footerText,
+  }: {
+    input: Record<string, unknown>;
+    footerText: string;
+  }) =>
+    postMessageMock({
+      ...input,
+      text: [input.text, footerText].filter(Boolean).join('\n\n'),
+    }),
 }));
 
 vi.mock('@roomote/communication/chat-messages', () => ({
@@ -345,8 +356,8 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
     discordEditMessageMock.mockResolvedValue(undefined);
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(null as never);
     vi.mocked(getThreadReplyFooterRecord).mockResolvedValue(null);
-    withThreadReplyFooterLockMock.mockImplementation(
-      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    withThreadReplyFooterLockMock.mockImplementation(async ({ fn, lockKey }) =>
+      fn(async () => {}, { key: lockKey, ownerId: 'owner' }),
     );
     discordAddReactionMock.mockResolvedValue({
       channelId: 'thread-1',
@@ -597,6 +608,16 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       {
         messageId: 'latest-reply',
         textWithoutFooter: 'Latest update',
+        refresh: {
+          channelId: 'thread-1',
+          footerText: '[Open task](https://app.example.com/task/task-3)',
+        },
+      },
+      {
+        lock: {
+          key: 'discord:thread_reply_footer_lock:channel-1:thread-1',
+          ownerId: 'owner',
+        },
       },
     );
   });
@@ -620,6 +641,13 @@ describe('maybeSendCommunicationThreadReply (Discord)', () => {
       {
         messageId: 'footer-chunk',
         textWithoutFooter: '',
+        refresh: { channelId: 'thread-1', footerText: 'Task footer' },
+      },
+      {
+        lock: {
+          key: 'discord:thread_reply_footer_lock:channel-1:thread-1',
+          ownerId: 'owner',
+        },
       },
     );
   });
@@ -657,8 +685,8 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
     // Tests force no managed-footer path unless they override this.
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(null as never);
     vi.mocked(getThreadReplyFooterRecord).mockResolvedValue(null);
-    withThreadReplyFooterLockMock.mockImplementation(
-      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    withThreadReplyFooterLockMock.mockImplementation(async ({ fn, lockKey }) =>
+      fn(async () => {}, { key: lockKey, ownerId: 'owner' }),
     );
     vi.mocked(
       createTeamsCommunicationProviderFromRuntimeCredentials,
@@ -708,9 +736,6 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
       },
     ];
 
-    withThreadReplyFooterLockMock.mockImplementation(
-      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
-    );
     vi.mocked(buildThreadReplyFooterText).mockReturnValue(
       '[View task](https://app.example.com/task/task-2)',
     );
@@ -719,7 +744,7 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
       textWithoutFooter: 'earlier reply with image',
       images: footerImages,
     });
-    vi.mocked(setThreadReplyFooterRecord).mockResolvedValue(undefined);
+    vi.mocked(setThreadReplyFooterRecord).mockResolvedValue(true);
     postMessageMock.mockResolvedValue({ messageId: 'new-reply' });
     vi.mocked(
       createTeamsCommunicationProviderFromRuntimeCredentials,
@@ -759,6 +784,17 @@ describe('maybeSendCommunicationThreadReply (Teams)', () => {
         messageId: 'new-reply',
         textWithoutFooter: 'later update',
         images: footerImages,
+        refresh: {
+          channelId: '19:conversation@thread.v2',
+          serviceUrl: 'https://smba.trafficmanager.net/amer/',
+          footerText: '[View task](https://app.example.com/task/task-2)',
+        },
+      },
+      {
+        lock: {
+          key: 'teams:thread_reply_footer_lock:19:conversation@thread.v2:activity-root',
+          ownerId: 'owner',
+        },
       },
     );
   });
@@ -772,7 +808,9 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     getLatestInboundMessageIdMock.mockResolvedValue(null);
     postMessageMock.mockResolvedValue({ messageId: '999' });
     sendChatActionMock.mockResolvedValue(undefined);
-    // Skip the footer path by returning a null footer.
+    vi.mocked(buildThreadReplyFooterText).mockReturnValue(
+      'Current task footer',
+    );
   });
 
   it('prefers the latest inbound message id over the launch message id', async () => {
@@ -835,7 +873,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     );
   });
 
-  it('does not post the managed live-preview footer in Telegram', async () => {
+  it('routes Telegram replies through managed footer delivery without extra posts', async () => {
     await maybeSendCommunicationThreadReply({
       taskRun: telegramTaskRun,
       parsedBody: { text: 'done', images: [] },
@@ -843,7 +881,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
 
     expect(postMessageMock).toHaveBeenCalledTimes(1);
     expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'done' }),
+      expect.objectContaining({ text: 'done\n\nCurrent task footer' }),
     );
   });
 
@@ -857,7 +895,10 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
 
     expect(response).not.toBeNull();
     expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: '222', text: 'done' }),
+      expect.objectContaining({
+        channelId: '222',
+        text: 'done\n\nCurrent task footer',
+      }),
     );
   });
 });

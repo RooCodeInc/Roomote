@@ -26,7 +26,9 @@
     "./teams-provider": "./src/teams-provider.ts",
     "./telegram-provider": "./src/telegram-provider.ts",
     "./telegram-update": "./src/telegram-update.ts",
-    "./thread-reply-footer-state": "./src/thread-reply-footer-state.ts"
+    "./thread-reply-footer-state": "./src/thread-reply-footer-state.ts",
+    "./thread-reply-footer-delivery": "./src/thread-reply-footer-delivery.ts",
+    "./thread-footer-refresh": "./src/thread-footer-refresh.ts"
   },
   "scripts": {
     "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",

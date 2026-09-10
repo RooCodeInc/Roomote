@@ -12,6 +12,7 @@ import {
   getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
   withSlackThreadReplyFooterLock,
+  removeSlackThreadReplyFooter,
   type SlackNotifier,
 } from '@roomote/slack';
 import {
@@ -125,12 +126,13 @@ export async function postSlackThreadMarkdownMessage({
     const updated = await withSlackThreadReplyFooterLock({
       channel,
       threadTs,
-      fn: async () => {
+      fn: async (assertLock) => {
         const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
           channel,
           threadTs,
         );
-        return slack.updateMessage({
+        await assertLock();
+        const updated = await slack.updateMessage({
           channel,
           ts: messageTs,
           message: {
@@ -150,6 +152,22 @@ export async function postSlackThreadMarkdownMessage({
             ],
           },
         });
+        try {
+          await assertLock();
+        } catch {
+          const current = await getSlackThreadReplyFooterMessageTs(
+            channel,
+            threadTs,
+          ).catch(() => undefined);
+          if (current !== undefined && current !== messageTs)
+            await removeSlackThreadReplyFooter({
+              slack,
+              channel,
+              threadTs,
+              messageTs,
+            }).catch(() => {});
+        }
+        return updated;
       },
     });
     if (!updated) {

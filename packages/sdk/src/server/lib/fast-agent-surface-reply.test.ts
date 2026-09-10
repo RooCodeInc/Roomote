@@ -41,7 +41,11 @@ vi.mock('@roomote/slack', () => ({
   getSlackThreadReplyFooterMessageTs: vi.fn(async () => null),
   postSlackThreadMessageWithFooterText: mocks.slackPostThreadMessage,
   withSlackThreadReplyFooterLock: vi.fn(
-    async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    async ({
+      fn,
+    }: {
+      fn: (assertLock: () => Promise<void>) => Promise<unknown>;
+    }) => fn(async () => {}),
   ),
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'quote',
   SlackNotifier: vi.fn(function () {
@@ -157,6 +161,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       messageId: 'teams-message-1',
     });
     mocks.createTeamsProvider.mockResolvedValue({
+      provider: 'teams',
       postMessage: mocks.teamsPostMessage,
       updateMessage: mocks.teamsUpdateMessage,
     });
@@ -167,6 +172,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
+      provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       editMessageText: mocks.telegramEditMessage,
       sendChatAction: mocks.telegramTyping,
@@ -713,7 +719,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
           channelId,
           ...(threadId ? { threadId } : {}),
           ...(currentMessageId ? { replyToMessageId: currentMessageId } : {}),
-          text: expect.stringContaining('Reply or use the [web app]'),
+          text: expect.stringContaining('[Open in Roomote]'),
         }),
       );
       expect(binding?.messageId).toBe(
@@ -723,7 +729,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         expect.objectContaining({
           channelId,
           messageId:
-            surface === 'teams' ? 'teams-message-1' : 'telegram-message-1',
+            surface === 'teams' ? 'teams-message-1' : 'telegram-message-2',
           text: expect.stringContaining('Updated'),
         }),
       );

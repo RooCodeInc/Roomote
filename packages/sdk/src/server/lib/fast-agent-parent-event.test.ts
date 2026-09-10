@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  redisStore: new Map<string, string>(),
   acquireTurnLock: vi.fn(),
   releaseTurnLock: Object.assign(vi.fn(), {
     signal: new AbortController().signal,
@@ -69,11 +70,37 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   return {
     ...actual,
     // The sticky-footer lock and state live in Redis; these tests run without
-    // a server, so satisfy lock acquisition and empty prior state.
+    // a server, so model lock ownership and atomic carrier writes in memory.
     getRedis: () => ({
-      set: async () => 'OK',
-      get: async () => null,
-      eval: async () => 1,
+      set: async (key: string, value: string, ...args: unknown[]) => {
+        if (args.includes('NX') && mocks.redisStore.has(key)) return null;
+        mocks.redisStore.set(key, value);
+        return 'OK';
+      },
+      get: async (key: string) => mocks.redisStore.get(key) ?? null,
+      eval: async (
+        script: string,
+        count: number,
+        key: string,
+        ...args: (string | number)[]
+      ) => {
+        const owner = args[count - 1];
+        if (mocks.redisStore.get(key) !== owner) return 0;
+        if (count === 2) {
+          const [pointerKey, , record, ttl] = args as [
+            string,
+            string,
+            string,
+            string | number,
+          ];
+          if (ttl !== 'keepTtl' || mocks.redisStore.has(pointerKey)) {
+            mocks.redisStore.set(pointerKey, record);
+          }
+        }
+        if (script.includes("'del'")) mocks.redisStore.delete(key);
+        return 1;
+      },
+      zadd: async () => 1,
     }),
   };
 });
@@ -89,6 +116,19 @@ vi.mock('@roomote/communication', async (importOriginal) => ({
     }),
   ),
 }));
+
+vi.mock(
+  '@roomote/communication/thread-footer-refresh',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('@roomote/communication/thread-footer-refresh')
+    >()),
+    resolveCurrentThreadFooterText: async (
+      _provider: string,
+      footerText: string,
+    ) => footerText,
+  }),
+);
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
@@ -285,6 +325,7 @@ const event = {
 
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
+    mocks.redisStore.clear();
     vi.clearAllMocks();
     mocks.findWakeupSession.mockResolvedValue({ id: originSessionId });
     mocks.releaseTurnLock.signal = new AbortController().signal;
@@ -383,6 +424,7 @@ describe('deliverFastAgentParentEvent', () => {
       messageId: 'teams-message-1',
     });
     mocks.createTeamsProvider.mockResolvedValue({
+      provider: 'teams',
       postMessage: mocks.teamsPostMessage,
       updateMessage: mocks.teamsUpdateMessage,
     });
@@ -393,6 +435,7 @@ describe('deliverFastAgentParentEvent', () => {
       lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
+      provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       sendChatAction: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
@@ -803,7 +846,7 @@ describe('deliverFastAgentParentEvent', () => {
             elements: [
               {
                 type: 'mrkdwn',
-                text: expect.stringContaining('Reply or use the'),
+                text: expect.stringContaining('|Open in Roomote>'),
               },
             ],
           },
@@ -2169,7 +2212,7 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'channel-1',
       idempotencyKey: 'fast-parent-artifact:artifact-1:v1',
       text: expect.stringMatching(
-        /^The proof is ready\.\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^The proof is ready\.\n\n-# Reply anytime · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
       ),
       textFormat: 'markdown',
       images: [
@@ -2217,6 +2260,8 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'teams-channel-1',
       threadId: 'teams-root-1',
       post: mocks.teamsPostMessage,
+      edit: mocks.teamsUpdateMessage,
+      messageId: 'teams-message-1',
     },
     {
       surface: 'telegram' as const,
@@ -2224,10 +2269,20 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'telegram-chat-1',
       threadId: undefined,
       post: mocks.telegramPostMessage,
+      edit: mocks.telegramEditMessage,
+      messageId: 'telegram-message-2',
     },
   ])(
     'delivers a $surface parent event through its provider adapter',
-    async ({ surface, workspaceId, channelId, threadId, post }) => {
+    async ({
+      surface,
+      workspaceId,
+      channelId,
+      threadId,
+      post,
+      edit,
+      messageId,
+    }) => {
       await deliverFastAgentParentEvent({
         parent: {
           ...parent,
@@ -2250,7 +2305,7 @@ describe('deliverFastAgentParentEvent', () => {
           ...(threadId ? { threadId } : {}),
           text: expect.stringMatching(
             new RegExp(
-              `^The proof is ready\\.\\n\\n.*Reply or use the \\[web app\\]\\(.*utm_source=${surface}.*\\)\\..*$`,
+              `^The proof is ready\\.\\n\\nReply anytime · \\[Open in Roomote\\]\\(.*utm_source=${surface}.*\\)$`,
             ),
           ),
           textFormat: 'markdown',
@@ -2263,8 +2318,66 @@ describe('deliverFastAgentParentEvent', () => {
           ],
         }),
       );
+      const footerText = post.mock.calls[0]![0].text.split('\n\n').at(-1);
+      expect(
+        JSON.parse(
+          mocks.redisStore.get(
+            `${surface}:thread_reply_footer:${channelId}:${threadId ?? 'root'}`,
+          )!,
+        ),
+      ).toEqual(
+        expect.objectContaining({
+          messageId,
+          textWithoutFooter: 'The proof is ready.',
+          refresh: expect.objectContaining({ channelId, footerText }),
+        }),
+      );
+      expect(edit).not.toHaveBeenCalled();
     },
   );
+
+  it('clears its own Teams footer without recording a carrier after losing the lease', async () => {
+    const lockKey =
+      'teams:thread_reply_footer_lock:teams-channel-1:teams-root-1';
+    mocks.teamsPostMessage.mockImplementationOnce(async () => {
+      mocks.redisStore.set(lockKey, 'new-owner');
+      return {
+        provider: 'teams',
+        channelId: 'teams-channel-1',
+        messageId: 'teams-message-1',
+      };
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'teams',
+          workspaceId: 'tenant-1',
+          conversationId: 'teams-conversation-1',
+          replyTarget: {
+            channelId: 'teams-channel-1',
+            threadId: 'teams-root-1',
+          },
+        },
+      },
+      event,
+    });
+
+    expect(mocks.teamsUpdateMessage).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        channelId: 'teams-channel-1',
+        messageId: 'teams-message-1',
+        text: 'The proof is ready.',
+      }),
+    );
+    expect(
+      mocks.redisStore.has(
+        'teams:thread_reply_footer:teams-channel-1:teams-root-1',
+      ),
+    ).toBe(false);
+    expect(mocks.redisStore.get(lockKey)).toBe('new-owner');
+  });
 
   it('updates the Teams automation root instead of posting a duplicate report', async () => {
     await deliverFastAgentParentEvent({
@@ -3100,7 +3213,7 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
       text: expect.stringMatching(
-        /^There is new PR feedback\.\n\n-# Working on \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\), reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^There is new PR feedback\.\n\n-# Reply anytime · \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
       ),
       textFormat: 'markdown',
       images: [],

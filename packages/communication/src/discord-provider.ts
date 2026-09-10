@@ -616,6 +616,8 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     messageId: string;
     text: string;
     buttons?: CommunicationMessageButton[][];
+    /** Footer-only edits must not clear interactive controls on the carrier. */
+    preserveButtons?: boolean;
   }): Promise<void> {
     if (input.text.length > DISCORD_MAX_MESSAGE_LENGTH) {
       throw new Error(
@@ -628,7 +630,9 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       {
         content: input.text,
         allowed_mentions: { parse: [] },
-        components: buildDiscordComponents(input.buttons) ?? [],
+        ...(input.preserveButtons
+          ? {}
+          : { components: buildDiscordComponents(input.buttons) ?? [] }),
       },
       { retryNetworkErrors: true, retryServerErrors: true },
     );

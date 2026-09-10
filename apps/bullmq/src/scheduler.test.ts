@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   },
   workerConstructor: vi.fn(),
   queueEventsConstructor: vi.fn(),
+  threadFooterRefreshJob: vi.fn(),
 }));
 
 vi.mock('bullmq', () => ({
@@ -64,12 +65,26 @@ vi.mock('./scheduled-jobs', () => ({
   brainOutboxDrainJob: vi.fn(),
   brainCollectorsJob: vi.fn(),
   brainMaintenanceJob: vi.fn(),
+  sessionsReconcileJob: vi.fn(),
+  threadFooterRefreshJob: mocks.threadFooterRefreshJob,
 }));
 
 import { ScheduledJobName } from './types';
 import { startScheduler } from './scheduler';
 
 describe('startScheduler', () => {
+  it('schedules current footer refresh every 30 seconds and dispatches it', async () => {
+    await startScheduler();
+    expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
+      ScheduledJobName.ThreadFooterRefresh,
+      { every: 30_000 },
+    );
+    const handler = mocks.workerConstructor.mock.calls[0]![1] as (job: {
+      name: string;
+    }) => Promise<void>;
+    await handler({ name: ScheduledJobName.ThreadFooterRefresh });
+    expect(mocks.threadFooterRefreshJob).toHaveBeenCalledTimes(1);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.queue.removeJobScheduler.mockResolvedValue(undefined);

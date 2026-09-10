@@ -147,7 +147,8 @@ export function convertMarkdownLinksToSlack(text: string): string {
   );
 }
 
-function decodeSlackEntity(text: string): string {
+/** Reverse Slack's `&amp;`/`&lt;`/`&gt;` escaping on text read back from the API. */
+export function decodeSlackEntity(text: string): string {
   // Decode lt/gt before amp so nested entities are not double-unescaped.
   return text
     .replaceAll('&lt;', '<')

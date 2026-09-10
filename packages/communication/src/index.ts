@@ -22,3 +22,5 @@ export * from './fast-session-footer';
 export * from './thread-reply-footer-context';
 export * from './thread-reply-footer-delivery';
 export * from './thread-reply-footer-state';
+export * from './thread-footer-refresh';
+export * from './text-thread-reply-footer';

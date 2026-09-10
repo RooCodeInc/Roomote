@@ -1,15 +1,12 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
-  and,
   claimTaskGoalContinuationForRun,
   db,
   eq,
   getTaskGoalForRun,
-  isNotNull,
   releaseTaskGoalContinuationForRun,
   slackInstallations,
-  taskPullRequests,
 } from '@roomote/db/server';
 
 import {
@@ -47,7 +44,7 @@ import {
   clearActiveSlackRunReplyTarget,
   clearPendingSlackRequestUserInput,
   getActiveSlackRunReplyTarget,
-  getSlackThreadFooterText as buildSlackThreadFooterText,
+  getSlackThreadFooterText,
   getSlackStartedMessageData,
   getSlackMessages,
   getSlackRequestUserInputAnswers,
@@ -592,38 +589,11 @@ export const taskRunsRouter = router({
       });
     }
 
-    // PR linkage lives on task_pull_requests; include every active GitHub PR
-    // so the existing footer can point users to the full task split.
-    const linkedPrs = await db.query.taskPullRequests.findMany({
-      where: and(
-        eq(taskPullRequests.taskId, taskRun.taskId),
-        eq(taskPullRequests.sourceControlProvider, 'github'),
-        isNotNull(taskPullRequests.repository),
-        isNotNull(taskPullRequests.prNumber),
-      ),
-      orderBy: (row, { asc }) => [asc(row.detectedAt), asc(row.createdAt)],
-      columns: {
-        repository: true,
-        prNumber: true,
-        prUrl: true,
-        status: true,
-      },
-    });
-
-    const activeLinkedPrs = linkedPrs.filter(
-      (pr) => pr.status !== 'closed' && pr.status !== 'merged',
-    );
-
-    return buildSlackThreadFooterText({
+    return getSlackThreadFooterText({
       taskUrl: input.taskUrl,
       taskId: taskRun.taskId,
-      prRepo: activeLinkedPrs[0]?.repository ?? null,
-      prNumber: activeLinkedPrs[0]?.prNumber ?? null,
-      linkedPrs: activeLinkedPrs.flatMap((pr) =>
-        pr.prNumber !== null && pr.prUrl
-          ? [{ prNumber: pr.prNumber, prUrl: pr.prUrl }]
-          : [],
-      ),
+      prRepo: null,
+      prNumber: null,
       channelId: input.slackChannelId,
       threadTs: input.threadTs,
     });

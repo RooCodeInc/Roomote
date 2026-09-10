@@ -14,9 +14,13 @@ import {
   buildThreadReplyFooterText,
   formatMarkdownLink,
   type ThreadReplyLinkedPr,
+  type ThreadReplyRunningTasks,
 } from './chat-messages';
 import { chunkDiscordMessage } from './discord-provider';
-import { resolveThreadReplyFooterContext } from './thread-reply-footer-context';
+import {
+  resolveSessionRunningTasks,
+  resolveThreadReplyFooterContext,
+} from './thread-reply-footer-context';
 
 export type FastSessionFooterProvider =
   | 'slack'
@@ -39,6 +43,9 @@ export type FastSessionPullRequestReference = {
 export type FastSessionReplyFooterContext = {
   linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
+  /** Session `activityAt` (epoch ms), so a refresh can tell when it has settled. */
+  sessionActivityAt?: number | null;
 };
 
 const TERMINAL_PULL_REQUEST_STATUSES = new Set(['closed', 'merged']);
@@ -66,9 +73,7 @@ function collectFastSessionLinkedPrs(params: {
   return [...uniquePrs.values()];
 }
 
-async function getFastSessionLinkedTaskIds(
-  sessionId: string,
-): Promise<string[]> {
+async function getFastSessionLinkedTasks(sessionId: string) {
   const session = await getSessionForFastConversation(db, sessionId);
   const linkedTasks = session
     ? await db
@@ -82,7 +87,7 @@ async function getFastSessionLinkedTaskIds(
         // across footer rebuilds.
         .orderBy(asc(sessionTasks.attachedAt), asc(sessionTasks.taskId))
     : [];
-  return linkedTasks.map(({ taskId }) => taskId);
+  return { session, linkedTaskIds: linkedTasks.map(({ taskId }) => taskId) };
 }
 
 export async function resolveFastSessionReplyFooterContext(params: {
@@ -90,18 +95,26 @@ export async function resolveFastSessionReplyFooterContext(params: {
   pullRequest?: FastSessionPullRequestReference | null;
   pullRequests?: readonly FastSessionPullRequestReference[];
 }): Promise<FastSessionReplyFooterContext> {
-  const linkedTaskIds = await getFastSessionLinkedTaskIds(params.sessionId);
-  const contexts = await Promise.all(
-    linkedTaskIds.map((taskId) =>
-      resolveThreadReplyFooterContext({
-        taskId,
-        prRepo: null,
-        prNumber: null,
-      }),
-    ),
+  const { session, linkedTaskIds } = await getFastSessionLinkedTasks(
+    params.sessionId,
   );
+  const [runningTasks, contexts] = await Promise.all([
+    session ? resolveSessionRunningTasks(session.id, linkedTaskIds) : null,
+    Promise.all(
+      linkedTaskIds.map((taskId) =>
+        resolveThreadReplyFooterContext({
+          taskId,
+          prRepo: null,
+          prNumber: null,
+          includeRunningTasks: false,
+        }),
+      ),
+    ),
+  ]);
 
   return {
+    ...(runningTasks ? { runningTasks } : {}),
+    sessionActivityAt: session?.activityAt ?? null,
     linkedPrs: collectFastSessionLinkedPrs({
       pullRequest: params.pullRequest,
       pullRequests: params.pullRequests,
@@ -136,8 +149,7 @@ export function buildSelectedTaskSessionUrl(params: {
 }
 
 /**
- * The Fast-session variant of the task thread-reply footer: always the plain
- * "Reply or use the web app." shape, linking to the session view.
+ * Compact Session links, with task navigation separate from the transcript.
  */
 export function buildFastSessionReplyFooterText(params: {
   provider: FastSessionFooterProvider;
@@ -146,23 +158,15 @@ export function buildFastSessionReplyFooterText(params: {
   pullRequests?: readonly FastSessionPullRequestReference[];
   linkedPrs?: readonly ThreadReplyLinkedPr[];
   livePreviewUrl?: string | null;
+  runningTasks?: ThreadReplyRunningTasks | null;
 }): string {
   const sessionUrl = buildFastSessionUrl(params.provider, params.sessionId);
-
-  // Chat surfaces route any thread reply to the Session; source-control
-  // discussions only hear @-mentions, so the footer must say so.
-  const explicitMentionRequired =
-    params.provider === 'github' ||
-    params.provider === 'gitlab' ||
-    params.provider === 'bitbucket' ||
-    params.provider === 'ado' ||
-    params.provider === 'gitea';
 
   return buildThreadReplyFooterText({
     taskUrl: sessionUrl,
     linkedPrs: collectFastSessionLinkedPrs(params),
     livePreviewUrl: params.livePreviewUrl,
-    explicitMentionRequired,
+    runningTasks: params.runningTasks,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
       : params.provider === 'discord'
