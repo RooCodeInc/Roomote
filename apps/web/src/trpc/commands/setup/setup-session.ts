@@ -117,6 +117,7 @@ async function persistSetupSessionReceipt(
     text: string;
     payload?: Record<string, unknown>;
     ts?: number;
+    role?: 'user' | 'assistant';
   },
   conversation?: SetupSessionConversation,
 ): Promise<boolean> {
@@ -661,7 +662,13 @@ export async function skipSetupSourceControlCommand(
   await persistSetupSessionReceipt(auth, {
     kind: 'source_control_skipped',
     fingerprint: 'initial-options',
+    text: 'Connect source control later',
+  });
+  await persistSetupSessionReceipt(auth, {
+    kind: 'source_control_skipped',
+    fingerprint: 'initial-options:response',
     text: 'No problem — you can still get started without connecting source control. I can research a question, create a useful document or plan, or set up a recurring check when a service is connected.',
+    role: 'assistant',
   });
   return { success: true };
 }

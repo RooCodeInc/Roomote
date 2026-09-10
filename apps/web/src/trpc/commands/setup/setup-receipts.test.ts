@@ -41,6 +41,24 @@ describe('setup transcript receipts', () => {
     });
   });
 
+  it('supports assistant-authored setup messages', () => {
+    const message = buildSetupReceiptMessage({
+      sessionId: 'session-1',
+      workflowVersion: 1,
+      userId: 'user-1',
+      kind: 'source_control_skipped',
+      fingerprint: 'initial-options:response',
+      text: 'No problem.',
+      role: 'assistant',
+    });
+
+    expect(message).toMatchObject({
+      eventId: expect.stringMatching(/:assistant$/),
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text: 'No problem.' }],
+    });
+  });
+
   it('formats readable receipts for every setup-card completion', () => {
     expect(
       formatSourceConnectionReceipt({

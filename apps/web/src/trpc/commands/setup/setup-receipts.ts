@@ -58,6 +58,7 @@ export function buildSetupReceiptMessage(input: {
   text: string;
   payload?: Record<string, unknown>;
   ts?: number;
+  role?: 'user' | 'assistant';
 }) {
   const digest = createHash('sha256')
     .update(
@@ -67,13 +68,14 @@ export function buildSetupReceiptMessage(input: {
     .slice(0, 24);
   const turnId = `setup:receipt:${input.kind}:${digest}`;
 
+  const role = input.role ?? 'user';
   return {
-    eventId: `${turnId}:user`,
+    eventId: `${turnId}:${role}`,
     turnId,
     turnSeq: 0,
     ts: input.ts ?? Date.now(),
     eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-    role: 'user' as const,
+    role,
     contentBlocks: [{ type: 'text' as const, text: input.text }],
     metadata: {
       visibleInTranscript: true,
