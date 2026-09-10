@@ -43,6 +43,7 @@ export type ToolIconKey =
   | 'environment'
   | 'alert'
   | 'messages'
+  | 'stopwatch'
   | 'tool';
 
 type ToolPresentationPhase = 'running' | 'completed' | 'failed';
@@ -107,7 +108,7 @@ const COMMUNICATION_TOOL_NAMES = new Set([
 ]);
 const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_custom_automations: 'task',
-  manage_wakeups: 'task',
+  manage_wakeups: 'stopwatch',
   get_about_me: 'roomote',
   describe_video: 'video',
   request_user_input: 'list',
@@ -416,6 +417,11 @@ function resolveReceiptLanguage(
     };
   if (toolName === 'manage_tasks' && serverName === 'roomote')
     return manageTasksReceipt(args, phase);
+  if (toolName === 'manage_wakeups')
+    return {
+      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
+      object: 'timers',
+    };
   if (toolName === 'find_integration_tools')
     return {
       verb: byPhase('Searching', 'Searched', 'Failed to Search'),
