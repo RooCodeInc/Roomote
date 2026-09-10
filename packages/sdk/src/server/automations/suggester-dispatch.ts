@@ -9,6 +9,10 @@ import type { WorkItemStatus } from '@roomote/types';
 import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback';
 import { type ActiveRepositoryProviderPartition } from './github-deployment-scope';
 
+type SuggesterRepositoryPartition = ActiveRepositoryProviderPartition & {
+  repositoryIds: string[];
+};
+
 export type SuggesterDeploymentContext = {
   slackBotToken: string | null;
   slackTeamId: string | null;
@@ -37,7 +41,7 @@ export async function dispatchSuggestionScan(params: {
     status: WorkItemStatus;
   }>;
   repositoryCoverage: EnvironmentBackedRepositoryCoverage;
-  repositoryPartitions: ActiveRepositoryProviderPartition[];
+  repositoryPartitions: SuggesterRepositoryPartition[];
   suggesterInstructions: string | null;
   triggerKind: 'manual' | 'scheduled';
   destinationPayloadFields?: Record<string, string>;
@@ -67,9 +71,9 @@ export async function dispatchSuggestionScan(params: {
     let firstLaunchedTaskId: string | null = null;
 
     const launchPartition = async (
-      partition: ActiveRepositoryProviderPartition,
+      partition: SuggesterRepositoryPartition,
     ): Promise<string> => {
-      const partitionNames = new Set(partition.repositoryFullNames);
+      const partitionIds = new Set(partition.repositoryIds);
       const launchResult = await enqueueTask({
         task: {
           type: TaskPayloadKind.Scan,
@@ -84,7 +88,7 @@ export async function dispatchSuggestionScan(params: {
             description: buildSuggestedTasksPrompt({
               repositoryFullNames: partition.repositoryFullNames,
               repositoryCoverage: params.repositoryCoverage.filter((coverage) =>
-                partitionNames.has(coverage.repositoryFullName),
+                partitionIds.has(coverage.repositoryId),
               ),
               setupGuidance: null,
               suggesterInstructions: params.suggesterInstructions,

@@ -52,6 +52,7 @@ function buildParams() {
         provider: 'github' as const,
         host: null,
         repositoryFullNames: ['acme/api'],
+        repositoryIds: ['repo-api'],
       },
     ],
     suggesterInstructions: 'Prioritize auth and data-loss failures.',
@@ -127,11 +128,13 @@ describe('dispatchSuggestionScan', () => {
         provider: 'bitbucket',
         host: 'bitbucket.org',
         repositoryFullNames: ['acme/api'],
+        repositoryIds: ['repo-api'],
       },
       {
         provider: 'ado',
         host: 'dev.azure.com',
         repositoryFullNames: ['acme/mobile'],
+        repositoryIds: ['repo-mobile'],
       },
     ] as const;
     mockEnqueueTask
@@ -143,6 +146,7 @@ describe('dispatchSuggestionScan', () => {
       repositoryPartitions: repositoryPartitions.map((partition) => ({
         ...partition,
         repositoryFullNames: [...partition.repositoryFullNames],
+        repositoryIds: [...partition.repositoryIds],
       })),
       repositoryCoverage: [
         {
@@ -165,6 +169,70 @@ describe('dispatchSuggestionScan', () => {
       sourceControlProvider: 'ado',
       sourceControlHost: 'dev.azure.com',
     });
+  });
+
+  it('keeps environment coverage scoped by repository ID', async () => {
+    await dispatchSuggestionScan({
+      ...buildParams(),
+      repositoryPartitions: [
+        {
+          provider: 'github',
+          host: null,
+          repositoryFullNames: ['acme/api'],
+          repositoryIds: ['repo-github'],
+        },
+        {
+          provider: 'gitlab',
+          host: 'gitlab.example.com',
+          repositoryFullNames: ['acme/api'],
+          repositoryIds: ['repo-gitlab'],
+        },
+      ],
+      repositoryCoverage: [
+        {
+          repositoryId: 'repo-github',
+          repositoryFullName: 'acme/api',
+          targetEnvironmentId: 'env-github',
+        },
+        {
+          repositoryId: 'repo-gitlab',
+          repositoryFullName: 'acme/api',
+          targetEnvironmentId: 'env-gitlab',
+        },
+      ],
+    });
+
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
+    expect(mockEnqueueTask.mock.calls[0]![0].task.payload.description).toBe(
+      buildSuggestedTasksPrompt({
+        repositoryFullNames: ['acme/api'],
+        repositoryCoverage: [
+          {
+            repositoryFullName: 'acme/api',
+            targetEnvironmentId: 'env-github',
+          },
+        ],
+        setupGuidance: null,
+        suggesterInstructions: 'Prioritize auth and data-loss failures.',
+        previousSuggestions: buildParams().previousSuggestions,
+        recentThreadFeedback: 'Manager feedback',
+      }),
+    );
+    expect(mockEnqueueTask.mock.calls[1]![0].task.payload.description).toBe(
+      buildSuggestedTasksPrompt({
+        repositoryFullNames: ['acme/api'],
+        repositoryCoverage: [
+          {
+            repositoryFullName: 'acme/api',
+            targetEnvironmentId: 'env-gitlab',
+          },
+        ],
+        setupGuidance: null,
+        suggesterInstructions: 'Prioritize auth and data-loss failures.',
+        previousSuggestions: buildParams().previousSuggestions,
+        recentThreadFeedback: 'Manager feedback',
+      }),
+    );
   });
 
   it('omits Slack metadata for a Telegram destination', async () => {

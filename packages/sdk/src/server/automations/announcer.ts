@@ -15,6 +15,7 @@ import {
   gte,
   isNotNull,
   inArray,
+  or,
   repositories,
 } from '@roomote/db/server';
 import {
@@ -103,6 +104,9 @@ async function getMergedPullRequests(
   const rows = await db
     .select({
       repo: taskPullRequests.repository,
+      repositoryId: taskPullRequests.repositoryId,
+      sourceControlProvider: taskPullRequests.sourceControlProvider,
+      host: taskPullRequests.host,
       prNumber: taskPullRequests.prNumber,
       prTitle: taskPullRequests.prTitle,
       prUrl: taskPullRequests.prUrl,
@@ -122,29 +126,48 @@ async function getMergedPullRequests(
     .limit(500);
 
   const deduped = new Map<string, MergedPullRequest>();
-  const repositoryNames = [
+  const legacyRepositoryNames = [
     ...new Set(
       rows
+        .filter((row) => row.repositoryId === null)
         .map((row) => row.repo)
         .filter((name): name is string => Boolean(name)),
     ),
   ];
-  const activeRepositories = repositoryNames.length
-    ? await db
-        .select({
-          id: repositories.id,
-          fullName: repositories.fullName,
-          sourceControlProvider: repositories.sourceControlProvider,
-          host: repositories.host,
-        })
-        .from(repositories)
-        .where(
-          and(
-            eq(repositories.isActive, true),
-            inArray(repositories.fullName, repositoryNames),
-          ),
-        )
-    : [];
+  const repositoryIds = [
+    ...new Set(
+      rows
+        .map((row) => row.repositoryId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const activeRepositories =
+    repositoryIds.length || legacyRepositoryNames.length
+      ? await db
+          .select({
+            id: repositories.id,
+            fullName: repositories.fullName,
+            sourceControlProvider: repositories.sourceControlProvider,
+            host: repositories.host,
+          })
+          .from(repositories)
+          .where(
+            and(
+              eq(repositories.isActive, true),
+              or(
+                repositoryIds.length
+                  ? inArray(repositories.id, repositoryIds)
+                  : undefined,
+                legacyRepositoryNames.length
+                  ? inArray(repositories.fullName, legacyRepositoryNames)
+                  : undefined,
+              ),
+            ),
+          )
+      : [];
+  const repositoriesById = new Map(
+    activeRepositories.map((repository) => [repository.id, repository]),
+  );
   const repositoriesByName = new Map<string, typeof activeRepositories>();
   for (const repository of activeRepositories) {
     const matches = repositoriesByName.get(repository.fullName) ?? [];
@@ -156,7 +179,16 @@ async function getMergedPullRequests(
     if (!row.repo || row.prNumber === null || !row.prUrl || !row.mergedAt) {
       continue;
     }
-    const repositoryMatches = repositoriesByName.get(row.repo) ?? [];
+    const repositoryMatches = row.repositoryId
+      ? [repositoriesById.get(row.repositoryId)].filter(
+          (repository): repository is (typeof activeRepositories)[number] =>
+            Boolean(repository),
+        )
+      : (repositoriesByName.get(row.repo) ?? []).filter(
+          (repository) =>
+            repository.sourceControlProvider === row.sourceControlProvider &&
+            (row.host === null || repository.host === row.host),
+        );
     if (repositoryMatches.length !== 1) continue;
     const repository = repositoryMatches[0]!;
 

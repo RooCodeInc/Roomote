@@ -1,7 +1,7 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
-  getCiFailureTriageRules,
-  isCiFailureTriageRepositoryAllowed,
+  getAutomationAdditionalRules,
+  isAutomationAdditionalRulesRepositoryAllowed,
   isTriggerableBackgroundAutomationKey,
   type CommunicationProvider,
   type TriggerableBackgroundAutomationKey,
@@ -46,18 +46,27 @@ async function assertManualTriggerIsRunnable(
     );
   }
 
-  if (automationKey === 'ci_failure_triage') {
-    const rules = getCiFailureTriageRules(runtime.settings);
+  if ('additionalRules' in descriptor) {
+    const rules = getAutomationAdditionalRules(runtime.settings);
     if (rules !== undefined) {
+      if (rules === null) {
+        throw new Error(
+          `${descriptor.label} Additional rules are invalid. Save them again before running the automation.`,
+        );
+      }
       const repositories = (await getRepositories(auth)).filter(
         (repo) =>
           descriptor.supportedSourceControlProviders.some(
             (provider) => provider === repo.sourceControlProvider,
-          ) && isCiFailureTriageRepositoryAllowed(runtime.settings, repo.id),
+          ) &&
+          isAutomationAdditionalRulesRepositoryAllowed(
+            runtime.settings,
+            repo.id,
+          ),
       );
       if (!repositories.length)
         throw new Error(
-          'Select at least one active repository before running CI Failure Triage.',
+          `Select at least one active repository before running ${descriptor.label}.`,
         );
       const connectedProviders = await listConnectedCommunicationProviders();
       for (const repository of repositories) {
@@ -73,7 +82,7 @@ async function assertManualTriggerIsRunnable(
         }
       }
       throw new Error(
-        'Configure an available destination for the selected CI Failure Triage repositories.',
+        `Configure an available destination for the selected ${descriptor.label} repositories.`,
       );
     }
   }

@@ -25,6 +25,9 @@ const {
   },
   taskPullRequestsTable: {
     repository: 'repository',
+    repositoryId: 'repositoryId',
+    sourceControlProvider: 'sourceControlProvider',
+    host: 'host',
     prNumber: 'prNumber',
     prTitle: 'prTitle',
     prUrl: 'prUrl',
@@ -92,6 +95,7 @@ vi.mock('@roomote/db/server', () => ({
   gte: vi.fn(),
   isNotNull: vi.fn(),
   inArray: vi.fn(),
+  or: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -174,6 +178,9 @@ import { announcerJob } from '../announcer';
 const MERGED_PR_ROWS = [
   {
     repo: 'acme/app',
+    repositoryId: '11111111-1111-4111-8111-111111111111',
+    sourceControlProvider: 'github',
+    host: null,
     prNumber: 1,
     prTitle: 'Fix bug',
     prUrl: 'https://github.com/acme/app/pull/1',
@@ -181,6 +188,9 @@ const MERGED_PR_ROWS = [
   },
   {
     repo: 'acme/app',
+    repositoryId: '11111111-1111-4111-8111-111111111111',
+    sourceControlProvider: 'github',
+    host: null,
     prNumber: 2,
     prTitle: 'Add thing',
     prUrl: 'https://github.com/acme/app/pull/2',
@@ -354,6 +364,53 @@ describe('announcerJob non-Slack posting', () => {
         surface: 'telegram',
       }),
     );
+  });
+
+  it('routes same-name repositories by their persisted repository IDs', async () => {
+    const secondRepositoryId = '22222222-2222-4222-8222-222222222222';
+    mockMergedPullRequestRows.mockResolvedValue([
+      MERGED_PR_ROWS[0],
+      {
+        ...MERGED_PR_ROWS[1],
+        repositoryId: secondRepositoryId,
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.example.com',
+        prUrl: 'https://gitlab.example.com/acme/app/-/merge_requests/2',
+      },
+    ]);
+    mockActiveRepositoryRows.mockResolvedValue([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        fullName: 'acme/app',
+        sourceControlProvider: 'github',
+        host: null,
+      },
+      {
+        id: secondRepositoryId,
+        fullName: 'acme/app',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.example.com',
+      },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+    mockResolveAutomationRepositoryDestination.mockImplementation(
+      async ({ repositoryId }) => ({
+        provider: 'telegram',
+        channelId: repositoryId === secondRepositoryId ? '-100222' : '-100111',
+      }),
+    );
+
+    await announcerJob({ manualTrigger: true });
+
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
+    expect(
+      mockResolveAutomationRepositoryDestination.mock.calls.map(
+        ([params]) => params.repositoryId,
+      ),
+    ).toEqual(['11111111-1111-4111-8111-111111111111', secondRepositoryId]);
   });
 
   it('records a failed outcome when task launch fails', async () => {

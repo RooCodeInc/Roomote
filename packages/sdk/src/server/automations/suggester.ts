@@ -339,17 +339,22 @@ export async function suggesterJob(
         ) {
           continue;
         }
-        const partitions = new Map<string, ActiveRepositoryProviderPartition>();
+        const partitions = new Map<
+          string,
+          ActiveRepositoryProviderPartition & { repositoryIds: string[] }
+        >();
         for (const repository of group.repositories) {
           const key = `${repository.sourceControlProvider}\0${repository.host ?? ''}`;
           const partition = partitions.get(key);
-          if (partition)
+          if (partition) {
             partition.repositoryFullNames.push(repository.fullName);
-          else
+            partition.repositoryIds.push(repository.id);
+          } else
             partitions.set(key, {
               provider: repository.sourceControlProvider,
               host: repository.host,
               repositoryFullNames: [repository.fullName],
+              repositoryIds: [repository.id],
             });
         }
         const dispatchResult = await dispatchSuggestionScan({
