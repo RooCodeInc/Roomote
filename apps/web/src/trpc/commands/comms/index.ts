@@ -7,6 +7,7 @@ import {
   invalidateDiscordRuntimeCredentialsCache,
   normalizeDiscordBotToken,
   resolveAgentMailRuntimeCredentials,
+  type AgentMailKeyScope,
   resolveDiscordGatewaySecret,
   resolveDiscordRuntimeCredentials,
   validateDiscordBotToken,
@@ -142,7 +143,7 @@ const ADDITIONAL_COMMS_PROVIDERS: Record<
       {
         envVarName: 'R_AGENTMAIL_POD_ID',
         acceptedEnvVarNames: ['R_AGENTMAIL_POD_ID'],
-        label: 'AgentMail Pod ID (optional)',
+        label: 'AgentMail Pod ID',
         required: false,
       },
       {
@@ -214,6 +215,8 @@ type AgentMailWebhookStatus = {
 export type AgentMailCommsStatus = {
   /** The AgentMail pod the inbox and webhook live in, when pod-scoped. */
   podId: string | null;
+  /** 'inbox' when the key is inbox-scoped and the webhook lives on the inbox. */
+  keyScope: AgentMailKeyScope;
   /** The routed inbox_id (the persisted configuration value). */
   inboxAddress: string | null;
   /** The deliverable address for display, resolved live from AgentMail. */
@@ -662,12 +665,35 @@ function buildExpectedAgentMailWebhookUrl(): string {
   return new URL('/api/webhooks/agentmail', Env.R_APP_URL).toString();
 }
 
-function createAgentMailApiClient(apiKey: string, podId: string | null) {
+function createAgentMailApiClient(
+  apiKey: string,
+  podId: string | null,
+  webhookInboxId: string | null = null,
+) {
   return new AgentMailApiClient({
     apiKey,
     ...(podId ? { podId } : {}),
+    ...(webhookInboxId ? { webhookInboxId } : {}),
     timeoutMs: AGENTMAIL_API_TIMEOUT_MS,
   });
+}
+
+/** The inbox to manage webhooks under, when the saved key is inbox-scoped. */
+function webhookInboxForScope(credentials: {
+  keyScope: AgentMailKeyScope;
+  inboxId: string | null;
+  podId: string | null;
+}): string | null {
+  return credentials.keyScope === 'inbox' && !credentials.podId
+    ? credentials.inboxId
+    : null;
+}
+
+function isAgentMailPermissionError(error: unknown): boolean {
+  return (
+    error instanceof AgentMailApiError &&
+    (error.status === 401 || error.status === 403)
+  );
 }
 
 function normalizeAgentMailPodId(value: string | null | undefined) {
@@ -682,6 +708,25 @@ function assertEmailChannelEnabled(): void {
   if (!isEmailChannelEnabled()) {
     throw new Error(EMAIL_CHANNEL_DISABLED_MESSAGE);
   }
+}
+
+/**
+ * Pull "METHOD /path" plus AgentMail's response detail out of the client's
+ * error message (`AgentMail GET /v0/webhooks failed (403): {...}`), trimmed
+ * so a long body cannot swamp the settings toast.
+ */
+function describeAgentMailRequest(message: string): string | null {
+  const match =
+    /^AgentMail (GET|POST|PATCH|DELETE) (\S+) failed \(\d+\)(?::\s*([\s\S]*))?$/u.exec(
+      message.trim(),
+    );
+  if (!match) {
+    return null;
+  }
+  const [, method, path, body] = match;
+  const detail = body?.trim().replace(/\s+/gu, ' ') ?? '';
+  const clipped = detail.length > 160 ? `${detail.slice(0, 157)}...` : detail;
+  return clipped ? `${method} ${path} (${clipped})` : `${method} ${path}`;
 }
 
 /** Map AgentMail API / network failures into admin-facing setup copy. */
@@ -735,9 +780,20 @@ function classifyAgentMailSetupError(
     lower.includes('forbidden') ||
     lower.includes('invalid api key')
   ) {
-    return operation === 'validating the API key'
-      ? `AgentMail rejected this API key. Create a key in the AgentMail console with these permissions (or full access) and save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`
-      : `AgentMail refused permission while ${operation} (${message.includes('(403)') ? '403 Forbidden' : '401 Unauthorized'}). Create a key with these permissions (or full access) and save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`;
+    // Name the exact request AgentMail refused: the same key can pass the
+    // inbox checks and still be refused on the organization-level webhook
+    // endpoints when it is scoped to an inbox or a pod, and "check your
+    // permissions" alone sends the operator in circles.
+    const request = describeAgentMailRequest(message);
+    const requestDetail = request ? ` Request: ${request}.` : '';
+    if (operation === 'validating the API key') {
+      return `AgentMail rejected this API key. Create a key in the AgentMail console with these permissions (or full access) and save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.${requestDetail}`;
+    }
+    const scopeHint =
+      operation === 'configuring the webhook'
+        ? ' A key scoped to a pod is refused here even with full permissions unless the AgentMail Pod ID is entered, so Roomote registers the webhook inside that pod.'
+        : '';
+    return `AgentMail refused permission while ${operation} (${message.includes('(403)') ? '403 Forbidden' : '401 Unauthorized'}).${requestDetail}${scopeHint} Otherwise create a key with these permissions (or full access) and save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`;
   }
 
   return `AgentMail failed while ${operation}: ${message.trim() || 'could not connect.'}`;
@@ -861,6 +917,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   const client = createAgentMailApiClient(
     credentials.apiKey,
     credentials.podId,
+    webhookInboxForScope(credentials),
   );
 
   try {
@@ -892,6 +949,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
 
     return {
       podId: credentials.podId,
+      keyScope: credentials.keyScope,
       inboxAddress: credentials.inboxId,
       inboxEmail,
       webhook: {
@@ -908,6 +966,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   } catch (error) {
     return {
       podId: credentials.podId,
+      keyScope: credentials.keyScope,
       inboxAddress: credentials.inboxId,
       inboxEmail: null,
       webhook: {
@@ -982,6 +1041,8 @@ export async function listAgentMailInboxesCommand(
 type AgentMailReconcileResult = {
   /** The pod the inbox and webhook were reconciled in, when pod-scoped. */
   podId: string | null;
+  /** 'inbox' when the key turned out to be inbox-scoped. */
+  keyScope: AgentMailKeyScope;
   /** The routed inbox_id — persisted and used in API paths/webhook scoping. */
   inboxAddress: string;
   /** The deliverable address, display only. */
@@ -1091,17 +1152,6 @@ async function reconcileAgentMailSetup(input: {
     );
   }
 
-  // Webhook permissions are the ones default console keys most often lack;
-  // prove them during validation so the failure names the missing permission
-  // before any inbox work happens.
-  try {
-    await client.listWebhooks();
-  } catch (error) {
-    throw new Error(
-      classifyAgentMailSetupError(error, 'configuring the webhook'),
-    );
-  }
-
   const requestedInboxId =
     normalizeAgentMailInboxAddress(input.enteredInboxId) ?? existing.inboxId;
   let inboxAddress: string;
@@ -1208,11 +1258,46 @@ async function reconcileAgentMailSetup(input: {
   ];
   let webhookSecret = existing.webhookSecret;
 
+  // Which endpoints the key can manage the webhook through. An inbox-scoped
+  // key passes every inbox check above and is then refused on the
+  // organization-level webhook endpoints, so on that refusal the same key is
+  // tried against the inbox's own webhook endpoints before failing the save.
+  // The detected scope is persisted so status and disconnect use the same
+  // endpoints without probing again.
+  let keyScope: AgentMailKeyScope =
+    existing.keyScope === 'inbox' && !podId ? 'inbox' : 'organization';
+  let webhookClient =
+    keyScope === 'inbox'
+      ? createAgentMailApiClient(apiKey, null, inboxAddress)
+      : client;
+  let webhooks: AgentMailWebhook[] | undefined;
   try {
-    const { webhooks } = await client.listWebhooks();
+    webhooks = (await webhookClient.listWebhooks()).webhooks;
+  } catch (error) {
+    const inboxScopedClient =
+      keyScope === 'organization' && !podId && isAgentMailPermissionError(error)
+        ? createAgentMailApiClient(apiKey, null, inboxAddress)
+        : null;
+    const inboxScoped = inboxScopedClient
+      ? await inboxScopedClient
+          .listWebhooks()
+          .then((listed) => listed.webhooks)
+          .catch(() => null)
+      : null;
+    if (!inboxScopedClient || inboxScoped === null) {
+      throw new Error(
+        classifyAgentMailSetupError(error, 'configuring the webhook'),
+      );
+    }
+    keyScope = 'inbox';
+    webhookClient = inboxScopedClient;
+    webhooks = inboxScoped;
+  }
+
+  try {
     const existingWebhook = findRoomoteAgentMailWebhook(webhooks);
     const createDeploymentWebhook = async (): Promise<string | null> => {
-      const created = await client.createWebhook({
+      const created = await webhookClient.createWebhook({
         url: webhookUrl,
         clientId: buildAgentMailWebhookClientId(Env.R_APP_URL),
         inboxIds: desiredInboxIds,
@@ -1248,14 +1333,14 @@ async function reconcileAgentMailSetup(input: {
       // secret we cannot verify deliveries for is useless: both cases mean a
       // fresh registration. Scope and event drift converge in place.
       if (existingWebhook.url !== webhookUrl || !webhookSecret) {
-        await client.deleteWebhook(existingWebhook.webhook_id);
+        await webhookClient.deleteWebhook(existingWebhook.webhook_id);
         webhookSecret = await createDeploymentWebhook();
       } else if (
         addInboxIds.length > 0 ||
         removeInboxIds.length > 0 ||
         !eventTypesMatch
       ) {
-        await client.updateWebhook(existingWebhook.webhook_id, {
+        await webhookClient.updateWebhook(existingWebhook.webhook_id, {
           ...(addInboxIds.length ? { addInboxIds } : {}),
           ...(removeInboxIds.length ? { removeInboxIds } : {}),
           ...(eventTypesMatch ? {} : { eventTypes: desiredEventTypes }),
@@ -1272,6 +1357,7 @@ async function reconcileAgentMailSetup(input: {
 
   return {
     podId,
+    keyScope,
     inboxAddress,
     inboxEmail: inboxEmails.get(inboxAddress) ?? inboxAddress,
     webhookUrl,
@@ -1287,6 +1373,7 @@ async function deleteAgentMailWebhookBestEffort(): Promise<void> {
     const client = createAgentMailApiClient(
       credentials.apiKey,
       credentials.podId,
+      webhookInboxForScope(credentials),
     );
     const { webhooks } = await client.listWebhooks();
     const webhook = findRoomoteAgentMailWebhook(webhooks);
@@ -1841,6 +1928,14 @@ export async function saveCommsAuthConfigCommand(
       ) {
         await deleteDeploymentEnvVarsByNames(tx, ['R_AGENTMAIL_POD_ID']);
       }
+      // The key scope is detected, never entered: record an inbox-scoped key
+      // so status and disconnect address the inbox's webhook endpoints, and
+      // drop the record once an organization-level key replaces it.
+      if (agentmailSetup.keyScope === 'inbox') {
+        valuesToSave.push({ name: 'R_AGENTMAIL_KEY_SCOPE', value: 'inbox' });
+      } else if (persistedEnvVarNames.includes('R_AGENTMAIL_KEY_SCOPE')) {
+        await deleteDeploymentEnvVarsByNames(tx, ['R_AGENTMAIL_KEY_SCOPE']);
+      }
     }
 
     const hasConfiguredAuthEnvVar = (name: string) =>
@@ -1932,6 +2027,7 @@ export async function saveCommsAuthConfigCommand(
       ? {
           agentmail: {
             podId: agentmailSetup.podId,
+            keyScope: agentmailSetup.keyScope,
             inboxAddress: agentmailSetup.inboxAddress,
             inboxEmail: agentmailSetup.inboxEmail,
             webhookUrl: agentmailSetup.webhookUrl,
@@ -1960,7 +2056,10 @@ export async function clearCommsAuthConfigCommand(
     // The webhook secret is provisioned server-side rather than entered, so
     // it is not a field; remove it with the credentials, and best-effort
     // unregister the webhook while the API key is still available.
-    fieldEnvVarNames.push('R_AGENTMAIL_WEBHOOK_SECRET');
+    fieldEnvVarNames.push(
+      'R_AGENTMAIL_WEBHOOK_SECRET',
+      'R_AGENTMAIL_KEY_SCOPE',
+    );
     await deleteAgentMailWebhookBestEffort();
   }
 

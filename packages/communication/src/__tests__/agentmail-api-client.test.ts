@@ -136,6 +136,53 @@ describe('AgentMailApiClient pod scoping', () => {
     expect(client.podId).toBe('pod_acme');
   });
 
+  it('manages webhooks under the inbox for an inbox-scoped key', async () => {
+    const calls: Array<{ method: string; url: string; body: unknown }> = [];
+    const client = new AgentMailApiClient({
+      apiKey: 'am_inbox_scoped',
+      apiBaseUrl: 'https://agentmail.test',
+      webhookInboxId: 'roomote@roomote.me',
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({
+          method: init?.method ?? 'GET',
+          url: String(input),
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return jsonResponse({ inboxes: [], webhooks: [] });
+      }) as typeof fetch,
+    });
+
+    await client.listInboxes();
+    await client.listWebhooks();
+    await client.createWebhook({
+      url: 'https://app.example.com/api/webhooks/agentmail',
+      inboxIds: ['roomote@roomote.me'],
+      eventTypes: ['message.received'],
+    });
+    await client.updateWebhook('wh-1', {
+      addInboxIds: ['x@roomote.me'],
+      eventTypes: ['message.received', 'message.bounced'],
+    });
+    await client.deleteWebhook('wh-1');
+
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      'GET https://agentmail.test/v0/inboxes',
+      'GET https://agentmail.test/v0/inboxes/roomote%40roomote.me/webhooks',
+      'POST https://agentmail.test/v0/inboxes/roomote%40roomote.me/webhooks',
+      'PATCH https://agentmail.test/v0/inboxes/roomote%40roomote.me/webhooks/wh-1',
+      'DELETE https://agentmail.test/v0/inboxes/roomote%40roomote.me/webhooks/wh-1',
+    ]);
+    // The path pins the inbox: no inbox list on create, no add/remove on update.
+    expect(calls[2]?.body).toEqual({
+      url: 'https://app.example.com/api/webhooks/agentmail',
+      event_types: ['message.received'],
+    });
+    expect(calls[3]?.body).toEqual({
+      event_types: ['message.received', 'message.bounced'],
+    });
+    expect(client.webhookInboxId).toBe('roomote@roomote.me');
+  });
+
   it('stays at organization level without a pod', async () => {
     const { client, calls } = recordingClient();
     await client.listWebhooks();

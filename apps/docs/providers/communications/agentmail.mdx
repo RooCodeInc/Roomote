@@ -35,8 +35,16 @@ The API key must carry these AgentMail permissions (or be a full-access
 key): `inbox_read`, `inbox_create`, `inbox_update`, `webhook_read`,
 `webhook_create`, `webhook_update`, `webhook_delete`, `message_read`, and
 `message_send`. Missing permissions fail at save time with an error naming
-the refused step, except `message_send`, which has no side-effect-free
+the refused request, except `message_send`, which has no side-effect-free
 check and is exercised on the first reply.
+
+The key can be an organization-level key or an inbox-scoped key. An
+inbox-scoped key (created from inside the inbox in the AgentMail console) is
+the least-privilege choice for a one-inbox deployment: Roomote detects it on
+save and registers the webhook on the inbox itself instead of at the
+organization level. Enter that inbox's address, or leave the field blank
+when it is the only inbox the key can see. A pod-scoped key needs the pod id
+(see [Pods and pod-scoped keys](#pods-and-pod-scoped-keys)).
 
 In the Roomote UI (**Settings > Communications > Email (AgentMail)**),
 paste the API key, then save. Roomote proposes a deployment inbox address such as

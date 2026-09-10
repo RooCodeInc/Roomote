@@ -10,7 +10,21 @@ export type AgentMailRuntimeCredentials = {
    * organization-level resources.
    */
   podId: string | null;
+  /**
+   * Whether the API key is an inbox-scoped key. Inbox-scoped keys manage the
+   * webhook through the inbox's own endpoints; detected at save time and
+   * persisted so status and disconnect use the same endpoints.
+   */
+  keyScope: AgentMailKeyScope;
 };
+
+export type AgentMailKeyScope = 'organization' | 'inbox';
+
+function normalizeKeyScope(
+  value: string | null | undefined,
+): AgentMailKeyScope {
+  return value?.trim().toLowerCase() === 'inbox' ? 'inbox' : 'organization';
+}
 
 const CACHE_TTL_MS = 30_000;
 
@@ -30,6 +44,7 @@ function readProcessEnvCredentials(): AgentMailRuntimeCredentials {
     webhookSecret: process.env.R_AGENTMAIL_WEBHOOK_SECRET?.trim() || null,
     inboxId: normalizeInboxId(process.env.R_AGENTMAIL_INBOX_ID),
     podId: process.env.R_AGENTMAIL_POD_ID?.trim() || null,
+    keyScope: normalizeKeyScope(process.env.R_AGENTMAIL_KEY_SCOPE),
   };
 }
 
@@ -64,6 +79,9 @@ export async function resolveAgentMailRuntimeCredentials(): Promise<AgentMailRun
       normalizeInboxId(deploymentEnvVars.R_AGENTMAIL_INBOX_ID),
     podId:
       fromEnv.podId || deploymentEnvVars.R_AGENTMAIL_POD_ID?.trim() || null,
+    keyScope: process.env.R_AGENTMAIL_KEY_SCOPE?.trim()
+      ? fromEnv.keyScope
+      : normalizeKeyScope(deploymentEnvVars.R_AGENTMAIL_KEY_SCOPE),
   };
 
   cachedCredentials = { value, expiresAtMs: nowMs + CACHE_TTL_MS };

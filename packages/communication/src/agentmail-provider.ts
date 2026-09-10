@@ -422,6 +422,13 @@ export type AgentMailApiClientOptions = {
    * message endpoints are inbox-addressed either way.
    */
   podId?: string;
+  /**
+   * Manage webhooks through the inbox-scoped endpoints
+   * (`/v0/inboxes/{inbox_id}/webhooks`), which is all an inbox-scoped API
+   * key can reach. Such a webhook is fixed to the inbox: creation carries no
+   * inbox or pod scope and updates only change event types.
+   */
+  webhookInboxId?: string;
   apiBaseUrl?: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
@@ -458,6 +465,8 @@ export class AgentMailApiClient {
    * the organization otherwise. Message paths always hang off `/v0/inboxes`.
    */
   private readonly managementPrefix: string;
+  /** Prefix for webhook paths: the pod, the inbox, or the organization. */
+  private readonly webhookPrefix: string;
 
   constructor(private readonly options: AgentMailApiClientOptions) {
     this.apiBaseUrl = trimTrailingSlashes(
@@ -466,13 +475,24 @@ export class AgentMailApiClient {
     this.fetchImpl = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_AGENTMAIL_TIMEOUT_MS;
     const podId = options.podId?.trim();
+    const webhookInboxId = options.webhookInboxId?.trim();
     this.managementPrefix = podId
       ? `/v0/pods/${encodeURIComponent(podId)}`
       : '/v0';
+    this.webhookPrefix = podId
+      ? this.managementPrefix
+      : webhookInboxId
+        ? `/v0/inboxes/${encodeURIComponent(webhookInboxId)}`
+        : '/v0';
   }
 
   get podId(): string | null {
     return this.options.podId?.trim() || null;
+  }
+
+  /** The inbox webhooks are managed under, when inbox-scoped. */
+  get webhookInboxId(): string | null {
+    return this.podId ? null : this.options.webhookInboxId?.trim() || null;
   }
 
   /**
@@ -551,12 +571,13 @@ export class AgentMailApiClient {
   listWebhooks(): Promise<
     { webhooks?: AgentMailWebhook[] } & Record<string, unknown>
   > {
-    return this.request('GET', `${this.managementPrefix}/webhooks`);
+    return this.request('GET', `${this.webhookPrefix}/webhooks`);
   }
 
   /**
-   * Under a pod, the created webhook is scoped to that pod by the path;
-   * `inboxIds` narrows it further either way.
+   * Under a pod, the created webhook is scoped to that pod by the path and
+   * `inboxIds` narrows it further; under an inbox, the path fixes the scope
+   * and no inbox list is sent.
    */
   createWebhook(input: {
     url: string;
@@ -564,10 +585,12 @@ export class AgentMailApiClient {
     inboxIds?: string[];
     eventTypes?: string[];
   }): Promise<AgentMailWebhook> {
-    return this.request('POST', `${this.managementPrefix}/webhooks`, {
+    return this.request('POST', `${this.webhookPrefix}/webhooks`, {
       url: input.url,
       ...(input.clientId ? { client_id: input.clientId } : {}),
-      ...(input.inboxIds ? { inbox_ids: input.inboxIds } : {}),
+      ...(input.inboxIds && !this.webhookInboxId
+        ? { inbox_ids: input.inboxIds }
+        : {}),
       ...(input.eventTypes ? { event_types: input.eventTypes } : {}),
     });
   }
@@ -575,7 +598,7 @@ export class AgentMailApiClient {
   getWebhook(webhookId: string): Promise<AgentMailWebhook> {
     return this.request(
       'GET',
-      `${this.managementPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
+      `${this.webhookPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
     );
   }
 
@@ -588,14 +611,16 @@ export class AgentMailApiClient {
     webhookId: string,
     input: AgentMailWebhookUpdate,
   ): Promise<AgentMailWebhook> {
+    // An inbox-scoped webhook is fixed to its inbox: only event types move.
+    const inboxScoped = Boolean(this.webhookInboxId);
     return this.request(
       'PATCH',
-      `${this.managementPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
+      `${this.webhookPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
       {
-        ...(input.addInboxIds?.length
+        ...(!inboxScoped && input.addInboxIds?.length
           ? { add_inbox_ids: input.addInboxIds }
           : {}),
-        ...(input.removeInboxIds?.length
+        ...(!inboxScoped && input.removeInboxIds?.length
           ? { remove_inbox_ids: input.removeInboxIds }
           : {}),
         // A non-empty list REPLACES the subscription in full (AgentMail
@@ -608,7 +633,7 @@ export class AgentMailApiClient {
   deleteWebhook(webhookId: string): Promise<void> {
     return this.request(
       'DELETE',
-      `${this.managementPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
+      `${this.webhookPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
     );
   }
 

@@ -310,6 +310,14 @@ function AgentMailSetupStatus({
           </p>
         </div>
       ) : null}
+      {status.keyScope === 'inbox' ? (
+        <div className="flex items-start gap-2">
+          <Info className="size-4 mt-0.5 shrink-0" />
+          <p className="text-sm">
+            Inbox-scoped API key: the webhook is registered on the inbox.
+          </p>
+        </div>
+      ) : null}
       {status.inboxAddress ? (
         <div className="flex items-start gap-2">
           <Mail className="size-4 mt-0.5 shrink-0" />

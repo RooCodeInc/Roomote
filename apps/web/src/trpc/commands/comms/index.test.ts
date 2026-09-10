@@ -47,6 +47,7 @@ const {
     webhookSecret: null as string | null,
     inboxId: null as string | null,
     podId: null as string | null,
+    keyScope: 'organization' as 'organization' | 'inbox',
   })),
   mockAgentMailClientConstructor: vi.fn(),
   mockAgentMailListInboxes: vi.fn(),
@@ -324,6 +325,7 @@ describe('comms commands', () => {
       webhookSecret: null,
       inboxId: null,
       podId: null,
+      keyScope: 'organization',
     });
     mockAgentMailListInboxes.mockResolvedValue({ inboxes: [] });
     mockAgentMailListWebhooks.mockResolvedValue({ webhooks: [] });
@@ -1039,6 +1041,130 @@ describe('comms commands', () => {
       );
     });
 
+    it('names the refused webhook request and the scoped-key cause on a webhook 403', async () => {
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [{ inbox_id: 'roomote@roomote.me' }],
+      });
+      // An inbox- or pod-scoped key passes the inbox checks but cannot
+      // reach the organization-level webhook endpoints.
+      mockAgentMailListWebhooks.mockRejectedValue(
+        new AgentMailApiError(
+          'AgentMail GET /v0/webhooks failed (403): {"message":"Forbidden"}',
+          403,
+        ),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-scoped-key' },
+        }),
+      ).rejects.toThrow(
+        /refused permission while configuring the webhook \(403 Forbidden\)\. Request: GET \/v0\/webhooks \(\{"message":"Forbidden"\}\)\. A key scoped to a pod .* AgentMail Pod ID/,
+      );
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the inbox-scoped webhook endpoints for an inbox-scoped key and records the scope', async () => {
+      mockAgentMailListInboxes.mockResolvedValue({
+        inboxes: [{ inbox_id: 'roomote@roomote.me' }],
+      });
+      // The organization-level listing is refused; the same key succeeds
+      // against the inbox's own webhook endpoints.
+      mockAgentMailListWebhooks
+        .mockRejectedValueOnce(
+          new AgentMailApiError(
+            'AgentMail GET /v0/webhooks failed (403): {"message":"Forbidden"}',
+            403,
+          ),
+        )
+        .mockResolvedValueOnce({ webhooks: [] });
+      mockAgentMailCreateWebhook.mockResolvedValue({
+        webhook_id: 'wh-inbox',
+        url: expectedWebhookUrl,
+        secret: 'whsec_inbox',
+        inbox_ids: ['roomote@roomote.me'],
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: { R_AGENTMAIL_API_KEY: 'am-inbox-key' },
+        }),
+      ).resolves.toMatchObject({
+        agentmail: { keyScope: 'inbox', inboxAddress: 'roomote@roomote.me' },
+      });
+
+      expect(mockAgentMailClientConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiKey: 'am-inbox-key',
+          webhookInboxId: 'roomote@roomote.me',
+        }),
+      );
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          values: expect.arrayContaining([
+            { name: 'R_AGENTMAIL_KEY_SCOPE', value: 'inbox' },
+            { name: 'R_AGENTMAIL_WEBHOOK_SECRET', value: 'whsec_inbox' },
+          ]),
+        }),
+      );
+    });
+
+    it('addresses the inbox webhook endpoints directly once an inbox-scoped key is recorded', async () => {
+      mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
+        apiKey: 'am-inbox-key',
+        webhookSecret: 'whsec_inbox',
+        inboxId: 'roomote@roomote.me',
+        podId: null,
+        keyScope: 'inbox',
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_AGENTMAIL_API_KEY',
+        'R_AGENTMAIL_INBOX_ID',
+        'R_AGENTMAIL_WEBHOOK_SECRET',
+        'R_AGENTMAIL_KEY_SCOPE',
+      ]);
+      mockAgentMailGetInbox.mockResolvedValue({
+        inbox_id: 'roomote@roomote.me',
+      });
+      mockAgentMailListWebhooks.mockResolvedValue({
+        webhooks: [
+          {
+            webhook_id: 'wh-inbox',
+            url: expectedWebhookUrl,
+            client_id: `roomote-agentmail-webhook-${hostHash}`,
+            inbox_ids: ['roomote@roomote.me'],
+            event_types: [
+              'message.received',
+              'message.bounced',
+              'message.complained',
+            ],
+          },
+        ],
+      });
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'agentmail',
+        values: { R_AGENTMAIL_INBOX_ID: 'roomote@roomote.me' },
+      });
+
+      // No organization-level probe, so no 403 round trip: one client, inbox
+      // scoped from the start.
+      expect(mockAgentMailListWebhooks).toHaveBeenCalledOnce();
+      expect(mockAgentMailClientConstructor).toHaveBeenLastCalledWith(
+        expect.objectContaining({ webhookInboxId: 'roomote@roomote.me' }),
+      );
+      expect(mockAgentMailUpdateWebhook).not.toHaveBeenCalled();
+      expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
+
+      const status = await getCommsStatusCommand(buildMockAuth());
+      const agentmail = status.providers.find((p) => p.id === 'agentmail');
+      expect(agentmail?.agentmail?.keyScope).toBe('inbox');
+      expect(agentmail?.agentmail?.webhook.status).toBe('connected');
+    });
+
     it('rejects a bad API key with clear copy and persists nothing', async () => {
       mockAgentMailListInboxes.mockRejectedValue(
         new Error('AgentMail GET /v0/inboxes failed (401): Unauthorized'),
@@ -1111,6 +1237,7 @@ describe('comms commands', () => {
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
         podId: null,
+        keyScope: 'organization',
       });
       mockAgentMailCreateWebhook.mockResolvedValue({
         webhook_id: 'wh-2',
@@ -1166,6 +1293,7 @@ describe('comms commands', () => {
         webhookSecret: 'whsec_existing',
         inboxId: 'old-inbox@agentmail.to',
         podId: null,
+        keyScope: 'organization',
       });
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
         'R_AGENTMAIL_API_KEY',
@@ -1281,6 +1409,7 @@ describe('comms commands', () => {
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
         podId: 'pod_old',
+        keyScope: 'organization',
       });
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
         'R_AGENTMAIL_API_KEY',
@@ -1328,6 +1457,7 @@ describe('comms commands', () => {
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
         podId: null,
+        keyScope: 'organization',
       });
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
         'R_AGENTMAIL_API_KEY',
@@ -1506,6 +1636,7 @@ describe('comms commands', () => {
         webhookSecret: null,
         inboxId: null,
         podId: null,
+        keyScope: 'organization',
       });
       mockAgentMailListInboxes.mockResolvedValue({
         inboxes: [
@@ -1537,6 +1668,7 @@ describe('comms commands', () => {
         webhookSecret: null,
         inboxId: null,
         podId: null,
+        keyScope: 'organization',
       });
       mockAgentMailListInboxes.mockResolvedValue({
         inboxes: [{ inbox_id: 'existing@agentmail.to' }],
@@ -1596,6 +1728,7 @@ describe('comms commands', () => {
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
         podId: null,
+        keyScope: 'organization',
       });
       mockAgentMailListWebhooks.mockResolvedValue({
         webhooks: [
@@ -1634,6 +1767,7 @@ describe('comms commands', () => {
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
         podId: null,
+        keyScope: 'organization',
       });
       mockAgentMailListWebhooks.mockRejectedValue(
         new Error('AgentMail GET /v0/webhooks failed (500)'),
@@ -1657,6 +1791,7 @@ describe('comms commands', () => {
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
         podId: null,
+        keyScope: 'organization',
       });
     });
 
