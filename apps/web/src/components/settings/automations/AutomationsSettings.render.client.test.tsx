@@ -1379,6 +1379,30 @@ describe('AutomationsSettings', () => {
     }
   });
 
+  it('does not schedule follow-up refreshes after unmount', () => {
+    vi.useFakeTimers();
+    setRunnableCustomAutomation();
+    const { unmount } = render(<AutomationsSettings />);
+    const onSuccess = mutations.latestCustomTriggerOptions?.onSuccess;
+
+    try {
+      unmount();
+      act(() => {
+        onSuccess?.({ outcome: 'queued' });
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('offers and displays the all-repositories workspace target', async () => {
     state.customAutomations = [
       {
