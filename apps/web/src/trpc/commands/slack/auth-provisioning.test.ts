@@ -13,9 +13,9 @@ import {
 } from '@roomote/db/server';
 import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
-import { useExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
-useExclusiveAutomationSettingsDatabaseLock();
+registerExclusiveAutomationSettingsDatabaseLock();
 
 const { ensureChannel, education, decodeState, fetchMock } = vi.hoisted(() => ({
   ensureChannel: vi.fn(),

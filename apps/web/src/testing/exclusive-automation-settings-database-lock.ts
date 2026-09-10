@@ -9,7 +9,7 @@ const LOCK_DIRECTORY = join(
 const STALE_LOCK_MS = 5 * 60 * 1000;
 
 /** Serializes suites that replace deployment-wide automation settings rows. */
-export function useExclusiveAutomationSettingsDatabaseLock() {
+export function registerExclusiveAutomationSettingsDatabaseLock() {
   beforeAll(async () => {
     for (let attempt = 0; attempt < 3_000; attempt += 1) {
       try {

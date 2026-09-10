@@ -19,7 +19,7 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { useExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { updateBackgroundAgentSettingsCommand } from '../settings-update';
 import { mergeAnnouncerDestinationInputSchema } from '../settings-schema';
@@ -45,7 +45,7 @@ vi.mock('@roomote/telemetry/server', () => ({
   captureActivationAutomationChanged: mockCaptureActivationAutomationChanged,
 }));
 
-useExclusiveAutomationSettingsDatabaseLock();
+registerExclusiveAutomationSettingsDatabaseLock();
 
 // Keep the test hermetic: the command constructs a SlackNotifier whenever a
 // Slack installation exists and probes channel membership/names after saving.

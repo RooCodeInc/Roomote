@@ -9,7 +9,7 @@ import {
 import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { useExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { getAutomationOnboardingStatusCommand } from '../onboarding-status';
 
@@ -35,7 +35,7 @@ const adminAuth: UserAuthSuccess = {
   },
 };
 
-useExclusiveAutomationSettingsDatabaseLock();
+registerExclusiveAutomationSettingsDatabaseLock();
 
 describe('getAutomationOnboardingStatusCommand', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
