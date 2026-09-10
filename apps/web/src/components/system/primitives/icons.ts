@@ -214,6 +214,7 @@ export {
   Video,
   VideoIcon,
   Volume2,
+  VolumeX,
   Wrench,
   X,
   XIcon,

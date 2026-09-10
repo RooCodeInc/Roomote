@@ -19,7 +19,6 @@ import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useStartFastSession } from '@/hooks/task-runs';
-import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 
 import { type PromptInputMessage } from '@/components/ai-elements';
@@ -40,6 +39,8 @@ type FastSessionSubmission = {
   attachmentTexts?: string[];
   model?: string | null;
   reasoningEffort?: ReasoningEffort | null;
+  /** Open the Session for a voice call; it may start with nothing typed. */
+  voiceCall?: boolean;
 };
 
 type NewTaskFormProps = {
@@ -106,11 +107,13 @@ export function NewTaskForm({
             ...payload,
             conversationId,
           });
-        stagePendingFastSessionLaunch(sessionId, {
-          fastConversationId: fastConversationId ?? conversationId,
-          text: payload.text,
-          images: payload.images,
-        });
+        if (payload.text || payload.images?.length) {
+          stagePendingFastSessionLaunch(sessionId, {
+            fastConversationId: fastConversationId ?? conversationId,
+            text: payload.text,
+            images: payload.images,
+          });
+        }
         fastConversationRetryRef.current = null;
         onTaskStarted?.();
         router.push(
@@ -202,55 +205,33 @@ export function NewTaskForm({
   const voiceEnabled = useVoiceEnabled();
   const startFastSessionRef = useRef(startFastSession);
   startFastSessionRef.current = startFastSession;
-  const voiceContextRef = useRef({
-    promptText,
-    model: selectedModelOverrideId,
-    reasoningEffort: selectedReasoningEffort,
-  });
-  voiceContextRef.current = {
-    promptText,
-    model: selectedModelOverrideId,
-    reasoningEffort: selectedReasoningEffort,
-  };
-  const stopLiveVoiceRef = useRef<(options?: { silent?: boolean }) => void>(
-    () => undefined,
-  );
-
-  const handleVoiceUtterance = useCallback((utterance: string) => {
-    // The conversation continues in the new Session, which plays its own
-    // start cue, so this handoff ends quietly.
-    stopLiveVoiceRef.current({ silent: true });
-    const {
-      promptText: typed,
-      model,
-      reasoningEffort,
-    } = voiceContextRef.current;
-    const text = [typed.trim(), utterance.trim()].filter(Boolean).join('\n\n');
-    void startFastSessionRef.current(
-      {
-        text,
-        model,
-        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-      },
-      { voice: true },
-    );
-  }, []);
-
-  const liveVoice = useLiveVoice({
-    onUtterance: handleVoiceUtterance,
-    disabled: isBusy || Boolean(submitDisabledReason),
-    mode: 'kickoff',
-  });
-  stopLiveVoiceRef.current = liveVoice.stop;
-  const voiceActive = liveVoice.active || liveVoice.status === 'connecting';
-
+  // A voice call lives inside a Session, so the button opens one (sending
+  // anything already typed as the first message) and the Session page starts
+  // the call. Matches the flow of a call button beside the composer.
+  const [openingVoiceSession, setOpeningVoiceSession] = useState(false);
   const handleVoiceToggle = useCallback(() => {
-    if (voiceActive) {
-      liveVoice.stop();
-      return;
-    }
-    void liveVoice.start();
-  }, [liveVoice, voiceActive]);
+    if (openingVoiceSession) return;
+    setOpeningVoiceSession(true);
+    void startFastSessionRef
+      .current(
+        {
+          text: promptText.trim(),
+          model: selectedModelOverrideId,
+          ...(selectedReasoningEffort !== undefined
+            ? { reasoningEffort: selectedReasoningEffort }
+            : {}),
+          voiceCall: true,
+        },
+        { voice: true },
+      )
+      .finally(() => setOpeningVoiceSession(false));
+  }, [
+    openingVoiceSession,
+    promptText,
+    selectedModelOverrideId,
+    selectedReasoningEffort,
+  ]);
+  const voiceActive = openingVoiceSession;
 
   // Voice only applies to Fast sessions; an environment launch is a task.
   const showVoice = voiceEnabled && !environmentIdParam;

@@ -417,6 +417,14 @@ export function toAcpUiMessage(
         data: payloadRecord,
       };
 
+    case 'voice_call':
+      return {
+        ...base,
+        role: 'system',
+        kind: 'voice_call',
+        data: payloadRecord,
+      };
+
     default:
       return {
         ...base,

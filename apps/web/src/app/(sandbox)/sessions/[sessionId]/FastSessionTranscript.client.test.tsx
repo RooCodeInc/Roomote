@@ -35,6 +35,8 @@ const {
   narrationState,
   composerSuggestionState,
   voiceStatusQuery,
+  recordVoiceTurnMutate,
+  recordVoiceCallEventMutate,
   liveVoiceState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
@@ -48,6 +50,8 @@ const {
     data: undefined as { suggestion: string; messageCount: number } | undefined,
   },
   voiceStatusQuery: vi.fn(),
+  recordVoiceTurnMutate: vi.fn(),
+  recordVoiceCallEventMutate: vi.fn(),
   liveVoiceState: {
     active: false,
     status: 'idle' as
@@ -59,27 +63,41 @@ const {
     start: vi.fn(),
     stop: vi.fn(),
     speak: vi.fn(),
-    addContext: vi.fn(),
+    setMicMuted: vi.fn(),
+    setOutputMuted: vi.fn(),
+    startedAt: null as number | null,
     onUtterance: undefined as
-      | ((text: string, delegationId: string) => void)
+      | ((text: string, delegationId: string | null) => void)
       | undefined,
+    onHeardTurn: undefined as ((text: string) => void) | undefined,
+    onSpokenTurn: undefined as ((text: string) => void) | undefined,
   },
 }));
 
 vi.mock('@/hooks/useLiveVoice', () => ({
   useLiveVoice: ({
     onUtterance,
+    onHeardTurn,
+    onSpokenTurn,
   }: {
-    onUtterance: (text: string, delegationId: string) => void;
+    onUtterance: (text: string, delegationId: string | null) => void;
+    onHeardTurn?: (text: string) => void;
+    onSpokenTurn?: (text: string) => void;
   }) => {
     liveVoiceState.onUtterance = onUtterance;
+    liveVoiceState.onHeardTurn = onHeardTurn;
+    liveVoiceState.onSpokenTurn = onSpokenTurn;
     return {
       active: liveVoiceState.active,
       status: liveVoiceState.status,
       start: liveVoiceState.start,
       stop: liveVoiceState.stop,
       speak: liveVoiceState.speak,
-      addContext: liveVoiceState.addContext,
+      micMuted: false,
+      setMicMuted: liveVoiceState.setMicMuted,
+      outputMuted: false,
+      setOutputMuted: liveVoiceState.setOutputMuted,
+      startedAt: liveVoiceState.startedAt,
     };
   },
 }));
@@ -97,6 +115,8 @@ vi.mock('@/trpc/client', () => ({
     },
     voice: {
       status: { query: voiceStatusQuery },
+      recordTurn: { mutate: recordVoiceTurnMutate },
+      recordCallEvent: { mutate: recordVoiceCallEventMutate },
     },
   }),
   useTRPC: () => ({
@@ -261,10 +281,16 @@ beforeEach(() => {
   openTasksPanel.mockReset();
   voiceStatusQuery.mockReset();
   voiceStatusQuery.mockResolvedValue({ enabled: false });
+  recordVoiceTurnMutate.mockReset();
+  recordVoiceTurnMutate.mockResolvedValue({ eventId: 'voice:1' });
+  recordVoiceCallEventMutate.mockReset();
+  recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
+  liveVoiceState.startedAt = null;
+  liveVoiceState.onHeardTurn = undefined;
+  liveVoiceState.onSpokenTurn = undefined;
   liveVoiceState.active = false;
   liveVoiceState.status = 'idle';
   liveVoiceState.start.mockReset();
-  liveVoiceState.addContext.mockReset();
   liveVoiceState.stop.mockReset();
   liveVoiceState.speak.mockReset();
   liveVoiceState.onUtterance = undefined;
@@ -2268,32 +2294,29 @@ describe('FastSessionTranscript', () => {
       expect(liveVoiceState.start).not.toHaveBeenCalled();
     });
 
-    it('reads reply sentences to Live as they stream and finishes with the persisted row', async () => {
+    it('reads the answer to a spoken request to Live as it streams, and leaves typed replies on screen', async () => {
       voiceStatusQuery.mockResolvedValue({ enabled: true });
-      const transcript = () => (
-        <FastSessionTranscript
-          sessionId="session-1"
-          initialMessages={[
-            textMessage({
-              id: 'assistant-0',
-              role: 'assistant',
-              text: 'Earlier answer',
-              ts: 1,
-            }),
-          ]}
-          canReply
-        />
-      );
-      const { rerender } = render(transcript());
-
-      // Starting the conversation marks earlier replies as already spoken.
-      fireEvent.click(
-        await screen.findByRole('button', { name: /^voice conversation$/i }),
-      );
       liveVoiceState.active = true;
       liveVoiceState.status = 'listening';
-      rerender(transcript());
-      expect(liveVoiceState.speak).not.toHaveBeenCalled();
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />,
+      );
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+      replyMutate.mockResolvedValue({ success: true });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the build', 'item_1');
+      });
+      await waitFor(() =>
+        expect(replyMutate).toHaveBeenCalledWith(
+          expect.objectContaining({ text: 'Check the build', voiceMode: true }),
+        ),
+      );
+      const turnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
 
       // A completed sentence is read while the reply is still streaming; the
       // growing tail waits.
@@ -2306,47 +2329,129 @@ describe('FastSessionTranscript', () => {
       expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
       expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
         'First sentence.',
-        null,
+        'item_1',
       );
 
       // The persisted row shares the stream's id, so only the unread tail is
-      // spoken; nothing is read twice.
+      // spoken; nothing is read twice. It renders as a collapsed report, not
+      // a chat bubble: the spoken words are the reply.
       act(() => {
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
-            textMessage({
-              id: 'assistant-1',
-              role: 'assistant',
-              text: 'First sentence. Second part is here.',
-              ts: 11,
-            }),
+            {
+              ...textMessage({
+                id: 'assistant-1',
+                role: 'assistant',
+                text: 'First sentence. Second part is here.',
+                ts: 11,
+              }),
+              turnId,
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
+            },
           ],
         });
       });
       expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
       expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
         'Second part is here.',
-        null,
+        'item_1',
       );
+      expect(screen.getByText(/result to voice/i)).toBeInTheDocument();
 
-      // A later message in the same turn is spoken too; nothing is skipped
-      // because an earlier progress message was read first.
+      // A typed message's written reply stays on screen and is not spoken.
       act(() => {
+        FakeEventSource.instances[0]!.emit('session', {
+          conversationResponding: true,
+        });
+        FakeEventSource.instances[0]!.emit('session', {
+          conversationResponding: false,
+        });
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
             textMessage({
               id: 'assistant-2',
               role: 'assistant',
-              text: 'Here is the result.',
+              text: 'Typed answer stays written.',
               ts: 12,
             }),
           ],
         });
       });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(3);
-      expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
-        'Here is the result.',
-        null,
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
+      expect(
+        screen.getByText('Typed answer stays written.'),
+      ).toBeInTheDocument();
+    });
+
+    it('transcribes the call into the Session: markers, heard turns, and spoken turns', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      fireEvent.click(
+        await screen.findByRole('button', { name: /^voice conversation$/i }),
+      );
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = 1_000;
+      rerender(transcript());
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          phase: 'started',
+        }),
+      );
+
+      act(() => {
+        liveVoiceState.onHeardTurn?.('Hi Roomote, how is it going');
+        liveVoiceState.onSpokenTurn?.('Good, thanks. What can I do for you?');
+      });
+      expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        role: 'user',
+        text: 'Hi Roomote, how is it going',
+      });
+      expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
+        sessionId: 'session-1',
+        role: 'assistant',
+        text: 'Good, thanks. What can I do for you?',
+      });
+
+      // Persisted markers render as dividers.
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'call-1',
+                role: 'assistant',
+                text: 'Call started',
+                ts: 5,
+              }),
+              eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+              role: 'system',
+              payload: { phase: 'started' },
+            },
+          ],
+        });
+      });
+      expect(screen.getByTestId('voice-call-marker')).toHaveTextContent(
+        'Call started',
+      );
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      rerender(transcript());
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'session-1', phase: 'ended' }),
+        ),
       );
     });
 
@@ -2389,6 +2494,7 @@ describe('FastSessionTranscript', () => {
                 ts: 5,
               }),
               turnId: firstTurnId,
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
             },
             {
               ...textMessage({
@@ -2398,6 +2504,7 @@ describe('FastSessionTranscript', () => {
                 ts: 6,
               }),
               turnId: secondTurnId,
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
             },
           ],
         });
@@ -2457,12 +2564,15 @@ describe('FastSessionTranscript', () => {
       act(() => {
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
-            textMessage({
-              id: 'assistant-1',
-              role: 'assistant',
-              text: 'Server-timed reply',
-              ts: 2,
-            }),
+            {
+              ...textMessage({
+                id: 'assistant-1',
+                role: 'assistant',
+                text: 'Server-timed reply',
+                ts: 2,
+              }),
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
+            },
           ],
         });
       });
@@ -2555,13 +2665,6 @@ describe('FastSessionTranscript', () => {
       );
       // The flag is one-shot: a reload must not restart the conversation.
       expect(window.location.search).toBe('');
-      // The new conversation never heard the request that created the
-      // Session, so it is handed over as context.
-      await waitFor(() =>
-        expect(liveVoiceState.addContext).toHaveBeenCalledWith(
-          expect.stringContaining('"Hey there"'),
-        ),
-      );
 
       liveVoiceState.active = true;
       liveVoiceState.status = 'listening';
@@ -2570,12 +2673,15 @@ describe('FastSessionTranscript', () => {
       act(() => {
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
-            textMessage({
-              id: 'assistant-1',
-              role: 'assistant',
-              text: 'Hi! What can I do?',
-              ts: 2,
-            }),
+            {
+              ...textMessage({
+                id: 'assistant-1',
+                role: 'assistant',
+                text: 'Hi! What can I do?',
+                ts: 2,
+              }),
+              metadata: { visibleInTranscript: true, voiceCommentary: true },
+            },
           ],
         });
       });

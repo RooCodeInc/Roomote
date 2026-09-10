@@ -111,10 +111,7 @@ describe('useLiveVoice', () => {
 
     await act(async () => result.current.start());
 
-    expect(createLiveSessionMutate).toHaveBeenCalledWith({
-      sdp: 'offer-sdp',
-      mode: 'conversation',
-    });
+    expect(createLiveSessionMutate).toHaveBeenCalledWith({ sdp: 'offer-sdp' });
     expect(result.current.status).toBe('listening');
 
     act(() => {
@@ -298,32 +295,13 @@ describe('useLiveVoice', () => {
     expect(playVoiceCue).not.toHaveBeenCalled();
   });
 
-  it('starts a kickoff conversation and shares session-wide context', async () => {
-    const { result } = renderHook(() =>
-      useLiveVoice({ onUtterance: vi.fn(), mode: 'kickoff' }),
-    );
-
-    await act(async () => result.current.start());
-    expect(createLiveSessionMutate).toHaveBeenCalledWith({
-      sdp: 'offer-sdp',
-      mode: 'kickoff',
-    });
-
-    act(() => result.current.addContext('The person asked about the build.'));
-    expect(
-      FakePeer.instance.channel.sent.map((value) => JSON.parse(value)),
-    ).toContainEqual(
-      expect.objectContaining({
-        type: 'session.instructions.append',
-        delegation_id: null,
-        content: 'The person asked about the build.',
-      }),
-    );
-  });
-
-  it('sends an utterance to Fast after silence when GPT-Live never delegates', async () => {
+  it('records small talk GPT-Live handled itself as a heard turn, and what GPT-Live said as a spoken turn', async () => {
     const onUtterance = vi.fn();
-    const { result } = renderHook(() => useLiveVoice({ onUtterance }));
+    const onHeardTurn = vi.fn();
+    const onSpokenTurn = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance, onHeardTurn, onSpokenTurn }),
+    );
 
     await act(async () => result.current.start());
     act(() => {
@@ -342,22 +320,37 @@ describe('useLiveVoice', () => {
       });
       vi.advanceTimersByTime(1_499);
     });
-    await act(async () => {});
-    expect(onUtterance).not.toHaveBeenCalled();
+    expect(onHeardTurn).not.toHaveBeenCalled();
 
     act(() => {
       vi.advanceTimersByTime(1);
     });
-    await act(async () => {});
-    expect(onUtterance).toHaveBeenCalledWith('Thanks, that looks right.', null);
+    expect(onHeardTurn).toHaveBeenCalledWith('Thanks, that looks right');
+    expect(onUtterance).not.toHaveBeenCalled();
 
-    // A delegation that shows up right after belongs to that utterance and
-    // must not be held for the next one.
+    // GPT-Live answers on its own; its words are recorded once it goes quiet.
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.output_transcript.delta',
+        delta: 'Glad to ',
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.output_transcript.delta',
+        delta: 'hear it.',
+      });
+      vi.advanceTimersByTime(1_200);
+    });
+    expect(onSpokenTurn).toHaveBeenCalledWith('Glad to hear it.');
+
+    // A delegation that shows up right after a silence flush belongs to that
+    // utterance and must not be held for the next one.
     act(() => {
       FakePeer.instance.channel.emit({
         type: 'session.delegation.created',
         delegation: { id: 'item_late', target: 'client' },
       });
+    });
+    act(() => {
       FakePeer.instance.channel.emit({
         type: 'session.input_transcript.delta',
         delta: 'Now check the build',
@@ -366,7 +359,31 @@ describe('useLiveVoice', () => {
       });
       vi.advanceTimersByTime(1_500);
     });
-    await act(async () => {});
-    expect(onUtterance).toHaveBeenLastCalledWith('Now check the build.', null);
+    expect(onHeardTurn).toHaveBeenLastCalledWith('Now check the build');
+    expect(onUtterance).not.toHaveBeenCalled();
+  });
+
+  it('flushes the spoken turn when the person starts talking again', async () => {
+    const onSpokenTurn = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance: vi.fn(), onSpokenTurn }),
+    );
+
+    await act(async () => result.current.start());
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.output_transcript.delta',
+        delta: 'Roo-Code has about 452,000 lines.',
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Wow',
+        start_ms: 0,
+        end_ms: 200,
+      });
+    });
+    expect(onSpokenTurn).toHaveBeenCalledWith(
+      'Roo-Code has about 452,000 lines.',
+    );
   });
 });

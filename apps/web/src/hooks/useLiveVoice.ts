@@ -9,13 +9,15 @@ import { chunkSpeakableText, toSpeakableText } from '@/lib/voice-speech';
 
 const DELEGATION_TRANSCRIPT_SETTLE_MS = 250;
 /**
- * GPT-Live is instructed to delegate everything, but the instruction is not
- * a guarantee. An utterance followed by this much silence with no delegation
- * is sent to Fast anyway so nothing the person says is lost.
+ * Speech GPT-Live answers itself never produces a delegation. After this much
+ * silence with no delegation the utterance is recorded as a heard turn so the
+ * Session transcript still has it.
  */
 const UTTERANCE_SILENCE_FLUSH_MS = 1_500;
 /** A delegation this soon after a silence flush belongs to that utterance. */
 const STALE_DELEGATION_WINDOW_MS = 3_000;
+/** GPT-Live has finished a spoken turn once its transcript stops growing. */
+const SPOKEN_TURN_SETTLE_MS = 1_200;
 const SESSION_START_TIMEOUT_MS = 15_000;
 
 type LiveVoiceStatus =
@@ -32,13 +34,18 @@ interface UseLiveVoiceOptions {
    * a GPT-Live delegation; its reply is then spoken as session-wide commentary.
    */
   onUtterance: (text: string, delegationId: string | null) => void;
-  disabled?: boolean;
   /**
-   * `kickoff` is the home page and New Session dialog: the first thing the
-   * person says becomes the Session, so GPT-Live delegates it immediately
-   * without speaking. Defaults to a full `conversation`.
+   * Called with the transcript of each thing GPT-Live said, once it finishes
+   * speaking a turn. This is the spoken record the Session persists.
    */
-  mode?: 'conversation' | 'kickoff';
+  onSpokenTurn?: (text: string) => void;
+  /**
+   * Called with the raw transcript of what the person said each time GPT-Live
+   * handles it without delegating (small talk), so the Session still records
+   * it. Delegated utterances reach the Session through `onUtterance`.
+   */
+  onHeardTurn?: (text: string) => void;
+  disabled?: boolean;
 }
 
 interface UseLiveVoiceReturn {
@@ -52,11 +59,14 @@ interface UseLiveVoiceReturn {
   stop: (options?: { silent?: boolean }) => void;
   /** Return verified Fast output to GPT-Live for natural spoken delivery. */
   speak: (markdown: string, delegationId: string | null) => void;
-  /**
-   * Give GPT-Live session-wide context it did not hear itself, such as the
-   * request that created this Session before its conversation connected.
-   */
-  addContext: (text: string) => void;
+  /** Microphone muted: GPT-Live hears nothing until unmuted. */
+  micMuted: boolean;
+  setMicMuted: (muted: boolean) => void;
+  /** Output muted: GPT-Live keeps talking, the speaker stays quiet. */
+  outputMuted: boolean;
+  setOutputMuted: (muted: boolean) => void;
+  /** Milliseconds since the conversation connected, 0 when idle. */
+  startedAt: number | null;
 }
 
 type LiveServerEvent = {
@@ -94,13 +104,25 @@ async function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
  */
 export function useLiveVoice({
   onUtterance,
+  onSpokenTurn,
+  onHeardTurn,
   disabled = false,
-  mode = 'conversation',
 }: UseLiveVoiceOptions): UseLiveVoiceReturn {
   const trpcClient = useTRPCClient();
   const [active, setActive] = useState(false);
   const [status, setStatus] = useState<LiveVoiceStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [micMuted, setMicMutedState] = useState(false);
+  const [outputMuted, setOutputMutedState] = useState(false);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const onSpokenTurnRef = useRef(onSpokenTurn);
+  onSpokenTurnRef.current = onSpokenTurn;
+  const onHeardTurnRef = useRef(onHeardTurn);
+  onHeardTurnRef.current = onHeardTurn;
+  // GPT-Live's own words for the turn it is speaking now, flushed to the
+  // Session once it goes quiet or the person speaks again.
+  const outputTranscriptRef = useRef('');
+  const outputSettleTimerRef = useRef<number | null>(null);
 
   // The composer has no status strip, so failures surface as a toast.
   useEffect(() => {
@@ -157,6 +179,16 @@ export function useLiveVoice({
     }
   }, []);
 
+  const flushSpokenTurn = useCallback(() => {
+    if (outputSettleTimerRef.current !== null) {
+      window.clearTimeout(outputSettleTimerRef.current);
+      outputSettleTimerRef.current = null;
+    }
+    const spoken = outputTranscriptRef.current.trim();
+    outputTranscriptRef.current = '';
+    if (spoken) onSpokenTurnRef.current?.(spoken);
+  }, []);
+
   const flushDelegation = useCallback(() => {
     delegationTimerRef.current = null;
     const delegationId = pendingDelegationsRef.current[0];
@@ -182,8 +214,9 @@ export function useLiveVoice({
     );
   }, [flushDelegation]);
 
-  // Safety net: speech that GPT-Live never delegates still reaches Fast once
-  // the person has been quiet for a moment.
+  // Speech GPT-Live handles itself (small talk) never produces a delegation.
+  // Once the person has been quiet for a moment, record what they said so the
+  // Session transcript stays the complete record of the call.
   const scheduleSilenceFlush = useCallback(() => {
     clearSilenceTimer();
     silenceTimerRef.current = window.setTimeout(() => {
@@ -192,9 +225,9 @@ export function useLiveVoice({
       if (!utterance || pendingDelegationsRef.current.length > 0) return;
       inputTranscriptRef.current = '';
       lastSilenceFlushAtRef.current = Date.now();
-      deliverUtterance(utterance, null);
+      onHeardTurnRef.current?.(utterance);
     }, UTTERANCE_SILENCE_FLUSH_MS);
-  }, [clearSilenceTimer, deliverUtterance]);
+  }, [clearSilenceTimer]);
 
   const handleServerEvent = useCallback(
     (raw: string) => {
@@ -208,6 +241,8 @@ export function useLiveVoice({
       switch (event.type) {
         case 'session.input_transcript.delta':
           if (event.delta) {
+            // The person is talking again: whatever GPT-Live said is done.
+            if (outputTranscriptRef.current) flushSpokenTurn();
             inputTranscriptRef.current += event.delta;
             setStatus('listening');
             if (pendingDelegationsRef.current.length > 0) {
@@ -219,12 +254,20 @@ export function useLiveVoice({
           break;
         case 'session.output_transcript.delta':
           setStatus('speaking');
+          if (event.delta) outputTranscriptRef.current += event.delta;
           if (speakingTimerRef.current !== null) {
             window.clearTimeout(speakingTimerRef.current);
           }
           speakingTimerRef.current = window.setTimeout(() => {
             if (activeRef.current) setStatus('listening');
           }, 800);
+          if (outputSettleTimerRef.current !== null) {
+            window.clearTimeout(outputSettleTimerRef.current);
+          }
+          outputSettleTimerRef.current = window.setTimeout(
+            flushSpokenTurn,
+            SPOKEN_TURN_SETTLE_MS,
+          );
           break;
         case 'session.delegation.created':
           if (event.delegation?.target === 'client' && event.delegation.id) {
@@ -249,7 +292,7 @@ export function useLiveVoice({
           break;
       }
     },
-    [scheduleDelegationFlush, scheduleSilenceFlush],
+    [flushSpokenTurn, scheduleDelegationFlush, scheduleSilenceFlush],
   );
 
   const release = useCallback(
@@ -284,6 +327,7 @@ export function useLiveVoice({
         delegationTimerRef.current = null;
       }
       clearSilenceTimer();
+      flushSpokenTurn();
       if (speakingTimerRef.current !== null) {
         window.clearTimeout(speakingTimerRef.current);
         speakingTimerRef.current = null;
@@ -307,9 +351,12 @@ export function useLiveVoice({
       pendingDelegationsRef.current = [];
       setActive(false);
       setStatus('idle');
+      setStartedAt(null);
+      setMicMutedState(false);
+      setOutputMutedState(false);
       if (wasActive && !options?.silent) playVoiceCue('stop');
     },
-    [clearSilenceTimer, release],
+    [clearSilenceTimer, flushSpokenTurn, release],
   );
 
   const start = useCallback(async () => {
@@ -396,10 +443,7 @@ export function useLiveVoice({
 
       const sdp = peer.localDescription?.sdp;
       if (!sdp) throw new Error('Missing voice connection offer');
-      const result = await trpcClient.voice.createLiveSession.mutate({
-        sdp,
-        mode,
-      });
+      const result = await trpcClient.voice.createLiveSession.mutate({ sdp });
       if (isStale()) {
         release(peer, channel, mic, audio);
         return;
@@ -440,6 +484,7 @@ export function useLiveVoice({
       activeRef.current = true;
       setActive(true);
       setStatus('listening');
+      setStartedAt(Date.now());
       playVoiceCue('start');
     } catch (caught) {
       console.error('[voice] Could not start the voice conversation', caught);
@@ -458,7 +503,7 @@ export function useLiveVoice({
           : 'Could not start the voice conversation',
       );
     }
-  }, [disabled, handleServerEvent, mode, release, stop, trpcClient]);
+  }, [disabled, handleServerEvent, release, stop, trpcClient]);
 
   const speak = useCallback((markdown: string, delegationId: string | null) => {
     const channel = dataChannelRef.current;
@@ -477,21 +522,16 @@ export function useLiveVoice({
     }
   }, []);
 
-  const addContext = useCallback((text: string) => {
-    const channel = dataChannelRef.current;
-    const content = text.trim();
-    if (!content || !activeRef.current || channel?.readyState !== 'open') {
-      return;
-    }
+  const setMicMuted = useCallback((muted: boolean) => {
+    setMicMutedState(muted);
+    micStreamRef.current
+      ?.getAudioTracks()
+      .forEach((track) => (track.enabled = !muted));
+  }, []);
 
-    channel.send(
-      JSON.stringify({
-        type: 'session.instructions.append',
-        event_id: crypto.randomUUID(),
-        delegation_id: null,
-        content,
-      }),
-    );
+  const setOutputMuted = useCallback((muted: boolean) => {
+    setOutputMutedState(muted);
+    if (outputAudioRef.current) outputAudioRef.current.muted = muted;
   }, []);
 
   useEffect(() => () => stop(), [stop]);
@@ -502,6 +542,10 @@ export function useLiveVoice({
     start,
     stop,
     speak,
-    addContext,
+    micMuted,
+    setMicMuted,
+    outputMuted,
+    setOutputMuted,
+    startedAt,
   };
 }

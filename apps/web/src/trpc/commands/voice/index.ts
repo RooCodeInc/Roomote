@@ -1,10 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
+import {
+  appendFastAgentVisibleMessages,
+  upsertFastAgentMessage,
+} from '@roomote/cloud-agents/server';
+import { ACP_ENVELOPE_EVENT_TYPES, getUserDisplayName } from '@roomote/types';
+
+import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
 
 import {
   cleanVoiceTranscript,
   createVoiceLiveSession,
   resolveVoiceOpenAiKey,
-  type VoiceLiveMode,
   type VoiceLiveSession,
 } from '@/lib/server/voice';
 import { loadVoiceWorkspaceContext } from '@/lib/server/voice-context';
@@ -25,7 +32,7 @@ export async function getVoiceStatusCommand(): Promise<{ enabled: boolean }> {
  */
 export async function createVoiceLiveSessionCommand(
   auth: UserAuthSuccess,
-  input: { sdp: string; mode: VoiceLiveMode },
+  input: { sdp: string },
 ): Promise<VoiceLiveSession> {
   const apiKey = await resolveVoiceOpenAiKey();
 
@@ -39,12 +46,7 @@ export async function createVoiceLiveSessionCommand(
   const context = await loadVoiceWorkspaceContext(auth.userId);
 
   try {
-    return await createVoiceLiveSession({
-      apiKey,
-      sdp: input.sdp,
-      context,
-      mode: input.mode,
-    });
+    return await createVoiceLiveSession({ apiKey, sdp: input.sdp, context });
   } catch (error) {
     console.error('[voice] Failed to create GPT-Live session', error);
     throw new TRPCError({
@@ -87,4 +89,122 @@ export async function cleanVoiceTranscriptCommand(
     console.error('[voice] Failed to clean transcript, using raw text', error);
     return { text };
   }
+}
+
+/** Rows written by the voice call carry this source so they read as spoken. */
+const VOICE_MESSAGE_SOURCE = 'voice';
+
+/**
+ * Record one spoken turn of a voice call in the Session transcript: what the
+ * person said when the voice answered them directly (`user`), or what the
+ * voice said (`assistant`). Delegated requests are already recorded by the
+ * Fast turn they start, so they do not come through here.
+ *
+ * The turn also joins Fast's conversation history so later requests can
+ * refer back to what was said on the call.
+ */
+export async function recordVoiceTurnCommand(
+  auth: UserAuthSuccess,
+  input: { sessionId: string; role: 'user' | 'assistant'; text: string },
+): Promise<{ eventId: string }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Session not found' });
+  }
+
+  const text = input.text.trim();
+  const eventId = `voice:${randomUUID()}`;
+  const userName =
+    getUserDisplayName({ name: auth.name, email: auth.primaryEmail }) ?? null;
+  await upsertFastAgentMessage({
+    sessionId: session.id,
+    message: {
+      eventId,
+      turnId: eventId,
+      turnSeq: 0,
+      ts: Date.now(),
+      eventType:
+        input.role === 'user'
+          ? ACP_ENVELOPE_EVENT_TYPES.UserPrompt
+          : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: input.role,
+      contentBlocks: [{ type: 'text', text }],
+      metadata: {
+        visibleInTranscript: true,
+        voiceTurn: input.role === 'user' ? 'heard' : 'spoken',
+        ...(input.role === 'user'
+          ? {
+              userId: auth.userId,
+              ...(userName ? { userName } : {}),
+              ...(auth.primaryEmail ? { userEmail: auth.primaryEmail } : {}),
+            }
+          : { purpose: 'closeout' }),
+      },
+      payload: {},
+      source: VOICE_MESSAGE_SOURCE,
+      nativeSessionId: null,
+      nativeMessageId: null,
+    },
+  });
+  await appendFastAgentVisibleMessages({
+    sessionId: session.id,
+    messages: [
+      input.role === 'user'
+        ? { role: 'user', content: `(said on the voice call) ${text}` }
+        : {
+            role: 'assistant',
+            content: `(Roomote said on the voice call) ${text}`,
+          },
+    ],
+  }).catch((error: unknown) => {
+    console.warn('[voice] Failed to add a voice turn to Fast history', error);
+  });
+
+  return { eventId };
+}
+
+/** Mark where a voice call started or ended in the Session transcript. */
+export async function recordVoiceCallEventCommand(
+  auth: UserAuthSuccess,
+  input: {
+    sessionId: string;
+    phase: 'started' | 'ended';
+    durationMs?: number;
+  },
+): Promise<{ eventId: string }> {
+  const session = await findAccessibleFastSession(auth, input.sessionId);
+  if (!session) {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Session not found' });
+  }
+
+  const eventId = `voice-call:${input.phase}:${randomUUID()}`;
+  await upsertFastAgentMessage({
+    sessionId: session.id,
+    message: {
+      eventId,
+      turnId: eventId,
+      turnSeq: 0,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+      role: 'system',
+      contentBlocks: [
+        {
+          type: 'text',
+          text: input.phase === 'started' ? 'Call started' : 'Call ended',
+        },
+      ],
+      metadata: { visibleInTranscript: true },
+      payload: {
+        phase: input.phase,
+        ...(input.durationMs !== undefined
+          ? { durationMs: input.durationMs }
+          : {}),
+      },
+      source: VOICE_MESSAGE_SOURCE,
+      nativeSessionId: null,
+      nativeMessageId: null,
+    },
+  });
+
+  return { eventId };
 }

@@ -42,7 +42,6 @@ describe('createVoiceLiveSession', () => {
         apiKey: 'sk-test',
         sdp: 'offer-sdp',
         context,
-        mode: 'conversation',
       }),
     ).resolves.toEqual({ sessionId: 'live_123', sdp: 'answer-sdp' });
 
@@ -73,10 +72,12 @@ describe('createVoiceLiveSession', () => {
     expect(body.session.instructions).toContain(
       'Integrations the backend can use: GitHub.',
     );
-    // Replies are read verbatim and every utterance reaches the Session.
-    expect(body.session.instructions).toContain('word for word');
+    // The voice acknowledges, delegates real work, and reports results
+    // faithfully in its own words.
+    expect(body.session.instructions).toContain('Backchannel policy');
+    expect(body.session.instructions).toContain('Delegate to the backend when');
     expect(body.session.instructions).toContain(
-      'Delegate every single thing the person says',
+      'keep every number, name, path, and link label exactly as given',
     );
   });
 
@@ -91,38 +92,8 @@ describe('createVoiceLiveSession', () => {
         apiKey: 'sk-test',
         sdp: 'offer-sdp',
         context,
-        mode: 'conversation',
       }),
     ).rejects.toThrow('OpenAI Live session response was incomplete');
-  });
-
-  it('tells a kickoff conversation to delegate the first request silently', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          session: { id: 'live_123' },
-          transport: { type: 'webrtc', sdp: 'answer-sdp' },
-        }),
-        { status: 201 },
-      ),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    await createVoiceLiveSession({
-      apiKey: 'sk-test',
-      sdp: 'offer-sdp',
-      context,
-      mode: 'kickoff',
-    });
-
-    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    const body = JSON.parse(String(request.body)) as {
-      session: { instructions: string };
-    };
-    expect(body.session.instructions).toContain('Do not speak at all');
-    expect(body.session.instructions).toContain(
-      'delegate it to the backend immediately',
-    );
   });
 });
 

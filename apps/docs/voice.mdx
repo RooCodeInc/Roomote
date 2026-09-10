@@ -24,39 +24,45 @@ and receives only the negotiated session answer; it never receives the API key.
 ## Using voice
 
 1. Select the voice button in a composer: in an open Session, or on the home
-   page and the **New Session** dialog to start a fresh Session by speaking.
+   page and the **New Session** dialog. From the home page or dialog a new
+   Session is created and the call starts inside it.
 2. Grant microphone access when the browser asks. A short rising tone
-   confirms the conversation is open; a falling tone marks the end.
-3. Speak naturally. GPT-Live delegates requests to the Fast Session, and each
-   spoken request is cleaned up (filler words, false starts, and misheard
-   terms) by the deployment's helper model before it appears in the transcript
-   as if you had typed it. From the home page or dialog, the first thing you
-   say starts the Session and opens it already in voice mode, where the answer
-   is spoken.
-4. GPT-Live reads the Session's reply aloud word for word, sentence by
-   sentence while it is still being written. Speak at any time to interrupt;
-   GPT-Live continues listening while it speaks, and what you say goes back
-   through the same Fast Session.
-5. Select the voice button again to return to typing. The button stays
-   highlighted while the conversation is active.
+   confirms the call is open; a falling tone marks the end. A **Call started**
+   marker appears in the Session.
+3. Talk to Roomote the way you would on a phone call. It acknowledges each
+   request in a few words, hands the work to the Fast Session, and reports the
+   result out loud when it lands. Greetings, thanks, and small talk are
+   answered directly without starting Fast work.
+4. Speak at any time to interrupt. Roomote keeps listening while it speaks,
+   and follow-ups go back through the same Fast Session. You can also type in
+   the composer during the call.
+5. Use the in-call controls to mute your microphone, silence Roomote's audio
+   without muting yourself, or end the call. The button stays highlighted
+   while the call is active, and a **Call ended** marker records its length.
 
 Voice input requires a browser with microphone and WebRTC support, which
 includes current Chrome, Edge, Safari, and Firefox.
 
-## How work is handled
+## How the transcript works
 
-GPT-Live is the spoken channel for the Session, not a second agent. Everything
-you say goes through the same Fast reply path as typed messages, including
-greetings and short remarks, so the Session transcript is the full record of
-the conversation. If GPT-Live does not hand an utterance over on its own, it is
-sent after a short silence anyway. That preserves the Session's selected
-model, tools, permissions, and transcript. Replies are read back exactly as
-written; only code blocks and raw URLs are replaced with short spoken
-placeholders so they are not read character-by-character.
+A voice call is transcribed into the Session as the record of what was said.
+Your speech appears as your messages, and what Roomote said out loud appears
+as its replies. The Fast Session's work, such as tool calls, launched tasks,
+and reports, appears between those turns exactly as it does in a typed
+Session, so the timeline shows both the conversation and the work behind it.
 
+During a call the Fast Session returns its results to the voice rather than
+writing them as chat replies; Roomote then reports them in its own words,
+keeping numbers, names, paths, and link labels exact. If a result cannot be
+spoken, for example because the call drops, it is written to the transcript
+as a normal reply so nothing is lost. Typed messages sent during a call are
+answered in writing as usual.
+
+Each spoken request is cleaned up (filler words, false starts, and misheard
+terms) by the deployment's helper model before it reaches the Fast Session.
 GPT-Live is told which repositories, environments, and integrations the Fast
-Session can reach, so it recognises their names. The same names guide
-transcript cleanup, so a misheard repository name is corrected to the real one.
+Session can reach, so it recognises their names, and the same names guide the
+cleanup so a misheard repository name is corrected to the real one.
 
-Ending voice stops the microphone; Fast work already started remains visible
-in the Session and follows the normal Session lifecycle.
+Ending the call stops the microphone; Fast work already started remains
+visible in the Session and follows the normal Session lifecycle.

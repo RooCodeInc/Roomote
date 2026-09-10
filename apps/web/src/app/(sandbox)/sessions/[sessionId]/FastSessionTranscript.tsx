@@ -618,6 +618,41 @@ export function FastSessionTranscript({
               ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
         )
         .map((message) => {
+          // A reply written for the voice is reported aloud; the transcript
+          // keeps it as a collapsed source next to the spoken words, so the
+          // exact result is still there if the call dropped before it was
+          // spoken.
+          if (
+            message.role === 'assistant' &&
+            message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            (message.metadata as { voiceCommentary?: unknown } | null)
+              ?.voiceCommentary === true
+          ) {
+            const text = getTranscriptMessageText(message) ?? '';
+            return toAcpUiMessage({
+              id: `assistant:${message.eventId}`,
+              ts: message.ts,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult as AcpEventType,
+              role: 'tool',
+              kind: 'tool_result',
+              contentBlocks: [{ type: 'text', text }],
+              metadata: {
+                visibleInTranscript: true,
+                toolCallId: message.eventId,
+              },
+              payload: {
+                toolName: 'report_to_voice',
+                toolCallId: message.eventId,
+                status: 'completed',
+                rawInput: {},
+                output: text,
+              },
+              text,
+              userName: null,
+              userEmail: null,
+              userImageUrl: null,
+            });
+          }
           const uiMessage = toAcpUiMessage({
             // A reply keeps the id its streamed chunks rendered under, so the
             // persisted row reconciles in place instead of remounting.
@@ -713,6 +748,10 @@ export function FastSessionTranscript({
   // The delegation of the most recent spoken request; streamed reply pieces
   // are attributed to it until their persisted row pins the exact turn.
   const lastVoiceDelegationIdRef = useRef<string | null>(null);
+  // True from a spoken request until Fast finishes responding to it. Streamed
+  // reply chunks arriving in that window are voice commentary.
+  const voiceTurnActiveRef = useRef(false);
+  const voiceTurnRespondingSeenRef = useRef(false);
   const sendReply = useCallback(
     async (
       message: SessionPromptSubmission,
@@ -768,9 +807,15 @@ export function FastSessionTranscript({
         };
         setOptimisticMessages((previous) => [...previous, optimistic]);
         dispatchPendingResponse({ type: 'optimistic', message: optimistic });
+        if (options?.voiceDelegationId !== undefined) {
+          voiceTurnActiveRef.current = true;
+        }
         await trpcClient.fastSessions.reply.mutate({
           sessionId,
           ...(clientMessageId ? { clientMessageId } : {}),
+          ...(options?.voiceDelegationId !== undefined
+            ? { voiceMode: true }
+            : {}),
           text: prepared.text,
           ...(images.length > 0 ? { images } : {}),
           ...(prepared.attachmentTexts?.length
@@ -847,7 +892,14 @@ export function FastSessionTranscript({
     [],
   );
 
-  const liveVoice = useLiveVoice({ onUtterance: enqueueVoiceUtterance });
+  const recordVoiceTurnRef = useRef<
+    (role: 'user' | 'assistant', text: string) => void
+  >(() => undefined);
+  const liveVoice = useLiveVoice({
+    onUtterance: enqueueVoiceUtterance,
+    onHeardTurn: (text) => recordVoiceTurnRef.current('user', text),
+    onSpokenTurn: (text) => recordVoiceTurnRef.current('assistant', text),
+  });
 
   // Utterances queue rather than dropping when one lands while the previous
   // reply is still in flight; the queue drains as each send settles.
@@ -881,26 +933,61 @@ export function FastSessionTranscript({
   const speakRef = useRef(liveVoice.speak);
   speakRef.current = liveVoice.speak;
 
-  // Read each Fast reply to GPT-Live as it streams: every completed sentence
-  // goes out as soon as it exists, and the persisted row (same id as the
-  // stream) finishes the trailing sentence. Progress is tracked per message
-  // so nothing is read twice. GPT-Live handles interruption itself.
+  // Fast's answers to spoken requests are written for the voice, not the
+  // screen: they go to GPT-Live as commentary, every completed sentence as
+  // soon as it exists while the reply streams, and the persisted row (same
+  // id as the stream) finishes the trailing sentence. Progress is tracked per
+  // message so nothing is read twice. GPT-Live reports them aloud and its
+  // words become the transcript's reply.
   useEffect(() => {
     if (!liveVoiceActive) {
       return;
     }
 
-    for (const message of uiMessages) {
+    const commentary: Array<{
+      id: string;
+      ts: number;
+      text: string;
+      partial: boolean;
+    }> = [];
+    for (const message of messages) {
       if (
-        message.role !== 'assistant' ||
-        message.visibleInTranscript === false ||
-        message.ts <= voiceCutoffTsRef.current ||
-        !message.text ||
-        (message.kind !== 'text' &&
-          message.updateType !== ACP_ENVELOPE_EVENT_TYPES.AssistantMessage)
+        message.role === 'assistant' &&
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+        (message.metadata as { voiceCommentary?: unknown } | null)
+          ?.voiceCommentary === true
       ) {
-        continue;
+        const text = getTranscriptMessageText(message);
+        if (text) {
+          commentary.push({
+            id: `assistant:${message.eventId}`,
+            ts: message.ts,
+            text,
+            partial: false,
+          });
+        }
       }
+    }
+    if (voiceTurnActiveRef.current) {
+      for (const message of streamMessages) {
+        if (
+          message.role === 'assistant' &&
+          message.partial &&
+          message.text &&
+          message.kind === 'text'
+        ) {
+          commentary.push({
+            id: message.id,
+            ts: message.ts,
+            text: message.text,
+            partial: true,
+          });
+        }
+      }
+    }
+
+    for (const message of commentary) {
+      if (message.ts <= voiceCutoffTsRef.current) continue;
 
       const sentences = splitSpeakableSentences(toSpeakableText(message.text));
       // While streaming, the last sentence may still be growing.
@@ -920,7 +1007,59 @@ export function FastSessionTranscript({
           null,
       );
     }
-  }, [uiMessages, liveVoiceActive, persistedAssistantTurnIds]);
+  }, [messages, streamMessages, liveVoiceActive, persistedAssistantTurnIds]);
+
+  // A spoken request's turn is over once Fast stops responding; streamed
+  // chunks after that belong to typed messages and are not spoken.
+  useEffect(() => {
+    if (conversationResponding === true) {
+      voiceTurnRespondingSeenRef.current = true;
+    } else if (
+      conversationResponding === false &&
+      voiceTurnRespondingSeenRef.current
+    ) {
+      voiceTurnRespondingSeenRef.current = false;
+      voiceTurnActiveRef.current = false;
+    }
+  }, [conversationResponding]);
+
+  // The call is transcribed into the Session: what the person said when the
+  // voice answered directly, what the voice said, and where the call started
+  // and ended. Delegated requests are recorded by the Fast turn they start.
+  const recordVoiceTurn = useCallback(
+    (role: 'user' | 'assistant', text: string) => {
+      void trpcClient.voice.recordTurn
+        .mutate({ sessionId, role, text })
+        .catch((error: unknown) => {
+          console.error('[voice] Failed to record a voice turn', error);
+        });
+    },
+    [sessionId, trpcClient],
+  );
+  recordVoiceTurnRef.current = recordVoiceTurn;
+  const callStartedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (liveVoice.active && liveVoice.startedAt !== null) {
+      if (callStartedAtRef.current === liveVoice.startedAt) return;
+      callStartedAtRef.current = liveVoice.startedAt;
+      voiceTurnActiveRef.current = false;
+      void trpcClient.voice.recordCallEvent
+        .mutate({ sessionId, phase: 'started' })
+        .catch((error: unknown) => {
+          console.error('[voice] Failed to record call start', error);
+        });
+      return;
+    }
+    if (!liveVoice.active && callStartedAtRef.current !== null) {
+      const durationMs = Date.now() - callStartedAtRef.current;
+      callStartedAtRef.current = null;
+      void trpcClient.voice.recordCallEvent
+        .mutate({ sessionId, phase: 'ended', durationMs })
+        .catch((error: unknown) => {
+          console.error('[voice] Failed to record call end', error);
+        });
+    }
+  }, [liveVoice.active, liveVoice.startedAt, sessionId, trpcClient]);
 
   const handleVoiceToggle = useCallback(() => {
     // Toggling while the handshake is still connecting cancels it.
@@ -953,10 +1092,6 @@ export function FastSessionTranscript({
   // start again on the remount, which its dependencies already ensure.
   const startLiveVoiceRef = useRef(liveVoice.start);
   startLiveVoiceRef.current = liveVoice.start;
-  const addVoiceContextRef = useRef(liveVoice.addContext);
-  addVoiceContextRef.current = liveVoice.addContext;
-  const uiMessagesRef = useRef(uiMessages);
-  uiMessagesRef.current = uiMessages;
 
   useEffect(() => {
     if (!autoStartVoice || !voiceEnabled) {
@@ -967,19 +1102,7 @@ export function FastSessionTranscript({
     spokenSentenceCountsRef.current.clear();
     voiceDelegationByTurnIdRef.current.clear();
     pendingUtterancesRef.current = [];
-    // This conversation never heard the request that created the Session (a
-    // separate kickoff conversation delegated it), so hand it over as
-    // context; the reply then arrives as session-wide commentary.
-    const firstRequest = uiMessagesRef.current.find(
-      (message) => message.role === 'user' && message.text,
-    )?.text;
-    void Promise.resolve(startLiveVoiceRef.current()).then(() => {
-      if (firstRequest) {
-        addVoiceContextRef.current(
-          `The person opened this session by saying: "${firstRequest}". Roomote is already working on it; its answer will arrive as commentary for you to speak. Treat follow-ups as continuing that request.`,
-        );
-      }
-    });
+    void startLiveVoiceRef.current();
 
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
@@ -1115,6 +1238,15 @@ export function FastSessionTranscript({
                       active:
                         liveVoice.active || liveVoice.status === 'connecting',
                       onToggle: handleVoiceToggle,
+                      call: {
+                        startedAt: liveVoice.startedAt,
+                        micMuted: liveVoice.micMuted,
+                        onToggleMic: () =>
+                          liveVoice.setMicMuted(!liveVoice.micMuted),
+                        outputMuted: liveVoice.outputMuted,
+                        onToggleOutput: () =>
+                          liveVoice.setOutputMuted(!liveVoice.outputMuted),
+                      },
                     }
                   : undefined
               }

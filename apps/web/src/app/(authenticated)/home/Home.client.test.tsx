@@ -744,7 +744,7 @@ describe('Home', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('starts a Fast session from the first spoken utterance and opens it in voice mode', async () => {
+  it('opens a Session for the call, sending anything already typed, and starts voice there', async () => {
     voiceState.enabled = true;
     mockStartFastSession.mockResolvedValue({ sessionId: 'fast-session-1' });
     render(<Home initialPlaceholderIndex={0} />);
@@ -752,22 +752,18 @@ describe('Home', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Voice conversation' }),
     );
-    expect(voiceState.start).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      voiceState.onUtterance?.('Summarize open pull requests');
-    });
 
     await waitFor(() => {
       expect(mockStartFastSession).toHaveBeenCalledWith(
         expect.objectContaining({
-          text: 'Summarize open pull requests',
-          model: undefined,
+          text: '',
+          voiceCall: true,
           conversationId: expect.any(String),
         }),
       );
     });
-    expect(voiceState.stop).toHaveBeenCalled();
+    // No call is opened on the home page itself; the Session page owns it.
+    expect(voiceState.start).not.toHaveBeenCalled();
     expect(mockPush).toHaveBeenCalledWith('/sessions/fast-session-1?voice=1');
   });
 });
