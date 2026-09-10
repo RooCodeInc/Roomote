@@ -547,14 +547,307 @@ describe('FastSessionTranscript', () => {
         <FastSessionTranscript
           sessionId="session-1"
           initialMessages={[request, response]}
+          owner={{
+            userId: 'user-1',
+            name: 'Test User',
+            email: 'test@example.com',
+            imageUrl: null,
+          }}
         />,
       );
 
       expect(screen.queryByText('Structured input request')).toBeNull();
-      expect(screen.queryByText('Structured response')).toBeNull();
+      expect(screen.getByText('Structured response')).toBeInTheDocument();
+      expect(screen.getByLabelText('Test User')).toBeInTheDocument();
       expect(screen.queryByText(cardLabel)).toBeNull();
     },
   );
+
+  it('renders a structured response once in chronology as human-authored text', () => {
+    const requestId = 'rui:chronology';
+    const question = 'Which direction should I take?';
+    const request = {
+      ...textMessage({
+        id: 'input-request',
+        role: 'assistant',
+        text: question,
+        ts: 2,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId,
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        questions: [
+          {
+            id: 'direction',
+            header: 'Direction',
+            question,
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      },
+    };
+    const response = {
+      ...textMessage({
+        id: 'input-response',
+        role: 'user',
+        text: 'Legacy persisted answer',
+        ts: 3,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      payload: {
+        requestId,
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        answers: { direction: { answers: ['Use the narrow path'] } },
+        resolution: 'submitted',
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-before',
+            role: 'assistant',
+            text: 'Before the question',
+            ts: 1,
+          }),
+          request,
+          response,
+          textMessage({
+            id: 'assistant-after',
+            role: 'assistant',
+            text: 'After the answer',
+            ts: 4,
+          }),
+        ]}
+        owner={{
+          userId: 'user-1',
+          name: 'Transcript Owner',
+          email: 'owner@example.com',
+          imageUrl: null,
+        }}
+      />,
+    );
+
+    const before = screen.getByText('Before the question');
+    const answer = screen.getByText('Use the narrow path');
+    const after = screen.getByText('After the answer');
+    expect(before.compareDocumentPosition(answer)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(answer.compareDocumentPosition(after)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(screen.getAllByText(question)).toHaveLength(1);
+    expect(screen.queryByText('Legacy persisted answer')).toBeNull();
+    expect(screen.getByLabelText('Transcript Owner')).toBeInTheDocument();
+  });
+
+  it('hides request_user_input tool lifecycle rows while keeping the interaction card', () => {
+    const requestId = 'rui:hidden-tools';
+    const toolPayload = {
+      toolCallId: 'turn-1:tool:0',
+      title: 'request_user_input',
+      kind: 'tool',
+      status: 'completed',
+      isExecute: false,
+      isRead: false,
+      isMcp: false,
+      mcpServerName: null,
+      mcpToolName: null,
+      toolName: 'request_user_input',
+      command: null,
+      rawInput: { arguments: { question: 'Hidden tool question' } },
+    };
+    const toolBase = {
+      id: 'request-tool',
+      eventId: 'turn-1:tool:0',
+      turnId: 'turn-1',
+      turnSeq: 1,
+      ts: 1,
+      role: 'tool' as const,
+      metadata: { visibleInTranscript: true },
+      source: 'web',
+      nativeSessionId: 'opencode-1',
+      nativeMessageId: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+    const request = {
+      ...textMessage({
+        id: 'input-request',
+        role: 'assistant',
+        text: 'Choose a path',
+        ts: 2,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId,
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        questions: [
+          {
+            id: 'path',
+            header: 'Path',
+            question: 'Choose a path',
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...toolBase,
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+            contentBlocks: [],
+            payload: toolPayload,
+          },
+          {
+            ...toolBase,
+            id: 'request-tool-result',
+            eventId: 'turn-1:tool-result:0',
+            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+            contentBlocks: [
+              { type: 'text' as const, text: 'Hidden tool result' },
+            ],
+            payload: { ...toolPayload, output: 'Hidden tool result' },
+          },
+          request,
+        ]}
+      />,
+    );
+
+    expect(screen.getByText('Structured input request')).toBeInTheDocument();
+    expect(screen.queryByText('Asked for')).toBeNull();
+    expect(screen.queryByText('human guidance')).toBeNull();
+    expect(screen.queryByText('Hidden tool result')).toBeNull();
+    expect(screen.queryByText('Choose a path')).toBeNull();
+  });
+
+  it('places a pending interaction at its chronological position', () => {
+    const request = {
+      ...textMessage({
+        id: 'input-request',
+        role: 'assistant',
+        text: 'Choose a path',
+        ts: 2,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId: 'rui:pending-order',
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        questions: [
+          {
+            id: 'path',
+            header: 'Path',
+            question: 'Choose a path',
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      },
+    };
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({
+            id: 'assistant-before',
+            role: 'assistant',
+            text: 'Before pending input',
+            ts: 1,
+          }),
+          request,
+          textMessage({
+            id: 'assistant-after',
+            role: 'assistant',
+            text: 'Later transcript activity',
+            ts: 3,
+          }),
+        ]}
+      />,
+    );
+
+    const before = screen.getByText('Before pending input');
+    const interaction = screen.getByText('Structured input request');
+    const after = screen.getByText('Later transcript activity');
+    expect(before.compareDocumentPosition(interaction)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(interaction.compareDocumentPosition(after)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('keeps the composer available for non-preset input requests', () => {
+    const request = {
+      ...textMessage({
+        id: 'input-request',
+        role: 'assistant',
+        text: 'Choose or write another direction',
+        ts: 1,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId: 'rui:optional',
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        questions: [
+          {
+            id: 'direction',
+            header: 'Direction',
+            question: 'Choose or write another direction',
+            isOther: true,
+            isSecret: false,
+          },
+        ],
+      },
+    };
+
+    const { unmount } = render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request]}
+        canReply
+      />,
+    );
+    expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
+
+    unmount();
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...request,
+            payload: { ...request.payload, preset: 'setup_starter_tasks' },
+          },
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+    expect(screen.getByText('Setup starter tasks')).toBeInTheDocument();
+  });
 
   it.each([
     [1, '1 task running'],
@@ -1961,7 +2254,7 @@ describe('FastSessionTranscript', () => {
     expect(input.value).toBe('Do not lose me');
   });
 
-  it('shows structured input instead of the ordinary composer while pending', () => {
+  it('shows structured input with the ordinary composer while non-preset input is pending', () => {
     render(
       <FastSessionTranscript
         sessionId="session-1"
@@ -2004,7 +2297,7 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.getByText('Structured input request')).toBeVisible();
-    expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+    expect(screen.getByPlaceholderText('Message agent')).toBeInTheDocument();
   });
 
   it('updates the header title from the session stream event', () => {

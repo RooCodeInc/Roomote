@@ -1,10 +1,12 @@
 import {
   getAcpRequestUserInputValidationError,
+  normalizeAcpRequestUserInputAnswers,
   parseAcpRequestUserInputAnswers,
   parseAcpRequestUserInputPayload,
   parseAcpRequestUserInputQuestion,
   parseAcpRequestUserInputRequestParams,
   parseAcpRequestUserInputResponsePayload,
+  resolveAcpRequestUserInputAnswer,
 } from './acp';
 
 const singleQuestion = {
@@ -123,6 +125,41 @@ describe('request_user_input multi-select payloads', () => {
       parseAcpRequestUserInputPayload({ ...payload, preset: 'untrusted' })
         ?.preset,
     ).toBeUndefined();
+  });
+
+  it('canonicalizes trusted option IDs while accepting legacy labels', () => {
+    const question = {
+      ...singleQuestion,
+      options: [
+        { id: 'fast', label: 'Fast', description: 'Run fast' },
+        {
+          id: 'thorough',
+          label: 'Thorough',
+          description: 'Run thoroughly',
+        },
+      ],
+    };
+    expect(
+      getAcpRequestUserInputValidationError([question], {
+        mode: { answers: ['fast'] },
+      }),
+    ).toBeNull();
+    expect(
+      normalizeAcpRequestUserInputAnswers([question], {
+        mode: { answers: ['Fast'] },
+      }),
+    ).toEqual({ mode: { answers: ['fast'] } });
+    expect(resolveAcpRequestUserInputAnswer(question, 'Fast')).toBe('fast');
+    expect(resolveAcpRequestUserInputAnswer(question, '2')).toBe('thorough');
+  });
+
+  it('preserves labels for legacy options without IDs', () => {
+    expect(
+      normalizeAcpRequestUserInputAnswers([singleQuestion], {
+        mode: { answers: ['Fast'] },
+      }),
+    ).toEqual({ mode: { answers: ['Fast'] } });
+    expect(resolveAcpRequestUserInputAnswer(singleQuestion, '1')).toBe('Fast');
   });
 
   it('parses answers and response payloads without multi-select changes', () => {

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   acquireRootBindingLock: vi.fn(),
   releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
+  buildSetupAdapter: vi.fn(() => ({ assertTaskLaunch: vi.fn() })),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
   findSession: vi.fn(),
@@ -93,6 +94,7 @@ vi.mock('@roomote/communication', async (importOriginal) => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  buildFastAgentSetupAdapter: mocks.buildSetupAdapter,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   fastAgentConversationRepository: {
     findById: mocks.findSession,
@@ -640,6 +642,12 @@ describe('deliverFastAgentParentEvent', () => {
           platformEventKind: 'setup',
           platformEventVisibility: 'required',
           setupSession: true,
+          setupContext: {
+            sessionId: 'session-1',
+            fastConversationId: parent.sessionId,
+            setupSnapshot: '{"rail":{"source":"ready"}}',
+            starterTaskOptions: [],
+          },
         },
         resumedAfterInterruption: true,
         durableAdmission: { eventId: 'row-2' },
@@ -665,6 +673,10 @@ describe('deliverFastAgentParentEvent', () => {
         platformEventKind: 'setup',
         platformEventVisibility: 'required',
         setupSession: true,
+        setupSnapshot: '{"rail":{"source":"ready"}}',
+        adapter: expect.objectContaining({
+          assertTaskLaunch: expect.any(Function),
+        }),
         resumedAfterInterruption: true,
         durableAdmission: { eventId: 'row-2' },
       }),

@@ -1165,6 +1165,49 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     },
   );
 
+  it('closes a server-completed setup preset without persisting a pending request', async () => {
+    let toolResult: unknown;
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => []);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+          preset: 'setup_integrations',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      completed: true,
+      closed: true,
+    });
+    expect(requestUserInput).not.toHaveBeenCalled();
+    expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventType: 'roomote_runtime.request_user_input',
+        }),
+      }),
+    );
+  });
+
   it.each(['setup_starter_tasks', undefined])(
     'rejects integration preferences outside their preset: %s',
     async (preset) => {

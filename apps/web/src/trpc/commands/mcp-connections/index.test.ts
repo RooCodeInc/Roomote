@@ -25,6 +25,7 @@ import type { UserAuthSuccess } from '@/types';
 
 import {
   connectMcpCommand,
+  getEffectiveMcpIntegrationsCommand,
   saveAsanaConnectionCommand,
   setDeploymentMcpEnabledCommand,
 } from './index';
@@ -35,6 +36,11 @@ const adminAuth = {
   userId: 'mcp-connections-admin',
   isAdmin: true,
 } as UserAuthSuccess;
+const memberAuth = {
+  ...adminAuth,
+  userId: 'mcp-connections-member',
+  isAdmin: false,
+} as UserAuthSuccess;
 
 async function cleanup() {
   await db.delete(mcpConnections);
@@ -44,6 +50,7 @@ async function cleanup() {
 describe('MCP connection lifecycle telemetry', () => {
   beforeAll(async () => {
     await userFactory.create({ id: adminAuth.userId });
+    await userFactory.create({ id: memberAuth.userId });
   });
 
   beforeEach(async () => {
@@ -143,5 +150,45 @@ describe('MCP connection lifecycle telemetry', () => {
       authStatus: 'pending',
     });
     expect(reconnected?.refreshToken).toBeTruthy();
+  });
+
+  it('projects effective status from correctly scoped connections', async () => {
+    await db.insert(deploymentMcpEnablements).values([
+      { mcpId: 'sentry', enabled: true, enabledByUserId: adminAuth.userId },
+      { mcpId: 'monday', enabled: true, enabledByUserId: adminAuth.userId },
+    ]);
+    await db.insert(mcpConnections).values([
+      {
+        userId: null,
+        mcpId: 'sentry',
+        enabled: true,
+        authStatus: 'authenticated',
+      },
+      {
+        userId: memberAuth.userId,
+        mcpId: 'monday',
+        enabled: true,
+        authStatus: 'authenticated',
+      },
+    ]);
+
+    const integrations = await getEffectiveMcpIntegrationsCommand(adminAuth);
+
+    expect(integrations.find(({ id }) => id === 'sentry')).toMatchObject({
+      connectionScope: 'deployment',
+      enabled: true,
+      authStatus: 'authenticated',
+      status: 'connected',
+      capabilities: { agentTools: true, toolManagement: true },
+    });
+    expect(integrations.find(({ id }) => id === 'monday')).toMatchObject({
+      connectionScope: 'user',
+      enabled: true,
+      authStatus: null,
+      status: 'needs_connection',
+    });
+    expect(integrations.find(({ id }) => id === 'rippling')).toMatchObject({
+      capabilities: { agentTools: false, toolManagement: false },
+    });
   });
 });

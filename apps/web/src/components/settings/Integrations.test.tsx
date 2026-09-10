@@ -8,6 +8,7 @@ import type {
 } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { toast } from 'sonner';
+import { MCP_INTEGRATIONS } from '@roomote/types';
 
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 
@@ -226,6 +227,34 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useUserMcpConnections: () => ({
     data: state.userConnections,
+    isPending: false,
+  }),
+  useEffectiveMcpIntegrations: () => ({
+    data: MCP_INTEGRATIONS.map((integration) => {
+      const enabled = state.deploymentEnablements.some(
+        (entry) => entry.mcpId === integration.id && entry.enabled,
+      );
+      const connection = state.userConnections.find(
+        (entry) => entry.mcpId === integration.id,
+      );
+      const oauthReadiness =
+        state.oauthReadiness.find((entry) => entry.mcpId === integration.id)
+          ?.status ?? 'not_required';
+      return {
+        id: integration.id,
+        available: state.integrationsEnabled,
+        enabled,
+        authStatus: connection?.authStatus ?? null,
+        oauthReadiness,
+        status: !state.integrationsEnabled
+          ? 'unavailable'
+          : enabled
+            ? connection?.authStatus === 'authenticated'
+              ? 'connected'
+              : 'needs_connection'
+            : 'not_enabled',
+      };
+    }),
     isPending: false,
   }),
   useMcpConnectionTools: () => ({

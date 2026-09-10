@@ -19,7 +19,8 @@ vi.mock('@roomote/sdk/server', () => ({
   buildFastAgentArtifactCreator: vi.fn(),
   LINEAR_ORG_CONNECTION_ROLE: 'organization',
 }));
-vi.mock('@roomote/cloud-agents/server', () => ({
+vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/cloud-agents/server')>()),
   createFastAgentWebTaskLauncher: vi.fn(),
 }));
 vi.mock('@roomote/telemetry/server', () => ({ captureEvent: vi.fn() }));
@@ -126,7 +127,7 @@ describe('optional setup integration discovery', () => {
       },
     });
   }
-  async function continueDiscovery() {
+  async function continueDiscovery(answer = 'continue') {
     const questions = await (
       await context()
     ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
@@ -150,7 +151,7 @@ describe('optional setup integration discovery', () => {
     return submitSetupSessionUserInputCommand(auth, {
       sessionId,
       requestId: 'integrations',
-      answers: { 'setup-integrations': { answers: ['Continue'] } },
+      answers: { 'setup-integrations': { answers: [answer] } },
     });
   }
 
@@ -212,7 +213,7 @@ describe('optional setup integration discovery', () => {
     await db.delete(users).where(eq(users.id, auth.userId));
   });
 
-  it('continues without any connector or source connection and persists completion', async () => {
+  it('completes zero-match discovery server-side without a browser response', async () => {
     mocks.getStatus.mockImplementation(async () => ({
       setupNewState: await readState(),
       setupCompletedAt: null,
@@ -223,10 +224,7 @@ describe('optional setup integration discovery', () => {
     const questions = await (
       await context()
     ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
-    expect(questions[0]?.options?.map((option) => option.id)).toEqual([
-      'continue',
-    ]);
-    await expect(continueDiscovery()).resolves.toEqual({ success: true });
+    expect(questions).toEqual([]);
     expect(
       (await readState()).setupSession?.integrationDiscoveryCompletedAt,
     ).toEqual(expect.any(String));
@@ -239,11 +237,7 @@ describe('optional setup integration discovery', () => {
       .select()
       .from(fastAgentMessages)
       .where(eq(fastAgentMessages.eventId, 'event:integrations:response'));
-    expect(responses).toHaveLength(1);
-    expect(responses[0]?.payload).toMatchObject({
-      resolution: 'submitted',
-      answers: { 'setup-integrations': { answers: ['Continue'] } },
-    });
+    expect(responses).toHaveLength(0);
     await expect(
       (await context()).adapterExtensions.resolveUserInputPreset!(
         'setup_integrations',
@@ -251,7 +245,7 @@ describe('optional setup integration discovery', () => {
     ).rejects.toThrow('already complete');
   });
 
-  it('persists cancellation as an early skip while leaving final continuation optional', async () => {
+  it('persists cancellation as an early skip and completes an empty final match server-side', async () => {
     await answeredCategory('communication', [], 'cancelled');
     const snapshot = JSON.parse(
       (await context()).setupSnapshot,
@@ -262,14 +256,11 @@ describe('optional setup integration discovery', () => {
       matchedIntegrationIds: [],
     });
     await reconcileSetupPlatformEvents(auth);
-    expect(mocks.schedule).not.toHaveBeenCalled();
+    expect(mocks.schedule).toHaveBeenCalledOnce();
     const questions = await (
       await context()
     ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
-    expect(questions[0]?.options?.map((option) => option.id)).toEqual([
-      'continue',
-    ]);
-    await continueDiscovery();
+    expect(questions).toEqual([]);
     expect(
       JSON.parse((await context()).setupSnapshot).integrationDiscovery
         .completed,
@@ -319,6 +310,16 @@ describe('optional setup integration discovery', () => {
       completed: false,
       matchedIntegrationIds: ['vercel', 'granola'],
     });
+  });
+
+  it('accepts the legacy continuation label for an existing setup card', async () => {
+    await answeredCategory('documents', ['Notion']);
+    await expect(continueDiscovery('Continue')).resolves.toEqual({
+      success: true,
+    });
+    expect(
+      (await readState()).setupSession?.integrationDiscoveryCompletedAt,
+    ).toEqual(expect.any(String));
   });
 
   it('resumes persisted category answers and exactly matches catalog options in homepage order', async () => {
@@ -402,7 +403,7 @@ describe('optional setup integration discovery', () => {
     ]);
   });
 
-  it('suppresses async setup events and starter choices during discovery without gating setup completion', async () => {
+  it('coalesces setup changes into one deterministic turn without discovery-first dropping', async () => {
     expect(await reconcileSetupPlatformEvents(auth)).toBe(true);
     expect(mocks.complete).toHaveBeenCalled();
     expect(
@@ -410,7 +411,15 @@ describe('optional setup integration discovery', () => {
         ([turn]) =>
           JSON.parse(turn.question.replace(/<\/?platform_event>/g, '')).type,
       ),
-    ).toEqual(['session_creation']);
+    ).toEqual(['setup_state_changed']);
+    expect(
+      JSON.parse(
+        mocks.schedule.mock.calls[0]![0].question.replace(
+          /<\/?platform_event>/g,
+          '',
+        ),
+      ).changes.map((change: { type: string }) => change.type),
+    ).toEqual(['session_creation', 'source_connection', 'starter_request']);
     await answeredCategory('documents', ['Notion']);
     mocks.schedule.mockClear();
     await reconcileSetupPlatformEvents(auth);
@@ -427,14 +436,13 @@ describe('optional setup integration discovery', () => {
           fingerprint: 'test',
           payload: {},
         }),
-      ).toEqual({ scheduled: false });
+      ).toEqual({ scheduled: true });
     }
-    expect(mocks.schedule).not.toHaveBeenCalled();
-    await expect(
-      (await context()).adapterExtensions.resolveUserInputPreset!(
-        'setup_starter_tasks',
-      ),
-    ).rejects.toThrow('optional tool discovery');
+    expect(mocks.schedule).toHaveBeenCalledTimes(6);
+    const starterQuestions = await (
+      await context()
+    ).adapterExtensions.resolveUserInputPreset!('setup_starter_tasks');
+    expect(starterQuestions).toHaveLength(1);
     await continueDiscovery();
     expect(
       mocks.schedule.mock.calls.some(([turn]) =>
@@ -446,6 +454,7 @@ describe('optional setup integration discovery', () => {
     ).adapterExtensions.resolveUserInputPreset!('setup_starter_tasks');
     expect(questions[0]?.options).toEqual(
       SETUP_STARTER_TASKS.map((task) => ({
+        id: task.id,
         label: task.title,
         description: task.description,
       })),

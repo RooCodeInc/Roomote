@@ -162,6 +162,8 @@ export type FastAgentMcpServerConfig = {
   url: string;
   headers: Record<string, string>;
   disabledTools?: string[];
+  /** Opaque, non-secret revision used to invalidate process-local tool catalogs. */
+  cacheRevision?: string;
 };
 
 /** Structured input request issued with the Fast-native request_user_input tool. */

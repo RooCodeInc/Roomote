@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   MCP_INTEGRATIONS,
@@ -29,9 +29,7 @@ import {
 import { McpIcon } from '@/components/settings/McpIcon';
 import {
   useConnectMcp,
-  useCuratedIntegrationsAvailability,
-  useDeploymentMcpEnablements,
-  useUserMcpConnections,
+  useEffectiveMcpIntegrations,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useTelemetry } from '@/hooks/useTelemetry';
@@ -59,10 +57,7 @@ export function SetupIntegrationsCard({
   const searchParams = useSearchParams();
   const { isAdmin } = useAuthorizedUser();
   const { enabled, capture } = useTelemetry();
-  const onboarding = useQuery(trpc.onboarding.status.queryOptions());
-  const enablements = useDeploymentMcpEnablements();
-  const connections = useUserMcpConnections();
-  const availability = useCuratedIntegrationsAvailability();
+  const effectiveIntegrations = useEffectiveMcpIntegrations();
   const connectMcp = useConnectMcp();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [continued, setContinued] = useState(false);
@@ -115,41 +110,33 @@ export function SetupIntegrationsCard({
     });
   }, [matchedCount, mutate, request.requestId, sessionId]);
   const refresh = () => {
-    void onboarding.refetch();
-    void enablements.refetch();
-    void connections.refetch();
-    void availability.refetch();
+    void effectiveIntegrations.refetch();
   };
-  const statusPending =
-    onboarding.isPending || enablements.isPending || connections.isPending;
-  const statusError =
-    onboarding.isError ||
-    enablements.isError ||
-    connections.isError ||
-    availability.isError;
+  const statusPending = effectiveIntegrations.isPending;
+  const statusError = effectiveIntegrations.isError;
   const active = SETUP_INTEGRATIONS.find(
     (integration) => integration.id === activeId,
   );
   const activeDefinition = MCP_INTEGRATIONS.find(
     (integration) => integration.id === activeId,
   );
-  const authenticatedIds = new Set(
-    (connections.data ?? [])
-      .filter((connection) => connection.authStatus === 'authenticated')
-      .map((connection) => connection.mcpId),
-  );
-  const enabledIds = new Set(
-    (enablements.data ?? [])
-      .filter((entry) => entry.enabled)
-      .map((entry) => entry.mcpId),
+  const effectiveById = new Map(
+    (effectiveIntegrations.data ?? []).map((integration) => [
+      integration.id,
+      integration,
+    ]),
   );
   const getStatus = (integration: (typeof SETUP_INTEGRATIONS)[number]) => {
     if (statusPending || statusError) return null;
-    if (integration.id === 'linear')
-      return onboarding.data?.orgHasLinear ? 'Connected' : null;
-    if (authenticatedIds.has(integration.id))
-      return enabledIds.has(integration.id) ? 'Connected' : 'Not enabled';
-    return enabledIds.has(integration.id) ? 'Needs connection' : null;
+    const status = effectiveById.get(integration.id)?.status;
+    if (status === 'connected') return 'Connected';
+    if (
+      status === 'not_enabled' &&
+      effectiveById.get(integration.id)?.authStatus === 'authenticated'
+    )
+      return 'Not enabled';
+    if (status === 'needs_connection') return 'Needs connection';
+    return null;
   };
   const authFailed =
     searchParams.get('mcp') === 'error' || searchParams.get('error') !== null;
@@ -208,7 +195,9 @@ export function SetupIntegrationsCard({
           or keep going.
         </p>
       ) : null}
-      {availability.data?.enabled === false ? (
+      {effectiveIntegrations.data?.some(
+        (integration) => integration.status === 'unavailable',
+      ) ? (
         <p className="text-sm text-muted-foreground">
           Tool integrations are disabled by the deployment operator. You can
           still continue setup.
@@ -228,7 +217,8 @@ export function SetupIntegrationsCard({
             (entry) => entry.id === integration.id,
           );
           const status = getStatus(integration);
-          const unavailable = availability.data?.enabled === false;
+          const effective = effectiveById.get(integration.id);
+          const unavailable = effective?.status === 'unavailable';
           return (
             <li
               key={integration.id}
@@ -293,8 +283,7 @@ export function SetupIntegrationsCard({
           activeDefinition &&
           active.id !== 'linear' &&
           !isDeploymentScopedMcpIntegration(activeDefinition) &&
-          enabledIds.has(active.id) &&
-          !authenticatedIds.has(active.id) ? (
+          effectiveById.get(active.id)?.status === 'needs_connection' ? (
             <Button
               disabled={connectMcp.isPending}
               onClick={() =>

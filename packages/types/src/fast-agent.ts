@@ -231,6 +231,23 @@ export const fastAgentPlatformEventVisibilitySchema = z.enum([
   'required',
 ]);
 
+export const fastAgentSetupTurnContextSchema = z.object({
+  sessionId: z.string().min(1),
+  fastConversationId: z.string().min(1),
+  setupSnapshot: z.string().min(1),
+  starterTaskOptions: z.array(
+    z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      description: z.string(),
+    }),
+  ),
+});
+
+export type FastAgentSetupTurnContext = z.infer<
+  typeof fastAgentSetupTurnContextSchema
+>;
+
 export const fastAgentHumanFollowUpEventSchema = z.object({
   type: z.literal(FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE),
   eventId: z.string().min(1),
@@ -288,6 +305,9 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   platformEventKind: fastAgentPlatformEventKindSchema.optional(),
   platformEventVisibility: fastAgentPlatformEventVisibilitySchema.optional(),
   setupSession: z.boolean().optional(),
+  /** Serializable setup context used to rebuild trusted setup capabilities
+   * when an admitted web turn resumes in another process. */
+  setupContext: fastAgentSetupTurnContextSchema.optional(),
 });
 
 export type FastAgentHumanFollowUpEvent = z.infer<
