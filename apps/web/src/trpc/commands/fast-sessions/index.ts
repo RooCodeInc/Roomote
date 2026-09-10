@@ -992,7 +992,15 @@ export async function submitFastSessionUserInputCommand(
             }),
           },
         ],
-        metadata: { visibleInTranscript: true },
+        metadata: {
+          visibleInTranscript: true,
+          userId: auth.userId,
+          ...(auth.name ? { userName: auth.name } : {}),
+          ...(auth.primaryEmail ? { userEmail: auth.primaryEmail } : {}),
+          ...(auth.resource?.imageUrl
+            ? { userImageUrl: auth.resource.imageUrl }
+            : {}),
+        },
         payload: {
           requestId: input.requestId,
           sessionId: session.id,

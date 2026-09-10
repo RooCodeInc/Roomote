@@ -465,6 +465,9 @@ async function buildSetupPlatformEventTurn(
     prepared?.conversation ?? (await findSetupSessionConversation(auth));
   if (!conversation) return null;
 
+  const setupSnapshot =
+    prepared?.setupSnapshot ?? (await resolveSetupSnapshot(auth));
+  const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
   const currentMessageId = buildSetupEventTurnId({
     sessionId: conversation.sessionId,
     workflowVersion: conversation.workflowVersion,
@@ -504,10 +507,12 @@ async function buildSetupPlatformEventTurn(
       turnId: currentMessageId,
     },
     setupSession: true,
-    setupContext: buildSetupTurnContext(
-      conversation,
-      prepared?.setupSnapshot ?? (await resolveSetupSnapshot(auth)),
-    ),
+    setupContext,
+    adapterExtensions: buildFastAgentSetupAdapter(setupContext, {
+      onIntegrationDiscoveryCompleted: async () => {
+        await reconcileSetupPlatformEvents(auth);
+      },
+    }),
     durableSessionId: conversation.fastConversationId,
   };
 }
@@ -1037,10 +1042,17 @@ async function persistSetupPresetResponse(input: {
           }),
         },
       ],
-      // The transcript client needs this control event to resolve and remove
-      // the input card. FastSessionTranscript filters response event types
-      // from rendered chat, so it remains visually hidden.
-      metadata: { visibleInTranscript: true },
+      metadata: {
+        visibleInTranscript: true,
+        userId: input.auth.userId,
+        ...(input.auth.name ? { userName: input.auth.name } : {}),
+        ...(input.auth.primaryEmail
+          ? { userEmail: input.auth.primaryEmail }
+          : {}),
+        ...(input.auth.resource?.imageUrl
+          ? { userImageUrl: input.auth.resource.imageUrl }
+          : {}),
+      },
       payload: {
         requestId: input.request.payload.requestId,
         sessionId: input.fastConversationId,
@@ -1123,7 +1135,11 @@ export async function resolveSetupSessionTurnContext(
   const setupSnapshot = await resolveSetupSnapshot(auth);
   const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
   return {
-    adapterExtensions: buildFastAgentSetupAdapter(setupContext),
+    adapterExtensions: buildFastAgentSetupAdapter(setupContext, {
+      onIntegrationDiscoveryCompleted: async () => {
+        await reconcileSetupPlatformEvents(auth);
+      },
+    }),
     setupSnapshot,
     setupContext,
     setupSession: true as const,

@@ -225,6 +225,13 @@ describe('optional setup integration discovery', () => {
       await context()
     ).adapterExtensions.resolveUserInputPreset!('setup_integrations');
     expect(questions).toEqual([]);
+    expect(mocks.schedule).toHaveBeenCalledOnce();
+    expect(mocks.schedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformEventKind: 'setup',
+        setupSession: true,
+      }),
+    );
     expect(
       (await readState()).setupSession?.integrationDiscoveryCompletedAt,
     ).toEqual(expect.any(String));
@@ -320,6 +327,11 @@ describe('optional setup integration discovery', () => {
     expect(
       (await readState()).setupSession?.integrationDiscoveryCompletedAt,
     ).toEqual(expect.any(String));
+    const [response] = await db
+      .select({ metadata: fastAgentMessages.metadata })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.eventId, 'event:integrations:response'));
+    expect(response?.metadata).toMatchObject({ userId: auth.userId });
   });
 
   it('resumes persisted category answers and exactly matches catalog options in homepage order', async () => {
