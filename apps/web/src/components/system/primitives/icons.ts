@@ -146,7 +146,6 @@ export {
   PanelLeftOpen,
   PaperclipIcon,
   Pencil,
-  PencilRuler,
   Pin,
   Plug,
   PlugIcon,
