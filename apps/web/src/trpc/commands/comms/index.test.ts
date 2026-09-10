@@ -46,6 +46,7 @@ const {
     apiKey: null as string | null,
     webhookSecret: null as string | null,
     inboxId: null as string | null,
+    podId: null as string | null,
   })),
   mockAgentMailClientConstructor: vi.fn(),
   mockAgentMailListInboxes: vi.fn(),
@@ -322,6 +323,7 @@ describe('comms commands', () => {
       apiKey: null,
       webhookSecret: null,
       inboxId: null,
+      podId: null,
     });
     mockAgentMailListInboxes.mockResolvedValue({ inboxes: [] });
     mockAgentMailListWebhooks.mockResolvedValue({ webhooks: [] });
@@ -1103,11 +1105,17 @@ describe('comms commands', () => {
       );
     });
 
-    it('adopts a legacy client-id webhook and re-points it without recreating when a secret is stored', async () => {
+    it('recreates a legacy client-id webhook whose URL drifted, since AgentMail webhook URLs are immutable', async () => {
       mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
         apiKey: 'am-key',
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
+        podId: null,
+      });
+      mockAgentMailCreateWebhook.mockResolvedValue({
+        webhook_id: 'wh-2',
+        url: expectedWebhookUrl,
+        secret: 'whsec_fresh',
       });
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
         'R_AGENTMAIL_API_KEY',
@@ -1134,24 +1142,30 @@ describe('comms commands', () => {
         values: { R_AGENTMAIL_INBOX_ID: 'support@agentmail.to' },
       });
 
-      expect(mockAgentMailUpdateWebhook).toHaveBeenCalledWith('wh-1', {
-        url: expectedWebhookUrl,
-        inboxIds: ['support@agentmail.to'],
-        eventTypes: [
-          'message.received',
-          'message.bounced',
-          'message.complained',
-        ],
-      });
-      expect(mockAgentMailCreateWebhook).not.toHaveBeenCalled();
-      expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
+      expect(mockAgentMailDeleteWebhook).toHaveBeenCalledWith('wh-1');
+      expect(mockAgentMailCreateWebhook).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: expectedWebhookUrl,
+          inboxIds: ['support@agentmail.to'],
+        }),
+      );
+      expect(mockAgentMailUpdateWebhook).not.toHaveBeenCalled();
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          values: expect.arrayContaining([
+            { name: 'R_AGENTMAIL_WEBHOOK_SECRET', value: 'whsec_fresh' },
+          ]),
+        }),
+      );
     });
 
-    it('re-scopes the webhook inbox_ids when the configured inbox changes', async () => {
+    it('re-scopes the webhook inbox_ids in place when the configured inbox changes', async () => {
       mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
         apiKey: 'am-key',
         webhookSecret: 'whsec_existing',
         inboxId: 'old-inbox@agentmail.to',
+        podId: null,
       });
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
         'R_AGENTMAIL_API_KEY',
@@ -1178,9 +1192,11 @@ describe('comms commands', () => {
         values: { R_AGENTMAIL_INBOX_ID: 'new-inbox@agentmail.to' },
       });
 
+      // AgentMail's update takes add/remove lists and a full event-type
+      // replacement; the fixture carries no event types, so they converge too.
       expect(mockAgentMailUpdateWebhook).toHaveBeenCalledWith('wh-1', {
-        url: expectedWebhookUrl,
-        inboxIds: ['new-inbox@agentmail.to'],
+        addInboxIds: ['new-inbox@agentmail.to'],
+        removeInboxIds: ['old-inbox@agentmail.to'],
         eventTypes: [
           'message.received',
           'message.bounced',
@@ -1191,11 +1207,127 @@ describe('comms commands', () => {
       expect(mockAgentMailDeleteWebhook).not.toHaveBeenCalled();
     });
 
+    it('addresses AgentMail through the pod when a pod id is entered and persists it', async () => {
+      mockAgentMailCreateInbox.mockResolvedValue({
+        pod_id: 'pod_acme',
+        inbox_id: `${expectedUsername}@agentmail.to`,
+      });
+      mockAgentMailCreateWebhook.mockResolvedValue({
+        webhook_id: 'wh-1',
+        url: expectedWebhookUrl,
+        secret: 'whsec_pod',
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: {
+            R_AGENTMAIL_API_KEY: 'am-pod-key',
+            R_AGENTMAIL_POD_ID: ' pod_acme ',
+          },
+        }),
+      ).resolves.toMatchObject({
+        agentmail: {
+          podId: 'pod_acme',
+          inboxAddress: `${expectedUsername}@agentmail.to`,
+        },
+      });
+
+      // Every management call goes through a client bound to the pod, which
+      // is what a pod-scoped key can reach.
+      expect(mockAgentMailClientConstructor).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: 'am-pod-key', podId: 'pod_acme' }),
+      );
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          values: expect.arrayContaining([
+            { name: 'R_AGENTMAIL_POD_ID', value: 'pod_acme' },
+            { name: 'R_AGENTMAIL_WEBHOOK_SECRET', value: 'whsec_pod' },
+          ]),
+        }),
+      );
+    });
+
+    it('names the pod when the key cannot see it', async () => {
+      mockAgentMailListInboxes.mockRejectedValue(
+        new AgentMailApiError(
+          'AgentMail GET /v0/pods/pod_missing/inboxes failed (404): Not Found',
+          404,
+        ),
+      );
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: {
+            R_AGENTMAIL_API_KEY: 'am-key',
+            R_AGENTMAIL_POD_ID: 'pod_missing',
+          },
+        }),
+      ).rejects.toThrow(/could not find the pod pod_missing/);
+      expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    });
+
+    it('drops a saved pod id when the field is submitted empty', async () => {
+      const txDelete = vi.fn(() => ({
+        where: vi.fn(async () => undefined),
+      }));
+      mockDbTransaction.mockImplementation(async (callback) =>
+        callback({ delete: txDelete } as never),
+      );
+      mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
+        apiKey: 'am-key',
+        webhookSecret: 'whsec_existing',
+        inboxId: 'support@agentmail.to',
+        podId: 'pod_old',
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_AGENTMAIL_API_KEY',
+        'R_AGENTMAIL_INBOX_ID',
+        'R_AGENTMAIL_POD_ID',
+        'R_AGENTMAIL_WEBHOOK_SECRET',
+      ]);
+      mockAgentMailGetInbox.mockResolvedValue({
+        inbox_id: 'support@agentmail.to',
+      });
+      mockAgentMailListWebhooks.mockResolvedValue({
+        webhooks: [
+          {
+            webhook_id: 'wh-1',
+            url: expectedWebhookUrl,
+            client_id: `roomote-agentmail-webhook-${hostHash}`,
+            inbox_ids: ['support@agentmail.to'],
+            event_types: [
+              'message.received',
+              'message.bounced',
+              'message.complained',
+            ],
+          },
+        ],
+      });
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'agentmail',
+        values: {
+          R_AGENTMAIL_INBOX_ID: 'support@agentmail.to',
+          R_AGENTMAIL_POD_ID: '',
+        },
+      });
+
+      // The reconcile ran at organization level and the stale pod is removed.
+      expect(mockAgentMailClientConstructor).toHaveBeenCalledWith(
+        expect.not.objectContaining({ podId: expect.anything() }),
+      );
+      expect(txDelete).toHaveBeenCalled();
+    });
+
     it('leaves a fully converged webhook untouched', async () => {
       mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
         apiKey: 'am-key',
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
+        podId: null,
       });
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
         'R_AGENTMAIL_API_KEY',
@@ -1373,6 +1505,7 @@ describe('comms commands', () => {
         apiKey: 'saved-key',
         webhookSecret: null,
         inboxId: null,
+        podId: null,
       });
       mockAgentMailListInboxes.mockResolvedValue({
         inboxes: [
@@ -1403,6 +1536,7 @@ describe('comms commands', () => {
         apiKey: 'saved-key',
         webhookSecret: null,
         inboxId: null,
+        podId: null,
       });
       mockAgentMailListInboxes.mockResolvedValue({
         inboxes: [{ inbox_id: 'existing@agentmail.to' }],
@@ -1461,6 +1595,7 @@ describe('comms commands', () => {
         apiKey: 'am-key',
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
+        podId: null,
       });
       mockAgentMailListWebhooks.mockResolvedValue({
         webhooks: [
@@ -1498,6 +1633,7 @@ describe('comms commands', () => {
         apiKey: 'am-key',
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
+        podId: null,
       });
       mockAgentMailListWebhooks.mockRejectedValue(
         new Error('AgentMail GET /v0/webhooks failed (500)'),
@@ -1520,6 +1656,7 @@ describe('comms commands', () => {
         apiKey: 'am-key',
         webhookSecret: 'whsec_existing',
         inboxId: 'support@agentmail.to',
+        podId: null,
       });
     });
 

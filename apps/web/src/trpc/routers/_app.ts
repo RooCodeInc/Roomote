@@ -2105,7 +2105,12 @@ export const appRouter = createRouter({
     // and query inputs serialize into the GET URL (browser history, proxy
     // and access logs, tracing). Mutations POST the input in the body.
     listAgentMailInboxes: protectedProcedure
-      .input(z.object({ apiKey: z.string().trim().optional() }))
+      .input(
+        z.object({
+          apiKey: z.string().trim().optional(),
+          podId: z.string().trim().optional(),
+        }),
+      )
       .mutation(({ ctx: { auth }, input }) =>
         listAgentMailInboxesCommand(auth, input),
       ),

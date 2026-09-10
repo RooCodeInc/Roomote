@@ -140,6 +140,12 @@ const ADDITIONAL_COMMS_PROVIDERS: Record<
         secret: true,
       },
       {
+        envVarName: 'R_AGENTMAIL_POD_ID',
+        acceptedEnvVarNames: ['R_AGENTMAIL_POD_ID'],
+        label: 'AgentMail Pod ID (optional)',
+        required: false,
+      },
+      {
         envVarName: 'R_AGENTMAIL_INBOX_ID',
         acceptedEnvVarNames: ['R_AGENTMAIL_INBOX_ID'],
         label: 'Inbox Email Address',
@@ -206,6 +212,8 @@ type AgentMailWebhookStatus = {
 };
 
 export type AgentMailCommsStatus = {
+  /** The AgentMail pod the inbox and webhook live in, when pod-scoped. */
+  podId: string | null;
   /** The routed inbox_id (the persisted configuration value). */
   inboxAddress: string | null;
   /** The deliverable address for display, resolved live from AgentMail. */
@@ -654,11 +662,17 @@ function buildExpectedAgentMailWebhookUrl(): string {
   return new URL('/api/webhooks/agentmail', Env.R_APP_URL).toString();
 }
 
-function createAgentMailApiClient(apiKey: string) {
+function createAgentMailApiClient(apiKey: string, podId: string | null) {
   return new AgentMailApiClient({
     apiKey,
+    ...(podId ? { podId } : {}),
     timeoutMs: AGENTMAIL_API_TIMEOUT_MS,
   });
+}
+
+function normalizeAgentMailPodId(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  return trimmed || null;
 }
 
 const EMAIL_CHANNEL_DISABLED_MESSAGE =
@@ -844,7 +858,10 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   if (!credentials.apiKey) return null;
 
   const expectedUrl = buildExpectedAgentMailWebhookUrl();
-  const client = createAgentMailApiClient(credentials.apiKey);
+  const client = createAgentMailApiClient(
+    credentials.apiKey,
+    credentials.podId,
+  );
 
   try {
     // Display only: the deliverable address may differ from the routed
@@ -874,6 +891,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
       registeredInboxIds.includes(credentials.inboxId);
 
     return {
+      podId: credentials.podId,
       inboxAddress: credentials.inboxId,
       inboxEmail,
       webhook: {
@@ -889,6 +907,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
     };
   } catch (error) {
     return {
+      podId: credentials.podId,
       inboxAddress: credentials.inboxId,
       inboxEmail: null,
       webhook: {
@@ -909,7 +928,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
  */
 export async function listAgentMailInboxesCommand(
   auth: UserAuthSuccess,
-  input: { apiKey?: string } = {},
+  input: { apiKey?: string; podId?: string } = {},
 ): Promise<{
   inboxes: Array<{ inboxId: string; email: string }>;
   proposedNewAddress: string;
@@ -920,12 +939,19 @@ export async function listAgentMailInboxesCommand(
   invalidateAgentMailRuntimeCredentialsCache();
   const existing = await resolveAgentMailRuntimeCredentials();
   const apiKey = input.apiKey?.trim() || existing.apiKey;
+  // A pod typed alongside a new key scopes the listing to that pod; with no
+  // key typed, the saved pod (if any) applies so the chooser shows what the
+  // saved key can actually reach.
+  const podId =
+    input.podId !== undefined
+      ? normalizeAgentMailPodId(input.podId)
+      : existing.podId;
 
   if (!apiKey) {
     throw new Error('Enter an AgentMail API key to load the account inboxes.');
   }
 
-  const client = createAgentMailApiClient(apiKey);
+  const client = createAgentMailApiClient(apiKey, podId);
 
   try {
     const listed = await client.listInboxes();
@@ -954,6 +980,8 @@ export async function listAgentMailInboxesCommand(
 }
 
 type AgentMailReconcileResult = {
+  /** The pod the inbox and webhook were reconciled in, when pod-scoped. */
+  podId: string | null;
   /** The routed inbox_id — persisted and used in API paths/webhook scoping. */
   inboxAddress: string;
   /** The deliverable address, display only. */
@@ -1008,11 +1036,17 @@ async function createProposedAgentMailInbox(
 async function reconcileAgentMailSetup(input: {
   enteredApiKey: string | null;
   enteredInboxId: string | null;
+  /** Null clears a saved pod; undefined keeps it. */
+  enteredPodId: string | null | undefined;
 }): Promise<AgentMailReconcileResult> {
   assertEmailChannelEnabled();
   invalidateAgentMailRuntimeCredentialsCache();
   const existing = await resolveAgentMailRuntimeCredentials();
   const apiKey = input.enteredApiKey ?? existing.apiKey;
+  const podId =
+    input.enteredPodId !== undefined
+      ? normalizeAgentMailPodId(input.enteredPodId)
+      : existing.podId;
 
   if (!apiKey) {
     throw new Error(
@@ -1020,7 +1054,10 @@ async function reconcileAgentMailSetup(input: {
     );
   }
 
-  const client = createAgentMailApiClient(apiKey);
+  // A pod-scoped key can only reach its own pod, and an org key asked to
+  // work inside a pod keeps every resource it creates there: either way the
+  // management calls below are pod-addressed once a pod id is configured.
+  const client = createAgentMailApiClient(apiKey, podId);
 
   // Prove the key authenticates with the cheapest read before touching
   // anything else, so a bad key fails with a clear message instead of a
@@ -1044,6 +1081,11 @@ async function reconcileAgentMailSetup(input: {
       }
     }
   } catch (error) {
+    if (podId && error instanceof AgentMailApiError && error.status === 404) {
+      throw new Error(
+        `AgentMail could not find the pod ${podId} with this API key. Check the AgentMail Pod ID, or clear it to use the organization's inboxes.`,
+      );
+    }
     throw new Error(
       classifyAgentMailSetupError(error, 'validating the API key'),
     );
@@ -1183,25 +1225,17 @@ async function reconcileAgentMailSetup(input: {
 
     if (existingWebhook) {
       const registeredInboxIds = readAgentMailWebhookInboxIds(existingWebhook);
-      const inboxScopeMatches =
-        registeredInboxIds.length === desiredInboxIds.length &&
-        desiredInboxIds.every((id) => registeredInboxIds.includes(id));
+      const addInboxIds = desiredInboxIds.filter(
+        (id) => !registeredInboxIds.includes(id),
+      );
+      const removeInboxIds = registeredInboxIds.filter(
+        (id) => !desiredInboxIds.includes(id),
+      );
       const registeredEventTypes =
         readAgentMailWebhookEventTypes(existingWebhook);
       const eventTypesMatch =
         registeredEventTypes.length === desiredEventTypes.length &&
         desiredEventTypes.every((type) => registeredEventTypes.includes(type));
-      if (
-        existingWebhook.url !== webhookUrl ||
-        !inboxScopeMatches ||
-        !eventTypesMatch
-      ) {
-        await client.updateWebhook(existingWebhook.webhook_id, {
-          url: webhookUrl,
-          inboxIds: desiredInboxIds,
-          eventTypes: desiredEventTypes,
-        });
-      }
       const apiSecret =
         typeof existingWebhook.secret === 'string' &&
         existingWebhook.secret.trim()
@@ -1210,9 +1244,22 @@ async function reconcileAgentMailSetup(input: {
       if (apiSecret) {
         webhookSecret = apiSecret;
       }
-      if (!webhookSecret) {
+      // The URL is immutable on AgentMail's update, and a registration whose
+      // secret we cannot verify deliveries for is useless: both cases mean a
+      // fresh registration. Scope and event drift converge in place.
+      if (existingWebhook.url !== webhookUrl || !webhookSecret) {
         await client.deleteWebhook(existingWebhook.webhook_id);
         webhookSecret = await createDeploymentWebhook();
+      } else if (
+        addInboxIds.length > 0 ||
+        removeInboxIds.length > 0 ||
+        !eventTypesMatch
+      ) {
+        await client.updateWebhook(existingWebhook.webhook_id, {
+          ...(addInboxIds.length ? { addInboxIds } : {}),
+          ...(removeInboxIds.length ? { removeInboxIds } : {}),
+          ...(eventTypesMatch ? {} : { eventTypes: desiredEventTypes }),
+        });
       }
     } else {
       webhookSecret = (await createDeploymentWebhook()) ?? webhookSecret;
@@ -1224,6 +1271,7 @@ async function reconcileAgentMailSetup(input: {
   }
 
   return {
+    podId,
     inboxAddress,
     inboxEmail: inboxEmails.get(inboxAddress) ?? inboxAddress,
     webhookUrl,
@@ -1236,7 +1284,10 @@ async function deleteAgentMailWebhookBestEffort(): Promise<void> {
   try {
     const credentials = await resolveAgentMailRuntimeCredentials();
     if (!credentials.apiKey) return;
-    const client = createAgentMailApiClient(credentials.apiKey);
+    const client = createAgentMailApiClient(
+      credentials.apiKey,
+      credentials.podId,
+    );
     const { webhooks } = await client.listWebhooks();
     const webhook = findRoomoteAgentMailWebhook(webhooks);
     if (webhook) {
@@ -1573,6 +1624,7 @@ export async function getCommsStatusCommand(
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_AUTH_ENV_VAR_NAMES,
       'R_AGENTMAIL_INBOX_ID',
+      'R_AGENTMAIL_POD_ID',
     ]),
     getTelegramWebhookStatus(),
     getDiscordCommsStatus(),
@@ -1638,6 +1690,12 @@ export async function saveCommsAuthConfigCommand(
       ? await reconcileAgentMailSetup({
           enteredApiKey: input.values?.R_AGENTMAIL_API_KEY?.trim() || null,
           enteredInboxId: input.values?.R_AGENTMAIL_INBOX_ID?.trim() || null,
+          // The pod field is part of the form: an omitted key keeps the saved
+          // pod, an empty string clears it (the form submits every field).
+          enteredPodId:
+            input.values && 'R_AGENTMAIL_POD_ID' in input.values
+              ? (input.values.R_AGENTMAIL_POD_ID?.trim() ?? null)
+              : undefined,
         })
       : null;
 
@@ -1774,6 +1832,15 @@ export async function saveCommsAuthConfigCommand(
           value: agentmailSetup.webhookSecret,
         });
       }
+      // Optional fields are only ever upserted by the generic path, so an
+      // emptied pod field would otherwise leave the old pod persisted and the
+      // next reconcile would silently address it again.
+      if (
+        !agentmailSetup.podId &&
+        persistedEnvVarNames.includes('R_AGENTMAIL_POD_ID')
+      ) {
+        await deleteDeploymentEnvVarsByNames(tx, ['R_AGENTMAIL_POD_ID']);
+      }
     }
 
     const hasConfiguredAuthEnvVar = (name: string) =>
@@ -1864,6 +1931,7 @@ export async function saveCommsAuthConfigCommand(
     ...(agentmailSetup
       ? {
           agentmail: {
+            podId: agentmailSetup.podId,
             inboxAddress: agentmailSetup.inboxAddress,
             inboxEmail: agentmailSetup.inboxEmail,
             webhookUrl: agentmailSetup.webhookUrl,

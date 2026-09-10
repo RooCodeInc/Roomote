@@ -398,6 +398,8 @@ function delay(ms: number): Promise<void> {
 
 export type AgentMailInbox = {
   inbox_id: string;
+  /** Present on inboxes that live inside a pod. */
+  pod_id?: string;
   /** Deliverable address. In practice equal to inbox_id today. */
   email?: string;
   display_name?: string;
@@ -413,9 +415,23 @@ export type AgentMailWebhook = {
 
 export type AgentMailApiClientOptions = {
   apiKey: string;
+  /**
+   * AgentMail pod the deployment's inbox and webhook live in. When set, inbox
+   * and webhook management goes through the pod-scoped endpoints
+   * (`/v0/pods/{pod_id}/...`), which is what a pod-scoped API key can reach;
+   * message endpoints are inbox-addressed either way.
+   */
+  podId?: string;
   apiBaseUrl?: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
+};
+
+export type AgentMailWebhookUpdate = {
+  addInboxIds?: string[];
+  removeInboxIds?: string[];
+  /** A non-empty list REPLACES the subscription in full (AgentMail semantics). */
+  eventTypes?: string[];
 };
 
 export type AgentMailOutboundBody = {
@@ -437,6 +453,11 @@ export class AgentMailApiClient {
   private readonly apiBaseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  /**
+   * Prefix for inbox and webhook MANAGEMENT paths: the pod when configured,
+   * the organization otherwise. Message paths always hang off `/v0/inboxes`.
+   */
+  private readonly managementPrefix: string;
 
   constructor(private readonly options: AgentMailApiClientOptions) {
     this.apiBaseUrl = trimTrailingSlashes(
@@ -444,6 +465,14 @@ export class AgentMailApiClient {
     );
     this.fetchImpl = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_AGENTMAIL_TIMEOUT_MS;
+    const podId = options.podId?.trim();
+    this.managementPrefix = podId
+      ? `/v0/pods/${encodeURIComponent(podId)}`
+      : '/v0';
+  }
+
+  get podId(): string | null {
+    return this.options.podId?.trim() || null;
   }
 
   /**
@@ -467,7 +496,7 @@ export class AgentMailApiClient {
           inboxes?: AgentMailInbox[];
           next_page_token?: string;
         } & Record<string, unknown>
-      >('GET', `/v0/inboxes${query}`);
+      >('GET', `${this.managementPrefix}/inboxes${query}`);
       inboxes.push(...(result.inboxes ?? []));
 
       pageToken =
@@ -491,7 +520,7 @@ export class AgentMailApiClient {
     clientId?: string;
     displayName?: string;
   }): Promise<AgentMailInbox> {
-    return this.request('POST', '/v0/inboxes', {
+    return this.request('POST', `${this.managementPrefix}/inboxes`, {
       ...(input.username ? { username: input.username } : {}),
       ...(input.domain ? { domain: input.domain } : {}),
       ...(input.clientId ? { client_id: input.clientId } : {}),
@@ -500,31 +529,42 @@ export class AgentMailApiClient {
   }
 
   getInbox(inboxId: string): Promise<AgentMailInbox> {
-    return this.request('GET', `/v0/inboxes/${encodeURIComponent(inboxId)}`);
+    return this.request(
+      'GET',
+      `${this.managementPrefix}/inboxes/${encodeURIComponent(inboxId)}`,
+    );
   }
 
   updateInbox(
     inboxId: string,
     input: { displayName?: string },
   ): Promise<AgentMailInbox> {
-    return this.request('PATCH', `/v0/inboxes/${encodeURIComponent(inboxId)}`, {
-      ...(input.displayName ? { display_name: input.displayName } : {}),
-    });
+    return this.request(
+      'PATCH',
+      `${this.managementPrefix}/inboxes/${encodeURIComponent(inboxId)}`,
+      {
+        ...(input.displayName ? { display_name: input.displayName } : {}),
+      },
+    );
   }
 
   listWebhooks(): Promise<
     { webhooks?: AgentMailWebhook[] } & Record<string, unknown>
   > {
-    return this.request('GET', '/v0/webhooks');
+    return this.request('GET', `${this.managementPrefix}/webhooks`);
   }
 
+  /**
+   * Under a pod, the created webhook is scoped to that pod by the path;
+   * `inboxIds` narrows it further either way.
+   */
   createWebhook(input: {
     url: string;
     clientId?: string;
     inboxIds?: string[];
     eventTypes?: string[];
   }): Promise<AgentMailWebhook> {
-    return this.request('POST', '/v0/webhooks', {
+    return this.request('POST', `${this.managementPrefix}/webhooks`, {
       url: input.url,
       ...(input.clientId ? { client_id: input.clientId } : {}),
       ...(input.inboxIds ? { inbox_ids: input.inboxIds } : {}),
@@ -533,19 +573,31 @@ export class AgentMailApiClient {
   }
 
   getWebhook(webhookId: string): Promise<AgentMailWebhook> {
-    return this.request('GET', `/v0/webhooks/${encodeURIComponent(webhookId)}`);
+    return this.request(
+      'GET',
+      `${this.managementPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
+    );
   }
 
+  /**
+   * AgentMail's webhook update is add/remove lists for the inbox scope plus
+   * a full replacement for event types; the URL is immutable, so a re-pointed
+   * webhook is deleted and recreated by the caller.
+   */
   updateWebhook(
     webhookId: string,
-    input: { url?: string; inboxIds?: string[]; eventTypes?: string[] },
+    input: AgentMailWebhookUpdate,
   ): Promise<AgentMailWebhook> {
     return this.request(
       'PATCH',
-      `/v0/webhooks/${encodeURIComponent(webhookId)}`,
+      `${this.managementPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
       {
-        ...(input.url ? { url: input.url } : {}),
-        ...(input.inboxIds ? { inbox_ids: input.inboxIds } : {}),
+        ...(input.addInboxIds?.length
+          ? { add_inbox_ids: input.addInboxIds }
+          : {}),
+        ...(input.removeInboxIds?.length
+          ? { remove_inbox_ids: input.removeInboxIds }
+          : {}),
         // A non-empty list REPLACES the subscription in full (AgentMail
         // semantics); an omitted/empty list leaves it unchanged.
         ...(input.eventTypes?.length ? { event_types: input.eventTypes } : {}),
@@ -556,7 +608,7 @@ export class AgentMailApiClient {
   deleteWebhook(webhookId: string): Promise<void> {
     return this.request(
       'DELETE',
-      `/v0/webhooks/${encodeURIComponent(webhookId)}`,
+      `${this.managementPrefix}/webhooks/${encodeURIComponent(webhookId)}`,
     );
   }
 

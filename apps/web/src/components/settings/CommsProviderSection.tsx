@@ -302,6 +302,14 @@ function AgentMailSetupStatus({
 
   return (
     <div className="space-y-2 mt-4">
+      {status.podId ? (
+        <div className="flex items-start gap-2">
+          <Info className="size-4 mt-0.5 shrink-0" />
+          <p className="text-sm">
+            Pod: <span className="break-all font-mono">{status.podId}</span>
+          </p>
+        </div>
+      ) : null}
       {status.inboxAddress ? (
         <div className="flex items-start gap-2">
           <Mail className="size-4 mt-0.5 shrink-0" />
@@ -356,6 +364,7 @@ const AGENTMAIL_MANUAL_INBOX_OPTION = '__agentmail_manual__';
  */
 function AgentMailInboxChooser({
   enteredApiKey,
+  enteredPodId,
   keyConfigured,
   value,
   savedSatisfied,
@@ -364,6 +373,8 @@ function AgentMailInboxChooser({
 }: {
   /** API key currently typed into the form (already trimmed). */
   enteredApiKey: string;
+  /** Pod id currently in the form (already trimmed); scopes the listing. */
+  enteredPodId: string;
   /** The API key field is satisfied by a saved or runtime value. */
   keyConfigured: boolean;
   value: string;
@@ -398,7 +409,7 @@ function AgentMailInboxChooser({
   const requestKey = hasEnteredKey ? enteredApiKey : '';
   // savedSatisfied joins the signature so a save that just created the
   // inbox refreshes the list (mutations have no query cache to invalidate).
-  const requestSignature = `${savedSatisfied ? 'saved' : 'unsaved'}:${requestKey}`;
+  const requestSignature = `${savedSatisfied ? 'saved' : 'unsaved'}:${requestKey}:${enteredPodId}`;
   const { mutate: loadInboxesMutate } = loadInboxes;
 
   useEffect(() => {
@@ -406,8 +417,17 @@ function AgentMailInboxChooser({
       return;
     }
     requestedKeyRef.current = requestSignature;
-    loadInboxesMutate(requestKey ? { apiKey: requestKey } : {});
-  }, [loadEnabled, requestKey, requestSignature, loadInboxesMutate]);
+    loadInboxesMutate({
+      ...(requestKey ? { apiKey: requestKey } : {}),
+      podId: enteredPodId,
+    });
+  }, [
+    loadEnabled,
+    requestKey,
+    requestSignature,
+    enteredPodId,
+    loadInboxesMutate,
+  ]);
 
   const inboxesLoading =
     loadInboxes.isPending ||
@@ -934,7 +954,7 @@ export function CommsProviderSection({
                   : !provider.runtimeSatisfied && provider.id === 'discord'
                     ? 'Roomote validates the token, derives the bot identity, and registers /new, /goal, /link, and /help when you save.'
                     : !provider.runtimeSatisfied && provider.id === 'agentmail'
-                      ? 'Roomote validates the API key, adopts or provisions an inbox, and registers the AgentMail webhook when you save. The key needs these AgentMail permissions (or full access): inbox_read, inbox_create, inbox_update, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send.'
+                      ? 'Roomote validates the API key, adopts or provisions an inbox, and registers the AgentMail webhook when you save. The key needs these AgentMail permissions (or full access): inbox_read, inbox_create, inbox_update, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send. Enter a Pod ID to keep the inbox and webhook inside that AgentMail pod, which is required for a pod-scoped key.'
                       : undefined
               }
               onCreateSlackApp={(configToken) =>
@@ -961,6 +981,7 @@ export function CommsProviderSection({
             {agentMailChooserActive && agentMailInboxField ? (
               <AgentMailInboxChooser
                 enteredApiKey={values['R_AGENTMAIL_API_KEY']?.trim() ?? ''}
+                enteredPodId={values['R_AGENTMAIL_POD_ID']?.trim() ?? ''}
                 keyConfigured={agentMailKeyConfigured}
                 value={values['R_AGENTMAIL_INBOX_ID'] ?? ''}
                 savedSatisfied={agentMailInboxField.savedSatisfied}
