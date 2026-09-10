@@ -201,7 +201,7 @@ describe('TaskFilters', () => {
     );
   });
 
-  it('keeps the no-repositories option with a human-readable label', () => {
+  it('labels the no-repositories option as Blank Slate', () => {
     useRepositoriesForFilterMock.mockReturnValue({
       data: [
         {
@@ -224,7 +224,7 @@ describe('TaskFilters', () => {
       />,
     );
 
-    const noRepositoriesLabels = getAllByText('No Repositories');
+    const noRepositoriesLabels = getAllByText('Blank Slate');
     expect(noRepositoriesLabels).toHaveLength(2);
     expect(queryByText(NO_REPOSITORIES)).not.toBeInTheDocument();
     expect(queryByText(ALL_REPOSITORIES)).not.toBeInTheDocument();

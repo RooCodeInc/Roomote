@@ -170,7 +170,7 @@ export const TaskFilters = ({
         .filter((repository) => repository.value !== ALL_REPOSITORIES)
         .map((repository) =>
           repository.value === NO_REPOSITORIES
-            ? { ...repository, label: 'No Repositories' }
+            ? { ...repository, label: 'Blank Slate' }
             : repository,
         ),
     [rawRepositories],
