@@ -37,7 +37,6 @@ export const FAST_AGENT_PACKAGED_SKILL_NAMES = [
   'security-auditor',
   'security-best-practices',
   'security-review',
-  'scheduling',
   'sentry-triage',
   'simplify',
   'triage-better-stack',
