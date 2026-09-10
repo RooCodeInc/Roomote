@@ -170,6 +170,146 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     mockEnqueuePrReviewNotification.mockResolvedValue({ notifiedTaskCount: 1 });
   });
 
+  it('closes a GitHub pull request with the installation token', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const update = vi.fn().mockResolvedValue({
+      data: { html_url: 'https://github.com/acme/backend/pull/55' },
+    });
+    mockGetOctokit.mockReturnValue({ rest: { pulls: { update } } });
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'close_pull_request',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      state: 'closed',
+    });
+    expect(result).toMatchObject({
+      success: true,
+      action: 'close_pull_request',
+      provider: 'github',
+      number: 55,
+      url: 'https://github.com/acme/backend/pull/55',
+      applied: true,
+      warnings: [],
+    });
+  });
+
+  it.each([
+    {
+      provider: 'gitlab' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://gitlab.com/acme/backend',
+      },
+      expectedUrl: 'https://gitlab.com/api/v4/projects/101/merge_requests/55',
+      expectedMethod: 'PUT',
+      expectedBody: { state_event: 'close' },
+    },
+    {
+      provider: 'gitea' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://git.example.com/acme/backend',
+      },
+      expectedUrl: 'https://git.example.com/api/v1/repos/acme/backend/pulls/55',
+      expectedMethod: 'PATCH',
+      expectedBody: { state: 'closed' },
+    },
+    {
+      provider: 'bitbucket' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://bitbucket.org/acme/backend',
+      },
+      expectedUrl:
+        'https://api.bitbucket.org/2.0/repositories/acme/backend/pullrequests/55/decline',
+      expectedMethod: 'POST',
+      expectedBody: undefined,
+    },
+    {
+      provider: 'ado' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: 'repo-uuid',
+        fullName: 'acme/Platform/backend',
+        htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      },
+      expectedUrl:
+        'https://dev.azure.com/acme/Platform/_apis/git/repositories/repo-uuid/pullrequests/55?api-version=7.1',
+      expectedMethod: 'PATCH',
+      expectedBody: { status: 'abandoned' },
+    },
+  ])(
+    'uses the $provider close operation',
+    async ({
+      provider,
+      repository,
+      expectedUrl,
+      expectedMethod,
+      expectedBody,
+    }) => {
+      mockRepositoriesFindFirst.mockResolvedValue(repository);
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({}, 200));
+
+      const result = await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: repository.fullName,
+          sourceControlProvider: provider,
+        }),
+        input: {
+          action: 'close_pull_request',
+          repositoryFullName: repository.fullName,
+          prNumber: 55,
+          sourceControlProvider: provider,
+        },
+        fetchImpl,
+      });
+
+      expect(fetchImpl).toHaveBeenCalledWith(
+        expectedUrl,
+        expect.objectContaining({
+          method: expectedMethod,
+          ...(expectedBody === undefined
+            ? {}
+            : { body: JSON.stringify(expectedBody) }),
+        }),
+      );
+      expect(result).toMatchObject({
+        success: true,
+        action: 'close_pull_request',
+        provider,
+        number: 55,
+        applied: true,
+        warnings: [],
+      });
+    },
+  );
+
   it('requests GitHub user and team reviewers with the installation token', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: 'installation-1',

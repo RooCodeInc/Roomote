@@ -379,6 +379,61 @@ describe('handleManageSourceControl issue actions', () => {
     );
   });
 
+  it('forwards close pull request actions', async () => {
+    vi.mocked(tasksApiClient.writeSourceControl).mockResolvedValueOnce({
+      success: true,
+      action: 'close_pull_request',
+      provider: 'github',
+      repositoryFullName: 'acme/web',
+      number: 12,
+      applied: true,
+      warnings: [],
+    } as never);
+
+    const result = await handleManageSourceControl(
+      {
+        action: 'close_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: true,
+      action: 'close_pull_request',
+      applied: true,
+    });
+    expect(tasksApiClient.writeSourceControl).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      expect.objectContaining({
+        action: 'close_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+      }),
+    );
+  });
+
+  it('requires a positive pull request number for close actions', async () => {
+    const result = await handleManageSourceControl(
+      {
+        action: 'close_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 0,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: 'prNumber is required for close_pull_request',
+    });
+    expect(tasksApiClient.writeSourceControl).not.toHaveBeenCalled();
+  });
+
   it('requires at least one pull request reviewer target', async () => {
     const result = await handleManageSourceControl(
       {
