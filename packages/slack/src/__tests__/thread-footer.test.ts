@@ -78,7 +78,7 @@ describe('getSlackThreadFooterText', () => {
         },
       }),
     ).toBe(
-      '_<https://app.example.com/sessions/owner?task=task-1|1 running task> · <https://app.example.com/sessions/owner?utm_source=slack&task=task-1|Web app>_',
+      '<https://app.example.com/sessions/owner?task=task-1|1 running task> · <https://app.example.com/sessions/owner?utm_source=slack&task=task-1|Open in Roomote>',
     );
   });
 
@@ -112,7 +112,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://github.com/roomote/app/pull/4321|PR #4321> · <https://app.example.com/task/task-1|Web app>_',
+      '<https://github.com/roomote/app/pull/4321|PR #4321> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -132,7 +132,7 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe('_<https://app.example.com/task/task-1|Web app>_');
+    ).resolves.toBe('<https://app.example.com/task/task-1|Open in Roomote>');
   });
 
   it('falls back to the task run PR when no linked task PR row exists', async () => {
@@ -146,7 +146,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Web app>_',
+      '<https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -168,7 +168,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://task-1-web.preview.example.com/auth/dev-login|Live preview> · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Web app>_',
+      '<https://task-1-web.preview.example.com/auth/dev-login|Live preview> · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -190,7 +190,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://task-1-web.preview.example.com/auth/dev-login|Live preview> · <https://app.example.com/task/task-1|Web app>_',
+      '<https://task-1-web.preview.example.com/auth/dev-login|Live preview> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -220,7 +220,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://task-1-my-app.preview.example.com/?path=/story/example|Live preview> · <https://app.example.com/task/task-1|Web app>_',
+      '<https://task-1-my-app.preview.example.com/?path=/story/example|Live preview> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -242,7 +242,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Web app>_',
+      '<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -265,7 +265,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Web app>_',
+      '<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -284,7 +284,7 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe('_<https://app.example.com/task/task-1|Web app>_');
+    ).resolves.toBe('<https://app.example.com/task/task-1|Open in Roomote>');
   });
 
   it('omits the live preview link for repo-only tasks without an environment', async () => {
@@ -303,7 +303,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Web app>_',
+      '<https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
 
     expect(environmentFindFirstMock).not.toHaveBeenCalled();
@@ -331,6 +331,6 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe('_<https://app.example.com/task/task-1|Web app>_');
+    ).resolves.toBe('<https://app.example.com/task/task-1|Open in Roomote>');
   });
 });

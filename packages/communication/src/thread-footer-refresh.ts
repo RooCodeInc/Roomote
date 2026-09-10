@@ -137,8 +137,8 @@ export async function forgetThreadFooterRefresh(
 /** Only accept the navigation link in a product-generated footer, never body links. */
 export function getThreadFooterNavigationUrl(footerText: string): URL | null {
   const link =
-    /<([^<>|]+)\|(?:Open in Roomote|[Ww]eb app)>/.exec(footerText)?.[1] ??
-    /\[(?:Open in Roomote|[Ww]eb app)\]\(([^()]+)\)/.exec(footerText)?.[1];
+    /<([^<>|]+)\|Open in Roomote>/.exec(footerText)?.[1] ??
+    /\[Open in Roomote\]\(([^()]+)\)/.exec(footerText)?.[1];
   if (!link) return null;
   try {
     const url = new URL(link.replaceAll('&amp;', '&'));

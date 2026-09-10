@@ -22,14 +22,18 @@ import {
 describe('bounded footer refresh registry', () => {
   it('parses supported navigation links without consuming nested open parentheses', () => {
     const url = 'https://app.example.com/sessions/session';
-    expect(getThreadFooterNavigationUrl(`_[Web app](${url})_`)?.href).toBe(url);
-    expect(getThreadFooterNavigationUrl(`_<${url}|Web app>_`)?.href).toBe(url);
     expect(
-      getThreadFooterNavigationUrl('[Web app](('.repeat(20_000)),
+      getThreadFooterNavigationUrl(`_[Open in Roomote](${url})_`)?.href,
+    ).toBe(url);
+    expect(
+      getThreadFooterNavigationUrl(`_<${url}|Open in Roomote>_`)?.href,
+    ).toBe(url);
+    expect(
+      getThreadFooterNavigationUrl('[Open in Roomote](('.repeat(20_000)),
     ).toBeNull();
     expect(
       getThreadFooterNavigationUrl(
-        '_[Web app](https://other.example/sessions/session)_',
+        '_[Open in Roomote](https://other.example/sessions/session)_',
       ),
     ).toBeNull();
   });
@@ -119,7 +123,7 @@ describe('bounded footer refresh registry', () => {
   it('reads the pull request links a footer already shows, in order', () => {
     expect(
       getThreadFooterPullRequestLinks(
-        '_<https://app/tasks|No running tasks> · <https://github.com/o/r/pull/7?a=1&amp;b=2|PR #7> · <https://github.com/o/r/pull/9|PR #9> · <https://app/sessions/s|Web app>_',
+        '_<https://app/tasks|No running tasks> · <https://github.com/o/r/pull/7?a=1&amp;b=2|PR #7> · <https://github.com/o/r/pull/9|PR #9> · <https://app/sessions/s|Open in Roomote>_',
       ),
     ).toEqual([
       { prNumber: 7, prUrl: 'https://github.com/o/r/pull/7?a=1&b=2' },
@@ -127,11 +131,11 @@ describe('bounded footer refresh registry', () => {
     ]);
     expect(
       getThreadFooterPullRequestLinks(
-        '-# _[PR #12](https://github.com/o/r/pull/12) · [Web app](https://app/sessions/s)_',
+        '-# _[PR #12](https://github.com/o/r/pull/12) · [Open in Roomote](https://app/sessions/s)_',
       ),
     ).toEqual([{ prNumber: 12, prUrl: 'https://github.com/o/r/pull/12' }]);
-    expect(getThreadFooterPullRequestLinks('_[Web app](https://app)_')).toEqual(
-      [],
-    );
+    expect(
+      getThreadFooterPullRequestLinks('_[Open in Roomote](https://app)_'),
+    ).toEqual([]);
   });
 });
