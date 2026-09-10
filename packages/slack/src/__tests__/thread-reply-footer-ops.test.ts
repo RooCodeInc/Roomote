@@ -58,7 +58,6 @@ describe('thread-reply-footer-ops', () => {
     mockResolveFooterContext.mockResolvedValue({
       linkedPrs: [{ prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }],
       livePreviewUrl: null,
-      explicitMentionRequired: false,
     });
     mockBuildFooterText.mockReturnValue(
       '_Working on <https://github.com/o/r/pull/7|PR #7>, reply or use the <https://app.example.com/task/t1|web app>._',
@@ -221,7 +220,6 @@ describe('thread-reply-footer-ops', () => {
       livePreviewUrl: 'https://preview.example.com',
       runningTasks: { count: 0, url: 'https://app.example.com/tasks' },
       webAppUrl: 'https://app.example.com/sessions/owner',
-      explicitMentionRequired: true,
     };
     mockResolveFooterContext.mockResolvedValue(context);
     mockGetFooterTs.mockResolvedValue(null);

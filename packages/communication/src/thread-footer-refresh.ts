@@ -155,7 +155,6 @@ export async function resolveCurrentThreadFooterText(
   return buildThreadReplyFooterText({
     taskUrl: url.toString(),
     ...context,
-    explicitMentionRequired: footerText.includes('@-mention'),
     formatLink:
       provider === 'slack'
         ? (label, href) => `<${href}|${label}>`

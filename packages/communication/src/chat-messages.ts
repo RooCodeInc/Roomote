@@ -300,7 +300,6 @@ export function buildThreadReplyFooterText({
   livePreviewUrl,
   runningTasks,
   webAppUrl,
-  explicitMentionRequired = false,
   formatLink = formatMarkdownLink,
   formatFooterText = (text) => `_${text}_`,
 }: {
@@ -309,7 +308,6 @@ export function buildThreadReplyFooterText({
   livePreviewUrl?: string | null;
   runningTasks?: ThreadReplyRunningTasks | null;
   webAppUrl?: string | null;
-  explicitMentionRequired?: boolean;
   formatLink?: LinkFormatter;
   formatFooterText?: (text: string) => string;
 }): string {
@@ -342,7 +340,6 @@ export function buildThreadReplyFooterText({
     webUrl.searchParams.delete('v');
   }
   items.push(formatLink('Web app', webUrl.toString()));
-  if (explicitMentionRequired) items.push('Reply with @-mention');
   return formatFooterText(items.join(' · '));
 }
 

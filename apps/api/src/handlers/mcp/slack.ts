@@ -157,7 +157,6 @@ async function buildLateBoundSlackRootFooterText(params: {
   return buildSlackThreadFooterText({
     taskUrl: params.taskUrl,
     ...context,
-    explicitMentionRequired: false,
   });
 }
 

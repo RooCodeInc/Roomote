@@ -240,13 +240,6 @@ describe('chat message copy builders', () => {
     expect(
       buildThreadReplyFooterText({
         taskUrl: 'https://roomote.dev/task/123',
-        explicitMentionRequired: true,
-      }),
-    ).toBe('_[Web app](https://roomote.dev/task/123) · Reply with @-mention_');
-
-    expect(
-      buildThreadReplyFooterText({
-        taskUrl: 'https://roomote.dev/task/123',
         linkedPrs: [
           {
             prNumber: 7,

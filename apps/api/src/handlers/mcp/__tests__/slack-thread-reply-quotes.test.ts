@@ -506,7 +506,6 @@ describe('Slack thread reply quotes', () => {
       expect(buildSlackThreadFooterTextMock).toHaveBeenCalledWith({
         ...context,
         taskUrl: expect.stringContaining('/task/task-1?'),
-        explicitMentionRequired: false,
       });
       expect(postMessageDetailedMock).toHaveBeenCalledWith(
         expect.objectContaining({

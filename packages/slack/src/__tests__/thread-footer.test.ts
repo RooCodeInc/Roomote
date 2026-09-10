@@ -6,14 +6,12 @@ const {
   taskRunFindFirstMock,
   environmentFindFirstMock,
   resolveEffectivePreviewRuntimeConfigMock,
-  redisGetMock,
 } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
   findManyMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
   resolveEffectivePreviewRuntimeConfigMock: vi.fn(),
-  redisGetMock: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -53,12 +51,6 @@ vi.mock('@roomote/env', () => ({
   },
 }));
 
-vi.mock('@roomote/redis', () => ({
-  getRedis: vi.fn(() => ({
-    get: redisGetMock,
-  })),
-}));
-
 import {
   buildSlackThreadFooterText,
   getSlackThreadFooterText,
@@ -84,7 +76,6 @@ describe('getSlackThreadFooterText', () => {
           count: 1,
           url: 'https://app.example.com/sessions/owner?task=task-1',
         },
-        explicitMentionRequired: false,
       }),
     ).toBe(
       '_<https://app.example.com/sessions/owner?task=task-1|1 running task> · <https://app.example.com/sessions/owner?utm_source=slack|Web app>_',
@@ -102,16 +93,14 @@ describe('getSlackThreadFooterText', () => {
         previewProxyBaseUrl: 'https://preview.example.com',
       },
     });
-    redisGetMock.mockResolvedValue(null);
   });
 
-  it('prefers the linked task PR and uses the explicit-mention marker', async () => {
+  it('prefers the linked task PR', async () => {
     findFirstMock.mockResolvedValue({
       prUrl: 'https://github.com/roomote/app/pull/4321',
       prNumber: 4321,
       status: 'open',
     });
-    redisGetMock.mockResolvedValue('1');
 
     await expect(
       getSlackThreadFooterText({
@@ -123,7 +112,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_<https://github.com/roomote/app/pull/4321|PR #4321> · <https://app.example.com/task/task-1|Web app> · Reply with @-mention_',
+      '_<https://github.com/roomote/app/pull/4321|PR #4321> · <https://app.example.com/task/task-1|Web app>_',
     );
   });
 
@@ -343,28 +332,5 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe('_<https://app.example.com/task/task-1|Web app>_');
-  });
-
-  it('keeps the explicit-mention instruction with the live preview link', async () => {
-    mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
-    environmentFindFirstMock.mockResolvedValue({
-      config: {
-        ports: [{ name: 'WEB', port: 3000 }],
-      },
-    });
-    redisGetMock.mockResolvedValue('1');
-
-    await expect(
-      getSlackThreadFooterText({
-        taskUrl: 'https://app.example.com/task/task-1',
-        taskId: 'task-1',
-        prRepo: null,
-        prNumber: null,
-        channelId: 'C123',
-        threadTs: '111.000',
-      }),
-    ).resolves.toBe(
-      '_<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Web app> · Reply with @-mention_',
-    );
   });
 });

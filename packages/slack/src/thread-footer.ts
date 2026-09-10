@@ -9,13 +9,9 @@ import {
   type ThreadReplyRunningTasks,
 } from '@roomote/communication';
 
-import { isSlackThreadExplicitMentionRequired } from './slack-messages';
-
 export type SlackThreadLinkedPr = ThreadReplyLinkedPr;
 
-export interface SlackThreadFooterContext extends ThreadReplyFooterContext {
-  explicitMentionRequired: boolean;
-}
+export type SlackThreadFooterContext = ThreadReplyFooterContext;
 
 export {
   buildThreadReplyPrUrl as buildSlackThreadReplyPrUrl,
@@ -30,15 +26,7 @@ export async function resolveSlackThreadFooterContext(params: {
   channelId: string;
   threadTs: string;
 }): Promise<SlackThreadFooterContext> {
-  const [context, explicitMentionRequired] = await Promise.all([
-    resolveThreadReplyFooterContext(params),
-    isSlackThreadExplicitMentionRequired(params.channelId, params.threadTs),
-  ]);
-
-  return {
-    ...context,
-    explicitMentionRequired,
-  };
+  return resolveThreadReplyFooterContext(params);
 }
 
 export function buildSlackThreadFooterText(params: {
@@ -47,7 +35,6 @@ export function buildSlackThreadFooterText(params: {
   livePreviewUrl?: string | null;
   runningTasks?: ThreadReplyRunningTasks | null;
   webAppUrl?: string | null;
-  explicitMentionRequired: boolean;
 }): string {
   return buildThreadReplyFooterText({
     taskUrl: params.taskUrl,
@@ -55,7 +42,6 @@ export function buildSlackThreadFooterText(params: {
     livePreviewUrl: params.livePreviewUrl,
     runningTasks: params.runningTasks,
     webAppUrl: params.webAppUrl,
-    explicitMentionRequired: params.explicitMentionRequired,
     formatLink: (label, url) => `<${url}|${label}>`,
   });
 }
@@ -77,6 +63,5 @@ export async function getSlackThreadFooterText(params: {
     livePreviewUrl: context.livePreviewUrl,
     runningTasks: context.runningTasks,
     webAppUrl: context.webAppUrl,
-    explicitMentionRequired: context.explicitMentionRequired,
   });
 }

@@ -116,7 +116,7 @@ describe('buildFastSessionReplyFooterText', () => {
         livePreviewUrl: 'https://preview.roomote.dev',
       }),
     ).toBe(
-      `<sub><em>[Live preview](https://preview.roomote.dev) · [PR #123](https://github.com/roomote/roomote/pull/123) · [Web app](${buildFastSessionUrl('github', sessionId)}) · Reply with @-mention</em></sub>`,
+      `<sub><em>[Live preview](https://preview.roomote.dev) · [PR #123](https://github.com/roomote/roomote/pull/123) · [Web app](${buildFastSessionUrl('github', sessionId)})</em></sub>`,
     );
   });
 
