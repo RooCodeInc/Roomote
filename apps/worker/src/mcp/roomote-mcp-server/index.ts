@@ -866,7 +866,8 @@ roomoteMcpServer.registerTool(
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
       '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
-      'Use "close_pull_request" to close, decline, or abandon an open PR/MR without merging it or deleting its branch. ' +
+      'Use "update_pull_request" with an explicit prNumber to update an existing PR/MR base branch, title, body, or draft state without ever creating a replacement. ' +
+      'Use "close_pull_request" and "reopen_pull_request" to change an existing PR/MR state without merging it or deleting its branch. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
       '"resolve_pull_request_thread" to resolve or reopen a thread, "request_pull_request_reviewers" to request user or team reviewers after PR creation, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
@@ -881,6 +882,8 @@ roomoteMcpServer.registerTool(
           'list_pull_requests',
           'list_pull_request_comments',
           'close_pull_request',
+          'update_pull_request',
+          'reopen_pull_request',
           'reply_to_pull_request_comment',
           'create_pull_request_comment',
           'create_pull_request_review_comment',
@@ -894,7 +897,7 @@ roomoteMcpServer.registerTool(
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; close_pull_request closes, declines, or abandons a PR/MR without merging it or deleting its branch; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline comment anchored to a file and line of the current diff; resolve_pull_request_thread resolves or reopens a thread; request_pull_request_reviewers requests user or team reviewers after PR creation; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; update_pull_request updates an existing PR/MR by explicit prNumber and never creates one; close_pull_request and reopen_pull_request change an existing PR/MR state without merging or deleting its branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline comment anchored to a file and line of the current diff; resolve_pull_request_thread resolves or reopens a thread; request_pull_request_reviewers requests user or team reviewers after PR creation; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -1025,19 +1028,25 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'The base branch the PR/MR should target. Required only when create_or_update_pull_request creates a new PR/MR; omit it when an open PR/MR already exists for sourceBranch to keep its current base.',
+          'The base branch the PR/MR should target. Required only when create_or_update_pull_request creates a new PR/MR; for update_pull_request, pass it only when retargeting the explicitly identified PR/MR.',
         ),
       title: z
         .string()
         .optional()
         .describe(
-          'Required for create_or_update_pull_request. The PR/MR title.',
+          'Required for create_or_update_pull_request; optional new title for update_pull_request.',
         ),
       body: z
         .string()
         .optional()
         .describe(
-          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
+          'The text content: the PR/MR description for create_or_update_pull_request or update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
+        ),
+      draft: z
+        .boolean()
+        .optional()
+        .describe(
+          'Optional draft state for update_pull_request. Provider gaps are returned explicitly instead of silently ignoring this field.',
         ),
       prAttribution: z
         .string()
@@ -1103,6 +1112,7 @@ roomoteMcpServer.registerTool(
         targetBranch: params.targetBranch,
         title: params.title,
         body: params.body,
+        draft: params.draft,
         prAttribution: params.prAttribution,
         labels: params.labels,
         assignees: params.assignees,

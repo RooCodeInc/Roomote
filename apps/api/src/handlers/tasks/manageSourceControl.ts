@@ -179,6 +179,8 @@ export async function manageSourceControl(
         );
       case 'reply_to_pull_request_comment':
       case 'close_pull_request':
+      case 'update_pull_request':
+      case 'reopen_pull_request':
       case 'create_pull_request_comment':
       case 'create_pull_request_review_comment':
       case 'resolve_pull_request_thread':
