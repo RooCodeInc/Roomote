@@ -218,9 +218,7 @@ describe('updateTaskModelSelection task access', () => {
     mockWithSandboxServerRpcClient
       .mockRejectedValueOnce(new Error('sandbox unavailable'))
       .mockResolvedValueOnce({ application: 'restarted' });
-    const consoleError = vi
-      .spyOn(console, 'error')
-      .mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const failedApply = await postModelSelection(
       createApp(owner),
