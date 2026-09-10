@@ -61,6 +61,7 @@ describe('tool presentation resolver', () => {
 
   it.each([
     ['manage_custom_automations', 'task'],
+    ['manage_wakeups', 'stopwatch'],
     ['get_about_me', 'roomote'],
     ['describe_video', 'video'],
     ['manage_goal', 'target'],
@@ -163,6 +164,41 @@ describe('tool presentation resolver', () => {
       iconKey: 'list',
     });
   });
+
+  it.each(['create', 'list', 'get', 'cancel'])(
+    'humanizes completed manage_wakeups %s calls',
+    (action) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            isMcp: true,
+            serverName: 'roomote',
+            toolName: 'manage_wakeups',
+            rawInput: { arguments: { action } },
+          } as never),
+        ),
+      ).toMatchObject({
+        verb: 'Updated',
+        object: 'timers',
+        iconKey: 'stopwatch',
+        providerLabel: undefined,
+      });
+    },
+  );
+
+  it.each([
+    ['in_progress', 'Updating'],
+    ['failed', 'Failed to Update'],
+  ] as const)(
+    'preserves manage_wakeups %s lifecycle wording',
+    (status, verb) => {
+      expect(
+        resolveToolPresentation(
+          toolData({ toolName: 'manage_wakeups', status }),
+        ),
+      ).toMatchObject({ verb, object: 'timers' });
+    },
+  );
 
   it('describes saved memories with an optional subject', () => {
     expect(

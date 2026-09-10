@@ -67,6 +67,11 @@ const DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID = Object.fromEntries(
 
 export type FormState = {
   ciFailureTriageAdditionalRules?: string;
+  suggesterAdditionalRules?: string;
+  announcerAdditionalRules?: string;
+  securityAuditorAdditionalRules?: string;
+  codeQualityAuditorAdditionalRules?: string;
+  mergeAnnouncerAdditionalRules?: string;
   callRoomoteViaEmojiEnabled: boolean;
   callRoomoteViaEmojiName: string;
   callRoomoteViaEmojiInstructions: string;
@@ -207,12 +212,14 @@ const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterUseTelegram',
   'suggesterUseTeams',
   'suggesterInstructions',
+  'suggesterAdditionalRules',
 ];
 
 const ANNOUNCER_FIELDS: Array<keyof FormState> = [
   'announcerFrequency',
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.announcer,
   'announcerInstructions',
+  'announcerAdditionalRules',
 ];
 
 const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
@@ -228,6 +235,12 @@ const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
       ...(automation.id === 'ciFailureTriage'
         ? (['ciFailureTriageAdditionalRules'] as const)
         : []),
+      ...(automation.id === 'securityAuditor'
+        ? (['securityAuditorAdditionalRules'] as const)
+        : []),
+      ...(automation.id === 'codeQualityAuditor'
+        ? (['codeQualityAuditorAdditionalRules'] as const)
+        : []),
       ...(DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID[
         automation.id as keyof typeof DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID
       ] ?? []),
@@ -239,6 +252,7 @@ const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
             'mergeAnnouncerTargetProvider',
             'mergeAnnouncerTargetMode',
             'mergeAnnouncerTargetChannelId',
+            'mergeAnnouncerAdditionalRules',
           ] as const)
         : []),
     ],
@@ -348,6 +362,14 @@ export function buildAutomationSettingsSaveInput(
     savingAutomation: automationId,
     ciFailureTriageAdditionalRules:
       stateToSave.ciFailureTriageAdditionalRules ?? '',
+    suggesterAdditionalRules: stateToSave.suggesterAdditionalRules ?? '',
+    announcerAdditionalRules: stateToSave.announcerAdditionalRules ?? '',
+    securityAuditorAdditionalRules:
+      stateToSave.securityAuditorAdditionalRules ?? '',
+    codeQualityAuditorAdditionalRules:
+      stateToSave.codeQualityAuditorAdditionalRules ?? '',
+    mergeAnnouncerAdditionalRules:
+      stateToSave.mergeAnnouncerAdditionalRules ?? '',
     callRoomoteViaEmojiEnabled: stateToSave.callRoomoteViaEmojiEnabled,
     callRoomoteViaEmojiName: stateToSave.callRoomoteViaEmojiName.trim() || null,
     callRoomoteViaEmojiInstructions:

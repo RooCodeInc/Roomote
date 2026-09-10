@@ -9,8 +9,8 @@ import {
   type AutomationRuntime,
 } from '@roomote/db/server';
 import {
-  getCiFailureTriageRules,
-  isCiFailureTriageRepositoryAllowed,
+  getAutomationAdditionalRules,
+  isAutomationAdditionalRulesRepositoryAllowed,
   type CommunicationProvider,
 } from '@roomote/types';
 
@@ -28,24 +28,24 @@ export async function isCiFailureTriageRepositoryEnabled(
   return (
     runtime.enabled &&
     runtime.scheduleMode !== 'off' &&
-    isCiFailureTriageRepositoryAllowed(runtime.settings, repositoryId)
+    isAutomationAdditionalRulesRepositoryAllowed(runtime.settings, repositoryId)
   );
 }
 
-export async function resolveCiFailureTriageRepositoryDestination(params: {
+export async function resolveAutomationRepositoryDestination(params: {
   runtime: Pick<AutomationRuntime, 'settings' | 'destination' | 'targets'>;
   repositoryId: string;
   connectedProviders: readonly CommunicationProvider[];
   destination?: ResolvedAutomationDestination;
 }): Promise<ResolvedAutomationDestination | null> {
   if (
-    !isCiFailureTriageRepositoryAllowed(
+    !isAutomationAdditionalRulesRepositoryAllowed(
       params.runtime.settings,
       params.repositoryId,
     )
   )
     return null;
-  const rules = getCiFailureTriageRules(params.runtime.settings);
+  const rules = getAutomationAdditionalRules(params.runtime.settings);
   const route = rules?.destinations.find(
     (entry) => entry.repositoryId === params.repositoryId,
   );

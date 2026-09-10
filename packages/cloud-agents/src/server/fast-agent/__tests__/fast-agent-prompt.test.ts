@@ -734,6 +734,56 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('schedules one bounded own-task check after a successful coding launch', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain('## Own Coding Task Follow-Through');
+    expect(prompt).toContain(
+      'After "launch_task" successfully creates a coding task for a human-authored request',
+    );
+    expect(prompt).toContain(
+      'list active wakeups and arrange exactly one equivalent-free one-shot check for the returned task ID',
+    );
+    expect(prompt).toContain('schedule "in 10m"');
+    expect(prompt).toContain('reportPolicy "only_when_notable"');
+    expect(prompt).toContain(
+      'not external-process monitoring, so do not ask for monitoring consent',
+    );
+    expect(prompt).toContain(
+      'Do not schedule after a failed launch or create a second check when an equivalent one exists',
+    );
+  });
+
+  it('keeps own-task check-ins useful, quiet, and nonrenewing', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+    });
+
+    expect(prompt).toContain(
+      'stay silent when the task finished or was canceled',
+    );
+    expect(prompt).toContain(
+      'completion or useful progress was already reported',
+    );
+    expect(prompt).toContain(
+      'a recent useful update makes another check-in redundant',
+    );
+    expect(prompt).toContain(
+      'Otherwise report only concrete progress, a blocker, or needed input grounded in the task; never invent progress',
+    );
+    expect(prompt).toContain(
+      'Do not create another wakeup, renew the check, or duplicate task or pull-request lifecycle notifications',
+    );
+    expect(prompt).toContain(
+      'call "ignore_event" without a cancellation closeout',
+    );
+    expect(prompt).not.toContain(
+      'when it is already on its final run, finished, canceled',
+    );
+  });
+
   it('lists on-demand servers by name with their tool names instead of mounting them', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

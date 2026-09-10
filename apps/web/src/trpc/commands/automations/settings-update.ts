@@ -39,7 +39,7 @@ import { captureActivationAutomationChanged } from '@roomote/telemetry/server';
 import type { ActivationAutomation } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
-import { resolveCiFailureTriageRules } from './ci-failure-triage-routing';
+import { resolveAutomationAdditionalRules } from './ci-failure-triage-routing';
 
 import {
   hasActiveGitHubInstallation,
@@ -93,6 +93,27 @@ import type {
 type BackgroundAgentSettings = Awaited<
   ReturnType<typeof getBackgroundAgentSettingsForDeployment>
 >;
+
+const ADDITIONAL_RULES_BY_AUTOMATION = {
+  suggester: { key: 'suggester', field: 'suggesterAdditionalRules' },
+  announcer: { key: 'announcer', field: 'announcerAdditionalRules' },
+  securityAuditor: {
+    key: 'security_auditor',
+    field: 'securityAuditorAdditionalRules',
+  },
+  codeQualityAuditor: {
+    key: 'code_quality_auditor',
+    field: 'codeQualityAuditorAdditionalRules',
+  },
+  ciFailureTriage: {
+    key: 'ci_failure_triage',
+    field: 'ciFailureTriageAdditionalRules',
+  },
+  mergeAnnouncer: {
+    key: 'merge_announcer',
+    field: 'mergeAnnouncerAdditionalRules',
+  },
+} as const;
 
 function getAutomationActivations(
   settings: BackgroundAgentSettings,
@@ -341,23 +362,30 @@ export async function updateBackgroundAgentSettingsCommand(
       ? (input.platformIssueAlertsEnabled ??
         existingSettings.platformIssueAlertsEnabled)
       : existingSettings.platformIssueAlertsEnabled;
-  const savingCiRules =
-    input.savingAutomation === 'ciFailureTriage' &&
-    input.ciFailureTriageAdditionalRules !== undefined;
-  let ciRules: Awaited<ReturnType<typeof resolveCiFailureTriageRules>>;
-  const ciRulesText = input.ciFailureTriageAdditionalRules?.trim() ?? '';
-  if (savingCiRules) {
+  const additionalRulesConfig =
+    ADDITIONAL_RULES_BY_AUTOMATION[
+      input.savingAutomation as keyof typeof ADDITIONAL_RULES_BY_AUTOMATION
+    ];
+  const submittedAdditionalRules = additionalRulesConfig
+    ? input[additionalRulesConfig.field]
+    : undefined;
+  const additionalRulesText = submittedAdditionalRules?.trim() ?? '';
+  let compiledAdditionalRules: Awaited<
+    ReturnType<typeof resolveAutomationAdditionalRules>
+  >;
+  if (additionalRulesConfig && submittedAdditionalRules !== undefined) {
     try {
-      ciRules = await resolveCiFailureTriageRules(
+      compiledAdditionalRules = await resolveAutomationAdditionalRules(
         auth,
-        ciRulesText,
-        (await getAutomationByKey('ci_failure_triage'))?.settings ?? {},
+        additionalRulesConfig.key,
+        additionalRulesText,
+        (await getAutomationByKey(additionalRulesConfig.key))?.settings ?? {},
       );
     } catch (error) {
       return {
         success: false,
         fieldErrors: {
-          ciFailureTriageAdditionalRules:
+          [additionalRulesConfig.field]:
             error instanceof Error ? error.message : String(error),
         },
       };
@@ -941,7 +969,6 @@ export async function updateBackgroundAgentSettingsCommand(
     input.suggesterInstructions,
   );
   const effectiveSuggesterInstructions = normalizedSuggesterInstructions;
-  const suggesterAutomationSettings: Record<string, string> = {};
   const sentryTriageFrequency = input.sentryTriageFrequency ?? 'off';
   const dependabotTriageFrequency = input.dependabotTriageFrequency ?? 'off';
   const codeqlTriageFrequency = input.codeqlTriageFrequency ?? 'off';
@@ -1308,6 +1335,30 @@ export async function updateBackgroundAgentSettingsCommand(
   }
 
   await db.transaction(async (tx) => {
+    let updatedAdditionalRulesSettings: Record<string, unknown> | undefined;
+    if (additionalRulesConfig && submittedAdditionalRules !== undefined) {
+      updatedAdditionalRulesSettings = {
+        ...(
+          await tx.query.automations.findFirst({
+            where: eq(automations.key, additionalRulesConfig.key),
+          })
+        )?.settings,
+      };
+      if (!compiledAdditionalRules) {
+        delete updatedAdditionalRulesSettings.additionalRules;
+        delete updatedAdditionalRulesSettings.compiledRules;
+      } else {
+        updatedAdditionalRulesSettings.additionalRules = additionalRulesText;
+        updatedAdditionalRulesSettings.compiledRules = compiledAdditionalRules;
+      }
+    }
+    const additionalRulesUpsertFields = (
+      key: TriggerableBackgroundAutomationKey,
+    ) =>
+      additionalRulesConfig?.key === key && updatedAdditionalRulesSettings
+        ? { settings: updatedAdditionalRulesSettings }
+        : {};
+
     await tx
       .insert(deploymentSettings)
       .values({
@@ -1485,6 +1536,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'security_auditor',
+      ...additionalRulesUpsertFields('security_auditor'),
       enabled: securityAuditorFrequency !== 'off',
       schedule: { mode: securityAuditorFrequency },
       ...destinationUpsertFields('securityAuditor'),
@@ -1493,33 +1545,16 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'code_quality_auditor',
+      ...additionalRulesUpsertFields('code_quality_auditor'),
       enabled: codeQualityAuditorFrequency !== 'off',
       schedule: { mode: codeQualityAuditorFrequency },
       ...destinationUpsertFields('codeQualityAuditor'),
       updatedAt: now,
     });
 
-    const ciSettings = savingCiRules
-      ? {
-          ...(
-            await tx.query.automations.findFirst({
-              where: eq(automations.key, 'ci_failure_triage'),
-            })
-          )?.settings,
-        }
-      : undefined;
-    if (ciSettings) {
-      if (!ciRules) {
-        delete ciSettings.additionalRules;
-        delete ciSettings.compiledRules;
-      } else {
-        ciSettings.additionalRules = ciRulesText;
-        ciSettings.compiledRules = ciRules;
-      }
-    }
     await upsertAutomation(tx, {
       key: 'ci_failure_triage',
-      ...(ciSettings ? { settings: ciSettings } : {}),
+      ...additionalRulesUpsertFields('ci_failure_triage'),
       enabled: ciFailureTriageFrequency !== 'off',
       schedule: { mode: ciFailureTriageFrequency },
       ...destinationUpsertFields('ciFailureTriage'),
@@ -1528,6 +1563,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'merge_announcer',
+      ...additionalRulesUpsertFields('merge_announcer'),
       enabled: mergeAnnouncerFrequency !== 'off',
       schedule: { mode: mergeAnnouncerFrequency },
       ...(mergeAnnouncerDestinationSubmitted
@@ -1550,18 +1586,19 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'suggester',
+      ...additionalRulesUpsertFields('suggester'),
       enabled: effectiveSuggesterFrequency !== 'off',
       schedule: {
         mode: effectiveSuggesterFrequency,
       },
       instructions: effectiveSuggesterInstructions,
-      settings: suggesterAutomationSettings,
       ...destinationUpsertFields('suggester'),
       updatedAt: now,
     });
 
     await upsertAutomation(tx, {
       key: 'announcer',
+      ...additionalRulesUpsertFields('announcer'),
       enabled: effectiveAnnouncerFrequency !== 'off',
       schedule: {
         mode: effectiveAnnouncerFrequency,

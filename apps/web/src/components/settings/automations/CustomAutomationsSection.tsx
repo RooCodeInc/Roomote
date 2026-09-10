@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -16,7 +16,6 @@ import {
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
 import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
-import { buildCreatorFilterValue } from '@/lib/task-creator-filter';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
@@ -34,7 +33,6 @@ import {
   Label,
   Play,
   Plus,
-  RotateCcwClock,
   Select,
   SelectContent,
   SelectItem,
@@ -45,6 +43,7 @@ import {
   Switch,
   Textarea,
   Trash2,
+  Zap,
 } from '@/components/system';
 
 import { ModelSelect } from '@/components/tasks/ModelSelect';
@@ -56,6 +55,12 @@ import {
   AutomationDestinationPicker,
   type AutomationDestinationProvider,
 } from './AutomationDestinationPicker';
+import {
+  AutomationListHeader,
+  AutomationListRow,
+  AutomationListToolbar,
+  type AutomationListFilter,
+} from './AutomationList';
 
 type ConnectedDestinationProvider = Exclude<
   AutomationDestinationProvider,
@@ -281,7 +286,21 @@ function scheduleSummaryLine(summary: string, timeZone: string): string {
     : `${summary} (${timeZoneLabel})`;
 }
 
-export function CustomAutomationsSection() {
+export function CustomAutomationsSection({
+  filter: controlledFilter,
+  search: controlledSearch,
+  onFilterChange,
+  onSearchChange,
+  toolbarLeading,
+  children,
+}: {
+  filter?: AutomationListFilter;
+  search?: string;
+  onFilterChange?: (filter: AutomationListFilter) => void;
+  onSearchChange?: (search: string) => void;
+  toolbarLeading?: ReactNode;
+  children?: ReactNode;
+} = {}) {
   const { isAdmin } = useAuthorizedUser();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -309,6 +328,12 @@ export function CustomAutomationsSection() {
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
   const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
+  const [localFilter, setLocalFilter] = useState<AutomationListFilter>('all');
+  const [localSearch, setLocalSearch] = useState('');
+  const filter = controlledFilter ?? localFilter;
+  const search = controlledSearch ?? localSearch;
+  const setFilter = onFilterChange ?? setLocalFilter;
+  const setSearch = onSearchChange ?? setLocalSearch;
 
   // New destinations default to the shared manager channel, matching where
   // the other automations report by default.
@@ -483,6 +508,51 @@ export function CustomAutomationsSection() {
       : scheduleSummary;
 
   const rows = useMemo(() => listQuery.data ?? [], [listQuery.data]);
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleRows =
+    filter === 'built-in'
+      ? []
+      : rows.filter((row) => {
+          const target = targetFromRow(row);
+          const environmentName =
+            row.executionMode === 'fast'
+              ? ''
+              : (environmentOptions.find(
+                  (environment) => environment.id === row.environmentId,
+                )?.name ?? 'Environment missing');
+          const destinationName =
+            DESTINATION_OPTIONS.find(
+              (option) => option.value === target.provider,
+            )?.label ?? 'No report channel';
+          const destinationLabel =
+            target.provider === 'slack'
+              ? (slackOptions.find(
+                  (option) =>
+                    option.id === target.channelId ||
+                    option.name === target.channelId,
+                )?.label ?? target.channelId)
+              : target.provider === 'discord'
+                ? (discordOptions.find(
+                    (option) => option.id === target.channelId,
+                  )?.label ?? target.channelId)
+                : target.channelId;
+
+          return (
+            !normalizedSearch ||
+            [
+              row.name,
+              row.prompt,
+              cadenceLabel(row),
+              environmentName,
+              destinationName,
+              destinationLabel,
+              row.createdByName ?? '',
+            ]
+              .join(' ')
+              .toLowerCase()
+              .includes(normalizedSearch)
+          );
+        });
   const atCap = rows.length >= MAX_CUSTOM_AUTOMATIONS;
   const busy =
     createMutation.isPending ||
@@ -885,54 +955,53 @@ export function CustomAutomationsSection() {
     </DialogContent>
   );
 
+  const newButton =
+    !isCreating && !editingId ? (
+      <Button
+        type="button"
+        size="sm"
+        disabled={busy || atCap || !capabilitiesLoaded}
+        onClick={() => {
+          const managerProvider =
+            managerSlackChannelId && capabilities?.slackConnected
+              ? 'slack'
+              : managerDiscordChannelId && capabilities?.discordConnected
+                ? 'discord'
+                : null;
+          const targetProvider =
+            managerProvider ?? connectedDestinationOptions[0]?.value ?? 'none';
+          setIsCreating(true);
+          setEditingId(null);
+          setForm({
+            ...EMPTY_FORM,
+            targetProvider,
+            targetChannelId:
+              targetProvider === 'slack'
+                ? managerSlackChannelId
+                : targetProvider === 'discord'
+                  ? managerDiscordChannelId
+                  : '',
+          });
+          setResolvedCron(null);
+          setScheduleSummary(null);
+        }}
+      >
+        <Plus />
+        New
+      </Button>
+    ) : null;
+
   return (
-    <section className="space-y-3" aria-labelledby="custom-automations-heading">
-      <div className="flex items-start justify-between gap-3 pt-2">
-        <div className="space-y-1">
-          <h2
-            id="custom-automations-heading"
-            className="text-sm font-semibold text-foreground"
-          >
-            Custom
-          </h2>
-        </div>
-        {!isCreating && !editingId ? (
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy || atCap || !capabilitiesLoaded}
-            onClick={() => {
-              const managerProvider =
-                managerSlackChannelId && capabilities?.slackConnected
-                  ? 'slack'
-                  : managerDiscordChannelId && capabilities?.discordConnected
-                    ? 'discord'
-                    : null;
-              const targetProvider =
-                managerProvider ??
-                connectedDestinationOptions[0]?.value ??
-                'none';
-              setIsCreating(true);
-              setEditingId(null);
-              setForm({
-                ...EMPTY_FORM,
-                targetProvider,
-                targetChannelId:
-                  targetProvider === 'slack'
-                    ? managerSlackChannelId
-                    : targetProvider === 'discord'
-                      ? managerDiscordChannelId
-                      : '',
-              });
-              setResolvedCron(null);
-              setScheduleSummary(null);
-            }}
-          >
-            <Plus className="size-4" />
-            New
-          </Button>
-        ) : null}
-      </div>
+    <section className="space-y-3" aria-label="Automations">
+      <AutomationListToolbar
+        filter={filter}
+        search={search}
+        leading={toolbarLeading}
+        action={newButton}
+        showBuiltInFilter={Boolean(children)}
+        onFilterChange={setFilter}
+        onSearchChange={setSearch}
+      />
 
       <Dialog
         open={isCreating || Boolean(editingId)}
@@ -943,34 +1012,37 @@ export function CustomAutomationsSection() {
         {isCreating || editingId ? renderEditor() : null}
       </Dialog>
 
-      {listQuery.isPending ? (
-        <Card variant="snug" data-testid="custom-automations-skeleton">
-          <CardContent>
-            <div className="divide-y divide-background">
-              {Array.from({ length: 2 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
-                >
-                  <Skeleton className="mt-0.5 h-5 w-9 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-48" />
-                    <Skeleton className="h-3 w-full max-w-lg" />
-                  </div>
+      <Card variant="snug">
+        <CardContent className="p-0!">
+          <div role="table" aria-label="Automations">
+            <AutomationListHeader />
+            <div role="rowgroup" className="divide-y divide-background">
+              {listQuery.isPending && filter !== 'built-in' ? (
+                <div data-testid="custom-automations-skeleton">
+                  {Array.from({ length: 2 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="flex items-start gap-3 px-4 py-3"
+                    >
+                      <Skeleton className="mt-0.5 h-5 w-9 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-3 w-full max-w-lg" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : rows.length === 0 && !isCreating ? (
-        <p className="text-sm text-muted-foreground -mt-4">
-          No custom automations created yet.
-        </p>
-      ) : (
-        <Card variant="snug">
-          <CardContent>
-            <div className="divide-y divide-background">
-              {rows.map((row) => {
+              ) : null}
+              {!listQuery.isPending &&
+              visibleRows.length === 0 &&
+              (filter === 'custom' || (!children && filter === 'all')) ? (
+                <p className="px-4 py-6 text-sm text-muted-foreground">
+                  {normalizedSearch
+                    ? 'No custom automations match your search.'
+                    : 'No custom automations created yet.'}
+                </p>
+              ) : null}
+              {visibleRows.map((row) => {
                 const environmentName =
                   row.executionMode === 'fast'
                     ? null
@@ -998,34 +1070,29 @@ export function CustomAutomationsSection() {
                               (option) => option.id === target.channelId,
                             )?.label ?? target.channelId)
                           : target.channelId;
-                const historyFilter = buildCreatorFilterValue({
-                  initiatorKind: 'automation',
-                  initiatorUserId: null,
-                  initiatorAutomation: 'custom_automation',
-                  actorExternalId: row.id,
-                });
-
                 return (
-                  <div
+                  <AutomationListRow
                     key={row.id}
-                    className="grid grid-cols-[1fr_auto] gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[auto_1fr_auto] sm:items-start"
-                  >
-                    <Switch
-                      aria-label={`Toggle ${row.name}`}
-                      checked={row.enabled}
-                      disabled={busy}
-                      className="col-start-1 row-start-2 mt-0.5 sm:row-start-1"
-                      onCheckedChange={(enabled) =>
-                        toggleMutation.mutate({
-                          id: row.id,
-                          ...writeInputFromRow(row),
-                          enabled,
-                        })
-                      }
-                    />
-                    <div className="col-span-2 row-start-1 min-w-0 space-y-1 sm:col-span-1 sm:col-start-2">
-                      <p className="text-sm font-semibold">{row.name}</p>
-                      <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
+                    icon={Zap}
+                    name={row.name}
+                    description={<p className="line-clamp-2">{row.prompt}</p>}
+                    enabledControl={
+                      <Switch
+                        aria-label={`Toggle ${row.name}`}
+                        checked={row.enabled}
+                        disabled={busy}
+                        className="border-border data-[state=unchecked]:bg-muted"
+                        onCheckedChange={(enabled) =>
+                          toggleMutation.mutate({
+                            id: row.id,
+                            ...writeInputFromRow(row),
+                            enabled,
+                          })
+                        }
+                      />
+                    }
+                    summary={
+                      <>
                         <span>
                           {cadenceLabel(row)}
                           {environmentName
@@ -1043,86 +1110,81 @@ export function CustomAutomationsSection() {
                           {destinationName}
                           {destinationLabel ? ` ${destinationLabel}` : ''}
                         </span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Created by {row.createdByName ?? 'Unknown'}
-                        {row.lastRunAt ? (
-                          <>
-                            {' · Last run '}
-                            <span
-                              title={new Date(row.lastRunAt).toLocaleString()}
-                            >
-                              {formatDistanceToNowCompact(
-                                new Date(row.lastRunAt),
-                                { addSuffix: true },
-                              )}
-                            </span>
-                          </>
-                        ) : null}
-                      </p>
-                      {row.latestFastResult ? (
-                        <p className="line-clamp-2 text-xs text-muted-foreground">
-                          {row.latestFastResult}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
-                      {historyFilter ? (
-                        <BasicTooltip content="View previous runs">
-                          <Button asChild size="icon" variant="ghost">
-                            <Link
-                              href={`/tasks?userId=${encodeURIComponent(historyFilter)}`}
-                              aria-label={`View previous runs for ${row.name}`}
-                            >
-                              <RotateCcwClock />
-                            </Link>
+                        <span>
+                          Created by {row.createdByName ?? 'Unknown'}
+                          {row.lastRunAt ? (
+                            <>
+                              {' · Last run '}
+                              <span
+                                title={new Date(row.lastRunAt).toLocaleString()}
+                              >
+                                {formatDistanceToNowCompact(
+                                  new Date(row.lastRunAt),
+                                  { addSuffix: true },
+                                )}
+                              </span>
+                            </>
+                          ) : null}
+                        </span>
+                      </>
+                    }
+                    actions={
+                      <>
+                        <CustomAutomationRunButton
+                          automation={row}
+                          disabled={busy}
+                        />
+                        <BasicTooltip content="Configure">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            disabled={busy}
+                            aria-label={`Configure ${row.name}`}
+                            onClick={() => editAutomation(row)}
+                          >
+                            <Settings2 />
                           </Button>
                         </BasicTooltip>
-                      ) : null}
-                      <CustomAutomationRunButton
-                        automation={row}
-                        disabled={busy}
-                      />
-                      <BasicTooltip content="Configure">
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          disabled={busy}
-                          aria-label={`Configure ${row.name}`}
-                          onClick={() => editAutomation(row)}
-                        >
-                          <Settings2 />
-                        </Button>
-                      </BasicTooltip>
-                      <BasicTooltip content="Delete">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Delete custom automation “${row.name}”?`,
-                              )
-                            ) {
-                              deleteMutation.mutate({ id: row.id });
-                            }
-                          }}
-                          aria-label={`Delete ${row.name}`}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </BasicTooltip>
-                    </div>
-                  </div>
+                        <BasicTooltip content="Delete">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `Delete custom automation “${row.name}”?`,
+                                )
+                              ) {
+                                deleteMutation.mutate({ id: row.id });
+                              }
+                            }}
+                            aria-label={`Delete ${row.name}`}
+                          >
+                            <Trash2 />
+                          </Button>
+                        </BasicTooltip>
+                      </>
+                    }
+                  />
                 );
               })}
+              {filter !== 'custom' ? children : null}
+              {!listQuery.isPending &&
+              visibleRows.length === 0 &&
+              !children &&
+              filter !== 'custom' &&
+              filter !== 'all' ? (
+                <p className="px-4 py-6 text-sm text-muted-foreground">
+                  No automations match your filters.
+                </p>
+              ) : null}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </CardContent>
+      </Card>
     </section>
   );
 }
