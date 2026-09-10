@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   queriedKeys: [] as unknown[],
   customAutomationsPending: false,
   customAutomationRunPendingId: null as string | null,
+  customAutomationTimeZone: 'UTC' as string | undefined,
   customAutomations: [] as Array<{
     id: string;
     name: string;
@@ -334,7 +335,7 @@ vi.mock('@tanstack/react-query', () => ({
             state.settingsQuery.data.settings.managerSlackChannelId,
           managerDiscordChannelId:
             state.settingsQuery.data.settings.managerDiscordChannelId,
-          effectiveTimeZone: 'UTC',
+          effectiveTimeZone: state.customAutomationTimeZone,
         },
       };
     }
@@ -671,6 +672,7 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
     state.customAutomations = [];
+    state.customAutomationTimeZone = 'UTC';
     state.customAutomationsPending = false;
     state.settingsQuery.isPending = false;
     state.environments = [];
@@ -1397,13 +1399,94 @@ describe('AutomationsSettings', () => {
 
     expect(
       await screen.findByText(
-        'At 09:00 AM, Monday through Friday, in Production →',
+        'At 09:00 AM, Monday through Friday (UTC), in Production →',
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/Created by Ada/)).toHaveTextContent(
       /Created by Ada · Last run \d+s ago/,
     );
     expect(screen.queryByText('0 9 * * 1-5')).not.toBeInTheDocument();
+  });
+
+  it('shows saved cron cadence in the deployment timezone', async () => {
+    state.customAutomationTimeZone = 'America/New_York';
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Daily scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'cron',
+        cronExpression: '0 9 * * *',
+        model: null,
+        environmentId: 'env-1',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText(
+        'Daily at 09:00 AM (America/New York), in Production →',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Daily scan' }),
+    );
+    expect(
+      screen.getByText('Daily at 09:00 AM (America/New York)'),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      reason: 'the deployment timezone is unavailable',
+      timeZone: undefined,
+      cronExpression: '0 9 * * *',
+    },
+    {
+      reason: 'the saved cron is invalid',
+      timeZone: 'UTC',
+      cronExpression: '99 99 * * *',
+    },
+  ])('falls back when $reason', async ({ timeZone, cronExpression }) => {
+    state.customAutomationTimeZone = timeZone;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Daily scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'cron',
+        cronExpression,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Custom schedule →')).toBeInTheDocument();
   });
 
   it('shows Slack DM me as a custom automation destination', async () => {

@@ -129,14 +129,21 @@ function scheduleLabel(mode: CustomAutomationScheduleMode): string {
   );
 }
 
-function cadenceLabel(row: CustomAutomationListItem): string {
+function cadenceLabel(
+  row: CustomAutomationListItem,
+  timeZone: string | undefined,
+): string {
   if (row.scheduleMode !== 'cron') {
     return scheduleLabel(row.scheduleMode);
   }
 
-  return row.cronExpression
-    ? (tryParseCronSchedule(row.cronExpression, 'UTC')?.summary ??
-        'Custom schedule')
+  if (!row.cronExpression || !timeZone) {
+    return 'Custom schedule';
+  }
+
+  const parsed = tryParseCronSchedule(row.cronExpression, timeZone);
+  return parsed
+    ? scheduleSummaryLine(parsed.summary, timeZone)
     : 'Custom schedule';
 }
 
@@ -1094,7 +1101,7 @@ export function CustomAutomationsSection({
                     summary={
                       <>
                         <span>
-                          {cadenceLabel(row)}
+                          {cadenceLabel(row, schedulingTimeZone)}
                           {environmentName
                             ? `, in ${environmentName}`
                             : ''} →
