@@ -1,14 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { isSlackManifestUpgradeRequired } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { useConnectSlack, useSlackInstallation } from '@/hooks/slack';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import {
   Button,
+  Badge,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -24,6 +26,7 @@ import {
 
 export function SlackManifestUpdateDialog() {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
   const slackInstallation = useSlackInstallation();
   const connectSlack = useConnectSlack(SETTINGS_PATHS.comms);
   const [open, setOpen] = useState(false);
@@ -32,13 +35,17 @@ export function SlackManifestUpdateDialog() {
 
   const updateManifest = useMutation(
     trpc.slack.updateAppManifest.mutationOptions({
-      onSuccess: (result) => {
+      onSuccess: async (result) => {
         setConfigToken('');
 
         if (!result.success) {
           toast.error(result.error);
           return;
         }
+
+        await queryClient.invalidateQueries({
+          queryKey: trpc.slack.installation.queryKey(),
+        });
 
         if (!result.changed) {
           toast.success('Slack app is already up to date');
@@ -63,6 +70,10 @@ export function SlackManifestUpdateDialog() {
     return null;
   }
 
+  const upgradeRequired = isSlackManifestUpgradeRequired(
+    slackInstallation.data.manifestVersion,
+  );
+
   const handleOpenChange = (nextOpen: boolean) => {
     if (updateManifest.isPending || connectSlack.isPending) return;
     setOpen(nextOpen);
@@ -83,15 +94,22 @@ export function SlackManifestUpdateDialog() {
 
   return (
     <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => setOpen(true)}
-      >
-        <RefreshCw />
-        Update app
-      </Button>
+      <div className="flex items-center gap-2">
+        {upgradeRequired ? (
+          <Badge variant="warning" className="hidden sm:inline-flex">
+            Upgrade available
+          </Badge>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setOpen(true)}
+        >
+          <RefreshCw />
+          {upgradeRequired ? 'Upgrade app' : 'Update app'}
+        </Button>
+      </div>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent size="md">
           <DialogHeader>

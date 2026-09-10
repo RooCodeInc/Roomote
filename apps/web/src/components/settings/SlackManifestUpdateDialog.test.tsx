@@ -1,8 +1,15 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { SLACK_MANIFEST_VERSION } from '@roomote/types';
 
 const { state, mutations } = vi.hoisted(() => ({
   state: {
-    installation: { appId: 'A0ROOMOTE' } as { appId: string } | null,
+    installation: {
+      appId: 'A0ROOMOTE',
+      manifestVersion: null,
+    } as {
+      appId: string;
+      manifestVersion: number | null;
+    } | null,
     updateResult: {
       success: true,
       changed: true,
@@ -20,10 +27,12 @@ const { state, mutations } = vi.hoisted(() => ({
   mutations: {
     updateManifest: vi.fn(),
     connectSlack: vi.fn(),
+    invalidateQueries: vi.fn(),
   },
 }));
 
 vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => ({ invalidateQueries: mutations.invalidateQueries }),
   useMutation: (options: {
     mutationName?: string;
     onSuccess?: (result: typeof state.updateResult) => void;
@@ -41,6 +50,7 @@ vi.mock('@tanstack/react-query', () => ({
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     slack: {
+      installation: { queryKey: () => ['slack', 'installation'] },
       updateAppManifest: {
         mutationOptions: (options: unknown) => ({
           ...(options as Record<string, unknown>),
@@ -68,7 +78,10 @@ import { SlackManifestUpdateDialog } from './SlackManifestUpdateDialog';
 describe('SlackManifestUpdateDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    state.installation = { appId: 'A0ROOMOTE' };
+    state.installation = {
+      appId: 'A0ROOMOTE',
+      manifestVersion: SLACK_MANIFEST_VERSION,
+    };
     state.updateResult = {
       success: true,
       changed: true,
@@ -85,12 +98,32 @@ describe('SlackManifestUpdateDialog', () => {
       screen.queryByRole('button', { name: 'Update app' }),
     ).not.toBeInTheDocument();
 
-    state.installation = { appId: 'A0ROOMOTE' };
+    state.installation = {
+      appId: 'A0ROOMOTE',
+      manifestVersion: SLACK_MANIFEST_VERSION,
+    };
     rerender(<SlackManifestUpdateDialog />);
     expect(
       screen.getByRole('button', { name: 'Update app' }),
     ).toBeInTheDocument();
   });
+
+  it.each([
+    { manifestVersion: null, expected: true },
+    { manifestVersion: SLACK_MANIFEST_VERSION - 1, expected: true },
+    { manifestVersion: SLACK_MANIFEST_VERSION, expected: false },
+  ])(
+    'shows the upgrade indicator when installed version is $manifestVersion',
+    ({ manifestVersion, expected }) => {
+      state.installation = { appId: 'A0ROOMOTE', manifestVersion };
+      render(<SlackManifestUpdateDialog />);
+
+      expect(screen.queryByText('Upgrade available') !== null).toBe(expected);
+      expect(
+        screen.queryByRole('button', { name: 'Upgrade app' }) !== null,
+      ).toBe(expected);
+    },
+  );
 
   it('requests a fresh token and sends it only when updating', async () => {
     render(<SlackManifestUpdateDialog />);

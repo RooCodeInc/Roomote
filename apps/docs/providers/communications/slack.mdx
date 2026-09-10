@@ -47,9 +47,17 @@ adds or updates Roomote's required capabilities, scopes, events, redirect URLs,
 and callback URLs, validates the result, and then applies it. The token is not
 stored.
 
+Roomote records the Slack integration version separately from the Roomote
+release. Installations created before version tracking have an unknown version
+and show **Upgrade available** until Roomote can confirm their manifest. Running
+**Upgrade app** clears the indicator immediately when the exported manifest is
+already current or when Slack applies an update without new permissions.
+
 If the update changes permissions, Roomote shows **Reinstall in Slack**. Finish
-that approval step before testing the new capabilities because Slack does not
-add scopes to existing installations automatically.
+that approval step to clear the upgrade indicator and before testing the new
+capabilities because Slack does not add scopes to existing installations
+automatically. Saving credentials or validating a configuration token does not
+mark the installation current.
 
 ### Alternative: env vars or an existing app
 

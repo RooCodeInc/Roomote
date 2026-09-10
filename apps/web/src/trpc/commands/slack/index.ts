@@ -9,6 +9,8 @@ import {
 } from '@roomote/sdk/server';
 import {
   PRODUCT_NAME,
+  SLACK_MANIFEST_APP_ID_ENV_VAR_NAME,
+  SLACK_MANIFEST_VERSION_ENV_VAR_NAME,
   buildSlackChannelUrl,
   buildSlackUserProfileUrl,
   getSlackTeamIdFromTaskPayload,
@@ -124,11 +126,19 @@ async function resolveSlackOAuthConfig() {
 
     return '';
   };
+  const manifestVersionValue =
+    deploymentEnvVars[SLACK_MANIFEST_VERSION_ENV_VAR_NAME]?.trim() ?? '';
+  const manifestVersion = /^\d+$/.test(manifestVersionValue)
+    ? Number(manifestVersionValue)
+    : Number.NaN;
 
   return {
     clientId: readConfiguredValue('R_SLACK_CLIENT_ID'),
     clientSecret: readConfiguredValue('R_SLACK_CLIENT_SECRET'),
     appId: readConfiguredValue('SLACK_APP_ID'),
+    manifestAppId:
+      deploymentEnvVars[SLACK_MANIFEST_APP_ID_ENV_VAR_NAME]?.trim() ?? '',
+    manifestVersion,
   };
 }
 
@@ -459,6 +469,13 @@ export async function exchangeSlackOAuthCodeCommand(
 
     const teamId = data.team.id;
     const botAccessToken = data.access_token;
+    const installedAppId = data.app_id || slackOAuthConfig.appId;
+    const confirmedManifestVersion =
+      state.manifestAppId === installedAppId &&
+      Number.isInteger(state.manifestVersion) &&
+      (state.manifestVersion ?? 0) > 0
+        ? state.manifestVersion
+        : null;
     const displayMetadata = await resolveSlackBotDisplayMetadata({
       botAccessToken,
       botUserId: data.bot_user_id,
@@ -469,7 +486,7 @@ export async function exchangeSlackOAuthCodeCommand(
       teamDomain: data.team.domain || null,
       enterpriseId: data.enterprise?.id || null,
       enterpriseName: data.enterprise?.name || null,
-      appId: data.app_id || slackOAuthConfig.appId,
+      appId: installedAppId,
       botUserId: data.bot_user_id,
       botName: displayMetadata.botName,
       appName: displayMetadata.appName,
@@ -487,11 +504,18 @@ export async function exchangeSlackOAuthCodeCommand(
 
     const savedInstallation = await db
       .insert(slackInstallations)
-      .values({ ...installationData, teamId })
+      .values({
+        ...installationData,
+        teamId,
+        manifestVersion: confirmedManifestVersion,
+      })
       .onConflictDoUpdate({
         target: slackInstallations.teamId,
         set: {
           ...installationData,
+          ...(confirmedManifestVersion
+            ? { manifestVersion: confirmedManifestVersion }
+            : {}),
           updatedAt: new Date(),
         },
       })
@@ -561,7 +585,18 @@ export async function connectSlackAppCommand(
     const slackOAuthConfig = await resolveSlackOAuthConfig();
 
     const redirectPath = input.redirectPath ?? '/settings';
-    const state = await createSignedSlackInstallState({ redirectPath });
+    const manifestVersion = slackOAuthConfig.manifestVersion;
+    const state = await createSignedSlackInstallState({
+      redirectPath,
+      ...(slackOAuthConfig.manifestAppId &&
+      Number.isInteger(manifestVersion) &&
+      manifestVersion > 0
+        ? {
+            manifestAppId: slackOAuthConfig.manifestAppId,
+            manifestVersion,
+          }
+        : {}),
+    });
     const url = buildSlackInstallUrl({
       clientId: slackOAuthConfig.clientId,
       state,

@@ -3,6 +3,10 @@ import {
   SLACK_SIGN_IN_CALLBACK_PATH,
 } from './slack-callback-paths';
 
+// Bump this independent integration version when changing static requirements
+// below so existing installations surface the upgrade flow.
+export { SLACK_MANIFEST_VERSION } from '@roomote/types';
+
 export const SLACK_MANIFEST_BOT_SCOPES = [
   'app_mentions:read',
   'assistant:write',
