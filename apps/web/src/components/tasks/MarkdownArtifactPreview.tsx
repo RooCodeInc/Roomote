@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import type { ImgHTMLAttributes, ReactNode } from 'react';
 import { Streamdown, defaultRemarkPlugins } from 'streamdown';
 import remarkBreaks from 'remark-breaks';
 
@@ -9,6 +9,10 @@ import { cn } from '@/lib/utils';
 
 function StaticPreviewLink({ children }: { children?: ReactNode }) {
   return <span data-streamdown="link">{children}</span>;
+}
+
+function StaticPreviewImage({ alt }: ImgHTMLAttributes<HTMLImageElement>) {
+  return alt ? <span data-streamdown="image">{alt}</span> : null;
 }
 
 type MarkdownArtifactPreviewProps = {
@@ -49,7 +53,7 @@ export function MarkdownArtifactPreview({
               ...Object.values(defaultRemarkPlugins),
               remarkBreaks,
             ]}
-            components={{ a: StaticPreviewLink }}
+            components={{ a: StaticPreviewLink, img: StaticPreviewImage }}
           >
             {content}
           </Streamdown>

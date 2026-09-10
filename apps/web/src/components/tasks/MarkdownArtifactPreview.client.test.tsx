@@ -87,4 +87,26 @@ describe('MarkdownArtifactPreview', () => {
     expect(container).toHaveTextContent('Partial plan');
     expect(container.querySelector('a')).not.toBeInTheDocument();
   });
+
+  it('does not load remote images from Markdown content', () => {
+    useArtifactByPathMock.mockReturnValue({
+      data: {
+        path: 'plans/external-image.md',
+        version: 1,
+        content: '![Tracking pixel](https://example.test/pixel.gif)',
+      },
+      isPending: false,
+    });
+
+    const { container } = render(
+      <MarkdownArtifactPreview
+        owner={{ taskId: 'task-1' }}
+        path="plans/external-image.md"
+        version={1}
+      />,
+    );
+
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(container).toHaveTextContent('Tracking pixel');
+  });
 });
