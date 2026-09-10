@@ -77,13 +77,17 @@ export function AutomationListHeader() {
   return (
     <div
       role="row"
-      className="hidden grid-cols-[auto_minmax(18rem,2fr)_minmax(10rem,1fr)_auto] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+      className="hidden grid-cols-[auto_minmax(0,4fr)_minmax(0,6fr)_auto] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
     >
       <span role="columnheader" className="sr-only">
         Enabled
       </span>
-      <span role="columnheader">Name</span>
-      <span role="columnheader">Description</span>
+      <span role="columnheader" className="col-start-2">
+        Name
+      </span>
+      <span role="columnheader" className="col-start-3">
+        Description
+      </span>
       <span role="columnheader" className="sr-only">
         Actions
       </span>
@@ -109,17 +113,17 @@ export function AutomationListRow({
   return (
     <div
       role="row"
-      className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[auto_minmax(18rem,2fr)_minmax(10rem,1fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
+      className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[auto_minmax(0,4fr)_minmax(0,6fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
     >
       <div
         role="cell"
-        className="col-start-1 row-start-2 flex w-8 items-center md:row-start-1"
+        className="col-start-1 row-span-2 row-start-1 flex w-8 items-start pt-0.5 md:row-span-1 md:items-center md:pt-0"
       >
         {enabledControl}
       </div>
       <div
         role="cell"
-        className="col-span-2 row-start-1 flex min-w-0 items-start gap-2 md:col-span-1 md:col-start-2"
+        className="col-start-2 row-start-1 flex min-w-0 items-start gap-2"
       >
         <Icon className="mt-0.5 size-4 shrink-0" />
         <div className="min-w-0 space-y-1">
@@ -131,13 +135,13 @@ export function AutomationListRow({
       </div>
       <div
         role="cell"
-        className="col-span-2 min-w-0 whitespace-normal text-xs text-muted-foreground/80 md:col-span-1 md:col-start-3"
+        className="col-span-2 col-start-2 row-start-2 min-w-0 whitespace-normal pl-6 text-xs text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1 md:pl-0"
       >
         {description}
       </div>
       <div
         role="cell"
-        className="col-start-2 row-start-2 flex shrink-0 items-center justify-end gap-1 md:col-start-4 md:row-start-1"
+        className="col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4"
       >
         {actions}
       </div>

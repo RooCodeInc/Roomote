@@ -1028,10 +1028,10 @@ describe('AutomationsSettings', () => {
       }),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', {
+      screen.getByRole('button', {
         name: 'Configure Auto-respond to channels',
       }),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
     fireEvent.click(enabledSwitch);
     expect(
       await screen.findByRole('dialog', { name: 'Auto-respond to channels' }),
@@ -1328,12 +1328,9 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     expect(await screen.findByText('Daily →')).toBeInTheDocument();
-    expect(
-      screen.getByText('No actionable regressions found.'),
-    ).toBeInTheDocument();
     const search = screen.getByRole('textbox', { name: 'Search automations' });
     fireEvent.change(search, {
-      target: { value: 'No actionable regressions' },
+      target: { value: 'Summarize priorities' },
     });
     expect(screen.getByText('Fast daily digest')).toBeInTheDocument();
     fireEvent.change(search, { target: { value: 'No matching automation' } });

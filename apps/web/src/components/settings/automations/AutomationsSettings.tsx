@@ -126,6 +126,7 @@ import {
   Slack,
   Slider,
   Spinner,
+  Settings2,
   Switch,
   Textarea,
   TriangleAlert,
@@ -1369,6 +1370,7 @@ function AutomationCard({
   onOpenChange,
   iconEnabled,
   isAvailableMatch = true,
+  runAction,
   debugSection,
   footer,
   disabled = false,
@@ -1428,10 +1430,28 @@ function AutomationCard({
             <Switch
               checked={iconEnabled}
               disabled={disabled}
+              className="border-border data-[state=unchecked]:bg-muted"
               aria-label={`${actionLabel} enabled state`}
               onCheckedChange={() => onOpenChange(true)}
             />
           </BasicTooltip>
+        }
+        actions={
+          <>
+            {runAction && iconEnabled && !disabled ? runAction : null}
+            <BasicTooltip content={actionLabel}>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                aria-label={actionLabel}
+                disabled={disabled}
+                onClick={() => onOpenChange(true)}
+              >
+                <Settings2 />
+              </Button>
+            </BasicTooltip>
+          </>
         }
       />
 

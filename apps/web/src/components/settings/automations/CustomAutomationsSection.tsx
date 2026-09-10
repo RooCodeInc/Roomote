@@ -547,7 +547,6 @@ export function CustomAutomationsSection({
               destinationName,
               destinationLabel,
               row.createdByName ?? '',
-              row.latestFastResult ?? '',
             ]
               .join(' ')
               .toLowerCase()
@@ -1076,21 +1075,13 @@ export function CustomAutomationsSection({
                     key={row.id}
                     icon={Zap}
                     name={row.name}
-                    description={
-                      <div className="space-y-1">
-                        <p>{row.prompt}</p>
-                        {row.latestFastResult ? (
-                          <p className="line-clamp-2 text-xs">
-                            {row.latestFastResult}
-                          </p>
-                        ) : null}
-                      </div>
-                    }
+                    description={<p className="line-clamp-2">{row.prompt}</p>}
                     enabledControl={
                       <Switch
                         aria-label={`Toggle ${row.name}`}
                         checked={row.enabled}
                         disabled={busy}
+                        className="border-border data-[state=unchecked]:bg-muted"
                         onCheckedChange={(enabled) =>
                           toggleMutation.mutate({
                             id: row.id,
