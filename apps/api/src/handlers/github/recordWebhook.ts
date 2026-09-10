@@ -1,8 +1,17 @@
-import { db, webhooks as webhooksTable, eq } from '@roomote/db/server';
+import {
+  and,
+  db,
+  webhooks as webhooksTable,
+  eq,
+  isNull,
+} from '@roomote/db/server';
 import type { SourceControlProvider } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
 import { redactWebhookPayload } from '../webhook-payload-redaction';
+
+const UNKNOWN_HANDLER_OUTCOME_ERROR =
+  'Webhook handler outcome is unknown because a redelivery found its durable claim nonterminal; the handler was not replayed';
 
 /**
  * Records a webhook after executing the handler, setting status based on the response.
@@ -50,6 +59,36 @@ export async function recordWebhook<T>(
 
   // Skip only if there was a conflict (not if there was a DB error)
   if (!hadInsertError && insertedRecord === undefined) {
+    // A nonterminal duplicate can be in progress or missing its final audit update.
+    // Never replay it; the original handler can still overwrite this unknown result.
+    try {
+      const [recovered] = await db
+        .update(webhooksTable)
+        .set({
+          failedAt: new Date(),
+          error: UNKNOWN_HANDLER_OUTCOME_ERROR,
+        })
+        .where(
+          and(
+            eq(webhooksTable.provider, provider),
+            eq(webhooksTable.deliveryId, deliveryId),
+            isNull(webhooksTable.succeededAt),
+            isNull(webhooksTable.failedAt),
+          ),
+        )
+        .returning({ id: webhooksTable.id });
+
+      if (recovered) {
+        console.warn(
+          `[recordWebhook] Finalized unclassified ${provider} webhook ${deliveryId} without replaying its handler`,
+        );
+      }
+    } catch (recoveryError) {
+      console.error(
+        `[recordWebhook] Failed to finalize unclassified ${provider} webhook ${deliveryId}:`,
+        recoveryError instanceof Error ? recoveryError.message : recoveryError,
+      );
+    }
     return;
   }
 
