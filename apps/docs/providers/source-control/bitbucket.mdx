@@ -96,10 +96,11 @@ operators, `AND`/`OR`/`NOT`, or user-supplied repository filters. Roomote fixes 
 search to the connected repository and rejects scope or identity mismatches.
 
 <Warning>
-Bitbucket's code search API is deprecated November 1, 2026. If search becomes
-unavailable or a request fails authorization, scope, or size checks, Roomote
-reports the limitation rather than broadening the search or silently cloning a
-repository. Supported API requests do not launch a coding task as a workaround.
+Bitbucket's code search API is deprecated November 1, 2026. Roomote reports
+search and response-size limitations and can use a coding task when a local
+checkout is substantially more appropriate for the investigation. Focused reads
+prefer APIs; broad investigations do not require an API attempt first. An
+authorization or repository-scope denial must never be bypassed through a task.
 </Warning>
 
 The Fast API does not support reopening or merging PRs, writing files, creating

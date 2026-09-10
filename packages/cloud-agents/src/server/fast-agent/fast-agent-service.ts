@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
+import zodToJsonSchema from 'zod-to-json-schema';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
@@ -14,12 +15,17 @@ import {
   FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE,
   FAST_AGENT_MEMORY_FACT_MAX_CHARS,
   INFERENCE_PROVIDER_MAX_RETRIES,
+  NO_REPOSITORIES,
   ROOMOTE_MCP_ID,
   REASONING_EFFORT_VALUES,
   activeRunStatuses,
   buildInferenceProviderRecoveryPrompt,
+  buildDataVisualizationBlocks,
+  dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
+  MANAGE_WAKEUPS_TOOL,
   manageWakeupsInputSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
@@ -29,6 +35,7 @@ import {
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
   type IntegrationToolCandidate,
+  type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
   FIND_INTEGRATION_TOOLS_TOOL,
 } from '@roomote/types';
@@ -161,6 +168,7 @@ import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
   sendFastAgentTaskMessage,
+  stopFastAgentTask,
 } from './fast-agent-tasks';
 import { FastAgentTaskMessageGuard } from './fast-agent-task-message-guard';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -203,6 +211,60 @@ import {
 } from './fast-agent-storage-diagnostics';
 
 const LEGACY_SLACK_REACTION_TOOL = 'add_reaction_to_slack_message';
+export const FAST_AGENT_SCHEDULING_CAPABILITY_ID = 'scheduling';
+const FAST_AGENT_SCHEDULING_SKILL = {
+  id: 'packaged:scheduling',
+  name: 'scheduling',
+  description:
+    'Required workflow guidance for reminders, bounded checks, reports, and custom automation lifecycle changes.',
+  loadWith: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
+} as const;
+const FAST_AGENT_CUSTOM_AUTOMATIONS_TOOL_NAME = `${ROOMOTE_MCP_ID}_${MANAGE_CUSTOM_AUTOMATIONS_TOOL.name}`;
+
+function schedulingInputSchema(shape: z.ZodRawShape): Record<string, unknown> {
+  return zodToJsonSchema(z.object(shape), {
+    $refStrategy: 'none',
+    target: 'jsonSchema7',
+  }) as Record<string, unknown>;
+}
+
+const FAST_AGENT_MANAGE_WAKEUPS_INPUT_SCHEMA = schedulingInputSchema(
+  MANAGE_WAKEUPS_TOOL.inputSchema,
+);
+const FAST_AGENT_MANAGE_CUSTOM_AUTOMATIONS_INPUT_SCHEMA = schedulingInputSchema(
+  MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
+);
+
+function getFastAgentSchedulingTools(
+  integrations: FastAgentIntegration[],
+): IntegrationToolCandidate[] {
+  const tools: IntegrationToolCandidate[] = [
+    {
+      integrationId: FAST_AGENT_SCHEDULING_CAPABILITY_ID,
+      name: MANAGE_WAKEUPS_TOOL.name,
+      description: `Scheduling capability for conversation reminders and bounded checks. ${MANAGE_WAKEUPS_TOOL.description}`,
+      inputSchema: FAST_AGENT_MANAGE_WAKEUPS_INPUT_SCHEMA,
+      source: 'native',
+    },
+  ];
+  const customAutomationsAvailable = integrations.some(
+    (integration) =>
+      integration.id === ROOMOTE_MCP_ID &&
+      integration.tools.some(
+        (tool) => tool.name === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+      ),
+  );
+  if (customAutomationsAvailable) {
+    tools.push({
+      integrationId: FAST_AGENT_SCHEDULING_CAPABILITY_ID,
+      name: FAST_AGENT_CUSTOM_AUTOMATIONS_TOOL_NAME,
+      description: `Scheduling capability for deployment automations and reports. ${MANAGE_CUSTOM_AUTOMATIONS_TOOL.description}`,
+      inputSchema: FAST_AGENT_MANAGE_CUSTOM_AUTOMATIONS_INPUT_SCHEMA,
+      source: 'native',
+    });
+  }
+  return tools;
+}
 
 function selectFastRoomoteChannelTools(options: {
   integrations: FastAgentIntegration[];
@@ -240,6 +302,7 @@ const chatReplyArgsSchema = z.object({
   purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
   imageArtifactIds: z.array(z.string()).optional(),
   videoArtifactIds: z.array(z.string()).optional(),
+  charts: dataVisualizationInputsSchema.optional(),
   suggestions: z
     .array(
       z.object({
@@ -475,6 +538,9 @@ const taskMessageArgsSchema = z.object({
 const taskIdArgsSchema = z.object({
   taskId: z.string().trim().min(1).nullable().optional(),
 });
+const stopTaskArgsSchema = taskIdArgsSchema.extend({
+  userInitiated: z.boolean(),
+});
 const ignoreEventArgsSchema = z.object({ reason: z.string().trim().min(1) });
 const findIntegrationToolsArgsSchema = z.object(
   FIND_INTEGRATION_TOOLS_TOOL.inputSchema,
@@ -494,6 +560,7 @@ const callIntegrationToolArgsSchema = z.object(
 function findFastAgentIntegrationTools(
   integrations: FastAgentIntegration[],
   args: z.infer<typeof findIntegrationToolsArgsSchema>,
+  additionalCandidates: IntegrationToolCandidate[] = [],
 ): {
   tools: IntegrationToolCandidate[];
   truncated: boolean;
@@ -501,20 +568,28 @@ function findFastAgentIntegrationTools(
 } {
   if (
     args.integrationId &&
-    !integrations.some((integration) => integration.id === args.integrationId)
+    !integrations.some(
+      (integration) => integration.id === args.integrationId,
+    ) &&
+    !additionalCandidates.some(
+      (candidate) => candidate.integrationId === args.integrationId,
+    )
   ) {
     return { tools: [], truncated: false, unknownIntegration: true };
   }
-  const candidates = integrations.flatMap((integration) =>
-    integration.tools.map((tool) => ({
-      integrationId: integration.id,
-      name: tool.name,
-      ...(tool.description ? { description: tool.description } : {}),
-      ...(tool.inputSchema !== undefined
-        ? { inputSchema: tool.inputSchema }
-        : {}),
-    })),
-  );
+  const candidates = [
+    ...integrations.flatMap((integration) =>
+      integration.tools.map((tool) => ({
+        integrationId: integration.id,
+        name: tool.name,
+        ...(tool.description ? { description: tool.description } : {}),
+        ...(tool.inputSchema !== undefined
+          ? { inputSchema: tool.inputSchema }
+          : {}),
+      })),
+    ),
+    ...additionalCandidates,
+  ];
   return {
     ...matchIntegrationTools(candidates, args),
     unknownIntegration: false,
@@ -1601,6 +1676,7 @@ export async function answerFastAgentQuestion({
   platformEventKind = 'delegated_task',
   automationReport = false,
   defaultImageArtifactIds = [],
+  defaultCharts = [],
   allowSilentAmbientReply = false,
   platformEventTranscriptPayload,
   slackRoomoteUserId,
@@ -1610,6 +1686,8 @@ export async function answerFastAgentQuestion({
   durableAdmission,
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
+  schedulingProgressiveDisclosureEnabled = Env.R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED ===
+    true,
 }: {
   question: string;
   images?: string[];
@@ -1642,6 +1720,8 @@ export async function answerFastAgentQuestion({
   /** Child-selected images to carry through when the parent model omits the
    * optional attachment argument while composing the child update. */
   defaultImageArtifactIds?: string[];
+  /** Child-selected charts to preserve when the parent model omits them. */
+  defaultCharts?: DataVisualizationInput[];
   /** True only for an unmentioned turn in a multi-human Fast conversation. */
   allowSilentAmbientReply?: boolean;
   platformEventTranscriptPayload?: Record<string, unknown>;
@@ -1669,6 +1749,9 @@ export async function answerFastAgentQuestion({
   /** The durable queue is re-running this turn at its scheduled retry time
    * after a previous execution parked it on a temporary provider failure. */
   resumedAfterInferenceRetry?: boolean;
+  /** Operator-controlled pilot override. Primarily injectable for focused
+   * transport tests; production uses the deployment environment setting. */
+  schedulingProgressiveDisclosureEnabled?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -2494,7 +2577,10 @@ export async function answerFastAgentQuestion({
         ts: ts ?? nativeMessage?.completedAtMs ?? Date.now(),
         eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
         role: 'assistant',
-        contentBlocks: [{ type: 'text', text: reply.message }],
+        contentBlocks: [
+          { type: 'text', text: reply.message },
+          ...buildDataVisualizationBlocks(reply.charts),
+        ],
         metadata: {
           visibleInTranscript,
           purpose: reply.purpose,
@@ -2881,6 +2967,7 @@ export async function answerFastAgentQuestion({
       discoveredIntegrations,
       currentUser,
       therapistModeEnabled,
+      agentBehaviorSettings,
     ] = await Promise.all([
       getAvailableEnvironments(),
       getDeploymentTaskModelOptions().catch((error) => {
@@ -2920,6 +3007,17 @@ export async function answerFastAgentQuestion({
         );
         return false;
       }),
+      db.query.deploymentSettings
+        .findFirst({
+          columns: { globalAgentInstructions: true },
+        })
+        .catch((error) => {
+          degradedContextComponents.add('agent_guidance');
+          console.warn(
+            `[Fast Agent] Shared agent guidance unavailable: ${formatErrorForLog(error)}`,
+          );
+          return undefined;
+        }),
     ]);
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
@@ -3158,12 +3256,14 @@ export async function answerFastAgentQuestion({
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
+      schedulingProgressiveDisclosureEnabled,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
       therapistModeEnabled,
+      globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -3213,10 +3313,15 @@ export async function answerFastAgentQuestion({
       /** The streamed partial this reply finalizes, if one was shown. */
       streamedEvent?: { eventId: string; turnSeq: number },
     ) => {
-      const replyWithImages =
-        !reply.imageArtifactIds?.length && defaultImageArtifactIds.length
-          ? { ...reply, imageArtifactIds: defaultImageArtifactIds }
-          : reply;
+      const replyWithImages = {
+        ...reply,
+        ...(!reply.imageArtifactIds?.length && defaultImageArtifactIds.length
+          ? { imageArtifactIds: defaultImageArtifactIds }
+          : {}),
+        ...(!reply.charts?.length && defaultCharts.length
+          ? { charts: defaultCharts }
+          : {}),
+      };
       const replacedRetry = await replaceInferenceRetryReply(
         replyWithImages,
         true,
@@ -3656,12 +3761,16 @@ export async function answerFastAgentQuestion({
     const onDemandIntegrations = availableIntegrations.filter(
       (integration) => !isFastAgentNativeIntegration(integration.id),
     );
+    const schedulingTools = schedulingProgressiveDisclosureEnabled
+      ? getFastAgentSchedulingTools(availableIntegrations)
+      : [];
     const nativeIntegrationError = (integrationId: string) => ({
       success: false as const,
       error: `The "${integrationId}" server is mounted natively; call its tools directly by their ${integrationId}_ prefixed names.`,
     });
     const describeIntegrationTools = (
       args: z.infer<typeof findIntegrationToolsArgsSchema>,
+      options: { includeScheduling?: boolean } = {},
     ) => {
       if (
         args.integrationId &&
@@ -3669,7 +3778,11 @@ export async function answerFastAgentQuestion({
       ) {
         return nativeIntegrationError(args.integrationId);
       }
-      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
+      const found = findFastAgentIntegrationTools(
+        onDemandIntegrations,
+        args,
+        options.includeScheduling ? schedulingTools : [],
+      );
       if (found.unknownIntegration) {
         return {
           success: false as const,
@@ -3679,6 +3792,9 @@ export async function answerFastAgentQuestion({
       return {
         success: true as const,
         tools: found.tools,
+        ...(found.tools.some((tool) => tool.source === 'native')
+          ? { skill: FAST_AGENT_SCHEDULING_SKILL }
+          : {}),
         ...(found.truncated
           ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }
           : {}),
@@ -3694,10 +3810,18 @@ export async function answerFastAgentQuestion({
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
           return describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
+            { includeScheduling: false },
           );
         }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
           const args = callIntegrationToolArgsSchema.parse(call.args);
+          if (args.integrationId === FAST_AGENT_SCHEDULING_CAPABILITY_ID) {
+            return {
+              success: false,
+              error:
+                'Scheduling capabilities are reserved for the Fast parent agent.',
+            };
+          }
           if (isFastAgentNativeIntegration(args.integrationId)) {
             return nativeIntegrationError(args.integrationId);
           }
@@ -3728,7 +3852,13 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        const startDenial = authorizeToolStart(call.name);
+        const localWakeupCall =
+          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool &&
+          call.args.integrationId === FAST_AGENT_SCHEDULING_CAPABILITY_ID &&
+          call.args.toolName === MANAGE_WAKEUPS_TOOL.name;
+        const startDenial = authorizeToolStart(
+          localWakeupCall ? MANAGE_WAKEUPS_TOOL.name : call.name,
+        );
         if (startDenial) return startDenial;
         // No replay withdrawal here: every call is recorded before it runs and
         // its result after, and a resumed run is handed that record, so an
@@ -3776,6 +3906,7 @@ export async function answerFastAgentQuestion({
             const validSuggestionEnvironmentIds = new Set([
               ALL_REPOSITORIES,
               FAST_EXECUTION,
+              NO_REPOSITORIES,
               ...availableEnvironments.map((environment) => environment.id),
             ]);
             if (
@@ -3829,6 +3960,7 @@ export async function answerFastAgentQuestion({
               signatureImageArtifactIds,
               requestedVideoArtifactIds,
               args.suggestions ?? [],
+              args.charts ?? defaultCharts,
             ]);
             if (completedChatReplySignatures.has(signature)) {
               replyTextTracker.consumeUnconsumed();
@@ -3859,6 +3991,7 @@ export async function answerFastAgentQuestion({
                 ...(args.suggestions?.length
                   ? { suggestions: args.suggestions }
                   : {}),
+                ...(args.charts?.length ? { charts: args.charts } : {}),
               },
               false,
               undefined,
@@ -3976,6 +4109,7 @@ export async function answerFastAgentQuestion({
             const args = launchTaskArgsSchema.parse(call.args);
             const validEnvironmentIds = new Set([
               ALL_REPOSITORIES,
+              NO_REPOSITORIES,
               ...availableEnvironments.map((environment) => environment.id),
             ]);
             if (
@@ -4278,6 +4412,38 @@ export async function answerFastAgentQuestion({
             return result;
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.stopTask: {
+            const args = stopTaskArgsSchema.parse(call.args);
+            const target = selectActiveTaskId(args.taskId, currentTasks);
+            if (!target.taskId) return { success: false, error: target.error };
+            const targetTask = currentTasks.get(target.taskId);
+            if (
+              targetTask?.status !== undefined &&
+              !(activeRunStatuses as readonly RunStatus[]).includes(
+                targetTask.status,
+              )
+            ) {
+              return {
+                success: false,
+                error: `Task ${target.taskId} is not active in this conversation.`,
+              };
+            }
+            const signature = `stop_task:${target.taskId}`;
+            if (completedTaskActions.has(signature)) {
+              return {
+                success: false,
+                error: 'That task was already stopped.',
+              };
+            }
+            completedTaskActions.add(signature);
+            throwIfTurnCancelled();
+            const result = await stopFastAgentTask(
+              { userId, apiBaseUrl },
+              { taskId: target.taskId, userInitiated: args.userInitiated },
+            );
+            return result;
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups: {
             const args = manageWakeupsInputSchema.parse(
               normalizeManageWakeupsArgs(call.args),
@@ -4430,6 +4596,7 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools: {
             return describeIntegrationTools(
               findIntegrationToolsArgsSchema.parse(call.args),
+              { includeScheduling: true },
             );
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages: {
@@ -4437,6 +4604,35 @@ export async function answerFastAgentQuestion({
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
             const args = callIntegrationToolArgsSchema.parse(call.args);
+            if (args.integrationId === FAST_AGENT_SCHEDULING_CAPABILITY_ID) {
+              const availableTool = schedulingTools.find(
+                (tool) => tool.name === args.toolName,
+              );
+              if (!availableTool) {
+                return {
+                  success: false,
+                  error:
+                    'That scheduling tool is not available in this Fast Session.',
+                };
+              }
+              if (args.toolName === MANAGE_WAKEUPS_TOOL.name) {
+                const wakeupArgs = manageWakeupsInputSchema.parse(
+                  normalizeManageWakeupsArgs(args.args),
+                );
+                throwIfTurnCancelled();
+                return await handleManageWakeupsToolCall(
+                  { conversationId: session.id, userId },
+                  wakeupArgs,
+                );
+              }
+              if (args.toolName === FAST_AGENT_CUSTOM_AUTOMATIONS_TOOL_NAME) {
+                return executeMcpTool({
+                  integrationId: ROOMOTE_MCP_ID,
+                  toolName: MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
+                  args: args.args,
+                });
+              }
+            }
             if (isFastAgentNativeIntegration(args.integrationId)) {
               return nativeIntegrationError(args.integrationId);
             }
@@ -4480,11 +4676,18 @@ export async function answerFastAgentQuestion({
         // The on-demand call is transport: the MCP executor it delegates to
         // records the integration tool event, which is what the transcript
         // should show, so no wrapper event is written for it.
-        if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
+        const localWakeupCall =
+          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool &&
+          call.args.integrationId === FAST_AGENT_SCHEDULING_CAPABILITY_ID &&
+          call.args.toolName === MANAGE_WAKEUPS_TOOL.name;
+        if (
+          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool &&
+          !localWakeupCall
+        ) {
           return await executeNativeToolInner(call);
         }
         const canonicalToolEvent = await beginCanonicalToolEvent({
-          title: call.name,
+          title: localWakeupCall ? MANAGE_WAKEUPS_TOOL.name : call.name,
           args: call.args,
           nativeSessionId: call.sessionId,
           kind: getFastAgentNativeAcpKind(call.name),
@@ -4598,7 +4801,12 @@ export async function answerFastAgentQuestion({
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
-          { surface: conversation.surface },
+          {
+            surface: conversation.surface,
+            ...(schedulingProgressiveDisclosureEnabled
+              ? { schedulingProgressiveDisclosureEnabled: true }
+              : {}),
+          },
         );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();

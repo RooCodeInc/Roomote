@@ -26,6 +26,7 @@ import {
   FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS,
   FIND_INTEGRATION_TOOLS_TOOL,
   INTEGRATION_TOOL_LOOKUP_MAX_LIMIT,
+  NO_REPOSITORIES,
   REASONING_EFFORT_VALUES,
   MANAGE_WAKEUPS_TOOL_DESCRIPTION,
   SESSION_WAKEUP_NAME_MAX_LENGTH,
@@ -269,6 +270,37 @@ const FAST_AGENT_NATIVE_TOOL_SOURCES: Record<FastAgentNativeToolName, string> =
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
+const chartLabel = z.string().trim().min(1).max(20)
+const chartTitle = z.string().trim().min(1).max(50)
+const dataPoint = z.object({ label: chartLabel, value: z.number().finite() })
+const series = z.object({
+  name: chartLabel,
+  data: z.array(dataPoint).min(1).max(20),
+})
+const cartesianChart = z.object({
+  type: z.enum(["bar", "area", "line"]),
+  series: z.array(series).min(1).max(12),
+  axis_config: z.object({
+    categories: z.array(chartLabel).min(1).max(20),
+    x_label: chartTitle.optional(),
+    y_label: chartTitle.optional(),
+  }),
+})
+const chartInput = z.object({
+  title: chartTitle,
+  chart: z.union([
+    z.object({
+      type: z.literal("pie"),
+      segments: z.array(z.object({
+        label: chartLabel,
+        value: z.number().finite().gt(0),
+      })).min(1).max(12),
+    }),
+    cartesianChart,
+  ]),
+  block_id: z.string().trim().min(1).max(255).optional(),
+})
+
 export default {
   description: "Deliver a user-visible reply. Write the reply as ordinary assistant text first, then call this with its purpose; the text you wrote since your last reply is delivered. Fast automation reports may attach launchable suggested tasks on Slack or Discord.",
   args: {
@@ -276,10 +308,11 @@ export default {
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded images to attach. Never claim an image or screenshot is attached, shown, or included unless this list is non-empty. If attachment delivery fails, reply with an accessible artifact viewer link and say that the image could not be attached."),
     videoArtifactIds: z.array(z.string()).optional().describe("Stable IDs of uploaded videos explicitly selected for native Slack delivery. Recover IDs and viewer links with manage_tasks get_summary. Never claim a video is attached unless selected here and delivery succeeds; when native delivery fails or is unavailable, share only its viewer link without an error or unavailability explanation."),
+    charts: z.array(chartInput).max(2).optional().describe("Up to two pie, bar, area, or line charts. Charts render in the web Session transcript and as native Block Kit data visualization blocks on Slack; other chat providers retain the Markdown fallback. Keep the Markdown reply useful on its own. Cartesian series names and categories must be unique, and every series must contain exactly one point for every category."),
     suggestions: z.array(z.object({
       title: z.string().min(1).max(140),
       brief: z.string().min(1).max(2000),
-      environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
+      environmentId: z.string().min(1).optional().describe(${JSON.stringify(`Exact environment ID from the system prompt, "${ALL_REPOSITORIES}" for all repositories, "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, or "${FAST_EXECUTION}" for Fast mode. Omit to use normal workspace routing.`)}),
     })).max(10).optional().describe("Launchable follow-ups for a Slack or Discord automation report only"),
   },
   execute: (args, context) => invoke("send_chat_reply", args, context),
@@ -324,7 +357,7 @@ export default {
   description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID. Supported current-turn attachments are forwarded only when includeAttachments is true.",
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
-    environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact environment ID from the system prompt; omit, pass null, or pass "${ALL_REPOSITORIES}" to run against all active repositories`)}),
+    environmentId: z.string().nullable().optional().describe(${JSON.stringify(`Exact launch target ID from the system prompt; pass "${NO_REPOSITORIES}" for a Blank slate sandbox without repositories, pass "${ALL_REPOSITORIES}" for all active repositories, or omit/pass null to use normal workspace routing`)}),
     model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     includeAttachments: z.boolean().optional().describe("Set true to forward supported images and extracted file, audio, or video context from the active conversation turn; defaults to false"),
   },
@@ -388,9 +421,23 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Cancel an active task delegated by this Fast conversation.",
+  description: "Cancel an active task delegated by this Fast conversation and end its current run.",
   args: { taskId: z.string().nullable().optional() },
   execute: (args, context) => invoke("cancel_task", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.stopTask]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Stop an active task delegated by this Fast conversation. This interrupts the current work but preserves the task and sandbox so a later message can resume it.",
+  args: {
+    taskId: z.string().nullable().optional(),
+    userInitiated: z.boolean().describe("True only when the user explicitly requested this stop; false for autonomous recovery"),
+  },
+  execute: (args, context) => invoke("stop_task", args, context),
 }
 `,
 
@@ -1288,7 +1335,10 @@ function pruneSessionRuntimes(): void {
 export async function getFastAgentNativeToolRuntime(
   sessionId: string,
   integrations: FastAgentIntegration[],
-  options: { surface?: FastAgentSurface } = {},
+  options: {
+    surface?: FastAgentSurface;
+    schedulingProgressiveDisclosureEnabled?: boolean;
+  } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
   const bridge = await bridgePromise;
@@ -1342,7 +1392,11 @@ export async function getFastAgentNativeToolRuntime(
         build: {
           tools: buildFastAgentToolFilter(
             nativeIntegrations.map((integration) => integration.id),
-            { surface: options.surface ?? 'web' },
+            {
+              surface: options.surface ?? 'web',
+              schedulingProgressiveDisclosureEnabled:
+                options.schedulingProgressiveDisclosureEnabled,
+            },
           ),
         },
       },

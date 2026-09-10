@@ -1,4 +1,8 @@
 export {
+  resolveAutomationRepositoryDestination,
+  isCiFailureTriageRepositoryEnabled,
+} from './automations/ci-failure-triage-routing';
+export {
   type AppRouter,
   type AppRouterInput,
   type AppRouterOutput,

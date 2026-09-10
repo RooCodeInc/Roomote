@@ -18,6 +18,7 @@ import {
   extractOutputText,
   formatRequestUserInputResponseText,
   getAcpLogicalEventId,
+  getDataVisualizationBlocks,
   getImageUrisFromContentBlocks,
   getProviderRetryNoticeFromMessageData,
   inferAcpMessageKind,
@@ -352,6 +353,7 @@ export function toAcpUiMessage(
           payloadRecord,
         ),
         imageArtifacts: extractPayloadImageArtifacts(payloadRecord),
+        charts: getDataVisualizationBlocks(normalized.contentBlocks),
         clientMessageId: getAcpClientMessageId(normalized) ?? undefined,
         data: payloadRecord,
       };

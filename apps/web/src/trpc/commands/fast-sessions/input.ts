@@ -87,6 +87,7 @@ function requireFastSessionContent(
 export const startFastSessionInputSchema = z
   .object({
     ...fastSessionMessageInputShape,
+    conversationId: z.string().uuid().optional(),
     pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
   })
   .superRefine(requireFastSessionContent);

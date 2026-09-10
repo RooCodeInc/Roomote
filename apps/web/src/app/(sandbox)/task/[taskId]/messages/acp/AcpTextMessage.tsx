@@ -43,6 +43,7 @@ import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
+import { AcpDataVisualizations } from './AcpDataVisualizations';
 import { PrReviewActionOffer } from '@/components/ai-elements/pr-review-action-offer';
 import { useMessageUiOptions } from '@/components/ai-elements/message-ui-options';
 import { SlackMessageText } from '@/components/ai-elements/slack-message-text';
@@ -286,7 +287,12 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
     setSelectedImageIndex(index);
   };
 
-  if (!msg.partial && content === '' && !msg.images?.length) {
+  if (
+    !msg.partial &&
+    content === '' &&
+    !msg.images?.length &&
+    !msg.charts?.length
+  ) {
     return;
   }
 
@@ -407,6 +413,9 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
           ) : (
             <MessageResponse>{content}</MessageResponse>
           )}
+          {!isUser && msg.charts?.length ? (
+            <AcpDataVisualizations charts={msg.charts} />
+          ) : null}
           {!hidePrReviewActions && !isUser && msg.kind === 'text' ? (
             <PrReviewNotificationActions msg={msg} />
           ) : null}

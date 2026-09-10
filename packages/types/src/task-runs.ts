@@ -14,7 +14,7 @@ import {
 import { fastAgentParentSchema, taskReportConsumerSchema } from './fast-agent';
 import { getSnapshotExpiryMs } from './compute-providers/snapshot-retention';
 import { prActions } from './cloud-agents';
-import { ALL_REPOSITORIES } from './constants';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
 import { resolveTaskModelIdAlias } from './task-models';
 
@@ -2137,6 +2137,9 @@ type TaskWorkspacePayload = {
 
 export type TaskWorkspace =
   | {
+      type: 'no_repositories';
+    }
+  | {
       type: 'repository';
       repo: string;
       branch?: string;
@@ -2181,6 +2184,10 @@ export function resolveTaskWorkspace(
       sourceBranch: payload.branch,
       sourceSha: payload.sha,
     };
+  }
+
+  if (payload.repo === NO_REPOSITORIES) {
+    return { type: 'no_repositories' };
   }
 
   if (payload.repo === ALL_REPOSITORIES) {

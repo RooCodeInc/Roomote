@@ -143,7 +143,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     label: 'Agent Guidance',
     title: 'Agent Guidance',
     description:
-      'Configure shared instructions that apply to every task in this workspace.',
+      'Configure shared instructions that apply to every session and task in this workspace.',
     href: SETTINGS_PATHS.agentGuidance,
     icon: ScrollText,
     adminOnly: true,
@@ -154,7 +154,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'skills',
     label: 'Skills',
     title: 'Skills',
-    description: 'Shared instructions for all Sessions and coding tasks.',
+    description: 'Shared instructions for all sessions and coding tasks.',
     href: SETTINGS_PATHS.skills,
     icon: GraduationCap,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.skills),

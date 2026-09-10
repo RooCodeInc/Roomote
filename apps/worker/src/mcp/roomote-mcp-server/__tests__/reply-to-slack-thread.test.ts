@@ -80,6 +80,38 @@ describe('handleReplyToSlackThread', () => {
     });
   });
 
+  it('posts validated charts after the visible Markdown body', async () => {
+    vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+    const chart = {
+      title: 'Traffic sources',
+      chart: {
+        type: 'pie' as const,
+        segments: [
+          { label: 'Search', value: 65 },
+          { label: 'Direct', value: 35 },
+        ],
+      },
+    };
+
+    await handleSendChatReply(
+      {
+        taskId: 'task-1',
+        summary: 'Search accounts for most visits.',
+        charts: [chart],
+      },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(replyToChatThread).toHaveBeenCalledWith(roomoteConfig, {
+      text: 'Search accounts for most visits.',
+      blocks: [
+        { type: 'markdown', text: 'Search accounts for most visits.' },
+        { type: 'data_visualization', ...chart },
+      ],
+    });
+  });
+
   it('posts structured suggestions into the current Slack thread', async () => {
     vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
     vi.mocked(submitTaskSuggestions).mockResolvedValue({

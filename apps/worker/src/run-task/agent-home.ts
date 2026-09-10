@@ -808,6 +808,11 @@ export function createIntegrationMcpInstructions(
 ): string | undefined {
   let hasPrimaryMemory = false;
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
+    if (mcpServer.name === 'github') {
+      return [
+        '# GitHub reads\n\nDiscover GitHub tools through roomote_find_integration_tools with integrationId github. An eligible deployment GitHub App installation with an active connected repository is required, just as in Fast. Public github.com repositories do not themselves need to be connected, and no personal GitHub account linkage is required. Use the existing native tools and their discovered schemas for source reads, code search, issues, and pull requests. Searches require exactly one positive repo:owner/name qualifier. Private reads retain connected-repository authorization. Respect upstream pagination and search-index limits; disclose incomplete results. Never retry an authorization denial anonymously. This task MCP path is read-only, including for human-driven tasks; use the existing authorized coding-task source-control workflow for writes.',
+      ];
+    }
     if (isMemoryMcpServer(mcpServer.name)) {
       const primary = !hasPrimaryMemory;
       hasPrimaryMemory = true;

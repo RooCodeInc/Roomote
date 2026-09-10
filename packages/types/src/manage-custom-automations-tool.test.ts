@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { FAST_EXECUTION, NO_REPOSITORIES } from './constants';
 import {
   MANAGE_CUSTOM_AUTOMATIONS_ACTIONS,
   MANAGE_CUSTOM_AUTOMATIONS_TOOL,
@@ -43,7 +44,10 @@ describe('manage custom automations tool contract', () => {
       'List results omit prompts',
     );
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
-      'run the automation in Fast mode',
+      `environmentId "${NO_REPOSITORIES}" to start a Blank slate sandbox without repositories`,
+    );
+    expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
+      `"${FAST_EXECUTION}" to run in Fast mode without starting an initial sandbox task`,
     );
     expect(MANAGE_CUSTOM_AUTOMATIONS_TOOL.description).toContain(
       'report it as queued or started, never completed',
@@ -51,6 +55,9 @@ describe('manage custom automations tool contract', () => {
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.environmentId.description,
     ).toContain('Fast mode without an initial sandbox task');
+    expect(
+      MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.environmentId.description,
+    ).toContain('Blank slate sandbox without repositories');
     expect(
       MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema.schedule.description,
     ).toContain('off, every_hour, every_6_hours, daily, weekly');

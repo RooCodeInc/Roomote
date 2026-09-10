@@ -112,7 +112,9 @@ export async function handleGiteaPullRequest(
       ? ('merged' as const)
       : ('closed' as const);
 
-    await updateTaskPrStatus('gitea', repoFullName, payload.number, status);
+    await updateTaskPrStatus('gitea', repoFullName, payload.number, status, {
+      host: toHostFromUrl(getPullRequestUrl(payload)),
+    });
 
     scheduleSourceControlPullRequestFactSync({
       provider: 'gitea',
@@ -161,6 +163,7 @@ export async function handleGiteaPullRequest(
       repoFullName,
       payload.number,
       pullRequest.draft ? 'draft' : 'open',
+      { host: toHostFromUrl(getPullRequestUrl(payload)) },
     );
   }
 

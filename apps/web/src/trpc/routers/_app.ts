@@ -10,6 +10,7 @@ import {
   SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   computeProviders,
   environmentConfigSchema,
@@ -110,7 +111,6 @@ import {
 import {
   getGitHubInstallationsCommand,
   getGitHubPendingInstallationsCommand,
-  getBranchesCommand,
   getCollaboratorsCommand,
   getIssuesCommand,
   getPullRequestsCommand,
@@ -198,7 +198,6 @@ import {
   getEnvironmentsCommand,
   getWorkspaceRoutingSettingsCommand,
   updateWorkspaceRoutingSettingsCommand,
-  getAvailableEnvironmentsCommand,
   getEnvironmentNamesByIdsCommand,
   getEnvironmentByIdCommand,
   getEnvironmentConfigVersionCommand,
@@ -748,6 +747,7 @@ const automationsRouter = createRouter({
          */
         suggesterUseTeams: z.boolean().optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
+        suggesterAdditionalRules: z.string().max(8000).nullable().optional(),
         announcerFrequency: z.enum(['off', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         announcerDiscordChannel: z
@@ -758,6 +758,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         announcerInstructions: z.string().max(8_000).nullable(),
+        announcerAdditionalRules: z.string().max(8000).nullable().optional(),
         platformIssueAlertsEnabled: z.boolean().optional(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
         platformIssueDiscordChannel: z
@@ -779,6 +780,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        securityAuditorAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         codeQualityAuditorSlackChannel: z
           .string()
           .trim()
@@ -791,18 +797,33 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        codeQualityAuditorAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         ciFailureTriageSlackChannel: z
           .string()
           .trim()
           .min(1)
           .max(160)
           .nullable(),
+        ciFailureTriageAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         ciFailureTriageDiscordChannel: z
           .string()
           .trim()
           .min(1)
           .max(160)
           .nullable(),
+        mergeAnnouncerAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -856,6 +877,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
@@ -897,6 +919,7 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
@@ -1165,10 +1188,6 @@ export const appRouter = createRouter({
     resolvePendingInstallations: protectedProcedure.mutation(
       ({ ctx: { auth } }) => resolvePendingGitHubInstallationsCommand(auth),
     ),
-
-    branches: protectedProcedure
-      .input(z.object({ fullName: z.string() }))
-      .query(({ ctx: { auth }, input }) => getBranchesCommand(auth, input)),
 
     collaborators: protectedProcedure.query(({ ctx: { auth } }) =>
       getCollaboratorsCommand(auth),
@@ -1594,12 +1613,6 @@ export const appRouter = createRouter({
       .input(workspaceRoutingSettingsSchema)
       .mutation(({ ctx: { auth }, input }) =>
         updateWorkspaceRoutingSettingsCommand(auth, input),
-      ),
-
-    available: protectedProcedure
-      .input(z.object({ repository: z.string().optional() }).optional())
-      .query(({ ctx: { auth }, input }) =>
-        getAvailableEnvironmentsCommand(auth, input),
       ),
 
     namesByIds: protectedProcedure

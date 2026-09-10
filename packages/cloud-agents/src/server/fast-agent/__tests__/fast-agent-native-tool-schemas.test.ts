@@ -450,6 +450,56 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     });
   });
 
+  // Synthetic arguments verify the generic bridge, not live upstream schemas.
+  it.each([
+    { toolName: 'sources', args: {} },
+    { toolName: 'sources', args: { name: 'example', page: 2, per_page: 10 } },
+    { toolName: 'source', args: { id: 42 } },
+    {
+      toolName: 'query',
+      args: {
+        source_id: 42,
+        table: 'observed_logs_7',
+        host: 'cluster.example.test',
+        query: 'SELECT count() FROM observed_logs_7',
+      },
+    },
+    {
+      toolName: 'query',
+      args: { source_id: 42, table: 'observed_logs_7', query: 'SELECT 1' },
+    },
+  ])(
+    'preserves Better Stack $toolName arguments without defaults through generated execution',
+    async ({ toolName, args }) => {
+      const callTool = tools.find(
+        (tool) =>
+          tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+      )!;
+      const request = JSON.parse(
+        JSON.stringify({ integrationId: 'betterstack', toolName, args }),
+      );
+      const validate = validator.compile(
+        toOpenCodeJsonSchema(zod, callTool.args),
+      );
+      expect(validate(request), JSON.stringify(validate.errors)).toBe(true);
+      const parsed = zod.z
+        .object(callTool.args as Record<string, never>)
+        .parse(request);
+      expect(parsed).toEqual(request);
+      const execute = callTool.execute as (
+        args: unknown,
+        context: unknown,
+      ) => Promise<{ name: string; args: unknown }>;
+      const forwarded = await execute(parsed, {});
+      expect(forwarded.name).toBe(
+        FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+      );
+      expect(
+        z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse(forwarded.args),
+      ).toEqual(request);
+    },
+  );
+
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {
     const { z } = zod;
     const question = z.object({ id: z.string() });

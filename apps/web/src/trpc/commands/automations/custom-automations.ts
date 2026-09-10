@@ -25,6 +25,7 @@ import {
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   getCommunicationAutomationTargetKind,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
@@ -142,7 +143,9 @@ function toListItem(
         ? FAST_EXECUTION
         : row.allRepositories
           ? ALL_REPOSITORIES
-          : row.environmentId,
+          : row.noRepositories
+            ? NO_REPOSITORIES
+            : row.environmentId,
     target: row.target,
     lastRunAt: row.lastRunAt,
     lastSucceededAt: row.lastSucceededAt,

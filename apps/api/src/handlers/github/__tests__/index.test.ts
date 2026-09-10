@@ -361,9 +361,45 @@ describe('github webhook router', () => {
       'test-org/test-repo',
       42,
       'draft',
+      { host: 'github.com' },
     );
     expect(mockHandlePrReopen).toHaveBeenCalledWith(payload);
   });
+
+  it.each([
+    [
+      'https://GitHub.Example:8443/test-org/test-repo/pull/42',
+      'github.example:8443',
+    ],
+    ['https://GitHub.Example:443/test-org/test-repo/pull/42', 'github.example'],
+    [undefined, null],
+    ['not-a-url', null],
+  ] as const)(
+    'scopes status updates using PR URL %s',
+    async (html_url, host) => {
+      const response = await app.request(
+        'http://localhost/api/webhooks/github',
+        {
+          method: 'POST',
+          headers: {
+            'x-github-delivery': 'delivery-host-scope',
+            'x-github-event': 'pull_request',
+            'x-hub-signature-256': 'sha256=test',
+          },
+          body: JSON.stringify(makePullRequestPayload('closed', { html_url })),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+        'github',
+        'test-org/test-repo',
+        42,
+        'closed',
+        { host },
+      );
+    },
+  );
 
   it('waits for terminal status persistence before notifying linked tasks', async () => {
     let resolveStatusUpdate: (() => void) | undefined;
@@ -1249,6 +1285,7 @@ describe('github webhook router', () => {
         'test-org/test-repo',
         42,
         status,
+        { host: 'github.com' },
       );
       expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenCalledWith(
         expect.objectContaining({

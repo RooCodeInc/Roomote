@@ -61,13 +61,20 @@ export function aggregateCostAnalyticsRowsByTask(
     }
 
     const value = existingRow.value + row.value;
+    const tokens = (existingRow.tokens ?? 0) + (row.tokens ?? 0);
     const values: Record<string, string> = {
       ...existingRow.details.values,
       cost: value.toFixed(2),
+      tokens: String(tokens),
     };
 
     for (const [key, rowValue] of Object.entries(row.details.values)) {
-      if (key === 'date' || key === 'cost' || key === 'taskTitle') {
+      if (
+        key === 'date' ||
+        key === 'cost' ||
+        key === 'tokens' ||
+        key === 'taskTitle'
+      ) {
         continue;
       }
 
@@ -79,6 +86,7 @@ export function aggregateCostAnalyticsRowsByTask(
     aggregatedRows.set(taskId, {
       ...existingRow,
       value,
+      tokens,
       details: {
         ...existingRow.details,
         values,
@@ -109,6 +117,7 @@ export async function getCostAnalyticsRows(
       timestamp: llmUsageEvents.messageCompletedAt,
       createdAt: llmUsageEvents.createdAt,
       costMicroUsd: llmUsageEvents.costMicroUsd,
+      totalTokens: llmUsageEvents.totalTokens,
       taskId: llmUsageEvents.taskId,
       runId: llmUsageEvents.runId,
       harnessSessionId: llmUsageEvents.harnessSessionId,
@@ -267,6 +276,7 @@ export async function getCostAnalyticsRows(
           : createLabelBackedDimensionValue(NO_VALUE_LABEL);
     const timestamp = row.timestamp ?? row.createdAt;
     const cost = Number(row.costMicroUsd ?? 0) / 1_000_000;
+    const tokens = Number(row.totalTokens ?? 0);
     const provider = row.providerId ?? 'Unknown provider';
     const model = row.modelId ?? 'Unknown model';
     const project =
@@ -278,6 +288,7 @@ export async function getCostAnalyticsRows(
       id: row.id,
       timestamp,
       value: cost,
+      tokens,
       dimensions: {
         user: userDimension,
         taskType,
@@ -297,6 +308,7 @@ export async function getCostAnalyticsRows(
           provider,
           model,
           cost: cost.toFixed(2),
+          tokens: String(tokens),
           taskTitle: row.taskTitle ?? taskType.label,
         },
         links: row.taskId ? { task: `/task/${row.taskId}` } : undefined,

@@ -33,6 +33,18 @@ describe('Fast session input schemas', () => {
     ).toEqual(['Attachment: plan.md\nAdd the feature.']);
   });
 
+  it('accepts a stable client conversation identity for initial retries', () => {
+    expect(
+      startFastSessionInputSchema.parse({
+        text: 'Implement this plan',
+        conversationId: '11111111-1111-4111-8111-111111111111',
+      }),
+    ).toEqual({
+      text: 'Implement this plan',
+      conversationId: '11111111-1111-4111-8111-111111111111',
+    });
+  });
+
   it('rejects too many extracted attachments', () => {
     expect(() =>
       startFastSessionInputSchema.parse({

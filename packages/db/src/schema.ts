@@ -4048,6 +4048,7 @@ export const customAutomations = pgTable(
       onDelete: 'set null',
     }),
     allRepositories: boolean('all_repositories').notNull().default(false),
+    noRepositories: boolean('no_repositories').notNull().default(false),
     executionMode: text('execution_mode')
       .notNull()
       .default('sandbox_task')
