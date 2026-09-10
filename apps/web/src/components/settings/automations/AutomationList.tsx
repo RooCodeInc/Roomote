@@ -1,6 +1,7 @@
 'use client';
 
 import type { ComponentType, ReactNode } from 'react';
+import { createContext, useContext } from 'react';
 
 import {
   Input,
@@ -11,6 +12,34 @@ import {
 } from '@/components/system';
 
 export type AutomationListFilter = 'all' | 'custom' | 'built-in';
+
+const AutomationListOrderContext = createContext<ReadonlyMap<string, number>>(
+  new Map(),
+);
+
+export function useAutomationListOrder(name: string) {
+  return useContext(AutomationListOrderContext).get(name);
+}
+
+export function AutomationListOrderProvider({
+  names,
+  children,
+}: {
+  names: readonly string[];
+  children: ReactNode;
+}) {
+  const order = new Map(
+    names
+      .toSorted((left, right) => left.localeCompare(right))
+      .map((name, index) => [name, index]),
+  );
+
+  return (
+    <AutomationListOrderContext.Provider value={order}>
+      {children}
+    </AutomationListOrderContext.Provider>
+  );
+}
 
 export function AutomationListToolbar({
   filter,
@@ -77,15 +106,18 @@ export function AutomationListHeader() {
   return (
     <div
       role="row"
-      className="hidden grid-cols-[auto_minmax(0,4fr)_minmax(0,6fr)_auto] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+      className="hidden grid-cols-[2rem_1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
     >
       <span role="columnheader" className="sr-only">
         Enabled
       </span>
-      <span role="columnheader" className="col-start-2">
-        Name
+      <span role="columnheader" className="sr-only">
+        Icon
       </span>
       <span role="columnheader" className="col-start-3">
+        Name
+      </span>
+      <span role="columnheader" className="col-start-4">
         Description
       </span>
       <span role="columnheader" className="sr-only">
@@ -102,6 +134,7 @@ export function AutomationListRow({
   description,
   enabledControl,
   actions,
+  order: explicitOrder,
 }: {
   icon: ComponentType<{ className?: string }>;
   name: string;
@@ -109,39 +142,44 @@ export function AutomationListRow({
   description: ReactNode;
   enabledControl: ReactNode;
   actions?: ReactNode;
+  order?: number;
 }) {
+  const contextualOrder = useAutomationListOrder(name);
+  const order = explicitOrder ?? contextualOrder;
+
   return (
     <div
       role="row"
-      className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[auto_minmax(0,4fr)_minmax(0,6fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
+      aria-rowindex={order === undefined ? undefined : order + 2}
+      style={order === undefined ? undefined : { order }}
+      className="grid grid-cols-[2rem_1rem_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[2rem_1rem_minmax(0,4fr)_minmax(0,6fr)_7rem] md:items-center md:gap-4 md:px-4 md:py-3"
     >
       <div
         role="cell"
-        className="col-start-1 row-span-2 row-start-1 flex w-8 items-start pt-0.5 md:row-span-1 md:items-center md:pt-0"
+        className="col-start-1 row-span-2 row-start-1 flex items-start pt-0.5 md:row-span-1 md:items-center md:pt-0"
       >
         {enabledControl}
       </div>
-      <div
-        role="cell"
-        className="col-start-2 row-start-1 flex min-w-0 items-start gap-2"
-      >
-        <Icon className="mt-0.5 size-4 shrink-0" />
+      <div role="cell" className="col-start-2 row-start-1 pt-0.5 md:pt-0">
+        <Icon className="size-4 shrink-0" />
+      </div>
+      <div role="cell" className="col-start-3 row-start-1 min-w-0">
         <div className="min-w-0 space-y-1">
           <p className="truncate text-sm font-semibold">{name}</p>
-          <div className="flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
             {summary}
           </div>
         </div>
       </div>
       <div
         role="cell"
-        className="col-span-2 col-start-2 row-start-2 min-w-0 whitespace-normal pl-6 text-xs text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1 md:pl-0"
+        className="col-span-2 col-start-3 row-start-2 min-w-0 whitespace-normal text-sm text-muted-foreground/80 md:col-span-1 md:col-start-4 md:row-start-1"
       >
         {description}
       </div>
       <div
         role="cell"
-        className="col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4"
+        className="col-start-4 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-5"
       >
         {actions}
       </div>

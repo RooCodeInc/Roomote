@@ -57,6 +57,7 @@ import {
 } from './AutomationDestinationPicker';
 import {
   AutomationListHeader,
+  AutomationListOrderProvider,
   AutomationListRow,
   AutomationListToolbar,
   type AutomationListFilter,
@@ -342,6 +343,7 @@ export function CustomAutomationsSection({
   onFilterChange,
   onSearchChange,
   toolbarLeading,
+  builtInAutomationNames = [],
   children,
 }: {
   filter?: AutomationListFilter;
@@ -349,6 +351,7 @@ export function CustomAutomationsSection({
   onFilterChange?: (filter: AutomationListFilter) => void;
   onSearchChange?: (search: string) => void;
   toolbarLeading?: ReactNode;
+  builtInAutomationNames?: readonly string[];
   children?: ReactNode;
 } = {}) {
   const { isAdmin } = useAuthorizedUser();
@@ -592,7 +595,7 @@ export function CustomAutomationsSection({
             [
               row.name,
               row.prompt,
-              cadenceLabel(row),
+              cadenceLabel(row, schedulingTimeZone),
               environmentName,
               destinationName,
               destinationLabel,
@@ -603,6 +606,15 @@ export function CustomAutomationsSection({
               .includes(normalizedSearch)
           );
         });
+  const visibleAutomationNames = [
+    ...visibleRows.map((row) => row.name),
+    ...(filter === 'custom' ? [] : builtInAutomationNames),
+  ];
+  const automationOrder = new Map(
+    visibleAutomationNames
+      .toSorted((left, right) => left.localeCompare(right))
+      .map((name, index) => [name, index]),
+  );
   const atCap = rows.length >= MAX_CUSTOM_AUTOMATIONS;
   const busy =
     createMutation.isPending ||
@@ -1062,11 +1074,14 @@ export function CustomAutomationsSection({
         {isCreating || editingId ? renderEditor() : null}
       </Dialog>
 
-      <Card variant="snug">
+      <Card variant="snug" className="gap-0 p-0">
         <CardContent className="p-0!">
           <div role="table" aria-label="Automations">
             <AutomationListHeader />
-            <div role="rowgroup" className="divide-y divide-background">
+            <div
+              role="rowgroup"
+              className="flex flex-col divide-y divide-background"
+            >
               {listQuery.isPending && filter !== 'built-in' ? (
                 <div data-testid="custom-automations-skeleton">
                   {Array.from({ length: 2 }).map((_, index) => (
@@ -1125,6 +1140,7 @@ export function CustomAutomationsSection({
                     key={row.id}
                     icon={Zap}
                     name={row.name}
+                    order={automationOrder.get(row.name)}
                     description={<p className="line-clamp-2">{row.prompt}</p>}
                     enabledControl={
                       <Switch
@@ -1221,7 +1237,11 @@ export function CustomAutomationsSection({
                   />
                 );
               })}
-              {filter !== 'custom' ? children : null}
+              {filter !== 'custom' ? (
+                <AutomationListOrderProvider names={visibleAutomationNames}>
+                  {children}
+                </AutomationListOrderProvider>
+              ) : null}
               {!listQuery.isPending &&
               visibleRows.length === 0 &&
               !children &&

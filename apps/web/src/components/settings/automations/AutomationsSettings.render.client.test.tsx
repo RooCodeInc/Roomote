@@ -1053,6 +1053,72 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('Available')).not.toBeInTheDocument();
   });
 
+  it('orders the unified list alphabetically without changing query data', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-z',
+        name: 'Zulu custom automation',
+        prompt: 'Run last alphabetically.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      {
+        id: 'automation-a',
+        name: 'Aardvark custom automation',
+        prompt: 'Run first alphabetically.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    const firstCustomRow = (
+      await screen.findByText('Aardvark custom automation')
+    ).closest('[role="row"]');
+    const firstBuiltInRow = screen
+      .getByText('Alert on Config Errors')
+      .closest('[role="row"]');
+    const lastCustomRow = screen
+      .getByText('Zulu custom automation')
+      .closest('[role="row"]');
+
+    expect(firstCustomRow).toHaveStyle({ order: 0 });
+    expect(
+      Number((firstBuiltInRow as HTMLElement).style.order),
+    ).toBeGreaterThan(0);
+    expect(Number((lastCustomRow as HTMLElement).style.order)).toBeGreaterThan(
+      Number((firstBuiltInRow as HTMLElement).style.order),
+    );
+    expect(
+      state.customAutomations.map((automation) => automation.name),
+    ).toEqual(['Zulu custom automation', 'Aardvark custom automation']);
+  });
+
   it('uses the left switch as the built-in configuration entry point', async () => {
     render(<AutomationsSettings />);
 

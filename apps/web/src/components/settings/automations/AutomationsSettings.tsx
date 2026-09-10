@@ -75,7 +75,11 @@ import {
   SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS,
 } from './ScheduleOnlyAutomationContent';
 import { CustomAutomationsSection } from './CustomAutomationsSection';
-import { AutomationListRow, type AutomationListFilter } from './AutomationList';
+import {
+  AutomationListRow,
+  type AutomationListFilter,
+  useAutomationListOrder,
+} from './AutomationList';
 import { AutomationDestinationPicker } from './AutomationDestinationPicker';
 import { AutomationAdditionalRules } from './CiFailureTriageAdditionalRules';
 import {
@@ -1412,6 +1416,7 @@ function AutomationCard({
     ? `Configure ${automation.label}`
     : `Set up ${automation.label}`;
   const summaries = useContext(AutomationSummaryContext);
+  const order = useAutomationListOrder(automation.label);
 
   if (!isAvailableMatch) {
     return null;
@@ -1421,6 +1426,7 @@ function AutomationCard({
     <div
       id={automation.id}
       className="scroll-mt-24"
+      style={order === undefined ? undefined : { order }}
       aria-disabled={disabled || undefined}
     >
       <AutomationListRow
@@ -2696,6 +2702,9 @@ export function AutomationsSettings({
         onFilterChange={setAutomationFilter}
         onSearchChange={setAutomationSearch}
         toolbarLeading={toolbarLeading}
+        builtInAutomationNames={Object.values(AUTOMATION_DEFINITIONS)
+          .filter((automation) => visibleBuiltInAutomations.has(automation.id))
+          .map((automation) => automation.label)}
       >
         {settingsQuery.isPending || !formState ? (
           <LoadingSkeleton />
