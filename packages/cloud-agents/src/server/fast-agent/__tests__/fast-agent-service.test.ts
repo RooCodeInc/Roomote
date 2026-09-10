@@ -4145,7 +4145,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       answerFastAgentQuestion({
         ...baseParams,
         adapter,
-        schedulingProgressiveDisclosureEnabled: false,
       }),
     ).resolves.toBe('Subagent review completed.');
     expect(mocks.callIntegration).toHaveBeenCalledTimes(3);
@@ -6624,7 +6623,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             integrationId: 'missing',
           }),
         );
-        // Natively mounted servers are neither searchable nor callable here.
+        // The native Roomote server remains hidden, but its deferred
+        // scheduling capability is discoverable through this transport.
         toolResults.push(
           await invokeTool(nativeToolNames.findIntegrationTools, {
             query: 'automations',
@@ -6681,7 +6681,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       success: false,
       error: expect.stringContaining('"missing"'),
     });
-    expect(toolResults[2]).toEqual({ success: true, tools: [] });
+    expect(toolResults[2]).toMatchObject({
+      success: true,
+      skill: { id: 'packaged:scheduling', loadWith: 'load_skill' },
+      tools: [
+        {
+          integrationId: 'scheduling',
+          name: 'roomote_manage_custom_automations',
+          source: 'native',
+          inputSchema: expect.objectContaining({ type: 'object' }),
+        },
+      ],
+    });
     // Calls follow the same gate as natively mounted MCP tools.
     expect(toolResults[3]).toEqual({
       success: false,
@@ -6786,7 +6797,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await answerFastAgentQuestion({
       ...baseParams,
       adapter: callbacks(),
-      schedulingProgressiveDisclosureEnabled: true,
     });
 
     expect(toolResults[0]).toMatchObject({

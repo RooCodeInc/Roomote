@@ -1336,7 +1336,6 @@ export async function getFastAgentNativeToolRuntime(
   integrations: FastAgentIntegration[],
   options: {
     surface?: FastAgentSurface;
-    schedulingProgressiveDisclosureEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
   bridgePromise ??= startBridge();
@@ -1391,11 +1390,7 @@ export async function getFastAgentNativeToolRuntime(
         build: {
           tools: buildFastAgentToolFilter(
             nativeIntegrations.map((integration) => integration.id),
-            {
-              surface: options.surface ?? 'web',
-              schedulingProgressiveDisclosureEnabled:
-                options.schedulingProgressiveDisclosureEnabled,
-            },
+            { surface: options.surface ?? 'web' },
           ),
         },
       },

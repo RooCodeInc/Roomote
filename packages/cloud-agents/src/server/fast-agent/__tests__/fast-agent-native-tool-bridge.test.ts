@@ -963,22 +963,18 @@ describe('Fast native OpenCode tool bridge', () => {
     );
   });
 
-  it('does not mount scheduling schemas directly during the pilot', async () => {
-    const runtime = await getFastAgentNativeToolRuntime(
-      'deferred-scheduling',
-      [
-        {
-          id: 'roomote',
-          name: 'Roomote',
-          description: 'Deployment access',
-          tools: [
-            { name: 'manage_tasks' },
-            { name: 'manage_custom_automations' },
-          ],
-        },
-      ],
-      { schedulingProgressiveDisclosureEnabled: true },
-    );
+  it('does not mount scheduling schemas directly', async () => {
+    const runtime = await getFastAgentNativeToolRuntime('deferred-scheduling', [
+      {
+        id: 'roomote',
+        name: 'Roomote',
+        description: 'Deployment access',
+        tools: [
+          { name: 'manage_tasks' },
+          { name: 'manage_custom_automations' },
+        ],
+      },
+    ]);
     const config = JSON.parse(
       await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
     ) as { agent: { build: { tools: Record<string, boolean> } } };
