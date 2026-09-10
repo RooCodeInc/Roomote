@@ -218,6 +218,18 @@ describe('tool presentation resolver', () => {
     },
   );
 
+  it('does not report a reused wakeup as newly created', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'manage_wakeups',
+          rawInput: { arguments: { action: 'create' } },
+          output: JSON.stringify({ success: true, duplicate: true }),
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Reused', object: 'timer' });
+  });
+
   it('describes saved memories with an optional subject', () => {
     expect(
       resolveToolPresentation(
