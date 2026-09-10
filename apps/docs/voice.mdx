@@ -12,15 +12,13 @@ separate voice-only agent.
 
 ## Enabling voice
 
-Voice uses OpenAI GPT-Live-1 and is available on deployments whose OpenAI
-project has GPT-Live access:
+Voice uses OpenAI GPT-Live-1 and is available on deployments that set
+`R_VOICE_OPENAI_API_KEY` to a key from an OpenAI project with GPT-Live access.
+Voice is opt-in: the deployment's general `OPENAI_API_KEY` is not used, so
+enabling OpenAI for task inference does not turn voice on.
 
-- `R_VOICE_OPENAI_API_KEY` dedicates a key to voice (for example to bill it
-  separately from task inference).
-- Without it, voice falls back to the deployment's general `OPENAI_API_KEY`.
-
-When neither key is configured the voice button does not appear. The key stays
-on the control plane. The browser sends its WebRTC connection offer to Roomote
+When the voice key is not configured the voice button does not appear. The key
+stays on the control plane. The browser sends its WebRTC connection offer to Roomote
 and receives only the negotiated session answer; it never receives the API key.
 
 ## Using voice
@@ -32,8 +30,9 @@ and receives only the negotiated session answer; it never receives the API key.
 3. Speak naturally. GPT-Live delegates requests to the Fast Session, and each
    spoken request is cleaned up (filler words, false starts, and misheard
    terms) by the deployment's helper model before it appears in the transcript
-   as if you had typed it. From the home page or dialog, your first delegated
-   request starts the Session and opens it already in voice mode.
+   as if you had typed it. From the home page or dialog, the first thing you
+   say starts the Session and opens it already in voice mode, where the answer
+   is spoken.
 4. GPT-Live speaks verified Fast output as it arrives. Speak at any time to
    interrupt; GPT-Live continues listening while it speaks, and corrections
    are sent back through the same Fast Session.

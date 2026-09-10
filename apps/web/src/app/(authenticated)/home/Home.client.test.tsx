@@ -117,6 +117,7 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       start: voiceState.start,
       stop: voiceState.stop,
       speak: vi.fn(),
+      addContext: vi.fn(),
     };
   },
 }));

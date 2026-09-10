@@ -38,7 +38,12 @@ describe('createVoiceLiveSession', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(
-      createVoiceLiveSession({ apiKey: 'sk-test', sdp: 'offer-sdp', context }),
+      createVoiceLiveSession({
+        apiKey: 'sk-test',
+        sdp: 'offer-sdp',
+        context,
+        mode: 'conversation',
+      }),
     ).resolves.toEqual({ sessionId: 'live_123', sdp: 'answer-sdp' });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -77,8 +82,42 @@ describe('createVoiceLiveSession', () => {
     );
 
     await expect(
-      createVoiceLiveSession({ apiKey: 'sk-test', sdp: 'offer-sdp', context }),
+      createVoiceLiveSession({
+        apiKey: 'sk-test',
+        sdp: 'offer-sdp',
+        context,
+        mode: 'conversation',
+      }),
     ).rejects.toThrow('OpenAI Live session response was incomplete');
+  });
+
+  it('tells a kickoff conversation to delegate the first request silently', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          session: { id: 'live_123' },
+          transport: { type: 'webrtc', sdp: 'answer-sdp' },
+        }),
+        { status: 201 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await createVoiceLiveSession({
+      apiKey: 'sk-test',
+      sdp: 'offer-sdp',
+      context,
+      mode: 'kickoff',
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(request.body)) as {
+      session: { instructions: string };
+    };
+    expect(body.session.instructions).toContain('Do not speak at all');
+    expect(body.session.instructions).toContain(
+      'delegate it to the backend immediately',
+    );
   });
 });
 

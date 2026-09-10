@@ -3031,7 +3031,12 @@ export const appRouter = createRouter({
     createLiveSession: protectedProcedure
       // Never trim the SDP: it must keep its trailing CRLF or GPT-Live
       // rejects the offer with "failed to unmarshal SDP: EOF".
-      .input(z.object({ sdp: z.string().min(1).max(65_536) }))
+      .input(
+        z.object({
+          sdp: z.string().min(1).max(65_536),
+          mode: z.enum(['conversation', 'kickoff']).default('conversation'),
+        }),
+      )
       .mutation(({ ctx: { auth }, input }) =>
         createVoiceLiveSessionCommand(auth, input),
       ),

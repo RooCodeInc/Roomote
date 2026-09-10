@@ -59,6 +59,7 @@ const {
     start: vi.fn(),
     stop: vi.fn(),
     speak: vi.fn(),
+    addContext: vi.fn(),
     onUtterance: undefined as
       | ((text: string, delegationId: string) => void)
       | undefined,
@@ -78,6 +79,7 @@ vi.mock('@/hooks/useLiveVoice', () => ({
       start: liveVoiceState.start,
       stop: liveVoiceState.stop,
       speak: liveVoiceState.speak,
+      addContext: liveVoiceState.addContext,
     };
   },
 }));
@@ -262,6 +264,7 @@ beforeEach(() => {
   liveVoiceState.active = false;
   liveVoiceState.status = 'idle';
   liveVoiceState.start.mockReset();
+  liveVoiceState.addContext.mockReset();
   liveVoiceState.stop.mockReset();
   liveVoiceState.speak.mockReset();
   liveVoiceState.onUtterance = undefined;
@@ -2545,6 +2548,13 @@ describe('FastSessionTranscript', () => {
       );
       // The flag is one-shot: a reload must not restart the conversation.
       expect(window.location.search).toBe('');
+      // The new conversation never heard the request that created the
+      // Session, so it is handed over as context.
+      await waitFor(() =>
+        expect(liveVoiceState.addContext).toHaveBeenCalledWith(
+          expect.stringContaining('"Hey there"'),
+        ),
+      );
 
       liveVoiceState.active = true;
       liveVoiceState.status = 'listening';

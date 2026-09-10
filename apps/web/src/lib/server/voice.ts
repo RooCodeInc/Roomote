@@ -13,14 +13,11 @@ import {
 /** GPT-Live session creation. The OpenAI API key never leaves the server. */
 
 /**
- * A dedicated voice key wins over the deployment's general model-provider
- * key, so an operator can bill voice separately from task inference without
- * the two settings fighting (mirrors the Brain's key precedence).
+ * Voice is opt-in through its own key. The general OPENAI_API_KEY is not a
+ * fallback: many deployments have one for task inference without wanting a
+ * GPT-Live bill, and OpenRouter-only deployments have none at all.
  */
-const VOICE_OPENAI_ENV_VAR_NAMES = [
-  'R_VOICE_OPENAI_API_KEY',
-  'OPENAI_API_KEY',
-] as const;
+const VOICE_OPENAI_ENV_VAR_NAMES = ['R_VOICE_OPENAI_API_KEY'] as const;
 
 const OPENAI_API_BASE_URL = 'https://api.openai.com';
 const VOICE_LIVE_MODEL = 'gpt-live-1';
@@ -79,11 +76,30 @@ export type VoiceLiveSession = {
 };
 
 /**
+ * `conversation`: a full spoken conversation attached to an open Session.
+ * `kickoff`: the home page or New Session dialog; the first thing the person
+ * says is the request that creates the Session, so GPT-Live delegates it at
+ * once and stays silent. The new Session's own conversation takes over.
+ */
+export type VoiceLiveMode = 'conversation' | 'kickoff';
+
+/**
  * Exchange a browser WebRTC offer for a GPT-Live answer. Client delegation
  * keeps task reasoning, tools, model choice, and durable state in Roomote's
  * existing Fast session rather than creating a second agent in OpenAI.
  */
-function buildVoiceLiveInstructions(context: VoiceWorkspaceContext): string {
+function buildVoiceLiveInstructions(
+  context: VoiceWorkspaceContext,
+  mode: VoiceLiveMode,
+): string {
+  if (mode === 'kickoff') {
+    return `You are the voice interface for Roomote, a coding agent platform. The person is starting a new session by voice.
+
+Whatever they say first is their request. As soon as they finish speaking, delegate it to the backend immediately and completely, exactly as they said it. The backend understands their repositories, integrations, tasks, and tools; you do not need to.
+
+Do not speak at all: no greeting, no acknowledgement, no clarifying questions, no summary. Do not wait for more. The new session will continue the conversation.`;
+  }
+
   return `You are the voice interface for a Roomote Fast session. Speak naturally and concisely.
 
 The person is talking to Roomote, a coding agent platform. They will mostly ask about their code repositories, pull requests, issues, tasks, and the tools connected to this deployment. Treat any name you do not recognise as one of those rather than something to ask about.
@@ -112,6 +128,7 @@ export async function createVoiceLiveSession(options: {
   apiKey: string;
   sdp: string;
   context: VoiceWorkspaceContext;
+  mode: VoiceLiveMode;
 }): Promise<VoiceLiveSession> {
   const response = await fetch(`${OPENAI_API_BASE_URL}/v1/live/sessions`, {
     method: 'POST',
@@ -122,7 +139,7 @@ export async function createVoiceLiveSession(options: {
     body: JSON.stringify({
       session: {
         model: VOICE_LIVE_MODEL,
-        instructions: buildVoiceLiveInstructions(options.context),
+        instructions: buildVoiceLiveInstructions(options.context, options.mode),
         delegation: { type: 'client' },
       },
       transport: { type: 'webrtc', sdp: options.sdp },

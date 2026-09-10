@@ -4,6 +4,7 @@ import {
   cleanVoiceTranscript,
   createVoiceLiveSession,
   resolveVoiceOpenAiKey,
+  type VoiceLiveMode,
   type VoiceLiveSession,
 } from '@/lib/server/voice';
 import { loadVoiceWorkspaceContext } from '@/lib/server/voice-context';
@@ -11,8 +12,8 @@ import type { UserAuthSuccess } from '@/types';
 
 /**
  * Whether live voice conversation is available on this deployment. Voice
- * rides an OpenAI key (`R_VOICE_OPENAI_API_KEY`, falling back to the general
- * `OPENAI_API_KEY`); without one the UI hides the feature entirely.
+ * requires its own `R_VOICE_OPENAI_API_KEY`; without one the UI hides the
+ * feature entirely.
  */
 export async function getVoiceStatusCommand(): Promise<{ enabled: boolean }> {
   return { enabled: Boolean(await resolveVoiceOpenAiKey()) };
@@ -24,7 +25,7 @@ export async function getVoiceStatusCommand(): Promise<{ enabled: boolean }> {
  */
 export async function createVoiceLiveSessionCommand(
   auth: UserAuthSuccess,
-  input: { sdp: string },
+  input: { sdp: string; mode: VoiceLiveMode },
 ): Promise<VoiceLiveSession> {
   const apiKey = await resolveVoiceOpenAiKey();
 
@@ -38,7 +39,12 @@ export async function createVoiceLiveSessionCommand(
   const context = await loadVoiceWorkspaceContext(auth.userId);
 
   try {
-    return await createVoiceLiveSession({ apiKey, sdp: input.sdp, context });
+    return await createVoiceLiveSession({
+      apiKey,
+      sdp: input.sdp,
+      context,
+      mode: input.mode,
+    });
   } catch (error) {
     console.error('[voice] Failed to create GPT-Live session', error);
     throw new TRPCError({

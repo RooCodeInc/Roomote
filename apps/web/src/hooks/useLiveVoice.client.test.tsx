@@ -111,7 +111,10 @@ describe('useLiveVoice', () => {
 
     await act(async () => result.current.start());
 
-    expect(createLiveSessionMutate).toHaveBeenCalledWith({ sdp: 'offer-sdp' });
+    expect(createLiveSessionMutate).toHaveBeenCalledWith({
+      sdp: 'offer-sdp',
+      mode: 'conversation',
+    });
     expect(result.current.status).toBe('listening');
 
     act(() => {
@@ -293,5 +296,28 @@ describe('useLiveVoice', () => {
     playVoiceCue.mockClear();
     act(() => result.current.stop({ silent: true }));
     expect(playVoiceCue).not.toHaveBeenCalled();
+  });
+
+  it('starts a kickoff conversation and shares session-wide context', async () => {
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance: vi.fn(), mode: 'kickoff' }),
+    );
+
+    await act(async () => result.current.start());
+    expect(createLiveSessionMutate).toHaveBeenCalledWith({
+      sdp: 'offer-sdp',
+      mode: 'kickoff',
+    });
+
+    act(() => result.current.addContext('The person asked about the build.'));
+    expect(
+      FakePeer.instance.channel.sent.map((value) => JSON.parse(value)),
+    ).toContainEqual(
+      expect.objectContaining({
+        type: 'session.instructions.append',
+        delegation_id: null,
+        content: 'The person asked about the build.',
+      }),
+    );
   });
 });

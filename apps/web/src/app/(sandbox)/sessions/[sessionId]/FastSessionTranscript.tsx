@@ -937,6 +937,10 @@ export function FastSessionTranscript({
   // start again on the remount, which its dependencies already ensure.
   const startLiveVoiceRef = useRef(liveVoice.start);
   startLiveVoiceRef.current = liveVoice.start;
+  const addVoiceContextRef = useRef(liveVoice.addContext);
+  addVoiceContextRef.current = liveVoice.addContext;
+  const uiMessagesRef = useRef(uiMessages);
+  uiMessagesRef.current = uiMessages;
 
   useEffect(() => {
     if (!autoStartVoice || !voiceEnabled) {
@@ -947,7 +951,19 @@ export function FastSessionTranscript({
     spokenMessageIdsRef.current.clear();
     voiceDelegationByTurnIdRef.current.clear();
     pendingUtterancesRef.current = [];
-    void startLiveVoiceRef.current();
+    // This conversation never heard the request that created the Session (a
+    // separate kickoff conversation delegated it), so hand it over as
+    // context; the reply then arrives as session-wide commentary.
+    const firstRequest = uiMessagesRef.current.find(
+      (message) => message.role === 'user' && message.text,
+    )?.text;
+    void Promise.resolve(startLiveVoiceRef.current()).then(() => {
+      if (firstRequest) {
+        addVoiceContextRef.current(
+          `The person opened this session by saying: "${firstRequest}". Roomote is already working on it; its answer will arrive as commentary for you to speak. Treat follow-ups as continuing that request.`,
+        );
+      }
+    });
 
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);

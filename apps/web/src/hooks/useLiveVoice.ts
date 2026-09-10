@@ -21,6 +21,12 @@ interface UseLiveVoiceOptions {
   /** Called when GPT-Live delegates a spoken request to the Fast session. */
   onUtterance: (text: string, delegationId: string) => void;
   disabled?: boolean;
+  /**
+   * `kickoff` is the home page and New Session dialog: the first thing the
+   * person says becomes the Session, so GPT-Live delegates it immediately
+   * without speaking. Defaults to a full `conversation`.
+   */
+  mode?: 'conversation' | 'kickoff';
 }
 
 interface UseLiveVoiceReturn {
@@ -34,6 +40,11 @@ interface UseLiveVoiceReturn {
   stop: (options?: { silent?: boolean }) => void;
   /** Return verified Fast output to GPT-Live for natural spoken delivery. */
   speak: (markdown: string, delegationId: string | null) => void;
+  /**
+   * Give GPT-Live session-wide context it did not hear itself, such as the
+   * request that created this Session before its conversation connected.
+   */
+  addContext: (text: string) => void;
 }
 
 type LiveServerEvent = {
@@ -72,6 +83,7 @@ async function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
 export function useLiveVoice({
   onUtterance,
   disabled = false,
+  mode = 'conversation',
 }: UseLiveVoiceOptions): UseLiveVoiceReturn {
   const trpcClient = useTRPCClient();
   const [active, setActive] = useState(false);
@@ -177,6 +189,7 @@ export function useLiveVoice({
           }
           break;
         case 'error':
+          console.error('[voice] GPT-Live reported an error', event);
           setError(event.error?.message ?? 'Voice conversation error');
           break;
         default:
@@ -302,6 +315,7 @@ export function useLiveVoice({
             message.type === 'session.closed' &&
             startGenerationRef.current === generation
           ) {
+            console.info('[voice] GPT-Live closed the session', message);
             stop();
           }
         } catch {
@@ -309,7 +323,13 @@ export function useLiveVoice({
         }
       });
       channel.addEventListener('close', () => {
-        if (startGenerationRef.current === generation) stop();
+        if (startGenerationRef.current === generation) {
+          console.info('[voice] Data channel closed by the peer');
+          stop();
+        }
+      });
+      peer.addEventListener('connectionstatechange', () => {
+        console.info(`[voice] Peer connection ${peer?.connectionState}`);
       });
 
       const offer = await peer.createOffer();
@@ -322,7 +342,10 @@ export function useLiveVoice({
 
       const sdp = peer.localDescription?.sdp;
       if (!sdp) throw new Error('Missing voice connection offer');
-      const result = await trpcClient.voice.createLiveSession.mutate({ sdp });
+      const result = await trpcClient.voice.createLiveSession.mutate({
+        sdp,
+        mode,
+      });
       if (isStale()) {
         release(peer, channel, mic, audio);
         return;
@@ -381,7 +404,7 @@ export function useLiveVoice({
           : 'Could not start the voice conversation',
       );
     }
-  }, [disabled, handleServerEvent, release, stop, trpcClient]);
+  }, [disabled, handleServerEvent, mode, release, stop, trpcClient]);
 
   const speak = useCallback((markdown: string, delegationId: string | null) => {
     const channel = dataChannelRef.current;
@@ -400,6 +423,23 @@ export function useLiveVoice({
     }
   }, []);
 
+  const addContext = useCallback((text: string) => {
+    const channel = dataChannelRef.current;
+    const content = text.trim();
+    if (!content || !activeRef.current || channel?.readyState !== 'open') {
+      return;
+    }
+
+    channel.send(
+      JSON.stringify({
+        type: 'session.instructions.append',
+        event_id: crypto.randomUUID(),
+        delegation_id: null,
+        content,
+      }),
+    );
+  }, []);
+
   useEffect(() => () => stop(), [stop]);
 
   return {
@@ -408,5 +448,6 @@ export function useLiveVoice({
     start,
     stop,
     speak,
+    addContext,
   };
 }

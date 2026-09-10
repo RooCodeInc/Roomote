@@ -239,6 +239,7 @@ export function NewTaskForm({
   const liveVoice = useLiveVoice({
     onUtterance: handleVoiceUtterance,
     disabled: isBusy || Boolean(submitDisabledReason),
+    mode: 'kickoff',
   });
   stopLiveVoiceRef.current = liveVoice.stop;
   const voiceActive = liveVoice.active || liveVoice.status === 'connecting';

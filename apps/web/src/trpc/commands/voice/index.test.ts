@@ -64,7 +64,10 @@ describe('createVoiceLiveSessionCommand', () => {
     });
 
     await expect(
-      createVoiceLiveSessionCommand(auth, { sdp: 'offer-sdp' }),
+      createVoiceLiveSessionCommand(auth, {
+        sdp: 'offer-sdp',
+        mode: 'kickoff',
+      }),
     ).resolves.toEqual({
       sessionId: 'live_abc',
       sdp: 'answer-sdp',
@@ -73,6 +76,7 @@ describe('createVoiceLiveSessionCommand', () => {
       apiKey: 'sk-test',
       sdp: 'offer-sdp',
       context: voiceContext,
+      mode: 'kickoff',
     });
   });
 
@@ -80,7 +84,10 @@ describe('createVoiceLiveSessionCommand', () => {
     mockResolveVoiceOpenAiKey.mockResolvedValue(undefined);
 
     await expect(
-      createVoiceLiveSessionCommand(auth, { sdp: 'offer-sdp' }),
+      createVoiceLiveSessionCommand(auth, {
+        sdp: 'offer-sdp',
+        mode: 'conversation',
+      }),
     ).rejects.toMatchObject({ code: 'PRECONDITION_FAILED' });
     expect(mockCreateVoiceLiveSession).not.toHaveBeenCalled();
   });
@@ -91,6 +98,7 @@ describe('createVoiceLiveSessionCommand', () => {
 
     const error = await createVoiceLiveSessionCommand(auth, {
       sdp: 'offer-sdp',
+      mode: 'conversation',
     }).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(TRPCError);
