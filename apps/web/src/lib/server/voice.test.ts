@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { generateTrackedNonTaskText } = vi.hoisted(() => ({
   generateTrackedNonTaskText: vi.fn(),
@@ -11,7 +11,38 @@ vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
   },
 }));
 
-import { cleanVoiceTranscript, createVoiceLiveSession } from './voice';
+const { resolveModelProviderEnvValue, findConnection, findEnablement } =
+  vi.hoisted(() => ({
+    resolveModelProviderEnvValue: vi.fn(),
+    findConnection: vi.fn(),
+    findEnablement: vi.fn(),
+  }));
+
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
+  resolveModelProviderEnvValue,
+  db: {
+    query: {
+      mcpConnections: { findFirst: findConnection },
+      deploymentMcpEnablements: { findFirst: findEnablement },
+    },
+  },
+}));
+
+vi.mock('@roomote/db/encryption', () => ({
+  decrypt: (value: string) => value.replace(/^enc:/, ''),
+}));
+
+vi.mock('./env', () => ({
+  Env: { R_CURATED_INTEGRATIONS_DISABLED: undefined },
+  areCuratedIntegrationsDisabled: () => false,
+}));
+
+import {
+  cleanVoiceTranscript,
+  createVoiceLiveSession,
+  resolveVoiceOpenAiKey,
+} from './voice';
 import type { VoiceWorkspaceContext } from './voice-context';
 
 const context: VoiceWorkspaceContext = {
@@ -130,5 +161,36 @@ describe('cleanVoiceTranscript', () => {
     await expect(
       cleanVoiceTranscript({ userId: 'user-1', text: 'hello', context }),
     ).rejects.toThrow('Transcript cleanup returned no text');
+  });
+});
+
+describe('resolveVoiceOpenAiKey', () => {
+  beforeEach(() => {
+    resolveModelProviderEnvValue.mockReset();
+    findConnection.mockReset();
+    findEnablement.mockReset();
+  });
+
+  it('reads the Settings-managed key fresh on every call so saves and disconnects apply at once', async () => {
+    resolveModelProviderEnvValue.mockResolvedValue(undefined);
+    findConnection.mockResolvedValueOnce(null);
+    await expect(resolveVoiceOpenAiKey()).resolves.toBeUndefined();
+
+    // The admin saves a key: the next call sees it, no cache window.
+    findConnection.mockResolvedValueOnce({
+      authConfig: { type: 'voice', encryptedApiKey: 'enc:sk-voice' },
+    });
+    findEnablement.mockResolvedValueOnce({ enabled: true });
+    await expect(resolveVoiceOpenAiKey()).resolves.toBe('sk-voice');
+
+    // The admin disconnects: the next call no longer has it.
+    findConnection.mockResolvedValueOnce(null);
+    await expect(resolveVoiceOpenAiKey()).resolves.toBeUndefined();
+  });
+
+  it('prefers the environment key and ignores a disabled stored connection', async () => {
+    resolveModelProviderEnvValue.mockResolvedValueOnce(' sk-env ');
+    await expect(resolveVoiceOpenAiKey()).resolves.toBe('sk-env');
+    expect(findConnection).not.toHaveBeenCalled();
   });
 });
