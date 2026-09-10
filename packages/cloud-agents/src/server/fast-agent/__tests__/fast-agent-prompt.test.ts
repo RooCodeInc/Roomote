@@ -502,7 +502,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'never claim a video is attached unless native delivery succeeds',
     );
     expect(prompt).toContain(
-      'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
+      'Use `send_chat_reaction` only for an optional meaningful reaction or an emoji-only terminal answer',
+    );
+    expect(prompt).toContain(
+      'do not use "eyes" as an automatic processing or working-status acknowledgement',
     );
     expect(prompt).toContain(
       'It does not satisfy the turn-start acknowledgement required before continuing work',

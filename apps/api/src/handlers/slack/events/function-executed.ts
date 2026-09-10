@@ -9,11 +9,7 @@ import {
   getSessionForFastConversation,
   slackUserMappings,
 } from '@roomote/db/server';
-import {
-  resolveSlackReactionNames,
-  type SlackFunctionExecutedEvent,
-  SlackNotifier,
-} from '@roomote/slack';
+import { type SlackFunctionExecutedEvent, SlackNotifier } from '@roomote/slack';
 
 import { apiLogger } from '../../../logging.js';
 import {
@@ -297,7 +293,6 @@ export async function processSlackWorkflowFunctionExecuted(params: {
     const fastSlackUserId = launchUserMapping
       ? launchUserMapping.slackUserId
       : launchIdentity.slackUserId;
-    const { ackEmoji } = await resolveSlackReactionNames();
     const fastStart = await startFastAgentResponse({
       event: {
         type: 'app_mention',
@@ -316,7 +311,6 @@ export async function processSlackWorkflowFunctionExecuted(params: {
       ...(initiator.kind === 'automation'
         ? { delegatedTaskInitiator: initiator }
         : {}),
-      processingReactionName: ackEmoji,
       errorLogPrefix: `[SlackWorkflow] Fast response failed for ${functionExecutionId}:`,
     });
 
