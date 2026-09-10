@@ -39,6 +39,8 @@ async function assertManualTriggerIsRunnable(
   }
 
   const runtime = await getAutomationRuntime(automationKey);
+  let hasAdditionalRules = false;
+  let rulesDestination: ResolvedAutomationDestination | null = null;
 
   if (!runtime.enabled) {
     throw new Error(
@@ -49,6 +51,7 @@ async function assertManualTriggerIsRunnable(
   if ('additionalRules' in descriptor) {
     const rules = getAutomationAdditionalRules(runtime.settings);
     if (rules !== undefined) {
+      hasAdditionalRules = true;
       if (rules === null) {
         throw new Error(
           `${descriptor.label} Additional rules are invalid. Save them again before running the automation.`,
@@ -70,20 +73,24 @@ async function assertManualTriggerIsRunnable(
         );
       const connectedProviders = await listConnectedCommunicationProviders();
       for (const repository of repositories) {
-        if (
+        const repositoryDestination =
           await resolveAutomationRepositoryDestination({
             runtime,
             repositoryId: repository.id,
             connectedProviders,
-          })
-        ) {
-          // The runner resolves each repository's explicit override or default.
-          return null;
+          });
+        if (repositoryDestination) {
+          // Keep this only as a preflight signal. The runner must still resolve
+          // each repository independently rather than treating it as a default.
+          rulesDestination = repositoryDestination;
+          break;
         }
       }
-      throw new Error(
-        `Configure an available destination for the selected ${descriptor.label} repositories.`,
-      );
+      if (!rulesDestination) {
+        throw new Error(
+          `Configure an available destination for the selected ${descriptor.label} repositories.`,
+        );
+      }
     }
   }
 
@@ -95,9 +102,10 @@ async function assertManualTriggerIsRunnable(
         fallbackUserId: auth.userId,
       })
     : null;
+  const preflightDestination = destination ?? rulesDestination;
 
   if (descriptor.usesManagerChannel) {
-    if (!destination) {
+    if (!preflightDestination) {
       throw new Error(
         `Set a Manager Channel before running ${descriptor.label}.`,
       );
@@ -106,9 +114,9 @@ async function assertManualTriggerIsRunnable(
     const supportedProviders: readonly CommunicationProvider[] =
       descriptor.supportedCommunicationProviders;
 
-    if (!supportedProviders.includes(destination.provider)) {
+    if (!supportedProviders.includes(preflightDestination.provider)) {
       throw new Error(
-        `${descriptor.label} cannot report to ${destination.provider} yet. Choose a Slack channel or the shared Manager Channel.`,
+        `${descriptor.label} cannot report to ${preflightDestination.provider} yet. Choose a Slack channel or the shared Manager Channel.`,
       );
     }
   }
@@ -119,7 +127,7 @@ async function assertManualTriggerIsRunnable(
         // A supported non-Slack destination satisfies the comms requirement;
         // the Slack connection itself is only needed when the report goes to
         // Slack.
-        if (destination && destination.provider !== 'slack') {
+        if (preflightDestination && preflightDestination.provider !== 'slack') {
           break;
         }
         if (!slackConnected) {
@@ -148,7 +156,7 @@ async function assertManualTriggerIsRunnable(
     }
   }
 
-  return destination;
+  return hasAdditionalRules ? null : destination;
 }
 
 /**

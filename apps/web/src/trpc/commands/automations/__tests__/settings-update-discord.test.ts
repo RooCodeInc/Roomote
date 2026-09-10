@@ -37,16 +37,22 @@ const mockRunAutomationNow = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ outcome: 'completed' }),
 );
 const mockResolveAutomationRepositoryDestination = vi.hoisted(() => vi.fn());
+const mockResolveAutomationRuntimeDestination = vi.hoisted(() => vi.fn());
 vi.mock('@roomote/sdk/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
   mockResolveAutomationRepositoryDestination.mockImplementation(
     actual.resolveAutomationRepositoryDestination,
+  );
+  mockResolveAutomationRuntimeDestination.mockImplementation(
+    actual.resolveAutomationRuntimeDestination,
   );
   return {
     ...actual,
     runAutomationNow: mockRunAutomationNow,
     resolveAutomationRepositoryDestination:
       mockResolveAutomationRepositoryDestination,
+    resolveAutomationRuntimeDestination:
+      mockResolveAutomationRuntimeDestination,
   };
 });
 
@@ -197,7 +203,7 @@ async function insertAvailableDiscordChannel(params: {
   });
 }
 
-async function insertSlackInstallation() {
+async function insertAdminUser() {
   await db.insert(users).values({
     id: 'user-admin',
     name: 'Admin',
@@ -205,7 +211,10 @@ async function insertSlackInstallation() {
     imageUrl: '',
     entity: {},
   });
+}
 
+async function insertSlackInstallation() {
+  await insertAdminUser();
   await db.insert(slackInstallations).values({
     teamId: 'T123',
     teamName: 'Acme',
@@ -242,6 +251,7 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     mockCaptureActivationAutomationChanged.mockClear();
     mockRunAutomationNow.mockClear();
     mockResolveAutomationRepositoryDestination.mockClear();
+    mockResolveAutomationRuntimeDestination.mockClear();
     mockResolveRules.mockReset();
     // Internal automation rows are referenced by other suites' task fixtures.
     await db
@@ -337,7 +347,8 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   });
 
   it('runs an eligible automation with only a rules-based destination', async () => {
-    await insertSlackInstallation();
+    mockResolveAutomationRuntimeDestination.mockResolvedValueOnce(null);
+    await insertAdminUser();
     await insertAvailableDiscordChannel({
       guildId: 'guild-rules',
       channelId: 'channel-rules',
