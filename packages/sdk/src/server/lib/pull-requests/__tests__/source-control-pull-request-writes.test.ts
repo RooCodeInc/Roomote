@@ -421,7 +421,7 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     },
   );
 
-  it('reports an unsupported Gitea native draft transition without applying partial updates', async () => {
+  it('does not report a prefixed Gitea native draft as ready after a title-only transition', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
       externalRepoId: null,
@@ -431,7 +431,7 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(
-        jsonResponse({ number: 55, title: 'Unprefixed title', draft: true }),
+        jsonResponse({ number: 55, title: 'WIP: Existing title', draft: true }),
       );
 
     const result = await writeSourceControlPullRequestForTaskRun({

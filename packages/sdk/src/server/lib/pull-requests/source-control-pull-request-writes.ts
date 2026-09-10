@@ -1872,18 +1872,14 @@ async function writeGiteaPullRequest({
             ],
           });
         }
-        if (
-          input.draft === false &&
-          current.draft === true &&
-          !isDraftTitle(currentTitle)
-        ) {
+        if (input.draft === false && current.draft === true) {
           return buildWriteResult({
             input,
             provider,
             repository,
             applied: false,
             warnings: [
-              'Gitea cannot change native draft state through this source-control interface when the pull request title has no Draft/WIP prefix, so none of the requested pull request updates were applied.',
+              'Gitea cannot change native draft state through this source-control interface, so none of the requested pull request updates were applied.',
             ],
           });
         }
