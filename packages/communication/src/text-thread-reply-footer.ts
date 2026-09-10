@@ -62,11 +62,9 @@ export async function postTextThreadReplyWithFooter(params: {
     logRef: 'text reply',
     logContext: 'threadFooter',
     postReplyWithFooter: async () => {
-      const footerText =
-        (await resolveCurrentThreadFooterText(
-          provider.provider,
-          params.footerText,
-        )) ?? params.footerText;
+      // The caller's footer already reflects the event that produced this
+      // reply; the scheduled refresh keeps it current from here.
+      const footerText = params.footerText;
       const text = [input.text, footerText].filter(Boolean).join('\n\n');
       const refresh = {
         footerText,

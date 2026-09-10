@@ -7,10 +7,13 @@ import {
 import { and, db, eq, repositories } from '@roomote/db/server';
 import {
   buildFastSessionReplyFooterText,
+  classifyThreadFooterActivity,
   resolveFastSessionReplyFooterContext,
   withThreadReplyFooterLock,
   forgetThreadFooterRefresh,
+  type ThreadFooterRefreshOutcome,
 } from '@roomote/communication';
+import { tryThreadReplyFooterLock } from '@roomote/communication/thread-reply-footer-delivery';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -965,6 +968,27 @@ export function buildSourceControlFastAdapter(params: {
         }
       : {}),
   });
+  // The footer moved to a newer comment: the old carrier must not keep a
+  // status that will never update again. Best effort, like the chat surfaces.
+  const stripPreviousFooter = async (
+    previous: SourceControlFooterRecord,
+    assertLock: () => Promise<void>,
+  ) => {
+    if (!params.delivery.updateCommentById || !discussion) return;
+    try {
+      await assertLock();
+      await params.delivery.updateCommentById({
+        discussion,
+        messageId: previous.messageId,
+        body: previous.body,
+      });
+    } catch (error) {
+      if (isCommentGoneError(error)) return;
+      console.warn(
+        `[Fast Agent] Failed to remove the footer from the previous comment ${previous.messageId}: ${formatErrorForLog(error)}`,
+      );
+    }
+  };
   // The thread's comment record is a best-effort nicety: losing it costs one
   // extra comment, never the reply.
   const rememberThreadComment = async (
@@ -992,6 +1016,8 @@ export function buildSourceControlFastAdapter(params: {
         body,
         footerText,
       });
+      if (relocate && current && current.messageId !== comment.messageId)
+        await stripPreviousFooter(current, assertLock);
       if (!threaded || !threadId) return;
       await assertLock();
       await setSourceControlThreadCommentRecord(params.sessionId, threadId, {
@@ -1154,55 +1180,91 @@ export function buildSourceControlFastAdapter(params: {
   };
 }
 
-/** Refresh only the recorded carrier; missing comments never trigger a post. */
-export async function refreshSourceControlThreadFooter(target: {
-  channelId: string;
-  threadId: string;
-}): Promise<void> {
-  await withThreadReplyFooterLock({
+/**
+ * Unregister a destination, but only if its record still matches what this
+ * refresh pass read: a delivery that raced in owns the registration now.
+ */
+async function forgetSourceControlFooterIfUnchanged(
+  target: { channelId: string; threadId: string },
+  seen: SourceControlFooterRecord | null,
+): Promise<ThreadFooterRefreshOutcome> {
+  const result = await tryThreadReplyFooterLock({
     lockKey: `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
-    maxAcquireAttempts: 1,
-    fn: async (assertLock) => {
-      const record = await getSourceControlFooterRecord(
+    fn: async (assertLock): Promise<ThreadFooterRefreshOutcome> => {
+      const current = await getSourceControlFooterRecord(
         target.channelId,
         target.threadId,
       );
-      if (!record) {
-        await assertLock();
-        await forgetThreadFooterRefresh({
-          provider: 'source-control',
-          ...target,
-        });
-        return;
-      }
-      const footerText = buildFastSessionReplyFooterText({
-        provider: record.conversation.surface,
-        sessionId: record.sessionId,
-        ...(await resolveFastSessionReplyFooterContext({
-          sessionId: record.sessionId,
-        })),
+      if (
+        current?.messageId !== seen?.messageId ||
+        current?.footerText !== seen?.footerText
+      )
+        return 'active';
+      await assertLock();
+      await forgetThreadFooterRefresh({
+        provider: 'source-control',
+        ...target,
       });
-      if (footerText === record.footerText) return;
-      const delivery = await buildSourceControlFastDelivery(
-        record.conversation,
+      return 'gone';
+    },
+  });
+  return result.acquired ? result.value : 'active';
+}
+
+/**
+ * Refresh only the recorded carrier; missing comments never trigger a post.
+ * Resolution happens outside the destination lock; the lock is held only for
+ * the comment edit and the pointer write, so a reply is never starved.
+ */
+export async function refreshSourceControlThreadFooter(target: {
+  channelId: string;
+  threadId: string;
+}): Promise<ThreadFooterRefreshOutcome> {
+  const record = await getSourceControlFooterRecord(
+    target.channelId,
+    target.threadId,
+  );
+  if (!record) return forgetSourceControlFooterIfUnchanged(target, null);
+  const context = await resolveFastSessionReplyFooterContext({
+    sessionId: record.sessionId,
+  });
+  const footerText = buildFastSessionReplyFooterText({
+    provider: record.conversation.surface,
+    sessionId: record.sessionId,
+    ...context,
+  });
+  const { active, settled } = classifyThreadFooterActivity(context);
+  const outcome: ThreadFooterRefreshOutcome = active ? 'active' : 'idle';
+  if (footerText === record.footerText) {
+    return settled
+      ? forgetSourceControlFooterIfUnchanged(target, record)
+      : outcome;
+  }
+  const delivery = await buildSourceControlFastDelivery(record.conversation);
+  const discussion = parseSourceControlFastConversation(record.conversation);
+  if (!delivery?.updateCommentById || !discussion)
+    return forgetSourceControlFooterIfUnchanged(target, record);
+  const result = await tryThreadReplyFooterLock({
+    lockKey: `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
+    fn: async (assertLock): Promise<ThreadFooterRefreshOutcome> => {
+      const latest = await getSourceControlFooterRecord(
+        target.channelId,
+        target.threadId,
       );
-      const discussion = parseSourceControlFastConversation(
-        record.conversation,
-      );
-      if (!delivery?.updateCommentById || !discussion) {
-        await assertLock();
-        await forgetThreadFooterRefresh({
-          provider: 'source-control',
-          ...target,
-        });
-        return;
-      }
+      // A reply relocated or rewrote the carrier while this pass was
+      // resolving; the next pass reads the new state.
+      if (
+        !latest ||
+        latest.messageId !== record.messageId ||
+        latest.footerText !== record.footerText
+      )
+        return 'active';
       await assertLock();
       try {
-        await delivery.updateCommentById({
+        await delivery.updateCommentById!({
           discussion,
-          messageId: record.messageId,
-          body: `${record.body}\n\n${footerText}`,
+          messageId: latest.messageId,
+          body: `${latest.body}\n\n${footerText}`,
         });
       } catch (error) {
         if (!isCommentGoneError(error)) throw error;
@@ -1211,10 +1273,21 @@ export async function refreshSourceControlThreadFooter(target: {
           provider: 'source-control',
           ...target,
         });
-        return;
+        return 'gone';
       }
       await assertLock();
-      await setSourceControlFooterRecord({ ...record, footerText }, true);
+      await setSourceControlFooterRecord({ ...latest, footerText }, true);
+      if (settled) {
+        await assertLock();
+        await forgetThreadFooterRefresh({
+          provider: 'source-control',
+          ...target,
+        });
+        return 'gone';
+      }
+      return outcome;
     },
   });
+  // A delivery holds the lock: it re-registers the destination itself.
+  return result.acquired ? result.value : 'active';
 }

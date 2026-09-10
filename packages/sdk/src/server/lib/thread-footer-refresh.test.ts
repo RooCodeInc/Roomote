@@ -8,12 +8,16 @@ const mocks = vi.hoisted(() => ({
   installation: vi.fn(),
   redisGet: vi.fn(),
   forget: vi.fn(),
+  reschedule: vi.fn(),
+  jobLock: vi.fn(),
+  jobRelease: vi.fn(),
 }));
 vi.mock('@roomote/communication', () => ({
   claimThreadFooterRefreshTargets: mocks.claim,
   refreshManagedThreadReplyFooter: mocks.managed,
   editTextThreadFooterMessage: mocks.textEdit,
   forgetThreadFooterRefresh: mocks.forget,
+  rescheduleThreadFooterRefresh: mocks.reschedule,
 }));
 vi.mock('@roomote/db/server', () => ({
   db: { query: { slackInstallations: { findFirst: mocks.installation } } },
@@ -23,14 +27,18 @@ vi.mock('@roomote/db/server', () => ({
 }));
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({ get: mocks.redisGet }),
+  acquireRedisLock: mocks.jobLock,
 }));
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: class {
     constructor(readonly token: string) {}
   },
   refreshSlackThreadReplyFooter: mocks.slackRefresh,
-  withSlackThreadReplyFooterLock: async ({ fn }: { fn: () => Promise<void> }) =>
-    fn(),
+  withSlackThreadReplyFooterLock: async ({
+    fn,
+  }: {
+    fn: (assertLock: () => Promise<void>) => Promise<void>;
+  }) => fn(async () => {}),
 }));
 vi.mock('./discord-communication', () => ({
   createDiscordCommunicationProviderFromRuntimeCredentials: async () => ({
@@ -62,6 +70,52 @@ describe('footer refresh control-plane dispatch', () => {
     mocks.claim.mockResolvedValue([]);
     mocks.redisGet.mockResolvedValue('team');
     mocks.installation.mockResolvedValue({ botAccessToken: 'test-token' });
+    mocks.managed.mockResolvedValue('active');
+    mocks.slackRefresh.mockResolvedValue('active');
+    mocks.sourceRefresh.mockResolvedValue('active');
+    mocks.jobLock.mockResolvedValue(mocks.jobRelease);
+  });
+
+  it('runs one pass at a time and releases the pass lock when done', async () => {
+    mocks.jobLock.mockResolvedValueOnce(null);
+    await refreshCurrentThreadFooters();
+    expect(mocks.claim).not.toHaveBeenCalled();
+    mocks.claim.mockRejectedValueOnce(new Error('redis down'));
+    await expect(refreshCurrentThreadFooters()).rejects.toThrow('redis down');
+    expect(mocks.jobRelease).toHaveBeenCalledTimes(1);
+  });
+
+  it('reschedules each destination by what the refresh learned and drops unregistered ones', async () => {
+    const targets = ['active', 'idle', 'gone'].map((outcome) => ({
+      provider: 'discord' as const,
+      channelId: outcome,
+      threadId: 'T',
+    }));
+    mocks.claim.mockResolvedValue(targets);
+    mocks.managed.mockImplementation(async ({ channelId }) => channelId);
+    await refreshCurrentThreadFooters();
+    expect(mocks.reschedule).toHaveBeenCalledTimes(2);
+    expect(mocks.reschedule).toHaveBeenCalledWith(targets[0], 'active');
+    expect(mocks.reschedule).toHaveBeenCalledWith(targets[1], 'idle');
+  });
+
+  it('retires a Slack footer whose workspace has no active installation', async () => {
+    mocks.installation.mockResolvedValue(null);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(
+      await refreshThreadFooterTarget({
+        provider: 'slack',
+        channelId: 'C',
+        threadId: 'T',
+      }),
+    ).toBe('gone');
+    expect(mocks.forget).toHaveBeenCalledWith({
+      provider: 'slack',
+      channelId: 'C',
+      threadId: 'T',
+    });
+    expect(mocks.slackRefresh).not.toHaveBeenCalled();
+    warning.mockRestore();
   });
 
   it('does no provider work when there are no recorded due carriers', async () => {

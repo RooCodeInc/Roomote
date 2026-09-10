@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   store: new Map<string, string>(),
   current: 'old',
   resolve: vi.fn(),
+  activity: { active: true, settled: false },
   forget: vi.fn(),
   schedule: vi.fn(),
 }));
@@ -29,6 +30,10 @@ vi.mock('@roomote/redis', () => ({
 }));
 vi.mock('@roomote/communication', () => ({
   resolveCurrentThreadFooterText: mocks.resolve,
+  resolveCurrentThreadFooter: async (provider: string, footerText: string) => {
+    const text = await mocks.resolve(provider, footerText);
+    return text === null ? null : { text, ...mocks.activity };
+  },
   forgetThreadFooterRefresh: mocks.forget,
   scheduleThreadFooterRefresh: mocks.schedule,
 }));
@@ -59,6 +64,8 @@ describe('Slack lifecycle footer refresh', () => {
     mocks.store.clear();
     mocks.current = 'old';
     vi.clearAllMocks();
+    mocks.activity.active = true;
+    mocks.activity.settled = false;
     mocks.resolve.mockResolvedValue('running');
   });
   const body = { type: 'markdown', text: 'Narrative' };
@@ -181,21 +188,108 @@ describe('Slack lifecycle footer refresh', () => {
     expect(provider.postMessage).not.toHaveBeenCalled();
   });
 
-  it('does not forget a competitor when the lease is lost during the missing-message lookup', async () => {
+  it('does not forget a competitor that relocated the footer during the missing-message lookup', async () => {
     const provider = slack();
     provider.getMessageBlocks.mockImplementationOnce(async () => {
       mocks.store.set('slack:thread_reply_footer_lock:C:T', 'competitor');
       mocks.current = 'new';
       return null;
     });
-    await expect(
-      refreshSlackThreadReplyFooter({
+    expect(
+      await refreshSlackThreadReplyFooter({
         slack: provider,
         channel: 'C',
         threadTs: 'T',
       }),
-    ).rejects.toThrow('lease lost');
+    ).toBe('active');
     expect(mocks.forget).not.toHaveBeenCalled();
+    mocks.store.delete('slack:thread_reply_footer_lock:C:T');
+    provider.getMessageBlocks.mockImplementationOnce(async () => {
+      mocks.current = 'newer';
+      return null;
+    });
+    expect(
+      await refreshSlackThreadReplyFooter({
+        slack: provider,
+        channel: 'C',
+        threadTs: 'T',
+      }),
+    ).toBe('active');
+    expect(mocks.forget).not.toHaveBeenCalled();
+  });
+
+  it('compares against the footer as written, not as Slack escapes it on read-back', async () => {
+    const provider = slack();
+    const written =
+      '_<https://app/sessions/s?utm_source=slack&utm_medium=link|Web app>_';
+    provider.getMessageBlocks.mockResolvedValue([
+      body,
+      buildSlackThreadReplyFooterBlock({
+        footerText: written.replaceAll('&', '&amp;'),
+      }),
+    ]);
+    mocks.resolve.mockResolvedValue(written);
+    expect(
+      await refreshSlackThreadReplyFooter({
+        slack: provider,
+        channel: 'C',
+        threadTs: 'T',
+      }),
+    ).toBe('active');
+    expect(mocks.resolve).toHaveBeenCalledWith('slack', written);
+    expect(provider.updateMessage).not.toHaveBeenCalled();
+  });
+
+  it('reports idle threads, and unregisters settled or unresolvable ones without editing', async () => {
+    const provider = slack();
+    mocks.activity.active = false;
+    mocks.resolve.mockResolvedValue('idle');
+    expect(
+      await refreshSlackThreadReplyFooter({
+        slack: provider,
+        channel: 'C',
+        threadTs: 'T',
+      }),
+    ).toBe('idle');
+    expect(mocks.forget).not.toHaveBeenCalled();
+    mocks.activity.settled = true;
+    expect(
+      await refreshSlackThreadReplyFooter({
+        slack: provider,
+        channel: 'C',
+        threadTs: 'T',
+      }),
+    ).toBe('gone');
+    expect(mocks.forget).toHaveBeenCalledTimes(1);
+    mocks.forget.mockClear();
+    mocks.activity.settled = false;
+    mocks.resolve.mockResolvedValue(null);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(
+      await refreshSlackThreadReplyFooter({
+        slack: provider,
+        channel: 'C',
+        threadTs: 'T',
+      }),
+    ).toBe('gone');
+    expect(mocks.forget).toHaveBeenCalledTimes(1);
+    expect(provider.updateMessage).not.toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
+  it('yields to a reply holding the thread instead of waiting for it', async () => {
+    const provider = slack();
+    mocks.store.set('slack:thread_reply_footer_lock:C:T', 'a-reply');
+    const startedAt = Date.now();
+    expect(
+      await refreshSlackThreadReplyFooter({
+        slack: provider,
+        channel: 'C',
+        threadTs: 'T',
+      }),
+    ).toBe('active');
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(provider.updateMessage).not.toHaveBeenCalled();
   });
 
   it('skips unchanged, missing and already footerless messages without history lookup or posting', async () => {
@@ -225,7 +319,7 @@ describe('Slack lifecycle footer refresh', () => {
     expect(provider.postMessage).not.toHaveBeenCalled();
   });
 
-  it('serializes relocation with a paused refresh, then reads the new pointer on the next tick', async () => {
+  it('never edits a carrier that a reply relocated while it was resolving; the next tick reads the new pointer', async () => {
     const provider = slack();
     let release!: () => void;
     let started!: () => void;
@@ -246,7 +340,8 @@ describe('Slack lifecycle footer refresh', () => {
       threadTs: 'T',
     });
     await ready;
-    const post = postSlackThreadMessageWithFooterText({
+    // Resolution holds no lock, so the reply is never delayed by it.
+    await postSlackThreadMessageWithFooterText({
       slack: provider,
       channel: 'C',
       threadTs: 'T',
@@ -254,12 +349,12 @@ describe('Slack lifecycle footer refresh', () => {
       bodyBlocks: [body],
       footerText: 'running',
     });
-    expect(provider.postMessage).not.toHaveBeenCalled();
+    expect(provider.postMessage).toHaveBeenCalledTimes(1);
+    provider.updateMessage.mockClear(); // The reply's own footer strip of 'old'.
     release();
-    await refresh;
-    await post;
+    expect(await refresh).toBe('active');
     expect(mocks.current).toBe('new');
-    provider.updateMessage.mockClear();
+    expect(provider.updateMessage).not.toHaveBeenCalled();
     await refreshSlackThreadReplyFooter({
       slack: provider,
       channel: 'C',

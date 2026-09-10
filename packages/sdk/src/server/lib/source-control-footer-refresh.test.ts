@@ -80,6 +80,21 @@ vi.mock('@roomote/communication', async () => {
     }) =>
       `${runningTasks?.count ?? 0} running; preview=${livePreviewUrl ?? 'none'}`,
     resolveFastSessionReplyFooterContext: mocks.context,
+    classifyThreadFooterActivity: (context: {
+      runningTasks?: { count: number } | null;
+      livePreviewUrl?: string | null;
+      sessionActivityAt?: number | null;
+    }) => {
+      const active =
+        (context.runningTasks?.count ?? 0) > 0 ||
+        Boolean(context.livePreviewUrl);
+      return {
+        active,
+        settled:
+          !active &&
+          Date.now() - (context.sessionActivityAt ?? 0) > 6 * 60 * 60_000,
+      };
+    },
     scheduleThreadFooterRefresh: mocks.schedule,
     forgetThreadFooterRefresh: mocks.forget,
   };
@@ -171,7 +186,12 @@ describe('source-control current footer refresh', () => {
     ).resolves.toEqual({ messageId: '123' });
     expect((await record())?.messageId).toBe('456');
     expect((await record())?.body).toContain('Competitor');
-    expect(mocks.update).toHaveBeenCalledTimes(1);
+    // The competitor stripped the footer it displaced; the orphan stripped its own.
+    expect(mocks.update).toHaveBeenCalledTimes(2);
+    expect(mocks.update).toHaveBeenCalledWith({
+      messageId: '111',
+      body: '> Quoted message\n\nOriginal',
+    });
     expect(mocks.update).toHaveBeenCalledWith({
       messageId: '123',
       body: '> Quoted message\n\nOrphan',
@@ -218,6 +238,38 @@ describe('source-control current footer refresh', () => {
     expect(await record()).toEqual(newer);
   });
 
+  it('a relocated footer is removed from the previous comment so it cannot go stale', async () => {
+    await adapter('123').postReply({ message: 'First turn' });
+    await adapter('456').postReply({ message: 'Second turn' });
+    expect(mocks.update).toHaveBeenCalledWith({
+      messageId: '123',
+      body: '> Quoted message\n\nFirst turn',
+    });
+    expect((await record())?.messageId).toBe('456');
+    mocks.update.mockClear();
+    mocks.context.mockResolvedValue({ runningTasks: { count: 3 } });
+    await refreshSourceControlThreadFooter(target);
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ comment_id: 456 }),
+    );
+  });
+
+  it('reports idle Sessions and unregisters settled ones without editing', async () => {
+    await adapter('123').postReply({ message: 'Body' });
+    mocks.update.mockClear();
+    const idle = { runningTasks: { count: 0 }, sessionActivityAt: Date.now() };
+    mocks.context.mockResolvedValue(idle);
+    await refreshSourceControlThreadFooter(target);
+    mocks.context.mockResolvedValue(idle);
+    expect(await refreshSourceControlThreadFooter(target)).toBe('idle');
+    expect(mocks.forget).not.toHaveBeenCalled();
+    mocks.context.mockResolvedValue({ ...idle, sessionActivityAt: 0 });
+    expect(await refreshSourceControlThreadFooter(target)).toBe('gone');
+    expect(mocks.forget).toHaveBeenCalledWith(target);
+    expect(mocks.update).toHaveBeenCalledTimes(1); // Only the idle edit itself.
+  });
+
   it('forgets a carrier when the repository no longer has an available updater', async () => {
     await adapter('123').postReply({ message: 'Original' });
     mocks.repositoryAvailable = false;
@@ -242,7 +294,7 @@ describe('source-control current footer refresh', () => {
     );
   });
 
-  it('refresh and a concurrent reply share serialization; refresh follows only the latest carrier', async () => {
+  it('refresh never edits a carrier a concurrent reply relocated; it follows only the latest carrier', async () => {
     await adapter('123').postReply({ message: 'Old body' });
     let release!: () => void;
     let started!: () => void;
@@ -259,13 +311,16 @@ describe('source-control current footer refresh', () => {
     });
     const refresh = refreshSourceControlThreadFooter(target);
     await ready;
+    // Resolution holds no lock, so the reply is never delayed by it.
     const post = vi.fn(async () => ({ messageId: '456' }));
-    const reply = adapter('456', post).postReply({ message: 'New body' });
-    expect(post).not.toHaveBeenCalled();
+    await adapter('456', post).postReply({ message: 'New body' });
+    expect(post).toHaveBeenCalledTimes(1);
     release();
-    await refresh;
-    await reply;
+    expect(await refresh).toBe('active');
     expect((await record())?.messageId).toBe('456');
+    expect(mocks.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ comment_id: 123 }),
+    );
     mocks.update.mockClear();
     mocks.context.mockResolvedValue({ runningTasks: { count: 2 } });
     await refreshSourceControlThreadFooter(target);

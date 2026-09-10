@@ -2,6 +2,7 @@ const mocks = vi.hoisted(() => ({
   current: 'old',
   owned: true,
   locked: false,
+  busy: false,
   post: vi.fn(),
   getBlocks: vi.fn(),
   remove: vi.fn(),
@@ -50,11 +51,15 @@ vi.mock('@roomote/slack', () => ({
   trackSlackBotReply: async () => {},
   getLatestSlackBotReply: async () => null,
   setLatestSlackBotReply: async () => {},
+  THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE:
+    'Timed out acquiring thread reply footer lock',
   withSlackThreadReplyFooterLock: async ({
     fn,
   }: {
     fn: (assertLock: () => Promise<void>) => Promise<unknown>;
   }) => {
+    if (mocks.busy)
+      throw new Error('Timed out acquiring thread reply footer lock');
     mocks.locked = true;
     try {
       return await fn(async () => {
@@ -73,6 +78,7 @@ const payload = {
   team: { id: 'team' },
   channel: { id: 'C' },
   message: { ts: 'old', thread_ts: 'T' },
+  response_url: 'https://hooks.slack.test/response',
 } as unknown as SlackInteractivePayload;
 
 describe('details-toggle footer serialization', () => {
@@ -81,6 +87,7 @@ describe('details-toggle footer serialization', () => {
     mocks.current = 'old';
     mocks.owned = true;
     mocks.locked = false;
+    mocks.busy = false;
     mocks.getBlocks.mockImplementation(async () => {
       expect(mocks.locked).toBe(true);
       return [
@@ -143,5 +150,21 @@ describe('details-toggle footer serialization', () => {
     );
     expect(mocks.setFooter).not.toHaveBeenCalled();
     expect(mocks.clearFooter).not.toHaveBeenCalled();
+  });
+
+  it('tells the user to retry when a reply or footer refresh holds the thread', async () => {
+    mocks.busy = true;
+    const fetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('ok'));
+    await handleThreadReplyDetailsToggle(payload);
+    expect(mocks.post).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith(
+      'https://hooks.slack.test/response',
+      expect.objectContaining({
+        body: expect.stringContaining('being updated right now'),
+      }),
+    );
+    fetch.mockRestore();
   });
 });

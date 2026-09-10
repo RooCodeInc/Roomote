@@ -132,7 +132,10 @@ export async function getThreadReplyFooterRecord(
   }
 }
 
-/** Returns false when the supplied lease no longer owns the lock. */
+/**
+ * Returns false when the supplied lease no longer owns the lock, or when a
+ * `keepTtl` write found no record to update (it expired since it was read).
+ */
 export async function setThreadReplyFooterRecord(
   provider: CommunicationProvider,
   channelId: string,
@@ -145,7 +148,8 @@ export async function setThreadReplyFooterRecord(
     const written = await redis.eval(
       `if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end
        if ARGV[3] == 'keepTtl' then
-         redis.call('set', KEYS[2], ARGV[2], 'KEEPTTL', 'XX')
+         -- A record that expired since it was read cannot be revived: report it.
+         if not redis.call('set', KEYS[2], ARGV[2], 'KEEPTTL', 'XX') then return 0 end
        else
          redis.call('set', KEYS[2], ARGV[2], 'EX', ARGV[3])
        end
@@ -160,13 +164,13 @@ export async function setThreadReplyFooterRecord(
     if (!written) return false;
     if (options.keepTtl) return true;
   } else if (options?.keepTtl) {
-    await redis.set(
+    const written = await redis.set(
       getThreadReplyFooterKey(provider, channelId, threadId),
       JSON.stringify(record),
       'KEEPTTL',
       'XX',
     );
-    return true;
+    return written === 'OK';
   } else {
     await redis.set(
       getThreadReplyFooterKey(provider, channelId, threadId),

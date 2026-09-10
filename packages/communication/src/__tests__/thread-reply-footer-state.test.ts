@@ -70,6 +70,32 @@ describe('thread reply footer state', () => {
     },
   );
 
+  it('reports a keepTtl write that found no record to update', async () => {
+    const record = { messageId: 'activity-2', textWithoutFooter: 'reply' };
+    expect(
+      await setThreadReplyFooterRecord('teams', 'channel', 'thread', record, {
+        keepTtl: true,
+        lock: { key: 'lock', ownerId: 'owner' },
+      }),
+    ).toBe(true);
+    expect(evalMock.mock.calls[0]![0]).toContain(
+      "if not redis.call('set', KEYS[2], ARGV[2], 'KEEPTTL', 'XX') then return 0 end",
+    );
+    setMock.mockResolvedValueOnce(null);
+    expect(
+      await setThreadReplyFooterRecord('teams', 'channel', 'thread', record, {
+        keepTtl: true,
+      }),
+    ).toBe(false);
+    expect(setMock).toHaveBeenCalledWith(
+      'teams:thread_reply_footer:channel:thread',
+      JSON.stringify(record),
+      'KEEPTTL',
+      'XX',
+    );
+    expect(scheduleMock).not.toHaveBeenCalled();
+  });
+
   it('stores footer records under a provider-scoped key with a TTL', async () => {
     await setThreadReplyFooterRecord('teams', '19:conversation', 'thread-1', {
       messageId: 'activity-2',

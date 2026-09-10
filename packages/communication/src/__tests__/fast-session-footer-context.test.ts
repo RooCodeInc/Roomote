@@ -4,17 +4,22 @@ const {
   getSessionForFastConversationMock,
   selectWhereMock,
   resolveThreadReplyFooterContextMock,
-  taskRunFindFirstMock,
+  latestRunsMock,
+  latestRunsQuery,
 } = vi.hoisted(() => ({
   getSessionForFastConversationMock: vi.fn(),
   selectWhereMock: vi.fn(),
   resolveThreadReplyFooterContextMock: vi.fn(),
-  taskRunFindFirstMock: vi.fn(),
+  latestRunsMock: vi.fn(),
+  latestRunsQuery: {
+    selectDistinctOn: vi.fn(),
+    where: vi.fn(),
+    orderBy: vi.fn(),
+  },
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
-    query: { taskRuns: { findFirst: taskRunFindFirstMock } },
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         innerJoin: vi.fn(() => ({
@@ -22,10 +27,29 @@ vi.mock('@roomote/db/server', () => ({
         })),
       })),
     })),
+    // One DISTINCT ON query returns every linked task's latest run.
+    selectDistinctOn: vi.fn((...args: unknown[]) => {
+      latestRunsQuery.selectDistinctOn(...args);
+      return {
+        from: vi.fn(() => ({
+          where: vi.fn((...whereArgs: unknown[]) => {
+            latestRunsQuery.where(...whereArgs);
+            return {
+              orderBy: vi.fn((...orderArgs: unknown[]) => {
+                latestRunsQuery.orderBy(...orderArgs);
+                return latestRunsMock();
+              }),
+            };
+          }),
+        })),
+      };
+    }),
   },
   and: vi.fn((...args: unknown[]) => ({ and: args })),
   asc: vi.fn((value: unknown) => ({ asc: value })),
+  desc: vi.fn((value: unknown) => ({ desc: value })),
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
+  inArray: vi.fn((...args: unknown[]) => ({ inArray: args })),
   getSessionForFastConversation: getSessionForFastConversationMock,
   isNull: vi.fn((value: unknown) => ({ isNull: value })),
   sessionTasks: {
@@ -37,7 +61,13 @@ vi.mock('@roomote/db/server', () => ({
     id: 'id',
     deletedAt: 'deletedAt',
   },
-  taskRuns: { taskId: 'taskId' },
+  taskRuns: {
+    id: 'id',
+    taskId: 'taskId',
+    status: 'status',
+    taskPhase: 'taskPhase',
+    createdAt: 'createdAt',
+  },
 }));
 
 vi.mock('../thread-reply-footer-context', async (importOriginal) => ({
@@ -60,10 +90,18 @@ describe('resolveFastSessionReplyFooterContext', () => {
       { taskId: 'task-1' },
       { taskId: 'task-2' },
     ]);
-    taskRunFindFirstMock.mockResolvedValue({
-      status: RunStatus.Idle,
-      taskPhase: 'waiting_for_prompt',
-    });
+    latestRunsMock.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        status: RunStatus.Idle,
+        taskPhase: 'waiting_for_prompt',
+      },
+      {
+        taskId: 'task-2',
+        status: RunStatus.Idle,
+        taskPhase: 'waiting_for_prompt',
+      },
+    ]);
     resolveThreadReplyFooterContextMock.mockImplementation(
       async ({ taskId }: { taskId: string }) => ({
         linkedPrs:
@@ -105,6 +143,7 @@ describe('resolveFastSessionReplyFooterContext', () => {
       ],
       livePreviewUrl: 'https://preview.example',
       runningTasks: { count: 0, url: 'https://roomote.example/tasks' },
+      sessionActivityAt: null,
     });
 
     expect(getSessionForFastConversationMock).toHaveBeenCalledWith(
@@ -123,15 +162,19 @@ describe('resolveFastSessionReplyFooterContext', () => {
         sessionId: 'conversation',
       });
       expect(context.runningTasks).toBeUndefined();
-      expect(taskRunFindFirstMock).not.toHaveBeenCalled();
+      expect(latestRunsMock).not.toHaveBeenCalled();
     },
   );
 
   it('links one executing follow-up to its owning Session, not the Fast conversation', async () => {
-    taskRunFindFirstMock.mockResolvedValueOnce({
-      status: RunStatus.Idle,
-      taskPhase: 'running',
-    });
+    latestRunsMock.mockResolvedValueOnce([
+      { taskId: 'task-1', status: RunStatus.Idle, taskPhase: 'running' },
+      {
+        taskId: 'task-2',
+        status: RunStatus.Idle,
+        taskPhase: 'waiting_for_prompt',
+      },
+    ]);
     const context = await resolveFastSessionReplyFooterContext({
       sessionId: 'conversation',
     });
@@ -142,10 +185,10 @@ describe('resolveFastSessionReplyFooterContext', () => {
   });
 
   it('links multiple executing tasks to the supported task-list route', async () => {
-    taskRunFindFirstMock.mockResolvedValue({
-      status: RunStatus.Running,
-      taskPhase: 'running',
-    });
+    latestRunsMock.mockResolvedValue([
+      { taskId: 'task-1', status: RunStatus.Running, taskPhase: 'running' },
+      { taskId: 'task-2', status: RunStatus.Running, taskPhase: 'running' },
+    ]);
     const context = await resolveFastSessionReplyFooterContext({
       sessionId: 'conversation',
     });
@@ -161,7 +204,14 @@ describe('resolveFastSessionReplyFooterContext', () => {
     { status: RunStatus.Completed, taskPhase: 'running' },
     null,
   ])('does not count non-executing latest runs: %j', async (run) => {
-    taskRunFindFirstMock.mockResolvedValue(run);
+    latestRunsMock.mockResolvedValue(
+      run
+        ? [
+            { taskId: 'task-1', ...run },
+            { taskId: 'task-2', ...run },
+          ]
+        : [],
+    );
     const context = await resolveFastSessionReplyFooterContext({
       sessionId: 'conversation',
     });
@@ -169,13 +219,21 @@ describe('resolveFastSessionReplyFooterContext', () => {
     expect(context.livePreviewUrl).toBe('https://preview.example');
   });
 
-  it('requests the latest run deterministically, never an arbitrary older running run', async () => {
+  it('requests every task latest run in one deterministic query, never an arbitrary older running run', async () => {
     await resolveFastSessionReplyFooterContext({ sessionId: 'conversation' });
-    const query = taskRunFindFirstMock.mock.calls[0]![0];
-    const desc = vi.fn((value) => `desc:${value}`);
-    expect(query.orderBy({ createdAt: 'created', id: 'id' }, { desc })).toEqual(
-      ['desc:created', 'desc:id'],
+    expect(latestRunsMock).toHaveBeenCalledTimes(1);
+    expect(latestRunsQuery.selectDistinctOn).toHaveBeenCalledWith(['taskId'], {
+      taskId: 'taskId',
+      status: 'status',
+      taskPhase: 'taskPhase',
+    });
+    expect(latestRunsQuery.where).toHaveBeenCalledWith({
+      inArray: ['taskId', ['task-1', 'task-2']],
+    });
+    expect(latestRunsQuery.orderBy).toHaveBeenCalledWith(
+      'taskId',
+      { desc: 'createdAt' },
+      { desc: 'id' },
     );
-    expect(query.where).toEqual({ eq: ['taskId', 'task-1'] });
   });
 });

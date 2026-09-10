@@ -1,9 +1,11 @@
 import {
   db,
   and,
+  desc,
   environments,
   eq,
   getSessionForTask,
+  inArray,
   isNull,
   resolveEffectivePreviewRuntimeConfig,
   taskPullRequests,
@@ -57,21 +59,21 @@ export async function resolveSessionRunningTasks(
         )
     ).map(({ taskId }) => taskId);
   if (taskIds.length === 0) return null;
-  const latestRuns = await Promise.all(
-    taskIds.map((taskId) =>
-      db.query.taskRuns.findFirst({
-        columns: { status: true, taskPhase: true },
-        where: eq(taskRuns.taskId, taskId),
-        orderBy: (table, { desc }) => [desc(table.createdAt), desc(table.id)],
-      }),
-    ),
-  );
-  const runningTaskIds = taskIds.filter((_, index) =>
-    isTaskExecutingTurn(
-      latestRuns[index]?.status,
-      latestRuns[index]?.taskPhase,
-    ),
-  );
+  // One query for every task's latest run; this runs on each reply and refresh.
+  const latestRuns = await db
+    .selectDistinctOn([taskRuns.taskId], {
+      taskId: taskRuns.taskId,
+      status: taskRuns.status,
+      taskPhase: taskRuns.taskPhase,
+    })
+    .from(taskRuns)
+    .where(inArray(taskRuns.taskId, taskIds))
+    .orderBy(taskRuns.taskId, desc(taskRuns.createdAt), desc(taskRuns.id));
+  const latestRunByTaskId = new Map(latestRuns.map((run) => [run.taskId, run]));
+  const runningTaskIds = taskIds.filter((taskId) => {
+    const run = latestRunByTaskId.get(taskId);
+    return isTaskExecutingTurn(run?.status, run?.taskPhase);
+  });
   // Session's task-list panel has no URL state; /tasks is the supported list route.
   const url = new URL(`${Env.R_APP_URL}/tasks`);
   if (runningTaskIds.length === 1) {

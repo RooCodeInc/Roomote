@@ -1,17 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { store, get, resolveFooter, schedule, forget, renew, failures } =
-  vi.hoisted(() => ({
-    store: new Map<string, string>(),
-    get: vi.fn(),
-    resolveFooter: vi.fn(),
-    schedule: vi.fn().mockResolvedValue(undefined),
-    forget: vi.fn(),
-    renew: vi.fn(),
-    failures: { recordWrite: false },
-  }));
+const {
+  store,
+  get,
+  resolveFooter,
+  activity,
+  schedule,
+  forget,
+  renew,
+  failures,
+} = vi.hoisted(() => ({
+  store: new Map<string, string>(),
+  get: vi.fn(),
+  resolveFooter: vi.fn(),
+  activity: { active: true, settled: false },
+  schedule: vi.fn().mockResolvedValue(undefined),
+  forget: vi.fn(),
+  renew: vi.fn(),
+  failures: { recordWrite: false },
+}));
 vi.mock('../thread-footer-refresh', () => ({
   resolveCurrentThreadFooterText: resolveFooter,
+  resolveCurrentThreadFooter: async (provider: string, footerText: string) => {
+    const text = await resolveFooter(provider, footerText);
+    return text === null ? null : { text, ...activity };
+  },
   scheduleThreadFooterRefresh: schedule,
   forgetThreadFooterRefresh: forget,
 }));
@@ -40,8 +53,8 @@ vi.mock('@roomote/redis', () => ({
       if (count === 2) {
         if (failures.recordWrite) throw new Error('Redis write unavailable');
         const [pointerKey, , value, ttl] = args;
-        if (ttl !== 'keepTtl' || store.has(pointerKey!))
-          store.set(pointerKey!, value!);
+        if (ttl === 'keepTtl' && !store.has(pointerKey!)) return 0;
+        store.set(pointerKey!, value!);
         return 1;
       }
       if (script.includes("'expire'")) renew();
@@ -331,7 +344,65 @@ describe('current footer refresh serialization', () => {
     store.clear();
     vi.clearAllMocks();
     failures.recordWrite = false;
+    activity.active = true;
+    activity.settled = false;
     resolveFooter.mockResolvedValue('running');
+  });
+
+  it('reports activity so the scheduler can slow down idle threads and drop settled ones', async () => {
+    await write();
+    expect(await tick()).toBe('active');
+    activity.active = false;
+    resolveFooter.mockResolvedValue('idle');
+    expect(await tick()).toBe('idle');
+    expect(forget).not.toHaveBeenCalled();
+    activity.settled = true;
+    expect(await tick()).toBe('gone');
+    expect(forget).toHaveBeenCalledWith(target);
+    expect(await read()).toEqual(record); // Settling never touches the carrier.
+  });
+
+  it('unregisters after editing a settled footer, but not while a reply owns the thread', async () => {
+    await write();
+    activity.active = false;
+    activity.settled = true;
+    resolveFooter.mockResolvedValue('No running tasks');
+    const edit = vi.fn().mockResolvedValue(undefined);
+    expect(await tick(edit)).toBe('gone');
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(forget).toHaveBeenCalledWith(target);
+    forget.mockClear();
+    store.set('discord:thread_reply_footer_lock:parent:thread', 'a-reply');
+    expect(await tick(edit)).toBe('active');
+    expect(forget).not.toHaveBeenCalled();
+    expect(edit).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires a footer whose navigation no longer resolves instead of polling it forever', async () => {
+    await write();
+    resolveFooter.mockResolvedValue(null);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await tick()).toBe('gone');
+    expect(forget).toHaveBeenCalledWith(target);
+    expect(warning).toHaveBeenCalledWith(
+      expect.stringContaining('no longer resolves'),
+      expect.objectContaining(target),
+    );
+    warning.mockRestore();
+  });
+
+  it('strips a footer it applied after the record expired mid-edit, so a later reply cannot leave two footers', async () => {
+    await write();
+    const edit = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        store.delete('discord:thread_reply_footer:parent:thread');
+      })
+      .mockResolvedValue(undefined);
+    await tick(edit);
+    expect(edit).toHaveBeenCalledTimes(2);
+    expect(edit).toHaveBeenLastCalledWith(record, record.textWithoutFooter);
+    expect(await read()).toBeNull();
   });
 
   it('updates start/finish/fail/cancel/wait/resume from each newly resolved state, retaining body and images', async () => {
@@ -383,7 +454,7 @@ describe('current footer refresh serialization', () => {
     expect(edit).toHaveBeenCalledTimes(1);
   });
 
-  it('holds the delivery lock across resolution and edit; later ticks target only the relocated carrier', async () => {
+  it('holds the delivery lock across the edit only; later ticks target only the relocated carrier', async () => {
     await write();
     let release!: () => void;
     let started!: () => void;
@@ -435,21 +506,35 @@ describe('current footer refresh serialization', () => {
     );
   });
 
-  it('aborts when its lease was lost while resolving instead of overwriting a newer reply', async () => {
+  it('yields to a reply that took the thread while it was resolving, without waiting or editing', async () => {
     await write();
     resolveFooter.mockImplementationOnce(async () => {
       store.set('discord:thread_reply_footer_lock:parent:thread', 'new-owner');
       return 'running';
     });
     const edit = vi.fn();
-    await expect(tick(edit)).rejects.toThrow('lease lost');
+    const startedAt = Date.now();
+    expect(await tick(edit)).toBe('active');
+    expect(Date.now() - startedAt).toBeLessThan(500);
     expect(edit).not.toHaveBeenCalled();
     expect(store.get('discord:thread_reply_footer_lock:parent:thread')).toBe(
       'new-owner',
     );
   });
 
-  it('renews its lease across slow resolution/provider work and releases it on completion', async () => {
+  it('skips a carrier that a reply relocated between resolution and the edit', async () => {
+    await write();
+    resolveFooter.mockImplementationOnce(async () => {
+      await write({ ...record, messageId: 'relocated' });
+      return 'running';
+    });
+    const edit = vi.fn();
+    expect(await tick(edit)).toBe('active');
+    expect(edit).not.toHaveBeenCalled();
+    expect((await read())?.messageId).toBe('relocated');
+  });
+
+  it('renews its lease across slow provider work and releases it on completion', async () => {
     vi.useFakeTimers();
     try {
       await write();
@@ -461,12 +546,12 @@ describe('current footer refresh serialization', () => {
       const gate = new Promise<void>((resolve) => {
         release = resolve;
       });
-      resolveFooter.mockImplementationOnce(async () => {
-        started();
-        await gate;
-        return 'running';
-      });
-      const refresh = tick();
+      const refresh = tick(
+        vi.fn(async () => {
+          started();
+          await gate;
+        }),
+      );
       await ready;
       await vi.advanceTimersByTimeAsync(35_000);
       expect(renew).toHaveBeenCalledTimes(3);

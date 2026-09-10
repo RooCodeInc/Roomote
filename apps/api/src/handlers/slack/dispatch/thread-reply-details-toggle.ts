@@ -17,6 +17,7 @@ import {
   setLatestSlackBotReply,
   setSlackThreadReplyFooterMessageTs,
   SlackNotifier,
+  THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE,
   trackSlackBotReply,
   withSlackThreadReplyFooterLock,
   removeSlackThreadReplyFooter,
@@ -32,6 +33,8 @@ const TOGGLE_RELOAD_ERROR_TEXT =
   "I couldn't reload that reply just now. Please try again.";
 const TOGGLE_UPDATE_ERROR_TEXT =
   "I couldn't update that reply just now. Please try again.";
+const TOGGLE_BUSY_TEXT =
+  'That thread is being updated right now. Please try again in a moment.';
 
 async function findSlackReplyDetailRecord(params: {
   taskId: string;
@@ -475,63 +478,79 @@ export async function handleThreadReplyDetailsToggle(
     return;
   }
 
-  const updated = await withSlackThreadReplyFooterLock({
-    channel: payload.channel.id,
-    threadTs,
-    fn: async (assertLock) => {
-      const expanded = !toggleValue.expanded;
-      const existingBlocks = await slack.getMessageBlocks({
-        channel: payload.channel.id,
-        messageTs: payload.message.ts,
-        threadTs,
-      });
-
-      if (existingBlocks === null) {
-        console.warn(
-          `[ThreadReplyDetailsToggle] Failed to load Slack blocks for message ${payload.message.ts} in thread ${threadTs} for task ${toggleValue.taskId} detail ${toggleValue.detailId}`,
-        );
-        await postToggleErrorResponse({
-          responseUrl: payload.response_url,
-          text: TOGGLE_RELOAD_ERROR_TEXT,
+  let updated: boolean;
+  try {
+    updated = await withSlackThreadReplyFooterLock({
+      channel: payload.channel.id,
+      threadTs,
+      fn: async (assertLock) => {
+        const expanded = !toggleValue.expanded;
+        const existingBlocks = await slack.getMessageBlocks({
+          channel: payload.channel.id,
+          messageTs: payload.message.ts,
+          threadTs,
         });
-        return true;
-      }
 
-      const blocks = buildUpdatedReplyBlocks({
-        existingBlocks,
-        summary: detailRecord.summary,
-        findings: detailRecord.findings,
-        taskId: toggleValue.taskId,
-        detailId: toggleValue.detailId,
-        expanded,
-      });
-      const currentFooterTs = await getSlackThreadReplyFooterMessageTs(
-        payload.channel.id,
-        threadTs,
-      );
-      if (currentFooterTs !== payload.message.ts) {
-        for (let index = blocks.length - 1; index >= 0; index -= 1) {
-          if (isSlackFooterBlock(blocks[index])) blocks.splice(index, 1);
+        if (existingBlocks === null) {
+          console.warn(
+            `[ThreadReplyDetailsToggle] Failed to load Slack blocks for message ${payload.message.ts} in thread ${threadTs} for task ${toggleValue.taskId} detail ${toggleValue.detailId}`,
+          );
+          await postToggleErrorResponse({
+            responseUrl: payload.response_url,
+            text: TOGGLE_RELOAD_ERROR_TEXT,
+          });
+          return true;
         }
-      }
-      const text =
-        buildRoomoteSlackReplyFallbackText({
+
+        const blocks = buildUpdatedReplyBlocks({
+          existingBlocks,
           summary: detailRecord.summary,
           findings: detailRecord.findings,
+          taskId: toggleValue.taskId,
+          detailId: toggleValue.detailId,
           expanded,
-        }) ?? 'Slack reply';
+        });
+        const currentFooterTs = await getSlackThreadReplyFooterMessageTs(
+          payload.channel.id,
+          threadTs,
+        );
+        if (currentFooterTs !== payload.message.ts) {
+          for (let index = blocks.length - 1; index >= 0; index -= 1) {
+            if (isSlackFooterBlock(blocks[index])) blocks.splice(index, 1);
+          }
+        }
+        const text =
+          buildRoomoteSlackReplyFallbackText({
+            summary: detailRecord.summary,
+            findings: detailRecord.findings,
+            expanded,
+          }) ?? 'Slack reply';
 
-      return replaceThreadReply({
-        assertLock,
-        slack,
-        channel: payload.channel.id,
-        threadTs,
-        previousMessageTs: payload.message.ts,
-        text,
-        blocks,
-      });
-    },
-  });
+        return replaceThreadReply({
+          assertLock,
+          slack,
+          channel: payload.channel.id,
+          threadTs,
+          previousMessageTs: payload.message.ts,
+          text,
+          blocks,
+        });
+      },
+    });
+  } catch (error) {
+    // The thread is busy (a reply or footer refresh holds it). Tell the user
+    // instead of letting the click fail silently.
+    if (
+      !(error instanceof Error) ||
+      error.message !== THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE
+    )
+      throw error;
+    await postToggleErrorResponse({
+      responseUrl: payload.response_url,
+      text: TOGGLE_BUSY_TEXT,
+    });
+    return;
+  }
 
   if (!updated) {
     console.warn(

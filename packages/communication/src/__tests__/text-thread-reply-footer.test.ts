@@ -8,6 +8,10 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../thread-footer-refresh', () => ({
   resolveCurrentThreadFooterText: mocks.resolve,
+  resolveCurrentThreadFooter: async (provider: string, footerText: string) => {
+    const text = await mocks.resolve(provider, footerText);
+    return text === null ? null : { text, active: true, settled: false };
+  },
   scheduleThreadFooterRefresh: vi.fn().mockResolvedValue(undefined),
   forgetThreadFooterRefresh: vi.fn(),
 }));
@@ -83,9 +87,11 @@ describe('text provider current carriers', () => {
       },
       footerText: 'old footer',
     });
+    // Like Slack and Discord, the caller's footer is posted as written.
     expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'Body\n\ncurrent footer', images }),
+      expect.objectContaining({ text: 'Body\n\nold footer', images }),
     );
+    expect(mocks.resolve).not.toHaveBeenCalled();
     mocks.resolve.mockResolvedValue('idle with live preview');
     await refreshManagedThreadReplyFooter({
       provider: 'teams',

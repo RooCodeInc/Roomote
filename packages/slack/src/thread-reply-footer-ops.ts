@@ -1,12 +1,17 @@
 import { Env } from '@roomote/env';
 import { getRedis } from '@roomote/redis';
-import { withThreadReplyFooterLock } from '@roomote/communication/thread-reply-footer-delivery';
+import {
+  tryThreadReplyFooterLock,
+  withThreadReplyFooterLock,
+} from '@roomote/communication/thread-reply-footer-delivery';
 import {
   scheduleThreadFooterRefresh,
   forgetThreadFooterRefresh,
-  resolveCurrentThreadFooterText,
+  resolveCurrentThreadFooter,
+  type ThreadFooterRefreshOutcome,
 } from '@roomote/communication';
 
+import { decodeSlackEntity } from './markdown-converter';
 import type { SlackNotifier } from './slack-notifier';
 import {
   getSlackThreadReplyFooterMessageTs,
@@ -468,59 +473,113 @@ export async function rememberSlackThreadFooterRefresh(
   }
 }
 
+/**
+ * Unregister a Slack destination, but only if its pointer still matches what
+ * this refresh pass read: a delivery that raced in owns the registration now.
+ */
+async function forgetSlackFooterIfUnchanged(params: {
+  channel: string;
+  threadTs: string;
+  seenMessageTs: string | null;
+}): Promise<ThreadFooterRefreshOutcome> {
+  const result = await tryThreadReplyFooterLock({
+    lockKey: `${SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channel}:${params.threadTs}`,
+    fn: async (assertLock): Promise<ThreadFooterRefreshOutcome> => {
+      const current = await getSlackThreadReplyFooterMessageTs(
+        params.channel,
+        params.threadTs,
+      );
+      if ((current ?? null) !== params.seenMessageTs) return 'active';
+      await assertLock();
+      await forgetThreadFooterRefresh({
+        provider: 'slack',
+        channelId: params.channel,
+        threadId: params.threadTs,
+      });
+      return 'gone';
+    },
+  });
+  return result.acquired ? result.value : 'active';
+}
+
+/**
+ * Bring the current carrier's footer block up to date. Reading the message
+ * and resolving state happen outside the destination lock; the lock is held
+ * only for the edit, so a concurrent reply is never starved by Slack reads.
+ */
 export async function refreshSlackThreadReplyFooter(params: {
   slack: Pick<SlackNotifier, 'getMessageBlocks' | 'updateMessage'>;
   channel: string;
   threadTs: string;
-}): Promise<void> {
-  await withSlackThreadReplyFooterLock({
+}): Promise<ThreadFooterRefreshOutcome> {
+  const messageTs = await getSlackThreadReplyFooterMessageTs(
+    params.channel,
+    params.threadTs,
+  );
+  if (!messageTs)
+    return forgetSlackFooterIfUnchanged({ ...params, seenMessageTs: null });
+  const blocks = await params.slack.getMessageBlocks({
     channel: params.channel,
     threadTs: params.threadTs,
-    maxAcquireAttempts: 1,
-    fn: async (assertLock) => {
-      const messageTs = await getSlackThreadReplyFooterMessageTs(
-        params.channel,
-        params.threadTs,
-      );
-      if (!messageTs) {
-        await assertLock();
-        await forgetThreadFooterRefresh({
-          provider: 'slack',
-          channelId: params.channel,
-          threadId: params.threadTs,
-        });
-        return;
-      }
-      const blocks = await params.slack.getMessageBlocks({
-        channel: params.channel,
-        threadTs: params.threadTs,
-        messageTs,
-        throwOnUnavailable: true,
-      });
-      const index = blocks?.findIndex(isSlackThreadReplyFooterBlock) ?? -1;
-      if (!blocks || index < 0) {
-        await assertLock();
-        await forgetThreadFooterRefresh({
-          provider: 'slack',
-          channelId: params.channel,
-          threadId: params.threadTs,
-        });
-        return;
-      }
-      const block = blocks[index] as {
-        text?: string;
-        elements?: { text?: string }[];
-      };
-      const previous =
-        block.elements?.find((element) => typeof element.text === 'string')
-          ?.text ?? block.text;
-      if (!previous) return;
-      const next = await resolveCurrentThreadFooterText('slack', previous);
-      if (!next || next === previous) return;
+    messageTs,
+    throwOnUnavailable: true,
+  });
+  const index = blocks?.findIndex(isSlackThreadReplyFooterBlock) ?? -1;
+  if (!blocks || index < 0)
+    return forgetSlackFooterIfUnchanged({
+      ...params,
+      seenMessageTs: messageTs,
+    });
+  const block = blocks[index] as {
+    text?: string;
+    elements?: { text?: string }[];
+  };
+  const posted =
+    block.elements?.find((element) => typeof element.text === 'string')?.text ??
+    block.text;
+  if (!posted)
+    return forgetSlackFooterIfUnchanged({
+      ...params,
+      seenMessageTs: messageTs,
+    });
+  // Slack returns block text with `&`, `<` and `>` escaped; compare and
+  // resolve against the text as it was written.
+  const previous = decodeSlackEntity(posted);
+  const current = await resolveCurrentThreadFooter('slack', previous);
+  if (!current) {
+    console.warn(
+      '[slackThreadFooter] Retiring a footer that no longer resolves',
+      { channel: params.channel, threadTs: params.threadTs },
+    );
+    return forgetSlackFooterIfUnchanged({
+      ...params,
+      seenMessageTs: messageTs,
+    });
+  }
+  const outcome: ThreadFooterRefreshOutcome = current.active
+    ? 'active'
+    : 'idle';
+  if (current.text === previous) {
+    return current.settled
+      ? forgetSlackFooterIfUnchanged({ ...params, seenMessageTs: messageTs })
+      : outcome;
+  }
+  const result = await tryThreadReplyFooterLock({
+    lockKey: `${SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channel}:${params.threadTs}`,
+    fn: async (assertLock): Promise<ThreadFooterRefreshOutcome> => {
+      // A reply relocated the footer while this pass was resolving; the next
+      // pass reads the new carrier.
+      if (
+        (await getSlackThreadReplyFooterMessageTs(
+          params.channel,
+          params.threadTs,
+        )) !== messageTs
+      )
+        return 'active';
       await assertLock();
       const updatedBlocks = [...blocks];
       updatedBlocks[index] = buildSlackThreadReplyFooterBlock({
-        footerText: next,
+        footerText: current.text,
       });
       // updateMessage verifies ownership and preserves fallback text/attachments.
       await params.slack.updateMessage({
@@ -528,6 +587,18 @@ export async function refreshSlackThreadReplyFooter(params: {
         ts: messageTs,
         message: { blocks: updatedBlocks },
       });
+      if (current.settled) {
+        await assertLock();
+        await forgetThreadFooterRefresh({
+          provider: 'slack',
+          channelId: params.channel,
+          threadId: params.threadTs,
+        });
+        return 'gone';
+      }
+      return outcome;
     },
   });
+  // A delivery holds the lock: it re-registers the destination itself.
+  return result.acquired ? result.value : 'active';
 }

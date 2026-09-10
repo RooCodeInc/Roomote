@@ -24,6 +24,7 @@ vi.mock('@roomote/redis', () => ({
       return 'OK';
     },
     zadd: async () => 1,
+    zrem: async () => 1,
     eval: async (
       script: string,
       count: number,

@@ -328,11 +328,17 @@ export function buildThreadReplyFooterText({
       formatLink(`PR #${pr.prNumber}`, pr.prUrl),
     ),
   );
-  const webUrl = new URL(webAppUrl ?? taskUrl);
-  if (webAppUrl) {
-    for (const [key, value] of new URL(taskUrl).searchParams) {
-      if (key.startsWith('utm_')) webUrl.searchParams.set(key, value);
+  // Default task navigation opens the owning Session with that task selected;
+  // any other caller-owned destination (setup, a specific artifact) is kept.
+  let webUrl = new URL(taskUrl);
+  const ownTaskId = /^\/task\/([^/]+)$/.exec(webUrl.pathname)?.[1];
+  if (webAppUrl && ownTaskId) {
+    const sessionUrl = new URL(webAppUrl);
+    for (const [key, value] of webUrl.searchParams) {
+      if (key.startsWith('utm_')) sessionUrl.searchParams.set(key, value);
     }
+    sessionUrl.searchParams.set('task', ownTaskId);
+    webUrl = sessionUrl;
   }
   items.push(formatLink('Web app', webUrl.toString()));
   return formatFooterText(items.join(' · '));

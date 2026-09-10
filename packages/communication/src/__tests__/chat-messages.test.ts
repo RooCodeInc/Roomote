@@ -327,7 +327,16 @@ describe('chat message copy builders', () => {
     );
   });
 
-  it('prefers the owning Session transcript over a direct task URL while retaining attribution', () => {
+  it('keeps non-task navigation such as setup even when the task has a Session', () => {
+    expect(
+      buildThreadReplyFooterText({
+        taskUrl: 'https://roomote.dev/setup?utm_source=slack',
+        webAppUrl: 'https://roomote.dev/sessions/owner',
+      }),
+    ).toBe('_[Web app](https://roomote.dev/setup?utm_source=slack)_');
+  });
+
+  it('opens the owning Session with the thread task selected, retaining attribution', () => {
     expect(
       buildThreadReplyFooterText({
         taskUrl:
@@ -339,7 +348,7 @@ describe('chat message copy builders', () => {
         },
       }),
     ).toBe(
-      '_[1 running task](https://roomote.dev/sessions/owner?task=task-1) · [Web app](https://roomote.dev/sessions/owner?utm_source=slack&utm_medium=link&utm_campaign=reply)_',
+      '_[1 running task](https://roomote.dev/sessions/owner?task=task-1) · [Web app](https://roomote.dev/sessions/owner?utm_source=slack&utm_medium=link&utm_campaign=reply&task=task-1)_',
     );
   });
 

@@ -43,6 +43,8 @@ export type FastSessionReplyFooterContext = {
   linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
   runningTasks?: ThreadReplyRunningTasks | null;
+  /** Session `activityAt` (epoch ms), so a refresh can tell when it has settled. */
+  sessionActivityAt?: number | null;
 };
 
 const TERMINAL_PULL_REQUEST_STATUSES = new Set(['closed', 'merged']);
@@ -95,22 +97,23 @@ export async function resolveFastSessionReplyFooterContext(params: {
   const { session, linkedTaskIds } = await getFastSessionLinkedTasks(
     params.sessionId,
   );
-  const runningTasks = session
-    ? await resolveSessionRunningTasks(session.id, linkedTaskIds)
-    : null;
-  const contexts = await Promise.all(
-    linkedTaskIds.map((taskId) =>
-      resolveThreadReplyFooterContext({
-        taskId,
-        prRepo: null,
-        prNumber: null,
-        includeRunningTasks: false,
-      }),
+  const [runningTasks, contexts] = await Promise.all([
+    session ? resolveSessionRunningTasks(session.id, linkedTaskIds) : null,
+    Promise.all(
+      linkedTaskIds.map((taskId) =>
+        resolveThreadReplyFooterContext({
+          taskId,
+          prRepo: null,
+          prNumber: null,
+          includeRunningTasks: false,
+        }),
+      ),
     ),
-  );
+  ]);
 
   return {
     ...(runningTasks ? { runningTasks } : {}),
+    sessionActivityAt: session?.activityAt ?? null,
     linkedPrs: collectFastSessionLinkedPrs({
       pullRequest: params.pullRequest,
       pullRequests: params.pullRequests,

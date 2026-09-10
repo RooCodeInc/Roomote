@@ -78,7 +78,7 @@ describe('getSlackThreadFooterText', () => {
         },
       }),
     ).toBe(
-      '_<https://app.example.com/sessions/owner?task=task-1|1 running task> · <https://app.example.com/sessions/owner?utm_source=slack|Web app>_',
+      '_<https://app.example.com/sessions/owner?task=task-1|1 running task> · <https://app.example.com/sessions/owner?utm_source=slack&task=task-1|Web app>_',
     );
   });
 

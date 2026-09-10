@@ -10,9 +10,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/redis', () => ({ getRedis: () => mocks }));
 import {
   claimThreadFooterRefreshTargets,
+  classifyThreadFooterActivity,
   scheduleThreadFooterRefresh,
   forgetThreadFooterRefresh,
   getThreadFooterNavigationUrl,
+  getThreadFooterPullRequestLinks,
+  rescheduleThreadFooterRefresh,
+  THREAD_FOOTER_SETTLED_AFTER_MS,
 } from '../thread-footer-refresh';
 
 describe('bounded footer refresh registry', () => {
@@ -51,7 +55,7 @@ describe('bounded footer refresh registry', () => {
       JSON.stringify(target),
     );
   });
-  it('caps claims at 100 and atomically advances claimed targets for retry/fairness', async () => {
+  it('caps claims at 100 and leases claimed targets past the scheduler cadence', async () => {
     mocks.eval.mockResolvedValue([JSON.stringify(target)]);
     expect(await claimThreadFooterRefreshTargets(1000)).toEqual([target]);
     expect(mocks.eval).toHaveBeenCalledWith(
@@ -59,9 +63,75 @@ describe('bounded footer refresh registry', () => {
       1,
       'thread_footer_refresh:due',
       1000,
-      31_000,
+      301_000,
       100,
     );
     expect(mocks.eval.mock.calls[0]![0]).toContain("'zadd'");
+  });
+  it('checks active destinations every 30 seconds and idle ones every 5 minutes', async () => {
+    await rescheduleThreadFooterRefresh(target, 'active');
+    expect(mocks.zadd).toHaveBeenLastCalledWith(
+      'thread_footer_refresh:due',
+      31_000,
+      JSON.stringify(target),
+    );
+    await rescheduleThreadFooterRefresh(target, 'idle');
+    expect(mocks.zadd).toHaveBeenLastCalledWith(
+      'thread_footer_refresh:due',
+      301_000,
+      JSON.stringify(target),
+    );
+  });
+  it('settles only quiet Sessions with nothing running or previewing', () => {
+    const now = THREAD_FOOTER_SETTLED_AFTER_MS * 2;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    const recent = { sessionActivityAt: now - 60_000 };
+    const quiet = {
+      sessionActivityAt: now - THREAD_FOOTER_SETTLED_AFTER_MS - 1,
+    };
+    expect(
+      classifyThreadFooterActivity({
+        ...quiet,
+        runningTasks: { count: 1, url: 'u' },
+      }),
+    ).toEqual({ active: true, settled: false });
+    expect(
+      classifyThreadFooterActivity({ ...quiet, livePreviewUrl: 'https://p' }),
+    ).toEqual({ active: true, settled: false });
+    expect(
+      classifyThreadFooterActivity({
+        ...recent,
+        runningTasks: { count: 0, url: 'u' },
+      }),
+    ).toEqual({ active: false, settled: false });
+    expect(
+      classifyThreadFooterActivity({
+        ...quiet,
+        runningTasks: { count: 0, url: 'u' },
+      }),
+    ).toEqual({ active: false, settled: true });
+    // No Session at all: nothing can start, so an idle footer settles at once.
+    expect(classifyThreadFooterActivity({})).toEqual({
+      active: false,
+      settled: true,
+    });
+  });
+  it('reads the pull request links a footer already shows, in order', () => {
+    expect(
+      getThreadFooterPullRequestLinks(
+        '_<https://app/tasks|No running tasks> · <https://github.com/o/r/pull/7?a=1&amp;b=2|PR #7> · <https://github.com/o/r/pull/9|PR #9> · <https://app/sessions/s|Web app>_',
+      ),
+    ).toEqual([
+      { prNumber: 7, prUrl: 'https://github.com/o/r/pull/7?a=1&b=2' },
+      { prNumber: 9, prUrl: 'https://github.com/o/r/pull/9' },
+    ]);
+    expect(
+      getThreadFooterPullRequestLinks(
+        '-# _[PR #12](https://github.com/o/r/pull/12) · [Web app](https://app/sessions/s)_',
+      ),
+    ).toEqual([{ prNumber: 12, prUrl: 'https://github.com/o/r/pull/12' }]);
+    expect(getThreadFooterPullRequestLinks('_[Web app](https://app)_')).toEqual(
+      [],
+    );
   });
 });

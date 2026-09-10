@@ -11,12 +11,19 @@ import {
 import type { CommunicationProvider } from '@roomote/types';
 import {
   forgetThreadFooterRefresh,
-  resolveCurrentThreadFooterText,
+  resolveCurrentThreadFooter,
+  type ThreadFooterRefreshOutcome,
+  type ThreadFooterRefreshTarget,
 } from './thread-footer-refresh';
 import { chunkTelegramMarkdownAsHtml } from './telegram-format';
 
 const THREAD_REPLY_FOOTER_LOCK_TTL_SECONDS = 30;
-const THREAD_REPLY_FOOTER_LOCK_MAX_ATTEMPTS = 8;
+/**
+ * A delivery waits out a concurrent delivery or a refresh's provider edit
+ * (which can sit in a rate-limit backoff for a few seconds) rather than
+ * failing the reply. Refreshes themselves never wait: they try once.
+ */
+const THREAD_REPLY_FOOTER_LOCK_MAX_ATTEMPTS = 40;
 const THREAD_REPLY_FOOTER_LOCK_RETRY_MS = 100;
 const RELEASE_LOCK_SCRIPT =
   "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end";
@@ -93,6 +100,35 @@ export async function withThreadReplyFooterLock<T>(params: {
   }
 
   throw new Error(THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE);
+}
+
+/**
+ * Run `fn` under the destination lock only if it is free right now. Background
+ * work (a scheduled refresh) must never delay a reply, so it yields instead of
+ * waiting and reports `acquired: false`.
+ */
+export async function tryThreadReplyFooterLock<T>(params: {
+  lockKey: string;
+  fn: (
+    assertLock: () => Promise<void>,
+    lock: ThreadReplyFooterLock,
+  ) => Promise<T>;
+}): Promise<{ acquired: true; value: T } | { acquired: false }> {
+  try {
+    const value = await withThreadReplyFooterLock({
+      lockKey: params.lockKey,
+      maxAcquireAttempts: 1,
+      fn: params.fn,
+    });
+    return { acquired: true, value };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE
+    )
+      return { acquired: false };
+    throw error;
+  }
 }
 
 type PostedFooterRecord<T extends { messageId: string }> = T & {
@@ -206,48 +242,120 @@ export async function deliverManagedThreadReplyFooter<
   });
 }
 
+function managedFooterLockKey(target: ThreadFooterRefreshTarget): string {
+  return `${target.provider}:thread_reply_footer_lock:${target.channelId}:${target.threadId}`;
+}
+
+/**
+ * Unregister a destination, but only if its record still matches what this
+ * refresh pass read: a delivery that raced in owns the registration now.
+ */
+async function forgetManagedFooterIfUnchanged(
+  target: ThreadFooterRefreshTarget & { provider: CommunicationProvider },
+  seen: ThreadReplyFooterRecord | null,
+): Promise<ThreadFooterRefreshOutcome> {
+  const result = await tryThreadReplyFooterLock({
+    lockKey: managedFooterLockKey(target),
+    fn: async (assertLock): Promise<ThreadFooterRefreshOutcome> => {
+      const current = await getThreadReplyFooterRecord(
+        target.provider,
+        target.channelId,
+        target.threadId,
+      );
+      const unchanged =
+        current?.messageId === seen?.messageId &&
+        current?.refresh?.footerText === seen?.refresh?.footerText;
+      if (!unchanged) return 'active';
+      await assertLock();
+      await forgetThreadFooterRefresh(target);
+      return 'gone';
+    },
+  });
+  return result.acquired ? result.value : 'active';
+}
+
+/**
+ * Bring the current carrier's footer up to date. All resolution happens
+ * outside the destination lock; the lock is held only for the provider edit
+ * and the pointer write, so a concurrent reply is never starved by DB work.
+ */
 export async function refreshManagedThreadReplyFooter(params: {
   provider: CommunicationProvider;
   channelId: string;
   threadId: string;
   edit: (record: ThreadReplyFooterRecord, text: string) => Promise<void>;
-}): Promise<void> {
-  await withThreadReplyFooterLock({
-    lockKey: `${params.provider}:thread_reply_footer_lock:${params.channelId}:${params.threadId}`,
-    maxAcquireAttempts: 1,
-    fn: async (assertLock, lock) => {
-      const record = await getThreadReplyFooterRecord(
+}): Promise<ThreadFooterRefreshOutcome> {
+  const target = {
+    provider: params.provider,
+    channelId: params.channelId,
+    threadId: params.threadId,
+  };
+  const record = await getThreadReplyFooterRecord(
+    params.provider,
+    params.channelId,
+    params.threadId,
+  );
+  if (!record?.refresh) return forgetManagedFooterIfUnchanged(target, record);
+  const refresh = record.refresh;
+  const current = await resolveCurrentThreadFooter(
+    params.provider,
+    refresh.footerText,
+  );
+  if (!current) {
+    // The footer no longer names a Session or task on this deployment (for
+    // example the app URL changed). Polling cannot fix that; a new reply
+    // registers a fresh footer.
+    console.warn('[threadFooter] Retiring a footer that no longer resolves', {
+      provider: params.provider,
+      channelId: params.channelId,
+      threadId: params.threadId,
+    });
+    return forgetManagedFooterIfUnchanged(target, record);
+  }
+  const outcome: ThreadFooterRefreshOutcome = current.active
+    ? 'active'
+    : 'idle';
+  if (current.text === refresh.footerText) {
+    return current.settled
+      ? forgetManagedFooterIfUnchanged(target, record)
+      : outcome;
+  }
+  const text = [record.textWithoutFooter, current.text]
+    .filter(Boolean)
+    .join('\n\n');
+  // A refresh cannot split a message or post a replacement carrier, and the
+  // body never shrinks, so this carrier will not fit on later passes either.
+  if (
+    (params.provider === 'discord' && text.length > 2000) ||
+    (params.provider === 'telegram' &&
+      chunkTelegramMarkdownAsHtml(text).length > 1)
+  ) {
+    console.warn('[threadFooter] Retiring a footer whose carrier is full', {
+      provider: params.provider,
+      channelId: params.channelId,
+      threadId: params.threadId,
+    });
+    return forgetManagedFooterIfUnchanged(target, record);
+  }
+  const result = await tryThreadReplyFooterLock({
+    lockKey: managedFooterLockKey(target),
+    fn: async (assertLock, lock): Promise<ThreadFooterRefreshOutcome> => {
+      const latest = await getThreadReplyFooterRecord(
         params.provider,
         params.channelId,
         params.threadId,
       );
-      if (!record?.refresh) {
-        await assertLock();
-        await forgetThreadFooterRefresh({
-          provider: params.provider,
-          channelId: params.channelId,
-          threadId: params.threadId,
-        });
-        return;
-      }
-      const footerText = await resolveCurrentThreadFooterText(
-        params.provider,
-        record.refresh.footerText,
-      );
-      if (!footerText || footerText === record.refresh.footerText) return;
-      const text = [record.textWithoutFooter, footerText]
-        .filter(Boolean)
-        .join('\n\n');
-      // A refresh cannot split a message or post a replacement carrier.
-      if (params.provider === 'discord' && text.length > 2000) return;
+      // A reply relocated the footer while this pass was resolving; the next
+      // pass reads the new carrier.
       if (
-        params.provider === 'telegram' &&
-        chunkTelegramMarkdownAsHtml(text).length > 1
+        !latest?.refresh ||
+        latest.messageId !== record.messageId ||
+        latest.refresh.footerText !== refresh.footerText
       )
-        return;
+        return 'active';
       await assertLock();
       try {
-        await params.edit(record, text);
+        await params.edit(latest, text);
       } catch (error) {
         const status =
           error && typeof error === 'object' && 'status' in error
@@ -263,23 +371,30 @@ export async function refreshManagedThreadReplyFooter(params: {
             /^Teams updateActivity failed with (404|410):/.test(message));
         if (!missing) throw error;
         await assertLock();
-        await forgetThreadFooterRefresh({
-          provider: params.provider,
-          channelId: params.channelId,
-          threadId: params.threadId,
-        });
-        return;
+        await forgetThreadFooterRefresh(target);
+        return 'gone';
       }
       await rememberThreadReplyFooterAfterEdit({
-        ...params,
-        record: { ...record, refresh: { ...record.refresh, footerText } },
+        ...target,
+        record: {
+          ...latest,
+          refresh: { ...latest.refresh, footerText: current.text },
+        },
         assertLock,
         lock,
-        clearOwnFooter: () => params.edit(record, record.textWithoutFooter),
+        clearOwnFooter: () => params.edit(latest, latest.textWithoutFooter),
         keepTtl: true,
       });
+      if (current.settled) {
+        await assertLock();
+        await forgetThreadFooterRefresh(target);
+        return 'gone';
+      }
+      return outcome;
     },
   });
+  // A delivery holds the lock: it re-registers the destination itself.
+  return result.acquired ? result.value : 'active';
 }
 
 /** An edit may finish after a competing delivery acquired the lease. */

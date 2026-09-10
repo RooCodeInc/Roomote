@@ -245,6 +245,16 @@ channels implicitly or inspect repository contents without delegating the work
 to a task. When the request spans every repository, Fast can delegate it to the
 deployment's all-repositories environment.
 
+Every Fast reply ends with a compact footer: a running-task count (linking to
+the running task, or to the task list when several are running), a **Live
+preview** link when a delegated task exposes one, links to pull requests the
+Session is working on, and **Web app**, which opens the Session transcript.
+Roomote keeps the footer on the latest reply current as delegated tasks start
+and finish, checking about every 30 seconds while work is running, so the
+thread shows whether coding is still going without another reply. Only the
+newest reply carries the footer; earlier replies drop it when a new reply
+posts.
+
 Agent replies and delegated reports can include up to two native Slack charts.
 Ask Roomote to visualize suitable data as a pie, bar, area, or line chart. Each
 chart keeps a Markdown fallback for notifications and accessibility, and the
