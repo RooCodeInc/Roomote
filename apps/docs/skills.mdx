@@ -31,17 +31,25 @@ variables, or writing the one-off prompt for the current task.
 
 ## What Skills settings controls
 
-**Settings > Skills** opens a shared skill list for every signed-in member.
-Choose **Add Skill** to create one, or select a skill to view its instructions
-and access any permitted **Edit** and **Delete** actions.
+**Settings > Skills** opens one searchable skill catalog. The **All** and
+**Everywhere** filters are available to every signed-in member; admins can also
+filter for **Env-Specific** skills. The **Availability** column shows
+**Everywhere** for instance skills and the selected environments for scoped
+skills. Select a skill to view its instructions and access any permitted
+**Edit** and **Delete** actions.
 Instance skills are stored once for the Roomote instance, independently of
 environments. Any member can create or read them. Only the creator or an admin
 can edit or delete them; these permissions also apply to conversational creation.
 
-Admins also see an **Environment-specific Skills** section below the shared
-catalog. It lists the custom and marketplace skills available in each
-environment. Admins can create, edit, or delete inline custom skills, choose
-which environments use them, and search the marketplace for published skills.
+Choose **Add Custom Skill** to create reusable instructions. Members create
+skills available everywhere. Admins can instead select environments in the
+creation dialog. Existing skills keep their current availability when edited;
+the settings UI does not move skills between instance and environment storage.
+
+Admins can use **Add from Marketplace** to open the Vercel Marketplace search,
+install published skills, and choose which environments use them. Admins can
+also edit or delete inline environment skills and manage installed marketplace
+availability from the unified catalog.
 The same configuration remains available in the environment editor's **YAML**
 view: use `manualSkills` for inline custom instructions and `skills` for
 published skills. See the
@@ -49,7 +57,7 @@ published skills. See the
 
 | Skill type        | How it is added                                      | Availability                                                           |
 | ----------------- | ---------------------------------------------------- | ---------------------------------------------------------------------- |
-| Instance skill    | Ask in conversation or use Add Skill in Settings      | All Sessions and coding tasks on this instance                          |
+| Instance skill    | Ask in conversation or use Add Custom Skill in Settings | All Sessions and coding tasks on this instance                          |
 | Environment skill | Admins use Settings or edit environment YAML              | Selected environments only                                             |
 | Repository skill  | Maintain a skill in the repository                    | The authorized repository or environment scope                          |
 
