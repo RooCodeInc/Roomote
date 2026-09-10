@@ -1,4 +1,17 @@
 import { z } from 'zod';
+import { beginConnectionAttempt } from '@/lib/server/source-control-connection-attempt';
+import {
+  getSourceControlSyncStartedAt,
+  reconcileSourceControlConnectionRequests,
+} from '@roomote/sdk/server';
+import {
+  connectionRequestCommand,
+  connectionRequestInput,
+} from '../commands/source-control/connection-requests';
+import {
+  githubConnectionCallbackCommand,
+  githubConnectionCallbackInput,
+} from '../commands/source-control/github-connection-callback';
 import { instanceSkillsRouter } from './instance-skills';
 import {
   publicAuthTokenTimeoutMsSchema,
@@ -315,6 +328,7 @@ import {
   notifySetupSourceControlSynchronized,
   persistSetupRecommendationApplicationReceipt,
   reconcileSetupPlatformEvents,
+  skipSetupSourceControlCommand,
   submitSetupSessionUserInputCommand,
 } from '../commands/setup/setup-session';
 import { SETUP_STARTER_TASK_IDS } from '@/lib/setup-starter-tasks';
@@ -1262,14 +1276,50 @@ export const appRouter = createRouter({
     syncInstallation: protectedProcedure
       .input(z.object({ installationId: z.number().int().positive() }))
       .mutation(async ({ ctx: { auth }, input }) => {
+        const startedAt = await getSourceControlSyncStartedAt('github');
         const result = await syncGitHubInstallationCommand(auth, input);
+        if (result.success)
+          await reconcileSourceControlConnectionRequests(
+            {
+              provider: 'github',
+              completedByUserId: auth.userId,
+            },
+            {
+              successfulSync: {
+                startedAt,
+                repositoryFullNames: result.repositories.map(
+                  (repository) => repository.fullName,
+                ),
+              },
+            },
+          );
         await notifySetupSourceControlSynchronized(auth);
         return result;
       }),
 
     syncInstallations: protectedProcedure.mutation(
       async ({ ctx: { auth } }) => {
+        const startedAt = await getSourceControlSyncStartedAt('github');
         const result = await syncGitHubInstallationsCommand(auth);
+        if (Array.isArray(result) && result.some((entry) => entry.success))
+          await reconcileSourceControlConnectionRequests(
+            {
+              provider: 'github',
+              completedByUserId: auth.userId,
+            },
+            {
+              successfulSync: {
+                startedAt,
+                repositoryFullNames: result.flatMap((entry) =>
+                  entry.success
+                    ? entry.repositories.map(
+                        (repository) => repository.fullName,
+                      )
+                    : [],
+                ),
+              },
+            },
+          );
         await notifySetupSourceControlSynchronized(auth);
         return result;
       },
@@ -1303,6 +1353,34 @@ export const appRouter = createRouter({
   }),
 
   sourceControl: createRouter({
+    startAdoConnection: protectedProcedure
+      .input(z.object({ requestId: z.string().uuid() }))
+      .mutation(async ({ ctx: { auth }, input }) => ({
+        state: await beginConnectionAttempt(auth, {
+          provider: 'ado',
+          requestId: input.requestId,
+        }),
+      })),
+    githubConnectionCallback: protectedProcedure
+      .input(githubConnectionCallbackInput)
+      .mutation(({ ctx: { auth }, input }) =>
+        githubConnectionCallbackCommand(auth, input),
+      ),
+    connectionRequest: protectedProcedure
+      .input(connectionRequestInput)
+      .query(({ ctx: { auth }, input }) =>
+        connectionRequestCommand(auth, input),
+      ),
+    checkConnectionRequest: protectedProcedure
+      .input(connectionRequestInput.extend({ requestId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        connectionRequestCommand(auth, input, 'check'),
+      ),
+    cancelConnectionRequest: protectedProcedure
+      .input(connectionRequestInput.extend({ requestId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        connectionRequestCommand(auth, input, 'cancel'),
+      ),
     repositories: protectedProcedure
       .input(
         z
@@ -1353,7 +1431,23 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(async ({ ctx: { auth }, input }) => {
+        const startedAt = await getSourceControlSyncStartedAt(input.provider);
         const result = await syncRepositoriesCommand(auth, input);
+        if (result.success)
+          await reconcileSourceControlConnectionRequests(
+            {
+              provider: input.provider,
+              completedByUserId: auth.userId,
+            },
+            {
+              successfulSync: {
+                startedAt,
+                repositoryFullNames: result.repositories.map(
+                  (repository) => repository.fullName,
+                ),
+              },
+            },
+          );
         if (result.success) await notifySetupSourceControlSynchronized(auth);
         return result;
       }),
@@ -2639,6 +2733,10 @@ export const appRouter = createRouter({
 
     sessionStatus: protectedProcedure.query(({ ctx: { auth } }) =>
       getSetupSessionStatusCommand(auth),
+    ),
+
+    skipSourceControl: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      skipSetupSourceControlCommand(auth),
     ),
 
     submitSessionUserInput: protectedProcedure

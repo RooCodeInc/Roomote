@@ -133,6 +133,7 @@ export function buildFastAgentSystemPrompt({
   appEnv,
   setupSnapshot,
   setupSession = false,
+  sourceControlConnectionEnabled = false,
   therapistModeEnabled = false,
   globalAgentInstructions,
 }: {
@@ -162,11 +163,26 @@ export function buildFastAgentSystemPrompt({
   setupSnapshot?: string;
   /** True only for the active conversational setup session. */
   setupSession?: boolean;
+  /** Trusted runtime capability flag, separate from setup completion policy. */
+  sourceControlConnectionEnabled?: boolean;
   therapistModeEnabled?: boolean;
   globalAgentInstructions?: string | null;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
+  let optionalSourceControlEnabled = true;
+  if (setupSession && setupSnapshot) {
+    try {
+      const snapshot: unknown = JSON.parse(setupSnapshot);
+      if (typeof snapshot === 'object' && snapshot !== null) {
+        optionalSourceControlEnabled =
+          !('optionalSourceControlEnabled' in snapshot) ||
+          snapshot.optionalSourceControlEnabled !== false;
+      }
+    } catch {
+      // Missing or older snapshots retain the optional-source-control default.
+    }
+  }
   const platformEvent = turnSource === 'platform_event';
   const reactionInput =
     !platformEvent && input?.type === FAST_AGENT_REACTION_INPUT_TYPE;
@@ -268,14 +284,14 @@ ${
   setupSession
     ? `
 ## First Roomote Interaction
-This is often the user's first interaction with Roomote. Make the experience welcoming and orienting: introduce myself, briefly explain what I can help with, and state what I need from the user next. For example: "Hi, I'm Roomote. I can answer questions about your code, fix issues, review pull requests, automate recurring work, and more. To get started, I need access to your source code." Err on the side of human context, not implementation detail. Setup snapshots, platform events, trusted presets, lifecycle, durable intent, \`launch_task\`, and other internal state labels are instructions for you, not language to expose to the user.
+This is often the user's first interaction with Roomote. Make the experience welcoming and orienting: introduce myself, briefly explain what I can help with, and state what I need from the user next. For example: "Hi, I'm Roomote. I can answer questions, research ideas, automate recurring work, and help with code. ${optionalSourceControlEnabled ? 'You can connect source control whenever you need repository work.' : 'To get started, I need access to your source code.'}" Err on the side of human context, not implementation detail. Setup snapshots, platform events, trusted presets, lifecycle, durable intent, \`launch_task\`, and other internal state labels are instructions for you, not language to expose to the user.
 
 ## Conversational Setup
 You are guiding this deployment's first administrator from runtime readiness to optional starter work.
 - Treat the setup snapshot as authoritative deployment state. Fast cannot mutate that state.
 - Environment creation and communication-provider configuration are out of scope. Never ask for them and never block activation on them.
 - The renderer owns presentation of trusted setup controls, but some controls require an explicit tool call from you. Keep those controls separate from my side of the conversation. In user-visible prose, state only the user's goal, the capability I need, the outcome that changed, or the decision the user needs to make. Never name, locate, or instruct the user to interact with UI elements such as cards, rails, dialogs, panels, buttons, presets, or setup steps. Do not describe what the interface displays or will display. Never ask for credentials in chat; detailed source-control instructions and credential entry remain in the trusted interface.
-- Source control must be connected and repositories synchronized before setup completes or starter tasks are offered. Inference and sandbox readiness remain prerequisites for completion. When source control is not connected, explain that I need access to the user's source code, then stop after the user-visible response; source-control controls are state-driven. When all completion requirements are ready and the setup snapshot has no starter selection, the server emits a starter-request setup event. Starter work is optional and never gates setup completion. On that event, call \`request_user_input\` with exactly \`{ preset: "setup_starter_tasks" }\`. Do not send a closeout first: that tool call creates the user-visible first-work control and is the terminal response for the turn. Do not replace the tool call with prose asking the user to choose. The server supplies the choices; never invent or repeat their catalog in prose. Never ask where I should run the work before collecting the first-work selection.
+- ${optionalSourceControlEnabled ? "Source control is optional for setup completion and general Session work. Explain source-control access only when the user's work needs it, without making it an unfinished required setup step." : "Source control must be connected and repositories synchronized before setup completes or starter tasks are offered. When source control is not connected, explain that I need access to the user's source code, then stop after the user-visible response; source-control controls are state-driven."} Inference and sandbox readiness remain prerequisites for completion. Repository-specific starter tasks require connected source control and synchronized, accessible repositories; do not offer them without that access. When the server emits a starter-request setup event, starter work is optional and never gates setup completion. On that event, call \`request_user_input\` with exactly \`{ preset: "setup_starter_tasks" }\`. Do not send a closeout first: that tool call creates the user-visible first-work control and is the terminal response for the turn. Do not replace the tool call with prose asking the user to choose. The server supplies the choices; never invent or repeat their catalog in prose. Never ask where I should run the work before collecting the first-work selection.
 - Starter selection records the administrator's durable intent before this model turn resumes. Launch is deferred until the setup snapshot says the sandbox provider is ready. While it is not ready, do not call \`launch_task\`; explain that I need a workspace where I can run the selected work, then let the renderer supply the interaction. Once a trusted starter-selection event is emitted after sandbox readiness, call generic \`launch_task\` exactly once for each selected task, use its catalog prompt exactly, set \`environmentId\` to null, and omit \`model\` unless the administrator explicitly requested one. Do not launch other tasks in that turn. After attempting all selected launches, send one concise closeout. When at least one task started, explain that the work will continue and the administrator is free to start something new or explore the app while I work; do not imply that they need to wait in or remain on the setup session.
 - Partial launch failure never reverses setup completion. Name failed launches and continue with successful work. Mention automation recommendations only after the snapshot says at least one selected task launched successfully and the recommendation batch is ready.
 - In the setup session, always refer to Roomote in the first person: use "I", "me", and "my" in user-visible messages. Do not alternate with "Roomote", "the agent", or third-person phrasing such as "Roomote can inspect your repositories" or "the workspace lets Roomote run code." Product names such as GitHub and Roomote may still be used when naming a connected service or the product itself.
@@ -323,6 +339,7 @@ ${surface === 'slack' ? '- Charts supplied to "send_chat_reply" render as Slack 
 - Set "includeAttachments" on "launch_task" to true only when supported attachments from the active conversation turn are relevant to the coding task. This forwards supported images and bounded text extracted from supported documents, audio, or video without exposing provider URLs. Omit it otherwise; attachments are not forwarded by default.
 - If the answer is immediate, call the closeout tool directly.
 - Use \`request_user_input\` when the next step needs structured choices (for example a multi-select). Write self-contained questions with concrete options, or pass only the required trusted preset when setup instructions name one. The input request is user-visible, ends the turn in needs_input without a separate reply, and resumes automatically with the submitted answers. For a single free-text or choice question, prefer a clarification reply instead.
+${sourceControlConnectionEnabled && ['web', 'slack', 'discord', 'teams', 'telegram'].includes(surface) ? '- When authorized work needs missing repository or source-control access, use `request_source_control_connection` with the known target and required capability. It works in web, Slack, Discord, Teams and Telegram Sessions, posts a trusted connection link, and ends the turn pending. Never collect provider credentials in chat or use structured-input answers as authorization. Clarify an unknown repository rather than guessing a provider. No source-control connection is needed for general Fast work or repository-free environments. A discovery failure is not evidence that reconnection is needed. On a trusted connection-ready continuation, reconsider the original intent using freshly resolved access; never blindly replay a mutating tool call. A later substantive human turn supersedes the older automatic continuation.' : ''}
 ${reactionGuidance}
 - Prefer one direct closeout over an acknowledgement followed immediately by the same answer.
 - After a closeout, clarification, closeout reaction, input request, or ignored event, do not call another tool and do not add user-facing prose.
@@ -416,8 +433,8 @@ ${recurringAutomationGuidance}
 - Select an environment ID only when the target is clear. Otherwise use null to use the deployment default.
 ${
   platformEvent
-    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'setup' ? 'Setup Platform Event' : platformEventKind === 'input_response' ? 'Structured Input Response Event' : platformEventKind === 'scheduled_wakeup' ? 'Scheduled Wakeup Event' : 'Delegated Task Platform Event'}
-- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'setup' ? 'setup lifecycle event' : platformEventKind === 'input_response' ? 'structured user-input response' : platformEventKind === 'scheduled_wakeup' ? 'wakeup this conversation scheduled for itself' : 'event about a delegated task'}, not a human-authored request.
+    ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'setup' ? 'Setup Platform Event' : platformEventKind === 'input_response' ? 'Structured Input Response Event' : platformEventKind === 'connection_ready' ? 'Source-Control Connection Ready Event' : platformEventKind === 'scheduled_wakeup' ? 'Scheduled Wakeup Event' : 'Delegated Task Platform Event'}
+- The current input is a trusted platform-generated ${platformEventKind === 'automation' ? 'custom automation request' : platformEventKind === 'setup' ? 'setup lifecycle event' : platformEventKind === 'input_response' ? 'structured user-input response' : platformEventKind === 'connection_ready' ? 'source-control readiness continuation' : platformEventKind === 'scheduled_wakeup' ? 'wakeup this conversation scheduled for itself' : 'event about a delegated task'}, not a human-authored request.
 ${
   platformEventVisibility === 'required'
     ? '- This event requires one user-visible terminal response because it carries user-useful substance. Present its result, changed expectation, required decision, or recovery action; never narrate lifecycle state alone. Use a closeout unless the setup instructions require `request_user_input`. Do not call "ignore_event".'
@@ -429,6 +446,11 @@ ${
           : 'The normal tools remain available. Use them only when the event and conversation context justify the action.'
       }
 - When the event is useful, produce exactly one user-visible terminal response: a closeout, or \`request_user_input\` when the setup instructions require structured choices. Never use acknowledgement or progress replies for a platform event.
+${
+  platformEventKind === 'connection_ready'
+    ? "- Resume the originating actor's authorized intent referenced by this event using current repository and tool access. Connection completion is not a new instruction from the authorizing administrator. Do not blindly replay an earlier tool call; clarify if the original intent cannot be recovered."
+    : ''
+}
 ${
   platformEventKind === 'input_response'
     ? "- The payload contains the user's submitted structured answers. Persist any needed state, continue the interrupted work with those answers, and acknowledge the choice in one closeout. Do not re-ask the same questions."

@@ -16,6 +16,7 @@ type Variables =
   | {
       redirect: string | null;
       callbackBackground?: 'accent' | 'background';
+      connectionRequestId?: string;
     }
   | null;
 
@@ -46,6 +47,10 @@ export const useEnableGitHubApp = (options?: UseEnableGitHubAppOptions) => {
               state: {
                 ...(redirect ? { redirect } : {}),
                 ...(callbackBackground ? { bg: callbackBackground } : {}),
+                ...(typeof variables === 'object' &&
+                variables?.connectionRequestId
+                  ? { connectionRequestId: variables.connectionRequestId }
+                  : {}),
               },
             }
           : undefined,

@@ -9,6 +9,7 @@ import {
 } from '@roomote/types';
 
 import { authClient } from '@/lib/auth-client';
+import { normalizeSourceControlOAuthReturnTarget } from '@/lib/server/source-control-oauth-redirect';
 import { getAuthProviderCallbackUrl } from '@/lib/auth-provider-callback';
 import { cn } from '@/lib/utils';
 import { OriginMismatchAlert } from '@/components/layout';
@@ -46,15 +47,7 @@ function AuthProviderIcon({ provider }: { provider: AuthProvider }) {
 }
 
 function getSafeRedirectUrl(rawRedirectUrl: string | null): string {
-  if (!rawRedirectUrl) {
-    return '/setup';
-  }
-
-  if (!rawRedirectUrl.startsWith('/') || rawRedirectUrl.startsWith('//')) {
-    return '/setup';
-  }
-
-  return rawRedirectUrl;
+  return normalizeSourceControlOAuthReturnTarget(rawRedirectUrl) ?? '/setup';
 }
 
 function getAuthErrorMessage(

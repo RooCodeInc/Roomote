@@ -52,11 +52,17 @@ export function buildFastAgentToolFilter(
   integrationIds: string[],
   options: {
     surface?: FastAgentSurface;
+    sourceControlConnectionEnabled?: boolean;
     schedulingProgressiveDisclosureEnabled?: boolean;
   } = {},
 ): Record<string, boolean> {
   return {
     ...FAST_AGENT_NATIVE_TOOL_FILTER,
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestSourceControlConnection]:
+      options.sourceControlConnectionEnabled === true &&
+      ['web', 'slack', 'discord', 'teams', 'telegram'].includes(
+        options.surface ?? 'web',
+      ),
     ...(options.surface && options.surface !== 'web'
       ? { [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: false }
       : {}),

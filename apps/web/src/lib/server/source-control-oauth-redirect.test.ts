@@ -8,6 +8,32 @@ import {
 } from './source-control-oauth-redirect';
 
 describe('source-control OAuth redirect handling', () => {
+  it.each([
+    '/\\evil.example',
+    '/%2f%2fevil.example',
+    '/%5cevil.example',
+    '/%252f%252fevil.example',
+    '/\nevil.example',
+    '/%00evil.example',
+  ])('rejects unsafe return %s', (target) => {
+    expect(normalizeSourceControlOAuthReturnTarget(target)).toBeNull();
+  });
+  it.each([true, false])(
+    'preserves a generic Session request when setupOpen=%s',
+    (setupOpen) => {
+      const target =
+        '/sessions/11111111-1111-4111-8111-111111111111?connectionRequest=22222222-2222-4222-8222-222222222222';
+      expect(
+        resolveSourceControlOAuthReturnTarget({
+          requestedTarget: target,
+          setupOpen,
+        }),
+      ).toBe(target);
+      expect(
+        addSourceControlOAuthResult(target, 'gitlab', 'connected'),
+      ).not.toContain('sync=1');
+    },
+  );
   it('defaults incomplete setup flows to the source-control step', () => {
     expect(
       resolveSourceControlOAuthReturnTarget({

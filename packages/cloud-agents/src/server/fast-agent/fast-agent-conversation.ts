@@ -32,6 +32,7 @@ export type FastAgentPlatformEventKind =
   | 'automation'
   | 'setup'
   | 'input_response'
+  | 'connection_ready'
   | 'scheduled_wakeup';
 
 /** Shared with the durable follow-up event so an admitted reaction resumes as the same input. */
@@ -181,8 +182,62 @@ export type FastAgentInputRequest = {
 
 export type FastAgentInputPreset = 'setup_starter_tasks';
 
+export type FastAgentSourceControlTarget = {
+  provider?: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
+  repositoryFullName?: string;
+  environmentId?: string;
+  capability: 'repository' | 'source_control_tool';
+};
+
+/** Safe, server-owned classification; never include provider errors or credentials. */
+export type FastAgentSourceControlReadiness = {
+  status:
+    | 'ready'
+    | 'not_connected'
+    | 'approval_pending'
+    | 'sync_pending'
+    | 'sync_failed'
+    | 'repository_unavailable'
+    | 'discovery_unavailable'
+    | 'forbidden'
+    | 'target_required';
+};
+
+export type FastAgentSourceControlContext = {
+  actorUserId: string;
+  conversationId: string;
+  conversation: FastAgentConversation;
+  turnId: string;
+};
+
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
+  /** Trusted deployment rollout flag; explicit false preserves legacy behavior. */
+  sourceControlConnectionEnabled?: boolean;
+  /** SDK-owned authoritative inventory/permission check, repeated at each operation. */
+  getSourceControlReadiness?: (input: {
+    actorUserId: string;
+    target: FastAgentSourceControlTarget;
+    /** The actual broker tool, when known; a Roomote source-control tool need
+     * not have a separate provider-specific MCP catalog. */
+    tool?: { integrationId: string; toolName: string };
+  }) => Promise<FastAgentSourceControlReadiness>;
+  /** Persist the request before returning a navigation-only URL. The runtime
+   * projects the safe result into the canonical tool output. */
+  requestSourceControlConnection?: (
+    input: FastAgentSourceControlContext & {
+      target: FastAgentSourceControlTarget;
+    },
+  ) => Promise<
+    | { status: 'ready' }
+    | { status: 'pending'; requestId: string; connectionUrl: string }
+  >;
+  /** Exclude this same turn so durable retries cannot supersede their own request. */
+  supersedeSourceControlConnectionRequests?: (
+    input: FastAgentSourceControlContext,
+  ) => Promise<void>;
+  /** Set only for a trusted connection-ready continuation, using its original actor. */
+  forceFreshSourceControlDiscovery?: boolean;
   launchTask: LaunchFastAgentTask;
   /** Persist inline text output against the owning Session. */
   createArtifact?: CreateFastAgentArtifact;

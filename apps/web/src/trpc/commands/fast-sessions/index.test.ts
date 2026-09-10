@@ -1,4 +1,10 @@
 const mocks = vi.hoisted(() => ({
+  connectionAdapter: {
+    getSourceControlReadiness: vi.fn(),
+    requestSourceControlConnection: vi.fn(),
+    supersedeSourceControlConnectionRequests: vi.fn(),
+  },
+  connectionEnabled: vi.fn(async () => false),
   after: vi.fn(),
   acquireTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
@@ -38,6 +44,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  createSourceControlConnectionAdapter: vi.fn(() => mocks.connectionAdapter),
+  isSourceControlConnectionEnabled: mocks.connectionEnabled,
   buildFastAgentArtifactCreator: vi.fn(() => mocks.createConversationArtifact),
   buildFastAgentSurfaceReplyDelivery: mocks.buildReplyDelivery,
   createFastAgentSessionArtifact: mocks.createSessionArtifact,
@@ -158,6 +166,41 @@ const session = {
 };
 
 describe('scheduleWebFastAgentTurn', () => {
+  it.each([true, false])(
+    'attaches trusted connection rollout %s and callbacks for the originating actor',
+    async (enabled) => {
+      mocks.connectionEnabled.mockResolvedValueOnce(enabled);
+      mocks.after.mockImplementation(() => {});
+      mocks.acquireTurnLock.mockResolvedValue(
+        Object.assign(vi.fn().mockResolvedValue(undefined), {
+          signal: new AbortController().signal,
+        }),
+      );
+      scheduleWebFastAgentTurn({
+        userId: 'origin-member',
+        delivery: {
+          conversation: {
+            surface: 'web',
+            workspaceId: 'session-owner',
+            conversationId: 'session-1',
+          },
+          adapter: { launchTask: vi.fn(), postReply: vi.fn() },
+        },
+        question: 'Connect the repository',
+      });
+      await mocks.after.mock.calls.at(-1)![0]();
+      expect(mocks.connectionEnabled).toHaveBeenCalledWith();
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'origin-member',
+          adapter: expect.objectContaining({
+            ...mocks.connectionAdapter,
+            sourceControlConnectionEnabled: enabled,
+          }),
+        }),
+      );
+    },
+  );
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.answerQuestion.mockResolvedValue('');

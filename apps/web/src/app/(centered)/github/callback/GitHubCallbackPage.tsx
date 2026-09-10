@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { z } from 'zod';
+import { useMutation } from '@tanstack/react-query';
+import { useTRPC } from '@/trpc/client';
+import { normalizeSourceControlOAuthReturnTarget } from '@/lib/server/source-control-oauth-redirect';
 import {
   CircleX,
   CircleCheck,
@@ -55,6 +58,27 @@ import { GitHubInstallRequestPending } from '@/components/github/GitHubInstallRe
 export default function Page() {
   const router = useRouter();
   const params = useSearchParams();
+  const trpc = useTRPC();
+  const connectionCallback = useMutation(
+    trpc.sourceControl.githubConnectionCallback.mutationOptions({
+      onSuccess: (result) => {
+        setIsLoading(false);
+        if (!result.success) {
+          setError(result.error);
+          return;
+        }
+        if ('installUrl' in result && result.installUrl)
+          window.location.assign(result.installUrl);
+        else router.push(result.returnTarget);
+      },
+      onError: () => {
+        setIsLoading(false);
+        setError(
+          'Connection attempt is no longer available. Return to the Session to try again.',
+        );
+      },
+    }),
+  );
 
   const { authStatus, isSignedIn } = useUser();
   const setupBootstrapOpen = useSetupBootstrapOpen();
@@ -84,20 +108,16 @@ export default function Page() {
 
     const redirect = decodedState?.redirect;
 
-    const isValidRedirect =
-      redirect &&
-      redirect.startsWith('/') &&
-      !redirect.startsWith('//') &&
-      !redirect.includes('://');
+    const isValidRedirect = normalizeSourceControlOAuthReturnTarget(redirect);
 
     const setupCompletedRedirect =
-      isValidRedirect && redirect.startsWith('/setup') && !setupBootstrapOpen
+      isValidRedirect &&
+      isValidRedirect.startsWith('/setup') &&
+      !setupBootstrapOpen
         ? '/settings/source-control'
         : null;
 
-    router.push(
-      setupCompletedRedirect ?? (isValidRedirect ? redirect : '/settings'),
-    );
+    router.push(setupCompletedRedirect ?? isValidRedirect ?? '/settings');
   }, [params, router, setupBootstrapOpen]);
 
   const finishAuthentication = useFinishAuthenticateGitHubAccount({
@@ -192,6 +212,19 @@ export default function Page() {
     if (error) {
       setIsLoading(false);
       setError(error);
+    } else if (decodedState?.connectionState) {
+      connectionCallback.mutate({
+        state: decodedState.connectionState,
+        action: isAppManifestFlow
+          ? 'manifest'
+          : setupAction === 'request'
+            ? 'request'
+            : 'install',
+        ...(code ? { code } : {}),
+        ...(params.get('installation_id')
+          ? { installationId: Number(params.get('installation_id')) }
+          : {}),
+      });
     } else if (isAppManifestFlow) {
       if (!code) {
         setIsLoading(false);
@@ -244,6 +277,7 @@ export default function Page() {
     isSignedIn,
     params,
     syncInstall,
+    connectionCallback,
   ]);
 
   return (

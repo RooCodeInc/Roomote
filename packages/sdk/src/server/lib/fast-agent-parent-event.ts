@@ -176,6 +176,7 @@ export type FastAgentPullRequestContext = {
 };
 
 export type FastAgentParentEvent =
+  | { type: 'connection_ready'; requestId: string }
   | FastAgentHumanFollowUpEvent
   | FastAgentScheduledWakeupEvent
   | {
@@ -376,6 +377,8 @@ export function buildEventClientMessageSeed(
   event: FastAgentParentEvent,
 ): string {
   switch (event.type) {
+    case 'connection_ready':
+      return `fast-parent-connection-ready:${event.requestId}`;
     case 'human_follow_up':
       return `fast-parent-human-follow-up:${event.eventId}`;
     case 'automation_triggered':
@@ -2388,14 +2391,27 @@ export async function deliverFastAgentParentEventWithLock(
 
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
+    const connectionRequest =
+      params.event.type === 'connection_ready'
+        ? await (
+            await import('./source-control-connection')
+          ).validateSourceControlConnectionContinuation({
+            requestId: params.event.requestId,
+            conversationId: params.parent.sessionId,
+          })
+        : null;
+    if (params.event.type === 'connection_ready' && !connectionRequest)
+      return 'skipped';
     const parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
       event: params.event,
-      ...(humanFollowUp
-        ? { actorUserId: humanFollowUp.userId }
-        : params.event.type === 'scheduled_wakeup'
-          ? { actorUserId: params.event.createdByUserId }
-          : {}),
+      ...(connectionRequest
+        ? { actorUserId: connectionRequest.actorUserId }
+        : humanFollowUp
+          ? { actorUserId: humanFollowUp.userId }
+          : params.event.type === 'scheduled_wakeup'
+            ? { actorUserId: params.event.createdByUserId }
+            : {}),
       onReplyPosted: () => {
         replyPosted = true;
       },
@@ -2426,6 +2442,9 @@ export async function deliverFastAgentParentEventWithLock(
     await answerFastAgentQuestion({
       question:
         humanFollowUp?.question ??
+        (connectionRequest
+          ? `<platform_event>${JSON.stringify({ type: 'connection_ready', requestId: connectionRequest.id, originatingTurnId: connectionRequest.turnId, capability: connectionRequest.capability, tool: connectionRequest.tool, provider: connectionRequest.provider, repositoryFullName: connectionRequest.repositoryFullName, environmentId: connectionRequest.environmentId, instruction: 'Reconsider the original authorized intent with current access. Do not blindly replay a previous tool call.' })}</platform_event>`
+          : undefined) ??
         `<platform_event>${JSON.stringify(params.event)}</platform_event>`,
       ...(humanFollowUp?.images ? { images: humanFollowUp.images } : {}),
       userId: humanFollowUp?.userId ?? parentTurn.userId,
@@ -2519,6 +2538,23 @@ export async function deliverFastAgentParentEventWithLock(
           }
         : {}),
       adapter: {
+        sourceControlConnectionEnabled: await (
+          await import('./source-control-connection')
+        ).isSourceControlConnectionEnabled(),
+        ...(
+          await import('./source-control-connection')
+        ).createSourceControlConnectionAdapter(
+          {},
+          connectionRequest
+            ? {
+                requestId: connectionRequest.id,
+                conversationId: params.parent.sessionId,
+              }
+            : undefined,
+        ),
+        ...(connectionRequest
+          ? { forceFreshSourceControlDiscovery: true }
+          : {}),
         createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
         ...parentTurn.adapter,
         launchTask: parentTurn.adapter.launchTask,

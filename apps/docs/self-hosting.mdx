@@ -211,6 +211,13 @@ setup; ask Roomote to retry that item. Automation recommendations are analyzed
 after repository sync and appear only after at least one starter task launches.
 They remain optional.
 
+On deployments with optional source-control setup enabled, inference and a
+sandbox provider are sufficient to complete setup. Source control can be
+connected later in **Settings > Source control** when you need repository work.
+Repository starter tasks and repository recommendations still require connected,
+synchronized repositories. The default setup flow continues to require source
+control; disabling the optional flow does not reopen already completed setup.
+
 After setup, run a small task that uses the first environment if you did not
 start one from the starter list. A healthy deployment should let you:
 

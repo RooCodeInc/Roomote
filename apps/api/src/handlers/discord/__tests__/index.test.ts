@@ -103,6 +103,12 @@ vi.mock('../provider.js', () => {
 });
 
 vi.mock('@roomote/sdk/server', () => ({
+  createSourceControlConnectionAdapter: vi.fn(() => ({
+    getSourceControlReadiness: vi.fn(),
+    requestSourceControlConnection: vi.fn(),
+    supersedeSourceControlConnectionRequests: vi.fn(),
+  })),
+  isSourceControlConnectionEnabled: vi.fn(async () => false),
   findDiscordMappedUserId: mocks.findMappedUserId,
   findDiscordInstallationByGuildId: mocks.findInstallation,
   consumeDiscordLinkCode: mocks.consumeLinkCode,

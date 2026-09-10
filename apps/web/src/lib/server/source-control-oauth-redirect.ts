@@ -18,7 +18,10 @@ export function normalizeSourceControlOAuthReturnTarget(
     !target ||
     !target.startsWith('/') ||
     target.startsWith('//') ||
-    target.includes('://')
+    target.includes('://') ||
+    target.includes('\\') ||
+    Array.from(target).some((character) => character.charCodeAt(0) <= 32) ||
+    /%(?:2f|5c|25|0[0-9a-f]|1[0-9a-f])/i.test(target.split(/[?#]/, 1)[0] ?? '')
   ) {
     return null;
   }

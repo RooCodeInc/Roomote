@@ -110,6 +110,7 @@ const auditContext = {
 function listFastAgentIntegrations(context: {
   userId: string;
   apiBaseUrl?: string;
+  forceFreshDiscovery?: boolean;
 }) {
   return listFastAgentIntegrationsWithResolver(
     context,
@@ -147,6 +148,35 @@ describe('fast-agent integration broker', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('refreshes only the resumed actor catalog and never serves stale tools on failure', async () => {
+    mocks.configuredServers = {
+      github: {
+        url: 'https://api.example.com/api/mcp-routing/github',
+        headers: {},
+      },
+    };
+    await listFastAgentIntegrations(auditContext);
+    await listFastAgentIntegrations({ ...auditContext, userId: 'other-user' });
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+    mocks.listMcpTools.mockRejectedValueOnce(
+      new Error('discovery unavailable'),
+    );
+    expect(
+      await listFastAgentIntegrations({
+        ...auditContext,
+        forceFreshDiscovery: true,
+      }),
+    ).toEqual([]);
+    await listFastAgentIntegrations({ ...auditContext, userId: 'other-user' });
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(3);
+    mocks.listMcpTools.mockResolvedValue([
+      { name: 'new_tool', inputSchema: { type: 'object' } },
+    ]);
+    const refreshed = await listFastAgentIntegrations(auditContext);
+    expect(refreshed[0]?.tools[0]?.name).toBe('new_tool');
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(4);
   });
 
   it('discovers and forwards required Sentry organization scope without injecting a default', async () => {

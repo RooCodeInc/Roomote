@@ -206,6 +206,7 @@ export {
   fastAgentMessages,
   fastAgentMessagesRelations,
   fastAgentParentEvents,
+  sourceControlConnectionRequests,
   fastAgentParentEventsRelations,
   sessionWakeups,
   sessionWakeupsRelations,

@@ -119,6 +119,18 @@ export async function persistFastAgentInlineHumanTurn(params: {
     }
 
     if (supersedesPendingTurns(params.event)) {
+      if (inserted.length) {
+        const { supersedeSourceControlConnectionRequests } =
+          await import('./source-control-connection');
+        await supersedeSourceControlConnectionRequests(
+          {
+            conversationId: params.parent.sessionId,
+            actorUserId: params.event.userId,
+            turnId: `incoming:${eventKey}`,
+          },
+          tx,
+        );
+      }
       await tx
         .update(fastAgentParentEvents)
         .set({

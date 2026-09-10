@@ -1,9 +1,11 @@
 import { Octokit } from '@octokit/rest';
+import { beginConnectionAttempt } from '@/lib/server/source-control-connection-attempt';
 import type { Endpoints } from '@octokit/types';
 
 import { createAuthToken } from '@roomote/auth';
 import * as GitHub from '@roomote/github';
 import { createClient } from '@roomote/sdk/client';
+import { getSourceControlSyncStartedAt } from '@roomote/sdk/server';
 import { enqueueAutomationSignalPrefetch } from '@roomote/sdk/server/automation-recommendations';
 import { requestBrainBackfill } from '@roomote/sdk/server/request-instance-ping';
 import { isLoopbackHostname } from '@roomote/types';
@@ -521,7 +523,20 @@ export async function startCreateGitHubInstallationCommand(
   const params = new URLSearchParams();
 
   if (state) {
-    params.set('state', encodeRecord(state));
+    const connectionState = state.connectionRequestId
+      ? await beginConnectionAttempt(auth, {
+          provider: 'github',
+          requestId: state.connectionRequestId,
+          purpose: 'github-install',
+        })
+      : undefined;
+    params.set(
+      'state',
+      encodeRecord({
+        ...state,
+        ...(connectionState ? { connectionState } : {}),
+      }),
+    );
   }
 
   if (baseUrl) {
@@ -573,7 +588,20 @@ export async function startCreateGitHubAppManifestCommand(
   const params = new URLSearchParams();
 
   if (state) {
-    params.set('state', encodeRecord(state));
+    const connectionState = state.connectionRequestId
+      ? await beginConnectionAttempt(auth, {
+          provider: 'github',
+          requestId: state.connectionRequestId,
+          purpose: 'github-manifest',
+        })
+      : undefined;
+    params.set(
+      'state',
+      encodeRecord({
+        ...state,
+        ...(connectionState ? { connectionState } : {}),
+      }),
+    );
   }
 
   return {
@@ -657,6 +685,12 @@ export async function enableGitHubAppCommand(
       return getUnauthorizedResult();
     }
 
+    if (state?.connectionRequestId) {
+      const install = await startCreateGitHubInstallationCommand(auth, state);
+      return install.success
+        ? { success: true, mode: 'redirect', url: install.url }
+        : install;
+    }
     const suspendedInstallations = await db.query.githubInstallations.findMany({
       where: isNotNull(githubInstallations.suspendedAt),
       columns: {
@@ -665,6 +699,7 @@ export async function enableGitHubAppCommand(
     });
 
     if (suspendedInstallations.length > 0) {
+      const startedAt = await getSourceControlSyncStartedAt('github');
       const results = await Promise.all(
         suspendedInstallations.map(({ installationId }) =>
           GitHub.syncGitHubInstallation({
@@ -675,6 +710,24 @@ export async function enableGitHubAppCommand(
       );
 
       if (results.some((result) => result.success)) {
+        const { reconcileSourceControlConnectionRequests } =
+          await import('@roomote/sdk/server');
+        await reconcileSourceControlConnectionRequests(
+          {
+            provider: 'github',
+            completedByUserId: auth.userId,
+          },
+          {
+            successfulSync: {
+              startedAt,
+              repositoryFullNames: results.flatMap((result) =>
+                result.success
+                  ? result.repositories.map((repository) => repository.fullName)
+                  : [],
+              ),
+            },
+          },
+        );
         // Repositories just came back online for Memory ingestion.
         void requestBrainBackfill('github-connected');
         return { success: true, mode: 'synced' };
@@ -827,6 +880,34 @@ export async function resolvePendingGitHubInstallationsCommand(
     });
 
     if (result.completed > 0) {
+      // The pending resolver returns counts, not inventory evidence. Recheck
+      // installations to obtain the exact successful repository scope.
+      const startedAt = await getSourceControlSyncStartedAt('github');
+      const synchronized = await syncGitHubInstallationsCommand(auth).catch(
+        () => [],
+      );
+      const { reconcileSourceControlConnectionRequests } =
+        await import('@roomote/sdk/server');
+      await reconcileSourceControlConnectionRequests(
+        {
+          provider: 'github',
+          completedByUserId: auth.userId,
+        },
+        {
+          successfulSync: {
+            startedAt,
+            repositoryFullNames: Array.isArray(synchronized)
+              ? synchronized.flatMap((entry) =>
+                  entry.success
+                    ? entry.repositories.map(
+                        (repository) => repository.fullName,
+                      )
+                    : [],
+                )
+              : [],
+          },
+        },
+      );
       // A pending installation just resolved into live repositories — start
       // Memory ingestion now rather than waiting out the 15-minute schedules.
       void requestBrainBackfill('github-connected');

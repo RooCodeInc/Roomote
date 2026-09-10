@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from 'next/server';
+import { beginConnectionAttempt } from '@/lib/server/source-control-connection-attempt';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import {
@@ -40,7 +41,24 @@ export async function GET(request: NextRequest) {
     clientId,
     redirectUri,
   });
-  const response = NextResponse.redirect(url);
+  const authorizationUrl = new URL(url);
+  try {
+    authorizationUrl.searchParams.set(
+      'state',
+      await beginConnectionAttempt(authResult, {
+        provider: 'gitea',
+        requestId:
+          request.nextUrl.searchParams.get('connectionRequestId') ?? undefined,
+        returnTarget: request.nextUrl.searchParams.get('redirectTo'),
+      }),
+    );
+  } catch {
+    return NextResponse.json(
+      { error: 'Connection request is unavailable.' },
+      { status: 400 },
+    );
+  }
+  const response = NextResponse.redirect(authorizationUrl);
   const returnTarget = normalizeSourceControlOAuthReturnTarget(
     request.nextUrl.searchParams.get('redirectTo'),
   );

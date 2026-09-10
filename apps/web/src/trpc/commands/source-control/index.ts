@@ -1038,6 +1038,9 @@ export async function saveSourceControlConfigCommand(
   });
 
   const result = await db.transaction(async (tx) => {
+    const { requireSourceControlConnectionSync } =
+      await import('@roomote/sdk/server');
+    await requireSourceControlConnectionSync(input.provider, tx);
     const providerStatus = await saveSourceControlConfigValues({
       executor: tx,
       actorUserId: auth.userId,

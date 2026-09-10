@@ -1,4 +1,10 @@
 const mocks = vi.hoisted(() => ({
+  connectionAdapter: {
+    getSourceControlReadiness: vi.fn(),
+    requestSourceControlConnection: vi.fn(),
+    supersedeSourceControlConnectionRequests: vi.fn(),
+  },
+  connectionEnabled: vi.fn(async () => false),
   createTeamsProvider: vi.fn(),
   teamsPostMessage: vi.fn(),
   teamsUpdateMessage: vi.fn(),
@@ -29,6 +35,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./artifacts/create-session-artifact', () => ({
   createFastAgentConversationArtifact: mocks.createConversationArtifact,
+}));
+vi.mock('./source-control-connection', () => ({
+  createSourceControlConnectionAdapter: vi.fn(() => mocks.connectionAdapter),
+  isSourceControlConnectionEnabled: mocks.connectionEnabled,
 }));
 vi.mock('./fast-agent-session-videos', () => ({
   deliverFastAgentSessionVideos: mocks.deliverVideos,
@@ -777,6 +787,65 @@ describe('continueFastAgentSurfaceReply admission hooks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+
+  it.each(
+    (['teams', 'telegram'] as const).flatMap((surface) =>
+      [true, false].map((enabled) => ({ surface, enabled })),
+    ),
+  )(
+    'wires $surface callbacks and trusted rollout $enabled for the originating actor',
+    async ({ surface, enabled }) => {
+      const owner = await userFactory.create();
+      const actor = await userFactory.create();
+      const conversation = await createConversation({
+        userId: owner.id,
+        surface,
+        replyTarget: { channelId: '123', threadId: '456' },
+      });
+      mocks.connectionEnabled.mockResolvedValueOnce(enabled);
+      mocks.createTeamsProvider.mockResolvedValue({
+        postMessage: mocks.teamsPostMessage,
+        updateMessage: mocks.teamsUpdateMessage,
+      });
+      mocks.findTeamsConversationRoute.mockResolvedValue({
+        serviceUrl: 'https://smba.example.com/amer/',
+        workspaceId: 'tenant-1',
+      });
+      mocks.createTelegramProvider.mockResolvedValue({
+        postMessage: mocks.telegramPostMessage,
+        editMessageText: mocks.telegramEditMessage,
+        sendChatAction: mocks.telegramTyping,
+      });
+      mocks.admitHumanFollowUp.mockResolvedValue({
+        kind: 'turn',
+        turnLock: Object.assign(vi.fn().mockResolvedValue(undefined), {
+          signal: new AbortController().signal,
+        }),
+        durable: { id: 'row-1', eventKey: 'key-1' },
+      });
+      mocks.answerQuestion.mockResolvedValue('');
+      await expect(
+        continueFastAgentSurfaceReply({
+          sessionId: conversation.id,
+          userId: actor.id,
+          senderDisplayName: 'Originating member',
+          question: 'Connect repository',
+          currentMessageId: 'message-1',
+        }),
+      ).resolves.toBe(true);
+      expect(mocks.connectionEnabled).toHaveBeenCalledWith();
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: actor.id,
+          senderDisplayName: 'Originating member',
+          adapter: expect.objectContaining({
+            ...mocks.connectionAdapter,
+            sourceControlConnectionEnabled: enabled,
+          }),
+        }),
+      );
+    },
+  );
 
   it('reports admission with the queued follow-up’s abort before the turn runs', async () => {
     const user = await userFactory.create();

@@ -91,6 +91,7 @@ const nativeToolNames = vi.hoisted(
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
       requestUserInput: 'request_user_input',
+      requestSourceControlConnection: 'request_source_control_connection',
       listSkills: 'list_skills',
       loadSkill: 'load_skill',
       showWidget: 'show_widget',
@@ -374,7 +375,11 @@ function callbacks(
   overrides: Partial<FastAgentTurnAdapter> = {},
 ): FastAgentTurnAdapter {
   return {
+    sourceControlConnectionEnabled: true,
     launchTask: vi.fn<LaunchFastAgentTask>(),
+    getSourceControlReadiness: vi.fn(async () => ({
+      status: 'ready' as const,
+    })),
     postReply: vi.fn().mockResolvedValue(undefined),
     postReaction: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -1098,6 +1103,286 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       preset: 'setup_starter_tasks',
       questions: presetQuestions,
     });
+  });
+
+  it.each([undefined, false])(
+    'hides and rejects JIT when the rollout flag is %s',
+    async (sourceControlConnectionEnabled) => {
+      const requestSourceControlConnection = vi.fn();
+      const getSourceControlReadiness = vi.fn();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          expect(
+            await invokeTool(nativeToolNames.requestSourceControlConnection, {
+              target: { capability: 'repository' },
+            }),
+          ).toEqual({
+            success: false,
+            error:
+              'Source-control connection requests are unavailable in this Session.',
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({
+          sourceControlConnectionEnabled,
+          requestSourceControlConnection,
+          getSourceControlReadiness,
+        }),
+      });
+      expect(requestSourceControlConnection).not.toHaveBeenCalled();
+      expect(getSourceControlReadiness).not.toHaveBeenCalled();
+      expect(mocks.generateText.mock.calls[0]?.[0].system).not.toContain(
+        'request_source_control_connection',
+      );
+      expect(mocks.getNativeRuntime).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        { surface: 'slack', sourceControlConnectionEnabled: false },
+      );
+    },
+  );
+
+  it('safely rejects a request when the backend disables a stale enabled turn', async () => {
+    const requestSourceControlConnection = vi.fn(async () => {
+      throw new Error('disabled; provider token=secret');
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        expect(
+          await invokeTool(nativeToolNames.requestSourceControlConnection, {
+            target: { provider: 'github', capability: 'repository' },
+          }),
+        ).toEqual({
+          success: false,
+          error:
+            'The source-control connection request could not be created. Check access and try again.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks({
+      requestSourceControlConnection,
+      getSourceControlReadiness: vi.fn(async () => ({
+        status: 'not_connected' as const,
+      })),
+    });
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+    expect(requestSourceControlConnection).toHaveBeenCalledOnce();
+    expect(
+      JSON.stringify(vi.mocked(adapter.postReply).mock.calls),
+    ).not.toContain('secret');
+  });
+
+  it('hides and safely rejects an enabled request tool when a callback is missing', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        expect(
+          await invokeTool(nativeToolNames.requestSourceControlConnection, {
+            target: { capability: 'repository' },
+          }),
+        ).toMatchObject({ success: false });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({
+        sourceControlConnectionEnabled: true,
+        requestSourceControlConnection: undefined,
+      }),
+    });
+    expect(mocks.generateText.mock.calls[0]?.[0].system).not.toContain(
+      'request_source_control_connection',
+    );
+  });
+
+  it.each(['web', 'slack', 'discord', 'teams', 'telegram'] as const)(
+    'ends a %s connection request pending with original actor and turn context',
+    async (surface) => {
+      const requestSourceControlConnection = vi.fn(async () => ({
+        status: 'pending' as const,
+        requestId: 'request-1',
+        connectionUrl: '/sessions/session-1?connectionRequest=request-1',
+      }));
+      const supersedeSourceControlConnectionRequests = vi.fn(async () => {});
+      const adapter = callbacks({
+        requestSourceControlConnection,
+        supersedeSourceControlConnectionRequests,
+        getSourceControlReadiness: vi.fn(async () => ({
+          status: 'not_connected' as const,
+        })),
+      });
+      let result: unknown;
+      let after: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          result = await invokeTool(
+            nativeToolNames.requestSourceControlConnection,
+            {
+              target: {
+                provider: 'github',
+                repositoryFullName: 'acme/api',
+                capability: 'repository',
+              },
+            },
+          );
+          after = await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Must not run',
+          });
+          return '';
+        },
+      );
+      const conversation =
+        surface === 'web'
+          ? {
+              surface,
+              workspaceId: 'deployment-1',
+              conversationId: 'session-1',
+            }
+          : { ...baseParams.conversation, surface };
+      await answerFastAgentQuestion({ ...baseParams, conversation, adapter });
+      expect(result).toMatchObject({
+        success: true,
+        status: 'pending',
+        closed: true,
+      });
+      expect(after).toMatchObject({
+        success: false,
+        error: 'This Fast turn is closed.',
+      });
+      expect(requestSourceControlConnection).toHaveBeenCalledWith({
+        actorUserId: baseParams.userId,
+        conversationId: 'conversation-1',
+        conversation,
+        turnId: expect.any(String),
+        target: {
+          provider: 'github',
+          repositoryFullName: 'acme/api',
+          capability: 'repository',
+        },
+      });
+      expect(supersedeSourceControlConnectionRequests).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.stringContaining('[Connect or check access]'),
+        }),
+      );
+      expect(adapter.postReply).toHaveBeenCalledOnce();
+      expect(adapter.launchTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refreshes actor discovery without superseding on a platform continuation', async () => {
+    const supersedeSourceControlConnectionRequests = vi.fn(async () => {});
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      adapter: callbacks({
+        forceFreshSourceControlDiscovery: true,
+        supersedeSourceControlConnectionRequests,
+      }),
+    });
+    expect(supersedeSourceControlConnectionRequests).not.toHaveBeenCalled();
+    expect(mocks.listIntegrations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: baseParams.userId,
+        forceFreshDiscovery: true,
+      }),
+      undefined,
+    );
+  });
+
+  it('does not supersede connection intent for a reaction', async () => {
+    const supersedeSourceControlConnectionRequests = vi.fn(async () => {});
+    await answerFastAgentQuestion({
+      ...baseParams,
+      ...reactionTurnInput,
+      adapter: callbacks({ supersedeSourceControlConnectionRequests }),
+    });
+    expect(supersedeSourceControlConnectionRequests).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'ready',
+    'forbidden',
+    'target_required',
+    'discovery_unavailable',
+  ] as const)(
+    'does not start a connection flow for %s readiness',
+    async (status) => {
+      const requestSourceControlConnection = vi.fn();
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          const result = await invokeTool(
+            nativeToolNames.requestSourceControlConnection,
+            {
+              target: {
+                capability: 'repository',
+                repositoryFullName: 'acme/api',
+              },
+            },
+          );
+          expect(result).toMatchObject(
+            status === 'ready'
+              ? { success: true, status: 'ready' }
+              : { success: false, readiness: { status } },
+          );
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({
+          getSourceControlReadiness: vi.fn(async () => ({ status })),
+          requestSourceControlConnection,
+        }),
+      });
+      expect(requestSourceControlConnection).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    'https://other.example/sessions/session-1?connectionRequest=request-1',
+    '/sessions/session-1?connectionRequest=request-1&token=secret',
+    '/sessions/session-1?connectionRequest=wrong-request',
+    'http://[invalid',
+  ])('never publishes an invalid connection URL: %s', async (connectionUrl) => {
+    const adapter = callbacks({
+      getSourceControlReadiness: vi.fn(async () => ({
+        status: 'not_connected' as const,
+      })),
+      requestSourceControlConnection: vi.fn(async () => ({
+        status: 'pending' as const,
+        requestId: 'request-1',
+        connectionUrl,
+      })),
+    });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        expect(
+          await invokeTool(nativeToolNames.requestSourceControlConnection, {
+            target: { provider: 'github', capability: 'repository' },
+          }),
+        ).toEqual({
+          success: false,
+          error: 'The source-control connection link is unavailable.',
+        });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+    expect(
+      JSON.stringify(vi.mocked(adapter.postReply).mock.calls),
+    ).not.toContain(connectionUrl);
   });
 
   it('rejects request_user_input calls with neither questions nor a preset', async () => {
@@ -4155,7 +4440,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ id: 'github' }),
         expect.objectContaining({ id: 'roomote' }),
       ]),
-      { surface: 'slack' },
+      { surface: 'slack', sourceControlConnectionEnabled: false },
     );
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.any(Object),
@@ -8527,6 +8812,124 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }),
     );
   });
+
+  it('denies repository launches before task creation using authoritative readiness', async () => {
+    const getSourceControlReadiness = vi.fn(async () => ({
+      status: 'repository_unavailable' as const,
+    }));
+    const adapter = callbacks({ getSourceControlReadiness });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Checking access.',
+        });
+        expect(
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix checkout',
+            environmentId: 'env-1',
+          }),
+        ).toMatchObject({
+          success: false,
+          readiness: { status: 'repository_unavailable' },
+        });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+    expect(adapter.launchTask).not.toHaveBeenCalled();
+    expect(getSourceControlReadiness).toHaveBeenCalledWith({
+      actorUserId: baseParams.userId,
+      target: { capability: 'repository', environmentId: 'env-1' },
+    });
+  });
+
+  it('allows an authoritative repository-free environment without any integration catalog', async () => {
+    mocks.getEnvironments.mockResolvedValue([
+      { id: 'env-empty', name: 'Research', repositoryNames: [] },
+    ]);
+    const getSourceControlReadiness = vi.fn(async () => ({
+      status: 'ready' as const,
+    }));
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'research-task',
+    }));
+    const adapter = callbacks({ getSourceControlReadiness, launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Starting research.',
+        });
+        expect(
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Research',
+            environmentId: 'env-empty',
+          }),
+        ).toMatchObject({ success: true });
+        return '';
+      },
+    );
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+    expect(launchTask).toHaveBeenCalledOnce();
+    expect(getSourceControlReadiness).toHaveBeenCalledWith({
+      actorUserId: baseParams.userId,
+      target: { capability: 'repository', environmentId: 'env-empty' },
+    });
+  });
+
+  it('does not check source control for general Fast replies', async () => {
+    const getSourceControlReadiness = vi.fn(async () => ({
+      status: 'not_connected' as const,
+    }));
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter: callbacks({ getSourceControlReadiness }),
+    });
+    expect(getSourceControlReadiness).not.toHaveBeenCalled();
+  });
+
+  it.each(['on-demand', 'native'] as const)(
+    'checks %s source tools before the broker can execute them',
+    async (path) => {
+      const getSourceControlReadiness = vi.fn(async () => ({
+        status: 'forbidden' as const,
+      }));
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'ack',
+            message: 'Checking access.',
+          });
+          const result =
+            path === 'native'
+              ? await invokeMcpTool('roomote', 'manage_source_control', {
+                  repositoryFullName: 'acme/api',
+                  sourceControlProvider: 'github',
+                })
+              : await invokeTool(nativeToolNames.callIntegrationTool, {
+                  integrationId: 'github',
+                  toolName: 'get_file',
+                  args: { owner: 'acme', repo: 'api' },
+                });
+          expect(result).toMatchObject({
+            success: false,
+            readiness: { status: 'forbidden' },
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        adapter: callbacks({ getSourceControlReadiness }),
+      });
+      expect(mocks.callIntegration).not.toHaveBeenCalled();
+    },
+  );
 
   it('honors a surface launch gate before creating a task', async () => {
     const assertTaskLaunch = vi.fn(async () => {

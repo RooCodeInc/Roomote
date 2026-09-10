@@ -32,6 +32,37 @@ vi.mock('@/components/layout', () => ({
 import { AuthForm } from './auth-form';
 
 describe('AuthForm', () => {
+  it('preserves the Session connection request through deployment sign-in', async () => {
+    const target =
+      '/sessions/11111111-1111-4111-8111-111111111111?connectionRequest=22222222-2222-4222-8222-222222222222';
+    searchParams = new URLSearchParams({ redirect_url: target });
+    render(<AuthForm />);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
+    );
+    await waitFor(() =>
+      expect(signInOauth2Mock).toHaveBeenCalledWith({
+        providerId: 'microsoft-entra-id',
+        callbackURL: target,
+      }),
+    );
+  });
+  it.each(['/\\evil.example', '/%2f%2fevil.example', '/%255cevil.example'])(
+    'rejects unsafe login return %s',
+    async (target) => {
+      searchParams = new URLSearchParams({ redirect_url: target });
+      render(<AuthForm />);
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Continue with Microsoft Teams' }),
+      );
+      await waitFor(() =>
+        expect(signInOauth2Mock).toHaveBeenCalledWith({
+          providerId: 'microsoft-entra-id',
+          callbackURL: '/setup',
+        }),
+      );
+    },
+  );
   beforeEach(() => {
     searchParams = new URLSearchParams();
     signInOauth2Mock.mockResolvedValue({

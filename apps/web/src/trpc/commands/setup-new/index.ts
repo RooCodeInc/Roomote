@@ -10,6 +10,9 @@ import {
   deploymentSettings,
   environments,
   environmentVariables,
+  fastAgentConversations,
+  fastAgentMessages,
+  sessions,
   workItems,
   pullRequestFacts,
   slackInstallations,
@@ -91,6 +94,7 @@ import {
   hasSetupChatHandoffDestination,
   isSetupProvisionableComputeProvider,
   normalizeSetupNewState,
+  normalizeSetupNewSetupSession,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
   resolveTeamsBotCredentialEnvVarNames,
@@ -130,6 +134,7 @@ import {
   normalizeRepositorySelection,
 } from '@/lib/setup-new';
 import type { QueuedOnboardingTask } from './types';
+import { buildSetupReceiptMessage } from '../setup/setup-receipts';
 import {
   getLinkedDiscordAccountCommand,
   getLinkedTelegramAccountCommand,
@@ -1519,12 +1524,50 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     gitlabBaseUrl,
   });
 
+  const setupSession = normalizeSetupNewSetupSession(
+    setupNewState.setupSession,
+  );
+  let sourceControlSkipped = false;
+  if (setupSession) {
+    // The existing idempotent receipt is the durable skip marker, not its text.
+    const receipt = buildSetupReceiptMessage({
+      sessionId: setupSession.sessionId,
+      workflowVersion: setupSession.workflowVersion,
+      userId,
+      kind: 'source_control_skipped',
+      fingerprint: 'initial-options',
+      text: '',
+    });
+    const [savedSkip] = await db
+      .select({ id: fastAgentMessages.id })
+      .from(sessions)
+      .innerJoin(
+        fastAgentConversations,
+        eq(sessions.fastConversationId, fastAgentConversations.id),
+      )
+      .innerJoin(
+        fastAgentMessages,
+        eq(fastAgentMessages.conversationId, fastAgentConversations.id),
+      )
+      .where(
+        and(
+          eq(sessions.id, setupSession.sessionId),
+          eq(fastAgentConversations.userId, userId),
+          eq(fastAgentMessages.eventId, receipt.eventId),
+        ),
+      )
+      .limit(1);
+    sourceControlSkipped = Boolean(savedSkip);
+  }
+
   const status = {
     hasGitHub: baseStatus.hasGitHub,
     hasSlack: slackAccessStatus.hasSlackUserMapping,
     hasSlackInstallation: slackAccessStatus.hasSlackInstallation,
     hasLinear: baseStatus.hasLinear,
     setupCompletedAt: baseStatus.setupCompletedAt,
+    optionalSourceControlEnabled: baseStatus.optionalSourceControlEnabled,
+    sourceControlSkipped,
     setupNewState,
     selectedRepositories,
     onboardingTaskStatus,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type {
@@ -22,7 +22,10 @@ import {
   GitBranch,
 } from '@/components/system';
 
-import { SetupSessionActionCard } from './SetupSessionActionCard';
+import {
+  SetupSessionActionCard,
+  SetupSessionActionCardActions,
+} from './SetupSessionActionCard';
 import { SourceControlConfiguration } from './SourceControlConfiguration';
 import { SourceControlConnection } from './SourceControlConnection';
 import { SourceControlProviderPicker } from './SourceControlProviderPicker';
@@ -42,13 +45,16 @@ function SetupSessionSourceControlCardBody({
   sourceControlSetup,
   explicitlySelectedProvider,
   sessionId,
+  optionalSourceControlEnabled,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   explicitlySelectedProvider: SourceControlProvider | null;
   sessionId: string;
+  optionalSourceControlEnabled: boolean;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [stage, setStage] = useState<SourceControlCardStage>(() =>
     getInitialSourceControlCardStage(
@@ -58,6 +64,19 @@ function SetupSessionSourceControlCardBody({
     ),
   );
   const [configOpen, setConfigOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const skipSourceControl = useMutation(
+    trpc.setup.skipSourceControl.mutationOptions({
+      onSuccess: () => {
+        setDismissed(true);
+        void queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+        router.refresh();
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
   const [activeProvider, setActiveProvider] =
     useState<SourceControlProvider | null>(null);
   const saveSourceControlProviderChoice = useMutation(
@@ -92,15 +111,17 @@ function SetupSessionSourceControlCardBody({
       ? searchParams.get('reason') || `${provider} authorization was cancelled.`
       : null;
 
+  if (dismissed) return null;
+
   const cardTitle =
     stage === 'provider'
-      ? 'Connect source control'
+      ? 'Where do you keep your code?'
       : stage === 'config'
         ? `Set up ${providerLabel}`
         : `Authorize ${providerLabel}`;
   const cardIntro =
     stage === 'provider'
-      ? 'Connect the service that hosts your repositories so I can work on your code.'
+      ? 'Connect to your source control provider for me to work on your code. You can also do that later in Settings → Source control.'
       : stage === 'config'
         ? `Add the ${providerLabel} app credentials. The detailed setup opens in a separate dialog.`
         : `Give me access to ${providerLabel} and sync the repositories I can work with.`;
@@ -117,13 +138,29 @@ function SetupSessionSourceControlCardBody({
         </p>
       ) : null}
       {stage === 'provider' ? (
-        <SourceControlProviderPicker
-          sourceControlSetup={sourceControlSetup}
-          onContinue={(nextProvider) =>
-            saveSourceControlProviderChoice.mutate({ provider: nextProvider })
-          }
-          disabled={saveSourceControlProviderChoice.isPending}
-        />
+        <>
+          <SourceControlProviderPicker
+            sourceControlSetup={sourceControlSetup}
+            onContinue={(nextProvider) =>
+              saveSourceControlProviderChoice.mutate({ provider: nextProvider })
+            }
+            disabled={saveSourceControlProviderChoice.isPending}
+          />
+          {optionalSourceControlEnabled ? (
+            <SetupSessionActionCardActions>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={skipSourceControl.isPending}
+                onClick={() => skipSourceControl.mutate()}
+              >
+                Skip for now
+                <ArrowRight />
+              </Button>
+            </SetupSessionActionCardActions>
+          ) : null}
+        </>
       ) : stage === 'config' ? (
         <>
           <Button type="button" onClick={() => setConfigOpen(true)}>
@@ -183,7 +220,12 @@ export function SetupSessionSourceControlCard({
     (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
   );
 
-  if (!sourceControlSetup || hasSynchronizedRepository) {
+  if (
+    !sourceControlSetup ||
+    hasSynchronizedRepository ||
+    (statusQuery.data?.optionalSourceControlEnabled === true &&
+      statusQuery.data.sourceControlSkipped)
+  ) {
     return null;
   }
 
@@ -192,6 +234,9 @@ export function SetupSessionSourceControlCard({
       sourceControlSetup={sourceControlSetup}
       explicitlySelectedProvider={explicitlySelectedProvider}
       sessionId={sessionId}
+      optionalSourceControlEnabled={
+        statusQuery.data?.optionalSourceControlEnabled === true
+      }
     />
   );
 }

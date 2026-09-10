@@ -1,4 +1,25 @@
 export {
+  getSourceControlReadiness,
+  createSourceControlConnectionAdapter,
+  isSourceControlConnectionEnabled,
+  enforceSourceControlConnectionRollout,
+  requestSourceControlConnection,
+  getSourceControlConnectionRequest,
+  cancelSourceControlConnectionRequest,
+  reconcileSourceControlConnectionRequests,
+  requireSourceControlConnectionSync,
+  getSourceControlSyncStartedAt,
+  supersedeSourceControlConnectionRequests,
+  type SourceControlConnectionTarget,
+  type SourceControlConnectionTool,
+  type SourceControlReadiness,
+  type SourceControlReadinessOptions,
+  type RequestSourceControlConnectionInput,
+  type SourceControlConnectionRequestView,
+  type SourceControlConnectionRequest,
+} from './lib/source-control-connection';
+
+export {
   resolveAutomationRepositoryDestination,
   isCiFailureTriageRepositoryEnabled,
 } from './automations/ci-failure-triage-routing';

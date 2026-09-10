@@ -1,3 +1,7 @@
+vi.mock('@/lib/server/source-control-connection-attempt', () => ({
+  beginConnectionAttempt: vi.fn(async () => 'state-1'),
+}));
+
 const {
   authorizeMock,
   bootstrapWebRuntimeEnvMock,

@@ -1,5 +1,13 @@
 const mocks = vi.hoisted(() => ({
+  connectionAdapter: {
+    getSourceControlReadiness: vi.fn(),
+    requestSourceControlConnection: vi.fn(),
+    supersedeSourceControlConnectionRequests: vi.fn(),
+  },
+  connectionEnabled: vi.fn(async () => false),
+  createConnectionAdapter: vi.fn(),
   acquireTurnLock: vi.fn(),
+  validateConnection: vi.fn(),
   releaseTurnLock: Object.assign(vi.fn(), {
     signal: new AbortController().signal,
     abort: vi.fn(),
@@ -58,6 +66,12 @@ const mocks = vi.hoisted(() => ({
   updateSourceControlComment: vi.fn(),
   linearEmitResponse: vi.fn(),
   createConversationArtifact: vi.fn(),
+}));
+
+vi.mock('./source-control-connection', () => ({
+  validateSourceControlConnectionContinuation: mocks.validateConnection,
+  createSourceControlConnectionAdapter: mocks.createConnectionAdapter,
+  isSourceControlConnectionEnabled: mocks.connectionEnabled,
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -285,6 +299,7 @@ const event = {
 
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
+    mocks.createConnectionAdapter.mockReturnValue(mocks.connectionAdapter);
     vi.clearAllMocks();
     mocks.findWakeupSession.mockResolvedValue({ id: originSessionId });
     mocks.releaseTurnLock.signal = new AbortController().signal;
@@ -3361,6 +3376,113 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
+
+  it('skips a cancelled or revoked source-control request before adapter construction', async () => {
+    mocks.validateConnection.mockResolvedValueOnce(null);
+    expect(
+      await deliverFastAgentParentEvent({
+        parent,
+        event: { type: 'connection_ready', requestId: 'connection-1' },
+      }),
+    ).toBe('skipped');
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it.each(
+    (
+      [
+        'web',
+        'automation',
+        'slack',
+        'discord',
+        'teams',
+        'telegram',
+        'linear',
+        'github',
+        'gitlab',
+        'gitea',
+        'ado',
+        'bitbucket',
+      ] as const
+    ).flatMap((surface) =>
+      [true, false].map((enabled) => ({ surface, enabled })),
+    ),
+  )(
+    'resumes a connection as its persisted actor on $surface with rollout $enabled',
+    async ({ surface, enabled }) => {
+      mocks.connectionEnabled.mockResolvedValueOnce(enabled);
+      mocks.answerQuestion.mockResolvedValueOnce('Connection ready.');
+      if (['github', 'gitlab', 'gitea', 'ado', 'bitbucket'].includes(surface))
+        mocks.buildSourceControlFastDelivery.mockResolvedValueOnce({
+          postComment: vi.fn(),
+          resolveTarget: vi.fn(),
+        });
+      mocks.validateConnection.mockResolvedValueOnce({
+        id: 'connection-1',
+        actorUserId: 'origin-member',
+        turnId: 'original-turn',
+        capability: 'repository',
+        provider: 'github',
+        repositoryFullName: 'acme/web',
+      });
+      const conversation =
+        surface === 'web' || surface === 'automation'
+          ? {
+              surface,
+              workspaceId: 'workspace-1',
+              conversationId: 'conversation-1',
+            }
+          : {
+              surface,
+              workspaceId:
+                surface === 'github' ||
+                surface === 'gitlab' ||
+                surface === 'gitea' ||
+                surface === 'ado' ||
+                surface === 'bitbucket'
+                  ? 'github.com/acme/web'
+                  : 'workspace-1',
+              conversationId:
+                surface === 'github' ||
+                surface === 'gitlab' ||
+                surface === 'gitea' ||
+                surface === 'ado' ||
+                surface === 'bitbucket'
+                  ? 'pull/42'
+                  : 'conversation-1',
+              replyTarget: { channelId: 'pull/42', threadId: 'thread-1' },
+            };
+      await deliverFastAgentParentEvent({
+        parent: { ...parent, conversation },
+        event: { type: 'connection_ready', requestId: 'connection-1' },
+      });
+      expect(mocks.validateConnection).toHaveBeenCalledWith({
+        requestId: 'connection-1',
+        conversationId: parent.sessionId,
+      });
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'origin-member',
+          question: expect.stringContaining('original-turn'),
+          adapter: expect.objectContaining({
+            forceFreshSourceControlDiscovery: true,
+            ...mocks.connectionAdapter,
+            sourceControlConnectionEnabled: enabled,
+          }),
+        }),
+      );
+      const turn = mocks.answerQuestion.mock.calls.at(-1)![0];
+      expect(mocks.connectionEnabled).toHaveBeenCalledWith();
+      expect(mocks.createConnectionAdapter).toHaveBeenCalledWith(
+        {},
+        { requestId: 'connection-1', conversationId: parent.sessionId },
+      );
+      await turn.adapter.resolveMcpServerConfigs();
+      expect(mocks.resolveUserMcpServerConfigs).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'origin-member' }),
+      );
+    },
+  );
 
   it('skips a scheduled wakeup that was cancelled after its occurrence was admitted', async () => {
     mocks.findWakeup.mockResolvedValueOnce({ status: 'cancelled' });

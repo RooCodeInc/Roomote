@@ -15,6 +15,8 @@ import {
 } from '@roomote/communication';
 import {
   buildFastAgentArtifactCreator,
+  createSourceControlConnectionAdapter,
+  isSourceControlConnectionEnabled,
   findFastAgentSessionForProviderMessage,
   persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
@@ -147,6 +149,9 @@ async function processFastAgentReaction(params: {
       ...(durableTurn ? { durableAdmission: { eventId: durableTurn.id } } : {}),
       ...(durableTurn?.resumed ? { resumedAfterInterruption: true } : {}),
       adapter: {
+        ...createSourceControlConnectionAdapter(),
+        sourceControlConnectionEnabled:
+          await isSourceControlConnectionEnabled(),
         ...(durableTurn
           ? {
               requestDurableResume: () =>

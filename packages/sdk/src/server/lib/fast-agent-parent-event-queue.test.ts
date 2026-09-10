@@ -45,6 +45,9 @@ vi.mock('bullmq', () => ({
 }));
 
 vi.mock('@roomote/redis', () => ({ getRedis: vi.fn(() => ({})) }));
+vi.mock('./source-control-connection', () => ({
+  enforceSourceControlConnectionRollout: vi.fn(async () => true),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,

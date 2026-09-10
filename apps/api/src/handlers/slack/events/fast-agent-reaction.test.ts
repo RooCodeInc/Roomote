@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  connectionAdapter: {
+    getSourceControlReadiness: vi.fn(),
+    requestSourceControlConnection: vi.fn(),
+    supersedeSourceControlConnectionRequests: vi.fn(),
+  },
+  connectionEnabled: vi.fn(async () => false),
   acquireLock: vi.fn(),
   answerQuestion: vi.fn(),
   createArtifact: vi.fn(),
@@ -36,6 +42,8 @@ vi.mock('@roomote/communication', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  createSourceControlConnectionAdapter: vi.fn(() => mocks.connectionAdapter),
+  isSourceControlConnectionEnabled: mocks.connectionEnabled,
   findSlackConversationSubjectByUserId: vi.fn(async () => null),
   buildFastAgentArtifactCreator: vi.fn(() => mocks.createArtifact),
   findFastAgentSessionForProviderMessage: mocks.findSession,
@@ -184,69 +192,86 @@ describe('Fast Slack reaction input', () => {
     );
   });
 
-  it('includes the Fast-authored message when a reaction can directly answer it', async () => {
-    const slack = {
-      getMessage: vi.fn(async () => ({
-        text: 'React to this message with your favorite emoji.',
-        thread_ts: '100.000',
-      })),
-      normalizeIncomingText: vi.fn(async () => '@alice'),
-      updateMessage: vi.fn(),
-    };
+  it.each([true, false])(
+    'includes the reaction actor and connection wiring with rollout %s',
+    async (enabled) => {
+      mocks.connectionEnabled.mockResolvedValueOnce(enabled);
+      const slack = {
+        getMessage: vi.fn(async () => ({
+          text: 'React to this message with your favorite emoji.',
+          thread_ts: '100.000',
+        })),
+        normalizeIncomingText: vi.fn(async () => '@alice'),
+        updateMessage: vi.fn(),
+      };
 
-    await expect(
-      maybeRouteFastAgentReaction({
-        context: {
-          teamId: 'T1',
-          slackInstallation: { botUserId: 'UROOMOTE' },
-          slack,
-        } as never,
-        event: {
-          type: 'reaction_added',
-          user: 'UALICE',
-          reaction: 'sparkling_heart',
-          item: { type: 'message', channel: 'C1', ts: '101.000' },
-          event_ts: '102.000',
-        },
-      }),
-    ).resolves.toBe(true);
-
-    await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
-    expect(mocks.createActivity).toHaveBeenCalledWith({
-      slack: expect.anything(),
-      workspaceId: 'T1',
-      channel: 'C1',
-      threadTs: '100.000',
-      title: 'Investigate Slack agent status',
-      resolveTitle: expect.any(Function),
-    });
-    expect(mocks.findSession).toHaveBeenCalledWith({
-      provider: 'slack',
-      workspaceId: 'T1',
-      channelId: 'C1',
-      messageId: '101.000',
-      userId: 'user-1',
-    });
-    expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        currentMessageId: 'slack-reaction:102.000',
-        senderExternalId: 'UALICE',
-        senderDisplayName: '@alice',
-        input: {
-          type: 'reaction',
-          externalInput: expect.objectContaining({
+      await expect(
+        maybeRouteFastAgentReaction({
+          context: {
+            teamId: 'T1',
+            slackInstallation: { botUserId: 'UROOMOTE' },
+            slack,
+          } as never,
+          event: {
             type: 'reaction_added',
-            provider: 'slack',
-            reactions: [{ name: 'sparkling_heart' }],
+            user: 'UALICE',
+            reaction: 'sparkling_heart',
+            item: { type: 'message', channel: 'C1', ts: '101.000' },
+            event_ts: '102.000',
+          },
+        }),
+      ).resolves.toBe(true);
+
+      await vi.waitFor(() =>
+        expect(mocks.answerQuestion).toHaveBeenCalledOnce(),
+      );
+      expect(mocks.connectionEnabled).toHaveBeenCalledWith();
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          senderExternalId: 'UALICE',
+          adapter: expect.objectContaining({
+            ...mocks.connectionAdapter,
+            sourceControlConnectionEnabled: enabled,
           }),
-        },
-        question: expect.stringContaining(
-          'React to this message with your favorite emoji.',
-        ),
-      }),
-    );
-    expect(mocks.postThreadMessage).not.toHaveBeenCalled();
-  });
+        }),
+      );
+      expect(mocks.createActivity).toHaveBeenCalledWith({
+        slack: expect.anything(),
+        workspaceId: 'T1',
+        channel: 'C1',
+        threadTs: '100.000',
+        title: 'Investigate Slack agent status',
+        resolveTitle: expect.any(Function),
+      });
+      expect(mocks.findSession).toHaveBeenCalledWith({
+        provider: 'slack',
+        workspaceId: 'T1',
+        channelId: 'C1',
+        messageId: '101.000',
+        userId: 'user-1',
+      });
+      expect(mocks.answerQuestion).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currentMessageId: 'slack-reaction:102.000',
+          senderExternalId: 'UALICE',
+          senderDisplayName: '@alice',
+          input: {
+            type: 'reaction',
+            externalInput: expect.objectContaining({
+              type: 'reaction_added',
+              provider: 'slack',
+              reactions: [{ name: 'sparkling_heart' }],
+            }),
+          },
+          question: expect.stringContaining(
+            'React to this message with your favorite emoji.',
+          ),
+        }),
+      );
+      expect(mocks.postThreadMessage).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ['', true],

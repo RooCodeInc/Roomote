@@ -63,6 +63,7 @@ type FastAgentIntegrationCandidate = Omit<FastAgentIntegration, 'tools'> & {
 type BrokerContext = {
   userId: string;
   apiBaseUrl?: string;
+  forceFreshDiscovery?: boolean;
 };
 
 type IntegrationAuditContext = BrokerContext & {
@@ -173,8 +174,12 @@ async function listCachedIntegrationTools(options: {
   cacheKey: string;
   url: string;
   headers: Record<string, string>;
+  forceFreshDiscovery?: boolean;
 }): Promise<McpToolDefinition[]> {
-  const { cacheKey, ...clientOptions } = options;
+  const { cacheKey, forceFreshDiscovery, ...clientOptions } = options;
+  // Only this actor/endpoint is invalidated. A resumed connection must not
+  // execute against a stale catalog, including after a failed fresh lookup.
+  if (forceFreshDiscovery) integrationToolCache.delete(cacheKey);
   const cached = integrationToolCache.get(cacheKey);
   if (cached) {
     // Re-insert so eviction below is least-recently-used rather than oldest.
@@ -504,6 +509,7 @@ export async function listFastAgentIntegrations(
           cacheKey: `${context.userId}:${integration.endpoint!.url}`,
           url: integration.endpoint!.url,
           headers: integration.endpoint!.headers,
+          forceFreshDiscovery: context.forceFreshDiscovery,
         })
       )
         .filter((tool) => !integration.disabledTools.has(tool.name))

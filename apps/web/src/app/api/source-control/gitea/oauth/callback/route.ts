@@ -1,4 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server';
+import { isConnectionState } from '@/lib/server/source-control-connection-state';
+import { connectionOAuthCallback } from '@/lib/server/source-control-connection-callback';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import {
@@ -24,6 +26,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
   const callbackOrigin = new URL(getCallbackHost(request)).origin;
+  if (isConnectionState(request.nextUrl.searchParams.get('state')))
+    return connectionOAuthCallback(request, 'gitea', callbackOrigin);
   const { setupOpen } = await getSetupBootstrapState();
   const returnTarget = resolveSourceControlOAuthReturnTarget({
     requestedTarget: request.cookies.get(

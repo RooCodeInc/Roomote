@@ -44,6 +44,9 @@ vi.mock('@/lib/server/auth-context', () => ({ authorize: authorizeMock }));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn() }),
   useSearchParams: () => new URLSearchParams(),
+  redirect: (target: string) => {
+    throw new Error(`NEXT_REDIRECT:${target}`);
+  },
   notFound: () => {
     throw new Error('NEXT_NOT_FOUND');
   },
@@ -107,6 +110,20 @@ vi.mock('@/components/sessions/SessionViewers', () => ({
 }));
 
 import SessionDetailPage, { generateMetadata } from './page';
+
+it('preserves a connection request when an unauthenticated visitor opens its Session', async () => {
+  authorizeMock.mockResolvedValue({ success: false });
+  const sessionId = '11111111-1111-4111-8111-111111111111';
+  const connectionRequest = '22222222-2222-4222-8222-222222222222';
+  await expect(
+    SessionDetailPage({
+      params: Promise.resolve({ sessionId }),
+      searchParams: Promise.resolve({ connectionRequest }),
+    }),
+  ).rejects.toThrow(
+    `NEXT_REDIRECT:/sign-in?${new URLSearchParams({ redirect_url: `/sessions/${sessionId}?connectionRequest=${connectionRequest}` })}`,
+  );
+});
 
 describe('Session detail page', () => {
   beforeEach(() => {
@@ -367,9 +384,7 @@ describe('Session detail page', () => {
     expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'initialConversationResponding',
     );
-    expect(transcriptMock.mock.calls[0]?.[0]).not.toHaveProperty(
-      'timelineExtras',
-    );
+    expect(transcriptMock.mock.calls[0]?.[0]).toHaveProperty('timelineExtras');
     expect(transcriptMock.mock.calls[0]?.[0]).toHaveProperty('headerExtras');
     const headerExtras = transcriptMock.mock.calls[0]?.[0].headerExtras;
     expect(isValidElement(headerExtras)).toBe(true);

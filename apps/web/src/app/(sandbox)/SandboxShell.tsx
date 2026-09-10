@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
@@ -29,6 +29,9 @@ export function SandboxShell({
   const router = useRouter();
   const { authStatus, isSignedIn, user } = useUser();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const isConnectionReturn =
+    pathname.startsWith('/sessions/') && searchParams.has('connectionRequest');
   const shouldRedirectToSignIn = requireAuth && authStatus === 'signed-out';
 
   useRedirectToSignIn(shouldRedirectToSignIn);
@@ -88,6 +91,9 @@ export function SandboxShell({
   );
 
   useEffect(() => {
+    // A handoff can be opened by an admin while setup changes in another tab.
+    // The request view still performs its own live authorization.
+    if (isConnectionReturn) return;
     // Wait for the setup-session lookup before routing. Otherwise a direct
     // visit to the in-progress setup session can briefly see no session ID
     // and be redirected to /setup before the lookup resolves.
@@ -97,6 +103,7 @@ export function SandboxShell({
       router.replace('/onboarding');
     }
   }, [
+    isConnectionReturn,
     isAllowedSetupSession,
     isOnboardingError,
     isSetupSessionLoading,

@@ -1,4 +1,7 @@
 import { NextRequest } from 'next/server';
+vi.mock('@/lib/server/source-control-connection-callback', () => ({
+  connectionOAuthCallback: vi.fn(),
+}));
 
 const {
   authorizeMock,

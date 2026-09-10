@@ -604,6 +604,24 @@ export default {
 }
 `,
 
+    [FAST_AGENT_NATIVE_TOOL_NAMES.requestSourceControlConnection]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Request source-control access for the current authorized work. Available in web, Slack, Discord, Teams and Telegram Sessions. Returns a trusted connection link and ends this turn pending when access is missing. Never collect credentials in chat. Clarify an unknown repository instead of guessing a provider.",
+  args: {
+    target: z.object({
+      provider: z.enum(["github", "gitlab", "gitea", "ado", "bitbucket"]).optional(),
+      repositoryFullName: z.string().min(1).max(500).optional(),
+      environmentId: z.string().min(1).max(200).optional(),
+      capability: z.enum(["repository", "source_control_tool"]),
+    }),
+  },
+  execute: (args, context) => invoke("request_source_control_connection", args, context),
+}
+`,
+
     [FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput]: String.raw`
 import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
@@ -1336,6 +1354,7 @@ export async function getFastAgentNativeToolRuntime(
   integrations: FastAgentIntegration[],
   options: {
     surface?: FastAgentSurface;
+    sourceControlConnectionEnabled?: boolean;
     schedulingProgressiveDisclosureEnabled?: boolean;
   } = {},
 ): Promise<FastAgentNativeToolRuntime> {
@@ -1393,6 +1412,8 @@ export async function getFastAgentNativeToolRuntime(
             nativeIntegrations.map((integration) => integration.id),
             {
               surface: options.surface ?? 'web',
+              sourceControlConnectionEnabled:
+                options.sourceControlConnectionEnabled,
               schedulingProgressiveDisclosureEnabled:
                 options.schedulingProgressiveDisclosureEnabled,
             },

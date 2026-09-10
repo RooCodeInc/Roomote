@@ -788,6 +788,12 @@ async function runFastAgentSurfaceReply(
           }
         : {}),
       adapter: {
+        ...(
+          await import('./source-control-connection')
+        ).createSourceControlConnectionAdapter(),
+        sourceControlConnectionEnabled: await (
+          await import('./source-control-connection')
+        ).isSourceControlConnectionEnabled(),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: params.userId,

@@ -3173,9 +3173,78 @@ export const fastAgentConversations = pgTable(
   ],
 );
 
+/** Navigation-only source-control handoffs. Additive and ignored by N-1 code. */
+export const sourceControlConnectionRequests = pgTable(
+  'source_control_connection_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    actorUserId: text('actor_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    turnId: text('turn_id').notNull(),
+    tool: jsonb('tool').$type<{ integrationId: string; toolName: string }>(),
+    provider: text('provider').$type<SourceControlProvider>(),
+    repositoryFullName: text('repository_full_name'),
+    environmentId: text('environment_id'),
+    capability: text('capability')
+      .notNull()
+      .$type<'repository' | 'source_control_tool'>(),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<
+        | 'pending'
+        | 'ready'
+        | 'continued'
+        | 'cancelled'
+        | 'expired'
+        | 'superseded'
+      >(),
+    reason: text('reason').notNull(),
+    revision: integer('revision').notNull().default(0),
+    syncAttempt: jsonb('sync_attempt').$type<{
+      provider: SourceControlProvider;
+      startedAt: string;
+      state: 'authorizing' | 'syncing' | 'pending' | 'failed';
+      successfulSync?: { startedAt: string; repositoryFullNames: string[] };
+    }>(),
+    completedByUserId: text('completed_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    continuationEventKey: text('continuation_event_key').unique(),
+    executionStartedAt: timestamp('execution_started_at'),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('source_control_connection_requests_active_unique')
+      .on(table.conversationId)
+      .where(sql`${table.status} in ('pending', 'ready')`),
+    index('source_control_connection_requests_pending_idx').on(
+      table.provider,
+      table.status,
+      table.expiresAt,
+    ),
+    check(
+      'source_control_connection_requests_status_check',
+      sql`${table.status} in ('pending', 'ready', 'continued', 'cancelled', 'expired', 'superseded')`,
+    ),
+    check(
+      'source_control_connection_requests_capability_check',
+      sql`${table.capability} in ('repository', 'source_control_tool')`,
+    ),
+    check(
+      'source_control_connection_requests_provider_check',
+      sql`${table.provider} is null or ${table.provider} in ('github', 'gitlab', 'gitea', 'ado', 'bitbucket')`,
+    ),
+  ],
+);
+
 /**
- * fast_agent_parent_events
- *
  * Durable admission queue for events entering a Fast conversation while its
  * turn lock is busy. Human follow-ups may be injected into the lock owner's
  * native OpenCode generation; ambient and recovery events are drained later
