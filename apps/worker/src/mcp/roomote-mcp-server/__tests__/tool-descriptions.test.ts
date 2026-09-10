@@ -1424,6 +1424,52 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('exposes and forwards close pull request actions', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          success: true,
+          action: 'close_pull_request',
+          provider: 'github',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          number: 12,
+          applied: true,
+          warnings: [],
+        }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const sourceControlTool = getRegisteredTool(
+      registeredTools,
+      'manage_source_control',
+    );
+
+    await sourceControlTool.handler?.({
+      action: 'close_pull_request',
+      repositoryFullName: 'RooCodeInc/Roomote',
+      prNumber: 12,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/tasks/task_123/source_control',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'close_pull_request',
+          repositoryFullName: 'RooCodeInc/Roomote',
+          prNumber: 12,
+        }),
+      }),
+    );
+  });
+
   it('forwards reviewId from manage_source_control tool params', async () => {
     vi.stubGlobal(
       'fetch',

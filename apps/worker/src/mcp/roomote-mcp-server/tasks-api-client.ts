@@ -485,14 +485,14 @@ export async function readSourceControl(
 }
 
 /**
- * Write review interactions (replies, comments, thread resolution, reviews)
- * through the platform API.
+ * Write pull request state and review interactions through the platform API.
  */
 export async function writeSourceControl(
   config: RoomoteConfig,
   taskId: string,
   params: {
     action:
+      | 'close_pull_request'
       | 'reply_to_pull_request_comment'
       | 'create_pull_request_comment'
       | 'create_pull_request_review_comment'
