@@ -768,7 +768,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'the runtime silently ensures this conversation has exactly one internal session-wide one-shot check',
     );
     expect(prompt).toContain('Do not create another wakeup for this purpose');
-    expect(prompt).not.toContain('and internal true');
+    expect(prompt).toContain('passing "internal": true');
     expect(prompt).toContain(
       'not external-process monitoring, so do not ask for monitoring consent',
     );
@@ -847,6 +847,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'ensure exactly one equivalent next one-shot check exists for "in 10m"',
     );
+    expect(prompt).toContain('passing "internal": true');
     expect(prompt).toContain('If no task remains running, do not rearm');
     expect(prompt).toContain('otherwise call "ignore_event"');
     expect(prompt).toContain(

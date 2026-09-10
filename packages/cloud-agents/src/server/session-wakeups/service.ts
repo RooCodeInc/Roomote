@@ -228,6 +228,7 @@ export async function handleManageWakeupsToolCall(
           prompt: input.prompt,
           schedule: input.schedule,
           reportPolicy: input.reportPolicy ?? null,
+          internal: input.internal ?? false,
         });
         return {
           success: true,
