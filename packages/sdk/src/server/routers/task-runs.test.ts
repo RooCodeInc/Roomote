@@ -452,11 +452,7 @@ describe('taskRunsRouter queue message guards', () => {
         prRepo: null,
         prNumber: null,
       });
-      const navigationUrl =
-        count === 1
-          ? 'https://app.example.com/sessions/owner?task=task-1'
-          : 'https://app.example.com/tasks';
-      const footer = `<${navigationUrl}|${count === 0 ? 'No running tasks' : `${count} running task${count === 1 ? '' : 's'}`}> · <https://preview.example.com|Live preview> · <https://app.example.com/sessions/owner|Open in Roomote>`;
+      const footer = `Reply anytime${count === 1 ? ' · 1 task running' : count >= 2 ? ` · ${count} tasks running` : ''} · <https://app.example.com/sessions/owner|Open in Roomote>`;
       mockGetSlackThreadFooterText.mockResolvedValue(footer);
 
       await expect(

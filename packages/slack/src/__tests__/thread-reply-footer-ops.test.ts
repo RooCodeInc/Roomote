@@ -60,7 +60,7 @@ describe('thread-reply-footer-ops', () => {
       livePreviewUrl: null,
     });
     mockBuildFooterText.mockReturnValue(
-      '_Working on <https://github.com/o/r/pull/7|PR #7>, reply or use the <https://app.example.com/task/t1|web app>._',
+      'Reply anytime · <https://github.com/o/r/pull/7|PR #7> · <https://app.example.com/task/t1|Open in Roomote>',
     );
   });
 
@@ -79,7 +79,31 @@ describe('thread-reply-footer-ops', () => {
         elements: [
           {
             type: 'mrkdwn',
-            text: '_Working on <https://example.com|PR #1>, reply or use the <https://app|web app>._',
+            text: 'Reply anytime · 0 tasks running · <https://app|Open in Roomote>',
+          },
+        ],
+      }),
+    ).toBe(false);
+
+    expect(
+      isSlackThreadReplyFooterBlock({
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: 'Reply anytime · 1 task running · <https://app|Open in Roomote>',
+          },
+        ],
+      }),
+    ).toBe(true);
+
+    expect(
+      isSlackThreadReplyFooterBlock({
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: 'Reply anytime · 2 tasks running · <https://example.com|PR #1> · <https://app|Open in Roomote>',
           },
         ],
       }),

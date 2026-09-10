@@ -96,7 +96,7 @@ describe('Session running-task resolution with persisted runs', () => {
     expect(
       buildThreadReplyFooterText({ taskUrl: taskUrl.toString(), ...context }),
     ).toBe(
-      `[1 running task](${selected}) · [Open in Roomote](${context.webAppUrl}${taskUrl.search}&task=${second.id})`,
+      `Reply anytime · 1 task running · [Open in Roomote](${context.webAppUrl}${taskUrl.search})`,
     );
     expect(
       (

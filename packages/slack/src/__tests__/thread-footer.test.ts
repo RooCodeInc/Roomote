@@ -78,7 +78,7 @@ describe('getSlackThreadFooterText', () => {
         },
       }),
     ).toBe(
-      '<https://app.example.com/sessions/owner?task=task-1|1 running task> · <https://app.example.com/sessions/owner?utm_source=slack&task=task-1|Open in Roomote>',
+      'Reply anytime · 1 task running · <https://app.example.com/sessions/owner?utm_source=slack|Open in Roomote>',
     );
   });
 
@@ -112,7 +112,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '<https://github.com/roomote/app/pull/4321|PR #4321> · <https://app.example.com/task/task-1|Open in Roomote>',
+      'Reply anytime · <https://github.com/roomote/app/pull/4321|PR #4321> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -132,7 +132,9 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe('<https://app.example.com/task/task-1|Open in Roomote>');
+    ).resolves.toBe(
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
+    );
   });
 
   it('falls back to the task run PR when no linked task PR row exists', async () => {
@@ -146,11 +148,11 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '<https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
+      'Reply anytime · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
-  it('includes the live preview link alongside the PR for environment-backed tasks', async () => {
+  it('omits the live preview chunk alongside a PR', async () => {
     mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
@@ -168,11 +170,11 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '<https://task-1-web.preview.example.com/auth/dev-login|Live preview> · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
+      'Reply anytime · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
-  it('includes the live preview link without a PR for environment-backed tasks', async () => {
+  it('omits the live preview chunk without a PR', async () => {
     mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
@@ -190,7 +192,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '<https://task-1-web.preview.example.com/auth/dev-login|Live preview> · <https://app.example.com/task/task-1|Open in Roomote>',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -220,7 +222,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '<https://task-1-my-app.preview.example.com/?path=/story/example|Live preview> · <https://app.example.com/task/task-1|Open in Roomote>',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -242,7 +244,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Open in Roomote>',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -265,7 +267,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '<https://task-1-web.preview.example.com|Live preview> · <https://app.example.com/task/task-1|Open in Roomote>',
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
     );
   });
 
@@ -284,7 +286,9 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe('<https://app.example.com/task/task-1|Open in Roomote>');
+    ).resolves.toBe(
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
+    );
   });
 
   it('omits the live preview link for repo-only tasks without an environment', async () => {
@@ -303,7 +307,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '<https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
+      'Reply anytime · <https://github.com/roomote/app/pull/1234|PR #1234> · <https://app.example.com/task/task-1|Open in Roomote>',
     );
 
     expect(environmentFindFirstMock).not.toHaveBeenCalled();
@@ -331,6 +335,8 @@ describe('getSlackThreadFooterText', () => {
         channelId: 'C123',
         threadTs: '111.000',
       }),
-    ).resolves.toBe('<https://app.example.com/task/task-1|Open in Roomote>');
+    ).resolves.toBe(
+      'Reply anytime · <https://app.example.com/task/task-1|Open in Roomote>',
+    );
   });
 });

@@ -68,7 +68,7 @@ describe('persisted latest-run lifecycle reaches the current carrier without ano
   });
 
   it.each(['task', 'sessions'])(
-    'refreshes %s navigation through start, finish, fail, cancel, wait and a superseding run',
+    'refreshes %s navigation through lifecycle states and 2 -> 1 -> 0 running tasks',
     async (navigation) => {
       const session = await sessionFactory.create();
       sessionIds.push(session.id);
@@ -106,8 +106,12 @@ describe('persisted latest-run lifecycle reaches the current carrier without ano
           threadId: 'T',
           edit,
         });
-      await tick();
-      expect(edit.mock.calls.at(-1)?.[1]).toContain('[No running tasks]');
+      await expect(tick()).resolves.toBe('gone');
+      expect(edit.mock.calls.at(-1)?.[1]).toContain(
+        '-# Reply anytime · [Open in Roomote]',
+      );
+      expect(edit.mock.calls.at(-1)?.[1]).not.toContain('tasks running');
+      expect(edit.mock.calls.at(-1)?.[1]).toContain('> Quote\n\nOriginal body');
       for (const status of [
         RunStatus.Running,
         RunStatus.Completed,
@@ -126,13 +130,14 @@ describe('persisted latest-run lifecycle reaches the current carrier without ano
               status === RunStatus.Idle ? 'waiting_for_prompt' : 'running',
           })
           .where(eq(taskRuns.id, latest.id));
-        await tick();
-        expect(edit.mock.calls.at(-1)?.[1]).toContain(
-          status === RunStatus.Running
-            ? '[1 running task]'
-            : '[No running tasks]',
+        await expect(tick()).resolves.toBe(
+          status === RunStatus.Running ? 'active' : 'gone',
         );
-        expect(edit.mock.calls.at(-1)?.[0].messageId).toBe('current');
+        if (status === RunStatus.Running) {
+          expect(edit.mock.calls.at(-1)?.[1]).toContain('1 task running');
+        } else {
+          expect(edit.mock.calls.at(-1)?.[1]).not.toContain('task running');
+        }
         expect(edit.mock.calls.at(-1)?.[1]).toContain(
           '> Quote\n\nOriginal body',
         );
@@ -142,16 +147,48 @@ describe('persisted latest-run lifecycle reaches the current carrier without ano
         .set({ status: RunStatus.Running, taskPhase: 'running' })
         .where(eq(taskRuns.id, latest.id));
       await tick();
-      await runFactory.create({
+      const superseding = await runFactory.create({
         taskId: task.id,
         status: RunStatus.Idle,
         taskPhase: 'waiting_for_prompt',
       });
-      await tick();
-      expect(edit.mock.calls.at(-1)?.[1]).toContain('[No running tasks]');
-      const count = edit.mock.calls.length;
-      await tick();
-      expect(edit).toHaveBeenCalledTimes(count);
+      await expect(tick()).resolves.toBe('gone');
+
+      const secondTask = await taskFactory.create({ state: 'active' });
+      taskIds.push(secondTask.id);
+      await db.insert(sessionTasks).values({
+        sessionId: session.id,
+        taskId: secondTask.id,
+        origin: 'fast_delegation',
+      });
+      const secondRun = await runFactory.create({
+        taskId: secondTask.id,
+        status: RunStatus.Running,
+      });
+      await db
+        .update(taskRuns)
+        .set({ status: RunStatus.Running, taskPhase: 'running' })
+        .where(eq(taskRuns.id, superseding.id));
+
+      await expect(tick()).resolves.toBe('active');
+      expect(edit.mock.calls.at(-1)?.[1]).toContain('2 tasks running');
+      expect(edit.mock.calls.at(-1)?.[1]).toContain('> Quote\n\nOriginal body');
+
+      await db
+        .update(taskRuns)
+        .set({ status: RunStatus.Completed })
+        .where(eq(taskRuns.id, superseding.id));
+      await expect(tick()).resolves.toBe('active');
+      expect(edit.mock.calls.at(-1)?.[1]).toContain('1 task running');
+      expect(edit.mock.calls.at(-1)?.[0].messageId).toBe('current');
+
+      await db
+        .update(taskRuns)
+        .set({ status: RunStatus.Completed })
+        .where(eq(taskRuns.id, secondRun.id));
+      await expect(tick()).resolves.toBe('gone');
+      expect(edit.mock.calls.at(-1)?.[1]).not.toContain('task running');
+      expect(edit.mock.calls.at(-1)?.[1]).toContain('> Quote\n\nOriginal body');
     },
   );
 });

@@ -63,6 +63,14 @@ describe('buildFastSessionReplyFooterText', () => {
       expectedPrLink: '[PR #123](https://github.com/roomote/roomote/pull/123)',
       expectedWebLink: '[Open in Roomote](',
     },
+    ...(['github', 'gitlab', 'bitbucket', 'ado', 'gitea'] as const).map(
+      (provider) => ({
+        provider,
+        expectedPrLink:
+          '[PR #123](https://github.com/roomote/roomote/pull/123)',
+        expectedWebLink: '[Open in Roomote](',
+      }),
+    ),
   ])(
     'includes a linked pull request in the $provider footer',
     ({ provider, expectedPrLink, expectedWebLink }) => {
@@ -77,10 +85,13 @@ describe('buildFastSessionReplyFooterText', () => {
 
       expect(footer).toContain(expectedPrLink);
       expect(footer).toContain(expectedWebLink);
+      expect(footer).toContain('Reply anytime · ');
+      expect(footer).not.toContain('Live preview');
+      expect(footer).not.toMatch(/^_/);
     },
   );
 
-  it('includes multiple pull requests and a live preview', () => {
+  it('groups multiple pull requests and omits the preview chunk', () => {
     const footer = buildFastSessionReplyFooterText({
       provider: 'discord',
       sessionId: '11111111-1111-4111-8111-111111111111',
@@ -98,8 +109,9 @@ describe('buildFastSessionReplyFooterText', () => {
     });
 
     expect(footer).toContain(
-      '[Live preview](https://preview.roomote.dev) · [PR #123](https://github.com/roomote/roomote/pull/123) · [PR #456](https://github.com/roomote/roomote/pull/456)',
+      'Reply anytime · [PR #123](https://github.com/roomote/roomote/pull/123), [PR #456](https://github.com/roomote/roomote/pull/456) · [Open in Roomote]',
     );
+    expect(footer).not.toContain('Live preview');
   });
 
   it('renders the GitHub footer as small subtext without changing its content', () => {
@@ -116,7 +128,7 @@ describe('buildFastSessionReplyFooterText', () => {
         livePreviewUrl: 'https://preview.roomote.dev',
       }),
     ).toBe(
-      `<sub>[Live preview](https://preview.roomote.dev) · [PR #123](https://github.com/roomote/roomote/pull/123) · [Open in Roomote](${buildFastSessionUrl('github', sessionId)})</sub>`,
+      `<sub>Reply anytime · [PR #123](https://github.com/roomote/roomote/pull/123) · [Open in Roomote](${buildFastSessionUrl('github', sessionId)})</sub>`,
     );
   });
 
@@ -149,33 +161,27 @@ describe('buildFastSessionReplyFooterText', () => {
     'keeps task selection out of the %s transcript link',
     (provider) => {
       const taskUrl = 'https://roomote.example/sessions/owner?task=task-1';
-      const footer = buildFastSessionReplyFooterText({
-        provider,
-        sessionId: 'conversation',
-        runningTasks: { count: 1, url: taskUrl },
-      });
-      expect(footer).toContain(
-        provider === 'slack'
-          ? `<${taskUrl}|1 running task>`
-          : `[1 running task](${taskUrl})`,
-      );
-      expect(
-        new URL(buildFastSessionUrl(provider, 'conversation')).searchParams.has(
-          'task',
-        ),
-      ).toBe(false);
-      expect(footer).toContain(
-        provider === 'slack' ? '|Open in Roomote>' : '[Open in Roomote](',
-      );
-      expect(footer).toMatch(
-        provider === 'github'
-          ? /^<sub>/
-          : provider === 'discord'
-            ? /^-# /
-            : provider === 'slack'
-              ? /^</
-              : /^\[/,
-      );
+      for (const [count, taskChunk] of [
+        [0, ''],
+        [1, ' · 1 task running'],
+        [3, ' · 3 tasks running'],
+      ] as const) {
+        const footer = buildFastSessionReplyFooterText({
+          provider,
+          sessionId: 'conversation',
+          runningTasks: { count, url: taskUrl },
+        });
+        expect(footer).toContain(`Reply anytime${taskChunk} · `);
+        expect(
+          new URL(
+            buildFastSessionUrl(provider, 'conversation'),
+          ).searchParams.has('task'),
+        ).toBe(false);
+        expect(footer).toContain(
+          provider === 'slack' ? '|Open in Roomote>' : '[Open in Roomote](',
+        );
+        expect(footer).not.toMatch(/^_/);
+      }
     },
   );
 });

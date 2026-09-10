@@ -297,7 +297,6 @@ export type ThreadReplyRunningTasks = {
 export function buildThreadReplyFooterText({
   taskUrl,
   linkedPrs,
-  livePreviewUrl,
   runningTasks,
   webAppUrl,
   formatLink = formatMarkdownLink,
@@ -311,34 +310,26 @@ export function buildThreadReplyFooterText({
   formatLink?: LinkFormatter;
   formatFooterText?: (text: string) => string;
 }): string {
-  const items: string[] = [];
-  if (runningTasks) {
+  const items = ['Reply anytime'];
+  if (runningTasks && runningTasks.count > 0) {
     items.push(
-      formatLink(
-        runningTasks.count === 0
-          ? 'No running tasks'
-          : `${runningTasks.count} running task${runningTasks.count === 1 ? '' : 's'}`,
-        runningTasks.url,
-      ),
+      runningTasks.count === 1
+        ? '1 task running'
+        : `${runningTasks.count} tasks running`,
     );
   }
-  if (livePreviewUrl) items.push(formatLink('Live preview', livePreviewUrl));
-  items.push(
-    ...(linkedPrs ?? []).map((pr) =>
-      formatLink(`PR #${pr.prNumber}`, pr.prUrl),
-    ),
+  const prLinks = (linkedPrs ?? []).map((pr) =>
+    formatLink(`PR #${pr.prNumber}`, pr.prUrl),
   );
-  // Default task navigation opens the owning Session with that task selected;
-  // any other caller-owned destination (setup, a specific artifact) is kept.
-  let webUrl = new URL(taskUrl);
-  const ownTaskId = /^\/task\/([^/]+)$/.exec(webUrl.pathname)?.[1];
-  if (webAppUrl && ownTaskId) {
-    const sessionUrl = new URL(webAppUrl);
-    for (const [key, value] of webUrl.searchParams) {
-      if (key.startsWith('utm_')) sessionUrl.searchParams.set(key, value);
+  if (prLinks.length > 0) items.push(prLinks.join(', '));
+
+  const taskNavigationUrl = new URL(taskUrl);
+  let webUrl = taskNavigationUrl;
+  if (webAppUrl && /^\/task\/[^/]+$/.test(taskNavigationUrl.pathname)) {
+    webUrl = new URL(webAppUrl);
+    for (const [key, value] of taskNavigationUrl.searchParams) {
+      if (key.startsWith('utm_')) webUrl.searchParams.set(key, value);
     }
-    sessionUrl.searchParams.set('task', ownTaskId);
-    webUrl = sessionUrl;
   }
   items.push(formatLink('Open in Roomote', webUrl.toString()));
   return formatFooterText(items.join(' · '));

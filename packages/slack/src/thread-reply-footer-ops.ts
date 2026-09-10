@@ -30,8 +30,13 @@ export const THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE =
   'Timed out acquiring thread reply footer lock';
 
 function isSlackThreadReplyFooterText(text: string): boolean {
-  return /^_(?:Reply(?: with @-mention)? or use the <[^>]+\|web app>\.|Working on (?:<[^>]+\|PR(?:\s+#)?\d+>(?:, <[^>]+\|live preview>)?|a <[^>]+\|live preview>), reply(?: with @-mention)? or use the <[^>]+\|web app>\.)_$/.test(
-    text,
+  return (
+    /^Reply anytime(?: · (?:1 task|(?:[2-9]|\d{2,}) tasks) running)?(?: · <[^>]+\|PR #\d+>(?:, <[^>]+\|PR #\d+>)*)? · <[^>]+\|Open in Roomote>$/.test(
+      text,
+    ) ||
+    /^_(?:Reply(?: with @-mention)? or use the <[^>]+\|web app>\.|Working on (?:<[^>]+\|PR(?:\s+#)?\d+>(?:, <[^>]+\|live preview>)?|a <[^>]+\|live preview>), reply(?: with @-mention)? or use the <[^>]+\|web app>\.)_$/.test(
+      text,
+    )
   );
 }
 
