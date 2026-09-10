@@ -1,7 +1,7 @@
 import type { CommunicationProvider } from '@roomote/types';
 import {
   isCiFailureTriageRepositoryEnabled,
-  resolveCiFailureTriageRepositoryDestination,
+  resolveAutomationRepositoryDestination,
 } from '../ci-failure-triage-routing';
 
 const { getRuntime, discord, teams, telegram, fallback } = vi.hoisted(() => ({
@@ -43,7 +43,7 @@ vi.mock('../destination', () => ({
 const repositoryId = '10000000-0000-4000-8000-000000000001';
 function params(
   provider: CommunicationProvider,
-): Parameters<typeof resolveCiFailureTriageRepositoryDestination>[0] {
+): Parameters<typeof resolveAutomationRepositoryDestination>[0] {
   return {
     repositoryId,
     connectedProviders: [provider],
@@ -77,19 +77,19 @@ beforeEach(() => {
 it('revalidates exact Discord guild and channel, never falling back on stale ownership', async () => {
   discord.mockResolvedValue({ guildId: 'other' });
   expect(
-    await resolveCiFailureTriageRepositoryDestination(params('discord')),
+    await resolveAutomationRepositoryDestination(params('discord')),
   ).toBeNull();
   expect(discord).toHaveBeenCalledWith('channel');
   discord.mockResolvedValue({ guildId: 'owner' });
   expect(
-    await resolveCiFailureTriageRepositoryDestination(params('discord')),
+    await resolveAutomationRepositoryDestination(params('discord')),
   ).toMatchObject({ provider: 'discord', channelId: 'channel' });
   expect(fallback).not.toHaveBeenCalled();
 });
 it('resolves Teams only against the exact active tenant and conversation', async () => {
   teams.mockResolvedValue([{ serviceUrl: 'https://teams.example' }]);
   expect(
-    await resolveCiFailureTriageRepositoryDestination(params('teams')),
+    await resolveAutomationRepositoryDestination(params('teams')),
   ).toMatchObject({ provider: 'teams', serviceUrl: 'https://teams.example' });
   expect(teams).toHaveBeenCalledWith({
     where: [
@@ -105,7 +105,7 @@ it('resolves Teams only against the exact active tenant and conversation', async
   ]) {
     teams.mockResolvedValue(rows);
     expect(
-      await resolveCiFailureTriageRepositoryDestination(params('teams')),
+      await resolveAutomationRepositoryDestination(params('teams')),
     ).toBeNull();
   }
   expect(fallback).not.toHaveBeenCalled();
@@ -113,11 +113,11 @@ it('resolves Teams only against the exact active tenant and conversation', async
 it('requires an exact verified Telegram workspace/chat record', async () => {
   telegram.mockResolvedValue(null);
   expect(
-    await resolveCiFailureTriageRepositoryDestination(params('telegram')),
+    await resolveAutomationRepositoryDestination(params('telegram')),
   ).toBeNull();
   telegram.mockResolvedValue({ id: 'known' });
   expect(
-    await resolveCiFailureTriageRepositoryDestination(params('telegram')),
+    await resolveAutomationRepositoryDestination(params('telegram')),
   ).toMatchObject({ provider: 'telegram', channelId: 'channel' });
   expect(telegram).toHaveBeenCalledWith({
     where: [
@@ -131,7 +131,7 @@ it('requires an exact verified Telegram workspace/chat record', async () => {
 });
 it('does not fall back or query disconnected override providers', async () => {
   expect(
-    await resolveCiFailureTriageRepositoryDestination({
+    await resolveAutomationRepositoryDestination({
       ...params('discord'),
       connectedProviders: [],
     }),

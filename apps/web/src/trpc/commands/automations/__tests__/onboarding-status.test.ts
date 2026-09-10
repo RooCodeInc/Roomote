@@ -1,15 +1,11 @@
-import {
-  automations,
-  db,
-  deploymentSettings,
-  inArray,
-  slackInstallations,
-  upsertAutomation,
-} from '@roomote/db/server';
-import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
+const mockGetBackgroundAgentSettingsForDeployment = vi.hoisted(() => vi.fn());
+
+vi.mock('@roomote/db/server', () => ({
+  getBackgroundAgentSettingsForDeployment:
+    mockGetBackgroundAgentSettingsForDeployment,
+}));
 
 import type { UserAuthSuccess } from '@/types';
-import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { getAutomationOnboardingStatusCommand } from '../onboarding-status';
 
@@ -35,18 +31,14 @@ const adminAuth: UserAuthSuccess = {
   },
 };
 
-registerExclusiveAutomationSettingsDatabaseLock();
-
 describe('getAutomationOnboardingStatusCommand', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
-  beforeEach(async () => {
-    // Internal automation rows are referenced by other suites' task fixtures.
-    await db
-      .delete(automations)
-      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
-    await db.delete(deploymentSettings);
-    await db.delete(slackInstallations);
+  beforeEach(() => {
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'off',
+    });
 
     fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -57,19 +49,18 @@ describe('getAutomationOnboardingStatusCommand', () => {
     fetchSpy.mockRestore();
   });
 
-  it('reports the default manager stats automation without calling Slack', async () => {
+  it('reports no enabled automations on a fresh deployment without calling Slack', async () => {
     await expect(
       getAutomationOnboardingStatusCommand(adminAuth),
-    ).resolves.toEqual({ hasEnabledAutomations: true });
+    ).resolves.toEqual({ hasEnabledAutomations: false });
 
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('reports enabled automations once one is scheduled', async () => {
-    await upsertAutomation(db, {
-      key: 'manager_stats',
-      enabled: true,
-      schedule: { mode: 'weekly' },
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'weekly',
     });
 
     await expect(
@@ -80,11 +71,9 @@ describe('getAutomationOnboardingStatusCommand', () => {
   });
 
   it('still reports nothing enabled when an automation exists but is off', async () => {
-    // Override the seeded manager-stats default so this case is fully off.
-    await upsertAutomation(db, {
-      key: 'manager_stats',
-      enabled: false,
-      schedule: { mode: 'weekly' },
+    mockGetBackgroundAgentSettingsForDeployment.mockResolvedValue({
+      providerUsageLimitFrequency: 'off',
+      managerStatsFrequency: 'off',
     });
 
     await expect(

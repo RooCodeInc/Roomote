@@ -45,7 +45,7 @@ import {
   listConnectedCommunicationProviders,
   type ResolvedAutomationDestination,
 } from './destination';
-import { resolveCiFailureTriageRepositoryDestination } from './ci-failure-triage-routing';
+import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
 import { findEnvironmentIdForRepositoryId } from './github-deployment-scope';
 import { finalizeAutomationLaunch } from './post-launch-finalization';
 
@@ -288,7 +288,7 @@ export async function launchCiFailureTriageForFailedRun(
   }
 
   const connectedProviders = await listConnectedCommunicationProviders();
-  const destination = await resolveCiFailureTriageRepositoryDestination({
+  const destination = await resolveAutomationRepositoryDestination({
     runtime,
     repositoryId: run.repositoryId,
     connectedProviders,

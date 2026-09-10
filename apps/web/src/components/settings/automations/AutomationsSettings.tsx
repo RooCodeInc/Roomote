@@ -77,7 +77,7 @@ import {
 import { CustomAutomationsSection } from './CustomAutomationsSection';
 import { AutomationListRow, type AutomationListFilter } from './AutomationList';
 import { AutomationDestinationPicker } from './AutomationDestinationPicker';
-import { CiFailureTriageAdditionalRules } from './CiFailureTriageAdditionalRules';
+import { AutomationAdditionalRules } from './CiFailureTriageAdditionalRules';
 import {
   buildAutomationDiscordDestinationOptions,
   buildManagerSlackChannelOptions,
@@ -137,6 +137,11 @@ type FieldErrors = Partial<
   Record<
     | 'general'
     | 'ciFailureTriageAdditionalRules'
+    | 'suggesterAdditionalRules'
+    | 'announcerAdditionalRules'
+    | 'securityAuditorAdditionalRules'
+    | 'codeQualityAuditorAdditionalRules'
+    | 'mergeAnnouncerAdditionalRules'
     | 'reviewerEnvironmentIds'
     | 'reviewerCollaborators'
     | 'reviewerExcludedAuthors'
@@ -790,11 +795,13 @@ function mapSettingsToFormState(
     suggesterTelegramChatId: string | null;
     suggesterTeamsChannelId: string | null;
     suggesterInstructions: string | null;
+    suggesterAdditionalRules?: string;
     announcerFrequency: AnnouncerFrequency;
     announcerSlackChannelId: string | null;
     announcerSlackChannelName?: string | null;
     announcerDiscordChannelId: string | null;
     announcerInstructions: string | null;
+    announcerAdditionalRules?: string;
     platformIssueAlertsEnabled: boolean;
     platformIssueSlackChannelId: string | null;
     platformIssueSlackChannelName?: string | null;
@@ -802,9 +809,11 @@ function mapSettingsToFormState(
     securityAuditorSlackChannelId: string | null;
     securityAuditorSlackChannelName?: string | null;
     securityAuditorDiscordChannelId: string | null;
+    securityAuditorAdditionalRules?: string;
     codeQualityAuditorSlackChannelId: string | null;
     codeQualityAuditorSlackChannelName?: string | null;
     codeQualityAuditorDiscordChannelId: string | null;
+    codeQualityAuditorAdditionalRules?: string;
     ciFailureTriageSlackChannelId: string | null;
     ciFailureTriageSlackChannelName?: string | null;
     ciFailureTriageDiscordChannelId: string | null;
@@ -812,6 +821,7 @@ function mapSettingsToFormState(
     mergeAnnouncerTargetProvider: CommunicationProvider | null;
     mergeAnnouncerTargetMode: 'channel' | 'direct_message' | null;
     mergeAnnouncerTargetChannelId: string | null;
+    mergeAnnouncerAdditionalRules?: string;
   } & ScheduleOnlyAutomationFrequencyState & {
       issueFixerInstructions: string | null;
     },
@@ -918,6 +928,7 @@ function mapSettingsToFormState(
     suggesterUseTelegram: Boolean(settings.suggesterTelegramChatId),
     suggesterUseTeams: Boolean(settings.suggesterTeamsChannelId),
     suggesterInstructions: settings.suggesterInstructions ?? '',
+    suggesterAdditionalRules: settings.suggesterAdditionalRules ?? '',
     announcerFrequency: settings.announcerFrequency,
     announcerSlackChannel:
       settings.announcerSlackChannelName ??
@@ -925,6 +936,7 @@ function mapSettingsToFormState(
       '',
     announcerDiscordChannel: settings.announcerDiscordChannelId ?? '',
     announcerInstructions: settings.announcerInstructions ?? '',
+    announcerAdditionalRules: settings.announcerAdditionalRules ?? '',
     platformIssueAlertsEnabled: settings.platformIssueAlertsEnabled,
     platformIssueSlackChannel:
       settings.platformIssueSlackChannelName ??
@@ -937,12 +949,16 @@ function mapSettingsToFormState(
       '',
     securityAuditorDiscordChannel:
       settings.securityAuditorDiscordChannelId ?? '',
+    securityAuditorAdditionalRules:
+      settings.securityAuditorAdditionalRules ?? '',
     codeQualityAuditorSlackChannel:
       settings.codeQualityAuditorSlackChannelName ??
       settings.codeQualityAuditorSlackChannelId ??
       '',
     codeQualityAuditorDiscordChannel:
       settings.codeQualityAuditorDiscordChannelId ?? '',
+    codeQualityAuditorAdditionalRules:
+      settings.codeQualityAuditorAdditionalRules ?? '',
     ciFailureTriageSlackChannel:
       settings.ciFailureTriageSlackChannelName ??
       settings.ciFailureTriageSlackChannelId ??
@@ -954,6 +970,7 @@ function mapSettingsToFormState(
       settings.mergeAnnouncerTargetProvider ?? 'none',
     mergeAnnouncerTargetMode: settings.mergeAnnouncerTargetMode ?? 'channel',
     mergeAnnouncerTargetChannelId: settings.mergeAnnouncerTargetChannelId ?? '',
+    mergeAnnouncerAdditionalRules: settings.mergeAnnouncerAdditionalRules ?? '',
   };
 }
 
@@ -3334,47 +3351,69 @@ export function AutomationsSettings({
                     }
                   >
                     {automation.id === 'mergeAnnouncer' ? (
-                      <AutomationDestinationPicker
-                        id="merge-announcer-destination"
-                        label="Post announcements to"
-                        value={{
-                          provider: formState.mergeAnnouncerTargetProvider,
-                          mode: formState.mergeAnnouncerTargetMode,
-                          channelId: formState.mergeAnnouncerTargetChannelId,
-                        }}
-                        availableProviders={communicationProviders.filter(
-                          (provider) =>
-                            settingsQuery.data?.capabilities[
-                              `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
-                            ] === true,
-                        )}
-                        slackOptions={buildSlackDestinationOptions(
-                          formState.mergeAnnouncerTargetProvider === 'slack'
-                            ? formState.mergeAnnouncerTargetChannelId
-                            : null,
-                        )}
-                        discordOptions={mergeAnnouncerDiscordOptions}
-                        defaultSlackChannelId={managerSlackChannelId ?? ''}
-                        defaultDiscordChannelId={managerDiscordChannelId ?? ''}
-                        noneLabel="Default"
-                        noneDescription="Uses the Manager Channel or primary conversation fallback."
-                        onChange={(destination) =>
+                      <AutomationAdditionalRules
+                        automationKey="merge_announcer"
+                        value={formState.mergeAnnouncerAdditionalRules ?? ''}
+                        onChange={(value) =>
                           setFormState((previous) =>
                             previous
                               ? {
                                   ...previous,
-                                  mergeAnnouncerTargetProvider:
-                                    destination.provider,
-                                  mergeAnnouncerTargetMode: destination.mode,
-                                  mergeAnnouncerTargetChannelId:
-                                    destination.channelId,
+                                  mergeAnnouncerAdditionalRules: value,
                                 }
                               : previous,
                           )
                         }
+                        error={fieldErrors.mergeAnnouncerAdditionalRules}
+                        globalDestination={
+                          <AutomationDestinationPicker
+                            id="merge-announcer-destination"
+                            label="Post announcements to"
+                            value={{
+                              provider: formState.mergeAnnouncerTargetProvider,
+                              mode: formState.mergeAnnouncerTargetMode,
+                              channelId:
+                                formState.mergeAnnouncerTargetChannelId,
+                            }}
+                            availableProviders={communicationProviders.filter(
+                              (provider) =>
+                                settingsQuery.data?.capabilities[
+                                  `${provider}Connected` as keyof typeof settingsQuery.data.capabilities
+                                ] === true,
+                            )}
+                            slackOptions={buildSlackDestinationOptions(
+                              formState.mergeAnnouncerTargetProvider === 'slack'
+                                ? formState.mergeAnnouncerTargetChannelId
+                                : null,
+                            )}
+                            discordOptions={mergeAnnouncerDiscordOptions}
+                            defaultSlackChannelId={managerSlackChannelId ?? ''}
+                            defaultDiscordChannelId={
+                              managerDiscordChannelId ?? ''
+                            }
+                            noneLabel="Default"
+                            noneDescription="Uses the Manager Channel or primary conversation fallback."
+                            onChange={(destination) =>
+                              setFormState((previous) =>
+                                previous
+                                  ? {
+                                      ...previous,
+                                      mergeAnnouncerTargetProvider:
+                                        destination.provider,
+                                      mergeAnnouncerTargetMode:
+                                        destination.mode,
+                                      mergeAnnouncerTargetChannelId:
+                                        destination.channelId,
+                                    }
+                                  : previous,
+                              )
+                            }
+                          />
+                        }
                       />
                     ) : (
-                      <CiFailureTriageAdditionalRules
+                      <AutomationAdditionalRules
+                        automationKey="ci_failure_triage"
                         value={formState.ciFailureTriageAdditionalRules ?? ''}
                         onChange={(value) =>
                           setFormState((previous) =>
@@ -3650,44 +3689,72 @@ export function AutomationsSettings({
                       )
                     }
                   >
-                    {renderSlackDestinationField({
-                      field:
+                    <AutomationAdditionalRules
+                      automationKey={automation.automationKey}
+                      value={
                         automation.id === 'securityAuditor'
-                          ? 'securityAuditorSlackChannel'
-                          : automation.id === 'codeQualityAuditor'
-                            ? 'codeQualityAuditorSlackChannel'
-                            : 'ciFailureTriageSlackChannel',
-                      inputId: `${automation.id}-slack-channel`,
-                      label: 'Post follow-up work to this Slack channel',
-                      helperText:
-                        automation.id === 'ciFailureTriage'
-                          ? 'Choose where Roomote should post CI failure triage work.'
-                          : 'Choose where Roomote should post actionable follow-up work.',
-                      savedChannelId:
+                          ? (formState.securityAuditorAdditionalRules ?? '')
+                          : (formState.codeQualityAuditorAdditionalRules ?? '')
+                      }
+                      onChange={(value) =>
+                        setFormState((previous) =>
+                          previous
+                            ? automation.id === 'securityAuditor'
+                              ? {
+                                  ...previous,
+                                  securityAuditorAdditionalRules: value,
+                                }
+                              : {
+                                  ...previous,
+                                  codeQualityAuditorAdditionalRules: value,
+                                }
+                            : previous,
+                        )
+                      }
+                      error={
                         automation.id === 'securityAuditor'
-                          ? (settingsQuery.data?.settings
-                              .securityAuditorSlackChannelId ?? null)
-                          : automation.id === 'codeQualityAuditor'
+                          ? fieldErrors.securityAuditorAdditionalRules
+                          : fieldErrors.codeQualityAuditorAdditionalRules
+                      }
+                      globalDestination={renderSlackDestinationField({
+                        field:
+                          automation.id === 'securityAuditor'
+                            ? 'securityAuditorSlackChannel'
+                            : automation.id === 'codeQualityAuditor'
+                              ? 'codeQualityAuditorSlackChannel'
+                              : 'ciFailureTriageSlackChannel',
+                        inputId: `${automation.id}-slack-channel`,
+                        label: 'Post follow-up work to this Slack channel',
+                        helperText:
+                          automation.id === 'ciFailureTriage'
+                            ? 'Choose where Roomote should post CI failure triage work.'
+                            : 'Choose where Roomote should post actionable follow-up work.',
+                        savedChannelId:
+                          automation.id === 'securityAuditor'
                             ? (settingsQuery.data?.settings
-                                .codeQualityAuditorSlackChannelId ?? null)
-                            : (settingsQuery.data?.settings
-                                .ciFailureTriageSlackChannelId ?? null),
-                      savedDiscordChannelId:
-                        automation.id === 'securityAuditor'
-                          ? (settingsQuery.data?.settings
-                              .securityAuditorDiscordChannelId ?? null)
-                          : automation.id === 'codeQualityAuditor'
+                                .securityAuditorSlackChannelId ?? null)
+                            : automation.id === 'codeQualityAuditor'
+                              ? (settingsQuery.data?.settings
+                                  .codeQualityAuditorSlackChannelId ?? null)
+                              : (settingsQuery.data?.settings
+                                  .ciFailureTriageSlackChannelId ?? null),
+                        savedDiscordChannelId:
+                          automation.id === 'securityAuditor'
                             ? (settingsQuery.data?.settings
-                                .codeQualityAuditorDiscordChannelId ?? null)
-                            : (settingsQuery.data?.settings
-                                .ciFailureTriageDiscordChannelId ?? null),
-                      warningChannelId:
-                        automation.id === 'securityAuditor'
-                          ? slackChannelAccessWarnings.securityAuditorSlackChannel
-                          : automation.id === 'codeQualityAuditor'
-                            ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
-                            : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
-                    })}
+                                .securityAuditorDiscordChannelId ?? null)
+                            : automation.id === 'codeQualityAuditor'
+                              ? (settingsQuery.data?.settings
+                                  .codeQualityAuditorDiscordChannelId ?? null)
+                              : (settingsQuery.data?.settings
+                                  .ciFailureTriageDiscordChannelId ?? null),
+                        warningChannelId:
+                          automation.id === 'securityAuditor'
+                            ? slackChannelAccessWarnings.securityAuditorSlackChannel
+                            : automation.id === 'codeQualityAuditor'
+                              ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
+                              : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
+                      })}
+                    />
                   </ScheduleOnlyAutomationContent>
                 </AutomationCard>
               );
@@ -4280,29 +4347,43 @@ export function AutomationsSettings({
                 {suggesterIsEnabled ? (
                   <div className="space-y-5">
                     <>
-                      {renderSlackDestinationField({
-                        field: 'suggesterSlackChannel',
-                        inputId: 'suggester-slack-channel',
-                        label: 'Post suggestions to this Slack channel',
-                        helperText:
-                          'Choose where Roomote should post its suggestion digests.',
-                        savedChannelId:
-                          settingsQuery.data?.settings
-                            .suggesterSlackChannelId ?? null,
-                        savedDiscordChannelId:
-                          settingsQuery.data?.settings
-                            .suggesterDiscordChannelId ?? null,
-                        warningChannelId:
-                          slackChannelAccessWarnings.suggesterSlackChannel,
-                        allowTelegram: true,
-                        savedTelegramSelected: Boolean(
-                          settingsQuery.data?.settings.suggesterTelegramChatId,
-                        ),
-                        allowTeams: true,
-                        savedTeamsSelected: Boolean(
-                          settingsQuery.data?.settings.suggesterTeamsChannelId,
-                        ),
-                      })}
+                      <AutomationAdditionalRules
+                        automationKey="suggester"
+                        value={formState.suggesterAdditionalRules ?? ''}
+                        onChange={(value) =>
+                          setFormState((previous) =>
+                            previous
+                              ? { ...previous, suggesterAdditionalRules: value }
+                              : previous,
+                          )
+                        }
+                        error={fieldErrors.suggesterAdditionalRules}
+                        globalDestination={renderSlackDestinationField({
+                          field: 'suggesterSlackChannel',
+                          inputId: 'suggester-slack-channel',
+                          label: 'Post suggestions to this Slack channel',
+                          helperText:
+                            'Choose where Roomote should post its suggestion digests.',
+                          savedChannelId:
+                            settingsQuery.data?.settings
+                              .suggesterSlackChannelId ?? null,
+                          savedDiscordChannelId:
+                            settingsQuery.data?.settings
+                              .suggesterDiscordChannelId ?? null,
+                          warningChannelId:
+                            slackChannelAccessWarnings.suggesterSlackChannel,
+                          allowTelegram: true,
+                          savedTelegramSelected: Boolean(
+                            settingsQuery.data?.settings
+                              .suggesterTelegramChatId,
+                          ),
+                          allowTeams: true,
+                          savedTeamsSelected: Boolean(
+                            settingsQuery.data?.settings
+                              .suggesterTeamsChannelId,
+                          ),
+                        })}
+                      />
 
                       <div className="space-y-2">
                         <Label htmlFor="suggester-instructions">
@@ -4403,21 +4484,33 @@ export function AutomationsSettings({
 
                 {announcerIsEnabled ? (
                   <div className="space-y-5">
-                    {renderSlackDestinationField({
-                      field: 'announcerSlackChannel',
-                      inputId: 'announcer-slack-channel',
-                      label: 'Post summaries to this Slack channel',
-                      helperText:
-                        'Choose where Roomote should post merged-PR summaries.',
-                      savedChannelId:
-                        settingsQuery.data?.settings.announcerSlackChannelId ??
-                        null,
-                      savedDiscordChannelId:
-                        settingsQuery.data?.settings
-                          .announcerDiscordChannelId ?? null,
-                      warningChannelId:
-                        slackChannelAccessWarnings.announcerSlackChannel,
-                    })}
+                    <AutomationAdditionalRules
+                      automationKey="announcer"
+                      value={formState.announcerAdditionalRules ?? ''}
+                      onChange={(value) =>
+                        setFormState((previous) =>
+                          previous
+                            ? { ...previous, announcerAdditionalRules: value }
+                            : previous,
+                        )
+                      }
+                      error={fieldErrors.announcerAdditionalRules}
+                      globalDestination={renderSlackDestinationField({
+                        field: 'announcerSlackChannel',
+                        inputId: 'announcer-slack-channel',
+                        label: 'Post summaries to this Slack channel',
+                        helperText:
+                          'Choose where Roomote should post merged-PR summaries.',
+                        savedChannelId:
+                          settingsQuery.data?.settings
+                            .announcerSlackChannelId ?? null,
+                        savedDiscordChannelId:
+                          settingsQuery.data?.settings
+                            .announcerDiscordChannelId ?? null,
+                        warningChannelId:
+                          slackChannelAccessWarnings.announcerSlackChannel,
+                      })}
+                    />
 
                     <div className="space-y-2">
                       <Label htmlFor="announcer-instructions">

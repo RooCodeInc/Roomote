@@ -90,6 +90,24 @@ export type TriggerableBackgroundAutomationDescriptor<
    */
   supportedSourceControlProviders: readonly SourceControlProvider[];
   scheduledSuggestionSource?: TaskSuggestionSource;
+  /**
+   * Optional natural-language repository scope, per-repository output routing,
+   * and residual workflow guidance. Add this only when output goes to a
+   * communication provider and may matter to different people or teams.
+   * Inherently global, triage-oriented (except CI), and non-comms-output
+   * automations should not opt in.
+   */
+  additionalRules?: {
+    field:
+      | 'suggesterAdditionalRules'
+      | 'announcerAdditionalRules'
+      | 'securityAuditorAdditionalRules'
+      | 'codeQualityAuditorAdditionalRules'
+      | 'ciFailureTriageAdditionalRules'
+      | 'mergeAnnouncerAdditionalRules';
+    placeholder: string;
+    defaultScopeDescription: string;
+  };
 };
 
 const CONFLICT_RESOLVER_SCHEDULE_MODES = [
@@ -174,6 +192,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'suggest_ideas',
+    additionalRules: {
+      field: 'suggesterAdditionalRules',
+      placeholder:
+        'Only suggest work for backend and platform. Send platform ideas to #platform in our Engineering Slack workspace.',
+      defaultScopeDescription: 'suggest work for all repositories',
+    },
   },
   {
     automationKey: 'announcer',
@@ -185,6 +209,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
+    additionalRules: {
+      field: 'announcerAdditionalRules',
+      placeholder:
+        'Only summarize backend and web. Send web summaries to #web-updates in our Engineering Slack workspace.',
+      defaultScopeDescription: 'summarize all repositories',
+    },
   },
   {
     automationKey: 'manager_stats',
@@ -267,6 +297,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'security_auditor',
+    additionalRules: {
+      field: 'securityAuditorAdditionalRules',
+      placeholder:
+        'Audit backend and platform. Send platform findings to #platform-security in our Engineering Slack workspace.',
+      defaultScopeDescription: 'audit all repositories',
+    },
   },
   {
     automationKey: 'code_quality_auditor',
@@ -279,6 +315,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'code_quality_auditor',
+    additionalRules: {
+      field: 'codeQualityAuditorAdditionalRules',
+      placeholder:
+        'Audit backend and web. Send web findings to #web-quality in our Engineering Slack workspace.',
+      defaultScopeDescription: 'audit all repositories',
+    },
   },
   {
     automationKey: 'ci_failure_triage',
@@ -300,6 +342,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
       'gitea',
     ],
     scheduledSuggestionSource: 'ci_failure_triage',
+    additionalRules: {
+      field: 'ciFailureTriageAdditionalRules',
+      placeholder:
+        'Only triage backend and platform. Send platform failures to #platform-ci in our Engineering Slack workspace.',
+      defaultScopeDescription: 'triage all repositories',
+    },
   },
   {
     automationKey: 'merge_announcer',
@@ -311,6 +359,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
+    additionalRules: {
+      field: 'mergeAnnouncerAdditionalRules',
+      placeholder:
+        'Only announce backend and web. Send web announcements to #web-updates in our Engineering Slack workspace.',
+      defaultScopeDescription: 'announce all repositories',
+    },
   },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];
 
