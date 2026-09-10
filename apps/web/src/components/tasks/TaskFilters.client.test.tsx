@@ -229,7 +229,7 @@ describe('TaskFilters', () => {
     expect(queryByText(NO_REPOSITORIES)).not.toBeInTheDocument();
     expect(queryByText(ALL_REPOSITORIES)).not.toBeInTheDocument();
 
-    fireEvent.click(noRepositoriesLabels[1]);
+    fireEvent.click(noRepositoriesLabels[1]!);
     expect(onRepositoryChange).toHaveBeenCalledWith(NO_REPOSITORIES);
   });
 
