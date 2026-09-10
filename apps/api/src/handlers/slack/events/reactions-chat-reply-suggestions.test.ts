@@ -531,6 +531,74 @@ describe('chat reply suggestion reactions', () => {
     },
   );
 
+  it('uses a persisted task-backed card origin without consulting its source task', async () => {
+    mocks.getSessionForTask.mockResolvedValue(null);
+    mocks.sessionsFindFirst.mockResolvedValue({
+      id: 'session-origin',
+      fastConversationId: 'fast-origin',
+    });
+    mocks.conversationFindById.mockResolvedValue({
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: 'automation-thread-ts',
+        replyTarget: {
+          channelId: 'C_REPORTS',
+          threadId: 'automation-thread-ts',
+        },
+      },
+    });
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        launchRouting: 'router',
+        originSessionId: 'session-origin',
+      },
+    });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'announce-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C_REPORTS', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.getSessionForTask).not.toHaveBeenCalled();
+    expect(slack.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C_REPORTS',
+        thread_ts: 'automation-thread-ts',
+      }),
+    );
+    expect(mocks.conversationGetOrCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-origin' }),
+    );
+    expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ thread_ts: 'automation-thread-ts' }),
+      }),
+    );
+  });
+
   it.each(['task', 'fast-report'])(
     "announces a pinned %s launch in the origin Session's own thread instead of seeding one",
     async (source) => {

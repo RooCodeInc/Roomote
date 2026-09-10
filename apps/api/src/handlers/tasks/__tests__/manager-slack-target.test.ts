@@ -2,7 +2,9 @@ import {
   automations,
   db,
   deploymentSettings,
+  ensureSessionForTask,
   eq,
+  sessions,
   slackInstallationChannels,
   slackInstallationFactory,
   slackInstallations,
@@ -20,7 +22,9 @@ import { resolveScheduledSuggestionSlackConfig } from '../background-automation-
 import { postSuggestedTasksSummaryToSlack } from '../submitTaskSuggestions';
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  fastAgentConversationRepository: { getOrCreate: vi.fn() },
+  fastAgentConversationRepository: {
+    getOrCreate: vi.fn(async ({ conversation }) => ({ conversation })),
+  },
   findEnvironmentForRepo: vi.fn(),
 }));
 vi.mock('@roomote/sdk/server', () => ({
@@ -60,6 +64,7 @@ describe.each(['work items', 'scheduled suggestions'] as const)(
   (consumer) => {
     let userId: string;
     let taskId: string;
+    let sessionId: string;
     let suggestion: Parameters<
       typeof postSuggestedTasksSummaryToSlack
     >[0]['suggestions'][number];
@@ -78,6 +83,7 @@ describe.each(['work items', 'scheduled suggestions'] as const)(
       });
       userId = (await userFactory.create()).id;
       taskId = (await taskFactory.create({ initiatorUserId: userId })).id;
+      sessionId = (await ensureSessionForTask(db, { taskId })).id;
       const [row] = await db
         .insert(workItems)
         .values({
@@ -96,6 +102,7 @@ describe.each(['work items', 'scheduled suggestions'] as const)(
         .delete(trackedMessages)
         .where(eq(trackedMessages.threadTs, '123.456'));
       await db.delete(tasks).where(eq(tasks.id, taskId));
+      await db.delete(sessions).where(eq(sessions.id, sessionId));
       await db
         .delete(slackInstallations)
         .where(eq(slackInstallations.installedByUserId, userId));
