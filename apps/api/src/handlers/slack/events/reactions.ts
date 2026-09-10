@@ -536,10 +536,10 @@ async function launchTaskSuggestionTaskFromReaction({
     title: workItem.title,
     brief: suggestionBrief,
   });
-  const seededSuggestionSlackText = buildSeededSuggestionSlackText(
-    suggestionSlackText,
-    reactionEvent.user,
-  );
+  const isSuggestedTask = suggestionType === 'suggested_tasks';
+  const seededSuggestionSlackText = isSuggestedTask
+    ? null
+    : buildSeededSuggestionSlackText(suggestionSlackText, reactionEvent.user);
   const suggestionTaskPrompt = buildSuggestionTaskPromptText({
     title: workItem.title,
     brief: suggestionBrief,
@@ -569,24 +569,40 @@ async function launchTaskSuggestionTaskFromReaction({
       ? await resolveOriginSessionSlackThread({ originSessionId, teamId })
       : null;
     announceChannelId = originThread?.channelId ?? channelId;
-    announceMessageTs = await slack.postMessage({
-      channel: announceChannelId,
-      ...(originThread ? { thread_ts: originThread.threadTs } : {}),
-      text: seededSuggestionSlackText,
-      blocks: [
-        {
-          type: 'markdown',
-          text: seededSuggestionSlackText,
-        },
-      ],
-    });
+    if (isSuggestedTask) {
+      announceMessageTs = messageTs;
+      const acknowledged = await slack.addReaction?.({
+        channel: channelId,
+        timestamp: messageTs,
+        name: ackEmoji,
+      });
+      if (acknowledged === false) {
+        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
+        apiLogger.warn(
+          `${logPrefix} failed to add the Slack launch acknowledgement`,
+        );
+        return false;
+      }
+    } else {
+      announceMessageTs = await slack.postMessage({
+        channel: announceChannelId,
+        ...(originThread ? { thread_ts: originThread.threadTs } : {}),
+        text: seededSuggestionSlackText!,
+        blocks: [
+          {
+            type: 'markdown',
+            text: seededSuggestionSlackText!,
+          },
+        ],
+      });
 
-    if (!announceMessageTs) {
-      await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
-      apiLogger.debug(
-        `${logPrefix} failed to post the Slack launch announcement; launch canceled`,
-      );
-      return false;
+      if (!announceMessageTs) {
+        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
+        apiLogger.debug(
+          `${logPrefix} failed to post the Slack launch announcement; launch canceled`,
+        );
+        return false;
+      }
     }
     const launchThreadTs = originThread?.threadTs ?? announceMessageTs;
 
@@ -699,7 +715,7 @@ async function launchTaskSuggestionTaskFromReaction({
                 : {}),
               channelId: announceChannelId,
               threadTs: launchThreadTs,
-              messageId: announceMessageTs,
+              messageId: isSuggestedTask ? launchThreadTs : announceMessageTs,
               initiator,
               repoForPayload:
                 launchTarget.kind === 'all_repositories'
@@ -736,9 +752,11 @@ async function launchTaskSuggestionTaskFromReaction({
       launchResult.status === 'rejected' ||
       launchResult.status === 'failed'
     ) {
-      await slack
-        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
-        .catch(() => {});
+      if (!isSuggestedTask) {
+        await slack
+          .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
+          .catch(() => {});
+      }
       await postSuggestionLaunchFailureMessage({
         slack,
         channelId,
@@ -759,9 +777,11 @@ async function launchTaskSuggestionTaskFromReaction({
       apiLogger.warn(
         `${logPrefix} failed to finalize work item ${workItemId}; task ${launchResult.taskId ?? 'null'} (run ${launchResult.runId ?? 'null'}) — ${launchResult.cancelNote}`,
       );
-      await slack
-        .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
-        .catch(() => {});
+      if (!isSuggestedTask) {
+        await slack
+          .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
+          .catch(() => {});
+      }
       return true;
     }
 
@@ -787,7 +807,7 @@ async function launchTaskSuggestionTaskFromReaction({
     );
     return true;
   } catch (error) {
-    if (announceMessageTs) {
+    if (announceMessageTs && !isSuggestedTask) {
       await slack
         .deleteMessage({ channel: announceChannelId, ts: announceMessageTs })
         .catch(() => {});

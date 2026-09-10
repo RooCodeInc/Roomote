@@ -2001,7 +2001,7 @@ export class SlackNotifier {
           `[addReaction] Slack reactions.add error: ${result.error} - ${JSON.stringify(result)}`,
         );
 
-        return false;
+        return result.error === 'already_reacted';
       }
 
       return true;
