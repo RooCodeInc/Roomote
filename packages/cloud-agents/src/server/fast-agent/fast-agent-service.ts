@@ -31,6 +31,7 @@ import {
   type RunStatus,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
+  normalizeWorkspaceRoutingSettings,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
   CALL_INTEGRATION_TOOL_TOOL,
@@ -3172,8 +3173,17 @@ export async function answerFastAgentQuestion({
       setupSession,
       therapistModeEnabled,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
-      workspaceRoutingRules:
-        agentBehaviorSettings?.workspaceRoutingSettings?.rules,
+      workspaceRoutingGuidance: agentBehaviorSettings?.workspaceRoutingSettings
+        ? normalizeWorkspaceRoutingSettings(
+            agentBehaviorSettings.workspaceRoutingSettings,
+            new Map(
+              availableEnvironments.map((environment) => [
+                environment.id,
+                environment.name,
+              ]),
+            ),
+          ).guidance
+        : undefined,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,

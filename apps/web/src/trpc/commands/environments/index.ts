@@ -39,6 +39,8 @@ import {
   type ComputeProvider,
   type EnvironmentConfig,
   environmentConfigSchema,
+  legacyWorkspaceRoutingSettingsSchema,
+  normalizeWorkspaceRoutingSettings,
   workspaceRoutingSettingsSchema,
   type WorkspaceRoutingSettings,
   getAmbiguousEnvironmentRepositoryError,
@@ -368,8 +370,35 @@ export async function getWorkspaceRoutingSettingsCommand(
     .where(eq(deploymentSettings.id, 'default'))
     .limit(1);
 
-  return workspaceRoutingSettingsSchema.parse(
-    settings?.workspaceRoutingSettings ?? { rules: [] },
+  const storedSettings = settings?.workspaceRoutingSettings ?? { guidance: '' };
+  const currentSettings =
+    workspaceRoutingSettingsSchema.safeParse(storedSettings);
+  if (currentSettings.success) return currentSettings.data;
+
+  const legacySettings =
+    legacyWorkspaceRoutingSettingsSchema.parse(storedSettings);
+  const targetIds = legacySettings.rules
+    .map((rule) => rule.target)
+    .filter((target) => target !== ALL_REPOSITORIES);
+  const environmentRows =
+    targetIds.length === 0
+      ? []
+      : await db
+          .select({ id: environments.id, name: environments.name })
+          .from(environments)
+          .where(
+            and(
+              buildOwnershipFilter(),
+              eq(environments.isEval, false),
+              inArray(environments.id, targetIds),
+            ),
+          );
+
+  return normalizeWorkspaceRoutingSettings(
+    storedSettings,
+    new Map(
+      environmentRows.map((environment) => [environment.id, environment.name]),
+    ),
   );
 }
 

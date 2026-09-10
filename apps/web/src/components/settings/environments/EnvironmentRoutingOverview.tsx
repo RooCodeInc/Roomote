@@ -2,220 +2,95 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import {
-  ALL_REPOSITORIES,
-  type WorkspaceRoutingSettings,
-} from '@roomote/types';
-import { GitBranch, Pencil, Trash2 } from '@/components/system';
+import { MAX_WORKSPACE_ROUTING_GUIDANCE_LENGTH } from '@roomote/types';
 import {
   Button,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  GitBranch,
+  Label,
   Skeleton,
+  Textarea,
 } from '@/components/system';
 import { Section } from '@/components/settings';
 import {
-  useEnvironments,
   useUpdateWorkspaceRoutingSettings,
   useWorkspaceRoutingSettings,
 } from '@/hooks/environments';
 
-const EMPTY_RULE = { description: '', target: '' };
-
 export function EnvironmentRoutingOverview() {
-  const environments = useEnvironments();
   const settings = useWorkspaceRoutingSettings();
   const updateSettings = useUpdateWorkspaceRoutingSettings();
-  const [rules, setRules] = useState<WorkspaceRoutingSettings['rules']>([]);
-  const [draftRule, setDraftRule] = useState(EMPTY_RULE);
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [guidance, setGuidance] = useState('');
+  const [savedGuidance, setSavedGuidance] = useState('');
 
   useEffect(() => {
-    setRules(settings.data?.rules ?? []);
+    const nextGuidance = settings.data?.guidance ?? '';
+    setGuidance(nextGuidance);
+    setSavedGuidance(nextGuidance);
   }, [settings.data]);
 
-  if (environments.isPending || settings.isPending) {
+  if (settings.isPending) {
     return (
       <Section icon={GitBranch} title="Routing Rules">
-        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-48 w-full" />
       </Section>
     );
   }
 
-  const saveRules = async (nextRules: WorkspaceRoutingSettings['rules']) => {
-    await updateSettings.mutateAsync({ rules: nextRules });
-    setRules(nextRules);
-    toast.success('Routing rules updated');
-  };
+  const isDirty = guidance !== savedGuidance;
+  const footer = isDirty ? (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={updateSettings.isPending}
+        onClick={() => setGuidance(savedGuidance)}
+      >
+        Reset
+      </Button>
+      <Button
+        type="button"
+        disabled={updateSettings.isPending}
+        onClick={async () => {
+          try {
+            const result = await updateSettings.mutateAsync({ guidance });
+            setGuidance(result.guidance);
+            setSavedGuidance(result.guidance);
+            toast.success('Routing guidance saved');
+          } catch {
+            toast.error('Failed to save routing guidance');
+          }
+        }}
+      >
+        {updateSettings.isPending ? 'Saving...' : 'Save'}
+      </Button>
+    </>
+  ) : undefined;
 
   return (
-    <Section icon={GitBranch} title="Routing Rules">
-      <p className="text-sm text-muted-foreground">
-        Routing rules help Roomote agents pick the right environment or broad
-        workspace. Describe when Roomote should choose a specific environment;
-        the router prioritizes matching rules unless the user explicitly
-        overrides them.
-      </p>
-
-      <div>
-        <div className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_auto]">
-          <Input
-            value={draftRule.description}
-            placeholder="Description..."
-            aria-label="Rule description"
-            onChange={(event) =>
-              setDraftRule((current) => ({
-                ...current,
-                description: event.target.value.slice(0, 500),
-              }))
-            }
-          />
-          <TargetSelect
-            value={draftRule.target}
-            environments={environments.data ?? []}
-            onChange={(target) =>
-              setDraftRule((current) => ({ ...current, target }))
-            }
-          />
-          <div className="flex gap-2">
-            {editingIndex !== null && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={updateSettings.isPending}
-                onClick={() => {
-                  setDraftRule(EMPTY_RULE);
-                  setEditingIndex(null);
-                }}
-              >
-                Cancel
-              </Button>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              disabled={
-                updateSettings.isPending ||
-                !draftRule.description.trim() ||
-                !draftRule.target
-              }
-              onClick={async () => {
-                try {
-                  const normalizedRule = {
-                    ...draftRule,
-                    description: draftRule.description.trim(),
-                  };
-                  const nextRules =
-                    editingIndex === null
-                      ? [...rules, normalizedRule]
-                      : rules.map((rule, index) =>
-                          index === editingIndex ? normalizedRule : rule,
-                        );
-                  await saveRules(nextRules);
-                  setDraftRule(EMPTY_RULE);
-                  setEditingIndex(null);
-                } catch {
-                  toast.error(
-                    editingIndex === null
-                      ? 'Failed to add routing rule'
-                      : 'Failed to update routing rule',
-                  );
-                }
-              }}
-            >
-              {editingIndex === null ? 'Add Rule' : 'Save Rule'}
-            </Button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
-          <span>Description</span>
-          <span>Target</span>
-          <span />
-        </div>
-
-        {rules.length === 0 ? (
-          <p className="py-4 text-sm text-muted-foreground">
-            No routing rules configured.
-          </p>
-        ) : (
-          rules.map((rule, index) => (
-            <div
-              key={`${rule.description}-${rule.target}-${index}`}
-              className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
-            >
-              <span className="text-sm">{rule.description}</span>
-              <span className="text-sm text-muted-foreground">
-                {rule.target === ALL_REPOSITORIES
-                  ? 'All repositories'
-                  : environments.data?.find(
-                      (environment) => environment.id === rule.target,
-                    )?.name || rule.target}
-              </span>
-              <div className="flex justify-end gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Edit ${rule.description}`}
-                  onClick={() => {
-                    setDraftRule(rule);
-                    setEditingIndex(index);
-                  }}
-                >
-                  <Pencil />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Delete ${rule.description}`}
-                  onClick={async () => {
-                    try {
-                      await saveRules(rules.filter((_, i) => i !== index));
-                    } catch {
-                      toast.error('Failed to delete routing rule');
-                    }
-                  }}
-                >
-                  <Trash2 />
-                </Button>
-              </div>
-            </div>
-          ))
-        )}
+    <Section icon={GitBranch} title="Routing Rules" footer={footer}>
+      <div className="space-y-3">
+        <p className="text-sm text-muted-foreground">
+          Describe how Roomote should choose environments and models. For
+          example: “Use the Web environment for frontend work” or “Prefer Claude
+          Sonnet for code reviews.” Explicit choices in a request always take
+          priority.
+        </p>
+        <Label htmlFor="workspace-routing-guidance" className="sr-only">
+          Routing guidance
+        </Label>
+        <Textarea
+          id="workspace-routing-guidance"
+          value={guidance}
+          rows={10}
+          maxLength={MAX_WORKSPACE_ROUTING_GUIDANCE_LENGTH}
+          className="min-h-48"
+          placeholder={
+            'Use the Web environment for frontend work.\nPrefer Claude Sonnet for code reviews.'
+          }
+          disabled={updateSettings.isPending}
+          onChange={(event) => setGuidance(event.target.value)}
+        />
       </div>
     </Section>
-  );
-}
-
-function TargetSelect({
-  value,
-  environments,
-  onChange,
-}: {
-  value: string;
-  environments: Array<{ id: string; name: string }>;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <Select value={value} onValueChange={onChange}>
-      <SelectTrigger aria-label="Rule target">
-        <SelectValue placeholder="Select target" />
-      </SelectTrigger>
-      <SelectContent>
-        {environments.map((environment) => (
-          <SelectItem key={environment.id} value={environment.id}>
-            {environment.name}
-          </SelectItem>
-        ))}
-        <SelectItem value={ALL_REPOSITORIES}>All repositories</SelectItem>
-      </SelectContent>
-    </Select>
   );
 }

@@ -1,24 +1,14 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 
 import { EnvironmentRoutingOverview } from './EnvironmentRoutingOverview';
 
 const mutateAsync = vi.fn();
-const environments = [{ id: 'env-1', name: 'Hospital app' }];
 const routingSettings = {
-  rules: [
-    {
-      description: 'Messages from hospital-bugs belong here.',
-      target: 'env-1',
-    },
-  ],
+  guidance: 'Use Hospital app for messages from hospital-bugs.',
 };
 
 vi.mock('@/hooks/environments', () => ({
-  useEnvironments: () => ({
-    isPending: false,
-    data: environments,
-  }),
   useWorkspaceRoutingSettings: () => ({
     isPending: false,
     data: routingSettings,
@@ -30,37 +20,45 @@ vi.mock('@/hooks/environments', () => ({
 }));
 
 describe('EnvironmentRoutingOverview', () => {
-  it('does not persist a deletion when edit starts', async () => {
-    render(<EnvironmentRoutingOverview />);
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Edit Messages from hospital-bugs belong here.',
-      }),
-    );
-
-    expect(mutateAsync).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Rule description')).toHaveValue(
-      'Messages from hospital-bugs belong here.',
-    );
-    expect(screen.getByRole('button', { name: 'Save Rule' })).toBeEnabled();
+  beforeEach(() => {
+    mutateAsync.mockReset();
   });
 
-  it('cancels an edit without persisting changes', () => {
+  it('loads and saves free-text environment and model guidance', async () => {
+    mutateAsync.mockResolvedValue({
+      guidance: 'Use Hospital app for frontend work. Prefer GPT-5.6.',
+    });
     render(<EnvironmentRoutingOverview />);
 
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'Edit Messages from hospital-bugs belong here.',
-      }),
+    const textarea = screen.getByLabelText('Routing guidance');
+    expect(textarea).toHaveValue(
+      'Use Hospital app for messages from hospital-bugs.',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.change(textarea, {
+      target: { value: 'Use Hospital app for frontend work. Prefer GPT-5.6.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(mutateAsync).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Rule description')).toHaveValue('');
-    expect(screen.getByRole('button', { name: 'Add Rule' })).toBeDisabled();
-    expect(
-      screen.queryByRole('button', { name: 'Cancel' }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({
+        guidance: 'Use Hospital app for frontend work. Prefer GPT-5.6.',
+      });
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    });
+  });
+
+  it('clears saved guidance', async () => {
+    mutateAsync.mockResolvedValue({ guidance: '' });
+    render(<EnvironmentRoutingOverview />);
+
+    fireEvent.change(screen.getByLabelText('Routing guidance'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mutateAsync).toHaveBeenCalledWith({ guidance: '' });
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    });
   });
 });

@@ -9,35 +9,51 @@ import {
   getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '../environment-config';
-import { workspaceRoutingSettingsSchema } from '../workspace-routing';
+import {
+  normalizeWorkspaceRoutingSettings,
+  workspaceRoutingSettingsSchema,
+} from '../workspace-routing';
 
 describe('workspaceRoutingSettingsSchema', () => {
-  it('normalizes centralized routing rules', () => {
+  it('normalizes free-text routing guidance', () => {
     expect(
       workspaceRoutingSettingsSchema.parse({
-        rules: [
-          {
-            description: '  Messages from hospital-bugs belong here.  ',
-            target: 'env-1',
-          },
-        ],
+        guidance: '  Use App for frontend work.\nPrefer GPT-5.6 for reviews.  ',
       }),
     ).toEqual({
-      rules: [
-        {
-          description: 'Messages from hospital-bugs belong here.',
-          target: 'env-1',
-        },
-      ],
+      guidance: 'Use App for frontend work.\nPrefer GPT-5.6 for reviews.',
     });
   });
 
-  it('rejects empty descriptions and targets', () => {
+  it('accepts cleared routing guidance', () => {
+    expect(workspaceRoutingSettingsSchema.parse({ guidance: '  ' })).toEqual({
+      guidance: '',
+    });
+  });
+
+  it('converts legacy rules without losing their environment targets', () => {
     expect(
-      workspaceRoutingSettingsSchema.safeParse({
-        rules: [{ description: ' ', target: '' }],
-      }).success,
-    ).toBe(false);
+      normalizeWorkspaceRoutingSettings(
+        {
+          rules: [
+            {
+              description: 'Messages from hospital-bugs belong here.',
+              target: 'env-1',
+            },
+            {
+              description: 'Cross-repository migrations use the broad scope.',
+              target: '__all_repositories__',
+            },
+          ],
+        },
+        new Map([['env-1', 'Hospital app']]),
+      ),
+    ).toEqual({
+      guidance: [
+        '- Messages from hospital-bugs belong here. -> Use the "Hospital app" environment.',
+        '- Cross-repository migrations use the broad scope. -> Use All repositories.',
+      ].join('\n'),
+    });
   });
 });
 
