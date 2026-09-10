@@ -99,6 +99,14 @@ export function configToYaml(config: EnvironmentConfig): string {
     cleanConfig.oidc = config.oidc;
   }
 
+  if (config.inherit_compute !== undefined) {
+    cleanConfig.inherit_compute = config.inherit_compute;
+  }
+
+  if (config.inherit_source_control !== undefined) {
+    cleanConfig.inherit_source_control = config.inherit_source_control;
+  }
+
   if (config.ports && config.ports.length > 0) {
     cleanConfig.ports = config.ports;
   }

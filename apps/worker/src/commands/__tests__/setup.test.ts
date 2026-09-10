@@ -462,6 +462,87 @@ describe('setup mode behavior', () => {
     });
   });
 
+  it('expands forwarded compute config into the nested environment env only', async () => {
+    const nestedComputeEnv = JSON.stringify({
+      DEFAULT_COMPUTE_PROVIDER: 'modal',
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+    });
+    mockGetRuntimeEnv.mockReturnValueOnce({
+      R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
+      R_MODEL: 'roomote/openai/outer-model',
+    });
+
+    await setup({
+      mode: 'directDispatch',
+      workspace: {
+        ...environmentWorkspaceOptions,
+        userEnvVars: {
+          FOO: 'bar',
+          R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
+        },
+      },
+      logger,
+      workerEnv: mockWorkerEnv,
+    });
+
+    // The raw forwarding value leaves the worker runtime env.
+    expect(mockSetRuntimeEnv).toHaveBeenCalledWith({
+      R_MODEL: 'roomote/openai/outer-model',
+    });
+
+    const expectedNestedEnv = {
+      BASE: 'base',
+      FOO: 'bar',
+      OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      DEFAULT_COMPUTE_PROVIDER: 'modal',
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+    };
+    expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledWith(
+      logger,
+      expect.objectContaining({
+        envVars: expectedNestedEnv,
+        userEnvVars: {
+          FOO: 'bar',
+          DEFAULT_COMPUTE_PROVIDER: 'modal',
+          MODAL_TOKEN_ID: 'ak-id',
+          MODAL_TOKEN_SECRET: 'as-secret',
+        },
+      }),
+    );
+    expect(mockSetUserEnv).toHaveBeenCalledWith(expectedNestedEnv);
+  });
+
+  it('leaves forwarded compute config out of repository workspaces', async () => {
+    const nestedComputeEnv = JSON.stringify({
+      DEFAULT_COMPUTE_PROVIDER: 'modal',
+      MODAL_TOKEN_ID: 'ak-id',
+      MODAL_TOKEN_SECRET: 'as-secret',
+    });
+    mockGetRuntimeEnv.mockReturnValueOnce({
+      R_NESTED_DEPLOYMENT_ENV: nestedComputeEnv,
+    });
+
+    await setup({
+      mode: 'directDispatch',
+      workspace: workspaceOptions,
+      logger,
+      workerEnv: mockWorkerEnv,
+    });
+
+    expect(mockSetRuntimeEnv).toHaveBeenCalledWith({});
+    expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledWith(
+      logger,
+      expect.objectContaining({
+        envVars: expect.not.objectContaining({
+          MODAL_TOKEN_ID: expect.anything(),
+          DEFAULT_COMPUTE_PROVIDER: expect.anything(),
+        }),
+      }),
+    );
+  });
+
   it('retains explicit environment values that initially equal runtime values', async () => {
     mockGetRuntimeEnv.mockReturnValueOnce({
       R_VISION_MODEL: 'openai/shared-model',

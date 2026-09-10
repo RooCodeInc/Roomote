@@ -2,6 +2,7 @@ import { COMMS_PROVIDER_ENV_VAR_NAMES } from './setup-auth-config';
 import { COMPUTE_PROVIDER_ENV_VAR_NAMES } from './setup-compute-config';
 import { SETUP_SOURCE_CONTROL_PROVIDER_CATALOG } from './setup-source-control-config';
 import { OPENCODE_AUTH_CONTENT_ENV_VAR_NAME } from './chatgpt-subscription';
+import { NESTED_DEPLOYMENT_ENV_VAR_NAME } from './nested-deployment-env';
 import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
@@ -154,6 +155,9 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     // Hosting-managed Roomote inference is served only through the inference
     // gateway, never configured through the generic environment editor.
     ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
+    // Launcher-built compute forwarding for `inherit_compute` environments.
+    // Never operator-set; the dequeue path injects it after this denylist.
+    NESTED_DEPLOYMENT_ENV_VAR_NAME,
   ],
 );
 
