@@ -245,9 +245,8 @@ channels implicitly or inspect repository contents without delegating the work
 to a task. When the request spans every repository, Fast can delegate it to the
 deployment's all-repositories environment.
 
-Every Fast reply ends with a compact footer: a running-task count (linking to
-the running task, or to the task list when several are running), a **Live
-preview** link when a delegated task exposes one, links to pull requests the
+Every Fast reply ends with a compact footer: **Reply anytime**, a plain
+running-task count when at least one task is running, links to pull requests the
 Session is working on, and **Open in Roomote**, which opens the Session transcript.
 Roomote keeps the footer on the latest reply current as delegated tasks start
 and finish, checking about every 30 seconds while work is running, so the
