@@ -1,12 +1,13 @@
 import {
+  and,
   db,
-  mcpConnections,
   deploymentMcpEnablements,
   eq,
   inArray,
-  and,
   isNull,
+  mcpConnections,
   or,
+  resolveModelProviderEnvValue,
 } from '@roomote/db/server';
 import {
   filterMcpToolDefinitions,
@@ -21,6 +22,7 @@ import {
   isMcpConnectionRipplingConfig,
   isMcpConnectionGranolaConfig,
   isMcpConnectionElevenLabsConfig,
+  isMcpConnectionVoiceConfig,
   isMcpConnectionGrafanaConfig,
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
@@ -51,6 +53,7 @@ import type {
   SaveRipplingConnectionInput,
   SaveGranolaConnectionInput,
   SaveElevenLabsConnectionInput,
+  SaveVoiceConnectionInput,
   SaveGrafanaConnectionInput,
   SaveSnowflakeConnectionInput,
   SaveVercelConnectionInput,
@@ -889,6 +892,45 @@ export async function getElevenLabsConnectionCommand(auth: UserAuthSuccess) {
   };
 }
 
+/**
+ * Where the deployment's voice key comes from. An `R_VOICE_OPENAI_API_KEY`
+ * environment variable wins over the Settings-managed connection, so the
+ * card shows as connected without anything to configure or disconnect.
+ */
+export async function getVoiceConnectionCommand(
+  auth: UserAuthSuccess,
+): Promise<{
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  source: 'environment' | 'connection';
+} | null> {
+  assertAdmin(auth);
+
+  const envKey = await resolveModelProviderEnvValue(['R_VOICE_OPENAI_API_KEY']);
+  if (envKey?.trim()) {
+    return { authStatus: 'authenticated', source: 'environment' };
+  }
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'voice'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionVoiceConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return {
+    authStatus: connection.authStatus,
+    source: 'connection',
+  };
+}
+
 export async function getXConnectionCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
@@ -1571,6 +1613,103 @@ export async function saveElevenLabsConnectionCommand(
     captureIntegrationLifecycleEvent(
       'integration_enabled',
       'elevenlabs',
+      auth.userId,
+    );
+  }
+
+  return {
+    authStatus: 'authenticated' as const,
+  };
+}
+
+export async function saveVoiceConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveVoiceConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'voice'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+    },
+  });
+
+  const existingConfig = isMcpConnectionVoiceConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedApiKey =
+    input.apiKey.length > 0
+      ? encrypt(input.apiKey)
+      : existingConfig?.encryptedApiKey;
+
+  if (!nextEncryptedApiKey) {
+    throw new Error(
+      'An OpenAI API key is required when no voice key is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'voice' as const,
+    encryptedApiKey: nextEncryptedApiKey,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'voice',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'voice',
+      enabled: true,
+      enabledByUserId: auth.userId,
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        updatedAt: new Date(),
+      },
+    });
+
+  if (!existingConnection) {
+    captureIntegrationLifecycleEvent(
+      'integration_connected',
+      'voice',
+      auth.userId,
+    );
+    captureIntegrationLifecycleEvent(
+      'integration_enabled',
+      'voice',
       auth.userId,
     );
   }
