@@ -29,7 +29,7 @@ import {
   Input,
   Label,
   Pencil,
-  PencilRuler,
+  Plus,
   Search,
   Skeleton,
   Spinner,
@@ -278,7 +278,7 @@ function EnvironmentSkillsSection({
           </p>
         </div>
         <Button size="sm" onClick={onAdd} disabled={addDisabled}>
-          <PencilRuler />
+          <Plus />
           Add Skill
         </Button>
       </div>

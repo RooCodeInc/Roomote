@@ -318,7 +318,7 @@ vi.mock('@/components/system', () => ({
     <label {...props}>{children}</label>
   ),
   Pencil: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
-  PencilRuler: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Search: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Settings2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Skeleton: (props: HTMLAttributes<HTMLDivElement>) => <div {...props} />,
