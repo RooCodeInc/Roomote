@@ -74,25 +74,23 @@ function AddCustomSkillDialog({
     setEnvironmentIds([]);
     form.reset();
   };
-  const onSuccess = async () => {
-    if (availability === 'shared') {
-      await queryClient.invalidateQueries({
-        queryKey: trpc.instanceSkills.pathKey(),
-      });
-    } else {
-      await queryClient.invalidateQueries({
-        queryKey: trpc.customSkills.list.queryKey(),
-      });
-    }
+  const finishCreate = async (queryKey: readonly unknown[]) => {
+    await queryClient.invalidateQueries({ queryKey });
     toast.success('Skill created');
     resetAndClose();
   };
   const onError = (error: { message: string }) => toast.error(error.message);
   const createShared = useMutation(
-    trpc.instanceSkills.create.mutationOptions({ onSuccess, onError }),
+    trpc.instanceSkills.create.mutationOptions({
+      onSuccess: () => finishCreate(trpc.instanceSkills.pathKey()),
+      onError,
+    }),
   );
   const createEnvironment = useMutation(
-    trpc.customSkills.saveManual.mutationOptions({ onSuccess, onError }),
+    trpc.customSkills.saveManual.mutationOptions({
+      onSuccess: () => finishCreate(trpc.customSkills.list.queryKey()),
+      onError,
+    }),
   );
   const isSaving = createShared.isPending || createEnvironment.isPending;
   const close = () => {
@@ -139,7 +137,11 @@ function AddCustomSkillDialog({
                 className="space-y-2"
               >
                 <div className="flex items-center gap-2">
-                  <RadioGroupItem value="shared" id="new-skill-shared" />
+                  <RadioGroupItem
+                    value="shared"
+                    id="new-skill-shared"
+                    disabled={isSaving}
+                  />
                   <Label htmlFor="new-skill-shared" className="cursor-pointer">
                     Everywhere
                   </Label>
@@ -150,6 +152,7 @@ function AddCustomSkillDialog({
                       value="environment"
                       id="new-skill-environment"
                       disabled={
+                        isSaving ||
                         environments.isPending ||
                         environments.data?.environments.length === 0
                       }
@@ -174,6 +177,7 @@ function AddCustomSkillDialog({
                       <Checkbox
                         id={`new-skill-env-${environment.id}`}
                         checked={environmentIds.includes(environment.id)}
+                        disabled={isSaving}
                         onCheckedChange={() =>
                           setEnvironmentIds((current) =>
                             current.includes(environment.id)

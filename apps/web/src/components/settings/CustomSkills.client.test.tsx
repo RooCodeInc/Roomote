@@ -434,8 +434,7 @@ describe('CustomSkills settings', () => {
       ).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Only in')).toBeInTheDocument();
-    expect(screen.getByText('Alpha')).toBeInTheDocument();
+    expect(screen.getByText('Only in Alpha')).toBeInTheDocument();
   });
 
   it('filters environment rows by skill and availability text', async () => {

@@ -26,7 +26,6 @@ import {
   FormMessage,
   Input,
   Pencil,
-  Sparkles,
   Skeleton,
   Textarea,
   Trash2,
@@ -274,7 +273,6 @@ export function InstanceSkills({
         visibleSkills.map((skill) => (
           <SkillListRow
             key={skill.id}
-            icon={Sparkles}
             name={
               <button
                 type="button"

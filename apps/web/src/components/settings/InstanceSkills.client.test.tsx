@@ -33,9 +33,13 @@ const { state, createMock, updateMock, deleteMock, saveManualMock } =
         { id: '00000000-0000-4000-8000-000000000011', name: 'Alpha' },
         { id: '00000000-0000-4000-8000-000000000012', name: 'Beta' },
       ],
+      createResult: null as Promise<{ success: true }> | null,
       isAdmin: false,
     },
-    createMock: vi.fn(async (_input: unknown) => ({ success: true })),
+    createMock: vi.fn(
+      async (_input: unknown) =>
+        state.createResult ?? Promise.resolve({ success: true as const }),
+    ),
     updateMock: vi.fn(async (_input: unknown) => ({ success: true })),
     deleteMock: vi.fn(async (_input: unknown) => ({ success: true })),
     saveManualMock: vi.fn(async (_input: unknown) => ({ success: true })),
@@ -157,6 +161,7 @@ function renderSkills() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  state.createResult = null;
   state.isAdmin = false;
 });
 
@@ -256,6 +261,41 @@ it('shows document-size validation instead of silently refusing to save', async 
   expect(screen.getByRole('dialog')).toBeInTheDocument();
 });
 
+it('keeps the submitted catalog invalidation stable while creation is pending', async () => {
+  let resolveCreate!: (value: { success: true }) => void;
+  state.createResult = new Promise((resolve) => {
+    resolveCreate = resolve;
+  });
+  const { invalidate } = renderSkills();
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Add Custom Skill' }),
+  );
+  const dialog = screen.getByRole('dialog');
+  fireEvent.change(within(dialog).getByLabelText('Slug'), {
+    target: { value: 'pending-skill' },
+  });
+  fireEvent.change(within(dialog).getByLabelText('Description'), {
+    target: { value: 'Pending instructions' },
+  });
+  fireEvent.change(within(dialog).getByLabelText('Content'), {
+    target: { value: '# Pending instructions' },
+  });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save Skill' }));
+
+  await waitFor(() => expect(createMock).toHaveBeenCalled());
+  expect(
+    within(dialog).getByRole('radio', { name: 'Everywhere' }),
+  ).toBeDisabled();
+  resolveCreate({ success: true });
+
+  await waitFor(() =>
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['instanceSkills'] }),
+  );
+  expect(invalidate).not.toHaveBeenCalledWith({
+    queryKey: ['customSkills', 'list'],
+  });
+});
+
 it('updates a creator skill and invalidates the catalog', async () => {
   const { invalidate } = renderSkills();
   fireEvent.click(await screen.findByRole('button', { name: 'Edit my-skill' }));
@@ -314,7 +354,7 @@ it('unifies admin skills with filters, search, marketplace, and scoped creation'
   expect(within(table).getAllByText('Everywhere')).toHaveLength(2);
   expect(screen.getAllByRole('radio')).toHaveLength(3);
 
-  fireEvent.click(screen.getByRole('radio', { name: 'Shared' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Everywhere' }));
   expect(screen.queryByText('env-skill')).not.toBeInTheDocument();
   expect(screen.getByText('my-skill')).toBeVisible();
   fireEvent.click(screen.getByRole('radio', { name: 'Env-Specific' }));

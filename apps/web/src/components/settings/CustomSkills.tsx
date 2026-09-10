@@ -31,7 +31,6 @@ import {
   Pencil,
   Search,
   Skeleton,
-  Sparkles,
   Spinner,
   SquareArrowOutUpRight,
   Textarea,
@@ -968,7 +967,6 @@ export function CustomSkills({
         visibleInstalledSkills.map((skill) => (
           <SkillListRow
             key={skill.skillId}
-            icon={Sparkles}
             name={formatSkillTitle(skill)}
             summary={formatSkillByline({
               kind: skill.kind,
@@ -980,21 +978,9 @@ export function CustomSkills({
                 {skill.description ?? 'No description provided.'}
               </p>
             }
-            availability={
-              <span className="flex flex-wrap items-center gap-x-1 gap-y-1">
-                <span>Only in</span>
-                {skill.environments.map((environment, index) => (
-                  <span
-                    key={environment.id}
-                    className="inline-flex items-center gap-1"
-                  >
-                    <VectorSquare className="size-3.5" />
-                    {environment.name}
-                    {index < skill.environments.length - 1 ? ',' : null}
-                  </span>
-                ))}
-              </span>
-            }
+            availability={`Only in ${skill.environments
+              .map((environment) => environment.name)
+              .join(', ')}`}
             actions={
               <>
                 <Button

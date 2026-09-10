@@ -1,6 +1,6 @@
 'use client';
 
-import type { ComponentType, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 import {
   Input,
@@ -29,7 +29,7 @@ export function SkillListToolbar({
 }) {
   const filters = [
     ['all', 'All'],
-    ['shared', 'Shared'],
+    ['shared', 'Everywhere'],
     ['environment', 'Env-Specific'],
   ] as const;
 
@@ -74,31 +74,22 @@ export function SkillListHeader() {
   return (
     <div
       role="row"
-      className="hidden grid-cols-[auto_minmax(0,4fr)_minmax(0,5fr)_minmax(12rem,3fr)_auto] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+      className="hidden grid-cols-[minmax(0,4fr)_minmax(0,5fr)_minmax(12rem,3fr)_auto] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
     >
-      <span aria-hidden className="w-4" />
-      <span role="columnheader" className="col-start-2">
-        Name
-      </span>
-      <span role="columnheader" className="col-start-3">
-        Description
-      </span>
-      <span role="columnheader" className="col-start-4">
-        Availability
-      </span>
+      <span role="columnheader">Name</span>
+      <span role="columnheader">Description</span>
+      <span role="columnheader">Availability</span>
     </div>
   );
 }
 
 export function SkillListRow({
-  icon: Icon,
   name,
   summary,
   description,
   availability,
   actions,
 }: {
-  icon: ComponentType<{ className?: string }>;
   name: ReactNode;
   summary?: ReactNode;
   description: ReactNode;
@@ -108,15 +99,9 @@ export function SkillListRow({
   return (
     <div
       role="row"
-      className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[auto_minmax(0,4fr)_minmax(0,5fr)_minmax(12rem,3fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
+      className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[minmax(0,4fr)_minmax(0,5fr)_minmax(12rem,3fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
     >
-      <div
-        role="cell"
-        className="col-start-1 row-span-3 row-start-1 flex w-4 items-start pt-0.5 md:row-span-1 md:items-center md:pt-0"
-      >
-        <Icon className="size-4 shrink-0" />
-      </div>
-      <div role="cell" className="col-start-2 row-start-1 min-w-0 space-y-1">
+      <div role="cell" className="col-start-1 row-start-1 min-w-0 space-y-1">
         <div className="truncate text-sm font-semibold">{name}</div>
         {summary ? (
           <div className="text-xs text-muted-foreground">{summary}</div>
@@ -124,19 +109,19 @@ export function SkillListRow({
       </div>
       <div
         role="cell"
-        className="col-span-2 col-start-2 row-start-2 min-w-0 text-xs text-muted-foreground/80 md:col-span-1 md:col-start-3 md:row-start-1"
+        className="col-span-2 col-start-1 row-start-2 min-w-0 text-xs text-muted-foreground/80 md:col-span-1 md:col-start-2 md:row-start-1"
       >
         {description}
       </div>
       <div
         role="cell"
-        className="col-span-2 col-start-2 row-start-3 min-w-0 text-xs text-muted-foreground md:col-span-1 md:col-start-4 md:row-start-1"
+        className="col-span-2 col-start-1 row-start-3 min-w-0 text-xs text-muted-foreground md:col-span-1 md:col-start-3 md:row-start-1"
       >
         {availability}
       </div>
       <div
         role="cell"
-        className="col-start-3 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-5"
+        className="col-start-2 row-start-1 flex shrink-0 items-center justify-end gap-1 md:col-start-4"
       >
         {actions}
       </div>
