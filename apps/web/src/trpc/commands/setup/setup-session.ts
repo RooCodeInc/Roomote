@@ -659,17 +659,27 @@ export async function skipSetupSourceControlCommand(
   auth: UserAuthSuccess,
 ): Promise<{ success: true }> {
   assertAdmin(auth);
-  await persistSetupSessionReceipt(auth, {
-    kind: 'source_control_skipped',
-    fingerprint: 'initial-options',
-    text: 'Connect source control later',
-  });
-  await persistSetupSessionReceipt(auth, {
-    kind: 'source_control_skipped',
-    fingerprint: 'initial-options:response',
-    text: 'No problem — you can still get started without connecting source control. I can research a question, create a useful document or plan, or set up a recurring check when a service is connected.',
-    role: 'assistant',
-  });
+  const conversation = await findSetupSessionConversation(auth);
+  if (!conversation) throw new Error('Setup Session not found');
+  await persistSetupSessionReceipt(
+    auth,
+    {
+      kind: 'source_control_skipped',
+      fingerprint: 'initial-options',
+      text: 'Connect source control later',
+    },
+    conversation,
+  );
+  await persistSetupSessionReceipt(
+    auth,
+    {
+      kind: 'source_control_skipped',
+      fingerprint: 'initial-options:response',
+      text: 'No problem — you can still get started without connecting source control. I can research a question, create a useful document or plan, or set up a recurring check when a service is connected.',
+      role: 'assistant',
+    },
+    conversation,
+  );
   return { success: true };
 }
 

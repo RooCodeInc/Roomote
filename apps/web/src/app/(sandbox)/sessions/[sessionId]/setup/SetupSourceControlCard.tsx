@@ -67,7 +67,13 @@ function SetupSessionSourceControlCardBody({
   const [dismissed, setDismissed] = useState(false);
   const skipSourceControl = useMutation(
     trpc.setup.skipSourceControl.mutationOptions({
-      onSuccess: () => router.refresh(),
+      onSuccess: () => {
+        setDismissed(true);
+        void queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+        router.refresh();
+      },
       onError: (error) => toast.error(error.message),
     }),
   );
@@ -146,10 +152,8 @@ function SetupSessionSourceControlCardBody({
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  setDismissed(true);
-                  skipSourceControl.mutate();
-                }}
+                disabled={skipSourceControl.isPending}
+                onClick={() => skipSourceControl.mutate()}
               >
                 Skip for now
                 <ArrowRight />
@@ -216,7 +220,12 @@ export function SetupSessionSourceControlCard({
     (provider) => provider.connected && (provider.repositoryCount ?? 0) > 0,
   );
 
-  if (!sourceControlSetup || hasSynchronizedRepository) {
+  if (
+    !sourceControlSetup ||
+    hasSynchronizedRepository ||
+    (statusQuery.data?.optionalSourceControlEnabled === true &&
+      statusQuery.data.sourceControlSkipped)
+  ) {
     return null;
   }
 
