@@ -1,9 +1,9 @@
 import { TRPCError } from '@trpc/server';
 
 import {
-  createVoiceRealtimeClientSecret,
+  createVoiceLiveSession,
   resolveVoiceOpenAiKey,
-  type VoiceRealtimeClientSecret,
+  type VoiceLiveSession,
 } from '@/lib/server/voice';
 
 /**
@@ -16,12 +16,12 @@ export async function getVoiceStatusCommand(): Promise<{ enabled: boolean }> {
 }
 
 /**
- * Mint a short-lived ephemeral token the browser uses to open a WebRTC
- * transcription session directly with OpenAI. The deployment's API key never
- * leaves the server; the token is scoped to transcription only and expires
- * on its own.
+ * Create GPT-Live on the server so the deployment key never reaches the
+ * browser. The browser supplies only its SDP offer and receives the answer.
  */
-export async function createVoiceRealtimeTokenCommand(): Promise<VoiceRealtimeClientSecret> {
+export async function createVoiceLiveSessionCommand(input: {
+  sdp: string;
+}): Promise<VoiceLiveSession> {
   const apiKey = await resolveVoiceOpenAiKey();
 
   if (!apiKey) {
@@ -32,7 +32,7 @@ export async function createVoiceRealtimeTokenCommand(): Promise<VoiceRealtimeCl
   }
 
   try {
-    return await createVoiceRealtimeClientSecret(apiKey);
+    return await createVoiceLiveSession({ apiKey, sdp: input.sdp });
   } catch (error) {
     throw new TRPCError({
       code: 'BAD_GATEWAY',

@@ -1,12 +1,11 @@
 /**
  * Text preparation for spoken replies in the live voice conversation
- * feature. Agent replies are markdown written for reading; text-to-speech
- * reads them literally, so structural syntax is stripped or summarized
- * before synthesis.
+ * feature. Agent replies are markdown written for reading, so structural
+ * syntax is stripped or summarized before the text is returned to GPT-Live.
  */
 
-/** Mirrors the server-side OpenAI TTS input cap (`VOICE_TTS_MAX_INPUT_CHARS`). */
-const VOICE_SPEECH_CHUNK_CHARS = 4_000;
+/** Stays comfortably below GPT-Live's 500-token append limit. */
+const VOICE_SPEECH_CHUNK_CHARS = 1_200;
 
 /**
  * Convert an agent's markdown reply into text worth speaking aloud. Code
@@ -48,9 +47,8 @@ export function toSpeakableText(markdown: string): string {
 }
 
 /**
- * Split a long reply into synthesis-sized chunks, preferring paragraph and
- * sentence boundaries, so each request stays under the TTS input cap and
- * playback can begin before the whole reply is synthesized.
+ * Split a long reply into GPT-Live commentary appends, preferring paragraph
+ * and sentence boundaries.
  */
 export function chunkSpeakableText(
   text: string,
@@ -106,37 +104,4 @@ function findLastSentenceEnd(window: string): number {
   }
 
   return -1;
-}
-
-/**
- * Find where a reply that is still streaming can safely be cut for speech:
- * the end of the last complete sentence (or line) at or after `from`. Text
- * inside an unclosed code fence is held back until the fence closes, since
- * `toSpeakableText` summarizes fenced blocks as a whole. Returns `from` when
- * nothing new is ready.
- */
-export function findSpeakableBoundary(text: string, from: number): number {
-  let limit = text.length;
-  const fences = [...text.slice(from).matchAll(/```/g)];
-
-  if (fences.length % 2 === 1) {
-    limit = from + (fences[fences.length - 1]?.index ?? 0);
-  }
-
-  for (let i = limit - 1; i > from; i--) {
-    const char = text[i];
-
-    if (char === '\n') {
-      return i + 1;
-    }
-
-    if (
-      (char === '.' || char === '!' || char === '?') &&
-      /\s/.test(text[i + 1] ?? '')
-    ) {
-      return i + 1;
-    }
-  }
-
-  return from;
 }

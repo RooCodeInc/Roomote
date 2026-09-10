@@ -50,8 +50,6 @@ const {
     start: vi.fn(),
     stop: vi.fn(),
     speak: vi.fn(),
-    stopSpeaking: vi.fn(),
-    interruptions: 0,
   },
 }));
 
@@ -64,8 +62,6 @@ vi.mock('@/hooks/useLiveVoice', () => ({
     start: liveVoiceState.start,
     stop: liveVoiceState.stop,
     speak: liveVoiceState.speak,
-    stopSpeaking: liveVoiceState.stopSpeaking,
-    interruptions: liveVoiceState.interruptions,
   }),
 }));
 
@@ -239,8 +235,6 @@ beforeEach(() => {
   liveVoiceState.start.mockReset();
   liveVoiceState.stop.mockReset();
   liveVoiceState.speak.mockReset();
-  liveVoiceState.stopSpeaking.mockReset();
-  liveVoiceState.interruptions = 0;
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -2011,8 +2005,7 @@ describe('FastSessionTranscript', () => {
       expect(liveVoiceState.start).not.toHaveBeenCalled();
     });
 
-    it('speaks each completed sentence as the reply streams, then the rest on persist', async () => {
-      vi.spyOn(Date, 'now').mockReturnValue(10);
+    it('returns persisted Fast messages to Live without forwarding partial UI chunks', async () => {
       voiceStatusQuery.mockResolvedValue({ enabled: true });
       const transcript = () => (
         <FastSessionTranscript
@@ -2045,20 +2038,9 @@ describe('FastSessionTranscript', () => {
           chunkEvent('assistant-1:event', 'First sentence. Second', 11),
         );
       });
-      // The finished sentence goes out immediately; the open one waits.
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
-      expect(liveVoiceState.speak).toHaveBeenLastCalledWith('First sentence.');
+      expect(liveVoiceState.speak).not.toHaveBeenCalled();
 
-      act(() => {
-        FakeEventSource.instances[0]!.emit(
-          'chunk',
-          chunkEvent('assistant-1:event', ' part is here', 11),
-        );
-      });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
-
-      // The persisted row finalizes the reply under the same id: only the
-      // unspoken remainder is queued.
+      // Only authoritative persisted messages are returned to GPT-Live.
       act(() => {
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
@@ -2071,9 +2053,9 @@ describe('FastSessionTranscript', () => {
           ],
         });
       });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
       expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
-        'Second part is here.',
+        'First sentence. Second part is here.',
       );
 
       // A later message in the same turn is spoken too; nothing is skipped
@@ -2090,67 +2072,10 @@ describe('FastSessionTranscript', () => {
           ],
         });
       });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(3);
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
       expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
         'Here is the result.',
       );
-    });
-
-    it('mutes the rest of a reply the user talked over', async () => {
-      voiceStatusQuery.mockResolvedValue({ enabled: true });
-      liveVoiceState.active = true;
-      liveVoiceState.status = 'listening';
-      const transcript = () => (
-        <FastSessionTranscript
-          sessionId="session-1"
-          initialMessages={[]}
-          canReply
-        />
-      );
-      const { rerender } = render(transcript());
-      await screen.findAllByRole('button', { name: /end voice conversation/i });
-
-      act(() => {
-        FakeEventSource.instances[0]!.emit(
-          'chunk',
-          chunkEvent('assistant-1:event', 'Long answer begins. And', 5),
-        );
-      });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
-
-      // The user interrupts mid-reply.
-      liveVoiceState.interruptions = 1;
-      rerender(transcript());
-
-      act(() => {
-        FakeEventSource.instances[0]!.emit('messages', {
-          messages: [
-            textMessage({
-              id: 'assistant-1',
-              role: 'assistant',
-              text: 'Long answer begins. And keeps going on.',
-              ts: 5,
-            }),
-          ],
-        });
-      });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
-
-      // The next reply is a fresh one and is spoken.
-      act(() => {
-        FakeEventSource.instances[0]!.emit('messages', {
-          messages: [
-            textMessage({
-              id: 'assistant-2',
-              role: 'assistant',
-              text: 'Sure, switching.',
-              ts: 6,
-            }),
-          ],
-        });
-      });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
-      expect(liveVoiceState.speak).toHaveBeenLastCalledWith('Sure, switching.');
     });
 
     it('sets the spoken cutoff from server timestamps, not the browser clock', async () => {
@@ -2172,12 +2097,14 @@ describe('FastSessionTranscript', () => {
         />
       );
       const { rerender } = render(transcript());
-      act(() => {
-        FakeEventSource.instances[0]!.emit('session', {
-          conversationResponding: false,
-        });
-      });
+      replyMutate.mockResolvedValue({ success: true });
+      const input = screen.getByPlaceholderText('Message agent');
+      fireEvent.change(input, { target: { value: 'Optimistic message' } });
+      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalled());
 
+      // Start voice while the browser-timestamped optimistic row is waiting
+      // for its persisted SSE echo.
       fireEvent.click(
         await screen.findByRole('button', { name: /^voice conversation$/i }),
       );

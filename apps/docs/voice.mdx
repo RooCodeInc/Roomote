@@ -1,49 +1,53 @@
 ---
 title: Voice
 icon: audio-lines
-description: Talk to Fast hands-free with live transcription and spoken replies.
+description: Talk naturally with a Fast Session using GPT-Live.
 ---
 
-Voice turns a Session into a spoken conversation. Start a voice conversation
-from the session composer and talk naturally: Roomote transcribes your speech
-live, sends each utterance to Fast as an ordinary session message, and reads
-the reply back out loud. You can interrupt a spoken reply just by talking, and
-the transcript stays in the Session like any typed exchange, so you can move
-between voice and text freely.
+Voice turns a Fast Session into a natural, full-duplex spoken conversation.
+GPT-Live handles listening, speaking, and interruptions while the actual Fast
+Session handles questions and work with its selected model, tools, context, and
+durable transcript. You can move between voice and text without switching to a
+separate voice-only agent.
 
 ## Enabling voice
 
-Voice uses OpenAI for live transcription and speech synthesis. It is available
-on any deployment with an OpenAI API key:
+Voice uses OpenAI GPT-Live-1 and is available on deployments whose OpenAI
+project has GPT-Live access:
 
 - `R_VOICE_OPENAI_API_KEY` dedicates a key to voice (for example to bill it
   separately from task inference).
 - Without it, voice falls back to the deployment's general `OPENAI_API_KEY`.
 
-When neither key is configured the voice button does not appear. Keys stay on
-the control plane: the browser receives only short-lived, transcription-scoped
-tokens and synthesized audio, never the API key.
+When neither key is configured the voice button does not appear. The key stays
+on the control plane. The browser sends its WebRTC connection offer to Roomote
+and receives only the negotiated session answer; it never receives the API key.
 
 ## Using voice
 
 1. Select the voice button in a composer: in an open Session, or on the home
    page and the **New Session** dialog to start a fresh Session by speaking.
 2. Grant microphone access when the browser asks.
-3. Speak. A pause ends your turn and sends it to Fast automatically; the live
-   transcription is shown above the composer while you talk. From the home
-   page or dialog, your first utterance starts the Session and opens it
-   already in voice mode.
-4. Fast's reply is read aloud as it arrives, sentence by sentence. Speak at
-   any time to interrupt the playback and take the next turn.
+3. Speak naturally. GPT-Live shows the live transcript and delegates requests
+   to the Fast Session. From the home page or dialog, your first delegated
+   request starts the Session and opens it already in voice mode.
+4. GPT-Live speaks verified Fast output as it arrives. Speak at any time to
+   interrupt; GPT-Live continues listening while it speaks, and corrections
+   are sent back through the same Fast Session.
 5. Select **End** (or the voice button again) to return to typing.
 
 Voice input requires a browser with microphone and WebRTC support, which
 includes current Chrome, Edge, Safari, and Firefox.
 
-## What gets spoken
+## How work is handled
 
-Replies are cleaned up for listening: code blocks are acknowledged but not
-read character-by-character, links are read by their label, and long replies
-are synthesized in order so playback starts quickly. Work that Fast delegates
-to execution continues to appear in the Session as usual; voice reads the
-conversational replies.
+GPT-Live is the conversation layer, not a second task agent. Requests that need
+an answer, reasoning, or an action go through the same Fast reply path as typed
+messages. That preserves the Session's selected model, tools, permissions, and
+transcript. Fast output is cleaned for speech before it is returned to
+GPT-Live, so code blocks and raw URLs are not read character-by-character.
+
+Brief greetings and clarifying questions can stay in the live conversation and
+do not start duplicate Fast work. Ending voice stops the microphone; Fast work
+already started remains visible in the Session and follows the normal Session
+lifecycle.

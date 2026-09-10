@@ -47,7 +47,7 @@ import {
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
-  createVoiceRealtimeTokenCommand,
+  createVoiceLiveSessionCommand,
   getVoiceStatusCommand,
 } from '../commands/voice';
 import {
@@ -2966,9 +2966,9 @@ export const appRouter = createRouter({
 
   voice: createRouter({
     status: protectedProcedure.query(() => getVoiceStatusCommand()),
-    createRealtimeToken: protectedProcedure.mutation(() =>
-      createVoiceRealtimeTokenCommand(),
-    ),
+    createLiveSession: protectedProcedure
+      .input(z.object({ sdp: z.string().trim().min(1).max(65_536) }))
+      .mutation(({ input }) => createVoiceLiveSessionCommand(input)),
   }),
 
   sessions: createRouter({

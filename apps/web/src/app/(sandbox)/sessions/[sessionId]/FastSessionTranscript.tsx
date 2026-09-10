@@ -42,7 +42,6 @@ import {
 import { WorkspaceHeader } from '@/components/layout';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
-import { findSpeakableBoundary } from '@/lib/voice-speech';
 import {
   SessionPromptInput,
   type SessionModelSelection,
@@ -763,12 +762,8 @@ export function FastSessionTranscript({
   });
   /** Assistant messages at or before this ts predate the conversation. */
   const voiceCutoffTsRef = useRef(0);
-  /**
-   * Per assistant message (keyed by transcript id), how many characters of
-   * its text have already been handed to speech. `Infinity` marks a reply
-   * the user interrupted, which stays silent even as more of it arrives.
-   */
-  const spokenCursorsRef = useRef(new Map<string, number>());
+  /** Persisted assistant messages already returned to the Live conversation. */
+  const spokenMessageIdsRef = useRef(new Set<string>());
   const pendingUtterancesRef = useRef<string[]>([]);
   const [utteranceQueueVersion, setUtteranceQueueVersion] = useState(0);
 
@@ -808,11 +803,9 @@ export function FastSessionTranscript({
   const speakRef = useRef(liveVoice.speak);
   speakRef.current = liveVoice.speak;
 
-  // Speak replies as they arrive rather than after the turn settles: each
-  // completed sentence of a streaming reply is queued the moment it lands,
-  // and whatever remains is queued when the persisted row finalizes it. The
-  // per-message cursor means a persisted row that replaces its streamed
-  // chunks continues where the stream left off instead of repeating.
+  // Return each persisted Fast message once. GPT-Live speaks it natively and
+  // handles interruption itself; partial UI chunks are not authoritative
+  // backend results and can contain incomplete Markdown.
   useEffect(() => {
     if (!liveVoiceActive) {
       return;
@@ -823,6 +816,7 @@ export function FastSessionTranscript({
         message.role !== 'assistant' ||
         message.visibleInTranscript === false ||
         message.ts <= voiceCutoffTsRef.current ||
+        message.partial ||
         !message.text ||
         (message.kind !== 'text' &&
           message.updateType !== ACP_ENVELOPE_EVENT_TYPES.AssistantMessage)
@@ -830,42 +824,11 @@ export function FastSessionTranscript({
         continue;
       }
 
-      const cursor = spokenCursorsRef.current.get(message.id) ?? 0;
-
-      if (cursor === Infinity) {
-        continue;
-      }
-
-      const boundary = message.partial
-        ? findSpeakableBoundary(message.text, cursor)
-        : message.text.length;
-
-      if (boundary <= cursor) {
-        continue;
-      }
-
-      spokenCursorsRef.current.set(message.id, boundary);
-      speakRef.current(message.text.slice(cursor, boundary).trim());
+      if (spokenMessageIdsRef.current.has(message.id)) continue;
+      spokenMessageIdsRef.current.add(message.id);
+      speakRef.current(message.text);
     }
   }, [uiMessages, liveVoiceActive]);
-
-  // Talking over a reply drops the rest of it: every reply known at the
-  // moment of interruption is muted so later chunks of it stay silent.
-  const uiMessagesRef = useRef(uiMessages);
-  uiMessagesRef.current = uiMessages;
-  const liveVoiceInterruptions = liveVoice.interruptions;
-
-  useEffect(() => {
-    if (liveVoiceInterruptions === 0) {
-      return;
-    }
-
-    for (const message of uiMessagesRef.current) {
-      if (message.role === 'assistant') {
-        spokenCursorsRef.current.set(message.id, Infinity);
-      }
-    }
-  }, [liveVoiceInterruptions]);
 
   const handleVoiceToggle = useCallback(() => {
     // Toggling while the handshake is still connecting cancels it.
@@ -877,14 +840,14 @@ export function FastSessionTranscript({
     // Replies that predate the conversation stay silent. The cutoff comes
     // from the transcript's own (server-assigned) timestamps rather than the
     // browser clock, which may run ahead of the server.
-    voiceCutoffTsRef.current = messages.reduce(
-      (latest, message) => Math.max(latest, message.ts),
-      0,
-    );
-    spokenCursorsRef.current.clear();
+    voiceCutoffTsRef.current = 0;
+    for (const message of serverMessages.values()) {
+      voiceCutoffTsRef.current = Math.max(voiceCutoffTsRef.current, message.ts);
+    }
+    spokenMessageIdsRef.current.clear();
     pendingUtterancesRef.current = [];
     void liveVoice.start();
-  }, [liveVoice, messages]);
+  }, [liveVoice, serverMessages]);
 
   // A session opened from a spoken prompt picks the conversation straight
   // up: voice starts once the deployment confirms it is configured, with no
@@ -901,7 +864,7 @@ export function FastSessionTranscript({
 
     autoStartedVoiceRef.current = true;
     voiceCutoffTsRef.current = 0;
-    spokenCursorsRef.current.clear();
+    spokenMessageIdsRef.current.clear();
     pendingUtterancesRef.current = [];
     void startLiveVoiceRef.current();
 
