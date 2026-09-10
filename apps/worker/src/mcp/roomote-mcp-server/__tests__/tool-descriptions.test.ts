@@ -1221,6 +1221,9 @@ describe('roomote MCP tool descriptions', () => {
       'manage_source_control',
     );
 
+    expect(sourceControlTool.config.description).toContain(
+      'The metadata refresh preserves its current draft or ready state; later human changes and opt-in clean-review promotion are separate transitions.',
+    );
     expect(sourceControlTool.handler).toBeDefined();
     const result = await sourceControlTool.handler?.({
       action: 'get_issue',
