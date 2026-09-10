@@ -193,6 +193,8 @@ import {
   acceptCookieConsentCommand,
   setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
+  getUserPersonalizationCommand,
+  updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
   type EnvironmentConfigVersionDetail,
@@ -1617,6 +1619,29 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         updatePersonalPreferencesCommand(auth, input),
+      ),
+    getPersonalization: protectedProcedure.query(({ ctx: { auth } }) =>
+      getUserPersonalizationCommand(auth),
+    ),
+    updatePersonalization: protectedProcedure
+      .input(
+        z
+          .object({
+            expectedVersion: z.number().int().nonnegative(),
+            instructions: z.string().max(8_000).optional(),
+            learnFromConversations: z.boolean().optional(),
+            reset: z.literal(true).optional(),
+          })
+          .refine(
+            (input) =>
+              input.instructions !== undefined ||
+              input.learnFromConversations !== undefined ||
+              input.reset === true,
+            { message: 'Expected a personalization change.' },
+          ),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateUserPersonalizationCommand(auth, input),
       ),
   }),
 

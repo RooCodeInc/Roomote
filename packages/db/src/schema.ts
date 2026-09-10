@@ -153,6 +153,26 @@ export const users = pgTable(
   ],
 );
 
+/** Private, actor-owned instructions used only while serving that user. */
+export const userPersonalizations = pgTable('user_personalizations', {
+  userId: text('user_id')
+    .notNull()
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  manualInstructions: encryptedText('manual_instructions'),
+  explicitConversationInstructions: encryptedText(
+    'explicit_conversation_instructions',
+  ),
+  inferredInstructions: encryptedText('inferred_instructions'),
+  learnFromConversations: boolean('learn_from_conversations')
+    .notNull()
+    .default(true),
+  version: integer('version').notNull().default(0),
+  resetAt: timestamp('reset_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 export const instanceSkills = pgTable(
   'instance_skills',
   {
@@ -178,6 +198,16 @@ export const userRelations = relations(users, ({ many }) => ({
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
+
+export const userPersonalizationRelations = relations(
+  userPersonalizations,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userPersonalizations.userId],
+      references: [users.id],
+    }),
+  }),
+);
 
 /**
  * deployment_settings

@@ -23,6 +23,7 @@ import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
 import { buildTherapistModeInstructions } from '../therapist-mode';
+import { buildUserPersonalizationInstructions } from '../user-personalization';
 
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
@@ -156,6 +157,7 @@ export function buildFastAgentSystemPrompt({
   setupSnapshot,
   setupSession = false,
   therapistModeEnabled = false,
+  personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
 }: {
@@ -185,6 +187,11 @@ export function buildFastAgentSystemPrompt({
   /** True only for the active conversational setup session. */
   setupSession?: boolean;
   therapistModeEnabled?: boolean;
+  personalizationContext?: {
+    displayName: string | null;
+    instructions: string;
+    learnFromConversations: boolean;
+  } | null;
   globalAgentInstructions?: string | null;
   workspaceRoutingRules?: WorkspaceRoutingSettings['rules'];
   /** @deprecated GitHub availability is derived from availableIntegrations. */
@@ -258,6 +265,11 @@ ${
 }`;
   const therapistModeInstructions =
     buildTherapistModeInstructions(therapistModeEnabled);
+  const personalizationInstructions = platformEvent
+    ? ''
+    : buildUserPersonalizationInstructions(personalizationContext, {
+        updateToolName: 'update_personalization',
+      });
   const sharedAgentGuidance = globalAgentInstructions?.trim();
   const workspaceRoutingGuidance = formatWorkspaceRoutingRulesForPrompt(
     workspaceRoutingRules,
@@ -300,6 +312,7 @@ ${formatActiveTasksForPrompt(activeTasks)}
 ## Deployment MCP Servers
 ${formatIntegrationsForPrompt(availableIntegrations)}
 ${therapistModeInstructions ? `\n${therapistModeInstructions}\n` : ''}
+${personalizationInstructions ? `\n${personalizationInstructions}\n` : ''}
 ${
   setupSession
     ? `
