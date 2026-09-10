@@ -982,7 +982,7 @@ export const taskRunsRouter = router({
     clearPendingCommunicationRequestUserInput(
       input.provider,
       input.conversationId,
-      input.requestId ? { requestId: input.requestId } : undefined,
+      { requestId: input.requestId, runId: input.runId },
     ),
   ),
   /**

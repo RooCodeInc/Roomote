@@ -1124,13 +1124,22 @@ export async function resolveSetupSessionTurnContext(
   auth: UserAuthSuccess,
   sessionId: string,
 ) {
-  const conversation = await findSetupSessionConversation(auth);
+  const state = await readSetupNewState();
+  const setupSession = normalizeSetupNewSetupSession(state.setupSession);
+  if (!setupSession) return null;
+  const [linkedSession] = await db
+    .select({ fastConversationId: sessions.fastConversationId })
+    .from(sessions)
+    .where(eq(sessions.id, setupSession.sessionId))
+    .limit(1);
   if (
-    !conversation ||
-    (conversation.sessionId !== sessionId &&
-      conversation.fastConversationId !== sessionId)
+    setupSession.sessionId !== sessionId &&
+    linkedSession?.fastConversationId !== sessionId
   )
     return null;
+  const conversation = await findSetupSessionConversation(auth);
+  if (!conversation)
+    throw new Error('Only the setup Session owner can reply during setup.');
   assertAdmin(auth);
   const setupSnapshot = await resolveSetupSnapshot(auth);
   const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
