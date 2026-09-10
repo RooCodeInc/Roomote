@@ -161,9 +161,6 @@ const serverSchema = {
   RELEASE_PRODUCT_VERSION: z.string().min(1).optional(),
   // Kill switch for the low-noise recurring-automation offer in Fast mode.
   R_FAST_AUTOMATION_OFFERS_DISABLED: optInBoolean(),
-  // Opt-in pilot: defer Fast scheduling schemas and detailed instructions
-  // behind capability discovery instead of sending them on every turn.
-  R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED: optInBoolean(),
   TRPC_URL: z.string().min(1),
   R_MODEL: z.string().min(1).optional(),
   R_ORCHESTRATION_MODEL: z.string().min(1).optional(),

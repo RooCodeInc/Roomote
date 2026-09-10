@@ -1662,8 +1662,6 @@ export async function answerFastAgentQuestion({
   durableAdmission,
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
-  schedulingProgressiveDisclosureEnabled = Env.R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED ===
-    true,
 }: {
   question: string;
   images?: string[];
@@ -1725,9 +1723,6 @@ export async function answerFastAgentQuestion({
   /** The durable queue is re-running this turn at its scheduled retry time
    * after a previous execution parked it on a temporary provider failure. */
   resumedAfterInferenceRetry?: boolean;
-  /** Operator-controlled pilot override. Primarily injectable for focused
-   * transport tests; production uses the deployment environment setting. */
-  schedulingProgressiveDisclosureEnabled?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -3232,7 +3227,6 @@ export async function answerFastAgentQuestion({
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
-      schedulingProgressiveDisclosureEnabled,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
       appEnv: Env.R_APP_ENV,
@@ -3737,9 +3731,7 @@ export async function answerFastAgentQuestion({
     const onDemandIntegrations = availableIntegrations.filter(
       (integration) => !isFastAgentNativeIntegration(integration.id),
     );
-    const schedulingTools = schedulingProgressiveDisclosureEnabled
-      ? getFastAgentSchedulingTools(availableIntegrations)
-      : [];
+    const schedulingTools = getFastAgentSchedulingTools(availableIntegrations);
     const nativeIntegrationError = (integrationId: string) => ({
       success: false as const,
       error: `The "${integrationId}" server is mounted natively; call its tools directly by their ${integrationId}_ prefixed names.`,
@@ -4774,12 +4766,7 @@ export async function answerFastAgentQuestion({
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
-          {
-            surface: conversation.surface,
-            ...(schedulingProgressiveDisclosureEnabled
-              ? { schedulingProgressiveDisclosureEnabled: true }
-              : {}),
-          },
+          { surface: conversation.surface },
         );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();

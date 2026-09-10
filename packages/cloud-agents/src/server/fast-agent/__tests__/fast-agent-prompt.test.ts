@@ -251,53 +251,28 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('guides every member through recurring work and offers automation when enabled', () => {
+  it('guides every member through scheduling discovery', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
     });
 
-    expect(prompt).toContain('## Recurring Work and Automations');
-    expect(prompt).toContain('Use `resolve_schedule` before creation');
-    expect(prompt).toContain(
+    expect(prompt).toContain('## Scheduling');
+    expect(prompt).toContain('Conversation reminders and checks');
+    expect(prompt).toContain('deployment custom automations');
+    expect(prompt).toContain('`find_integration_tools`');
+    expect(prompt).toContain('`query: "scheduling"`');
+    expect(prompt).toContain('exact packaged scheduling skill to load');
+    expect(prompt).toContain('Loading guidance never grants authorization');
+    expect(prompt).toContain('Ongoing-process monitoring must be finite');
+    expect(prompt).not.toContain('Use `resolve_schedule` before creation');
+    expect(prompt).not.toContain(
       'use `list` to check for an equivalent automation',
     );
-    expect(prompt).toContain('ask one explicit confirmation question');
-    expect(prompt).toContain('By the way — if you want this weekly');
-    expect(prompt).toContain('when in doubt, do not offer');
-    expect(prompt).toContain('When a user explicitly asks for recurring work');
-    expect(prompt).not.toContain('do not attempt creation');
-    expect(prompt).not.toContain('provide a copy-pasteable draft');
-  });
-
-  it('keeps only the scheduling distinction and discovery route upfront in the pilot', () => {
-    const baseline = buildFastAgentSystemPrompt({ availableEnvironments: [] });
-    const pilot = buildFastAgentSystemPrompt({
-      availableEnvironments: [],
-      schedulingProgressiveDisclosureEnabled: true,
-    });
-
-    expect(pilot).toContain('Conversation reminders and checks');
-    expect(pilot).toContain('deployment custom automations');
-    expect(pilot).toContain('`find_integration_tools`');
-    expect(pilot).toContain('`query: "scheduling"`');
-    expect(pilot).toContain('exact packaged scheduling skill to load');
-    expect(pilot).toContain('Loading guidance never grants authorization');
-    expect(pilot).toContain('Ongoing-process monitoring must be finite');
-    expect(pilot).not.toContain('Use `resolve_schedule` before creation');
-    expect(pilot).not.toContain(
-      'use `list` to check for an equivalent automation',
-    );
-    // Static prompt-size comparison only; this is not a latency or reliability
-    // evaluation. Tool-schema savings are measured separately from runtime.
-    expect(
-      Buffer.byteLength(baseline) - Buffer.byteLength(pilot),
-    ).toBeGreaterThan(2_000);
   });
 
   it('keeps deferred wakeup cancellation available on scheduled events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      schedulingProgressiveDisclosureEnabled: true,
       turnSource: 'platform_event',
       platformEventKind: 'scheduled_wakeup',
     });
@@ -560,7 +535,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('get_chat_message_context');
     expect(prompt).toContain('get_chat_channel_messages');
-    expect(prompt).toContain('manage_custom_automations');
+    expect(prompt).toContain('deployment custom automations');
     expect(prompt).toContain('roomote_create_custom_skill');
     expect(prompt).toContain('user explicitly asks to save');
     expect(prompt).toContain(
@@ -569,28 +544,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('exact returned `instance:<uuid>` ID');
     expect(prompt).not.toContain('integration_call');
     expect(prompt).toContain('roomote_manage_tasks');
-    expect(prompt).toContain("current user's deployment authorization");
     expect(prompt).toContain(
-      'members can create and manage their own custom automations',
+      'Scheduling tools are deferred native capabilities',
     );
-    expect(prompt).toContain(
-      'admins can manage all custom automations, including those without a creator',
-    );
-    expect(prompt).toContain(
-      "do not refuse a member's own-automation request merely because they are not an admin",
-    );
-    expect(prompt).toContain(
-      'Built-in automations and deployment settings remain admin-only',
-    );
-    expect(prompt).toContain(
-      'This tool is unavailable to advisor and judge subagents',
-    );
-    expect(prompt).toContain('use "run_now" rather than "launch_task"');
+    expect(prompt).toContain('Use scheduling discovery before acting');
     expect(prompt).toContain('same actor-authorized remote');
     expect(prompt).toContain('local stdio servers remain sandbox-only');
-    expect(prompt).toContain(
-      'Communicate first on a human-authored turn; platform events remain exempt',
-    );
     expect(prompt).toContain(
       'Keep using "launch_task", "send_task_message", "stop_task", or "cancel_task" for task changes',
     );
@@ -659,48 +618,22 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('gates ongoing-process offers on an unresolved outcome and verification capability', () => {
+  it('keeps ongoing-process offers bounded and capability-driven', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
-    expect(prompt).toContain(
-      'eligible under the exclusions below reports an outcome and is about to close, make one silent decision before the closeout',
-    );
-    expect(prompt).toContain(
-      'leave an ongoing process with a concrete unresolved outcome',
-    );
-    expect(prompt).toContain(
-      'include one specific bounded-check offer after the outcome in that same closeout',
-    );
-    expect(prompt).toContain('close normally without mentioning monitoring');
-    expect(prompt).toContain(
-      'not a blanket offer after every tool call, fix, or update',
-    );
-    expect(prompt).toContain('Verify capability before offering');
-    expect(prompt).toContain(
-      'if unavailable or uncertain, do not promise monitoring',
-    );
-    expect(prompt).toContain('outcome, evidence source, timing and stop bound');
-    expect(prompt).toContain('with confirmed deployment and telemetry access');
-    expect(prompt).toContain(
-      'Never imply a release or process started or completed without evidence',
-    );
+    expect(prompt).toContain('only when evidence leaves an unresolved outcome');
+    expect(prompt).toContain('an available source can verify it');
+    expect(prompt).toContain('at most one specific bounded follow-up check');
+    expect(prompt).toContain('Use scheduling discovery before acting');
   });
 
-  it('requires consent for offers but preserves direct explicit monitoring requests', () => {
+  it('distinguishes monitoring offers from explicit requests', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
-    expect(prompt).toContain('create no wakeup until the user accepts');
-    expect(prompt).toContain(
-      'Explicit user monitoring requests already authorize scheduling',
-    );
-    expect(prompt).toContain('do not require another opt-in');
-    expect(prompt).toContain('revalidate capability and list active wakeups');
-    expect(prompt).toContain('finite schedule and stop condition');
-    expect(prompt).toContain('without automatic renewal');
-    expect(prompt).toContain('Missing evidence is not success');
-    expect(prompt).toContain(
-      'Use "manage_wakeups" when the user wants a reminder',
-    );
+    expect(prompt).toContain('An offer is not authorization');
+    expect(prompt).toContain('explicit monitoring requests are');
+    expect(prompt).toContain('Ongoing-process monitoring must be finite');
+    expect(prompt).toContain('Follow the discovered scheduling guide');
   });
 
   it('keeps monitoring quiet, nonduplicative and subject to platform-event restrictions', () => {
@@ -710,28 +643,10 @@ describe('buildFastAgentSystemPrompt', () => {
       platformEventKind: 'scheduled_wakeup',
     });
 
-    expect(prompt).toContain('"only_when_notable" for monitoring');
-    expect(prompt).toContain('stay quiet on unchanged results');
-    expect(prompt).toContain(
-      'duplicate existing task, PR lifecycle/review, or other notifications and monitors',
-    );
-    expect(prompt).toContain(
-      'Offer at most once for the same unresolved outcome',
-    );
-    expect(prompt).toContain('do not repeat an ignored or declined offer');
-    expect(prompt).toContain(
-      'Do not make proactive offers on automation or scheduled-wakeup turns',
-    );
-    expect(prompt).toContain(
-      'Presentation-only events remain presentation-only',
-    );
-    expect(prompt).toContain('do not inspect or schedule from them');
-    expect(prompt).toContain(
-      'not an offer to save work as a deployment automation',
-    );
-    expect(prompt).toContain(
-      "the automation rule against pitching one-off fixes does not suppress an otherwise eligible check of a deployed fix's unresolved observable outcome",
-    );
+    expect(prompt).toContain('Never duplicate an existing notification');
+    expect(prompt).toContain('or make proactive offers on automation');
+    expect(prompt).toContain('scheduled-wakeup');
+    expect(prompt).toContain('presentation-only turns');
   });
 
   it('schedules one bounded own-task check after a successful coding launch', () => {
