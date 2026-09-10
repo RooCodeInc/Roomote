@@ -57,6 +57,7 @@ interface StructuredRequestUserInputButtonValue {
 
 const REQUEST_USER_INPUT_ALREADY_RECEIVED_TEXT =
   'I already received your answer. Please wait for the agent to continue.';
+const REQUEST_USER_INPUT_PROMPT_DELIVERY_ATTEMPTS = 2;
 
 function buildSlackRequestUserInputTaskUrl(params: {
   taskId: string | null | undefined;
@@ -218,7 +219,7 @@ async function deliverPendingSlackRequestUserInputQuestion(params: {
   previousAnswer: string;
   taskUrl: string;
 }): Promise<void> {
-  const nextPromptMessageTs = await params.slack.postMessage({
+  const nextPromptMessage = {
     channel: params.channel,
     thread_ts: params.threadId,
     client_msg_id: buildRequestUserInputPromptClientMessageId(
@@ -239,11 +240,23 @@ async function deliverPendingSlackRequestUserInputQuestion(params: {
         threadTs: params.threadId,
       }),
     }),
-  });
+  };
+  let nextPromptMessageTs: string | undefined;
+
+  for (
+    let attempt = 0;
+    attempt < REQUEST_USER_INPUT_PROMPT_DELIVERY_ATTEMPTS;
+    attempt += 1
+  ) {
+    nextPromptMessageTs = await params.slack.postMessage(nextPromptMessage);
+    if (nextPromptMessageTs) {
+      break;
+    }
+  }
 
   if (!nextPromptMessageTs) {
     throw new Error(
-      'Your answer was saved, but I could not show the next question. Please try your answer again.',
+      'Your answer was saved, but I could not deliver the next question.',
     );
   }
 

@@ -462,7 +462,7 @@ describe('handleFollowupAnswer', () => {
     );
   });
 
-  it('recovers a persisted question advance when posting the next prompt fails', async () => {
+  it('automatically retries next-prompt delivery without advancing state twice', async () => {
     selectLimitMock.mockResolvedValue([{ userId: 'user-1' }]);
     const questions = [
       {
@@ -482,47 +482,20 @@ describe('handleFollowupAnswer', () => {
         options: [{ label: 'Dashboard', description: 'Pane-first interface.' }],
       },
     ];
-    getPendingSlackRequestUserInputMock
-      .mockResolvedValueOnce({
-        requestId: 'rui:session:turn:call',
-        runId: 42,
-        taskId: 'task-1',
-        promptMessageTs: '111.222',
-        questions,
-        currentQuestionIndex: 0,
-        answers: {},
-        status: 'pending',
-        createdAt: 123,
-      })
-      .mockResolvedValueOnce({
-        requestId: 'rui:session:turn:call',
-        runId: 42,
-        taskId: 'task-1',
-        promptMessageTs: '111.222',
-        questions,
-        currentQuestionIndex: 1,
-        answers: { language: { answers: ['TypeScript'] } },
-        status: 'pending',
-        createdAt: 123,
-      })
-      .mockResolvedValueOnce({
-        requestId: 'rui:session:turn:call',
-        runId: 42,
-        taskId: 'task-1',
-        promptMessageTs: 'next-prompt-ts',
-        questions,
-        currentQuestionIndex: 1,
-        answers: { language: { answers: ['TypeScript'] } },
-        status: 'pending',
-        createdAt: 123,
-      });
+    getPendingSlackRequestUserInputMock.mockResolvedValue({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      promptMessageTs: '111.222',
+      questions,
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'pending',
+      createdAt: 123,
+    });
     postMessageMock
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce('next-prompt-ts');
-
-    await handleFollowupAnswer(buildPayload());
-
-    expect(updateMessageMock).not.toHaveBeenCalled();
 
     await handleFollowupAnswer(buildPayload());
 
@@ -530,9 +503,6 @@ describe('handleFollowupAnswer', () => {
     expect(postMessageMock.mock.invocationCallOrder[1]!).toBeLessThan(
       updateMessageMock.mock.invocationCallOrder[0]!,
     );
-
-    await handleFollowupAnswer(buildPayload());
-
     expect(
       advancePendingSlackRequestUserInputQuestionMock,
     ).toHaveBeenCalledTimes(1);
@@ -551,21 +521,105 @@ describe('handleFollowupAnswer', () => {
       1,
       'next-prompt-ts',
     );
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://slack.test/response',
-      expect.objectContaining({
-        body: JSON.stringify({
-          replace_original: false,
-          text: '❌ Failed to process answer: Your answer was saved, but I could not show the next question. Please try your answer again.',
-        }),
-      }),
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps one duplicate-safe delivery identity across automatic attempts', async () => {
+    selectLimitMock.mockResolvedValue([{ userId: 'user-1' }]);
+    getPendingSlackRequestUserInputMock.mockResolvedValue({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      promptMessageTs: '111.222',
+      questions: [
+        {
+          id: 'language',
+          header: 'Language',
+          question: 'Which language should I use?',
+          isOther: true,
+          isSecret: false,
+          options: [{ label: 'TypeScript', description: 'Use the app stack.' }],
+        },
+        {
+          id: 'style',
+          header: 'Style',
+          question: 'What should the UI optimize for?',
+          isOther: true,
+          isSecret: false,
+          options: [
+            { label: 'Dashboard', description: 'Pane-first interface.' },
+          ],
+        },
+      ],
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'pending',
+      createdAt: 123,
+    });
+    postMessageMock
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('next-prompt-ts');
+
+    await handleFollowupAnswer(buildPayload());
+
+    expect(postMessageMock.mock.calls[0]![0]).toEqual(
+      postMessageMock.mock.calls[1]![0],
     );
+    expect(postMessageMock.mock.calls[0]![0].client_msg_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('reports a concise failure after automatic delivery attempts are exhausted', async () => {
+    selectLimitMock.mockResolvedValue([{ userId: 'user-1' }]);
+    getPendingSlackRequestUserInputMock.mockResolvedValue({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      promptMessageTs: '111.222',
+      questions: [
+        {
+          id: 'language',
+          header: 'Language',
+          question: 'Which language should I use?',
+          isOther: true,
+          isSecret: false,
+          options: [{ label: 'TypeScript', description: 'Use the app stack.' }],
+        },
+        {
+          id: 'style',
+          header: 'Style',
+          question: 'What should the UI optimize for?',
+          isOther: true,
+          isSecret: false,
+          options: [
+            { label: 'Dashboard', description: 'Pane-first interface.' },
+          ],
+        },
+      ],
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'pending',
+      createdAt: 123,
+    });
+    postMessageMock.mockResolvedValue(undefined);
+
+    await handleFollowupAnswer(buildPayload());
+
+    expect(postMessageMock).toHaveBeenCalledTimes(2);
+    expect(
+      advancePendingSlackRequestUserInputQuestionMock,
+    ).toHaveBeenCalledTimes(1);
+    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(
+      setPendingSlackRequestUserInputPromptMessageTsMock,
+    ).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(
       'https://slack.test/response',
       expect.objectContaining({
         body: JSON.stringify({
           replace_original: false,
-          text: 'I already received your answer. Please wait for the agent to continue.',
+          text: '❌ Failed to process answer: Your answer was saved, but I could not deliver the next question.',
         }),
       }),
     );
