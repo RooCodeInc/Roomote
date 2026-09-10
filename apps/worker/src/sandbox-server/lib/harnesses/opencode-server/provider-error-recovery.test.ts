@@ -4,6 +4,7 @@ import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
   isOpenCodeTerminalProviderError,
+  isOpenCodeRetryableTransportError,
   resolveOpenCodeProviderErrorRetryDelayMs,
   summarizeOpenCodeProviderError,
 } from './provider-error-recovery';
@@ -37,6 +38,29 @@ describe('getOpenCodeProviderErrorRecovery', () => {
         data: { message: 'Upstream connection closed unexpectedly.' },
       }),
     ).toMatchObject({ kind: 'provider_error', maxRetries: 6 });
+  });
+
+  it.each([
+    { message: 'Connection reset by server' },
+    { error: { message: 'Connection reset by server' } },
+    {
+      data: JSON.stringify({
+        error: { message: 'Connection reset by server' },
+      }),
+    },
+  ])('retries exact and wrapped connection reset errors', (error) => {
+    expect(isOpenCodeRetryableTransportError(error)).toBe(true);
+    expect(isOpenCodeTerminalProviderError(error)).toBe(false);
+    expect(getOpenCodeProviderErrorRecovery(error)).toMatchObject({
+      kind: 'provider_error',
+      maxRetries: 6,
+    });
+  });
+
+  it('does not treat unrelated provider errors as connection resets', () => {
+    expect(
+      isOpenCodeRetryableTransportError({ message: 'Connection refused' }),
+    ).toBe(false);
   });
 
   it('classifies native ContentFilterError payloads as policy refusals', () => {
