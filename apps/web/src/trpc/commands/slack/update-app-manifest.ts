@@ -1,10 +1,16 @@
 import { buildSlackApiUrl } from '@roomote/slack';
 import { db, desc, eq, slackInstallations } from '@roomote/db/server';
+import {
+  SLACK_MANIFEST_APP_ID_ENV_VAR_NAME,
+  SLACK_MANIFEST_VERSION,
+  SLACK_MANIFEST_VERSION_ENV_VAR_NAME,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { buildSlackAppManifest } from '@/lib/slack-app-manifest';
+import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -178,6 +184,41 @@ async function callManifestApi({
   return { response, data };
 }
 
+async function recordSlackManifestVersion({
+  actorUserId,
+  appId,
+  installationId,
+  installed,
+}: {
+  actorUserId: string;
+  appId: string;
+  installationId: string;
+  installed: boolean;
+}) {
+  await db.transaction(async (tx) => {
+    await upsertDeploymentEnvironmentVariables(tx, {
+      userId: actorUserId,
+      values: [
+        { name: SLACK_MANIFEST_APP_ID_ENV_VAR_NAME, value: appId },
+        {
+          name: SLACK_MANIFEST_VERSION_ENV_VAR_NAME,
+          value: String(SLACK_MANIFEST_VERSION),
+        },
+      ],
+    });
+
+    if (installed) {
+      await tx
+        .update(slackInstallations)
+        .set({
+          manifestVersion: SLACK_MANIFEST_VERSION,
+          updatedAt: new Date(),
+        })
+        .where(eq(slackInstallations.id, installationId));
+    }
+  });
+}
+
 export async function updateSlackAppManifestCommand(
   auth: UserAuthSuccess,
   input: { configToken: string },
@@ -239,6 +280,12 @@ export async function updateSlackAppManifestCommand(
     const manifestJson = JSON.stringify(manifest);
 
     if (JSON.stringify(currentManifest) === manifestJson) {
+      await recordSlackManifestVersion({
+        actorUserId: auth.userId,
+        appId: installation.appId,
+        installationId: installation.id,
+        installed: true,
+      });
       return {
         success: true,
         changed: false,
@@ -279,10 +326,18 @@ export async function updateSlackAppManifestCommand(
       };
     }
 
+    const reinstallRequired = updated.data.permissions_updated === true;
+    await recordSlackManifestVersion({
+      actorUserId: auth.userId,
+      appId: installation.appId,
+      installationId: installation.id,
+      installed: !reinstallRequired,
+    });
+
     return {
       success: true,
       changed: true,
-      reinstallRequired: updated.data.permissions_updated === true,
+      reinstallRequired,
       appSettingsUrl,
     };
   } catch (error) {

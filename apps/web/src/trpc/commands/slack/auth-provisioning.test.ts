@@ -11,7 +11,10 @@ import {
   userFactory,
   type SlackInstallation,
 } from '@roomote/db/server';
-import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
+import {
+  SLACK_MANIFEST_VERSION,
+  USER_FACING_AUTOMATION_KEYS,
+} from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
@@ -293,7 +296,11 @@ describe('Slack user authentication manager provisioning', () => {
   });
 
   it('does not provision on app installation even when an installing user is mapped', async () => {
-    decodeState.mockResolvedValue({ mode: 'install' });
+    decodeState.mockResolvedValue({
+      mode: 'install',
+      manifestAppId: installation.appId,
+      manifestVersion: SLACK_MANIFEST_VERSION,
+    });
     fetchMock.mockResolvedValue(
       Response.json({
         ok: true,
@@ -313,7 +320,64 @@ describe('Slack user authentication manager provisioning', () => {
     expect(await db.query.slackUserMappings.findFirst()).toMatchObject({
       userId: auth.userId,
     });
+    expect(await db.query.slackInstallations.findFirst()).toMatchObject({
+      manifestVersion: SLACK_MANIFEST_VERSION,
+    });
     expect(ensureChannel).not.toHaveBeenCalled();
+  });
+
+  it('does not trust manifest provenance for a different Slack app', async () => {
+    decodeState.mockResolvedValue({
+      mode: 'install',
+      manifestAppId: 'A0DIFFERENT',
+      manifestVersion: SLACK_MANIFEST_VERSION,
+    });
+    fetchMock.mockResolvedValue(
+      Response.json({
+        ok: true,
+        access_token: 'installation-bot-token',
+        bot_user_id: 'UBOT',
+        team: { id: installation.teamId, name: installation.teamName },
+        app_id: installation.appId,
+      }),
+    );
+
+    expect(
+      await exchangeSlackOAuthCodeCommand(auth, {
+        code: 'install',
+        state: 'install',
+      }),
+    ).toMatchObject({ success: true });
+    expect(await db.query.slackInstallations.findFirst()).toMatchObject({
+      manifestVersion: null,
+    });
+  });
+
+  it('preserves a confirmed version during re-auth without manifest provenance', async () => {
+    await db
+      .update(slackInstallations)
+      .set({ manifestVersion: SLACK_MANIFEST_VERSION })
+      .where(eq(slackInstallations.id, installation.id));
+    decodeState.mockResolvedValue({ mode: 'install' });
+    fetchMock.mockResolvedValue(
+      Response.json({
+        ok: true,
+        access_token: 'installation-bot-token',
+        bot_user_id: 'UBOT',
+        team: { id: installation.teamId, name: installation.teamName },
+        app_id: installation.appId,
+      }),
+    );
+
+    expect(
+      await exchangeSlackOAuthCodeCommand(auth, {
+        code: 'install',
+        state: 'install',
+      }),
+    ).toMatchObject({ success: true });
+    expect(await db.query.slackInstallations.findFirst()).toMatchObject({
+      manifestVersion: SLACK_MANIFEST_VERSION,
+    });
   });
 
   it('contains unexpected provisioning errors without breaking auth or logging credentials', async () => {

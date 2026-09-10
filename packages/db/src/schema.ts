@@ -2658,6 +2658,7 @@ export const slackInstallations = pgTable(
     botAccessToken: text('bot_access_token').notNull(),
     userAccessToken: text('user_access_token'),
     scopes: jsonb('scopes').notNull(),
+    manifestVersion: integer('manifest_version'),
     tokenType: text('token_type').notNull().default('bot'), // 'bot' or 'user'
     installedByUserId: text('installed_by_user_id')
       .notNull()

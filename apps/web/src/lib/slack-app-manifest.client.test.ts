@@ -6,6 +6,10 @@ import {
   SLACK_MANIFEST_BOT_SCOPES,
   SLACK_MANIFEST_DESCRIPTION,
 } from './slack-app-manifest';
+import {
+  isSlackManifestUpgradeRequired,
+  SLACK_MANIFEST_VERSION,
+} from '@roomote/types';
 
 function relativeLuminance(hex: string): number {
   const normalized = hex.replace('#', '');
@@ -36,6 +40,17 @@ function contrastRatio(foreground: string, background: string): number {
 }
 
 describe('Slack app manifest builder', () => {
+  it('requires upgrades for unknown and older installations only', () => {
+    expect(isSlackManifestUpgradeRequired(null)).toBe(true);
+    expect(isSlackManifestUpgradeRequired(SLACK_MANIFEST_VERSION - 1)).toBe(
+      true,
+    );
+    expect(isSlackManifestUpgradeRequired(SLACK_MANIFEST_VERSION)).toBe(false);
+    expect(isSlackManifestUpgradeRequired(SLACK_MANIFEST_VERSION + 1)).toBe(
+      false,
+    );
+  });
+
   it('includes Roomote app display metadata', () => {
     const manifest = buildSlackAppManifest({
       publicOrigin: 'https://roomote.example.com',

@@ -41,6 +41,11 @@ vi.mock('node:fs/promises', () => ({
 vi.stubGlobal('fetch', mockFetch);
 
 import { createSlackAppFromManifestCommand } from './create-app-from-manifest';
+import {
+  SLACK_MANIFEST_APP_ID_ENV_VAR_NAME,
+  SLACK_MANIFEST_VERSION,
+  SLACK_MANIFEST_VERSION_ENV_VAR_NAME,
+} from '@roomote/types';
 
 function buildMockAuth(
   overrides: Partial<UserAuthSuccess> = {},
@@ -190,6 +195,11 @@ describe('createSlackAppFromManifestCommand', () => {
           { name: 'R_SLACK_CLIENT_ID', value: 'new-client-id' },
           { name: 'R_SLACK_CLIENT_SECRET', value: 'new-client-secret' },
           { name: 'R_SLACK_SIGNING_SECRET', value: 'new-signing-secret' },
+          { name: SLACK_MANIFEST_APP_ID_ENV_VAR_NAME, value: 'A0NEWAPP' },
+          {
+            name: SLACK_MANIFEST_VERSION_ENV_VAR_NAME,
+            value: String(SLACK_MANIFEST_VERSION),
+          },
         ],
       },
     );

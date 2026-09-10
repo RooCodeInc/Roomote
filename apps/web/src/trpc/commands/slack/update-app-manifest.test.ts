@@ -1,8 +1,16 @@
 import type { UserAuthSuccess } from '@/types';
+import { SLACK_MANIFEST_VERSION } from '@roomote/types';
 
-const { mockFetch, mockFindFirst } = vi.hoisted(() => ({
+const {
+  mockFetch,
+  mockFindFirst,
+  mockSet,
+  mockUpsertDeploymentEnvironmentVariables,
+} = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockFindFirst: vi.fn(),
+  mockSet: vi.fn(() => ({ where: vi.fn() })),
+  mockUpsertDeploymentEnvironmentVariables: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -11,6 +19,9 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    transaction: vi.fn(async (callback) =>
+      callback({ update: vi.fn(() => ({ set: mockSet })) }),
+    ),
     query: {
       slackInstallations: { findFirst: mockFindFirst },
     },
@@ -18,9 +29,15 @@ vi.mock('@roomote/db/server', () => ({
   desc: vi.fn((value) => value),
   eq: vi.fn(() => true),
   slackInstallations: {
+    id: 'id',
     isActive: 'isActive',
     updatedAt: 'updatedAt',
   },
+}));
+
+vi.mock('../environment-variables', () => ({
+  upsertDeploymentEnvironmentVariables:
+    mockUpsertDeploymentEnvironmentVariables,
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -122,7 +139,10 @@ describe('reconcileSlackAppManifest', () => {
 describe('updateSlackAppManifestCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindFirst.mockResolvedValue({ appId: 'A0ROOMOTE' });
+    mockFindFirst.mockResolvedValue({
+      id: 'installation-1',
+      appId: 'A0ROOMOTE',
+    });
   });
 
   it('rejects non-admin users without calling Slack', async () => {
@@ -182,6 +202,8 @@ describe('updateSlackAppManifestCommand', () => {
       appSettingsUrl: 'https://api.slack.com/apps/A0ROOMOTE',
     });
     expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledTimes(1);
+    expect(mockSet).not.toHaveBeenCalled();
     expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
       'https://slack.example.test/api/apps.manifest.export',
       'https://slack.example.test/api/apps.manifest.validate',
@@ -228,6 +250,40 @@ describe('updateSlackAppManifestCommand', () => {
       appSettingsUrl: 'https://api.slack.com/apps/A0ROOMOTE',
     });
     expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({ manifestVersion: SLACK_MANIFEST_VERSION }),
+    );
+  });
+
+  it('records the installed version when Slack applies changes without new permissions', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        slackResponse({
+          ok: true,
+          manifest: {
+            display_information: { name: 'Custom Roomote' },
+            oauth_config: { scopes: { bot: ['chat:write'] } },
+            settings: {},
+          },
+        }),
+      )
+      .mockResolvedValueOnce(slackResponse({ ok: true }))
+      .mockResolvedValueOnce(
+        slackResponse({ ok: true, permissions_updated: false }),
+      );
+
+    await expect(
+      updateSlackAppManifestCommand(buildMockAuth(), {
+        configToken: 'xoxe.xoxp-token',
+      }),
+    ).resolves.toMatchObject({
+      success: true,
+      changed: true,
+      reinstallRequired: false,
+    });
+    expect(mockSet).toHaveBeenCalledWith(
+      expect.objectContaining({ manifestVersion: SLACK_MANIFEST_VERSION }),
+    );
   });
 
   it('returns a useful error for an expired configuration token', async () => {
@@ -244,5 +300,6 @@ describe('updateSlackAppManifestCommand', () => {
       error:
         'Slack rejected the app configuration token. Generate a fresh token at api.slack.com/apps and try again.',
     });
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });
 });

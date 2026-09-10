@@ -1,5 +1,24 @@
 import type { DataVisualizationBlock } from './data-visualization';
 
+/**
+ * Increment when Roomote's static Slack manifest requirements change and
+ * existing installations should run the manifest update flow. This version is
+ * intentionally independent of the Roomote product release.
+ */
+export const SLACK_MANIFEST_VERSION = 1;
+export const SLACK_MANIFEST_APP_ID_ENV_VAR_NAME = 'R_SLACK_MANIFEST_APP_ID';
+export const SLACK_MANIFEST_VERSION_ENV_VAR_NAME = 'R_SLACK_MANIFEST_VERSION';
+
+export function isSlackManifestUpgradeRequired(
+  installedVersion: number | null | undefined,
+): boolean {
+  return (
+    installedVersion === null ||
+    installedVersion === undefined ||
+    installedVersion < SLACK_MANIFEST_VERSION
+  );
+}
+
 export type SlackTableCell =
   | { type: 'raw_text'; text: string }
   | { type: 'rich_text'; elements: Array<Record<string, unknown>> };

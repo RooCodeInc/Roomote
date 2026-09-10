@@ -3,6 +3,11 @@ import path from 'node:path';
 
 import { buildSlackApiUrl } from '@roomote/slack';
 import { db } from '@roomote/db/server';
+import {
+  SLACK_MANIFEST_APP_ID_ENV_VAR_NAME,
+  SLACK_MANIFEST_VERSION,
+  SLACK_MANIFEST_VERSION_ENV_VAR_NAME,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
@@ -318,6 +323,11 @@ export async function createSlackAppFromManifest({
             { name: 'R_SLACK_CLIENT_ID', value: clientId },
             { name: 'R_SLACK_CLIENT_SECRET', value: clientSecret },
             { name: 'R_SLACK_SIGNING_SECRET', value: signingSecret },
+            { name: SLACK_MANIFEST_APP_ID_ENV_VAR_NAME, value: appId },
+            {
+              name: SLACK_MANIFEST_VERSION_ENV_VAR_NAME,
+              value: String(SLACK_MANIFEST_VERSION),
+            },
           ],
         });
       });

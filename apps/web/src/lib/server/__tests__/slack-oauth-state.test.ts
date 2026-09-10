@@ -1,4 +1,5 @@
 import { encodeRecord } from '@/lib/url-coder';
+import { SLACK_MANIFEST_VERSION } from '@roomote/types';
 
 vi.mock('@roomote/db/server', () => ({
   resolveSlackSigningSecret: vi.fn(async () => 'test-signing-secret'),
@@ -28,6 +29,21 @@ describe('slack-oauth-state', () => {
     await expect(decodeSlackOAuthState(state)).resolves.toEqual({
       mode: 'install',
       redirectPath: '/settings/integrations',
+    });
+  });
+
+  it('round-trips server-confirmed manifest provenance', async () => {
+    const state = await createSignedSlackInstallState({
+      redirectPath: '/settings/integrations',
+      manifestAppId: 'A0ROOMOTE',
+      manifestVersion: SLACK_MANIFEST_VERSION,
+    });
+
+    await expect(decodeSlackOAuthState(state)).resolves.toEqual({
+      mode: 'install',
+      redirectPath: '/settings/integrations',
+      manifestAppId: 'A0ROOMOTE',
+      manifestVersion: SLACK_MANIFEST_VERSION,
     });
   });
 

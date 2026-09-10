@@ -10,6 +10,8 @@ type SignedSlackInstallStatePayload = {
   version: typeof SIGNED_STATE_VERSION;
   mode: 'install';
   redirectPath: string;
+  manifestAppId?: string;
+  manifestVersion?: number;
   issuedAt: number;
 };
 
@@ -25,6 +27,8 @@ type DecodedSlackOAuthState =
   | {
       mode: 'install';
       redirectPath: string;
+      manifestAppId?: string;
+      manifestVersion?: number;
     }
   | {
       mode: 'link_account';
@@ -82,13 +86,20 @@ async function createSignedSlackState(
 
 export async function createSignedSlackInstallState({
   redirectPath,
+  manifestAppId,
+  manifestVersion,
 }: {
   redirectPath?: string | null;
+  manifestAppId?: string;
+  manifestVersion?: number;
 }): Promise<string> {
   return createSignedSlackState({
     version: SIGNED_STATE_VERSION,
     mode: 'install',
     redirectPath: normalizeSlackOAuthRedirectPath(redirectPath),
+    ...(manifestAppId && manifestVersion
+      ? { manifestAppId, manifestVersion }
+      : {}),
     issuedAt: Date.now(),
   } satisfies SignedSlackInstallStatePayload);
 }
@@ -155,9 +166,25 @@ async function decodeSignedSlackState(
     }
 
     if (payload.mode === 'install') {
+      const manifestAppId = payload.manifestAppId;
+      const manifestVersion = payload.manifestVersion;
+      if (
+        (manifestAppId !== undefined || manifestVersion !== undefined) &&
+        (typeof manifestAppId !== 'string' ||
+          manifestAppId.length === 0 ||
+          typeof manifestVersion !== 'number' ||
+          !Number.isInteger(manifestVersion) ||
+          manifestVersion < 1)
+      ) {
+        return null;
+      }
+
       return {
         mode: 'install',
         redirectPath,
+        ...(manifestAppId && manifestVersion
+          ? { manifestAppId, manifestVersion }
+          : {}),
       };
     }
 
