@@ -1112,6 +1112,64 @@ describe('comms commands', () => {
       );
     });
 
+    it('re-detects the scope for a newly entered key instead of inheriting the recorded inbox scope', async () => {
+      const txDelete = vi.fn(() => ({
+        where: vi.fn(async () => undefined),
+      }));
+      mockDbTransaction.mockImplementation(async (callback) =>
+        callback({ delete: txDelete } as never),
+      );
+      mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
+        apiKey: 'am-old-inbox-key',
+        webhookSecret: 'whsec_inbox',
+        inboxId: 'roomote@roomote.me',
+        podId: null,
+        keyScope: 'inbox',
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_AGENTMAIL_API_KEY',
+        'R_AGENTMAIL_INBOX_ID',
+        'R_AGENTMAIL_WEBHOOK_SECRET',
+        'R_AGENTMAIL_KEY_SCOPE',
+      ]);
+      mockAgentMailGetInbox.mockResolvedValue({
+        inbox_id: 'roomote@roomote.me',
+      });
+      // The new organization-level key sees the old inbox-scoped
+      // registration from the organization listing and converges it.
+      mockAgentMailListWebhooks.mockResolvedValue({
+        webhooks: [
+          {
+            webhook_id: 'wh-inbox',
+            url: expectedWebhookUrl,
+            client_id: `roomote-agentmail-webhook-${hostHash}`,
+            inbox_ids: ['roomote@roomote.me'],
+            event_types: [
+              'message.received',
+              'message.bounced',
+              'message.complained',
+            ],
+          },
+        ],
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'agentmail',
+          values: {
+            R_AGENTMAIL_API_KEY: 'am-new-org-key',
+            R_AGENTMAIL_INBOX_ID: 'roomote@roomote.me',
+          },
+        }),
+      ).resolves.toMatchObject({ agentmail: { keyScope: 'organization' } });
+
+      expect(mockAgentMailClientConstructor).not.toHaveBeenCalledWith(
+        expect.objectContaining({ webhookInboxId: expect.anything() }),
+      );
+      // The stale inbox-scope record is dropped with the new key.
+      expect(txDelete).toHaveBeenCalled();
+    });
+
     it('addresses the inbox webhook endpoints directly once an inbox-scoped key is recorded', async () => {
       mockResolveAgentMailRuntimeCredentials.mockResolvedValue({
         apiKey: 'am-inbox-key',

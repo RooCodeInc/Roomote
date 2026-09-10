@@ -1263,9 +1263,14 @@ async function reconcileAgentMailSetup(input: {
   // organization-level webhook endpoints, so on that refusal the same key is
   // tried against the inbox's own webhook endpoints before failing the save.
   // The detected scope is persisted so status and disconnect use the same
-  // endpoints without probing again.
+  // endpoints without probing again. A newly entered key never inherits the
+  // recorded scope: an organization-level key replacing an inbox-scoped one
+  // must reconcile (and remove) the old inbox registration from the
+  // organization listing, which an inherited inbox scope could not see.
   let keyScope: AgentMailKeyScope =
-    existing.keyScope === 'inbox' && !podId ? 'inbox' : 'organization';
+    existing.keyScope === 'inbox' && !podId && input.enteredApiKey === null
+      ? 'inbox'
+      : 'organization';
   let webhookClient =
     keyScope === 'inbox'
       ? createAgentMailApiClient(apiKey, null, inboxAddress)
