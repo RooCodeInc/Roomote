@@ -1,11 +1,13 @@
 {
   "name": "slack-fast-own-task-follow-through",
-  "description": "A Fast coding-task launch and immediate follow-up exercise silent, recurring, bounded own-task monitoring without duplicate offers, wakeups, or lifecycle reports.",
+  "description": "A Fast coding-task launch and immediate follow-up exercise silent, recurring, bounded own-task monitoring that can correct evidenced task drift without duplicate offers, wakeups, instructions, or lifecycle reports.",
   "criteria": [
     "In the first turn, the bot acknowledges the repository fix and launches exactly one coding task without announcing, offering, or confirming its automatic follow-through monitor, cadence, or next check",
     "Behind the scenes, the bot schedules exactly one monitor scoped to the exact launched task, recurring every 10 minutes for at most 12 runs with only-when-notable reporting, without asking the user to opt in",
     "In the second turn, the bot routes the test-coverage instruction to the existing task and does not announce, offer, or schedule a second equivalent monitor",
-    "In the third turn, the bot explains that the monitor inspects the exact task every 10 minutes, reports only newly useful concrete progress, blockers, or needed input, suppresses unchanged, routine, redundant, and lifecycle-only updates, and never renews past its 12-run bound",
+    "In the third turn, the bot explains that the monitor compares the exact task's summary and recent messages with the user's goal and accepted instructions every 10 minutes, and can send that same active task one specific corrective instruction when concrete evidence shows drift, a missed requirement, or an actionable in-scope blocker",
+    "The bot explains that it does not steer on silence alone, invent progress or problems, expand scope, duplicate a correction that is queued, accepted, recorded, addressed, or superseded, or reactivate finished or canceled work",
+    "The bot reports only newly useful concrete progress, blockers, needed input, or corrective action, suppresses unchanged, routine, redundant, and lifecycle-only updates, and never renews past its 12-run bound",
     "The bot explains that monitoring stops silently when the task completes or is canceled, becomes irrelevant, loses task-inspection capability, or reaches its finite bound",
     "The bot does not claim implementation progress, completion, test results, or a pull request that the task has not reported",
     "Every bot reply stays in the originating Slack thread and no channel-level bot messages are posted"

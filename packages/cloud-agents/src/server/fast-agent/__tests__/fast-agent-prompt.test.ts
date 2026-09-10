@@ -774,16 +774,29 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain(
-      'compare its current summary and recent messages with this conversation',
+      "compare its current summary and recent messages with the user's goal and accepted instructions in this conversation",
     );
     expect(prompt).toContain(
-      'report only newly useful concrete progress, a blocker, or needed input',
+      'concrete evidence shows drift, a missed requirement, or an actionable blocker the task can resolve within that scope',
+    );
+    expect(prompt).toContain(
+      'use "send_task_message" to send one specific corrective instruction to that same task',
+    );
+    expect(prompt).toContain('naming the evidence and expected correction');
+    expect(prompt).toContain(
+      'the same correction is not already queued, accepted, recorded, addressed, or superseded',
+    );
+    expect(prompt).toContain(
+      'Do not steer on silence alone, invent progress or problems, expand scope, or reactivate finished or canceled work',
+    );
+    expect(prompt).toContain(
+      'Report only newly useful concrete progress, a blocker, needed input, or a corrective action taken',
     );
     expect(prompt).toContain(
       'unchanged, routine, already reported, superseded by a recent useful update',
     );
     expect(prompt).toContain(
-      'never invent progress or duplicate task, pull-request, or other lifecycle notifications',
+      'never duplicate task, pull-request, or other lifecycle notifications',
     );
     expect(prompt).toContain(
       'finished or was canceled, the monitor became irrelevant, or current task inspection capability was lost',
@@ -800,6 +813,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'This overrides the generic instruction to announce a resolved monitor',
     );
+    expect(prompt).toContain(
+      'when the automatic own-task monitor above authorizes a corrective instruction to an active task',
+    );
+    expect(prompt).toContain('automatic monitoring must never reactivate it');
   });
 
   it('lists on-demand servers by name with their tool names instead of mounting them', () => {
