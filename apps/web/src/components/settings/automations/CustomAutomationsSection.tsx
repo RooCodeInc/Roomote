@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -17,7 +16,6 @@ import {
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
 import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
-import { buildCreatorFilterValue } from '@/lib/task-creator-filter';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
@@ -35,7 +33,6 @@ import {
   Label,
   Play,
   Plus,
-  RotateCcwClock,
   Select,
   SelectContent,
   SelectItem,
@@ -294,12 +291,14 @@ export function CustomAutomationsSection({
   search: controlledSearch,
   onFilterChange,
   onSearchChange,
+  toolbarLeading,
   children,
 }: {
   filter?: AutomationListFilter;
   search?: string;
   onFilterChange?: (filter: AutomationListFilter) => void;
   onSearchChange?: (search: string) => void;
+  toolbarLeading?: ReactNode;
   children?: ReactNode;
 } = {}) {
   const { isAdmin } = useAuthorizedUser();
@@ -998,6 +997,7 @@ export function CustomAutomationsSection({
       <AutomationListToolbar
         filter={filter}
         search={search}
+        leading={toolbarLeading}
         action={newButton}
         onFilterChange={setFilter}
         onSearchChange={setSearch}
@@ -1070,13 +1070,6 @@ export function CustomAutomationsSection({
                               (option) => option.id === target.channelId,
                             )?.label ?? target.channelId)
                           : target.channelId;
-                const historyFilter = buildCreatorFilterValue({
-                  initiatorKind: 'automation',
-                  initiatorUserId: null,
-                  initiatorAutomation: 'custom_automation',
-                  actorExternalId: row.id,
-                });
-
                 return (
                   <AutomationListRow
                     key={row.id}
@@ -1145,18 +1138,6 @@ export function CustomAutomationsSection({
                     }
                     actions={
                       <>
-                        {historyFilter ? (
-                          <BasicTooltip content="View previous runs">
-                            <Button asChild size="icon" variant="ghost">
-                              <Link
-                                href={`/tasks?userId=${encodeURIComponent(historyFilter)}`}
-                                aria-label={`View previous runs for ${row.name}`}
-                              >
-                                <RotateCcwClock />
-                              </Link>
-                            </Button>
-                          </BasicTooltip>
-                        ) : null}
                         <CustomAutomationRunButton
                           automation={row}
                           disabled={busy}

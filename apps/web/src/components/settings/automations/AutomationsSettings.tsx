@@ -115,8 +115,6 @@ import {
   Label,
   Lightbulb,
   Play,
-  Plus,
-  RotateCcwClock,
   Select,
   SelectContent,
   SelectItem,
@@ -128,7 +126,6 @@ import {
   Slack,
   Slider,
   Spinner,
-  Settings2,
   Switch,
   Textarea,
   TriangleAlert,
@@ -656,34 +653,6 @@ const AUTOMATION_RUN_KEYS_BY_ID: Partial<
     ]),
   ),
 };
-
-const AUTOMATION_HISTORY_KEYS_BY_ID: Partial<
-  Record<AutomationId, BackgroundAutomationKey>
-> = {
-  callRoomoteViaEmoji: 'call_roomote_via_emoji',
-  channelAutoStart: 'slack_channel_auto_start',
-  reviewer: 'review_code',
-  platformIssueAlerts: 'platform_issue_alerts',
-  ...AUTOMATION_RUN_KEYS_BY_ID,
-};
-
-export function getAutomationHistoryHref(
-  automationId: AutomationId,
-): string | null {
-  // Provider usage alerts are delivered directly to a communication channel;
-  // their runner does not create Roomote tasks to inspect.
-  if (
-    automationId === 'providerUsageLimit' ||
-    automationId === 'mergeAnnouncer'
-  ) {
-    return null;
-  }
-
-  const automationKey = AUTOMATION_HISTORY_KEYS_BY_ID[automationId];
-  return automationKey
-    ? `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`
-    : null;
-}
 
 type ScheduleOnlyAutomationFrequencyState = Pick<
   FormState,
@@ -1400,7 +1369,6 @@ function AutomationCard({
   onOpenChange,
   iconEnabled,
   isAvailableMatch = true,
-  runAction,
   debugSection,
   footer,
   disabled = false,
@@ -1424,7 +1392,6 @@ function AutomationCard({
   const actionLabel = iconEnabled
     ? `Configure ${automation.label}`
     : `Set up ${automation.label}`;
-  const historyHref = getAutomationHistoryHref(automation.id);
   const summaries = useContext(AutomationSummaryContext);
 
   if (!isAvailableMatch) {
@@ -1465,35 +1432,6 @@ function AutomationCard({
               onCheckedChange={() => onOpenChange(true)}
             />
           </BasicTooltip>
-        }
-        actions={
-          <>
-            {historyHref && iconEnabled && !disabled ? (
-              <BasicTooltip content="View previous runs">
-                <Button asChild size="icon" variant="ghost">
-                  <Link
-                    href={historyHref}
-                    aria-label={`View previous runs for ${automation.label}`}
-                  >
-                    <RotateCcwClock />
-                  </Link>
-                </Button>
-              </BasicTooltip>
-            ) : null}
-            {runAction && iconEnabled && !disabled ? runAction : null}
-            <BasicTooltip content={actionLabel}>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                aria-label={actionLabel}
-                disabled={disabled}
-                onClick={() => onOpenChange(true)}
-              >
-                {iconEnabled ? <Settings2 /> : <Plus />}
-              </Button>
-            </BasicTooltip>
-          </>
         }
       />
 
@@ -1624,7 +1562,11 @@ function ScheduledAutomationCard<TFrequency extends string>({
   );
 }
 
-export function AutomationsSettings() {
+export function AutomationsSettings({
+  toolbarLeading,
+}: {
+  toolbarLeading?: React.ReactNode;
+} = {}) {
   const showAutomationDebugRuns = false;
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -2716,6 +2658,7 @@ export function AutomationsSettings() {
         search={automationSearch}
         onFilterChange={setAutomationFilter}
         onSearchChange={setAutomationSearch}
+        toolbarLeading={toolbarLeading}
       >
         {settingsQuery.isPending || !formState ? (
           <LoadingSkeleton />
