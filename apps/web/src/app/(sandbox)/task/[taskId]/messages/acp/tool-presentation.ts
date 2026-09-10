@@ -417,11 +417,7 @@ function resolveReceiptLanguage(
     };
   if (toolName === 'manage_tasks' && serverName === 'roomote')
     return manageTasksReceipt(args, phase);
-  if (toolName === 'manage_wakeups')
-    return {
-      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
-      object: 'timers',
-    };
+  if (toolName === 'manage_wakeups') return manageWakeupsReceipt(args, phase);
   if (toolName === 'find_integration_tools')
     return {
       verb: byPhase('Searching', 'Searched', 'Failed to Search'),
@@ -597,6 +593,40 @@ function manageTasksReceipt(
   };
 
   return action ? (receipts[action] ?? null) : null;
+}
+
+function manageWakeupsReceipt(
+  args: ToolArguments | null,
+  phase: ToolPresentationPhase,
+): { verb: string; object: string } {
+  const action = stringArgument(args, 'action');
+  const byPhase = (running: string, completed: string, failed: string) =>
+    phase === 'running' ? running : phase === 'failed' ? failed : completed;
+  const receipts: Record<string, { verb: string; object: string }> = {
+    create: {
+      verb: byPhase('Creating', 'Created', 'Failed to Create'),
+      object: 'timer',
+    },
+    list: {
+      verb: byPhase('Listing', 'Listed', 'Failed to List'),
+      object: 'timers',
+    },
+    get: {
+      verb: byPhase('Fetching', 'Fetched', 'Failed to Fetch'),
+      object: 'timer',
+    },
+    cancel: {
+      verb: byPhase('Canceling', 'Canceled', 'Failed to Cancel'),
+      object: 'timer',
+    },
+  };
+
+  return (
+    (action ? receipts[action] : undefined) ?? {
+      verb: byPhase('Updating', 'Updated', 'Failed to Update'),
+      object: 'timers',
+    }
+  );
 }
 
 export function summarizeToolGroup(

@@ -165,38 +165,56 @@ describe('tool presentation resolver', () => {
     });
   });
 
-  it.each(['create', 'list', 'get', 'cancel'])(
-    'humanizes completed manage_wakeups %s calls',
-    (action) => {
+  it.each([
+    ['create', 'in_progress', 'Creating', 'timer'],
+    ['create', 'completed', 'Created', 'timer'],
+    ['create', 'failed', 'Failed to Create', 'timer'],
+    ['list', 'in_progress', 'Listing', 'timers'],
+    ['list', 'completed', 'Listed', 'timers'],
+    ['list', 'failed', 'Failed to List', 'timers'],
+    ['get', 'in_progress', 'Fetching', 'timer'],
+    ['get', 'completed', 'Fetched', 'timer'],
+    ['get', 'failed', 'Failed to Fetch', 'timer'],
+    ['cancel', 'in_progress', 'Canceling', 'timer'],
+    ['cancel', 'completed', 'Canceled', 'timer'],
+    ['cancel', 'failed', 'Failed to Cancel', 'timer'],
+  ] as const)(
+    'humanizes manage_wakeups %s calls while %s',
+    (action, status, verb, object) => {
       expect(
         resolveToolPresentation(
           toolData({
             isMcp: true,
             serverName: 'roomote',
             toolName: 'manage_wakeups',
+            status,
             rawInput: { arguments: { action } },
           } as never),
         ),
       ).toMatchObject({
-        verb: 'Updated',
-        object: 'timers',
+        verb,
+        object,
         iconKey: 'stopwatch',
         providerLabel: undefined,
       });
     },
   );
 
-  it.each([
-    ['in_progress', 'Updating'],
-    ['failed', 'Failed to Update'],
-  ] as const)(
-    'preserves manage_wakeups %s lifecycle wording',
-    (status, verb) => {
-      expect(
-        resolveToolPresentation(
-          toolData({ toolName: 'manage_wakeups', status }),
-        ),
-      ).toMatchObject({ verb, object: 'timers' });
+  it.each([undefined, 'unknown'])(
+    'uses generic manage_wakeups wording for %s actions',
+    (action) => {
+      const rawInput = action ? { arguments: { action } } : undefined;
+      for (const [status, verb] of [
+        ['in_progress', 'Updating'],
+        ['completed', 'Updated'],
+        ['failed', 'Failed to Update'],
+      ] as const) {
+        expect(
+          resolveToolPresentation(
+            toolData({ toolName: 'manage_wakeups', status, rawInput } as never),
+          ),
+        ).toMatchObject({ verb, object: 'timers', iconKey: 'stopwatch' });
+      }
     },
   );
 
