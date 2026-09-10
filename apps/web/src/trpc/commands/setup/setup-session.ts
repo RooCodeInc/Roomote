@@ -117,9 +117,9 @@ async function readSetupNewState() {
   return normalizeSetupNewState(settings?.setupNewState ?? {});
 }
 
-async function findSetupSessionConversation(
-  auth: UserAuthSuccess,
-): Promise<SetupSessionConversation | null> {
+async function findSetupSessionConversationRecord(): Promise<
+  (SetupSessionConversation & { ownerUserId: string | null }) | null
+> {
   const state = await readSetupNewState();
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
   if (!setupSession) return null;
@@ -130,20 +130,25 @@ async function findSetupSessionConversation(
       sessionId: sessions.id,
       conversationId: fastAgentConversations.conversationId,
       workspaceId: fastAgentConversations.workspaceId,
+      ownerUserId: fastAgentConversations.userId,
     })
     .from(sessions)
     .innerJoin(
       fastAgentConversations,
       eq(sessions.fastConversationId, fastAgentConversations.id),
     )
-    .where(
-      and(
-        eq(sessions.id, setupSession.sessionId),
-        eq(fastAgentConversations.userId, auth.userId),
-      ),
-    )
+    .where(eq(sessions.id, setupSession.sessionId))
     .limit(1);
   return row ? { ...row, workflowVersion: setupSession.workflowVersion } : null;
+}
+
+async function findSetupSessionConversation(
+  auth: UserAuthSuccess,
+): Promise<SetupSessionConversation | null> {
+  const row = await findSetupSessionConversationRecord();
+  if (!row || row.ownerUserId !== auth.userId) return null;
+  const { ownerUserId: _, ...conversation } = row;
+  return conversation;
 }
 
 async function persistSetupSessionReceipt(
@@ -1099,7 +1104,21 @@ export async function submitSetupSessionUserInputCommand(
   },
 ): Promise<{ success: true }> {
   assertAdmin(auth);
-  const setupConversation = await findSetupSessionConversation(auth);
+  let setupConversation = await findSetupSessionConversation(auth);
+  if (!setupConversation) {
+    const [settings] = await db
+      .select({ setupCompletedAt: deploymentSettings.setupCompletedAt })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .limit(1);
+    if (settings?.setupCompletedAt) {
+      const row = await findSetupSessionConversationRecord();
+      if (row) {
+        const { ownerUserId: _, ...conversation } = row;
+        setupConversation = conversation;
+      }
+    }
+  }
   if (
     !setupConversation ||
     (input.sessionId !== setupConversation.sessionId &&

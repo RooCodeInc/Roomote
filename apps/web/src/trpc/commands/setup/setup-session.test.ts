@@ -368,6 +368,35 @@ describe('optional setup integration discovery', () => {
     }
   });
 
+  it('allows an admin collaborator to resolve a pending setup card after completion', async () => {
+    const collaborator = await userFactory.create({ role: 'admin' });
+    const collaboratorAuth = {
+      userId: collaborator.id,
+      isAdmin: true,
+    } as UserAuthSuccess;
+    await db
+      .update(deploymentSettings)
+      .set({ setupCompletedAt: new Date() })
+      .where(eq(deploymentSettings.id, 'default'));
+    mocks.submit.mockResolvedValueOnce({ success: true });
+    try {
+      await expect(
+        submitSetupSessionUserInputCommand(collaboratorAuth, {
+          sessionId,
+          requestId: 'pending-after-completion',
+          answers: {},
+        }),
+      ).resolves.toEqual({ success: true });
+      expect(mocks.submit).toHaveBeenCalledWith(
+        collaboratorAuth,
+        expect.objectContaining({ requestId: 'pending-after-completion' }),
+        expect.objectContaining({ setupSession: true }),
+      );
+    } finally {
+      await db.delete(users).where(eq(users.id, collaborator.id));
+    }
+  });
+
   it('resumes persisted category answers and exactly matches catalog options in homepage order', async () => {
     await answeredCategory('communication', ['Discord', 'slack']);
     await answeredCategory('monitoring', ['Grafana', 'Sentry', 'Datadog']);
