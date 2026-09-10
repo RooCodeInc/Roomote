@@ -1,5 +1,8 @@
 import { getRedis } from '@roomote/redis';
-import { scheduleThreadFooterRefresh } from '@roomote/communication';
+import {
+  scheduleThreadFooterRefresh,
+  type ThreadReplyFooterLock,
+} from '@roomote/communication';
 import type { FastAgentSourceControlConversation } from '@roomote/types';
 
 const THREAD_COMMENT_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -48,21 +51,45 @@ export async function getSourceControlFooterRecord(
   }
 }
 
+/**
+ * Returns false when the supplied lease no longer owns the destination lock,
+ * or when a `keepTtl` write found no record to update (it expired since it
+ * was read). Ownership and the write happen in one Redis operation, so a
+ * lease that lapses after `assertLock` cannot repoint a newer carrier.
+ */
 export async function setSourceControlFooterRecord(
   record: SourceControlFooterRecord,
-  keepTtl = false,
-): Promise<void> {
+  options: { keepTtl?: boolean; lock?: ThreadReplyFooterLock } = {},
+): Promise<boolean> {
   const target = sourceControlFooterTarget(record.conversation);
   const key = `source_control:footer:${target.channelId}:${target.threadId}`;
-  if (keepTtl) {
-    await getRedis().set(key, JSON.stringify(record), 'KEEPTTL', 'XX');
+  const value = JSON.stringify(record);
+  const redis = getRedis();
+  let written: boolean;
+  if (options.lock) {
+    written =
+      (await redis.eval(
+        `if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end
+         if ARGV[3] == 'keepTtl' then
+           if not redis.call('set', KEYS[2], ARGV[2], 'KEEPTTL', 'XX') then return 0 end
+         else
+           redis.call('set', KEYS[2], ARGV[2], 'EX', ARGV[3])
+         end
+         return 1`,
+        2,
+        options.lock.key,
+        key,
+        options.lock.ownerId,
+        value,
+        options.keepTtl ? 'keepTtl' : THREAD_COMMENT_TTL_SECONDS,
+      )) === 1;
+  } else if (options.keepTtl) {
+    written = (await redis.set(key, value, 'KEEPTTL', 'XX')) === 'OK';
   } else {
-    await getRedis().set(
-      key,
-      JSON.stringify(record),
-      'EX',
-      THREAD_COMMENT_TTL_SECONDS,
-    );
+    await redis.set(key, value, 'EX', THREAD_COMMENT_TTL_SECONDS);
+    written = true;
+  }
+  if (written && !options.keepTtl) {
     await scheduleThreadFooterRefresh(target).catch((error) => {
       console.warn(
         '[sourceControlFooter] Failed to schedule footer refresh',
@@ -70,6 +97,7 @@ export async function setSourceControlFooterRecord(
       );
     });
   }
+  return written;
 }
 
 export async function clearSourceControlFooterRecord(

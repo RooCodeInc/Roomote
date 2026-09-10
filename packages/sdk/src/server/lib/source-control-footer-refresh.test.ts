@@ -28,11 +28,23 @@ vi.mock('@roomote/redis', () => ({
     del: async (key: string) => Number(mocks.store.delete(key)),
     eval: async (
       script: string,
-      _count: number,
+      count: number,
       key: string,
-      owner: string,
+      ...args: string[]
     ) => {
+      const owner = args[count - 1];
       if (mocks.store.get(key) !== owner) return 0;
+      if (count === 2) {
+        const [pointerKey, , value, ttl] = args;
+        if (
+          mocks.failRemember &&
+          pointerKey!.startsWith('source_control:footer:')
+        )
+          throw new Error('pointer write failed');
+        if (ttl === 'keepTtl' && !mocks.store.has(pointerKey!)) return 0;
+        mocks.store.set(pointerKey!, value!);
+        return 1;
+      }
       if (script.includes("'del'")) mocks.store.delete(key);
       return 1;
     },
@@ -393,6 +405,36 @@ describe('source-control current footer refresh', () => {
       messageId: '123',
       body: 'First\n\nResumed\n\nLater\n\n0 running; preview=https://preview',
     });
+  });
+
+  it('a refresh whose lease lapses during the edit cannot repoint refresh at its comment, and strips the footer it applied', async () => {
+    await adapter('123').postReply({ message: 'Old body' });
+    mocks.context.mockResolvedValue({ runningTasks: { count: 1 } });
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mocks.update.mockImplementationOnce(async () => {
+      // The refresh's lease expires mid-edit and a newer reply takes over.
+      mocks.store.delete(
+        `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
+      );
+      await adapter('456').postReply({ message: 'Newer body' });
+    });
+    expect(await refreshSourceControlThreadFooter(target)).toBe('active');
+    expect((await record())?.messageId).toBe('456');
+    // The refresh removes the footer it just applied through its own delivery.
+    expect(mocks.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        comment_id: 123,
+        body: '> Quoted message\n\nOld body',
+      }),
+    );
+    mocks.update.mockClear();
+    mocks.context.mockResolvedValue({ runningTasks: { count: 2 } });
+    await refreshSourceControlThreadFooter(target);
+    expect(mocks.update).toHaveBeenCalledTimes(1);
+    expect(mocks.update).toHaveBeenCalledWith(
+      expect.objectContaining({ comment_id: 456 }),
+    );
+    warning.mockRestore();
   });
 
   it('does not fail an accepted reply or refresh an old body when pointer persistence fails', async () => {

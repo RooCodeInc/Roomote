@@ -12,6 +12,7 @@ import {
   withThreadReplyFooterLock,
   forgetThreadFooterRefresh,
   type ThreadFooterRefreshOutcome,
+  type ThreadReplyFooterLock,
 } from '@roomote/communication';
 import { tryThreadReplyFooterLock } from '@roomote/communication/thread-reply-footer-delivery';
 import {
@@ -993,6 +994,7 @@ export function buildSourceControlFastAdapter(params: {
   // extra comment, never the reply.
   const rememberThreadComment = async (
     assertLock: () => Promise<void>,
+    lock: ThreadReplyFooterLock | undefined,
     relocate = false,
   ) => {
     const comment = turnComment;
@@ -1009,13 +1011,17 @@ export function buildSourceControlFastAdapter(params: {
       await assertLock();
       if (!relocate && current && current.messageId !== comment.messageId)
         return;
-      await setSourceControlFooterRecord({
-        conversation: params.conversation,
-        sessionId: params.sessionId,
-        messageId: comment.messageId,
-        body,
-        footerText,
-      });
+      const written = await setSourceControlFooterRecord(
+        {
+          conversation: params.conversation,
+          sessionId: params.sessionId,
+          messageId: comment.messageId,
+          body,
+          footerText,
+        },
+        { lock },
+      );
+      if (!written) throw new Error('Thread reply footer lock lease lost');
       if (relocate && current && current.messageId !== comment.messageId)
         await stripPreviousFooter(current, assertLock);
       if (!threaded || !threadId) return;
@@ -1081,6 +1087,7 @@ export function buildSourceControlFastAdapter(params: {
     discussion: SourceControlFastDiscussion,
     message: string,
     assertLock: () => Promise<void>,
+    lock: ThreadReplyFooterLock | undefined,
   ) => {
     turnBody = quote ? `${quote}\n\n${message}` : message;
     turnComment = null;
@@ -1091,7 +1098,7 @@ export function buildSourceControlFastAdapter(params: {
       body,
     });
     adoptedThreadComment = false;
-    await rememberThreadComment(assertLock, true);
+    await rememberThreadComment(assertLock, lock, true);
     params.onReplyPosted?.();
     return { messageId: turnComment.messageId };
   };
@@ -1107,7 +1114,7 @@ export function buildSourceControlFastAdapter(params: {
     postReply: async ({ message }) =>
       withThreadReplyFooterLock({
         lockKey,
-        fn: async (assertLock) => {
+        fn: async (assertLock, lock) => {
           if (!discussion) {
             throw new Error(
               'The discussion for this Session could not be resolved.',
@@ -1146,13 +1153,13 @@ export function buildSourceControlFastAdapter(params: {
               );
               turnBody = previousBody;
               turnComment = null;
-              return postTurnComment(discussion, message, assertLock);
+              return postTurnComment(discussion, message, assertLock, lock);
             }
-            await rememberThreadComment(assertLock);
+            await rememberThreadComment(assertLock, lock);
             params.onReplyPosted?.();
             return { messageId: turnComment.messageId };
           }
-          return postTurnComment(discussion, message, assertLock);
+          return postTurnComment(discussion, message, assertLock, lock);
         },
       }),
     ...(params.delivery.updateCommentById && discussion
@@ -1163,14 +1170,14 @@ export function buildSourceControlFastAdapter(params: {
           replaceReply: async ({ messageId }, { message }) =>
             withThreadReplyFooterLock({
               lockKey,
-              fn: async (assertLock) => {
+              fn: async (assertLock, lock) => {
                 turnComment = editorFor(messageId);
                 adoptedThreadComment = false;
                 turnBody = message;
                 const body = await renderBody();
                 await assertLock();
                 await turnComment.update!(body);
-                await rememberThreadComment(assertLock);
+                await rememberThreadComment(assertLock, lock);
                 params.onReplyPosted?.();
                 return { messageId };
               },
@@ -1246,7 +1253,7 @@ export async function refreshSourceControlThreadFooter(target: {
     return forgetSourceControlFooterIfUnchanged(target, record);
   const result = await tryThreadReplyFooterLock({
     lockKey: `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
-    fn: async (assertLock): Promise<ThreadFooterRefreshOutcome> => {
+    fn: async (assertLock, lock): Promise<ThreadFooterRefreshOutcome> => {
       const latest = await getSourceControlFooterRecord(
         target.channelId,
         target.threadId,
@@ -1275,8 +1282,26 @@ export async function refreshSourceControlThreadFooter(target: {
         });
         return 'gone';
       }
-      await assertLock();
-      await setSourceControlFooterRecord({ ...latest, footerText }, true);
+      // The pointer write is fenced on the lease in one Redis operation: a
+      // lease that lapsed during the edit cannot repoint refresh at this
+      // comment once a newer carrier exists. Then this edit's footer must go.
+      const written = await setSourceControlFooterRecord(
+        { ...latest, footerText },
+        { keepTtl: true, lock },
+      );
+      if (!written) {
+        const current = await getSourceControlFooterRecord(
+          target.channelId,
+          target.threadId,
+        ).catch(() => undefined);
+        if (current !== undefined && current?.messageId !== latest.messageId)
+          await delivery.updateCommentById!({
+            discussion,
+            messageId: latest.messageId,
+            body: latest.body,
+          }).catch(() => {});
+        return 'active';
+      }
       if (settled) {
         await assertLock();
         await forgetThreadFooterRefresh({
