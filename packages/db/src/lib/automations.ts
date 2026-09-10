@@ -1013,6 +1013,10 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(SUGGESTER_FREQUENCIES),
     ),
     suggesterInstructions: suggester?.instructions ?? null,
+    suggesterAdditionalRules:
+      typeof suggester?.settings?.additionalRules === 'string'
+        ? suggester.settings.additionalRules
+        : '',
     suggesterLastRunAt: suggester?.lastRunAt ?? null,
 
     announcerFrequency: getAutomationFrequency(
@@ -1020,6 +1024,10 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(ANNOUNCER_FREQUENCIES),
     ),
     announcerInstructions: announcer?.instructions ?? null,
+    announcerAdditionalRules:
+      typeof announcer?.settings?.additionalRules === 'string'
+        ? announcer.settings.additionalRules
+        : '',
     announcerLastRunAt: announcer?.lastRunAt ?? null,
 
     // Platform issue alerts are on unless an admin explicitly opts out. This
@@ -1103,6 +1111,10 @@ export function normalizeBackgroundAgentSettings(
     ),
     securityAuditorLastRunAt: securityAuditor?.lastRunAt ?? null,
     securityAuditorScanCursor: securityAuditor?.scanCursor ?? null,
+    securityAuditorAdditionalRules:
+      typeof securityAuditor?.settings?.additionalRules === 'string'
+        ? securityAuditor.settings.additionalRules
+        : '',
 
     codeQualityAuditorFrequency: getAutomationFrequency(
       codeQualityAuditor,
@@ -1110,6 +1122,10 @@ export function normalizeBackgroundAgentSettings(
     ),
     codeQualityAuditorLastRunAt: codeQualityAuditor?.lastRunAt ?? null,
     codeQualityAuditorScanCursor: codeQualityAuditor?.scanCursor ?? null,
+    codeQualityAuditorAdditionalRules:
+      typeof codeQualityAuditor?.settings?.additionalRules === 'string'
+        ? codeQualityAuditor.settings.additionalRules
+        : '',
 
     ciFailureTriageFrequency: getAutomationFrequency(
       ciFailureTriage,
@@ -1141,6 +1157,10 @@ export function normalizeBackgroundAgentSettings(
       mergeAnnouncerTarget && !mergeAnnouncerTarget.targetKind.endsWith('_user')
         ? mergeAnnouncerTarget.externalRef
         : null,
+    mergeAnnouncerAdditionalRules:
+      typeof mergeAnnouncer?.settings?.additionalRules === 'string'
+        ? mergeAnnouncer.settings.additionalRules
+        : '',
 
     ...Object.fromEntries(
       AUTOMATION_DESTINATION_DESCRIPTORS.flatMap((descriptor) => {

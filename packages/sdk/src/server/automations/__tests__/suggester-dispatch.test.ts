@@ -1,12 +1,10 @@
 const {
   mockEnqueueTask,
   mockLoadAutomationThreadFeedbackReport,
-  mockPartitionActiveRepositoriesByProvider,
   mockRecordAutomationRunOutcome,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockLoadAutomationThreadFeedbackReport: vi.fn(),
-  mockPartitionActiveRepositoriesByProvider: vi.fn(),
   mockRecordAutomationRunOutcome: vi.fn(),
 }));
 
@@ -23,11 +21,6 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../automation-thread-feedback', () => ({
   loadAutomationThreadFeedbackReport: mockLoadAutomationThreadFeedbackReport,
-}));
-
-vi.mock('../github-deployment-scope', () => ({
-  partitionActiveRepositoriesByProvider:
-    mockPartitionActiveRepositoriesByProvider,
 }));
 
 import { buildSuggestedTasksPrompt } from '@roomote/cloud-agents/server';
@@ -48,9 +41,19 @@ function buildParams() {
       },
     ],
     repositoryCoverage: [
-      { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-1' },
+      {
+        repositoryId: 'repo-api',
+        repositoryFullName: 'acme/api',
+        targetEnvironmentId: 'env-1',
+      },
     ],
-    repositoryFullNames: ['acme/api'],
+    repositoryPartitions: [
+      {
+        provider: 'github' as const,
+        host: null,
+        repositoryFullNames: ['acme/api'],
+      },
+    ],
     suggesterInstructions: 'Prioritize auth and data-loss failures.',
     triggerKind: 'scheduled' as const,
   };
@@ -65,9 +68,6 @@ describe('dispatchSuggestionScan', () => {
     mockLoadAutomationThreadFeedbackReport.mockResolvedValue({
       promptText: 'Manager feedback',
     });
-    mockPartitionActiveRepositoriesByProvider.mockResolvedValue([
-      { provider: 'github', host: null, repositoryFullNames: ['acme/api'] },
-    ]);
   });
 
   afterEach(() => vi.useRealTimers());
@@ -91,7 +91,10 @@ describe('dispatchSuggestionScan', () => {
           description: buildSuggestedTasksPrompt({
             repositoryFullNames: ['acme/api'],
             repositoryCoverage: [
-              { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-1' },
+              {
+                repositoryFullName: 'acme/api',
+                targetEnvironmentId: 'env-1',
+              },
             ],
             setupGuidance: null,
             suggesterInstructions: 'Prioritize auth and data-loss failures.',
@@ -119,7 +122,7 @@ describe('dispatchSuggestionScan', () => {
   });
 
   it('launches one stamped scan per source-control partition', async () => {
-    mockPartitionActiveRepositoriesByProvider.mockResolvedValue([
+    const repositoryPartitions = [
       {
         provider: 'bitbucket',
         host: 'bitbucket.org',
@@ -130,17 +133,28 @@ describe('dispatchSuggestionScan', () => {
         host: 'dev.azure.com',
         repositoryFullNames: ['acme/mobile'],
       },
-    ]);
+    ] as const;
     mockEnqueueTask
       .mockResolvedValueOnce({ taskId: 'task-bitbucket' })
       .mockResolvedValueOnce({ taskId: 'task-ado' });
 
     const result = await dispatchSuggestionScan({
       ...buildParams(),
-      repositoryFullNames: ['acme/api', 'acme/mobile'],
+      repositoryPartitions: repositoryPartitions.map((partition) => ({
+        ...partition,
+        repositoryFullNames: [...partition.repositoryFullNames],
+      })),
       repositoryCoverage: [
-        { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-1' },
-        { repositoryFullName: 'acme/mobile', targetEnvironmentId: 'env-2' },
+        {
+          repositoryId: 'repo-api',
+          repositoryFullName: 'acme/api',
+          targetEnvironmentId: 'env-1',
+        },
+        {
+          repositoryId: 'repo-mobile',
+          repositoryFullName: 'acme/mobile',
+          targetEnvironmentId: 'env-2',
+        },
       ],
     });
 

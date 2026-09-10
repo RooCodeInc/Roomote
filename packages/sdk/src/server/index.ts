@@ -1,4 +1,5 @@
 export {
+  resolveAutomationRepositoryDestination,
   resolveCiFailureTriageRepositoryDestination,
   isCiFailureTriageRepositoryEnabled,
 } from './automations/ci-failure-triage-routing';

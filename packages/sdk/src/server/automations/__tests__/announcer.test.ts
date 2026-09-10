@@ -1,12 +1,15 @@
 const {
   slackInstallationsTable,
   taskPullRequestsTable,
+  repositoriesTable,
   mockSlackInstallationRows,
   mockMergedPullRequestRows,
+  mockActiveRepositoryRows,
   mockGetAutomationRuntime,
   mockRecordAutomationRunOutcome,
   mockUpsertBackgroundAutomationSlackThread,
   mockResolveAutomationRuntimeDestination,
+  mockResolveAutomationRepositoryDestination,
   mockListConnectedCommunicationProviders,
   mockHasAnyActiveRepository,
   mockGetCommunicationProviderAdapter,
@@ -29,12 +32,21 @@ const {
     status: 'status',
     taskId: 'taskId',
   },
+  repositoriesTable: {
+    id: 'repositoryId',
+    fullName: 'repositoryFullName',
+    sourceControlProvider: 'sourceControlProvider',
+    host: 'repositoryHost',
+    isActive: 'isActive',
+  },
   mockSlackInstallationRows: vi.fn(),
   mockMergedPullRequestRows: vi.fn(),
+  mockActiveRepositoryRows: vi.fn(),
   mockGetAutomationRuntime: vi.fn(),
   mockRecordAutomationRunOutcome: vi.fn(),
   mockUpsertBackgroundAutomationSlackThread: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
+  mockResolveAutomationRepositoryDestination: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
   mockHasAnyActiveRepository: vi.fn(),
   mockGetCommunicationProviderAdapter: vi.fn(),
@@ -50,6 +62,9 @@ vi.mock('@roomote/db/server', () => ({
       from: (table: unknown) => {
         if (table === slackInstallationsTable) {
           return { where: () => mockSlackInstallationRows() };
+        }
+        if (table === repositoriesTable) {
+          return { where: () => mockActiveRepositoryRows() };
         }
 
         return {
@@ -70,11 +85,13 @@ vi.mock('@roomote/db/server', () => ({
     mockUpsertBackgroundAutomationSlackThread,
   slackInstallations: slackInstallationsTable,
   taskPullRequests: taskPullRequestsTable,
+  repositories: repositoriesTable,
   tasks: { id: 'id' },
   and: vi.fn(),
   eq: vi.fn(),
   gte: vi.fn(),
   isNotNull: vi.fn(),
+  inArray: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -120,6 +137,11 @@ vi.mock('../destination', () => ({
 
 vi.mock('../github-deployment-scope', () => ({
   hasAnyActiveRepository: mockHasAnyActiveRepository,
+}));
+
+vi.mock('../ci-failure-triage-routing', () => ({
+  resolveAutomationRepositoryDestination:
+    mockResolveAutomationRepositoryDestination,
 }));
 
 vi.mock('../../lib/communication-providers', () => ({
@@ -186,8 +208,20 @@ describe('announcerJob non-Slack posting', () => {
       lastRunAt: null,
       instructions: null,
       destination: null,
+      settings: {},
     });
     mockMergedPullRequestRows.mockResolvedValue(MERGED_PR_ROWS);
+    mockActiveRepositoryRows.mockResolvedValue([
+      {
+        id: '11111111-1111-4111-8111-111111111111',
+        fullName: 'acme/app',
+        sourceControlProvider: 'github',
+        host: null,
+      },
+    ]);
+    mockResolveAutomationRepositoryDestination.mockImplementation(
+      async ({ destination }) => destination ?? null,
+    );
     mockLoadAutomationThreadFeedbackContext.mockResolvedValue(null);
     mockEnqueueTask.mockResolvedValue({ taskId: 'announcer-task-1' });
 

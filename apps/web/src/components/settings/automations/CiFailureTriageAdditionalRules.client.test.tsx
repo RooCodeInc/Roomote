@@ -1,5 +1,8 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import { CiFailureTriageAdditionalRules } from './CiFailureTriageAdditionalRules';
+import {
+  AutomationAdditionalRules,
+  CiFailureTriageAdditionalRules,
+} from './CiFailureTriageAdditionalRules';
 
 it('keeps the standard destination visible while editing free text and displays save errors', () => {
   const onChange = vi.fn();
@@ -23,4 +26,21 @@ it('keeps the standard destination visible while editing free text and displays 
   );
   expect(screen.getByRole('alert')).toHaveTextContent('Which workspace?');
   expect(screen.queryByText('Repository scope')).not.toBeInTheDocument();
+});
+
+it('derives automation-specific copy from registry metadata', () => {
+  render(
+    <AutomationAdditionalRules
+      automationKey="suggester"
+      value=""
+      onChange={() => {}}
+      globalDestination={<button>Suggestion destination</button>}
+    />,
+  );
+
+  expect(screen.getByRole('textbox')).toHaveAttribute(
+    'placeholder',
+    expect.stringContaining('Only suggest work'),
+  );
+  expect(screen.getByText(/suggest work for all repositories/)).toBeVisible();
 });

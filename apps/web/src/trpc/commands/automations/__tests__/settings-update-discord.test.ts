@@ -264,6 +264,57 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     );
   });
 
+  it('persists and preserves Additional rules for a non-CI eligible automation', async () => {
+    await insertSlackInstallation();
+    const repo = await repositoryFactory.create({
+      fullName: 'acme/suggestions',
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: adminAuth.userId,
+    });
+    createdRepositoryIds.push(repo.id);
+    mockResolveRules.mockResolvedValue({
+      object: {
+        status: 'resolved',
+        repositoryIds: [repo.id],
+        destinations: [],
+        instructions: 'Prioritize reliability work.',
+        clarification: null,
+      },
+    });
+    const text = 'Only suggest work for suggestions. Prioritize reliability.';
+
+    const saved = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'suggester',
+        suggesterAdditionalRules: text,
+      }),
+    );
+    expect(saved.success).toBe(true);
+    expect(saved.success && saved.settings.suggesterAdditionalRules).toBe(text);
+
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({ savingAutomation: 'suggester' }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .suggesterAdditionalRules,
+    ).toBe(text);
+
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'suggester',
+        suggesterAdditionalRules: '',
+      }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .suggesterAdditionalRules,
+    ).toBe('');
+  });
+
   it('roundtrips CI rules, preserves unrelated/omitted-field saves, and clears to all explicitly', async () => {
     await insertSlackInstallation();
     const repo = await repositoryFactory.create({

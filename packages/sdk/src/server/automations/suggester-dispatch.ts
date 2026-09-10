@@ -7,10 +7,7 @@ import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 import type { WorkItemStatus } from '@roomote/types';
 
 import { loadAutomationThreadFeedbackReport } from './automation-thread-feedback';
-import {
-  partitionActiveRepositoriesByProvider,
-  type ActiveRepositoryProviderPartition,
-} from './github-deployment-scope';
+import { type ActiveRepositoryProviderPartition } from './github-deployment-scope';
 
 export type SuggesterDeploymentContext = {
   slackBotToken: string | null;
@@ -18,12 +15,14 @@ export type SuggesterDeploymentContext = {
 };
 
 export type RepositoryCoverage = Array<{
+  repositoryId: string;
   repositoryFullName: string;
   workspaceReadiness: 'environment_backed' | 'bare_repo';
   targetEnvironmentId?: string;
 }>;
 
 type EnvironmentBackedRepositoryCoverage = Array<{
+  repositoryId: string;
   repositoryFullName: string;
   targetEnvironmentId: string;
 }>;
@@ -38,7 +37,7 @@ export async function dispatchSuggestionScan(params: {
     status: WorkItemStatus;
   }>;
   repositoryCoverage: EnvironmentBackedRepositoryCoverage;
-  repositoryFullNames: string[];
+  repositoryPartitions: ActiveRepositoryProviderPartition[];
   suggesterInstructions: string | null;
   triggerKind: 'manual' | 'scheduled';
   destinationPayloadFields?: Record<string, string>;
@@ -52,9 +51,7 @@ export async function dispatchSuggestionScan(params: {
     const isSlackDestination =
       !destinationFields.communicationProvider ||
       destinationFields.communicationProvider === 'slack';
-    const partitions = await partitionActiveRepositoriesByProvider(
-      params.repositoryFullNames,
-    );
+    const partitions = params.repositoryPartitions;
 
     if (partitions.length === 0) {
       throw new Error(
