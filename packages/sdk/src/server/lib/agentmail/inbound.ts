@@ -347,9 +347,9 @@ async function maybeSendStrangerRefusal(input: {
     await redis.expire(dailyKey, 2 * STRANGER_REFUSAL_SENDER_TTL_SECONDS);
   }
   if (dailyCount > STRANGER_REFUSAL_DAILY_CAP) {
-    // Release the per-sender claim so the sender still gets a refusal (and
-    // the link in it) tomorrow, once the ceiling resets.
-    await redis.del(senderKey).catch(() => undefined);
+    // Release both claims so the sender still gets a refusal (and the link
+    // in it) for this thread tomorrow, once the ceiling resets.
+    await redis.del(key, senderKey).catch(() => undefined);
     console.warn(
       `${LOG_PREFIX} Stranger refusal daily cap (${STRANGER_REFUSAL_DAILY_CAP}) reached; not replying to ${input.senderAddress} on thread ${input.message.thread_id}`,
     );
