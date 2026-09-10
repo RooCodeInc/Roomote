@@ -18,6 +18,7 @@ vi.mock('./better-auth-base-url', () => ({
 vi.mock('./env', () => ({
   Env: { R_APP_URL: 'https://auth.example.test' },
   getBetterAuthSecret: () => 'test-session-signing-secret-not-for-production',
+  isEmailChannelEnabled: () => false,
 }));
 vi.mock('./access-policy', () => ({
   isNewAuthUserEmailAllowed: async () => true,
