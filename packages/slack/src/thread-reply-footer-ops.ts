@@ -1,15 +1,16 @@
 import { Env } from '@roomote/env';
 import { getRedis } from '@roomote/redis';
-import {
-  tryThreadReplyFooterLock,
-  withThreadReplyFooterLock,
-} from '@roomote/communication/thread-reply-footer-delivery';
+import { withThreadReplyFooterLock } from '@roomote/communication/thread-reply-footer-delivery';
 import {
   scheduleThreadFooterRefresh,
   forgetThreadFooterRefresh,
   resolveCurrentThreadFooter,
   type ThreadFooterRefreshOutcome,
 } from '@roomote/communication';
+import {
+  refreshThreadFooterCarrier,
+  relocateThreadFooterCarrier,
+} from '@roomote/communication/thread-footer-carrier-lifecycle';
 
 import { decodeSlackEntity } from './markdown-converter';
 import type { SlackNotifier } from './slack-notifier';
@@ -101,6 +102,22 @@ export function buildSlackThreadReplyFooterBlock(params: {
   };
 }
 
+function readSlackThreadReplyFooter(blocks: unknown[]): {
+  index: number;
+  text: string;
+} | null {
+  const index = blocks.findIndex(isSlackThreadReplyFooterBlock);
+  if (index < 0) return null;
+  const block = blocks[index] as {
+    text?: string;
+    elements?: { text?: string }[];
+  };
+  const posted =
+    block.elements?.find((element) => typeof element.text === 'string')?.text ??
+    block.text;
+  return posted ? { index, text: decodeSlackEntity(posted) } : null;
+}
+
 export async function withSlackThreadReplyFooterLock<T>(params: {
   channel: string;
   threadTs: string;
@@ -161,6 +178,59 @@ function buildOutOfBandTaskUrl(taskId: string, utmCampaign: string): string {
   return url.toString();
 }
 
+async function relocateSlackThreadFooter<TResult>(params: {
+  slack: Pick<SlackNotifier, 'getMessageBlocks' | 'updateMessage'> &
+    Partial<Pick<SlackNotifier, 'getWorkspaceId'>>;
+  channel: string;
+  threadTs: string;
+  publish: () => Promise<{ messageId: string; result: TResult } | null>;
+}): Promise<TResult | null> {
+  return relocateThreadFooterCarrier({
+    lockKey: `${SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channel}:${params.threadTs}`,
+    read: async () => {
+      const messageId = await getSlackThreadReplyFooterMessageTs(
+        params.channel,
+        params.threadTs,
+      );
+      return messageId ? { messageId } : null;
+    },
+    sameVersion: (current, seen) => current?.messageId === seen?.messageId,
+    publish: async () => {
+      const published = await params.publish();
+      return published
+        ? {
+            carrier: { messageId: published.messageId },
+            result: published.result,
+          }
+        : null;
+    },
+    remember: (carrier, lock) =>
+      setSlackThreadReplyFooterMessageTs(
+        params.channel,
+        params.threadTs,
+        carrier.messageId,
+        { lock },
+      ),
+    afterRemember: (_carrier, assertLock) =>
+      rememberSlackThreadFooterRefresh(params, assertLock),
+    clearFooter: (carrier) =>
+      removeSlackThreadReplyFooter({
+        slack: params.slack,
+        channel: params.channel,
+        threadTs: params.threadTs,
+        messageTs: carrier.messageId,
+      }),
+    onRememberError: (carrier, error) => {
+      console.error(
+        `[slackThreadFooter] Failed to persist latest footer message ts ${carrier.messageId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+    onClearError: (_carrier, error) => {
+      console.error('[slackThreadFooter] Failed to remove prior footer', error);
+    },
+  });
+}
+
 /**
  * Post a Slack thread message carrying the given footer text as the thread's
  * sticky footer: attach the footer block, remove the footer from the prior
@@ -185,17 +255,10 @@ export async function postSlackThreadMessageWithFooterText(params: {
   });
   const bodyBlocks = params.bodyBlocks;
 
-  return withSlackThreadReplyFooterLock({
-    channel: params.channel,
-    threadTs: params.threadTs,
-    fn: async (assertLock) => {
-      const previousFooterMessageTs = await getSlackThreadReplyFooterMessageTs(
-        params.channel,
-        params.threadTs,
-      );
-
-      await assertLock();
-      const nextMessageTs = await params.slack.postMessage({
+  return relocateSlackThreadFooter({
+    ...params,
+    publish: async () => {
+      const messageId = await params.slack.postMessage({
         channel: params.channel,
         thread_ts: params.threadTs,
         text: params.text,
@@ -204,71 +267,7 @@ export async function postSlackThreadMessageWithFooterText(params: {
         blocks: [...bodyBlocks, footerBlock],
         ...(params.clientMsgId ? { client_msg_id: params.clientMsgId } : {}),
       });
-
-      if (!nextMessageTs) {
-        return null;
-      }
-
-      try {
-        await assertLock();
-        await setSlackThreadReplyFooterMessageTs(
-          params.channel,
-          params.threadTs,
-          nextMessageTs,
-        );
-        await rememberSlackThreadFooterRefresh(params, assertLock);
-      } catch (error) {
-        console.error(
-          `[slackThreadFooter] Failed to persist latest footer message ts ${nextMessageTs}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        const current = await getSlackThreadReplyFooterMessageTs(
-          params.channel,
-          params.threadTs,
-        ).catch(() => undefined);
-        if (current === undefined || current === nextMessageTs)
-          return nextMessageTs;
-        try {
-          await removeSlackThreadReplyFooter({
-            slack: params.slack,
-            channel: params.channel,
-            threadTs: params.threadTs,
-            messageTs: nextMessageTs,
-          });
-        } catch (removeError) {
-          console.error(
-            `[slackThreadFooter] Failed to remove footer from latest Slack message ${nextMessageTs} after persistence failure: ${
-              removeError instanceof Error
-                ? removeError.message
-                : String(removeError)
-            }`,
-          );
-        }
-        return nextMessageTs;
-      }
-
-      if (
-        previousFooterMessageTs &&
-        previousFooterMessageTs !== nextMessageTs
-      ) {
-        try {
-          await removeSlackThreadReplyFooter({
-            slack: params.slack,
-            channel: params.channel,
-            threadTs: params.threadTs,
-            messageTs: previousFooterMessageTs,
-            assertLock,
-          });
-        } catch (error) {
-          console.error(
-            '[slackThreadFooter] Failed to remove prior footer',
-            error,
-          );
-        }
-      }
-
-      return nextMessageTs;
+      return messageId ? { messageId, result: messageId } : null;
     },
   });
 }
@@ -293,15 +292,9 @@ export async function updateSlackThreadMessageWithFooterText(params: {
     footerText: params.footerText,
   });
 
-  return withSlackThreadReplyFooterLock({
-    channel: params.channel,
-    threadTs: params.threadTs,
-    fn: async (assertLock) => {
-      const previousFooterMessageTs = await getSlackThreadReplyFooterMessageTs(
-        params.channel,
-        params.threadTs,
-      );
-      await assertLock();
+  const result = await relocateSlackThreadFooter({
+    ...params,
+    publish: async () => {
       const updated = await params.slack.updateMessage({
         channel: params.channel,
         ts: params.messageTs,
@@ -310,73 +303,12 @@ export async function updateSlackThreadMessageWithFooterText(params: {
           blocks: [...params.bodyBlocks, footerBlock],
         },
       });
-      if (!updated) {
-        return false;
-      }
-
-      try {
-        await assertLock();
-        await setSlackThreadReplyFooterMessageTs(
-          params.channel,
-          params.threadTs,
-          params.messageTs,
-        );
-        await rememberSlackThreadFooterRefresh(params, assertLock);
-      } catch (error) {
-        console.error(
-          `[slackThreadFooter] Failed to persist latest footer message ts ${params.messageTs}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        const current = await getSlackThreadReplyFooterMessageTs(
-          params.channel,
-          params.threadTs,
-        ).catch(() => undefined);
-        if (current === undefined || current === params.messageTs) return true;
-        // Without the pointer no later reply could strip this footer, so
-        // take it back off rather than let the thread collect duplicates.
-        try {
-          await removeSlackThreadReplyFooter({
-            slack: params.slack,
-            channel: params.channel,
-            threadTs: params.threadTs,
-            messageTs: params.messageTs,
-          });
-        } catch (removeError) {
-          console.error(
-            `[slackThreadFooter] Failed to remove footer from Slack message ${params.messageTs} after persistence failure: ${
-              removeError instanceof Error
-                ? removeError.message
-                : String(removeError)
-            }`,
-          );
-        }
-        return true;
-      }
-
-      if (
-        previousFooterMessageTs &&
-        previousFooterMessageTs !== params.messageTs
-      ) {
-        try {
-          await removeSlackThreadReplyFooter({
-            slack: params.slack,
-            channel: params.channel,
-            threadTs: params.threadTs,
-            messageTs: previousFooterMessageTs,
-            assertLock,
-          });
-        } catch (error) {
-          console.error(
-            '[slackThreadFooter] Failed to remove prior footer',
-            error,
-          );
-        }
-      }
-
-      return true;
+      return updated
+        ? { messageId: params.messageTs, result: true as const }
+        : null;
     },
   });
+  return result ?? false;
 }
 
 /**
@@ -482,128 +414,93 @@ export async function rememberSlackThreadFooterRefresh(
  * Unregister a Slack destination, but only if its pointer still matches what
  * this refresh pass read: a delivery that raced in owns the registration now.
  */
-async function forgetSlackFooterIfUnchanged(params: {
-  channel: string;
-  threadTs: string;
-  seenMessageTs: string | null;
-}): Promise<ThreadFooterRefreshOutcome> {
-  const result = await tryThreadReplyFooterLock({
-    lockKey: `${SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channel}:${params.threadTs}`,
-    fn: async (assertLock): Promise<ThreadFooterRefreshOutcome> => {
-      const current = await getSlackThreadReplyFooterMessageTs(
-        params.channel,
-        params.threadTs,
-      );
-      if ((current ?? null) !== params.seenMessageTs) return 'active';
-      await assertLock();
-      await forgetThreadFooterRefresh({
-        provider: 'slack',
-        channelId: params.channel,
-        threadId: params.threadTs,
-      });
-      return 'gone';
-    },
-  });
-  return result.acquired ? result.value : 'active';
-}
-
 /**
- * Bring the current carrier's footer block up to date. Reading the message
- * and resolving state happen outside the destination lock; the lock is held
- * only for the edit, so a concurrent reply is never starved by Slack reads.
+ * Bring the current carrier's footer block up to date. Resolution happens
+ * outside the destination lock; the blocks are re-read under the lock before
+ * editing so an in-place body update cannot be overwritten.
  */
 export async function refreshSlackThreadReplyFooter(params: {
   slack: Pick<SlackNotifier, 'getMessageBlocks' | 'updateMessage'>;
   channel: string;
   threadTs: string;
 }): Promise<ThreadFooterRefreshOutcome> {
-  const messageTs = await getSlackThreadReplyFooterMessageTs(
-    params.channel,
-    params.threadTs,
-  );
-  if (!messageTs)
-    return forgetSlackFooterIfUnchanged({ ...params, seenMessageTs: null });
-  const blocks = await params.slack.getMessageBlocks({
-    channel: params.channel,
-    threadTs: params.threadTs,
-    messageTs,
-    throwOnUnavailable: true,
-  });
-  const index = blocks?.findIndex(isSlackThreadReplyFooterBlock) ?? -1;
-  if (!blocks || index < 0)
-    return forgetSlackFooterIfUnchanged({
-      ...params,
-      seenMessageTs: messageTs,
-    });
-  const block = blocks[index] as {
-    text?: string;
-    elements?: { text?: string }[];
-  };
-  const posted =
-    block.elements?.find((element) => typeof element.text === 'string')?.text ??
-    block.text;
-  if (!posted)
-    return forgetSlackFooterIfUnchanged({
-      ...params,
-      seenMessageTs: messageTs,
-    });
-  // Slack returns block text with `&`, `<` and `>` escaped; compare and
-  // resolve against the text as it was written.
-  const previous = decodeSlackEntity(posted);
-  const current = await resolveCurrentThreadFooter('slack', previous);
-  if (!current) {
-    console.warn(
-      '[slackThreadFooter] Retiring a footer that no longer resolves',
-      { channel: params.channel, threadTs: params.threadTs },
+  const read = async () => {
+    const messageId = await getSlackThreadReplyFooterMessageTs(
+      params.channel,
+      params.threadTs,
     );
-    return forgetSlackFooterIfUnchanged({
-      ...params,
-      seenMessageTs: messageTs,
-    });
-  }
-  const outcome: ThreadFooterRefreshOutcome = current.active
-    ? 'active'
-    : 'idle';
-  if (current.text === previous) {
-    return current.settled
-      ? forgetSlackFooterIfUnchanged({ ...params, seenMessageTs: messageTs })
-      : outcome;
-  }
-  const result = await tryThreadReplyFooterLock({
+    return messageId ? { messageId } : null;
+  };
+  return refreshThreadFooterCarrier({
     lockKey: `${SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channel}:${params.threadTs}`,
-    fn: async (assertLock): Promise<ThreadFooterRefreshOutcome> => {
-      // A reply relocated the footer while this pass was resolving; the next
-      // pass reads the new carrier.
-      if (
-        (await getSlackThreadReplyFooterMessageTs(
-          params.channel,
-          params.threadTs,
-        )) !== messageTs
-      )
-        return 'active';
-      await assertLock();
-      const updatedBlocks = [...blocks];
-      updatedBlocks[index] = buildSlackThreadReplyFooterBlock({
-        footerText: current.text,
-      });
-      // updateMessage verifies ownership and preserves fallback text/attachments.
-      await params.slack.updateMessage({
+    read,
+    sameVersion: (current, seen) => current?.messageId === seen?.messageId,
+    forget: () =>
+      forgetThreadFooterRefresh({
+        provider: 'slack',
+        channelId: params.channel,
+        threadId: params.threadTs,
+      }),
+    resolve: async (carrier) => {
+      const blocks = await params.slack.getMessageBlocks({
         channel: params.channel,
-        ts: messageTs,
-        message: { blocks: updatedBlocks },
+        threadTs: params.threadTs,
+        messageTs: carrier.messageId,
+        throwOnUnavailable: true,
       });
-      if (current.settled) {
-        await assertLock();
-        await forgetThreadFooterRefresh({
-          provider: 'slack',
-          channelId: params.channel,
-          threadId: params.threadTs,
-        });
-        return 'gone';
+      if (!blocks) return null;
+      const posted = readSlackThreadReplyFooter(blocks);
+      if (!posted) return null;
+      const previous = posted.text;
+      const current = await resolveCurrentThreadFooter('slack', previous);
+      if (!current) {
+        console.warn(
+          '[slackThreadFooter] Retiring a footer that no longer resolves',
+          { channel: params.channel, threadTs: params.threadTs },
+        );
+        return null;
       }
-      return outcome;
+      return {
+        outcome: current.active ? 'active' : 'idle',
+        settled: current.settled,
+        changed: current.text !== previous,
+        edit: async (latest) => {
+          const latestBlocks = await params.slack.getMessageBlocks({
+            channel: params.channel,
+            threadTs: params.threadTs,
+            messageTs: latest.messageId,
+            throwOnUnavailable: true,
+          });
+          if (!latestBlocks) return false;
+          const latestFooter = readSlackThreadReplyFooter(latestBlocks);
+          if (!latestFooter || latestFooter.text !== previous) return false;
+          const updatedBlocks = [...latestBlocks];
+          updatedBlocks[latestFooter.index] = buildSlackThreadReplyFooterBlock({
+            footerText: current.text,
+          });
+          if (
+            !(await params.slack.updateMessage({
+              channel: params.channel,
+              ts: latest.messageId,
+              message: { blocks: updatedBlocks },
+            }))
+          ) {
+            throw new Error('Slack footer edit failed');
+          }
+          return true;
+        },
+        recoverAfterLostLease: async (latest) => {
+          if ((await read())?.messageId !== latest.messageId) {
+            await removeSlackThreadReplyFooter({
+              slack: params.slack,
+              channel: params.channel,
+              threadTs: params.threadTs,
+              messageTs: latest.messageId,
+            }).catch(() => {});
+          }
+        },
+      };
     },
+    isGoneError: () => false,
   });
-  // A delivery holds the lock: it re-registers the destination itself.
-  return result.acquired ? result.value : 'active';
 }

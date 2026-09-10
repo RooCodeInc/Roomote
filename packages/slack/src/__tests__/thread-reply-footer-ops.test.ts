@@ -54,7 +54,7 @@ describe('thread-reply-footer-ops', () => {
     mockRedisSet.mockResolvedValue('OK');
     mockRedisEval.mockResolvedValue(1);
     mockGetFooterTs.mockResolvedValue('111.000');
-    mockSetFooterTs.mockResolvedValue(undefined);
+    mockSetFooterTs.mockResolvedValue(true);
     mockResolveFooterContext.mockResolvedValue({
       linkedPrs: [{ prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }],
       livePreviewUrl: null,
@@ -169,7 +169,9 @@ describe('thread-reply-footer-ops', () => {
         },
       }),
     );
-    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '222.000');
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '222.000', {
+      lock: expect.any(Object),
+    });
 
     mockBuildFooterText.mockClear();
     slack.postMessage.mockClear();
@@ -235,7 +237,9 @@ describe('thread-reply-footer-ops', () => {
       2,
       expect.objectContaining({ ts: '111.000' }),
     );
-    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '333.000');
+    expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '333.000', {
+      lock: expect.any(Object),
+    });
   });
 
   it('preserves awake preview, zero status and Session navigation in reply-only posts', async () => {
