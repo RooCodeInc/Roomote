@@ -1543,6 +1543,11 @@ describe('AutomationsSettings', () => {
         'Daily at 09:00 AM (America/New York), in Production →',
       ),
     ).toBeInTheDocument();
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'America/New York' } },
+    );
+    expect(screen.getByText('Daily scan')).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Configure Daily scan' }),
     );
