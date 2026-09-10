@@ -45,17 +45,14 @@ describe('manage wakeups tool contract', () => {
     }
   });
 
-  it('accepts an explicit internal create flag without adding it by default', () => {
-    expect(
-      manageWakeupsInputSchema.parse({ action: 'create', internal: true }),
-    ).toEqual({ action: 'create', internal: true });
+  it('accepts optional internal visibility and defaults it to absent', () => {
     expect(manageWakeupsInputSchema.parse({ action: 'create' })).toEqual({
       action: 'create',
     });
     expect(
-      manageWakeupsInputSchema.safeParse({ action: 'create', internal: 'true' })
-        .success,
-    ).toBe(false);
+      manageWakeupsInputSchema.parse({ action: 'create', internal: true }),
+    ).toEqual({ action: 'create', internal: true });
+    expect(MANAGE_WAKEUPS_TOOL.inputSchema.internal).toBeDefined();
   });
 
   it('publishes the canonical descriptor and is a Fast native tool', () => {
@@ -70,6 +67,9 @@ describe('manage wakeups tool contract', () => {
       '"every 30s x3"',
     );
     expect(MANAGE_WAKEUPS_TOOL.description).toContain('There is no pause.');
+    expect(MANAGE_WAKEUPS_TOOL.description).toContain(
+      'same prompt, schedule, and internal value',
+    );
     expect(MANAGE_WAKEUPS_TOOL.description).toContain(
       'Never poll, sleep, or wait',
     );

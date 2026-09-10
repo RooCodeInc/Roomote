@@ -160,7 +160,7 @@ export const manageWakeupsFieldSchemas = {
     .boolean()
     .optional()
     .describe(
-      '[create] Set true only when system instructions explicitly require an internal wakeup. Omit otherwise.',
+      '[create] Set true only for automatic housekeeping required by system instructions. Internal wakeups are hidden from the Session timer list but still count toward the active limit and remain listable, gettable, and cancellable. Omit or set false for user-requested reminders and monitors.',
     ),
 } satisfies z.ZodRawShape;
 
@@ -177,7 +177,7 @@ The schedule is one short string with positive whole-number s/m/h/d durations. R
 - Stop monitoring at the agreed finite bound without automatic renewal, or earlier on resolution, irrelevance, capability loss or user cancellation. A run that finds nothing new stays quiet under "only_when_notable". When a monitored condition resolves, tell the user and cancel the wakeup; a finished wakeup needs no cancel. Reaching the bound without evidence of resolution is not success.
 - Results arrive automatically as a new turn in this conversation. Delivery is best effort, not an exact-time guarantee. Never poll, sleep, or wait for a wakeup inside a turn.
 - When the user says stop, cancel, remove, delete, or end a wakeup, use cancel. There is no pause.
-- Creating a wakeup that matches an active one (same prompt and schedule) returns the existing wakeup instead of a duplicate. At most ${MAX_ACTIVE_SESSION_WAKEUPS} wakeups may be active per conversation.
+- Creating a wakeup that matches an active one (same prompt, schedule, and internal value) returns the existing wakeup instead of a duplicate. At most ${MAX_ACTIVE_SESSION_WAKEUPS} wakeups may be active per conversation.
 - Only send the fields the action needs; omit the rest. After creating a user-requested wakeup, confirm what will happen and when in one short sentence using the returned nextRunAt. Automatic wakeups required by system instructions follow their stated communication policy.`;
 
 export const MANAGE_WAKEUPS_TOOL = {

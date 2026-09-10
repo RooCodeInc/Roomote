@@ -125,3 +125,15 @@ describe('monday.com MCP tool policy', () => {
     expect(allowedToolNames).not.toContain('all_monday_api');
   });
 });
+
+describe('Sentry MCP tool policy', () => {
+  it('does not allowlist tool names', () => {
+    // mcp.sentry.dev is catalog-first: tools/list advertises a small top-level
+    // surface and everything else runs through execute_sentry_tool, so a
+    // static name list silently hides most of the server. Read-only access is
+    // chosen by the admin in Sentry's consent dialog (the "Inspect Issues &
+    // Events" skill) and narrowed further with the per-deployment disabled
+    // tools list.
+    expect(getAllowedIntegrationMcpToolNames('sentry')).toBeUndefined();
+  });
+});

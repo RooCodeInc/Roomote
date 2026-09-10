@@ -25,6 +25,13 @@ import {
 } from './schedule';
 
 const DEFAULT_DEPLOYMENT_SETTINGS_ID = 'default';
+const OWN_TASK_FOLLOW_THROUGH_WAKEUP = {
+  name: 'Follow through on session tasks',
+  prompt:
+    'Run the Own Coding Task Follow-Through session check for all tasks in this conversation. Follow that system policy exactly, including inspection, reporting, correction, stopping, and rearming.',
+  schedule: 'in 10m',
+  reportPolicy: 'only_when_notable' as const,
+};
 
 /** The conversation a wakeup tool call acts on, and who is acting. */
 export type SessionWakeupActor = {
@@ -47,6 +54,15 @@ export type CreateSessionWakeupResult = {
   duplicate: boolean;
   timeZone: string;
 };
+
+export function ensureOwnTaskFollowThroughWakeup(
+  actor: SessionWakeupActor,
+): Promise<CreateSessionWakeupResult> {
+  return createSessionWakeup(actor, {
+    ...OWN_TASK_FOLLOW_THROUGH_WAKEUP,
+    internal: true,
+  });
+}
 
 /**
  * Cron defaults and next-run confirmations use the deployment timezone when
@@ -212,7 +228,7 @@ export async function handleManageWakeupsToolCall(
           prompt: input.prompt,
           schedule: input.schedule,
           reportPolicy: input.reportPolicy ?? null,
-          internal: input.internal,
+          internal: input.internal ?? false,
         });
         return {
           success: true,
