@@ -7,7 +7,6 @@ import {
   invalidateDiscordRuntimeCredentialsCache,
   normalizeDiscordBotToken,
   resolveAgentMailRuntimeCredentials,
-  type AgentMailKeyScope,
   resolveDiscordGatewaySecret,
   resolveDiscordRuntimeCredentials,
   validateDiscordBotToken,
@@ -47,7 +46,6 @@ import {
 } from '@roomote/sdk/server';
 
 import { Env, isEmailChannelEnabled } from '@/lib/server/env';
-import { buildDeploymentAppName } from '@/lib/server/deployment-app-name';
 import { DISCORD_INSTALL_PERMISSIONS } from '@/lib/discord-install';
 import {
   PRODUCT_NAME,
@@ -140,18 +138,6 @@ const ADDITIONAL_COMMS_PROVIDERS: Record<
         label: 'AgentMail API Key',
         secret: true,
       },
-      {
-        envVarName: 'R_AGENTMAIL_POD_ID',
-        acceptedEnvVarNames: ['R_AGENTMAIL_POD_ID'],
-        label: 'AgentMail Pod ID',
-        required: false,
-      },
-      {
-        envVarName: 'R_AGENTMAIL_INBOX_ID',
-        acceptedEnvVarNames: ['R_AGENTMAIL_INBOX_ID'],
-        label: 'Inbox Email Address',
-        required: false,
-      },
     ],
   },
 };
@@ -213,11 +199,7 @@ type AgentMailWebhookStatus = {
 };
 
 export type AgentMailCommsStatus = {
-  /** The AgentMail pod the inbox and webhook live in, when pod-scoped. */
-  podId: string | null;
-  /** 'inbox' when the key is inbox-scoped and the webhook lives on the inbox. */
-  keyScope: AgentMailKeyScope;
-  /** The routed inbox_id (the persisted configuration value). */
+  /** The routed inbox_id (derived from the key on save and persisted). */
   inboxAddress: string | null;
   /** The deliverable address for display, resolved live from AgentMail. */
   inboxEmail: string | null;
@@ -659,46 +641,24 @@ const AGENTMAIL_API_TIMEOUT_MS = 5_000;
  * orphaned.
  */
 const AGENTMAIL_LEGACY_WEBHOOK_CLIENT_ID = 'roomote-agentmail-webhook';
-const AGENTMAIL_INBOX_HASH_LENGTH = 6;
+const AGENTMAIL_HOST_HASH_LENGTH = 6;
 
 function buildExpectedAgentMailWebhookUrl(): string {
   return new URL('/api/webhooks/agentmail', Env.R_APP_URL).toString();
 }
 
-function createAgentMailApiClient(
-  apiKey: string,
-  podId: string | null,
-  webhookInboxId: string | null = null,
-) {
+/**
+ * Every AgentMail call the deployment makes is addressed to its one inbox:
+ * message reads and sends by design, and webhook management through the
+ * inbox's own endpoints, which is all an inbox-scoped key can reach (an
+ * organization-level key can reach them too).
+ */
+function createAgentMailApiClient(apiKey: string, inboxId: string | null) {
   return new AgentMailApiClient({
     apiKey,
-    ...(podId ? { podId } : {}),
-    ...(webhookInboxId ? { webhookInboxId } : {}),
+    ...(inboxId ? { webhookInboxId: inboxId } : {}),
     timeoutMs: AGENTMAIL_API_TIMEOUT_MS,
   });
-}
-
-/** The inbox to manage webhooks under, when the saved key is inbox-scoped. */
-function webhookInboxForScope(credentials: {
-  keyScope: AgentMailKeyScope;
-  inboxId: string | null;
-  podId: string | null;
-}): string | null {
-  return credentials.keyScope === 'inbox' && !credentials.podId
-    ? credentials.inboxId
-    : null;
-}
-
-function isAgentMailPermissionError(error: unknown): boolean {
-  return (
-    error instanceof AgentMailApiError &&
-    (error.status === 401 || error.status === 403)
-  );
-}
-
-function normalizeAgentMailPodId(value: string | null | undefined) {
-  const trimmed = value?.trim();
-  return trimmed || null;
 }
 
 const EMAIL_CHANNEL_DISABLED_MESSAGE =
@@ -729,22 +689,24 @@ function describeAgentMailRequest(message: string): string | null {
   return clipped ? `${method} ${path} (${clipped})` : `${method} ${path}`;
 }
 
-/** Map AgentMail API / network failures into admin-facing setup copy. */
 /**
  * AgentMail keys carry fine-grained permissions
  * (https://docs.agentmail.to/core-concepts/permissions); this is the full set
- * the channel needs across setup, inbound processing, and replies.
+ * the channel needs across setup, inbound processing, and replies. An
+ * inbox-scoped key with these permissions is the intended shape.
  */
 const AGENTMAIL_REQUIRED_PERMISSIONS =
-  'inbox_read, inbox_create, inbox_update, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send';
+  'inbox_read, inbox_update, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send';
 
+const AGENTMAIL_KEY_GUIDANCE =
+  'In the AgentMail console, open the inbox Roomote should use and create an API key from inside it (an inbox-scoped key) with these permissions or full access';
+
+/** Map AgentMail API / network failures into admin-facing setup copy. */
 function classifyAgentMailSetupError(
   error: unknown,
   operation:
     | 'validating the API key'
-    | 'reading the inbox'
     | 'reading inbox messages'
-    | 'creating an inbox'
     | 'configuring the webhook' = 'validating the API key',
 ): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -780,35 +742,29 @@ function classifyAgentMailSetupError(
     lower.includes('forbidden') ||
     lower.includes('invalid api key')
   ) {
-    // Name the exact request AgentMail refused: the same key can pass the
-    // inbox checks and still be refused on the organization-level webhook
-    // endpoints when it is scoped to an inbox or a pod, and "check your
-    // permissions" alone sends the operator in circles.
+    // Name the exact request AgentMail refused; "check your permissions"
+    // alone sends the operator in circles.
     const request = describeAgentMailRequest(message);
     const requestDetail = request ? ` Request: ${request}.` : '';
     if (operation === 'validating the API key') {
-      return `AgentMail rejected this API key. Create a key in the AgentMail console with these permissions (or full access) and save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.${requestDetail}`;
+      return `AgentMail rejected this API key. ${AGENTMAIL_KEY_GUIDANCE}, then save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.${requestDetail}`;
     }
-    const scopeHint =
-      operation === 'configuring the webhook'
-        ? ' A key scoped to a pod is refused here even with full permissions unless the AgentMail Pod ID is entered, so Roomote registers the webhook inside that pod.'
-        : '';
-    return `AgentMail refused permission while ${operation} (${message.includes('(403)') ? '403 Forbidden' : '401 Unauthorized'}).${requestDetail}${scopeHint} Otherwise create a key with these permissions (or full access) and save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`;
+    return `AgentMail refused permission while ${operation} (${message.includes('(403)') ? '403 Forbidden' : '401 Unauthorized'}).${requestDetail} ${AGENTMAIL_KEY_GUIDANCE}, then save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`;
   }
 
   return `AgentMail failed while ${operation}: ${message.trim() || 'could not connect.'}`;
 }
 
 /**
- * Short stable hash of the deployment's public hostname. Keys both the inbox
- * proposal and the webhook client id, so two deployments sharing one
- * AgentMail account never adopt (or delete) each other's resources.
+ * Short stable hash of the deployment's public hostname, keying the webhook
+ * client id so two deployments sharing one inbox or account never adopt (or
+ * delete) each other's registration.
  */
 function buildAgentMailHostHash(publicAppUrl: string): string {
   return createHash('sha256')
     .update(new URL(publicAppUrl).hostname)
     .digest('hex')
-    .slice(0, AGENTMAIL_INBOX_HASH_LENGTH);
+    .slice(0, AGENTMAIL_HOST_HASH_LENGTH);
 }
 
 function buildAgentMailWebhookClientId(publicAppUrl: string): string {
@@ -836,32 +792,6 @@ function findRoomoteAgentMailWebhook(
     ) ??
     null
   );
-}
-
-/**
- * Propose a deterministic inbox username for this deployment: the shared
- * deployment app name plus a short hash of the full public hostname so
- * truncated app names cannot collide across deployments. The same hash keys
- * the createInbox client id, which makes inbox creation idempotent across
- * re-saves.
- */
-function buildAgentMailInboxProposal(publicAppUrl: string): {
-  username: string;
-  clientId: string;
-} {
-  const hostHash = buildAgentMailHostHash(publicAppUrl);
-  const username = `${buildDeploymentAppName(publicAppUrl).toLowerCase()}-${hostHash}`;
-
-  return { username, clientId: `roomote-${hostHash}` };
-}
-
-/** Default domain AgentMail assigns to inboxes created without a domain. */
-const AGENTMAIL_DEFAULT_INBOX_DOMAIN = 'agentmail.to';
-
-function buildAgentMailProposedInboxAddress(proposal: {
-  username: string;
-}): string {
-  return `${proposal.username}@${AGENTMAIL_DEFAULT_INBOX_DOMAIN}`;
 }
 
 function normalizeAgentMailInboxAddress(
@@ -916,8 +846,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   const expectedUrl = buildExpectedAgentMailWebhookUrl();
   const client = createAgentMailApiClient(
     credentials.apiKey,
-    credentials.podId,
-    webhookInboxForScope(credentials),
+    credentials.inboxId,
   );
 
   try {
@@ -948,8 +877,6 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
       registeredInboxIds.includes(credentials.inboxId);
 
     return {
-      podId: credentials.podId,
-      keyScope: credentials.keyScope,
       inboxAddress: credentials.inboxId,
       inboxEmail,
       webhook: {
@@ -965,8 +892,6 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
     };
   } catch (error) {
     return {
-      podId: credentials.podId,
-      keyScope: credentials.keyScope,
       inboxAddress: credentials.inboxId,
       inboxEmail: null,
       webhook: {
@@ -979,70 +904,7 @@ async function getAgentMailCommsStatus(): Promise<AgentMailCommsStatus | null> {
   }
 }
 
-/**
- * List the AgentMail inboxes the given (or saved) API key can see, plus the
- * deployment's proposed new-inbox address, so the settings UI can offer a
- * chooser instead of a free-text inbox field. Read-only: nothing is created
- * or persisted here.
- */
-export async function listAgentMailInboxesCommand(
-  auth: UserAuthSuccess,
-  input: { apiKey?: string; podId?: string } = {},
-): Promise<{
-  inboxes: Array<{ inboxId: string; email: string }>;
-  proposedNewAddress: string;
-}> {
-  assertAdmin(auth);
-  assertEmailChannelEnabled();
-
-  invalidateAgentMailRuntimeCredentialsCache();
-  const existing = await resolveAgentMailRuntimeCredentials();
-  const apiKey = input.apiKey?.trim() || existing.apiKey;
-  // A pod typed alongside a new key scopes the listing to that pod; with no
-  // key typed, the saved pod (if any) applies so the chooser shows what the
-  // saved key can actually reach.
-  const podId =
-    input.podId !== undefined
-      ? normalizeAgentMailPodId(input.podId)
-      : existing.podId;
-
-  if (!apiKey) {
-    throw new Error('Enter an AgentMail API key to load the account inboxes.');
-  }
-
-  const client = createAgentMailApiClient(apiKey, podId);
-
-  try {
-    const listed = await client.listInboxes();
-    const inboxes = (listed.inboxes ?? [])
-      .map((inbox) => {
-        const inboxId = readAgentMailInboxAddress(inbox);
-        return inboxId
-          ? { inboxId, email: readAgentMailInboxEmail(inbox) ?? inboxId }
-          : null;
-      })
-      .filter((entry): entry is { inboxId: string; email: string } =>
-        Boolean(entry),
-      );
-
-    return {
-      inboxes,
-      proposedNewAddress: buildAgentMailProposedInboxAddress(
-        buildAgentMailInboxProposal(Env.R_APP_URL),
-      ),
-    };
-  } catch (error) {
-    throw new Error(
-      classifyAgentMailSetupError(error, 'validating the API key'),
-    );
-  }
-}
-
 type AgentMailReconcileResult = {
-  /** The pod the inbox and webhook were reconciled in, when pod-scoped. */
-  podId: string | null;
-  /** 'inbox' when the key turned out to be inbox-scoped. */
-  keyScope: AgentMailKeyScope;
   /** The routed inbox_id — persisted and used in API paths/webhook scoping. */
   inboxAddress: string;
   /** The deliverable address, display only. */
@@ -1052,62 +914,24 @@ type AgentMailReconcileResult = {
 };
 
 /**
- * Create the deployment's proposed inbox (idempotent via the proposal client
- * id) and return its normalized routing address plus the deliverable email.
- * Shared by the blank-inbox provision path and the chooser's explicit
- * "create new" path.
- */
-async function createProposedAgentMailInbox(
-  client: AgentMailApiClient,
-  proposal: { username: string; clientId: string },
-): Promise<{ inboxAddress: string; inboxEmail: string }> {
-  try {
-    const inbox = await client.createInbox({
-      username: proposal.username,
-      clientId: proposal.clientId,
-      displayName: PRODUCT_NAME,
-    });
-    const createdAddress = readAgentMailInboxAddress(inbox);
-    if (!createdAddress) {
-      throw new Error('AgentMail created an inbox but returned no inbox id.');
-    }
-    return {
-      inboxAddress: createdAddress,
-      inboxEmail: readAgentMailInboxEmail(inbox) ?? createdAddress,
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (/\(409\)|already exists|already taken/iu.test(message)) {
-      throw new Error(
-        `The email address ${proposal.username} is already taken at AgentMail. Enter an inbox email address of your own in the Inbox Email Address field and save again.`,
-      );
-    }
-    throw new Error(classifyAgentMailSetupError(error, 'creating an inbox'));
-  }
-}
-
-/**
- * Reconcile the AgentMail account against this deployment before persisting
- * anything: validate the API key, adopt or provision the inbox, and converge
- * the webhook registration on this deployment's URL. Every step is idempotent
- * (inbox and webhook creation are keyed by client id), so a partial failure
- * is fixed by saving again. Failures throw with admin-facing copy and abort
- * the save so credentials are never persisted half-configured.
+ * Reconcile AgentMail against this deployment before persisting anything:
+ * validate the API key, resolve the one inbox it is for, and converge the
+ * webhook registration on this deployment's URL. The inbox is derived from
+ * the key, never entered: the intended key is inbox-scoped (it sees exactly
+ * its inbox), and an organization-level key is accepted only while the
+ * account has exactly one inbox, so there is never a wrong inbox to pick.
+ * Every step is idempotent (the webhook is keyed by client id), so a
+ * partial failure is fixed by saving again. Failures throw with
+ * admin-facing copy and abort the save so credentials are never persisted
+ * half-configured.
  */
 async function reconcileAgentMailSetup(input: {
   enteredApiKey: string | null;
-  enteredInboxId: string | null;
-  /** Null clears a saved pod; undefined keeps it. */
-  enteredPodId: string | null | undefined;
 }): Promise<AgentMailReconcileResult> {
   assertEmailChannelEnabled();
   invalidateAgentMailRuntimeCredentialsCache();
   const existing = await resolveAgentMailRuntimeCredentials();
   const apiKey = input.enteredApiKey ?? existing.apiKey;
-  const podId =
-    input.enteredPodId !== undefined
-      ? normalizeAgentMailPodId(input.enteredPodId)
-      : existing.podId;
 
   if (!apiKey) {
     throw new Error(
@@ -1115,23 +939,17 @@ async function reconcileAgentMailSetup(input: {
     );
   }
 
-  // A pod-scoped key can only reach its own pod, and an org key asked to
-  // work inside a pod keeps every resource it creates there: either way the
-  // management calls below are pod-addressed once a pod id is configured.
-  const client = createAgentMailApiClient(apiKey, podId);
-
-  // Prove the key authenticates with the cheapest read before touching
-  // anything else, so a bad key fails with a clear message instead of a
-  // confusing inbox or webhook error.
-  const orgInboxes: string[] = [];
+  // Prove the key authenticates with the cheapest read, which also tells us
+  // which inbox the key is for.
+  const visibleInboxes: string[] = [];
   const inboxDisplayNames = new Map<string, string | null>();
   const inboxEmails = new Map<string, string>();
   try {
-    const listed = await client.listInboxes();
+    const listed = await createAgentMailApiClient(apiKey, null).listInboxes();
     for (const inbox of listed.inboxes ?? []) {
       const address = readAgentMailInboxAddress(inbox);
       if (!address) continue;
-      orgInboxes.push(address);
+      visibleInboxes.push(address);
       inboxDisplayNames.set(
         address,
         typeof inbox.display_name === 'string' ? inbox.display_name : null,
@@ -1142,79 +960,45 @@ async function reconcileAgentMailSetup(input: {
       }
     }
   } catch (error) {
-    if (podId && error instanceof AgentMailApiError && error.status === 404) {
-      throw new Error(
-        `AgentMail could not find the pod ${podId} with this API key. Check the AgentMail Pod ID, or clear it to use the organization's inboxes.`,
-      );
-    }
     throw new Error(
       classifyAgentMailSetupError(error, 'validating the API key'),
     );
   }
 
-  const requestedInboxId =
-    normalizeAgentMailInboxAddress(input.enteredInboxId) ?? existing.inboxId;
-  let inboxAddress: string;
-
-  if (requestedInboxId) {
-    try {
-      const inbox = await client.getInbox(requestedInboxId);
-      inboxAddress = readAgentMailInboxAddress(inbox) ?? requestedInboxId;
-      const email = readAgentMailInboxEmail(inbox);
-      if (email) {
-        inboxEmails.set(inboxAddress, email);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (/\(404\)|not found/iu.test(message)) {
-        const proposal = buildAgentMailInboxProposal(Env.R_APP_URL);
-        if (requestedInboxId === buildAgentMailProposedInboxAddress(proposal)) {
-          // The inbox chooser's "create new" option submits the deployment's
-          // proposal address explicitly, so a 404 here means it does not
-          // exist yet: create it instead of erroring.
-          const created = await createProposedAgentMailInbox(client, proposal);
-          inboxAddress = created.inboxAddress;
-          inboxEmails.set(created.inboxAddress, created.inboxEmail);
-        } else {
-          throw new Error(
-            `AgentMail could not find the inbox ${requestedInboxId} with this API key. Check the inbox email address, or clear it to let Roomote create one.`,
-          );
-        }
-      } else {
-        throw new Error(
-          classifyAgentMailSetupError(error, 'reading the inbox'),
-        );
-      }
-    }
-  } else if (orgInboxes.length === 1) {
-    // The org already has exactly one inbox (the console provisions one at
-    // signup): adopt it instead of trying to create a second — free-tier
-    // plans often cannot, and a surprise extra inbox helps nobody.
-    inboxAddress = orgInboxes[0]!;
-  } else if (orgInboxes.length > 1) {
+  // An env-var-pinned inbox wins, provided the key can actually see it.
+  const pinnedInboxId = process.env.R_AGENTMAIL_INBOX_ID?.trim()
+    ? existing.inboxId
+    : null;
+  if (pinnedInboxId && !visibleInboxes.includes(pinnedInboxId)) {
     throw new Error(
-      `This AgentMail account has ${orgInboxes.length} inboxes. Enter the one Roomote should use in the Inbox Email Address field: ${orgInboxes
+      `R_AGENTMAIL_INBOX_ID is set to ${pinnedInboxId}, but this API key cannot see that inbox. ${AGENTMAIL_KEY_GUIDANCE}, then save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`,
+    );
+  }
+  if (visibleInboxes.length === 0) {
+    throw new Error(
+      `This API key cannot see any inbox. ${AGENTMAIL_KEY_GUIDANCE}, then save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`,
+    );
+  }
+  if (!pinnedInboxId && visibleInboxes.length > 1) {
+    throw new Error(
+      `This API key can see ${visibleInboxes.length} inboxes (${visibleInboxes
         .map((address) =>
           formatAgentMailInboxLabel(address, inboxEmails.get(address) ?? null),
         )
-        .join(', ')}`,
+        .join(
+          ', ',
+        )}), so Roomote cannot tell which one is for this deployment. ${AGENTMAIL_KEY_GUIDANCE}, then save again: ${AGENTMAIL_REQUIRED_PERMISSIONS}.`,
     );
-  } else {
-    const created = await createProposedAgentMailInbox(
-      client,
-      buildAgentMailInboxProposal(Env.R_APP_URL),
-    );
-    inboxAddress = created.inboxAddress;
-    inboxEmails.set(created.inboxAddress, created.inboxEmail);
   }
+  const inboxAddress = pinnedInboxId ?? visibleInboxes[0]!;
+  const client = createAgentMailApiClient(apiKey, inboxAddress);
 
   // Prove message_read without side effects: fetching a sentinel message id
   // returns 404 when the permission exists and 403 when it does not. An
-  // already-converged inbox/webhook would otherwise let a key without
-  // message permissions reach the successful save path, deferring the
-  // failure to runtime (oversize-body re-fetches and every reply).
-  // message_send has no side-effect-free probe; it is exercised on the
-  // first reply.
+  // already-converged webhook would otherwise let a key without message
+  // permissions reach the successful save path, deferring the failure to
+  // runtime (oversize-body re-fetches and every reply). message_send has no
+  // side-effect-free probe; it is exercised on the first reply.
   try {
     await client.getMessage(inboxAddress, 'roomote-permission-probe');
   } catch (error) {
@@ -1242,15 +1026,14 @@ async function reconcileAgentMailSetup(input: {
   }
 
   // Converge the deployment's webhook (found by client id) on the current
-  // URL and inbox scope, so pointing the config at a different inbox re-scopes
-  // delivery instead of silently keeping the old inbox. The webhook secret
-  // only exists where AgentMail returns it, so a registration we can no
-  // longer verify deliveries for is recreated.
+  // URL and event types. The registration is pinned to the inbox by the
+  // endpoint it is created through. The webhook secret only exists where
+  // AgentMail returns it, so a registration we can no longer verify
+  // deliveries for is recreated.
   const webhookUrl = buildExpectedAgentMailWebhookUrl();
-  const desiredInboxIds = [inboxAddress];
   // Bounce/complaint events feed the outbound suppression list; a webhook
   // created by an earlier release only carries message.received, so event
-  // types are converged like the URL and inbox scope.
+  // types are converged like the URL.
   const desiredEventTypes = [
     'message.received',
     'message.bounced',
@@ -1258,54 +1041,13 @@ async function reconcileAgentMailSetup(input: {
   ];
   let webhookSecret = existing.webhookSecret;
 
-  // Which endpoints the key can manage the webhook through. An inbox-scoped
-  // key passes every inbox check above and is then refused on the
-  // organization-level webhook endpoints, so on that refusal the same key is
-  // tried against the inbox's own webhook endpoints before failing the save.
-  // The detected scope is persisted so status and disconnect use the same
-  // endpoints without probing again. A newly entered key never inherits the
-  // recorded scope: an organization-level key replacing an inbox-scoped one
-  // must reconcile (and remove) the old inbox registration from the
-  // organization listing, which an inherited inbox scope could not see.
-  let keyScope: AgentMailKeyScope =
-    existing.keyScope === 'inbox' && !podId && input.enteredApiKey === null
-      ? 'inbox'
-      : 'organization';
-  let webhookClient =
-    keyScope === 'inbox'
-      ? createAgentMailApiClient(apiKey, null, inboxAddress)
-      : client;
-  let webhooks: AgentMailWebhook[] | undefined;
   try {
-    webhooks = (await webhookClient.listWebhooks()).webhooks;
-  } catch (error) {
-    const inboxScopedClient =
-      keyScope === 'organization' && !podId && isAgentMailPermissionError(error)
-        ? createAgentMailApiClient(apiKey, null, inboxAddress)
-        : null;
-    const inboxScoped = inboxScopedClient
-      ? await inboxScopedClient
-          .listWebhooks()
-          .then((listed) => listed.webhooks)
-          .catch(() => null)
-      : null;
-    if (!inboxScopedClient || inboxScoped === null) {
-      throw new Error(
-        classifyAgentMailSetupError(error, 'configuring the webhook'),
-      );
-    }
-    keyScope = 'inbox';
-    webhookClient = inboxScopedClient;
-    webhooks = inboxScoped;
-  }
-
-  try {
+    const { webhooks } = await client.listWebhooks();
     const existingWebhook = findRoomoteAgentMailWebhook(webhooks);
     const createDeploymentWebhook = async (): Promise<string | null> => {
-      const created = await webhookClient.createWebhook({
+      const created = await client.createWebhook({
         url: webhookUrl,
         clientId: buildAgentMailWebhookClientId(Env.R_APP_URL),
-        inboxIds: desiredInboxIds,
         eventTypes: desiredEventTypes,
       });
       return typeof created.secret === 'string' && created.secret.trim()
@@ -1314,13 +1056,6 @@ async function reconcileAgentMailSetup(input: {
     };
 
     if (existingWebhook) {
-      const registeredInboxIds = readAgentMailWebhookInboxIds(existingWebhook);
-      const addInboxIds = desiredInboxIds.filter(
-        (id) => !registeredInboxIds.includes(id),
-      );
-      const removeInboxIds = registeredInboxIds.filter(
-        (id) => !desiredInboxIds.includes(id),
-      );
       const registeredEventTypes =
         readAgentMailWebhookEventTypes(existingWebhook);
       const eventTypesMatch =
@@ -1336,19 +1071,13 @@ async function reconcileAgentMailSetup(input: {
       }
       // The URL is immutable on AgentMail's update, and a registration whose
       // secret we cannot verify deliveries for is useless: both cases mean a
-      // fresh registration. Scope and event drift converge in place.
+      // fresh registration. Event-type drift converges in place.
       if (existingWebhook.url !== webhookUrl || !webhookSecret) {
-        await webhookClient.deleteWebhook(existingWebhook.webhook_id);
+        await client.deleteWebhook(existingWebhook.webhook_id);
         webhookSecret = await createDeploymentWebhook();
-      } else if (
-        addInboxIds.length > 0 ||
-        removeInboxIds.length > 0 ||
-        !eventTypesMatch
-      ) {
-        await webhookClient.updateWebhook(existingWebhook.webhook_id, {
-          ...(addInboxIds.length ? { addInboxIds } : {}),
-          ...(removeInboxIds.length ? { removeInboxIds } : {}),
-          ...(eventTypesMatch ? {} : { eventTypes: desiredEventTypes }),
+      } else if (!eventTypesMatch) {
+        await client.updateWebhook(existingWebhook.webhook_id, {
+          eventTypes: desiredEventTypes,
         });
       }
     } else {
@@ -1361,8 +1090,6 @@ async function reconcileAgentMailSetup(input: {
   }
 
   return {
-    podId,
-    keyScope,
     inboxAddress,
     inboxEmail: inboxEmails.get(inboxAddress) ?? inboxAddress,
     webhookUrl,
@@ -1377,8 +1104,7 @@ async function deleteAgentMailWebhookBestEffort(): Promise<void> {
     if (!credentials.apiKey) return;
     const client = createAgentMailApiClient(
       credentials.apiKey,
-      credentials.podId,
-      webhookInboxForScope(credentials),
+      credentials.inboxId,
     );
     const { webhooks } = await client.listWebhooks();
     const webhook = findRoomoteAgentMailWebhook(webhooks);
@@ -1713,11 +1439,7 @@ export async function getCommsStatusCommand(
     invocationIdentities,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
-    getPersistedEnvironmentVariableValues([
-      ...NON_SECRET_AUTH_ENV_VAR_NAMES,
-      'R_AGENTMAIL_INBOX_ID',
-      'R_AGENTMAIL_POD_ID',
-    ]),
+    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
     getTelegramWebhookStatus(),
     getDiscordCommsStatus(),
     getAgentMailCommsStatus(),
@@ -1781,13 +1503,6 @@ export async function saveCommsAuthConfigCommand(
     input.provider === 'agentmail'
       ? await reconcileAgentMailSetup({
           enteredApiKey: input.values?.R_AGENTMAIL_API_KEY?.trim() || null,
-          enteredInboxId: input.values?.R_AGENTMAIL_INBOX_ID?.trim() || null,
-          // The pod field is part of the form: an omitted key keeps the saved
-          // pod, an empty string clears it (the form submits every field).
-          enteredPodId:
-            input.values && 'R_AGENTMAIL_POD_ID' in input.values
-              ? (input.values.R_AGENTMAIL_POD_ID?.trim() ?? null)
-              : undefined,
         })
       : null;
 
@@ -1905,15 +1620,9 @@ export async function saveCommsAuthConfigCommand(
     }
 
     if (input.provider === 'agentmail' && agentmailSetup) {
-      // Persist the reconciled inbox address (which may have just been
-      // provisioned) instead of whatever was typed, plus the webhook secret
-      // AgentMail issued for delivery verification.
-      const inboxIndex = valuesToSave.findIndex(
-        (value) => value.name === 'R_AGENTMAIL_INBOX_ID',
-      );
-      if (inboxIndex >= 0) {
-        valuesToSave.splice(inboxIndex, 1);
-      }
+      // The inbox is derived from the key, never entered: persist the
+      // reconciled address (so runtime callers route without re-listing)
+      // plus the webhook secret AgentMail issued for delivery verification.
       valuesToSave.push({
         name: 'R_AGENTMAIL_INBOX_ID',
         value: agentmailSetup.inboxAddress,
@@ -1923,23 +1632,6 @@ export async function saveCommsAuthConfigCommand(
           name: 'R_AGENTMAIL_WEBHOOK_SECRET',
           value: agentmailSetup.webhookSecret,
         });
-      }
-      // Optional fields are only ever upserted by the generic path, so an
-      // emptied pod field would otherwise leave the old pod persisted and the
-      // next reconcile would silently address it again.
-      if (
-        !agentmailSetup.podId &&
-        persistedEnvVarNames.includes('R_AGENTMAIL_POD_ID')
-      ) {
-        await deleteDeploymentEnvVarsByNames(tx, ['R_AGENTMAIL_POD_ID']);
-      }
-      // The key scope is detected, never entered: record an inbox-scoped key
-      // so status and disconnect address the inbox's webhook endpoints, and
-      // drop the record once an organization-level key replaces it.
-      if (agentmailSetup.keyScope === 'inbox') {
-        valuesToSave.push({ name: 'R_AGENTMAIL_KEY_SCOPE', value: 'inbox' });
-      } else if (persistedEnvVarNames.includes('R_AGENTMAIL_KEY_SCOPE')) {
-        await deleteDeploymentEnvVarsByNames(tx, ['R_AGENTMAIL_KEY_SCOPE']);
       }
     }
 
@@ -2031,8 +1723,6 @@ export async function saveCommsAuthConfigCommand(
     ...(agentmailSetup
       ? {
           agentmail: {
-            podId: agentmailSetup.podId,
-            keyScope: agentmailSetup.keyScope,
             inboxAddress: agentmailSetup.inboxAddress,
             inboxEmail: agentmailSetup.inboxEmail,
             webhookUrl: agentmailSetup.webhookUrl,
@@ -2061,9 +1751,14 @@ export async function clearCommsAuthConfigCommand(
     // The webhook secret is provisioned server-side rather than entered, so
     // it is not a field; remove it with the credentials, and best-effort
     // unregister the webhook while the API key is still available.
+    // The inbox and webhook secret are derived on save rather than entered,
+    // so they are not fields; remove them with the key, and best-effort
+    // unregister the webhook while the key is still available. The pod id
+    // is a retired field from an earlier build.
     fieldEnvVarNames.push(
+      'R_AGENTMAIL_INBOX_ID',
       'R_AGENTMAIL_WEBHOOK_SECRET',
-      'R_AGENTMAIL_KEY_SCOPE',
+      'R_AGENTMAIL_POD_ID',
     );
     await deleteAgentMailWebhookBestEffort();
   }

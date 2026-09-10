@@ -29,60 +29,44 @@ is never blocked on verification.
 
 ## Connect an AgentMail inbox
 
-Create an AgentMail account and API key at
-[console.agentmail.to/dashboard/api-keys](https://console.agentmail.to/dashboard/api-keys).
-The API key must carry these AgentMail permissions (or be a full-access
-key): `inbox_read`, `inbox_create`, `inbox_update`, `webhook_read`,
-`webhook_create`, `webhook_update`, `webhook_delete`, `message_read`, and
-`message_send`. Missing permissions fail at save time with an error naming
-the refused request, except `message_send`, which has no side-effect-free
-check and is exercised on the first reply.
+Create an AgentMail account at [console.agentmail.to](https://console.agentmail.to),
+then:
 
-The key can be an organization-level key or an inbox-scoped key. An
-inbox-scoped key (created from inside the inbox in the AgentMail console) is
-the least-privilege choice for a one-inbox deployment: Roomote detects it on
-save and registers the webhook on the inbox itself instead of at the
-organization level. Enter that inbox's address, or leave the field blank
-when it is the only inbox the key can see. A pod-scoped key needs the pod id
-(see [Pods and pod-scoped keys](#pods-and-pod-scoped-keys)).
+1. **Create the inbox** Roomote should receive mail at (or pick an existing
+   one). AgentMail's free tier includes 3 inboxes and 100 emails per day and
+   adds a "Sent via AgentMail" footer to outbound mail; custom domains, with
+   AgentMail-managed SPF/DKIM/DMARC, need a paid plan and are recommended for
+   production.
+2. **Create an API key from inside that inbox**, so the key is scoped to it.
+   Give it these permissions (or full access): `inbox_read`, `inbox_update`,
+   `webhook_read`, `webhook_create`, `webhook_update`, `webhook_delete`,
+   `message_read`, and `message_send`.
+3. In the Roomote UI (**Settings > Communications > Email (AgentMail)**),
+   paste the key and save.
 
-In the Roomote UI (**Settings > Communications > Email (AgentMail)**),
-paste the API key, then save. Roomote proposes a deployment inbox address such as
-`roomote-yourhost-a1b2c3@agentmail.to`; edit the address before creation, or
-supply the address of an existing AgentMail inbox instead. On save, Roomote
-creates the inbox and registers a webhook for `message.received`,
-`message.bounced`, and `message.complained` events automatically. The
-connected inbox address and the registered webhook URL are shown in
-settings.
+Roomote uses the inbox the key is scoped to; there is nothing else to enter.
+On save it validates the key, registers a webhook on the inbox for
+`message.received`, `message.bounced`, and `message.complained` events, and
+shows the connected address and webhook URL in settings. Missing permissions
+fail at save time with an error naming the refused request, except
+`message_send`, which has no side-effect-free check and is exercised on the
+first reply.
+
+An inbox-scoped key is the intended shape: it cannot read other inboxes or
+create new ones, so a leaked key exposes one mailbox rather than the
+account. An organization-level key is accepted only while the account has
+exactly one inbox, since Roomote would otherwise have no way to tell which
+inbox is for this deployment.
 
 For self-hosted env-var configuration instead of the UI, all values are
 optional overrides of the settings UI:
 
 ```sh
 # Optional — configure email entirely from settings when unset:
-# R_AGENTMAIL_API_KEY=<agentmail-api-key>
+# R_AGENTMAIL_API_KEY=<inbox-scoped-agentmail-api-key>
 # R_AGENTMAIL_WEBHOOK_SECRET=<webhook-secret>
 # R_AGENTMAIL_INBOX_ID=<inbox-address>
-# R_AGENTMAIL_POD_ID=<pod-id>
 ```
-
-### Pods and pod-scoped keys
-
-AgentMail [pods](https://docs.agentmail.to/documentation/core-concepts/pods)
-isolate inboxes, domains, and mail per tenant inside one AgentMail
-organization, and a pod-scoped API key can only reach its own pod. If the
-deployment was handed a pod-scoped key, or you want Roomote's inbox and
-webhook kept inside a particular pod, enter the pod id in the **AgentMail
-Pod ID** field (or set `R_AGENTMAIL_POD_ID`). Roomote then lists, creates,
-and updates the inbox and webhook through the pod's endpoints; inbound and
-outbound mail is unaffected. Leave the field empty to use the organization's
-inboxes directly. Inboxes cannot move between pods, so changing the pod id
-later means choosing or creating an inbox inside the new pod.
-
-AgentMail's free tier allows 3 inboxes and 100 emails per day and adds a
-"Sent via AgentMail" footer to outbound mail. Custom domains, with
-AgentMail-managed SPF/DKIM/DMARC, require a paid AgentMail plan. For
-production use, a paid plan with a custom domain is recommended.
 
 ## Email Roomote
 

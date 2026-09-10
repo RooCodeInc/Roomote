@@ -83,13 +83,12 @@ describe('AgentMailApiError', () => {
   });
 });
 
-describe('AgentMailApiClient pod scoping', () => {
-  function recordingClient(podId?: string) {
+describe('AgentMailApiClient webhook scoping', () => {
+  function recordingClient() {
     const calls: Array<{ method: string; url: string; body: unknown }> = [];
     const client = new AgentMailApiClient({
       apiKey: 'am_test',
       apiBaseUrl: 'https://agentmail.test',
-      ...(podId ? { podId } : {}),
       fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
         calls.push({
           method: init?.method ?? 'GET',
@@ -101,40 +100,6 @@ describe('AgentMailApiClient pod scoping', () => {
     });
     return { client, calls };
   }
-
-  it('routes inbox and webhook management through the pod, messages through the inbox', async () => {
-    const { client, calls } = recordingClient('pod_acme');
-
-    await client.listInboxes();
-    await client.createInbox({ username: 'roomote', clientId: 'roomote-1' });
-    await client.getInbox('roomote@agentmail.to');
-    await client.updateInbox('roomote@agentmail.to', {
-      displayName: 'Roomote',
-    });
-    await client.listWebhooks();
-    await client.createWebhook({
-      url: 'https://app.example.com/api/webhooks/agentmail',
-      inboxIds: ['roomote@agentmail.to'],
-    });
-    await client.updateWebhook('wh-1', { addInboxIds: ['a@agentmail.to'] });
-    await client.deleteWebhook('wh-1');
-    await client.getMessage('roomote@agentmail.to', 'm-1');
-    await client.sendMessage('roomote@agentmail.to', { to: ['x@example.com'] });
-
-    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
-      'GET https://agentmail.test/v0/pods/pod_acme/inboxes',
-      'POST https://agentmail.test/v0/pods/pod_acme/inboxes',
-      'GET https://agentmail.test/v0/pods/pod_acme/inboxes/roomote%40agentmail.to',
-      'PATCH https://agentmail.test/v0/pods/pod_acme/inboxes/roomote%40agentmail.to',
-      'GET https://agentmail.test/v0/pods/pod_acme/webhooks',
-      'POST https://agentmail.test/v0/pods/pod_acme/webhooks',
-      'PATCH https://agentmail.test/v0/pods/pod_acme/webhooks/wh-1',
-      'DELETE https://agentmail.test/v0/pods/pod_acme/webhooks/wh-1',
-      'GET https://agentmail.test/v0/inboxes/roomote%40agentmail.to/messages/m-1',
-      'POST https://agentmail.test/v0/inboxes/roomote%40agentmail.to/messages/send',
-    ]);
-    expect(client.podId).toBe('pod_acme');
-  });
 
   it('manages webhooks under the inbox for an inbox-scoped key', async () => {
     const calls: Array<{ method: string; url: string; body: unknown }> = [];
@@ -160,7 +125,6 @@ describe('AgentMailApiClient pod scoping', () => {
       eventTypes: ['message.received'],
     });
     await client.updateWebhook('wh-1', {
-      addInboxIds: ['x@roomote.me'],
       eventTypes: ['message.received', 'message.bounced'],
     });
     await client.deleteWebhook('wh-1');
@@ -172,7 +136,7 @@ describe('AgentMailApiClient pod scoping', () => {
       'PATCH https://agentmail.test/v0/inboxes/roomote%40roomote.me/webhooks/wh-1',
       'DELETE https://agentmail.test/v0/inboxes/roomote%40roomote.me/webhooks/wh-1',
     ]);
-    // The path pins the inbox: no inbox list on create, no add/remove on update.
+    // The path pins the inbox: no inbox list on create.
     expect(calls[2]?.body).toEqual({
       url: 'https://app.example.com/api/webhooks/agentmail',
       event_types: ['message.received'],
@@ -183,29 +147,32 @@ describe('AgentMailApiClient pod scoping', () => {
     expect(client.webhookInboxId).toBe('roomote@roomote.me');
   });
 
-  it('stays at organization level without a pod', async () => {
+  it('stays at organization level without an inbox', async () => {
     const { client, calls } = recordingClient();
     await client.listWebhooks();
-    await client.createInbox({ username: 'roomote' });
+    await client.createWebhook({
+      url: 'https://app.example.com/api/webhooks/agentmail',
+      inboxIds: ['roomote@agentmail.to'],
+    });
     expect(calls.map((call) => call.url)).toEqual([
       'https://agentmail.test/v0/webhooks',
-      'https://agentmail.test/v0/inboxes',
+      'https://agentmail.test/v0/webhooks',
     ]);
-    expect(client.podId).toBeNull();
+    expect(calls[1]?.body).toEqual({
+      url: 'https://app.example.com/api/webhooks/agentmail',
+      inbox_ids: ['roomote@agentmail.to'],
+    });
+    expect(client.webhookInboxId).toBeNull();
   });
 
-  it("sends AgentMail's add/remove inbox lists and full event-type replacement on update", async () => {
+  it('sends only a full event-type replacement on update, never an empty list', async () => {
     const { client, calls } = recordingClient();
     await client.updateWebhook('wh-1', {
-      addInboxIds: ['new@agentmail.to'],
-      removeInboxIds: ['old@agentmail.to'],
       eventTypes: ['message.received', 'message.bounced'],
     });
     await client.updateWebhook('wh-1', { eventTypes: [] });
 
     expect(calls[0]?.body).toEqual({
-      add_inbox_ids: ['new@agentmail.to'],
-      remove_inbox_ids: ['old@agentmail.to'],
       event_types: ['message.received', 'message.bounced'],
     });
     // An empty list must leave event types unchanged, never clear them.

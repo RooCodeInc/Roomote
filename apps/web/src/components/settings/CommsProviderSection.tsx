@@ -83,15 +83,9 @@ import {
   DialogTitle,
   ExternalLink,
   Info,
-  Input,
   Mail,
   Plug,
   RefreshCw,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Spinner,
   Trash2,
   TriangleAlert,
@@ -302,22 +296,6 @@ function AgentMailSetupStatus({
 
   return (
     <div className="space-y-2 mt-4">
-      {status.podId ? (
-        <div className="flex items-start gap-2">
-          <Info className="size-4 mt-0.5 shrink-0" />
-          <p className="text-sm">
-            Pod: <span className="break-all font-mono">{status.podId}</span>
-          </p>
-        </div>
-      ) : null}
-      {status.keyScope === 'inbox' ? (
-        <div className="flex items-start gap-2">
-          <Info className="size-4 mt-0.5 shrink-0" />
-          <p className="text-sm">
-            Inbox-scoped API key: the webhook is registered on the inbox.
-          </p>
-        </div>
-      ) : null}
       {status.inboxAddress ? (
         <div className="flex items-start gap-2">
           <Mail className="size-4 mt-0.5 shrink-0" />
@@ -356,250 +334,6 @@ function AgentMailSetupStatus({
           ) : null}
         </p>
       </div>
-    </div>
-  );
-}
-
-const AGENTMAIL_CREATE_NEW_INBOX_OPTION = '__agentmail_create_new__';
-const AGENTMAIL_MANUAL_INBOX_OPTION = '__agentmail_manual__';
-
-/**
- * Chooser for the AgentMail inbox: lists the inboxes the API key can see plus
- * a "create new" option for this deployment's proposed address, instead of a
- * free-text field. Manual entry stays available for inboxes the key cannot
- * list yet (e.g. custom domains). Writes the chosen address into the
- * R_AGENTMAIL_INBOX_ID form value; the save reconcile does the rest.
- */
-function AgentMailInboxChooser({
-  enteredApiKey,
-  enteredPodId,
-  keyConfigured,
-  value,
-  savedSatisfied,
-  disabled,
-  onChange,
-}: {
-  /** API key currently typed into the form (already trimmed). */
-  enteredApiKey: string;
-  /** Pod id currently in the form (already trimmed); scopes the listing. */
-  enteredPodId: string;
-  /** The API key field is satisfied by a saved or runtime value. */
-  keyConfigured: boolean;
-  value: string;
-  savedSatisfied: boolean;
-  disabled: boolean;
-  onChange: (address: string) => void;
-}) {
-  const trpc = useTRPC();
-  // A key typed into the form only loads on request, so AgentMail is not
-  // called on every keystroke. A saved-and-connected config never loads
-  // automatically either — the status block already names the inbox, so
-  // AgentMail is only called when the operator actually opens the chooser.
-  const [loadedEnteredKey, setLoadedEnteredKey] = useState<string | null>(null);
-  const [manualEntry, setManualEntry] = useState(false);
-  const [chooserRequested, setChooserRequested] = useState(false);
-
-  const hasEnteredKey = enteredApiKey.length > 0;
-  const keyAvailable = hasEnteredKey || keyConfigured;
-  const loadWanted = chooserRequested || (keyAvailable && !savedSatisfied);
-  const loadEnabled =
-    loadWanted &&
-    keyAvailable &&
-    (!hasEnteredKey || loadedEnteredKey === enteredApiKey);
-
-  // A mutation rather than a query: the typed API key travels in the POST
-  // body instead of being serialized into a GET URL (browser history, proxy
-  // logs, tracing).
-  const loadInboxes = useMutation(
-    trpc.comms.listAgentMailInboxes.mutationOptions(),
-  );
-  const requestedKeyRef = useRef<string | null>(null);
-  const requestKey = hasEnteredKey ? enteredApiKey : '';
-  // savedSatisfied joins the signature so a save that just created the
-  // inbox refreshes the list (mutations have no query cache to invalidate).
-  const requestSignature = `${savedSatisfied ? 'saved' : 'unsaved'}:${requestKey}:${enteredPodId}`;
-  const { mutate: loadInboxesMutate } = loadInboxes;
-
-  useEffect(() => {
-    if (!loadEnabled || requestedKeyRef.current === requestSignature) {
-      return;
-    }
-    requestedKeyRef.current = requestSignature;
-    loadInboxesMutate({
-      ...(requestKey ? { apiKey: requestKey } : {}),
-      podId: enteredPodId,
-    });
-  }, [
-    loadEnabled,
-    requestKey,
-    requestSignature,
-    enteredPodId,
-    loadInboxesMutate,
-  ]);
-
-  const inboxesLoading =
-    loadInboxes.isPending ||
-    (loadEnabled && !loadInboxes.isSuccess && !loadInboxes.isError);
-
-  // Entries pair the routed inbox_id (the submitted value) with the
-  // deliverable email (the label); they are equal today but may diverge.
-  const inboxes = loadInboxes.data?.inboxes ?? [];
-  const inboxIds = inboxes.map((inbox) => inbox.inboxId);
-  const proposedNewAddress = loadInboxes.data?.proposedNewAddress ?? null;
-  const proposalAlreadyExists = Boolean(
-    proposedNewAddress && inboxIds.includes(proposedNewAddress),
-  );
-  const normalizedValue = value.trim().toLowerCase();
-  const selectValue = !normalizedValue
-    ? undefined
-    : inboxIds.includes(normalizedValue)
-      ? normalizedValue
-      : normalizedValue === proposedNewAddress && !proposalAlreadyExists
-        ? AGENTMAIL_CREATE_NEW_INBOX_OPTION
-        : undefined;
-  // A value the account listing does not contain (custom domain, older
-  // config) keeps the manual input visible so it is never silently hidden.
-  // A saved config also rests on the input until the chooser is opened.
-  const showManualInput =
-    manualEntry ||
-    !keyAvailable ||
-    (savedSatisfied && !chooserRequested) ||
-    (loadInboxes.isSuccess &&
-      normalizedValue.length > 0 &&
-      selectValue === undefined);
-
-  const manualEntryLink = (
-    <button
-      type="button"
-      className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
-      onClick={() => setManualEntry(true)}
-      disabled={disabled}
-    >
-      Enter address manually
-    </button>
-  );
-
-  return (
-    <div className="max-w-xl space-y-2">
-      <div className="text-sm font-medium">Inbox Email Address (optional)</div>
-      <p className="text-sm text-muted-foreground">
-        The inbox Roomote receives mail at. Leave it unset to let Roomote adopt
-        the account&apos;s only inbox or create one when you save.
-      </p>
-      {showManualInput ? (
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Input
-              className="font-mono"
-              value={value}
-              onChange={(event) => onChange(event.target.value)}
-              placeholder="Inbox Email Address"
-              disabled={disabled}
-              data-1p-ignore
-            />
-            {savedSatisfied && <Check />}
-          </div>
-          {keyAvailable ? (
-            <button
-              type="button"
-              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
-              onClick={() => {
-                setManualEntry(false);
-                setChooserRequested(true);
-              }}
-              disabled={disabled}
-            >
-              Choose from account inboxes
-            </button>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Enter the AgentMail API key above to choose from the
-              account&apos;s inboxes.
-            </p>
-          )}
-        </div>
-      ) : !loadEnabled ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setLoadedEnteredKey(enteredApiKey)}
-            disabled={disabled}
-          >
-            <RefreshCw />
-            Load inboxes
-          </Button>
-          {manualEntryLink}
-        </div>
-      ) : inboxesLoading ? (
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner size="sm" />
-          Loading inboxes…
-        </div>
-      ) : loadInboxes.isError ? (
-        <div className="space-y-1">
-          <p className="text-sm text-destructive">
-            {loadInboxes.error.message}
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                loadInboxes.mutate(requestKey ? { apiKey: requestKey } : {})
-              }
-              disabled={disabled}
-            >
-              <RefreshCw />
-              Retry
-            </Button>
-            {manualEntryLink}
-          </div>
-        </div>
-      ) : (
-        <div className="flex items-center gap-2">
-          <Select
-            value={selectValue}
-            onValueChange={(option) => {
-              if (option === AGENTMAIL_MANUAL_INBOX_OPTION) {
-                setManualEntry(true);
-                return;
-              }
-              setManualEntry(false);
-              onChange(
-                option === AGENTMAIL_CREATE_NEW_INBOX_OPTION
-                  ? (proposedNewAddress ?? '')
-                  : option,
-              );
-            }}
-            disabled={disabled}
-          >
-            <SelectTrigger className="w-full font-mono">
-              <SelectValue placeholder="Choose an inbox" />
-            </SelectTrigger>
-            <SelectContent>
-              {inboxes.map((inbox) => (
-                <SelectItem key={inbox.inboxId} value={inbox.inboxId}>
-                  {inbox.email !== inbox.inboxId
-                    ? `${inbox.email} (${inbox.inboxId})`
-                    : inbox.inboxId}
-                </SelectItem>
-              ))}
-              {proposedNewAddress && !proposalAlreadyExists ? (
-                <SelectItem value={AGENTMAIL_CREATE_NEW_INBOX_OPTION}>
-                  Create new: {proposedNewAddress}
-                </SelectItem>
-              ) : null}
-              <SelectItem value={AGENTMAIL_MANUAL_INBOX_OPTION}>
-                Enter address manually
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          {savedSatisfied && <Check />}
-        </div>
-      )}
     </div>
   );
 }
@@ -862,39 +596,6 @@ export function CommsProviderSection({
     ? getTeamsAppPackageUnavailableReason(enteredTeamsBotAppId)
     : null;
 
-  // AgentMail replaces the free-text inbox field with a chooser fed by the
-  // account's inbox list, so that field is pulled out of the generic setup
-  // fields and rendered below (unless an env var pins it at runtime).
-  const agentMailInboxField =
-    provider.id === 'agentmail'
-      ? provider.fields.find(
-          (field) => field.envVarName === 'R_AGENTMAIL_INBOX_ID',
-        )
-      : undefined;
-  const agentMailChooserActive = Boolean(
-    agentMailInboxField && !agentMailInboxField.runtimeSatisfied,
-  );
-  const setupExperienceProvider = agentMailChooserActive
-    ? {
-        ...provider,
-        fields: provider.fields.filter(
-          (field) => field.envVarName !== 'R_AGENTMAIL_INBOX_ID',
-        ),
-      }
-    : provider;
-  const agentMailApiKeyField =
-    provider.id === 'agentmail'
-      ? provider.fields.find(
-          (field) => field.envVarName === 'R_AGENTMAIL_API_KEY',
-        )
-      : undefined;
-  const agentMailKeyConfigured = Boolean(
-    agentMailApiKeyField &&
-    (agentMailApiKeyField.runtimeSatisfied ||
-      (agentMailApiKeyField.savedSatisfied &&
-        !clearedSavedValues['R_AGENTMAIL_API_KEY'])),
-  );
-
   const handleSave = () => {
     onSave(provider.id, getSetupSubmitValues({ provider, values }));
   };
@@ -941,7 +642,7 @@ export function CommsProviderSection({
         ) : (
           <div className="space-y-8">
             <ProviderSetupExperience
-              provider={setupExperienceProvider}
+              provider={provider}
               values={values}
               publicOrigin={publicOrigin}
               disabled={savePending}
@@ -962,7 +663,7 @@ export function CommsProviderSection({
                   : !provider.runtimeSatisfied && provider.id === 'discord'
                     ? 'Roomote validates the token, derives the bot identity, and registers /new, /goal, /link, and /help when you save.'
                     : !provider.runtimeSatisfied && provider.id === 'agentmail'
-                      ? 'Roomote validates the API key, adopts or provisions an inbox, and registers the AgentMail webhook when you save. The key needs these AgentMail permissions (or full access): inbox_read, inbox_create, inbox_update, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send. Enter a Pod ID to keep the inbox and webhook inside that AgentMail pod, which is required for a pod-scoped key.'
+                      ? 'Roomote validates the API key, uses the inbox the key is scoped to, and registers the AgentMail webhook on that inbox when you save. Create the key from inside the inbox in the AgentMail console, with these permissions (or full access): inbox_read, inbox_update, webhook_read, webhook_create, webhook_update, webhook_delete, message_read, message_send.'
                       : undefined
               }
               onCreateSlackApp={(configToken) =>
@@ -985,29 +686,6 @@ export function CommsProviderSection({
                 }))
               }
             />
-
-            {agentMailChooserActive && agentMailInboxField ? (
-              <AgentMailInboxChooser
-                enteredApiKey={values['R_AGENTMAIL_API_KEY']?.trim() ?? ''}
-                enteredPodId={values['R_AGENTMAIL_POD_ID']?.trim() ?? ''}
-                keyConfigured={agentMailKeyConfigured}
-                value={values['R_AGENTMAIL_INBOX_ID'] ?? ''}
-                savedSatisfied={agentMailInboxField.savedSatisfied}
-                disabled={savePending}
-                onChange={(address) => {
-                  setValues((current) => ({
-                    ...current,
-                    R_AGENTMAIL_INBOX_ID: address,
-                  }));
-                  if (agentMailInboxField.savedSatisfied) {
-                    setClearedSavedValues((current) => ({
-                      ...current,
-                      R_AGENTMAIL_INBOX_ID: address.length === 0,
-                    }));
-                  }
-                }}
-              />
-            ) : null}
 
             <div className="space-y-2 text-sm text-muted-foreground">
               {provider.id === 'telegram' && provider.telegramWebhook && (
