@@ -57,5 +57,3 @@ export function AutomationAdditionalRules({
     </div>
   );
 }
-
-export const CiFailureTriageAdditionalRules = AutomationAdditionalRules;

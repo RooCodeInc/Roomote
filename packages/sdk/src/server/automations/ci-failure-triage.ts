@@ -55,7 +55,7 @@ import {
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
 } from './destination';
-import { resolveCiFailureTriageRepositoryDestination } from './ci-failure-triage-routing';
+import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
 import {
   findEnvironmentIdForRepositoryId,
   getActiveRepositoriesForProviders,
@@ -147,7 +147,7 @@ export async function ciFailureTriageJob(
     for (const selectedRepository of selectedRepositories) {
       const destination =
         legacyDestination ??
-        (await resolveCiFailureTriageRepositoryDestination({
+        (await resolveAutomationRepositoryDestination({
           runtime,
           repositoryId: selectedRepository.id,
           connectedProviders,

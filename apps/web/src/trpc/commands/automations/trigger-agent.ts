@@ -9,7 +9,7 @@ import {
 import { getAutomationRuntime } from '@roomote/db/server';
 import {
   resolveAutomationRuntimeDestination,
-  resolveCiFailureTriageRepositoryDestination,
+  resolveAutomationRepositoryDestination,
   listConnectedCommunicationProviders,
   runAutomationNow,
   type AutomationRunNowResult,
@@ -62,7 +62,7 @@ async function assertManualTriggerIsRunnable(
       const connectedProviders = await listConnectedCommunicationProviders();
       for (const repository of repositories) {
         if (
-          await resolveCiFailureTriageRepositoryDestination({
+          await resolveAutomationRepositoryDestination({
             runtime,
             repositoryId: repository.id,
             connectedProviders,

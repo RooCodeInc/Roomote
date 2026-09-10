@@ -127,6 +127,3 @@ export async function resolveAutomationRepositoryDestination(params: {
     slackConnected: params.connectedProviders.includes('slack'),
   });
 }
-
-export const resolveCiFailureTriageRepositoryDestination =
-  resolveAutomationRepositoryDestination;

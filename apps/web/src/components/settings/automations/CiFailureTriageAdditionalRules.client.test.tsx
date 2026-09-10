@@ -1,13 +1,10 @@
 import { render, screen, fireEvent } from '@testing-library/react';
-import {
-  AutomationAdditionalRules,
-  CiFailureTriageAdditionalRules,
-} from './CiFailureTriageAdditionalRules';
+import { AutomationAdditionalRules } from './CiFailureTriageAdditionalRules';
 
 it('keeps the standard destination visible while editing free text and displays save errors', () => {
   const onChange = vi.fn();
   render(
-    <CiFailureTriageAdditionalRules
+    <AutomationAdditionalRules
       value="Only triage backend"
       onChange={onChange}
       error="Which workspace?"
