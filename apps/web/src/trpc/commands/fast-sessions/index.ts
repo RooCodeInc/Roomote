@@ -792,8 +792,11 @@ export async function submitFastSessionUserInputCommand(
   if (!session) {
     throw new Error('Fast session not found');
   }
-  const { resolveSetupSessionTurnContext, submitSetupSessionUserInputCommand } =
-    await import('../setup/setup-session');
+  const {
+    reconcileSetupPlatformEvents,
+    resolveSetupSessionTurnContext,
+    submitSetupSessionUserInputCommand,
+  } = await import('../setup/setup-session');
   // Check setup ownership before persisting input; rebuild its snapshot after the write.
   const setupContext = await resolveSetupSessionTurnContext(auth, session.id);
 
@@ -854,6 +857,7 @@ export async function submitFastSessionUserInputCommand(
     throw new Error(validationError);
   }
   if (requestPayload.preset && existingResponse) {
+    if (setupContext) await reconcileSetupPlatformEvents(auth);
     return { success: true };
   }
   const savedResponse = existingResponse

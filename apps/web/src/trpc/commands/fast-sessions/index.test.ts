@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   dbSelect: vi.fn(),
   dbInnerJoin: vi.fn(),
   dbSelectLimit: vi.fn(),
+  reconcileSetupEvents: vi.fn(),
   resolveSetupContext: vi.fn().mockResolvedValue(null),
   submitSetupInput: vi.fn(),
   upsertMessage: vi.fn(),
@@ -88,6 +89,7 @@ vi.mock('./pinned-launch', () => ({
 }));
 
 vi.mock('../setup/setup-session', () => ({
+  reconcileSetupPlatformEvents: mocks.reconcileSetupEvents,
   resolveSetupSessionTurnContext: mocks.resolveSetupContext,
   submitSetupSessionUserInputCommand: mocks.submitSetupInput,
 }));
@@ -540,6 +542,46 @@ describe('setup context on ordinary Fast session input', () => {
     expect(mocks.submitSetupInput).toHaveBeenCalledWith(auth, finalInput);
     expect(mocks.upsertMessage).not.toHaveBeenCalled();
     expect(mocks.after).not.toHaveBeenCalled();
+  });
+
+  it('reconciles an already-persisted setup preset before returning success', async () => {
+    mocks.resolveSetupContext.mockResolvedValue(setupContext);
+    const final = {
+      ...request,
+      payload: {
+        ...request.payload,
+        preset: 'setup_integrations',
+        questions: [
+          {
+            ...question,
+            id: 'setup-integrations',
+            isOther: false,
+            options: [
+              {
+                id: 'continue',
+                label: 'Continue',
+                description: 'Continue without connections',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    mocks.dbSelectLimit
+      .mockResolvedValueOnce([final])
+      .mockResolvedValueOnce([{ eventId: 'response-event', payload: {} }]);
+
+    await expect(
+      submitFastSessionUserInputCommand(auth, {
+        ...input,
+        answers: { 'setup-integrations': { answers: ['Continue'] } },
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(mocks.reconcileSetupEvents).toHaveBeenCalledOnce();
+    expect(mocks.reconcileSetupEvents).toHaveBeenCalledWith(auth);
+    expect(mocks.submitSetupInput).not.toHaveBeenCalled();
+    expect(mocks.upsertMessage).not.toHaveBeenCalled();
   });
 
   it('checks setup admin ownership before an ordinary response is persisted', async () => {
