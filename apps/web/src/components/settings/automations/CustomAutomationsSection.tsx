@@ -147,6 +147,18 @@ function cadenceLabel(
     : 'Custom schedule';
 }
 
+// Fast runs settle asynchronously, so refresh sparsely through the existing
+// ten-minute launch-claim recovery window instead of polling indefinitely.
+const RUN_RESULT_REFRESH_DELAYS_MS = [
+  5_000,
+  15_000,
+  30_000,
+  60_000,
+  2 * 60_000,
+  5 * 60_000,
+  10 * 60_000,
+];
+
 function CustomAutomationRunButton({
   automation,
   disabled,
@@ -155,9 +167,40 @@ function CustomAutomationRunButton({
   disabled: boolean;
 }) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const isMountedRef = useRef(true);
+  const refreshTimeoutsRef = useRef<number[]>([]);
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: trpc.automations.listCustomAutomations.queryKey(),
+    });
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      for (const timeout of refreshTimeoutsRef.current) {
+        window.clearTimeout(timeout);
+      }
+    };
+  }, []);
+
   const triggerMutation = useMutation({
     ...trpc.automations.triggerCustomAutomation.mutationOptions({
       onSuccess: (result) => {
+        void invalidate();
+        if (
+          isMountedRef.current &&
+          (result.outcome === 'launched' || result.outcome === 'queued')
+        ) {
+          for (const timeout of refreshTimeoutsRef.current) {
+            window.clearTimeout(timeout);
+          }
+          refreshTimeoutsRef.current = RUN_RESULT_REFRESH_DELAYS_MS.map(
+            (delay) => window.setTimeout(() => void invalidate(), delay),
+          );
+        }
+
         switch (result.outcome) {
           case 'launched':
             toast.success(`Running ${automation.name} now`, {

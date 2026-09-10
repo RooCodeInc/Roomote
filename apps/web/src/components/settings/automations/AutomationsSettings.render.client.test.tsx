@@ -294,7 +294,14 @@ const mutations = vi.hoisted(() => ({
     ) => void;
   } | null,
   latestCustomTriggerOptions: null as {
-    onSuccess?: (result: { outcome: 'launched'; taskId: string }) => void;
+    onSuccess?: (
+      result:
+        | { outcome: 'launched'; taskId: string }
+        | { outcome: 'queued' }
+        | { outcome: 'completed' }
+        | { outcome: 'skipped'; reason: string }
+        | { outcome: 'failed'; error: string },
+    ) => void;
   } | null,
 }));
 
@@ -628,8 +635,34 @@ function closeAutomationDialog() {
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 }
 
+function setRunnableCustomAutomation() {
+  state.customAutomations = [
+    {
+      id: 'automation-1',
+      name: 'Daily scan',
+      prompt: 'Find flaky tests.',
+      enabled: true,
+      scheduleMode: 'daily',
+      cronExpression: null,
+      model: null,
+      executionMode: 'fast',
+      environmentId: '__fast__',
+      target: {},
+      lastRunAt: null,
+      lastSucceededAt: null,
+      lastFailedAt: null,
+      lastError: null,
+      lastLaunchedTaskId: null,
+      createdByName: 'Ada',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+    },
+  ];
+}
+
 describe('AutomationsSettings', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
     state.customAutomationRunPendingId = null;
@@ -1213,6 +1246,9 @@ describe('AutomationsSettings', () => {
         action: expect.objectContaining({ label: 'View task' }),
       }),
     );
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['automations', 'listCustomAutomations'],
+    });
 
     state.customAutomations.push({
       ...state.customAutomations[0]!,
@@ -1262,6 +1298,73 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { outcome: 'completed' as const },
+    { outcome: 'failed' as const, error: 'launch failed' },
+  ])('refreshes persisted custom automation state after $outcome', (result) => {
+    setRunnableCustomAutomation();
+    render(<AutomationsSettings />);
+
+    act(() => {
+      mutations.latestCustomTriggerOptions?.onSuccess?.(result);
+    });
+
+    expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['automations', 'listCustomAutomations'],
+    });
+  });
+
+  it.each([
+    { outcome: 'launched' as const, taskId: 'task-custom-1' },
+    { outcome: 'queued' as const },
+  ])('uses bounded follow-up refreshes after $outcome', (result) => {
+    vi.useFakeTimers();
+    setRunnableCustomAutomation();
+    const { unmount } = render(<AutomationsSettings />);
+
+    try {
+      act(() => {
+        mutations.latestCustomTriggerOptions?.onSuccess?.(result);
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(8);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not schedule follow-up refreshes after unmount', () => {
+    vi.useFakeTimers();
+    setRunnableCustomAutomation();
+    const { unmount } = render(<AutomationsSettings />);
+    const onSuccess = mutations.latestCustomTriggerOptions?.onSuccess;
+
+    try {
+      unmount();
+      act(() => {
+        onSuccess?.({ outcome: 'queued' });
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('offers and displays the all-repositories workspace target', async () => {
