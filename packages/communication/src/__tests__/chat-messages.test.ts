@@ -318,18 +318,12 @@ describe('chat message copy builders', () => {
     );
   });
 
-  it('keeps the Web app link on the transcript even when callers pass a selected task', () => {
-    expect(
-      buildThreadReplyFooterText({
-        taskUrl:
-          'https://roomote.dev/sessions/1?task=task-1&artifact=notes.md&v=2&utm_source=slack',
-        runningTasks: {
-          count: 1,
-          url: 'https://roomote.dev/sessions/1?task=task-1',
-        },
-      }),
-    ).toBe(
-      '_[1 running task](https://roomote.dev/sessions/1?task=task-1) · [Web app](https://roomote.dev/sessions/1?utm_source=slack)_',
+  it.each([
+    'https://roomote.dev/task/task-1?artifact=notes.md&v=2&utm_source=slack',
+    'https://roomote.dev/sessions/1?task=task-1&artifact=notes.md&v=2&utm_source=slack',
+  ])('preserves caller-provided navigation in %s', (taskUrl) => {
+    expect(buildThreadReplyFooterText({ taskUrl })).toBe(
+      `_[Web app](${taskUrl})_`,
     );
   });
 
@@ -337,7 +331,7 @@ describe('chat message copy builders', () => {
     expect(
       buildThreadReplyFooterText({
         taskUrl:
-          'https://roomote.dev/task/task-1?utm_source=slack&utm_campaign=reply',
+          'https://roomote.dev/task/task-1?artifact=notes.md&v=2&utm_source=slack&utm_medium=link&utm_campaign=reply',
         webAppUrl: 'https://roomote.dev/sessions/owner',
         runningTasks: {
           count: 1,
@@ -345,7 +339,7 @@ describe('chat message copy builders', () => {
         },
       }),
     ).toBe(
-      '_[1 running task](https://roomote.dev/sessions/owner?task=task-1) · [Web app](https://roomote.dev/sessions/owner?utm_source=slack&utm_campaign=reply)_',
+      '_[1 running task](https://roomote.dev/sessions/owner?task=task-1) · [Web app](https://roomote.dev/sessions/owner?utm_source=slack&utm_medium=link&utm_campaign=reply)_',
     );
   });
 

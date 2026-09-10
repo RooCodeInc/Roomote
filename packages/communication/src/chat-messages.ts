@@ -334,11 +334,6 @@ export function buildThreadReplyFooterText({
       if (key.startsWith('utm_')) webUrl.searchParams.set(key, value);
     }
   }
-  if (webUrl.pathname.startsWith('/sessions/')) {
-    webUrl.searchParams.delete('task');
-    webUrl.searchParams.delete('artifact');
-    webUrl.searchParams.delete('v');
-  }
   items.push(formatLink('Web app', webUrl.toString()));
   return formatFooterText(items.join(' · '));
 }

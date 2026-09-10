@@ -14,6 +14,7 @@ import {
 import { Env } from '@roomote/env';
 import { RunStatus } from '@roomote/types';
 
+import { buildThreadReplyFooterText } from '../chat-messages';
 import {
   resolveSessionRunningTasks,
   resolveThreadReplyFooterContext,
@@ -88,6 +89,14 @@ describe('Session running-task resolution with persisted runs', () => {
     });
     expect(context.webAppUrl).toBe(
       new URL(`/sessions/${session.id}`, Env.R_APP_URL).toString(),
+    );
+    const taskUrl = new URL(`/task/${second.id}`, Env.R_APP_URL);
+    taskUrl.search =
+      'utm_source=slack&utm_medium=link&utm_campaign=slack.thread_reply';
+    expect(
+      buildThreadReplyFooterText({ taskUrl: taskUrl.toString(), ...context }),
+    ).toBe(
+      `_[1 running task](${selected}) · [Web app](${context.webAppUrl}${taskUrl.search})_`,
     );
     expect(
       (
