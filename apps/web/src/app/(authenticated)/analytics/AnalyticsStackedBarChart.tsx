@@ -3,8 +3,9 @@
 import { useMemo, useState, type SyntheticEvent } from 'react';
 import {
   Bar,
-  BarChart,
   CartesianGrid,
+  ComposedChart,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -16,6 +17,7 @@ import type {
   AnalyticsDimension,
   AnalyticsGranularity,
   AnalyticsMetric,
+  AnalyticsSeries,
 } from '@/types';
 import { cn } from '@/lib/utils';
 import { formatInferenceCost, formatTokens } from '@/lib/formatters';
@@ -83,10 +85,6 @@ function formatMetricValue(value: number, metric: AnalyticsMetric) {
 
 function getSeriesColor(params: { index: number }) {
   return CHART_COLORS[params.index % CHART_COLORS.length];
-}
-
-function getTokenSeriesDataKey(seriesKey: string) {
-  return `tokens:${seriesKey}`;
 }
 
 function stopTooltipEventPropagation(event: SyntheticEvent<HTMLElement>) {
@@ -175,6 +173,7 @@ function AnalyticsTooltip({
   label,
   viewBy,
   metric,
+  series,
 }: {
   active?: boolean;
   hoveredSeriesKey: string | null;
@@ -183,10 +182,14 @@ function AnalyticsTooltip({
     value: number;
     color: string;
     unit?: string;
+    payload?: {
+      tokenSegments?: Record<string, number>;
+    };
   }>;
   label?: string;
   viewBy: AnalyticsDimension;
   metric: AnalyticsMetric;
+  series: AnalyticsSeries[];
 }) {
   if (!active || !payload || payload.length === 0) {
     return null;
@@ -198,7 +201,7 @@ function AnalyticsTooltip({
       { name: string; cost: number; tokens: number; color: string }
     >();
     for (const item of payload) {
-      if (item.value <= 0) {
+      if (item.unit === 'tokens') {
         continue;
       }
 
@@ -208,16 +211,25 @@ function AnalyticsTooltip({
         tokens: 0,
         color: item.color,
       };
-      if (item.unit === 'tokens') {
-        current.tokens += item.value;
-      } else {
-        current.cost += item.value;
-      }
+      current.cost += item.value;
       groupedItems.set(item.name, current);
     }
-    const costItems = [...groupedItems.values()].sort((left, right) =>
-      compareTooltipLabels(viewBy, left.name, right.name),
-    );
+    const tokenSegments = payload.find((item) => item.payload?.tokenSegments)
+      ?.payload?.tokenSegments;
+    const costItems = series
+      .map((item, index) => {
+        const costItem = groupedItems.get(item.label);
+        return {
+          name: item.label,
+          cost: costItem?.cost ?? 0,
+          tokens: tokenSegments?.[item.key] ?? 0,
+          color: costItem?.color ?? getSeriesColor({ index }),
+        };
+      })
+      .filter((item) => item.cost > 0 || item.tokens > 0)
+      .sort((left, right) =>
+        compareTooltipLabels(viewBy, left.name, right.name),
+      );
     const totalCost = costItems.reduce((sum, item) => sum + item.cost, 0);
     const totalTokens = costItems.reduce((sum, item) => sum + item.tokens, 0);
 
@@ -386,18 +398,16 @@ export function AnalyticsStackedBarChart({
     }
 
     return chart.buckets.map((bucket) => {
-      const entry: Record<string, string | number> = {
+      const entry: Record<string, string | number | Record<string, number>> = {
         bucketKey: bucket.key,
         label: bucket.label,
         total: bucket.total,
+        tokenTotal: bucket.tokenTotal ?? 0,
+        tokenSegments: bucket.tokenSegments ?? {},
       };
 
       for (const series of chart.series) {
         entry[series.key] = bucket.segments[series.key] ?? 0;
-        if (chart.object === 'costs') {
-          entry[getTokenSeriesDataKey(series.key)] =
-            bucket.tokenSegments?.[series.key] ?? 0;
-        }
       }
 
       return entry;
@@ -406,7 +416,13 @@ export function AnalyticsStackedBarChart({
 
   const metric = chart?.metric ?? 'tasks';
   const isCostChart = chart?.object === 'costs';
-  const yAxisWidth = isMobile ? 36 : metric === 'cost' ? 72 : 64;
+  const yAxisWidth = isMobile
+    ? isCostChart
+      ? 48
+      : 36
+    : metric === 'cost'
+      ? 72
+      : 64;
   const chartMargin = {
     top: 8,
     right: 8,
@@ -451,7 +467,7 @@ export function AnalyticsStackedBarChart({
     <div className="space-y-4">
       <div className="h-[320px] md:h-[420px]">
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart
+          <ComposedChart
             data={chartData}
             accessibilityLayer={false}
             className="outline-none [&_*:focus]:outline-none [&_*:focus-visible]:outline-none"
@@ -498,7 +514,7 @@ export function AnalyticsStackedBarChart({
                 orientation="right"
                 tickLine={false}
                 axisLine={false}
-                width={isMobile ? 40 : 64}
+                width={isMobile ? 44 : 64}
                 tick={{ fill: 'var(--color-muted-foreground)', fontSize: 11 }}
                 tickFormatter={(value) => formatTokens(Number(value))}
                 label={
@@ -524,6 +540,7 @@ export function AnalyticsStackedBarChart({
                   hoveredSeriesKey={hoveredSeriesKey}
                   viewBy={chart.viewBy}
                   metric={metric}
+                  series={chart.series}
                 />
               }
             />
@@ -567,48 +584,21 @@ export function AnalyticsStackedBarChart({
                 className="cursor-pointer"
               />
             ))}
-            {isCostChart
-              ? chart.series.map((series, index) => (
-                  <Bar
-                    key={getTokenSeriesDataKey(series.key)}
-                    dataKey={getTokenSeriesDataKey(series.key)}
-                    name={series.label}
-                    unit="tokens"
-                    yAxisId="tokens"
-                    stackId="tokens"
-                    onMouseOver={() => setHoveredSeriesKey(series.label)}
-                    onMouseLeave={() => setHoveredSeriesKey(null)}
-                    onClick={(data) => {
-                      const bucketKey =
-                        typeof data?.payload?.bucketKey === 'string'
-                          ? data.payload.bucketKey
-                          : null;
-                      const bucketLabel =
-                        typeof data?.payload?.label === 'string'
-                          ? data.payload.label
-                          : '';
-
-                      if (!bucketKey) {
-                        return;
-                      }
-
-                      onSelectSegment({
-                        bucketKey,
-                        bucketLabel,
-                        seriesKey: series.key,
-                        seriesLabel: series.label,
-                        metric: 'tokens',
-                      });
-                    }}
-                    radius={[0, 0, 0, 0]}
-                    fill={getSeriesColor({ index })}
-                    fillOpacity={0.5}
-                    maxBarSize={64}
-                    className="cursor-pointer"
-                  />
-                ))
-              : null}
-          </BarChart>
+            {isCostChart ? (
+              <Line
+                type="linear"
+                dataKey="tokenTotal"
+                name="Total tokens"
+                unit="tokens"
+                yAxisId="tokens"
+                stroke="var(--color-chart-6)"
+                strokeWidth={3}
+                connectNulls
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+              />
+            ) : null}
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
     </div>
