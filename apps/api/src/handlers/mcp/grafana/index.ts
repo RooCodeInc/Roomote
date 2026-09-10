@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { isMcpConnectionGrafanaConfig } from '@roomote/types';
@@ -51,7 +51,7 @@ async function resolveGrafanaConnection() {
 function createGrafanaMcpServer(
   config: Awaited<ReturnType<typeof resolveGrafanaConnection>>,
 ) {
-  const server = new McpServer(GRAFANA_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(GRAFANA_MCP_SERVER_INFO, {
     instructions:
       'Use these read-only Grafana tools to inspect dashboards, alerting state, annotations, and data sources through the configured workspace service account.',
   });

@@ -23,7 +23,7 @@ fi
 baseline_registry="${BASELINE_IMAGE_REGISTRY:-ghcr.io}"
 baseline_namespace="${BASELINE_IMAGE_NAMESPACE:-roocodeinc}"
 project_name="${COMPOSE_PROJECT_NAME:-roomote-upgrade-ci}"
-postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-57432}"
+postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-0}"
 redis_port="${DEPLOYMENT_CI_REDIS_PORT:-58379}"
 default_network="${ROOMOTE_DEFAULT_NETWORK:-${project_name}_default}"
 worker_network="${DOCKER_WORKER_NETWORK:-${project_name}_worker}"
@@ -57,16 +57,26 @@ cleanup() {
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$temporary_directory"
 }
-trap cleanup EXIT
 
 report_failure() {
-  local exit_code="$?"
   printf 'Upgrade compatibility test failed; final Compose state follows.\n' >&2
+  printf '\nCompose services:\n' >&2
   compose ps --all >&2 || true
-  compose logs --no-color --tail 200 >&2 || true
-  return "$exit_code"
+  printf '\nRequired service logs:\n' >&2
+  compose logs --no-color --tail 200 \
+    postgres redis minio minio-init docker-proxy db-migrate api web controller bullmq gbrain preview-proxy >&2 || true
 }
-trap report_failure ERR
+
+finish() {
+  local exit_code="$?"
+  trap - EXIT
+  if [ "$exit_code" -ne 0 ]; then
+    report_failure
+  fi
+  cleanup
+  exit "$exit_code"
+}
+trap finish EXIT
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -121,7 +131,7 @@ APP_ENV=production
 ARTIFACT_SIGNING_KEY=$artifact_signing_key
 CADDY_HTTP_PORT=19080
 CADDY_HTTPS_PORT=19443
-COMPOSE_PROFILES=local-postgres
+COMPOSE_PROFILES=local-postgres,brain
 DASHBOARD_PASSWORD=$dashboard_password
 DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
 DEFAULT_COMPUTE_PROVIDER=docker
@@ -159,10 +169,24 @@ TRPC_URL=http://api:3001
 EOF
 
 verify_endpoints() {
+  printf 'Probing API liveness endpoint\n'
   compose exec -T api curl -fsS --max-time 5 http://127.0.0.1:3001/health/liveness >/dev/null
+
+  printf 'Probing web health endpoint\n'
   compose exec -T web curl -fsS --max-time 5 http://127.0.0.1:3000/health >/dev/null
-  compose exec -T web curl -fsS --max-time 10 "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing web setup endpoint with generated token\n'
+  compose exec -T web curl -fsS \
+    --max-time 30 \
+    --retry 2 \
+    --retry-delay 1 \
+    --retry-all-errors \
+    "http://127.0.0.1:3000/setup?token=$setup_token" >/dev/null
+
+  printf 'Probing controller health endpoint\n'
   compose exec -T controller curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null
+
+  printf 'Probing BullMQ health endpoint\n'
   compose exec -T bullmq curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null
 }
 
@@ -486,7 +510,16 @@ compose up \
   --detach \
   --wait \
   --wait-timeout 600 \
-  postgres redis minio minio-init db-migrate api web controller bullmq preview-proxy
+  postgres redis minio minio-init db-migrate api web controller bullmq gbrain preview-proxy
+
+postgres_endpoint="$(compose port postgres 5432)"
+postgres_port="${postgres_endpoint##*:}"
+case "$postgres_port" in
+  '' | *[!0-9]*)
+    printf 'could not resolve the published Postgres port from %s\n' "$postgres_endpoint" >&2
+    exit 1
+    ;;
+esac
 
 migration_container="$(compose ps --all --quiet db-migrate)"
 [ -n "$migration_container" ] || {

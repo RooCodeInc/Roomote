@@ -2,9 +2,11 @@ import {
   automations,
   db,
   deploymentSettings,
+  inArray,
   slackInstallations,
   upsertAutomation,
 } from '@roomote/db/server';
+import { USER_FACING_AUTOMATION_KEYS } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -17,7 +19,6 @@ const adminAuth: UserAuthSuccess = {
   name: 'Admin',
   primaryEmail: 'admin@example.com',
   isAdmin: true,
-  featureFlags: {},
   anonymousAnalyticsEnabled: false,
   cloudEnabled: false,
   cookieConsentedAt: null,
@@ -37,7 +38,10 @@ describe('getAutomationOnboardingStatusCommand', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(async () => {
-    await db.delete(automations);
+    // Internal automation rows are referenced by other suites' task fixtures.
+    await db
+      .delete(automations)
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
     await db.delete(deploymentSettings);
     await db.delete(slackInstallations);
 

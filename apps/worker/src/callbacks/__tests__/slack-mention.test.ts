@@ -246,7 +246,7 @@ describe('slackMentionCallbacks', () => {
     }
   });
 
-  it('loads started-message metadata through sdk.taskRuns on start', async () => {
+  it('clears the reply target and removes the ack reaction on start', async () => {
     const taskRun = createTaskRun();
     const context = {};
 
@@ -260,49 +260,11 @@ describe('slackMentionCallbacks', () => {
       timestamp: '1710000000.100',
       name: 'eyes',
     });
-    expect(sdk.taskRuns.getSlackStartedMessageData).toHaveBeenCalledWith({
-      runId: 123,
-    });
-    expect(mockBuildStartedBlocks).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDisplayName: 'App',
-        runId: 123,
-        initiatingSlackUserId: 'U123',
-        otherRunningTasksCount: 2,
-        warningText:
-          '> :warning: Heads up: my humans are working on an issue that may affect me.',
-        taskUrl: expect.stringContaining(
-          '/task/task_row_123?utm_source=slack&utm_medium=link&utm_campaign=slack.app.mention',
-        ),
-      }),
-    );
-    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
+    // The started-message refresh is gone with the Follow button; onStart
+    // no longer reads started-message metadata or edits the message.
+    expect(sdk.taskRuns.getSlackStartedMessageData).not.toHaveBeenCalled();
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
   });
-
-  it('falls back to the Slack app mention payload user when older started-message metadata has no initiating Slack user', async () => {
-    const taskRun = createTaskRun();
-    const context = {};
-    mockGetSlackStartedMessageData.mockResolvedValueOnce({
-      ts: 'started-ts',
-      agentName: 'Agent',
-      workspaceDisplayName: 'App',
-      workspaceOnly: false,
-    });
-
-    await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
-
-    expect(mockBuildStartedBlocks).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDisplayName: 'App',
-        runId: 123,
-        initiatingSlackUserId: 'U123',
-        taskUrl: expect.stringContaining(
-          '/task/task_row_123?utm_source=slack&utm_medium=link&utm_campaign=slack.app.mention',
-        ),
-      }),
-    );
-  });
-
   it('removes eyes reactions for SnapshotResume runs when the triggering message ts is available', async () => {
     const taskRun = createSnapshotResumeTaskRun();
     const context = {};
@@ -314,9 +276,7 @@ describe('slackMentionCallbacks', () => {
       timestamp: '1710000000.100',
       name: 'eyes',
     });
-    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
   });
-
   it('still removes the ack reaction when resume state pre-seeds sessionId', async () => {
     const taskRun = createSnapshotResumeTaskRun();
     const context = { sessionId: 'existing-session' };
@@ -328,30 +288,25 @@ describe('slackMentionCallbacks', () => {
       timestamp: '1710000000.100',
       name: 'eyes',
     });
-    expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
   });
-
-  it('still refreshes the started message when reaction cleanup fails', async () => {
+  it('logs and continues when reaction cleanup fails', async () => {
     const taskRun = createTaskRun();
     const context = {};
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockRemoveReaction.mockRejectedValueOnce(new Error('reaction failed'));
 
     try {
-      await slackMentionCallbacks.onStart?.(taskRun, 'task_123', context);
+      await expect(
+        slackMentionCallbacks.onStart?.(taskRun, 'task_123', context),
+      ).resolves.toBeUndefined();
 
       expect(errorSpy).toHaveBeenCalledWith(
         '[slackMentionCallbacks#onStart] Failed Slack reaction cleanup for task run 123: reaction failed',
       );
-      expect(sdk.taskRuns.getSlackStartedMessageData).toHaveBeenCalledWith({
-        runId: 123,
-      });
-      expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
     } finally {
       errorSpy.mockRestore();
     }
   });
-
   it('retries and warns when Slack reaction cleanup returns false', async () => {
     const taskRun = createTaskRun();
     const context = {};
@@ -374,7 +329,6 @@ describe('slackMentionCallbacks', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         '[slackMentionCallbacks#onStart] Slack reaction cleanup failed for task run 123; retrying once (emoji=eyes, channel=C123, timestamp=1710000000.100)',
       );
-      expect(mockUpdateMessage).toHaveBeenCalledTimes(1);
     } finally {
       warnSpy.mockRestore();
     }

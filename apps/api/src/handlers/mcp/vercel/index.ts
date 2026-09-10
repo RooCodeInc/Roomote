@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { isMcpConnectionVercelConfig } from '@roomote/types';
@@ -51,7 +51,7 @@ async function resolveVercelConnection() {
 function createVercelMcpServer(
   config: Awaited<ReturnType<typeof resolveVercelConnection>>,
 ) {
-  const server = new McpServer(VERCEL_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(VERCEL_MCP_SERVER_INFO, {
     instructions:
       'Use these Vercel tools to inspect teams, projects, deployments, logs, and domain availability through the configured workspace token. This Roomote-hosted surface is intentionally read-only.',
   });

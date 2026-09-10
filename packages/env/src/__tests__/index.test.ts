@@ -248,6 +248,23 @@ describe('Env', () => {
     expect(areCuratedIntegrationsDisabled('0')).toBe(false);
   });
 
+  it('keeps scheduling progressive disclosure opt-in', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    delete runtimeEnv.R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED;
+
+    expect(
+      createRoomoteEnv(runtimeEnv)
+        .R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED,
+    ).toBe(false);
+    expect(
+      createRoomoteEnv({
+        ...runtimeEnv,
+        R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED: 'true',
+      }).R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED,
+    ).toBe(true);
+  });
+
   it('accepts valid Ping instance IDs and rejects invalid ones', () => {
     const runtimeEnv = { ...process.env };
     delete runtimeEnv.SKIP_ENV_VALIDATION;
@@ -445,6 +462,15 @@ describe('Env', () => {
     expect(env.R_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_PLANNING_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
+  });
+
+  it('accepts the parent-only sandbox OpenRouter key', () => {
+    const env = createRoomoteEnv({
+      ...process.env,
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+    });
+
+    expect(env.SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
   });
 
   it('supplies self-hosted local defaults outside production', () => {

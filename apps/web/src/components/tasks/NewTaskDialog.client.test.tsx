@@ -5,8 +5,19 @@ const { onOpenChangeMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('./NewTaskForm', () => ({
-  NewTaskForm: ({ onTaskStarted }: { onTaskStarted: () => void }) => (
-    <button type="button" data-testid="new-task-form" onClick={onTaskStarted}>
+  NewTaskForm: ({
+    animate,
+    onTaskStarted,
+  }: {
+    animate?: boolean;
+    onTaskStarted: () => void;
+  }) => (
+    <button
+      type="button"
+      data-animate={String(animate)}
+      data-testid="new-task-form"
+      onClick={onTaskStarted}
+    >
       Launch task
     </button>
   ),
@@ -26,10 +37,16 @@ describe('NewTaskDialog', () => {
 
     expect(dialog).toBeInTheDocument();
     expect(dialog).not.toHaveAttribute('aria-describedby');
+    expect(screen.getByRole('heading', { name: 'New Session' })).toHaveClass(
+      'sr-only',
+    );
     expect(
       screen.queryByText(/^Choose where Roomote should work/),
     ).not.toBeInTheDocument();
-    expect(screen.getByTestId('new-task-form')).toBeInTheDocument();
+    expect(screen.getByTestId('new-task-form')).toHaveAttribute(
+      'data-animate',
+      'false',
+    );
   });
 
   it('closes after the shared form starts a task', () => {

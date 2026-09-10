@@ -34,7 +34,7 @@ describe('standardTask reporting consumer', () => {
       '<destination>All task communication is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.</destination>',
     );
     expect(harnessInstructions).toContain(
-      '<delivery>Before settlement, send one report to the orchestrator using `send_chat_reply` with purpose `closeout`.</delivery>',
+      '<delivery>Before settlement, send one report to the parent Session using `report_to_parent_session` with purpose `closeout`.</delivery>',
     );
     for (const section of [
       'Outcome',

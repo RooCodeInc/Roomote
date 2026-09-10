@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { vi } from 'vitest';
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams('step=auth-provider'),
+  useSearchParams: () => new URLSearchParams('step=inference'),
 }));
 
 import { SetupDocs } from './SetupDocs';
@@ -11,25 +11,7 @@ import { getSetupDocsPath, getSetupDocsStep } from './setup-docs';
 
 describe('SetupDocs', () => {
   it('maps setup steps to the matching documentation pages', () => {
-    expect(getSetupDocsPath('auth-provider')).toBe('communications');
-    expect(
-      getSetupDocsPath('auth-env-vars', { authProvider: 'microsoft' }),
-    ).toBe('providers/communications/microsoft-teams');
-    expect(getSetupDocsPath('slack', { authProvider: 'microsoft' })).toBe(
-      'providers/communications/microsoft-teams',
-    );
     expect(getSetupDocsPath('inference')).toBe('models');
-    expect(
-      getSetupDocsPath('source-control-connect', {
-        sourceControlProvider: 'github',
-      }),
-    ).toBe('providers/source-control/github');
-    expect(getSetupDocsPath('compute-config', { computeProvider: 'e2b' })).toBe(
-      'providers/compute/e2b',
-    );
-    expect(getSetupDocsPath('compute-config', { computeProvider: 'box' })).toBe(
-      'providers/compute/box',
-    );
     expect(getSetupDocsPath('env-vars', { modelProvider: 'vllm' })).toBe(
       'providers/inference/vllm',
     );
@@ -98,7 +80,7 @@ describe('SetupDocs', () => {
       screen.getByRole('link', {
         name: 'Open this documentation page in a new tab',
       }),
-    ).toHaveAttribute('href', 'https://docs.roomote.dev/communications');
+    ).toHaveAttribute('href', 'https://docs.roomote.dev/models');
 
     fireEvent.click(screen.getByRole('button', { name: 'Close docs' }));
 

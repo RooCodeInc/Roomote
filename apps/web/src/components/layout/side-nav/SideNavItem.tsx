@@ -6,6 +6,7 @@ import {
   type ComponentPropsWithoutRef,
   type ReactElement,
   type ReactNode,
+  type MouseEventHandler,
   isValidElement,
 } from 'react';
 import type { LucideIcon } from '@/components/system';
@@ -36,6 +37,7 @@ type SideNavItemProps = Omit<
   active?: boolean;
   isActive?: boolean;
   highlight?: boolean;
+  focusableWhenDisabled?: boolean;
   useNativeLink?: boolean;
   linkProps?: Omit<
     ComponentPropsWithoutRef<'a'>,
@@ -57,12 +59,14 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       active,
       isActive,
       highlight = false,
+      focusableWhenDisabled = false,
       useNativeLink = false,
       linkProps,
       asChild = false,
       disabled = false,
       className,
       type,
+      onClick,
       'aria-label': ariaLabel,
       ...props
     },
@@ -72,6 +76,14 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       label ?? (typeof tooltip === 'string' ? tooltip : undefined);
     const isLeftSide = side === 'left';
     const isCurrentItem = active ?? isActive ?? false;
+    const isFocusableDisabled = disabled && focusableWhenDisabled;
+    const handleClick: MouseEventHandler<HTMLButtonElement> | undefined =
+      disabled
+        ? (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        : onClick;
 
     const itemClasses = cn(
       'relative cursor-pointer flex items-center transition-all text-sm',
@@ -134,18 +146,20 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         asChild
         disabled={disabled}
         className={itemClasses}
+        onClick={handleClick}
         aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
         {...props}
       >
         {children as ReactElement}
       </Button>
-    ) : href != null ? (
+    ) : href != null && !disabled ? (
       <Button
         ref={ref}
         variant="ghost"
         asChild
         disabled={disabled}
         className={itemClasses}
+        onClick={handleClick}
         aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
         {...props}
       >
@@ -172,8 +186,10 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         ref={ref}
         type={type ?? 'button'}
         variant="ghost"
-        disabled={disabled}
+        disabled={disabled && !focusableWhenDisabled}
+        aria-disabled={isFocusableDisabled || undefined}
         className={itemClasses}
+        onClick={handleClick}
         aria-label={ariaLabel ?? (!isLeftSide ? resolvedLabel : undefined)}
         {...props}
       >
@@ -181,7 +197,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       </Button>
     );
 
-    if (expanded || !tooltip) {
+    if ((expanded && !isFocusableDisabled) || !tooltip) {
       return control;
     }
 

@@ -242,6 +242,49 @@ describe('completeSetupCommand', () => {
     expect(mockInvalidateBrainEnabledCache).not.toHaveBeenCalled();
   });
 
+  it('atomically skips a completion transition that another request already finished', async () => {
+    mockFindDeploymentSettings.mockResolvedValue({
+      brainEnabled: null,
+      metadata: null,
+      setupCompletedAt: new Date('2026-01-01T00:00:00.000Z'),
+      setupNewState: null,
+    });
+
+    await expect(
+      completeSetupCommand(buildAuth(), undefined, {
+        requireIncomplete: true,
+      }),
+    ).resolves.toEqual({
+      success: true,
+      completionState: 'already_completed',
+    });
+
+    expect(mockInsertValues).not.toHaveBeenCalled();
+    expect(mockEnsureManagedReviewer).not.toHaveBeenCalled();
+    expect(mockCaptureEvent).not.toHaveBeenCalled();
+  });
+
+  it('does not commit completion when readiness is invalidated before the locked write', async () => {
+    mockFindDeploymentSettings.mockResolvedValue({
+      brainEnabled: null,
+      metadata: null,
+      setupCompletedAt: null,
+      setupNewState: null,
+    });
+    const validateBeforeCompletion = vi.fn().mockResolvedValue(false);
+
+    await expect(
+      completeSetupCommand(buildAuth(), undefined, {
+        requireIncomplete: true,
+        validateBeforeCompletion,
+      }),
+    ).resolves.toEqual({ success: true, completionState: 'not_ready' });
+
+    expect(validateBeforeCompletion).toHaveBeenCalledWith(expect.anything());
+    expect(mockInsertValues).not.toHaveBeenCalled();
+    expect(mockCaptureEvent).not.toHaveBeenCalled();
+  });
+
   it('subscribes by default with the setup source', async () => {
     await completeSetupCommand(buildAuth());
 

@@ -8,6 +8,7 @@ import {
 } from '@/lib';
 
 import { AlertCircle } from '@/components/system';
+import { useTaskRobotIconContext } from '@/components/tasks/TaskRobotIcon';
 import {
   Message,
   MessageContent,
@@ -29,6 +30,8 @@ import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-resul
 import { resolveToolPresentation } from './tool-presentation';
 import { mcpIntegrationIconFor, toolIconForKey } from './tool-icons';
 import { resolveToolPresentationPolicy } from './tool-presentation-policy';
+import { resolveTaskToolReference } from './task-tool-reference';
+import { useTaskToolIcon } from './task-tool-icon';
 
 interface AcpToolMessageProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
@@ -57,6 +60,11 @@ export function AcpToolMessage({
       : 'output-available';
 
   const presentation = resolveToolPresentation(msg.data, msg.partial);
+  const taskIconContext = useTaskRobotIconContext();
+  const taskIcon = useTaskToolIcon(
+    resolveTaskToolReference(msg, taskIconContext),
+    isFailed,
+  );
   const ToolIcon = isFailed
     ? AlertCircle
     : presentation.integrationIcon
@@ -119,6 +127,7 @@ export function AcpToolMessage({
             suffix={suffix}
             suffixPrefix={suffixPrefix}
             icon={ToolIcon}
+            {...taskIcon}
             state={toolState}
             params={sanitizedToolData}
             collapsible={showCollapsibleContent}

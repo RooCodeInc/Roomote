@@ -14,6 +14,7 @@ import {
   getOrCreateFastAgentSession,
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  FastAgentDurableRetryScheduledError,
   resolveApiBaseUrl,
 } from '@roomote/cloud-agents/server';
 import {
@@ -27,12 +28,23 @@ import {
 } from '@roomote/communication';
 import {
   admitFastAgentHumanFollowUp,
+  createFastAgentConversationArtifact,
+  persistFastAgentInlineHumanTurn,
   recordFastAgentConversationMessageBestEffort,
   resolveUserMcpServerConfigs,
+  wakeFastAgentParentEventAt,
+  wakeFastAgentParentEventNow,
+  type FastAgentDurableTurn,
 } from '@roomote/sdk/server';
-import { ALL_REPOSITORIES, type TaskInitiator } from '@roomote/types';
+import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
+import {
+  ALL_REPOSITORIES,
+  type FastAgentConversation,
+  type TaskInitiator,
+} from '@roomote/types';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import { resolveSuggestionFastConversation } from '../tasks/suggestion-launch.js';
 import {
   startAcceptedFastAgentTurn,
   type FastAgentStartResult,
@@ -40,6 +52,7 @@ import {
 import { replyToDiscordEvent } from './replies.js';
 import {
   discordMetadataForChannel,
+  resolveDiscordChannelContext,
   resolveDiscordWorkspace,
   type DiscordChannelContext,
 } from './task-launch.js';
@@ -87,6 +100,15 @@ type DiscordFastAgentSource =
 export async function processDiscordFastAgentMessage(
   input: {
     question: string;
+    /** Base64 image data URLs attached to the current message. */
+    images?: string[];
+    /** Extracted text of non-image attachments on the current message. */
+    attachmentTexts?: string[];
+    /**
+     * Surface context the model should read with this message, for example
+     * the instructions configured for an auto-respond channel.
+     */
+    agentContext?: string;
     sender: DiscordUser;
     senderUserId: string;
     provider: DiscordCommunicationProvider;
@@ -94,6 +116,7 @@ export async function processDiscordFastAgentMessage(
     channel: DiscordChannelContext;
     metadata: ReturnType<typeof discordMetadataForChannel>;
     conversationId: string;
+    originSessionId?: string;
     createAnchoredThread?: boolean;
     /** Real Discord message used for replies and anchored threads. */
     anchorMessageId?: string;
@@ -110,6 +133,11 @@ export async function processDiscordFastAgentMessage(
 ): Promise<boolean> {
   const message = input.event ? getDiscordMessageCreate(input.event) : null;
   const eventId = 'eventId' in input ? input.eventId : input.event.eventId;
+  const question = appendAttachmentTextsToPromptText({
+    text: input.question,
+    attachmentTexts: input.attachmentTexts,
+  });
+  const images = input.images ?? [];
   if (!eventId) {
     throw new Error('Discord Fast entry requires a source event id.');
   }
@@ -118,6 +146,7 @@ export async function processDiscordFastAgentMessage(
   let metadata = input.metadata;
   if (
     message &&
+    !input.originSessionId &&
     anchorMessageId &&
     input.createAnchoredThread !== false &&
     !channel.isDirectMessage &&
@@ -144,7 +173,7 @@ export async function processDiscordFastAgentMessage(
     };
   }
 
-  const conversation = {
+  let conversation: Extract<FastAgentConversation, { surface: 'discord' }> = {
     surface: 'discord' as const,
     workspaceId: channel.guildId ?? 'dm',
     conversationId: input.conversationId,
@@ -155,6 +184,30 @@ export async function processDiscordFastAgentMessage(
         : {}),
     },
   };
+  if (input.originSessionId) {
+    const originConversation = await resolveSuggestionFastConversation({
+      userId: input.senderUserId,
+      originSessionId: input.originSessionId,
+      conversation,
+    });
+    if (originConversation.surface !== 'discord') {
+      throw new Error('The suggestion origin is not a Discord conversation.');
+    }
+    conversation = originConversation;
+    const replyChannelId =
+      conversation.replyTarget.threadId ?? conversation.replyTarget.channelId;
+    if (replyChannelId !== channel.channelId) {
+      channel = await resolveDiscordChannelContext(
+        input.provider,
+        replyChannelId,
+      );
+    }
+    metadata = discordMetadataForChannel({ channel, messageId: eventId });
+  }
+  const replyTargetChanged =
+    Boolean(input.originSessionId) &&
+    channel.channelId !== input.channel.channelId;
+  const historyChannel = input.originSessionId ? channel : input.channel;
   let releaseFastAgentLock = await acquireFastAgentTurnLock({
     conversation,
     maxWaitMs: 0,
@@ -162,12 +215,12 @@ export async function processDiscordFastAgentMessage(
 
   try {
     const history =
-      input.channel.isThread || input.channel.isDirectMessage
+      historyChannel.isThread || historyChannel.isDirectMessage
         ? await fetchDiscordThreadHistoryBestEffort({
             provider: input.provider,
-            channelId: input.channel.channelId,
-            ...(input.channel.parentChannelId
-              ? { parentChannelId: input.channel.parentChannelId }
+            channelId: historyChannel.channelId,
+            ...(historyChannel.parentChannelId
+              ? { parentChannelId: historyChannel.parentChannelId }
               : {}),
           })
         : [];
@@ -177,33 +230,58 @@ export async function processDiscordFastAgentMessage(
       userId: input.senderUserId,
       conversation,
     });
+    const humanFollowUpEvent = {
+      type: 'human_follow_up' as const,
+      eventId,
+      currentMessageId: anchorMessageId ?? eventId,
+      userId: input.senderUserId,
+      question,
+      ...(images.length ? { images } : {}),
+      senderDisplayName:
+        input.interaction?.interaction.member?.nick ??
+        input.sender.global_name ??
+        input.sender.username,
+      senderExternalId: input.sender.id,
+      directedAtRoomote: Boolean(input.directedAtRoomote),
+    };
+    let durableTurn: FastAgentDurableTurn | null = null;
     if (!releaseFastAgentLock) {
       const admission = await admitFastAgentHumanFollowUp({
         parent: { sessionId: session.id, conversation },
-        event: {
-          type: 'human_follow_up',
-          eventId,
-          currentMessageId: anchorMessageId ?? eventId,
-          userId: input.senderUserId,
-          question: input.question,
-          senderDisplayName:
-            input.interaction?.interaction.member?.nick ??
-            input.sender.global_name ??
-            input.sender.username,
-          senderExternalId: input.sender.id,
-        },
+        event: humanFollowUpEvent,
       });
       if (admission.kind !== 'turn') {
         input.onAccepted?.(admission.abort);
         return true;
       }
       releaseFastAgentLock = admission.turnLock;
+      durableTurn = admission.durable;
     }
     if (!releaseFastAgentLock) {
       input.onRejected?.();
       return false;
     }
     const activeTurnLock = releaseFastAgentLock;
+    // Durable admission: the turn is persisted under this process's claim
+    // before it runs, so an interruption hands it to the queue.
+    durableTurn ??= await persistFastAgentInlineHumanTurn({
+      parent: { sessionId: session.id, conversation },
+      event: humanFollowUpEvent,
+    }).catch((error) => {
+      console.error(
+        `[DiscordFastAgent] Failed to persist Fast turn admission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    });
+    const durableTurnForResume = durableTurn;
+    if (durableTurnForResume) {
+      activeTurnLock.durableRowId = durableTurnForResume.id;
+      activeTurnLock.durableResume = () =>
+        wakeFastAgentParentEventNow({
+          conversationId: session.id,
+          eventKey: durableTurnForResume.eventKey,
+        });
+    }
     const footerContext = await resolveFastSessionReplyFooterContext({
       sessionId: session.id,
     });
@@ -237,8 +315,12 @@ export async function processDiscordFastAgentMessage(
             provider: input.provider,
             applicationId: input.applicationId,
             channel,
-            ...(input.interaction ? { interaction: input.interaction } : {}),
-            ...(anchorMessageId ? { replyToMessageId: anchorMessageId } : {}),
+            ...(!replyTargetChanged && input.interaction
+              ? { interaction: input.interaction }
+              : {}),
+            ...(!replyTargetChanged && anchorMessageId
+              ? { replyToMessageId: anchorMessageId }
+              : {}),
             text: textWithFooter,
           });
           await recordFastAgentConversationMessageBestEffort({
@@ -266,7 +348,14 @@ export async function processDiscordFastAgentMessage(
     let didSendVisibleResponse = false;
     const apiBaseUrl = resolveApiBaseUrl() ?? undefined;
     const response = await answerFastAgentQuestion({
-      question: input.question,
+      question,
+      ...(images.length ? { images } : {}),
+      ...(input.attachmentTexts?.length
+        ? { attachmentTexts: input.attachmentTexts }
+        : {}),
+      ...(input.agentContext
+        ? { currentMessageAgentContext: input.agentContext }
+        : {}),
       threadContext: history.map((entry) => ({
         user: entry.user,
         username: entry.username,
@@ -279,6 +368,14 @@ export async function processDiscordFastAgentMessage(
       conversation,
       currentMessageId: anchorMessageId ?? input.interaction?.interaction.id,
       signal: activeTurnLock.signal,
+      ...(durableTurnForResume
+        ? { durableAdmission: { eventId: durableTurnForResume.id } }
+        : {}),
+      // A redelivered event whose earlier inline attempt never settled
+      // resumes that attempt instead of repeating its recorded actions.
+      ...(durableTurnForResume?.resumed
+        ? { resumedAfterInterruption: true }
+        : {}),
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??
@@ -293,6 +390,28 @@ export async function processDiscordFastAgentMessage(
             entry.user !== input.sender.id,
         ),
       adapter: {
+        createArtifact: (artifact) =>
+          createFastAgentConversationArtifact({
+            fastConversationId: session.id,
+            ...artifact,
+          }),
+        ...(durableTurnForResume
+          ? {
+              requestDurableResume: () =>
+                wakeFastAgentParentEventNow({
+                  conversationId: session.id,
+                  eventKey: durableTurnForResume.eventKey,
+                }),
+              requestDurableRetry: (retryAt: Date) =>
+                wakeFastAgentParentEventAt(
+                  {
+                    conversationId: session.id,
+                    eventKey: durableTurnForResume.eventKey,
+                  },
+                  retryAt,
+                ),
+            }
+          : {}),
         resolveMcpServerConfigs: () =>
           resolveUserMcpServerConfigs({
             userId: input.senderUserId,
@@ -306,7 +425,7 @@ export async function processDiscordFastAgentMessage(
           parentSessionId,
           postKickoff,
         }) => {
-          const workspaceOverride =
+          const workspace =
             environmentId && environmentId !== ALL_REPOSITORIES
               ? await resolveDiscordWorkspace({
                   type: 'environment',
@@ -317,7 +436,7 @@ export async function processDiscordFastAgentMessage(
                   repoForPayload: ALL_REPOSITORIES,
                   workspaceDisplayName: 'all repos',
                 };
-          if (!workspaceOverride) {
+          if (!workspace) {
             return {
               success: false,
               error: 'The selected environment is unavailable.',
@@ -356,9 +475,8 @@ export async function processDiscordFastAgentMessage(
               sessionId: parentSessionId,
               conversation,
             },
-            skipRoutingConfirmation: true,
             model,
-            workspaceOverride,
+            workspace,
             beforeEnqueueKickoff: postKickoff,
           });
           if (started.status === 'started') {
@@ -368,17 +486,11 @@ export async function processDiscordFastAgentMessage(
               taskUrl: started.taskUrl,
             };
           }
-          if (started.status === 'already_started') {
-            return {
-              success: true,
-              taskId: started.existingRun.taskId,
-              taskUrl: started.taskUrl,
-              kickoffDelivered: true,
-            };
-          }
           return {
-            success: false,
-            error: `Task launch stopped with status ${started.status}.`,
+            success: true,
+            taskId: started.existingRun.taskId,
+            taskUrl: started.taskUrl,
+            kickoffDelivered: true,
           };
         },
         postReply: async ({ message: text }) => {
@@ -484,6 +596,13 @@ export function startDiscordFastAgentResponse(
         onRejected,
       }),
     onError: (error) => {
+      if (error instanceof FastAgentDurableRetryScheduledError) {
+        // Not a failure: the queue re-runs this turn at the scheduled time.
+        console.info(
+          `[Discord] Fast turn parked for a durable retry: ${error.message}`,
+        );
+        return;
+      }
       console.error(
         `[Discord] Fast suggestion response failed: ${error instanceof Error ? error.message : String(error)}`,
       );

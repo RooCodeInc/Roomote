@@ -1,5 +1,7 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
+  getCiFailureTriageRules,
+  isCiFailureTriageRepositoryAllowed,
   isTriggerableBackgroundAutomationKey,
   type CommunicationProvider,
   type TriggerableBackgroundAutomationKey,
@@ -7,12 +9,15 @@ import {
 import { getAutomationRuntime } from '@roomote/db/server';
 import {
   resolveAutomationRuntimeDestination,
+  resolveCiFailureTriageRepositoryDestination,
+  listConnectedCommunicationProviders,
   runAutomationNow,
   type AutomationRunNowResult,
   type ResolvedAutomationDestination,
 } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { getRepositories } from '@/lib/server/source-control';
 
 import {
   hasActiveGitHubInstallation,
@@ -24,7 +29,7 @@ import { assertAdmin } from './feature-gates';
 
 async function assertManualTriggerIsRunnable(
   automationKey: TriggerableBackgroundAutomationKey,
-  fallbackUserId: string,
+  auth: UserAuthSuccess,
 ): Promise<ResolvedAutomationDestination | null> {
   const descriptor =
     getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
@@ -41,12 +46,44 @@ async function assertManualTriggerIsRunnable(
     );
   }
 
+  if (automationKey === 'ci_failure_triage') {
+    const rules = getCiFailureTriageRules(runtime.settings);
+    if (rules !== undefined) {
+      const repositories = (await getRepositories(auth)).filter(
+        (repo) =>
+          descriptor.supportedSourceControlProviders.some(
+            (provider) => provider === repo.sourceControlProvider,
+          ) && isCiFailureTriageRepositoryAllowed(runtime.settings, repo.id),
+      );
+      if (!repositories.length)
+        throw new Error(
+          'Select at least one active repository before running CI Failure Triage.',
+        );
+      const connectedProviders = await listConnectedCommunicationProviders();
+      for (const repository of repositories) {
+        if (
+          await resolveCiFailureTriageRepositoryDestination({
+            runtime,
+            repositoryId: repository.id,
+            connectedProviders,
+          })
+        ) {
+          // The runner resolves each repository's explicit override or default.
+          return null;
+        }
+      }
+      throw new Error(
+        'Configure an available destination for the selected CI Failure Triage repositories.',
+      );
+    }
+  }
+
   const slackConnected = await hasActiveSlackInstallation();
   const destination = descriptor.usesManagerChannel
     ? await resolveAutomationRuntimeDestination({
         runtime,
         slackConnected,
-        fallbackUserId,
+        fallbackUserId: auth.userId,
       })
     : null;
 
@@ -122,7 +159,7 @@ export async function triggerAutomationCommand(
 
   const destination = await assertManualTriggerIsRunnable(
     input.automationKey,
-    auth.userId,
+    auth,
   );
 
   return runAutomationNow(input.automationKey, {

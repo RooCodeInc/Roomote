@@ -6,7 +6,6 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
-  getEnvironmentDefinitionIdFromPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
   parseConflictResolutionSummary,
@@ -85,7 +84,6 @@ import {
 } from './github-pr-review-check';
 import {
   SlackNotifier,
-  buildTaskFailedMessage,
   getSlackStartedMessageTs,
   refreshAutomationRootFooter,
   SLACK_RUNTIME_FAILURE_TEXT,
@@ -569,28 +567,6 @@ export const finishRun = async ({
     } catch (err) {
       console.error(
         `[finishRun] Failed to send email failure notification for run ${id}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-
-  const linkedEnvironmentDefinitionId =
-    status === RunStatus.Idle && run.taskPhase === 'waiting_for_prompt'
-      ? await resolveSetupCompletionEnvironmentDefinitionId(run)
-      : null;
-
-  if (
-    (status === RunStatus.Completed ||
-      linkedEnvironmentDefinitionId !== null) &&
-    (payloadKind === TaskPayloadKind.SlackAppMention ||
-      payloadKind === TaskPayloadKind.SnapshotResume)
-  ) {
-    try {
-      await cleanupSlackSetupCompletion(run);
-    } catch (err) {
-      console.error(
-        `[finishRun] Failed to clean up Slack setup completion UI for run ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -1250,15 +1226,7 @@ async function sendSlackFailureNotification(
         utm: { campaign: run.payloadKind, source: 'slack' },
       });
 
-  // Remove the cancel button from the started message.
   const slackStartedMessageTs = await getSlackStartedMessageTs(run.id);
-  if (slackStartedMessageTs && task.slackThreadTs) {
-    await slack.removeCancelButton({
-      channel,
-      messageTs: slackStartedMessageTs,
-      threadTs: task.slackThreadTs,
-    });
-  }
 
   if (!isSetupOnboarding) {
     const threadReplyTs = threadTs ?? task.slackThreadTs!;
@@ -1271,15 +1239,12 @@ async function sendSlackFailureNotification(
       ? `\n\n*Error details:* ${escapedError}`
       : '';
 
-    const failureMessage =
-      run.payloadKind === TaskPayloadKind.SlackAppMention
-        ? buildTaskFailedMessage({
-            runId: run.id,
-            messageText: `${retryableFailureText}${failureDetails}`,
-          })
-        : {
-            text: `${restartFailureText}${failureDetails}`,
-          };
+    const failureMessage = {
+      text:
+        run.payloadKind === TaskPayloadKind.SlackAppMention
+          ? `${retryableFailureText}${failureDetails}`
+          : `${restartFailureText}${failureDetails}`,
+    };
 
     const shouldUpdateStartedMessage =
       slackStartedMessageTs != null && !runtimeAlreadyStarted;
@@ -1577,77 +1542,6 @@ async function maybeSendSlackQuestionChannelInvite(
         ),
       ),
     );
-}
-
-async function cleanupSlackSetupCompletion(run: FinishedRun) {
-  const { channel, threadTs, route } = await resolveSlackTaskRunRouting(run);
-
-  if (route.kind !== 'setup-onboarding' || !threadTs || !channel) {
-    return;
-  }
-
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    where: and(eq(slackInstallations.isActive, true)),
-  });
-
-  if (!slackInstallation) {
-    return;
-  }
-
-  const slackStartedMessageTs = await getSlackStartedMessageTs(run.id);
-
-  if (!slackStartedMessageTs) {
-    return;
-  }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
-  await slack.removeCancelButton({
-    channel,
-    messageTs: slackStartedMessageTs,
-    threadTs,
-  });
-}
-
-/**
- * Setup-onboarding resumes carry the environment definition id somewhere in
- * the payloads of the task's run chain. Instead of walking sourceRunId links,
- * scan the sibling runs of the task from newest to oldest.
- */
-async function resolveSetupCompletionEnvironmentDefinitionId(
-  run: Pick<FinishedRun, 'id' | 'payload' | 'taskId'>,
-): Promise<string | null> {
-  const environmentDefinitionId = getEnvironmentDefinitionIdFromPayload(
-    run.payload,
-  );
-
-  if (environmentDefinitionId) {
-    return environmentDefinitionId;
-  }
-
-  const siblingRuns = await db.query.taskRuns.findMany({
-    columns: {
-      id: true,
-      payload: true,
-    },
-    where: eq(taskRuns.taskId, run.taskId),
-    orderBy: [asc(taskRuns.id)],
-  });
-
-  for (const siblingRun of siblingRuns) {
-    if (siblingRun.id === run.id) {
-      continue;
-    }
-
-    const fromSibling = getEnvironmentDefinitionIdFromPayload(
-      siblingRun.payload,
-    );
-
-    if (fromSibling) {
-      return fromSibling;
-    }
-  }
-
-  return null;
 }
 
 function buildSlackWebPathUrl(webPath: string, campaign: string): string {

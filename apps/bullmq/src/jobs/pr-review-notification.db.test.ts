@@ -20,6 +20,23 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => {
   return {
     ...actual,
     beginCanonicalPrReviewAutoDispatch: mocks.beginAutoDispatch,
+    dispatchCanonicalPrReviewAutoFollowUp: async (input: {
+      request: unknown;
+      followUpPrompt: string;
+      targetTaskId: string;
+      actingUserId: string;
+      route: unknown;
+      dispatchInput: unknown;
+    }) => {
+      const began = await mocks.beginAutoDispatch({
+        request: input.request,
+        followUpPrompt: input.followUpPrompt,
+        targetTaskId: input.targetTaskId,
+        actingUserId: input.actingUserId,
+        route: input.route,
+      });
+      return began ? mocks.dispatchFollowUp(input.dispatchInput) : null;
+    },
     completeCanonicalPrReviewAutoDispatch: mocks.completeAutoDispatch,
     consumePendingPrReviewActivity: mocks.consumePending,
     dispatchPrReviewFollowUp: mocks.dispatchFollowUp,

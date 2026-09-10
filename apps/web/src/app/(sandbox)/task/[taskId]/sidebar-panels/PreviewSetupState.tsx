@@ -77,12 +77,36 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
     }),
   );
 
-  if (!taskId || statusQuery.isError) {
+  if (!taskId) {
     return (
       <CenteredMessage>
         <p className="text-sm text-muted-foreground">
           Live Preview is not available for this task.
         </p>
+      </CenteredMessage>
+    );
+  }
+
+  if (statusQuery.isError) {
+    return (
+      <CenteredMessage>
+        <p className="text-sm font-medium">
+          We couldn&apos;t check Live Preview availability
+        </p>
+        <p className="text-sm text-muted-foreground">
+          The preview status request failed. Check your connection and try
+          again.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void statusQuery.refetch()}
+          disabled={statusQuery.isFetching}
+          aria-busy={statusQuery.isFetching}
+        >
+          {statusQuery.isFetching ? <Spinner /> : null}
+          {statusQuery.isFetching ? 'Retrying...' : 'Try again'}
+        </Button>
       </CenteredMessage>
     );
   }
@@ -126,24 +150,26 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
   // A preview setup/repair agent is already working on this environment.
   if (status.setupTask) {
     return (
-      <CenteredMessage>
-        <Spinner className="size-5" />
-        <p className="text-sm font-medium">
-          {`An agent is setting up live previews for ${status.environment.name}`}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Once it finishes, new tasks in this environment will include a live
-          preview.
-        </p>
-        {status.setupTask.taskId ? (
-          <Button asChild variant="outline" size="sm">
-            <Link href={`/task/${status.setupTask.taskId}`}>
-              View setup task
-              <ArrowRight />
-            </Link>
-          </Button>
-        ) : null}
-      </CenteredMessage>
+      <div role="status" aria-live="polite" className="size-full">
+        <CenteredMessage>
+          <Spinner className="size-5" />
+          <p className="text-sm font-medium">
+            {`An agent is setting up live previews for ${status.environment.name}`}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Once it finishes, new tasks in this environment will include a live
+            preview.
+          </p>
+          {status.setupTask.taskId ? (
+            <Button asChild variant="outline" size="sm">
+              <Link href={`/task/${status.setupTask.taskId}`}>
+                View setup task
+                <ArrowRight />
+              </Link>
+            </Button>
+          ) : null}
+        </CenteredMessage>
+      </div>
     );
   }
 
@@ -203,6 +229,7 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
                 startSetupMutation.isPending ||
                 Boolean(taskLaunchDisabledReason)
               }
+              aria-busy={startSetupMutation.isPending}
             >
               {startSetupMutation.isPending ? <Spinner /> : <Sparkles />}
               Set up previews with an agent

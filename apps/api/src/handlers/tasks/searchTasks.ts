@@ -16,6 +16,7 @@ import {
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
+import { customAutomationHistoryAccess } from '../custom-automation-history-access';
 import {
   TASK_SELECT_COLUMNS,
   getLatestTaskRunsByTaskIds,
@@ -133,7 +134,10 @@ export async function searchTasks(
   }
 
   try {
-    const conditions = [visibleTaskHistoryCondition];
+    const conditions = [
+      visibleTaskHistoryCondition,
+      customAutomationHistoryAccess(c.get('mcpAuth'), 'task'),
+    ];
 
     if (query) {
       // Escape LIKE metacharacters so literal %, _ in user input are matched verbatim

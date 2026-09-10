@@ -1,8 +1,10 @@
 import type { TelegramUpdateCommunicationMetadata } from '@roomote/communication/telegram-update';
 import {
   ALL_REPOSITORIES,
+  buildFastAgentChildTaskMetadata,
   buildTelegramMessagePermalink,
   TaskPayloadKind,
+  type FastAgentParent,
   type TaskSpec,
 } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
@@ -79,10 +81,10 @@ export function shouldCreateTelegramTaskTopic(input: {
 }
 
 /**
- * Enqueue a standard task for a Telegram request and post the
- * task-started message (with follow/cancel buttons) back to the chat. Shared
- * by the immediate launch path, the routing-confirmation buttons, and the
- * confirmation auto-start timer.
+ * Enqueue a standard task for a Telegram request into a workspace that is
+ * already decided, and post the task-started message (with follow/cancel
+ * buttons) back to the chat. Used by pinned suggestion launches that run
+ * inside a Fast Session.
  */
 export async function launchTelegramTask(input: {
   launchOwnerUserId: string;
@@ -90,6 +92,10 @@ export async function launchTelegramTask(input: {
   metadata: TelegramUpdateCommunicationMetadata;
   workspace: TelegramWorkspaceSelection;
   createTopicForTask?: boolean;
+  /** The Fast Session that owns this task; its transcript gets the kickoff. */
+  fastAgentParent?: FastAgentParent;
+  /** Runs inside the launch gate before the child becomes runnable. */
+  beforeEnqueue?: (taskRun: { id: number; taskId: string }) => Promise<void>;
 }) {
   const topicName = buildTelegramTaskTopicName(input.queuedMessage.text);
   const createdTopic = input.createTopicForTask
@@ -131,6 +137,9 @@ export async function launchTelegramTask(input: {
           : {}),
         ...metadata,
         ...(createdTopic ? { telegramTaskTopic: true } : {}),
+        ...(input.fastAgentParent
+          ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
+          : {}),
       },
     };
   const launchResult = await enqueueTask(
@@ -143,6 +152,7 @@ export async function launchTelegramTask(input: {
     },
     {
       launchClass: 'human',
+      ...(input.beforeEnqueue ? { beforeEnqueue: input.beforeEnqueue } : {}),
       ...(titleThreadId
         ? {
             onEarlyTitleGenerated: async ({ title }: { title: string }) => {

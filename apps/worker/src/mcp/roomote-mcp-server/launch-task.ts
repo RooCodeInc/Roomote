@@ -1,4 +1,4 @@
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 
 import { launchTask } from './tasks-api-client.js';
 import { errorResult, successResult, catchError } from './tool-result.js';
@@ -17,10 +17,14 @@ export async function handleLaunchTask(
     const branch = params.branch?.trim() || undefined;
     const result = await launchTask(config, {
       prompt: params.prompt,
-      repo: ALL_REPOSITORIES,
+      repo:
+        params.environmentId === NO_REPOSITORIES
+          ? NO_REPOSITORIES
+          : ALL_REPOSITORIES,
       branch,
       environmentId:
-        params.environmentId === ALL_REPOSITORIES
+        params.environmentId === ALL_REPOSITORIES ||
+        params.environmentId === NO_REPOSITORIES
           ? undefined
           : params.environmentId,
       type: 'standard',
@@ -34,7 +38,10 @@ export async function handleLaunchTask(
     return successResult({
       runId: result.runId,
       taskId: result.taskId,
-      message: `Task launched successfully. Task Run ID: ${result.runId}, Task ID: ${result.taskId}`,
+      ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+      message: `Task launched successfully. Task Run ID: ${result.runId}, Task ID: ${result.taskId}${
+        result.sessionId ? `, Session ID: ${result.sessionId}` : ''
+      }`,
     });
   } catch (error) {
     return catchError(error);

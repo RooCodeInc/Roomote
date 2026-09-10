@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 
 import {
-  queueCommunicationMessage,
+  queueCommunicationMessageOnce,
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import {
+  buildTelegramMessagePermalink,
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   RunStatus,
   activeRunStatuses,
@@ -56,7 +57,6 @@ import {
   handleTelegramCallbackQuery,
   handleTelegramSuggestionReaction,
 } from './callback-actions.js';
-import { handleTelegramRoutingReply } from './routing-confirmation.js';
 import {
   resolveTelegramSenderUserId,
   upsertTelegramUserMapping,
@@ -64,13 +64,15 @@ import {
 import { captureTelegramPrimaryChatBestEffort } from './primary-chat.js';
 import {
   ackTelegramMessageBestEffort,
+  createTelegramForumTopicBestEffort,
   postTelegramMessageBestEffort,
+  telegramPrivateTopicsEnabledBestEffort,
 } from './replies.js';
 
 const TELEGRAM_COMMAND_HELP = [
   '*Available commands*',
   '`/start` — show this welcome message.',
-  '`/new <request>` — start a fresh task instead of resuming the previous one; when topics are available, it opens a new topic.',
+  '`/new <request>` — start a fresh conversation instead of continuing the current one; when topics are available, it opens a new topic.',
 ].join('\n');
 
 const TELEGRAM_WELCOME_MESSAGE = [
@@ -82,13 +84,19 @@ const TELEGRAM_WELCOME_MESSAGE = [
 const TELEGRAM_WELCOME_LINK_NUDGE =
   'Tip: link this Telegram account to your Roomote account so tasks you start here are attributed to you — generate a code under *Settings → Personal → Linked Accounts* and send it here.';
 
+const TELEGRAM_FAST_UNAVAILABLE_MESSAGE =
+  "Roomote couldn't start a conversation right now. Please try again in a moment.";
+
 const TELEGRAM_LINK_REQUIRED_MESSAGE =
   '🔗 Link your Roomote account before starting tasks here. Generate a code under *Settings → Personal → Linked Accounts* and send it to me — until then I can’t attribute tasks to you.';
 import {
   replyToTelegramSnapshotResume,
   resumeTelegramTaskFromSnapshot,
-  startNewTelegramTask,
 } from './task-orchestration.js';
+import {
+  buildTelegramTaskTopicName,
+  shouldCreateTelegramTaskTopic,
+} from './task-launch.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
 import { attachTelegramMediaToQueuedMessage } from './attachments.js';
 import {
@@ -104,7 +112,21 @@ import { appendAccountLinkHelpText } from '../account-link-help.js';
 // https://t.me/<bot>?start=link opens the bot's DM with "/start link".
 const TELEGRAM_LINK_START_PAYLOAD = 'link';
 
-export const telegram = new Hono();
+type TelegramWebhookVariables = {
+  claimedUpdateId: number | undefined;
+};
+
+export const telegram = new Hono<{
+  Variables: TelegramWebhookVariables;
+}>();
+
+telegram.onError(async (error, c) => {
+  const claimedUpdateId = c.get('claimedUpdateId');
+  if (claimedUpdateId !== undefined) {
+    await releaseTelegramUpdateClaim(claimedUpdateId).catch(() => {});
+  }
+  throw error;
+});
 
 telegram.post('/', async (c) => {
   const verificationError = await verifyTelegramWebhookSecret(
@@ -147,6 +169,7 @@ telegram.post('/', async (c) => {
     if (!claimedReaction) {
       return c.json({ ok: true, duplicate: true });
     }
+    c.set('claimedUpdateId', update.update_id);
     const addedReactions = getNewTelegramMessageReactions(messageReaction);
     if (addedReactions.length === 0) {
       return c.json({ ok: true, ignored: 'reaction_removed_or_unchanged' });
@@ -250,6 +273,7 @@ telegram.post('/', async (c) => {
     if (!claimedCallback) {
       return c.json({ ok: true, duplicate: true });
     }
+    c.set('claimedUpdateId', update.update_id);
 
     await handleTelegramCallbackQuery(callbackQuery);
 
@@ -270,6 +294,7 @@ telegram.post('/', async (c) => {
     );
     return c.json({ ok: true, duplicate: true });
   }
+  c.set('claimedUpdateId', update.update_id);
 
   if (isTelegramImplicitTopicCreatedMessage(message)) {
     const implicitThreadId = message.message_thread_id ?? message.message_id;
@@ -500,22 +525,6 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
-  if (
-    queuedMessage &&
-    !newTaskCommand &&
-    (await handleTelegramRoutingReply({
-      launchOwnerUserId: senderUserId,
-      queuedMessage,
-      metadata,
-    }))
-  ) {
-    return c.json({
-      ok: true,
-      queued: false,
-      routingReplyHandled: true,
-    });
-  }
-
   const repliedToReportRootId =
     message.reply_to_message &&
     typeof message.reply_to_message === 'object' &&
@@ -595,20 +604,14 @@ telegram.post('/', async (c) => {
         .trim() ||
       message.from?.username?.trim() ||
       null;
-    let continued: boolean;
-    try {
-      continued = await queueFastAgentSurfaceReply({
-        sessionId: fastSession.id,
-        userId: senderUserId,
-        senderDisplayName,
-        question,
-        currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
-        ...(fastMessage.images ? { images: fastMessage.images } : {}),
-      });
-    } catch (error) {
-      await releaseTelegramUpdateClaim(update.update_id).catch(() => {});
-      throw error;
-    }
+    const continued = await queueFastAgentSurfaceReply({
+      sessionId: fastSession.id,
+      userId: senderUserId,
+      senderDisplayName,
+      question,
+      currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+      ...(fastMessage.images ? { images: fastMessage.images } : {}),
+    });
     if (!continued) {
       apiLogger.warn(
         `[telegram] Fast session ${fastSession.id} could not resolve an active delivery route`,
@@ -649,22 +652,9 @@ telegram.post('/', async (c) => {
     });
   }
 
-  if (activeRun && newTaskCommand) {
-    const commandLabel = `/${newTaskCommand.command}`;
-
-    await postTelegramMessageBestEffort({
-      chatId: metadata.communicationChannelId,
-      threadId: metadata.communicationThreadId,
-      replyToMessageId: metadata.communicationMessageId,
-      text: newTaskCommand.text
-        ? `A task is already running in this chat, so ${commandLabel} did not start a new one. Cancel it first (✖️ Cancel task) or wait for it to finish, then resend it:\n\n${commandLabel} ${newTaskCommand.text}`
-        : `A task is already running in this chat. Cancel it first (✖️ Cancel task) or wait for it to finish, then send ${commandLabel} <your request>.`,
-    });
-
-    return c.json({ ok: true, queued: false, repliedInline: true });
-  }
-
-  if (activeRun) {
+  // `/new` opens a fresh conversation even while a task is running here; it
+  // is handled below. Other messages continue the active run.
+  if (activeRun && !newTaskCommand) {
     if (!queuedMessage) {
       return c.json({ ok: true, ignored: 'unsupported_update' });
     }
@@ -701,7 +691,11 @@ telegram.post('/', async (c) => {
       runId: activeRun.id,
       senderUserId: queuedMessage.userId,
     });
-    await queueCommunicationMessage('telegram', activeRun.id, queuedMessage);
+    await queueCommunicationMessageOnce(
+      'telegram',
+      activeRun.id,
+      queuedMessage,
+    );
     // A typed reply supersedes any pending PR review offers in the chat.
     retireTelegramPrReviewOffersBestEffort({
       chatId: conversation.chatId,
@@ -757,7 +751,10 @@ telegram.post('/', async (c) => {
   const completedRunCandidate = repliedToAutomationReport
     ? repliedToAutomationReport.status === RunStatus.Completed &&
       repliedToAutomationReport.snapshotId &&
-      isSnapshotResumable(repliedToAutomationReport.snapshotCreatedAt)
+      isSnapshotResumable(
+        repliedToAutomationReport.snapshotCreatedAt,
+        repliedToAutomationReport.vendor,
+      )
       ? repliedToAutomationReport
       : null
     : !newTaskCommand && (isTaskEntry || metadata.communicationThreadId)
@@ -840,115 +837,138 @@ telegram.post('/', async (c) => {
     }
   }
 
-  if (!newTaskCommand) {
-    const providerConversationId =
-      metadata.communicationThreadId ??
-      (isTelegramPrivateChat(message)
-        ? metadata.communicationChannelId
-        : queuedMessage.ts);
-    const conversation = {
-      surface: 'telegram' as const,
-      workspaceId: metadata.communicationChannelId,
-      conversationId: `${providerConversationId}:user:${senderUserId}`,
-      replyTarget: {
-        channelId: metadata.communicationChannelId,
-        ...(metadata.communicationThreadId
-          ? { threadId: metadata.communicationThreadId }
-          : {}),
-      },
-    };
+  const senderDisplayName =
+    [message.from?.first_name, message.from?.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim() ||
+    message.from?.username?.trim() ||
+    null;
+  let replyTarget = {
+    channelId: metadata.communicationChannelId,
+    ...(metadata.communicationThreadId
+      ? { threadId: metadata.communicationThreadId }
+      : {}),
+  };
+  let providerConversationId =
+    metadata.communicationThreadId ??
+    (isTelegramPrivateChat(message)
+      ? metadata.communicationChannelId
+      : queuedMessage.ts);
+  let currentMessageId = metadata.communicationMessageId ?? queuedMessage.ts;
 
-    try {
-      const session = await getOrCreateFastAgentSession({
-        userId: senderUserId,
-        conversation,
-      });
-      void continueFastAgentSurfaceReply({
-        sessionId: session.id,
-        userId: senderUserId,
-        senderDisplayName:
-          [message.from?.first_name, message.from?.last_name]
-            .filter(Boolean)
-            .join(' ')
-            .trim() ||
-          message.from?.username?.trim() ||
-          null,
-        question: queuedMessage.text.trim(),
-        currentMessageId: metadata.communicationMessageId ?? queuedMessage.ts,
-        ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
-      })
-        .then((continued) => {
-          if (!continued) {
-            apiLogger.warn(
-              `[telegram] Default Fast session ${session.id} could not resolve an active delivery route`,
-            );
-          }
-        })
-        .catch((error) => {
-          apiLogger.error(
-            `[telegram] Default Fast response failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        });
-
-      return c.json({ ok: true, fastAnswered: true, fastDefaulted: true });
-    } catch (error) {
-      apiLogger.warn(
-        `[telegram] Failed to initialize the default Fast session; falling back to task routing: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
-  let launch: Awaited<ReturnType<typeof startNewTelegramTask>>;
-  try {
-    launch = await startNewTelegramTask({
-      message,
-      launchOwnerUserId: senderUserId,
-      queuedMessage,
-      metadata,
-      forceNewTopic: Boolean(newTaskCommand),
+  if (newTaskCommand) {
+    // `/new` opens a fresh conversation. Where Telegram supports topics it
+    // gets its own topic beside the current one; a plain private chat keeps
+    // one conversation, so the request simply joins it.
+    const needsPrivateTopicCapability = isTelegramPrivateChat(message);
+    const createTopic = shouldCreateTelegramTaskTopic({
+      chatType: message.chat.type,
+      isForum: message.chat.is_forum,
+      privateTopicsEnabled: needsPrivateTopicCapability
+        ? await telegramPrivateTopicsEnabledBestEffort()
+        : false,
+      threadId: metadata.communicationThreadId,
+      forceNewTopic: true,
     });
-  } catch (error) {
-    if (isDeploymentReadOnlyError(error)) {
+    const topicName = buildTelegramTaskTopicName(queuedMessage.text);
+    const topic = createTopic
+      ? await createTelegramForumTopicBestEffort({
+          chatId: metadata.communicationChannelId,
+          name: topicName,
+        })
+      : null;
+    if (topic) {
+      const topicRootMessage = await postTelegramMessageBestEffort({
+        chatId: metadata.communicationChannelId,
+        threadId: topic.threadId,
+        text: `Request from ${queuedMessage.user}:\n\n${queuedMessage.text}`,
+      });
+      const topicUrl = buildTelegramMessagePermalink({
+        chatId: metadata.communicationChannelId,
+        threadId: topic.threadId,
+        messageId: topicRootMessage?.messageId ?? null,
+      });
       await postTelegramMessageBestEffort({
         chatId: metadata.communicationChannelId,
         threadId: metadata.communicationThreadId,
         replyToMessageId: metadata.communicationMessageId,
-        text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+        text: topicUrl
+          ? `Started “${topicName}” in a new topic.`
+          : `Started “${topicName}” in a new topic. Open it from Telegram's topic list.`,
+        ...(topicUrl
+          ? { buttons: [[{ text: 'Open topic', url: topicUrl }]] }
+          : {}),
       });
-
-      return c.json({
-        ok: true,
-        queued: false,
-        repliedInline: true,
-      });
+      replyTarget = {
+        channelId: metadata.communicationChannelId,
+        threadId: topic.threadId,
+      };
+      providerConversationId = topic.threadId;
+      if (topicRootMessage?.messageId) {
+        currentMessageId = topicRootMessage.messageId;
+      }
+    } else if (!isTelegramPrivateChat(message)) {
+      // No topic support in this group: the command message anchors a
+      // conversation of its own, the way any fresh group mention does.
+      providerConversationId = queuedMessage.ts;
     }
-
-    throw error;
   }
 
-  if (launch.status === 'replied_inline') {
-    return c.json({
-      ok: true,
-      queued: false,
-      repliedInline: true,
+  const fastConversation = {
+    surface: 'telegram' as const,
+    workspaceId: metadata.communicationChannelId,
+    conversationId: `${providerConversationId}:user:${senderUserId}`,
+    replyTarget,
+  };
+
+  let session: Awaited<ReturnType<typeof getOrCreateFastAgentSession>>;
+  try {
+    session = await getOrCreateFastAgentSession({
+      userId: senderUserId,
+      conversation: fastConversation,
     });
+  } catch (error) {
+    apiLogger.error(
+      `[telegram] Failed to initialize the Fast session for chat ${metadata.communicationChannelId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    await postTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      replyToMessageId: metadata.communicationMessageId,
+      text: TELEGRAM_FAST_UNAVAILABLE_MESSAGE,
+    });
+    return c.json({ ok: true, queued: false, fastUnavailable: true });
   }
 
-  if (launch.status === 'confirmation_pending') {
-    return c.json({
-      ok: true,
-      queued: false,
-      confirmationPending: true,
+  void continueFastAgentSurfaceReply({
+    sessionId: session.id,
+    userId: senderUserId,
+    senderDisplayName,
+    question: queuedMessage.text.trim(),
+    currentMessageId,
+    ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
+  })
+    .then((continued) => {
+      if (!continued) {
+        apiLogger.warn(
+          `[telegram] Fast session ${session.id} could not resolve an active delivery route`,
+        );
+      }
+    })
+    .catch((error) => {
+      apiLogger.error(
+        `[telegram] Fast response failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     });
-  }
 
   return c.json({
     ok: true,
-    started: true,
-    runId: launch.launchResult.id,
+    fastAnswered: true,
+    ...(newTaskCommand ? { fastStartedNew: true } : { fastDefaulted: true }),
   });
 });

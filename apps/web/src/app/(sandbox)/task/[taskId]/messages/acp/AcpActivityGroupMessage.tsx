@@ -40,7 +40,7 @@ export function AcpActivityGroupMessage({
       <div className="flex items-center gap-3">
         <CollapsibleTrigger
           className={cn(
-            'flex shrink-0 cursor-pointer items-center gap-1.5 text-sm font-light text-muted-foreground transition-colors hover:text-foreground',
+            'flex shrink-0 cursor-pointer items-center gap-1.5 text-sm font-light text-muted-foreground/50 transition-colors hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
           )}
         >

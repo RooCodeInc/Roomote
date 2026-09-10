@@ -121,6 +121,27 @@ describe('Slack reply satisfaction state', () => {
     });
   });
 
+  it('records parent Session reports as terminal lifecycle satisfaction', () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-session-'));
+    tempDirs.push(tempDir);
+    const stateFilePath = path.join(tempDir, 'reply-state.json');
+    process.env[SLACK_REPLY_SATISFACTION_STATE_FILE_ENV] = stateFilePath;
+
+    recordSlackReplySatisfaction({
+      messageTs: 'report-1',
+      tool: 'report_to_parent_session',
+      replyPurpose: 'closeout',
+      nowMs: 1234,
+    });
+
+    expect(JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))).toEqual({
+      messageTs: 'report-1',
+      tool: 'report_to_parent_session',
+      replyPurpose: 'closeout',
+      recordedAtMs: 1234,
+    });
+  });
+
   it('records current-turn shortcut reactions with message timestamps', () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'roomote-slack-'));
     tempDirs.push(tempDir);

@@ -41,10 +41,7 @@ import { getFastSessionComposerSuggestionCommand } from '../composer-suggestion'
 
 const auth = {
   userId: 'user-1',
-  featureFlags: { composerSuggestions: true },
 } as UserAuthSuccess;
-
-const flagOffAuth = { userId: 'user-1', featureFlags: {} } as UserAuthSuccess;
 
 describe('getFastSessionComposerSuggestionCommand', () => {
   beforeEach(() => {
@@ -52,16 +49,6 @@ describe('getFastSessionComposerSuggestionCommand', () => {
     cacheKeys.length = 0;
     mockFindAccessibleFastSession.mockResolvedValue({ id: 'session-1' });
     mockGetFastSessionTasks.mockResolvedValue([]);
-  });
-
-  it('returns null without loading the session when the flag is off', async () => {
-    await expect(
-      getFastSessionComposerSuggestionCommand(flagOffAuth, {
-        sessionId: 'session-1',
-      }),
-    ).resolves.toEqual({ suggestion: null, messageCount: 0 });
-    expect(mockFindAccessibleFastSession).not.toHaveBeenCalled();
-    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
   it('returns null without generating when the session is not accessible', async () => {

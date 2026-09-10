@@ -231,17 +231,7 @@ async function notifySlack(run: NotifiedRun, error: string): Promise<boolean> {
     return false;
   }
 
-  const taskUrl = getTaskUrl({
-    taskId: run.taskId,
-    utm: { campaign: run.payloadKind, source: 'slack' },
-  });
-  const text = [
-    TASK_TURN_PROVIDER_ERROR_TEXT,
-    `*Error details:* ${escapeSlackMrkdwnText(error)}`,
-    taskUrl ? `<${taskUrl}|Open the task>` : null,
-  ]
-    .filter((part): part is string => part !== null)
-    .join('\n\n');
+  const text = `:warning: ${escapeSlackMrkdwnText(error)}`;
 
   // `SlackNotifier.postMessage` logs and returns no timestamp on API or
   // transport failure instead of throwing, so the returned ts is the only
@@ -252,6 +242,7 @@ async function notifySlack(run: NotifiedRun, error: string): Promise<boolean> {
     channel,
     thread_ts: threadTs ?? run.task.slackThreadTs ?? undefined,
     text,
+    blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }],
     unfurl_links: false,
     unfurl_media: false,
   });

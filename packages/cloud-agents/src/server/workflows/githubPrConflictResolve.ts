@@ -12,10 +12,12 @@ export function githubPrConflictResolve({
   taskSpec,
   taskRunUrl,
   attribution,
+  therapistModeEnabled,
 }: {
   taskSpec: GithubPrConflictResolveTask;
   taskRunUrl: string;
   attribution?: ResolvedTaskCommitAuthor;
+  therapistModeEnabled?: boolean;
 }) {
   const {
     payload: { repo, prNumber, prTitle, prUrl, headRef, baseRef },
@@ -51,5 +53,6 @@ export function githubPrConflictResolve({
     attribution,
     requestFormat: 'structured',
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
+    therapistModeEnabled,
   });
 }

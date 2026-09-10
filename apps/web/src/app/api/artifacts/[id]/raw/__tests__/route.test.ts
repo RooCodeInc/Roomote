@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 
 import {
   getUploadedArtifactById,
-  getArtifactObject,
+  getOwnedArtifactObject,
   verifyArtifactSignature,
 } from '@/lib/server';
 
@@ -13,7 +13,7 @@ vi.mock('@/lib/server/artifacts', () => ({
 }));
 
 vi.mock('@/lib/server/s3-client', () => ({
-  getArtifactObject: vi.fn(),
+  getOwnedArtifactObject: vi.fn(),
 }));
 
 vi.mock('@/lib/server/artifact-signature', () => ({
@@ -21,7 +21,7 @@ vi.mock('@/lib/server/artifact-signature', () => ({
 }));
 
 const mockGetUploadedArtifactById = vi.mocked(getUploadedArtifactById);
-const mockGetArtifactObject = vi.mocked(getArtifactObject);
+const mockGetArtifactObject = vi.mocked(getOwnedArtifactObject);
 const mockVerifyArtifactSignature = vi.mocked(verifyArtifactSignature);
 
 function makeRequest(id: string, params?: { sig?: string; ts?: string }) {
@@ -129,6 +129,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'plans/test.md',
@@ -161,6 +162,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'videos/demo.webm',
@@ -204,6 +206,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'screenshots/homepage.png',
@@ -260,6 +263,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'screenshots/homepage.png',
@@ -299,6 +303,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       mockGetUploadedArtifactById.mockResolvedValueOnce({
         id: 'art-1',
         taskId: 'task-1',
+        sessionId: null,
         runId: 1,
         artifactType: 'general',
         path: 'screenshots/test.img',
@@ -340,6 +345,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
+      sessionId: null,
       runId: 1,
       artifactType: 'general',
       path: 'docs/report.pdf',

@@ -2,6 +2,7 @@ const mockPersistPrReviewEvent = vi.fn();
 const mockRecordPrReviewCycleState = vi.fn();
 const mockClaimDuePrReviewDeliveries = vi.fn();
 const mockReleasePrReviewDeliveries = vi.fn();
+const mockReleaseSupersededCanonicalPrReviewAction = vi.fn();
 const mockDeferPrReviewDeliveries = vi.fn();
 const mockCompletePrReviewDeliveries = vi.fn();
 const mockRenewPrReviewDeliveryClaim = vi.fn();
@@ -35,6 +36,8 @@ vi.mock('@roomote/db/server', async () => {
       mockClaimDuePrReviewDeliveries(...args),
     releasePrReviewDeliveries: (...args: unknown[]) =>
       mockReleasePrReviewDeliveries(...args),
+    releaseSupersededCanonicalPrReviewAction: (...args: unknown[]) =>
+      mockReleaseSupersededCanonicalPrReviewAction(...args),
     deferPrReviewDeliveries: (...args: unknown[]) =>
       mockDeferPrReviewDeliveries(...args),
     completePrReviewDeliveries: (...args: unknown[]) =>
@@ -72,6 +75,7 @@ import {
   hasPrReviewNotificationThreadContext,
   migrateLegacyPrReviewNotificationRequest,
   resolvePrReviewNotificationRoute,
+  retrySupersededPrReviewAction,
   schedulePrReviewNotificationJob,
   startPrReviewNotificationCycle,
 } from '../pr-review-notification';
@@ -139,6 +143,7 @@ describe('durable PR review notification ownership', () => {
     mockRecordPrReviewCycleState.mockResolvedValue(undefined);
     mockClaimDuePrReviewDeliveries.mockResolvedValue([]);
     mockReleasePrReviewDeliveries.mockResolvedValue(undefined);
+    mockReleaseSupersededCanonicalPrReviewAction.mockResolvedValue(false);
     mockRedisLrange.mockResolvedValue([]);
     mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T123' }]);
     mockRedisGet.mockResolvedValue(null);
@@ -163,6 +168,37 @@ describe('durable PR review notification ownership', () => {
       }),
     );
     expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('releases and immediately redispatches a superseded action delivery', async () => {
+    const deliveryId = '11111111-1111-4111-8111-111111111111';
+    mockReleaseSupersededCanonicalPrReviewAction.mockResolvedValue(true);
+    mockClaimDuePrReviewDeliveries.mockResolvedValue([claim]);
+
+    await expect(
+      retrySupersededPrReviewAction({
+        taskId: claim.taskId,
+        repository: claim.repository,
+        prNumber: claim.prNumber,
+        prUrl: claim.prUrl,
+        deferrals: 0,
+        ownershipVersion: 'canonical',
+        deliveryId,
+        deliveryIds: [deliveryId],
+        leaseToken: claim.leaseToken,
+        events: [],
+      }),
+    ).resolves.toBe(true);
+
+    expect(mockReleaseSupersededCanonicalPrReviewAction).toHaveBeenCalledWith({
+      deliveryId,
+      leaseToken: claim.leaseToken,
+    });
+    expect(mockClaimDuePrReviewDeliveries).toHaveBeenCalled();
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'notify-pr-review-activity',
+      expect.objectContaining({ taskId: claim.taskId }),
+    );
   });
 
   it('delays provisional Roomote inline findings by five minutes', async () => {

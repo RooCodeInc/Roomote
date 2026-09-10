@@ -1,5 +1,9 @@
 import type { UserAuthSuccess } from '@/types';
 
+vi.mock('@/lib/server/custom-automation-task-access', () => ({
+  customAutomationTaskAccess: vi.fn(),
+}));
+
 const {
   mockDeleteArtifactsBatch,
   mockMarkParallelCounts,

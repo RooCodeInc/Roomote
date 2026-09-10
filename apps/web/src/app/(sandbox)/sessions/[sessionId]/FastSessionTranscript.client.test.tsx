@@ -5,13 +5,25 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
+} from '@roomote/types';
 
 import {
   FastSessionTranscript,
   pendingResponseReducer,
 } from './FastSessionTranscript';
 import { SessionRunningTaskCountContext } from './session-task-panel-context';
+import {
+  clearPendingFastSessionLaunch,
+  stagePendingFastSessionLaunch,
+} from '@/lib/pending-fast-session-launch';
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  usePathname: () => '/sessions/session-1',
+}));
 
 const {
   replyMutate,
@@ -21,6 +33,7 @@ const {
   openTaskPanel,
   openTasksPanel,
   narrationState,
+  composerSuggestionState,
 } = vi.hoisted(() => ({
   replyMutate: vi.fn(),
   reviewActionMutate: vi.fn(),
@@ -29,6 +42,9 @@ const {
   openTaskPanel: vi.fn(),
   openTasksPanel: vi.fn(),
   narrationState: { enabled: false },
+  composerSuggestionState: {
+    data: undefined as { suggestion: string; messageCount: number } | undefined,
+  },
 }));
 
 vi.mock('@/hooks/useNarrationMode', () => ({
@@ -44,6 +60,13 @@ vi.mock('@/trpc/client', () => ({
     },
   }),
   useTRPC: () => ({
+    slack: {
+      resolveUsers: {
+        queryOptions: (input: unknown) => ({
+          queryKey: ['slack.resolveUsers', input],
+        }),
+      },
+    },
     fastSessions: {
       composerSuggestion: {
         queryOptions: (input: unknown, options?: Record<string, unknown>) => ({
@@ -60,10 +83,22 @@ vi.mock('@/trpc/client', () => ({
 // these tests exercise the transcript, not suggestions.
 vi.mock('@tanstack/react-query', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@tanstack/react-query')>()),
-  useQuery: () => ({ data: undefined }),
+  useQuery: () => ({ data: composerSuggestionState.data }),
 }));
 
-vi.mock('./SessionModelSwitcher', () => ({
+// Wakeup polling has dedicated provider-backed tests. Keep this suite's query
+// mocks scoped to composer suggestions rather than mounting the live poller.
+vi.mock('./SessionWakeups', () => ({
+  SessionWakeups: () => null,
+}));
+
+vi.mock('../../task/[taskId]/messages/acp/AcpDataVisualizations', () => ({
+  AcpDataVisualizations: ({ charts }: { charts: Array<{ title: string }> }) => (
+    <div data-testid="session-chart">{charts[0]?.title}</div>
+  ),
+}));
+
+vi.mock('@/components/tasks/SessionModelSwitcher', () => ({
   SessionModelSwitcher: ({
     model,
     onModelChange,
@@ -136,6 +171,15 @@ vi.mock('../../task/[taskId]/messages/acp/DelegatedTaskCard', () => ({
   ),
 }));
 
+vi.mock('./SessionUserInputCard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./SessionUserInputCard')>()),
+  SessionUserInputCard: () => <div>Structured input request</div>,
+}));
+
+vi.mock('./setup/SetupStarterTasksCard', () => ({
+  SetupStarterTasksCard: () => <div>Setup starter tasks</div>,
+}));
+
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   listeners = new Map<string, Set<(event: MessageEvent) => void>>();
@@ -172,8 +216,10 @@ beforeEach(() => {
     Promise.resolve({ text }),
   );
   narrationState.enabled = false;
+  composerSuggestionState.data = undefined;
   openTaskPanel.mockReset();
   openTasksPanel.mockReset();
+  clearPendingFastSessionLaunch('session-1');
   vi.stubGlobal('EventSource', FakeEventSource);
 });
 
@@ -190,6 +236,11 @@ describe('FastSessionTranscript', () => {
     ts,
     visible = true,
     turnSeq = role === 'user' ? 0 : 1,
+    inputKind,
+    userId,
+    userName = null,
+    userEmail = null,
+    userImageUrl = null,
   }: {
     id: string;
     role: 'user' | 'assistant';
@@ -197,6 +248,11 @@ describe('FastSessionTranscript', () => {
     ts: number;
     visible?: boolean;
     turnSeq?: number;
+    inputKind?: string;
+    userId?: string;
+    userName?: string | null;
+    userEmail?: string | null;
+    userImageUrl?: string | null;
   }) => ({
     id,
     eventId: `${id}:event`,
@@ -209,12 +265,54 @@ describe('FastSessionTranscript', () => {
         : ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
     role,
     contentBlocks: [{ type: 'text' as const, text }],
-    metadata: { visibleInTranscript: visible },
+    metadata: {
+      visibleInTranscript: visible,
+      ...(inputKind ? { inputKind } : {}),
+      ...(userId ? { userId } : {}),
+    },
     payload: {},
     source: 'web',
     nativeSessionId: role === 'assistant' ? 'opencode-1' : null,
     nativeMessageId: null,
+    userName,
+    userEmail,
+    userImageUrl,
     createdAt: new Date(ts),
+  });
+
+  it('renders charts restored from persisted Session messages', () => {
+    const message = textMessage({
+      id: 'assistant-chart',
+      role: 'assistant',
+      text: 'Search accounts for most visits.',
+      ts: 10,
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...message,
+            contentBlocks: [
+              ...message.contentBlocks,
+              {
+                type: 'data_visualization',
+                title: 'Traffic sources',
+                chart: {
+                  type: 'pie',
+                  segments: [{ label: 'Search', value: 65 }],
+                },
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('session-chart')).toHaveTextContent(
+      'Traffic sources',
+    );
   });
 
   describe('pendingResponseReducer', () => {
@@ -223,6 +321,24 @@ describe('FastSessionTranscript', () => {
       latestVisibleResponse: null,
       optimisticRollback: null,
     };
+
+    it('does not treat transcript-only setup receipts as pending model input', () => {
+      const receipt = textMessage({
+        id: 'setup-receipt',
+        role: 'user',
+        text: 'Sandbox configured with Modal.',
+        ts: 2,
+        inputKind: SETUP_RECEIPT_INPUT_KIND,
+      });
+
+      const next = pendingResponseReducer(emptyState, {
+        type: 'messages',
+        newEventIds: new Set([receipt.eventId]),
+        messages: [receipt],
+      });
+
+      expect(next.pendingAfter).toBeNull();
+    });
 
     it('uses the same ordering and visibility rules for hydration and streamed messages', () => {
       const hydrated = pendingResponseReducer(emptyState, {
@@ -366,6 +482,61 @@ describe('FastSessionTranscript', () => {
     });
   });
 
+  it('removes a structured-input card when its response control event arrives', () => {
+    const requestId = 'rui:setup-starters';
+    const request = {
+      ...textMessage({
+        id: 'starter-request',
+        role: 'assistant',
+        text: 'Choose starter tasks',
+        ts: 1,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId,
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        preset: 'setup_starter_tasks',
+        questions: [
+          {
+            id: 'starters',
+            question: 'What should I work on first?',
+            multiple: true,
+            isOther: false,
+            isSecret: false,
+            options: [{ label: 'Speed up CI', description: 'Improve CI.' }],
+          },
+        ],
+      },
+    };
+    const response = {
+      ...textMessage({
+        id: 'starter-response',
+        role: 'user',
+        text: 'Structured response',
+        ts: 2,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      payload: {
+        requestId,
+        answers: { starters: { answers: ['Speed up CI'] } },
+        resolution: 'submitted',
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request, response]}
+      />,
+    );
+
+    expect(screen.queryByText('Structured input request')).toBeNull();
+    expect(screen.queryByText('Structured response')).toBeNull();
+  });
+
   it.each([
     [1, '1 task running'],
     [2, '2 tasks running'],
@@ -397,6 +568,36 @@ describe('FastSessionTranscript', () => {
     expect(status).toHaveTextContent(label);
     expect(status.closest('.chat-reasoning-message')).toHaveClass(
       'is-assistant',
+    );
+  });
+
+  it('resolves a setup receipt avatar from the session owner', () => {
+    const receipt = textMessage({
+      id: 'setup-receipt',
+      role: 'user',
+      text: 'GitHub connected with 17 repositories.',
+      ts: 1,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      userId: 'user-1',
+    });
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[receipt]}
+        owner={{
+          userId: 'user-1',
+          name: 'Test User',
+          email: 'test@example.com',
+          imageUrl: 'https://example.com/avatar.png',
+        }}
+      />,
+    );
+
+    const avatar = screen.getByLabelText('Test User');
+    expect(avatar.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://example.com/avatar.png',
     );
   });
 
@@ -651,6 +852,116 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByText('Thinking')).toBeInTheDocument();
   });
 
+  it('shows a staged initial prompt immediately and reconciles its canonical event', () => {
+    stagePendingFastSessionLaunch('session-1', {
+      fastConversationId: 'fast-session-1',
+      text: 'Initial question',
+      images: ['data:image/png;base64,aGVsbG8='],
+    });
+    render(
+      <FastSessionTranscript sessionId="session-1" initialMessages={[]} />,
+    );
+
+    expect(screen.getByText('Initial question')).toBeInTheDocument();
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          {
+            ...textMessage({
+              id: 'canonical-user',
+              role: 'user',
+              text: 'Initial question',
+              ts: Date.now(),
+            }),
+            eventId: 'web-kickoff:fast-session-1:user',
+            contentBlocks: [
+              { type: 'text', text: 'Initial question' },
+              { type: 'image', mimeType: 'image/png', data: 'aGVsbG8=' },
+            ],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getAllByText('Initial question')).toHaveLength(1);
+  });
+
+  it('does not duplicate a staged prompt already present in initial messages', () => {
+    stagePendingFastSessionLaunch('session-1', {
+      fastConversationId: 'fast-session-1',
+      text: 'Already persisted',
+    });
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            ...textMessage({
+              id: 'canonical-user',
+              role: 'user',
+              text: 'Already persisted',
+              ts: Date.now(),
+            }),
+            eventId: 'web-kickoff:fast-session-1:user',
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByText('Already persisted')).toHaveLength(1);
+  });
+
+  it('waits for the first visible assistant message before showing timeline extras', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[]}
+        timelineExtras={<div>Connect source control</div>}
+      />,
+    );
+
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.queryByText('Connect source control')).toBeNull();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'hidden-assistant-activity',
+            role: 'assistant',
+            text: 'Internal setup activity',
+            ts: 1,
+            visible: false,
+          }),
+        ],
+      });
+    });
+
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+    expect(screen.queryByText('Connect source control')).toBeNull();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-introduction',
+            role: 'assistant',
+            text: 'First, let’s connect your source code.',
+            ts: 2,
+          }),
+        ],
+      });
+    });
+
+    expect(
+      screen.getByText('First, let’s connect your source code.'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Connect source control')).toBeInTheDocument();
+    expect(screen.queryByText('Thinking')).toBeNull();
+  });
+
   it('shows Thinking after a follow-up until streamed output arrives', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(2);
     replyMutate.mockResolvedValue({ success: true });
@@ -863,6 +1174,11 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
+    expect(
+      screen.queryByText('Would you like me to resolve these issues?'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Review feedback remains.')).toBeInTheDocument();
+    expect(reviewActionMutate).not.toHaveBeenCalled();
     fireEvent.click(
       screen.getByRole('button', { name: 'Resolve these issues' }),
     );
@@ -958,6 +1274,9 @@ describe('FastSessionTranscript', () => {
             source: 'slack',
             nativeSessionId: null,
             nativeMessageId: null,
+            userName: 'Slack Sender',
+            userEmail: 'sender@example.com',
+            userImageUrl: null,
             createdAt: new Date('2026-01-01T00:00:00.000Z'),
           },
           {
@@ -983,6 +1302,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByRole('log')).toBeInTheDocument();
     expect(screen.getByText('What changed?')).toBeInTheDocument();
     expect(screen.getByText('Two files')).toBeInTheDocument();
+    expect(screen.getByLabelText('Slack Sender')).toHaveTextContent('SS');
   });
 
   it('updates one canonical tool row from in-progress to completed via the stream', () => {
@@ -1039,7 +1359,7 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.getByText('Starting')).toBeInTheDocument();
-    expect(screen.getByText('Coding Task')).toBeInTheDocument();
+    expect(screen.getByText('coding task')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.instances[0]!.url).toBe(
@@ -1176,68 +1496,124 @@ describe('FastSessionTranscript', () => {
     expect(openTaskPanel).toHaveBeenCalledWith('child-1');
   });
 
-  it('cold-loads one completed tool row before an intervening kickoff', () => {
-    render(
-      <FastSessionTranscript
-        sessionId="session-1"
-        initialMessages={[
-          {
-            id: 'tool-1',
-            eventId: 'turn-1:tool:0',
-            turnId: 'turn-1',
-            turnSeq: 1,
-            ts: 2,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
-            role: 'tool',
-            contentBlocks: [{ type: 'text', text: '{"success":true}' }],
-            metadata: { visibleInTranscript: true },
-            payload: {
-              toolCallId: 'turn-1:tool:0',
-              title: 'launch_task',
-              kind: 'tool',
-              status: 'completed',
-              isExecute: false,
-              isMcp: false,
-              mcpServerName: null,
-              mcpToolName: null,
-              toolName: 'launch_task',
-              command: null,
-              exitCode: null,
-              output: '{"success":true}',
-              rawInput: { arguments: { prompt: 'Fix checkout' } },
+  it.each([false, true])(
+    'keeps the task card while hiding runtime navigation (standalone: %s)',
+    (standalone) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'tool-1',
+              eventId: 'turn-1:tool:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 2,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+              role: 'tool',
+              contentBlocks: [{ type: 'text', text: '{"success":true}' }],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                toolCallId: 'turn-1:tool:0',
+                title: 'launch_task',
+                kind: 'tool',
+                status: 'completed',
+                isExecute: false,
+                isMcp: false,
+                mcpServerName: null,
+                mcpToolName: null,
+                toolName: 'launch_task',
+                command: null,
+                exitCode: null,
+                output: '{"success":true}',
+                rawInput: { arguments: { prompt: 'Fix checkout' } },
+              },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:01.000Z'),
             },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:01.000Z'),
-          },
-          {
-            id: 'kickoff-1',
-            eventId: 'turn-1:assistant:0',
-            turnId: 'turn-1',
-            turnSeq: 2,
-            ts: 3,
-            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-            role: 'assistant',
-            contentBlocks: [
-              { type: 'text', text: 'I started the checkout fix.' },
-            ],
-            metadata: { visibleInTranscript: true },
-            payload: { purpose: 'progress', kickoff: true },
-            source: 'slack',
-            nativeSessionId: 'opencode-1',
-            nativeMessageId: null,
-            createdAt: new Date('2026-01-01T00:00:02.000Z'),
-          },
-        ]}
-      />,
-    );
+            {
+              id: 'kickoff-1',
+              eventId: 'turn-1:assistant:0',
+              turnId: 'turn-1',
+              turnSeq: 2,
+              ts: 3,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+              role: 'assistant',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: `${standalone ? '' : 'I started the checkout fix.\n\n'}[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)`,
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: {
+                purpose: 'progress',
+                ...(standalone ? { taskNavigation: true } : { kickoff: true }),
+              },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:02.000Z'),
+            },
+          ]}
+        />,
+      );
 
-    expect(
-      screen.getByRole('button', { name: /Started Coding Task Completed/ }),
-    ).toBeInTheDocument();
-    expect(screen.getByText('I started the checkout fix.')).toBeInTheDocument();
-  });
+      expect(
+        screen.getByRole('button', { name: /Started coding task Completed/ }),
+      ).toBeInTheDocument();
+      if (!standalone) {
+        expect(
+          screen.getByText('I started the checkout fix.'),
+        ).toBeInTheDocument();
+      }
+      expect(
+        screen.queryByRole('link', { name: 'Open in Roomote' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it.each(['', 'You can follow the work here.\n\n'])(
+    'preserves ordinary assistant links with prefix %j',
+    (prefix) => {
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            {
+              id: 'ordinary-link',
+              eventId: 'turn-1:assistant:0',
+              turnId: 'turn-1',
+              turnSeq: 1,
+              ts: 1,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+              role: 'assistant',
+              contentBlocks: [
+                {
+                  type: 'text',
+                  text: `${prefix}[Open in Roomote](https://roomote.example/sessions/session-1?task=child-1)`,
+                },
+              ],
+              metadata: { visibleInTranscript: true },
+              payload: { purpose: 'progress' },
+              source: 'slack',
+              nativeSessionId: 'opencode-1',
+              nativeMessageId: null,
+              createdAt: new Date('2026-01-01T00:00:00.000Z'),
+            },
+          ]}
+        />,
+      );
+      expect(
+        screen.getByRole('link', { name: 'Open in Roomote' }),
+      ).toHaveAttribute(
+        'href',
+        'https://roomote.example/sessions/session-1?task=child-1',
+      );
+    },
+  );
 
   it('shows a reply composer for web sessions and sends replies optimistically', async () => {
     replyMutate.mockResolvedValue({ success: true });
@@ -1251,6 +1627,7 @@ describe('FastSessionTranscript', () => {
     );
 
     const input = screen.getByPlaceholderText('Message agent');
+    expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: 'Follow up question' } });
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
 
@@ -1263,6 +1640,132 @@ describe('FastSessionTranscript', () => {
       model: null,
       reasoningEffort: null,
     });
+  });
+
+  it.each(['Tab', 'Escape', 'mouse', 'touch'])(
+    'preserves focus-only hints and %s interaction for a long suggestion',
+    (action) => {
+      const suggestion =
+        'Implement the marker fix and add regression coverage.';
+      composerSuggestionState.data = { suggestion, messageCount: 2 };
+      render(
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[
+            textMessage({
+              id: 'user-1',
+              role: 'user',
+              text: 'Question',
+              ts: 1,
+            }),
+            textMessage({
+              id: 'assistant-1',
+              role: 'assistant',
+              text: 'Answer',
+              ts: 2,
+            }),
+          ]}
+          canReply
+        />,
+      );
+      const input = screen.getByPlaceholderText(suggestion);
+      act(() => input.blur());
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+      act(() => input.focus());
+      const hint = screen.getByRole('button', {
+        name: 'Insert suggested message',
+      });
+      expect(hint).toHaveTextContent('Tab to accept');
+      expect(input).toHaveAccessibleDescription(
+        `Suggested message: ${suggestion}. Press Tab to accept or Escape to dismiss.`,
+      );
+      act(() => input.blur());
+      expect(hint).not.toBeInTheDocument();
+      act(() => input.focus());
+
+      if (action === 'mouse' || action === 'touch') {
+        const focusedHint = screen.getByRole('button', {
+          name: 'Insert suggested message',
+        });
+        expect(
+          fireEvent.pointerDown(focusedHint, {
+            pointerType: action,
+            cancelable: true,
+          }),
+        ).toBe(false);
+        expect(input).toHaveFocus();
+        fireEvent.click(focusedHint);
+      } else {
+        fireEvent.keyDown(input, { key: action, code: action });
+      }
+
+      expect(input).toHaveValue(action === 'Escape' ? '' : suggestion);
+      expect(input).toHaveFocus();
+      expect(
+        screen.queryByRole('button', { name: 'Insert suggested message' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it('keeps a later suggestion hint hidden after a successful send remounts the composer', async () => {
+    composerSuggestionState.data = {
+      suggestion: 'Accept the first suggestion',
+      messageCount: 2,
+    };
+    replyMutate.mockResolvedValue({ success: true });
+    const initialMessages = [
+      textMessage({ id: 'user-1', role: 'user', text: 'Question', ts: 1 }),
+      textMessage({
+        id: 'assistant-1',
+        role: 'assistant',
+        text: 'Answer',
+        ts: 2,
+      }),
+    ];
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={initialMessages}
+        canReply
+      />,
+    );
+
+    const input = screen.getByPlaceholderText('Accept the first suggestion');
+    fireEvent.focus(input);
+    expect(
+      screen.getByRole('button', { name: 'Insert suggested message' }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'My own reply' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter', charCode: 13 });
+    await waitFor(() => expect(replyMutate).toHaveBeenCalled());
+    await screen.findByPlaceholderText('Message agent');
+
+    composerSuggestionState.data = {
+      suggestion: 'Accept the next suggestion',
+      messageCount: 3,
+    };
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-2',
+            role: 'assistant',
+            text: 'Next answer',
+            ts: Date.now() + 1,
+          }),
+        ],
+      });
+    });
+
+    expect(
+      screen.getByPlaceholderText('Accept the next suggestion'),
+    ).not.toHaveFocus();
+    expect(
+      screen.queryByRole('button', { name: 'Insert suggested message' }),
+    ).not.toBeInTheDocument();
   });
 
   it('persists model selections immediately and uses them for the next reply', async () => {
@@ -1405,7 +1908,7 @@ describe('FastSessionTranscript', () => {
             source: 'web',
             nativeSessionId: null,
             nativeMessageId: null,
-            createdAt: new Date().toISOString(),
+            createdAt: new Date(),
           },
         ],
       });
@@ -1439,6 +1942,52 @@ describe('FastSessionTranscript', () => {
     expect(input.value).toBe('Do not lose me');
   });
 
+  it('shows structured input instead of the ordinary composer while pending', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          {
+            id: 'request-1',
+            eventId: 'request-1',
+            turnId: 'turn-1',
+            turnSeq: 1,
+            ts: Date.now(),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+            role: 'assistant',
+            contentBlocks: [{ type: 'text', text: 'Choose one' }],
+            metadata: { visibleInTranscript: true },
+            payload: {
+              requestId: 'rui:request-1',
+              status: 'pending',
+              sessionId: 'session-1',
+              turnId: 'turn-1',
+              callId: 'call-1',
+              questions: [
+                {
+                  id: 'choice',
+                  header: 'Choice',
+                  question: 'Choose one',
+                  isOther: false,
+                  isSecret: false,
+                  options: [{ label: 'One', description: 'First choice' }],
+                },
+              ],
+            },
+            source: 'web',
+            nativeSessionId: null,
+            nativeMessageId: null,
+            createdAt: new Date(),
+          },
+        ]}
+        canReply
+      />,
+    );
+
+    expect(screen.getByText('Structured input request')).toBeVisible();
+    expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+  });
+
   it('updates the header title from the session stream event', () => {
     document.title = 'Roomote';
     render(
@@ -1449,7 +1998,9 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    expect(screen.getByText('New session')).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { name: 'New session' }),
+    ).toHaveAttribute('title', 'New session');
 
     act(() => {
       FakeEventSource.instances[0]!.emit('session', {
@@ -1459,12 +2010,43 @@ describe('FastSessionTranscript', () => {
     });
 
     expect(
-      screen.getByText(
-        'Rotate the API keys across every production environment without downtime',
-      ),
-    ).toBeInTheDocument();
+      screen.getByRole('heading', {
+        name: 'Rotate the API keys across every production environment without downtime',
+      }),
+    ).toHaveAttribute(
+      'title',
+      'Rotate the API keys across every production environment without downtime',
+    );
     expect(document.title).toBe(
       'Rotate the API keys across every production environment with... | Roomote',
+    );
+  });
+
+  it('renders header extras and actions while preserving the Fast stream ID', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="fast-conversation-1"
+        initialMessages={[]}
+        initialTitle="Short session title"
+        headerExtras={
+          <a href="https://github.com/acme/widgets/pull/42">widgets#42</a>
+        }
+        headerActions={<button type="button">Session viewers</button>}
+      />,
+    );
+
+    const heading = screen.getByRole('heading', {
+      name: 'Short session title',
+    });
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('link', { name: 'widgets#42' }),
+    );
+    expect(heading.closest('header')).toContainElement(
+      screen.getByRole('button', { name: 'Session viewers' }),
+    );
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]!.url).toBe(
+      '/api/sessions/fast-conversation-1/stream',
     );
   });
 
@@ -1474,5 +2056,110 @@ describe('FastSessionTranscript', () => {
     );
 
     expect(screen.queryByPlaceholderText('Message agent')).toBeNull();
+  });
+  const chunkEvent = (eventId: string, text: string, ts = 2) => ({
+    event: {
+      id: eventId,
+      kind: 'text',
+      ts,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessageChunk,
+      role: 'assistant',
+      contentBlocks: [{ type: 'text', text }],
+      metadata: { sessionId: 'opencode-1', turnId: 'msg-1' },
+      payload: { sessionId: 'opencode-1', turnId: 'msg-1', text },
+      text,
+    },
+  });
+
+  it('streams reply chunks live and lets the persisted row replace them', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({ id: 'user-1', role: 'user', text: 'Hi', ts: 1 }),
+        ]}
+        canReply
+      />,
+    );
+    expect(screen.getByText('Thinking')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', 'Looking'),
+      );
+    });
+    expect(screen.getByText('Looking')).toBeInTheDocument();
+    expect(screen.queryByText('Thinking')).not.toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', ' into it'),
+      );
+    });
+    expect(screen.getByText('Looking into it')).toBeInTheDocument();
+    const streamedNode = screen.getByText('Looking into it');
+
+    // The persisted row lands under the same eventId and takes over in
+    // place: the same element is updated rather than remounted.
+    act(() => {
+      FakeEventSource.instances[0]!.emit('messages', {
+        messages: [
+          textMessage({
+            id: 'assistant-1',
+            role: 'assistant',
+            text: 'Looking into it now.',
+            ts: 3,
+          }),
+        ],
+      });
+    });
+    expect(screen.getByText('Looking into it now.')).toBe(streamedNode);
+    expect(screen.queryByText('Looking into it')).not.toBeInTheDocument();
+
+    // A later reply streams as its own message.
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-2:event', 'Done.', 4),
+      );
+    });
+    expect(screen.getByText('Looking into it now.')).toBeInTheDocument();
+    expect(screen.getByText('Done.')).toBeInTheDocument();
+  });
+
+  it('withdraws streamed text that no reply delivered once the turn settles', () => {
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[
+          textMessage({ id: 'user-1', role: 'user', text: 'Hi', ts: 1 }),
+          textMessage({
+            id: 'assistant-0',
+            role: 'assistant',
+            text: 'Earlier answer',
+            ts: 2,
+          }),
+        ]}
+        canReply
+      />,
+    );
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit(
+        'chunk',
+        chunkEvent('assistant-1:event', 'Draft text', 3),
+      );
+    });
+    expect(screen.getByText('Draft text')).toBeInTheDocument();
+
+    act(() => {
+      FakeEventSource.instances[0]!.emit('session', {
+        conversationResponding: false,
+      });
+    });
+    expect(screen.queryByText('Draft text')).not.toBeInTheDocument();
+    expect(screen.getByText('Earlier answer')).toBeInTheDocument();
   });
 });

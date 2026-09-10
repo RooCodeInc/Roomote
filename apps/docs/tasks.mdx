@@ -102,9 +102,24 @@ look for:
 
 - commands, tests, or checks it ran
 - logs or errors it used to make decisions
-- screenshots or live previews for UI changes
+- screenshots, recordings, or live previews for UI changes
 - a diff or pull request for code changes
 - a clear explanation when something could not be verified
+
+Roomote chooses screenshots, recordings, both, or no visual proof according to
+what best demonstrates the work. Screenshots suit stable appearance; recordings
+can show motion and interactions, even when you did not explicitly ask for a
+video. Roomote skips visual proof when it would not add useful evidence. Judge
+the evidence against the stated result rather than requiring a recording for
+every change.
+
+Visual proof should use genuine application, authentication, database, and
+backend state when practical. When an artifact instead uses disclosed simulated
+state to make a UI reachable, treat it as evidence only for the rendered
+appearance, layout, or interaction under that setup. It does not verify real
+data flow, authorization, backend behavior, network behavior, or an end-to-end
+journey. The task report and artifact metadata should identify the simulation
+and state those limits explicitly.
 
 | Surface           | What to look for                                                                           |
 | ----------------- | ------------------------------------------------------------------------------------------ |
@@ -122,7 +137,9 @@ without needing to enter the sandbox workspace.
 
 You can send follow-up instructions while a task is active. If a task has
 completed and Roomote has a restorable snapshot, a follow-up can resume from
-that prior workspace instead of starting over.
+that prior workspace instead of starting over. Snapshot retention depends on
+the sandbox provider: Modal-backed snapshots do not have Roomote's seven-day
+application expiry, while other providers may use a bounded window.
 
 When a task delegated from a Fast session asks for input, reply naturally in
 the originating session. If one input request is pending, Roomote

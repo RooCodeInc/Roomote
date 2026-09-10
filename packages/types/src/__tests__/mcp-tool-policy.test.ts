@@ -16,6 +16,9 @@ describe('Better Stack MCP tool policy', () => {
         'render_chart',
         'search_documentation',
         'sources',
+        'source',
+        'source_fields',
+        'query_instructions',
       ]),
     );
     expect(allowedToolNames).not.toContain('uptime_list_monitors_tool');
@@ -29,6 +32,25 @@ describe('Better Stack MCP tool policy', () => {
         { allowedToolNames },
       ),
     ).toEqual([{ name: 'monitors' }, { name: 'query' }]);
+  });
+
+  it('preserves metadata and query schemas while honoring disabled tools', () => {
+    const tools = [
+      { name: 'sources', inputSchema: { type: 'object' } },
+      { name: 'source', inputSchema: { required: ['id'] } },
+      {
+        name: 'query',
+        inputSchema: { required: ['query', 'source_id', 'table'] },
+      },
+      { name: 'remove_dashboard' },
+      { name: 'unverified_helper' },
+    ];
+    expect(
+      filterMcpToolDefinitions(tools, {
+        allowedToolNames: getAllowedIntegrationMcpToolNames('betterstack'),
+        disabledToolNames: ['query'],
+      }),
+    ).toEqual(tools.slice(0, 2));
   });
 });
 

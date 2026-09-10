@@ -305,6 +305,167 @@ describe('resolveOpenCodeSmallModel', () => {
           },
         };
         yield {
+          type: 'message.updated' as const,
+          properties: {
+            info: {
+              id: 'assistant-message-1',
+              sessionID: 'session-1',
+              parentID: 'user-message-1',
+              role: 'assistant' as const,
+              time: { created: 150, completed: 175 },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'task-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'tool' as const,
+              callID: 'task-call-1',
+              tool: 'task',
+              state: {
+                status: 'running' as const,
+                title: 'Check the implementation',
+                input: {
+                  description: 'Review the implementation',
+                  prompt: 'Inspect the relevant code.',
+                  subagent_type: 'general',
+                },
+                metadata: { sessionId: 'subagent-session-1' },
+              },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'ignored-child-task',
+              messageID: 'child-message-1',
+              sessionID: 'subagent-session-1',
+              type: 'tool' as const,
+              callID: 'child-task-call',
+              tool: 'task',
+              state: { status: 'running' as const, input: {} },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'ignored-parent-tool',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'tool' as const,
+              callID: 'bash-call-1',
+              tool: 'bash',
+              state: { status: 'completed' as const, input: {} },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'task-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'tool' as const,
+              callID: 'task-call-1',
+              tool: 'task',
+              state: {
+                status: 'completed' as const,
+                title: 'Check the implementation',
+                input: {
+                  description: 'Review the implementation',
+                  prompt: 'Inspect the relevant code.',
+                  subagent_type: 'general',
+                },
+                output: 'Implementation looks correct.',
+                metadata: { sessionId: 'subagent-session-1' },
+              },
+            },
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'text-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: 'Look ',
+              time: { start: 160 },
+            },
+            delta: 'Look ',
+          },
+        };
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'assistant-message-1',
+            partID: 'text-part-1',
+            field: 'text',
+            delta: 'here ',
+          },
+        };
+        // A reasoning part streams deltas under the same field name; it was
+        // never announced as a text part, so it is not reply text.
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'assistant-message-1',
+            partID: 'reasoning-part-1',
+            field: 'text',
+            delta: '**Thinking about the request**',
+          },
+        };
+        // The user prompt's own text part is not assistant reply text.
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'user-text-part-1',
+              messageID: 'user-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: '[USER] Use the native tools.',
+              time: { start: 100, end: 100 },
+            },
+          },
+        };
+        // Other sessions and non-text fields are not assistant reply text.
+        yield {
+          type: 'message.part.delta',
+          properties: {
+            sessionID: 'subagent-session-1',
+            messageID: 'other',
+            partID: 'other',
+            field: 'text',
+            delta: 'ignored',
+          },
+        };
+        yield {
+          type: 'message.part.updated' as const,
+          properties: {
+            part: {
+              id: 'text-part-1',
+              messageID: 'assistant-message-1',
+              sessionID: 'session-1',
+              type: 'text' as const,
+              text: 'Look here ',
+              time: { start: 160, end: 170 },
+            },
+          },
+        };
+        yield {
           type: 'session.created',
           properties: {
             sessionID: 'subagent-session-1',
@@ -340,7 +501,10 @@ describe('resolveOpenCodeSmallModel', () => {
     const onPromptStarted = vi.fn();
     const onMessageCompleted = vi.fn();
     const onAssistantMessageStarted = vi.fn();
+    const onAssistantMessageCompleted = vi.fn();
     const onSubagentSessionReady = vi.fn(() => markSubagentReady());
+    const onParentTaskPartUpdated = vi.fn();
+    const onAssistantTextUpdated = vi.fn();
     const session: { id?: string } = {};
 
     await expect(
@@ -363,15 +527,42 @@ describe('resolveOpenCodeSmallModel', () => {
           },
           onModelResolved,
           onAssistantMessageStarted,
+          onAssistantMessageCompleted,
           onMessageCompleted,
           onPromptStarted,
           onSessionReady,
           onSubagentSessionReady,
+          onParentTaskPartUpdated,
+          onAssistantTextUpdated,
           permission: FAST_AGENT_SESSION_PERMISSIONS,
           promptOnlySubagents: true,
         },
       ),
     ).resolves.toBe('native tool turn complete');
+
+    // Boundary whitespace is preserved verbatim: deltas are appended to
+    // the previous text without any trimming.
+    expect(onAssistantTextUpdated.mock.calls.map(([text]) => text)).toEqual([
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        text: 'Look ',
+        delta: 'Look ',
+        completed: false,
+      },
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        delta: 'here ',
+        completed: false,
+      },
+      {
+        messageId: 'assistant-message-1',
+        partId: 'text-part-1',
+        text: 'Look here ',
+        completed: true,
+      },
+    ]);
 
     expect(session.id).toBe('session-1');
     expect(onModelResolved).toHaveBeenCalledWith('openrouter/openai/gpt-5.4');
@@ -387,9 +578,39 @@ describe('resolveOpenCodeSmallModel', () => {
       parentId: 'user-message-1',
       createdAtMs: 150,
     });
+    expect(onAssistantMessageCompleted).toHaveBeenCalledWith({
+      id: 'assistant-message-1',
+      sessionId: 'session-1',
+      createdAtMs: 150,
+      completedAtMs: 175,
+    });
     expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
     expect(onSubagentSessionReady).toHaveBeenCalledWith('subagent-session-1');
+    expect(onParentTaskPartUpdated).toHaveBeenCalledTimes(2);
+    expect(onParentTaskPartUpdated).toHaveBeenNthCalledWith(1, {
+      partId: 'task-part-1',
+      messageId: 'assistant-message-1',
+      sessionId: 'session-1',
+      toolCallId: 'task-call-1',
+      title: 'Check the implementation',
+      status: 'in_progress',
+      input: {
+        description: 'Review the implementation',
+        prompt: 'Inspect the relevant code.',
+        subagent_type: 'general',
+      },
+      childSessionId: 'subagent-session-1',
+      agentType: 'general',
+    });
+    expect(onParentTaskPartUpdated).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        partId: 'task-part-1',
+        status: 'completed',
+        output: 'Implementation looks correct.',
+      }),
+    );
     expect(onModelResolved.mock.invocationCallOrder[0]!).toBeLessThan(
       onPromptStarted.mock.invocationCallOrder[0]!,
     );
@@ -945,7 +1166,7 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it('exposes native prompt_async steering only while the Fast prompt is active', async () => {
+  it('leaves native steering unavailable while the Fast prompt is active', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',
     });
@@ -957,13 +1178,7 @@ describe('resolveOpenCodeSmallModel', () => {
         }),
     );
     const onNativeSteerClosed = vi.fn();
-    let steer:
-      | ((input: {
-          messageId: string;
-          text: string;
-          files?: Array<{ mime: string; url: string }>;
-        }) => Promise<void>)
-      | undefined;
+    const onNativeSteerReady = vi.fn();
     const { generateTrackedNonTaskTextInOpenCodeSession } =
       await import('../non-task-provider-usage.js');
 
@@ -973,35 +1188,14 @@ describe('resolveOpenCodeSmallModel', () => {
       {
         directory: '/tmp/roomote-fast-native-test',
         tools: { '*': false, send_chat_reply: true },
-        onNativeSteerReady: (inject) => {
-          steer = inject;
-        },
+        onNativeSteerReady,
         onNativeSteerClosed,
       },
     );
-    await vi.waitFor(() => expect(steer).toBeTypeOf('function'));
-    await steer!({
-      messageId: 'msg_019cf00dbabe00000000000000',
-      text: 'Use the corrected requirement.',
-      files: [{ mime: 'image/png', url: 'data:image/png;base64,aGVsbG8=' }],
-    });
-
-    expect(sessionPromptAsyncMock).toHaveBeenCalledWith(
-      {
-        sessionID: 'session-1',
-        directory: '/tmp/roomote-fast-native-test',
-        messageID: 'msg_019cf00dbabe00000000000000',
-        parts: [
-          { type: 'text', text: 'Use the corrected requirement.' },
-          {
-            type: 'file',
-            mime: 'image/png',
-            url: 'data:image/png;base64,aGVsbG8=',
-          },
-        ],
-      },
-      expect.any(Object),
-    );
+    await vi.waitFor(() => expect(finishPrompt).toBeTypeOf('function'));
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(onNativeSteerClosed).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
 
     finishPrompt?.({
       data: {
@@ -1012,6 +1206,86 @@ describe('resolveOpenCodeSmallModel', () => {
     });
     await expect(result).resolves.toBe('updated answer');
     expect(onNativeSteerClosed).toHaveBeenCalledOnce();
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('does not advertise or dispatch native steering at assistant completion', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((finish) => {
+        resolve = finish;
+      });
+      return { promise, resolve };
+    }
+    const initialPrompt = deferred<unknown>();
+    const initialCompletion = deferred<void>();
+    sessionPromptMock.mockReturnValue(initialPrompt.promise);
+    let eventSignal: AbortSignal | undefined;
+    const initialInfo = {
+      id: 'msg_initial_answer',
+      sessionID: 'session-1',
+      parentID: 'msg_initial_request',
+      role: 'assistant',
+      time: { created: 1, completed: 2 },
+    };
+    eventSubscribeMock.mockImplementation(async (_query, { signal }) => {
+      eventSignal = signal;
+      return {
+        stream: (async function* () {
+          await initialCompletion.promise;
+          yield {
+            type: 'message.updated',
+            properties: { info: initialInfo },
+          };
+        })(),
+      };
+    });
+    const onNativeSteerClosed = vi.fn();
+    const onNativeSteerReady = vi.fn();
+    const onMessageCompleted = vi.fn();
+    const onAssistantMessageCompleted = vi.fn();
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+    const result = generateTrackedNonTaskTextInOpenCodeSession(
+      { surface: 'fast_agent', prompt: 'Initial request.' },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        tools: { '*': false, send_chat_reply: true },
+        onNativeSteerReady,
+        onNativeSteerClosed,
+        onMessageCompleted,
+        onAssistantMessageCompleted,
+      },
+    );
+    await vi.waitFor(() => expect(sessionPromptMock).toHaveBeenCalledOnce());
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    initialCompletion.resolve();
+    await vi.waitFor(() =>
+      expect(onAssistantMessageCompleted).toHaveBeenCalledOnce(),
+    );
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
+    expect(eventSignal?.aborted).toBe(false);
+    initialPrompt.resolve({
+      data: {
+        info: initialInfo,
+        parts: [{ type: 'text', text: 'Original answer only.' }],
+      },
+      error: undefined,
+    });
+    await expect(result).resolves.toBe('Original answer only.');
+    expect(onMessageCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: initialInfo.id }),
+    );
+    expect(onNativeSteerClosed).toHaveBeenCalledOnce();
+    expect(eventSignal?.aborted).toBe(true);
+    expect(onNativeSteerReady).not.toHaveBeenCalled();
+    expect(sessionPromptAsyncMock).not.toHaveBeenCalled();
   });
 
   it('classifies a missing held OpenCode session for cold bootstrap recovery', async () => {
@@ -1314,6 +1588,51 @@ describe('resolveOpenCodeSmallModel', () => {
         },
       },
     });
+  });
+
+  it('uses the deployment coding model for Fast inference when no orchestration override is configured', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'ok' }],
+      },
+      error: undefined,
+    });
+
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'orchestration',
+        prompt: 'Answer.',
+      },
+      { id: 'default-fast-session' },
+      {
+        directory: '/tmp/roomote-fast-default-test',
+        tools: { '*': false, send_chat_reply: true },
+      },
+    );
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'z-ai/glm-5.2',
+        },
+      }),
+      expect.any(Object),
+    );
   });
 
   it('does not apply coding reasoning to a non-reasoning orchestration model', async () => {
@@ -1943,6 +2262,47 @@ describe('resolveOpenCodeSmallModel', () => {
     ).toMatchObject({ retryable: false });
   });
 
+  it.each([
+    [{ statusCode: ' 429 ', status: 401 }, 'rate_limited', true],
+    [
+      { statusCode: 'invalid', status: 402, code: 401 },
+      'insufficient_credits',
+      false,
+    ],
+    [{ statusCode: 399, status: 600, code: '404' }, 'model_unavailable', false],
+    [{ statusCode: 401.5, status: '0401', code: 429 }, 'rate_limited', true],
+    [{ extra: '[{"code":"401"}]' }, 'invalid_credentials', false],
+    [
+      { a: { nested: { status: 401 } }, b: { status: 429 } },
+      'rate_limited',
+      true,
+    ],
+    [{ status: 429, extra: { isRetryable: false } }, 'provider_error', false],
+    [{ status: 429, isRetryable: 'false' }, 'rate_limited', true],
+    [{ status: 429, isRetryable: 0 }, 'rate_limited', true],
+    [
+      { status: 401, isRetryable: false, extra: 'CONTENT_FILTER' },
+      'content_filter',
+      false,
+    ],
+    [
+      new Error('{"statusCode":418,"isRetryable":false}'),
+      'provider_error',
+      true,
+    ],
+    [{ error: new Error('ContentFilterError') }, 'content_filter', false],
+  ])(
+    'preserves classification policy for %j',
+    async (error, reason, retryable) => {
+      const { classifyNonTaskInferenceError } =
+        await import('../non-task-provider-usage.js');
+      expect(classifyNonTaskInferenceError(error)).toMatchObject({
+        reason,
+        retryable,
+      });
+    },
+  );
+
   it('continues observing provider errors when retry reporting fails', async () => {
     process.env = {
       ...originalEnv,
@@ -2376,6 +2736,160 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
     ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
     expect(sessionPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a native Fast session on its own model when it can view attached images', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_ORCHESTRATION_MODEL: 'openrouter/openai/gpt-5.6-sol',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-5.6-sol': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.8-flash': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'orchestration',
+      }),
+    ).resolves.toEqual({
+      delivery: 'direct',
+      model: 'openrouter/openai/gpt-5.6-sol',
+    });
+  });
+
+  it('hands images to the vision model as a helper when the session model cannot view them', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_ORCHESTRATION_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.8-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.6-pro',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'z-ai/glm-5.2': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.6-pro': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.8-flash': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const { resolveNonTaskInputModalityDelivery } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'orchestration',
+      }),
+    ).resolves.toEqual({
+      delivery: 'helper',
+      model: 'openrouter/z-ai/glm-5.2',
+      helperModel: 'openrouter/google/gemini-3.6-pro',
+      helperReasoningEffort: 'low',
+    });
+  });
+
+  it('rejects image delivery when no configured model accepts images', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_VISION_MODEL: 'openrouter/z-ai/glm-5.2',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'z-ai/glm-5.2': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const {
+      resolveNonTaskInputModalityDelivery,
+      NonTaskInputModalityUnsupportedError,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      resolveNonTaskInputModalityDelivery({
+        modality: 'image',
+        modelRole: 'primary',
+      }),
+    ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
   });
 
   it('rejects when the plain SDK prompt reports a message error', async () => {

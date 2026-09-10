@@ -1,8 +1,34 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  TaskPayloadKind,
+  type GithubPrConflictResolveTask,
+} from '@roomote/types';
+
+import { githubPrConflictResolve } from '../githubPrConflictResolve';
 
 describe('resolve-github-pr-merge-conflicts skill', () => {
+  it('forwards therapist mode to the Standard Task prompt', () => {
+    const result = githubPrConflictResolve({
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrConflictResolve,
+        payload: {
+          repo: 'acme/backend',
+          prNumber: 42,
+          prTitle: 'Resolve conflicts',
+          prUrl: 'https://github.com/acme/backend/pull/42',
+          headRef: 'feature/example',
+          baseRef: 'develop',
+        },
+      } as GithubPrConflictResolveTask,
+      taskRunUrl: 'https://roomote.example/task/1',
+      therapistModeEnabled: true,
+    });
+
+    expect(result.harnessInstructions).toContain('<therapist_mode>');
+  });
+
   it('keeps an explicit machine-parseable final response contract', () => {
     const thisFilePath = fileURLToPath(import.meta.url);
     const thisDirPath = path.dirname(thisFilePath);

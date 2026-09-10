@@ -96,7 +96,7 @@ curl -s -X POST http://127.0.0.1:3013/mock/events \
     "message": {
       "chat": { "id": 111000111, "type": "private", "first_name": "Grace" },
       "from": { "id": 111000111, "first_name": "Grace", "username": "grace_mock" },
-      "text": "!fast what file handles Telegram webhooks?"
+      "text": "what file handles Telegram webhooks?"
     }
   }'
 
@@ -151,7 +151,7 @@ curl -s http://127.0.0.1:3013/mock/state | jq '.callbackAnswers'
 
 See `references/scenarios.md` for the full user-journey catalog. Common picks:
 
-- **`private-fast-answer`** — `!fast ...` inline Q&A without a cloud job
+- **`private-fast-answer`** — an ordinary private message answered inline without a cloud job
 - **`private-task-entry`** — DM task kickoff that creates a cloud job
 - **`followup-to-active-job`** — second message in the same chat queues to the running job instead of launching a new task
 - **`new-task-command`** — `/new <req>` after completion forces a fresh task instead of snapshot resume

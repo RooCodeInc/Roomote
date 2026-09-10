@@ -20,7 +20,10 @@ import { settleSlackLiveTaskCardForRun } from './settle-live-task-card';
 
 type SlackLiveTaskCardNotifier = Pick<
   SlackNotifier,
-  'postMessage' | 'postMessageDetailed' | 'updateMessage'
+  | 'normalizeIncomingText'
+  | 'postMessage'
+  | 'postMessageDetailed'
+  | 'updateMessage'
 >;
 
 const PREPARING_WORKSPACE_TITLE = 'Preparing workspace…';
@@ -154,7 +157,7 @@ export function createFastAgentSlackLiveTaskLauncher(
             taskUpdateId,
             title: PREPARING_WORKSPACE_TITLE,
             status: 'error',
-            message: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
+            output: SLACK_SESSION_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
             taskUrl: destinationUrl,
           }),
         });
@@ -169,7 +172,7 @@ export function createFastAgentSlackLiveTaskLauncher(
     }
   };
 
-  return createFastAgentSlackTaskLauncher({
+  const launchTask = createFastAgentSlackTaskLauncher({
     ...launcherParams,
     liveTaskStream: true,
     afterKickoff: startLiveTaskCard,
@@ -182,4 +185,17 @@ export function createFastAgentSlackLiveTaskLauncher(
     },
     rendersTaskLink: true,
   });
+
+  return async (input) => {
+    const prompt = await slack
+      .normalizeIncomingText(input.prompt, { preserveMentions: true })
+      .catch((error) => {
+        console.warn(
+          `[Fast Agent] Failed to normalize the Slack task prompt: ${describeError(error)}`,
+        );
+        return input.prompt;
+      });
+
+    return launchTask({ ...input, prompt });
+  };
 }

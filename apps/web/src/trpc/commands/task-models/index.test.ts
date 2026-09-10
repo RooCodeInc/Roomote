@@ -1866,18 +1866,20 @@ describe('task model provider commands', () => {
       seededSettings?.models.map((model: { id: string }) => model.id),
     ).toEqual([
       'anthropic/claude-fable-5',
+      'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
       'anthropic/claude-opus-5',
       'anthropic/claude-sonnet-5',
     ]);
     expect([...seededSettings.allowedModelIds].sort()).toEqual([
       'anthropic/claude-fable-5',
+      'anthropic/claude-fable-5-1',
       'anthropic/claude-haiku-4-5',
       'anthropic/claude-opus-5',
       'anthropic/claude-sonnet-5',
     ]);
     expect(seededSettings?.defaultModelId).toBe('anthropic/claude-sonnet-5');
-    expect(result.addedRecommendedModelCount).toBe(4);
+    expect(result.addedRecommendedModelCount).toBe(5);
 
     expect(
       result.providerSetup.providers.find(
@@ -1930,7 +1932,7 @@ describe('task model provider commands', () => {
     expect(seededSettings?.defaultModelId).toBe(
       'openrouter/openai/gpt-5.6-terra',
     );
-    expect(result.addedRecommendedModelCount).toBe(4);
+    expect(result.addedRecommendedModelCount).toBe(5);
   });
 
   it('does not reseed models when the provider already has configured models', async () => {

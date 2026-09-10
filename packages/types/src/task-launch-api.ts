@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { launchCodingHarnesses, REASONING_EFFORT_VALUES } from './task-runs';
 import { computeProviders } from './compute-providers';
-import { ALL_REPOSITORIES } from './constants';
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from './constants';
 import { gitBranchNameSchema } from './git-ref';
 import {
   appendEnvironmentDefinitionGuidance,
@@ -14,6 +14,7 @@ export const launchTaskTypeSchema = z.enum([
   'standard',
   'environment-definition',
   'suggested-tasks',
+  'pr-review',
 ]);
 
 export type TaskLaunchType = z.infer<typeof launchTaskTypeSchema>;
@@ -57,7 +58,7 @@ export function buildTaskTypePromptAndWorkspacePayload({
   if (
     type === 'environment-definition' &&
     (!repositoryFullNames || repositoryFullNames.length === 0) &&
-    (!repo || repo === ALL_REPOSITORIES)
+    (!repo || repo === ALL_REPOSITORIES || repo === NO_REPOSITORIES)
   ) {
     throw new TaskTypePromptAndWorkspacePayloadError(
       ENVIRONMENT_DEFINITION_REPOSITORY_SELECTION_REQUIRED_ERROR,
@@ -111,6 +112,11 @@ export const taskLaunchRequestSchema = z.object({
     .regex(/^[0-9a-f]{7,40}$/i, 'sha must be a git commit SHA')
     .optional(),
   environmentId: z.string().uuid().optional(),
+  /**
+   * Idempotency key for standard launches. Retrying with the same id returns
+   * the task the first request created instead of starting another one.
+   */
+  launchId: z.string().uuid().optional(),
   type: launchTaskTypeSchema.optional(),
   repositoryFullNames: z.array(z.string().trim().min(1)).min(1).optional(),
   selectedRepositories: z.array(z.string().trim().min(1)).min(1).optional(),
@@ -132,6 +138,13 @@ export const taskLaunchRequestSchema = z.object({
    * polling. Standard launches only.
    */
   notifyOnSettle: z.boolean().optional(),
+  /** Pull request number for `pr-review` launches; `repo` names its repository. */
+  prNumber: z.number().int().positive().optional(),
+  /**
+   * Fast conversation whose Session should own the launched task. `pr-review`
+   * launches attach the review to this Session and announce its outcome there.
+   */
+  fastConversationId: z.string().uuid().optional(),
 });
 
 export type TaskLaunchRequest = z.infer<typeof taskLaunchRequestSchema>;

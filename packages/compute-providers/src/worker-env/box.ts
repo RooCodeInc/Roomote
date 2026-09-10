@@ -11,7 +11,6 @@ export function buildBoxWorkerEnv({
   machineType,
 }: BuildWorkerEnvOptions & {
   deploymentSlug?: string;
-  environmentId?: string;
   machineType?: string;
 }): Record<string, string> {
   return {
@@ -19,6 +18,7 @@ export function buildBoxWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
+      environmentId,
     }),
     ...buildWorkerContextEnv({
       provider: 'box',

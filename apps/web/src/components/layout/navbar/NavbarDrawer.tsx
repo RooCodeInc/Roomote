@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { Menu, Plus, X, Settings } from '@/components/system';
+import {
+  Menu,
+  X,
+  Settings,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/system';
 import { useAuthorizedUser } from '@/hooks/useUser';
-import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
 
 import {
   Button,
@@ -14,15 +20,21 @@ import {
   DrawerTitle,
 } from '@/components/system';
 
-import { getVisiblePrimaryNavItems } from '../navigation-items';
+import {
+  getVisiblePrimaryNavItems,
+  SETUP_INCOMPLETE_NAV_TOOLTIP,
+} from '../navigation-items';
 
-export const NavbarDrawer = () => {
+export const NavbarDrawer = ({
+  setupIncomplete = false,
+}: {
+  setupIncomplete?: boolean;
+}) => {
   const pathname = usePathname();
   const { isAdmin } = useAuthorizedUser();
   const visibleNavItems = getVisiblePrimaryNavItems({ isAdmin });
 
   const [open, setOpen] = useState(false);
-  const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
 
   useEffect(() => setOpen(false), [pathname]);
 
@@ -51,35 +63,40 @@ export const NavbarDrawer = () => {
             </DrawerHeader>
 
             <div className="flex flex-1 flex-col gap-2 p-4">
-              <Button
-                variant="ghost"
-                size="lg"
-                className="justify-start"
-                onClick={() => {
-                  setOpen(false);
-                  setIsNewTaskDialogOpen(true);
-                }}
-              >
-                <Plus className="size-5" />
-                New Session
-              </Button>
-
               {visibleNavItems.map((item) => {
                 const Icon = item.icon;
-
-                return (
+                const disabled = setupIncomplete && item.requiresSetup;
+                const control = (
                   <Button
-                    key={item.href}
                     variant="ghost"
                     size="lg"
                     className="justify-start"
-                    asChild
+                    aria-disabled={disabled || undefined}
+                    asChild={!disabled}
                   >
-                    <Link href={item.href}>
-                      <Icon className="size-5" />
-                      {item.mobileLabel ?? item.label}
-                    </Link>
+                    {disabled ? (
+                      <>
+                        <Icon className="size-5" />
+                        {item.mobileLabel ?? item.label}
+                      </>
+                    ) : (
+                      <Link href={item.href}>
+                        <Icon className="size-5" />
+                        {item.mobileLabel ?? item.label}
+                      </Link>
+                    )}
                   </Button>
+                );
+
+                return disabled ? (
+                  <Tooltip key={item.href}>
+                    <TooltipTrigger asChild>{control}</TooltipTrigger>
+                    <TooltipContent side="right">
+                      {SETUP_INCOMPLETE_NAV_TOOLTIP}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : (
+                  <Fragment key={item.href}>{control}</Fragment>
                 );
               })}
 
@@ -98,10 +115,6 @@ export const NavbarDrawer = () => {
           </div>
         </DrawerContent>
       </Drawer>
-      <NewTaskDialog
-        open={isNewTaskDialogOpen}
-        onOpenChange={setIsNewTaskDialogOpen}
-      />
     </>
   );
 };

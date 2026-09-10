@@ -3,6 +3,7 @@ import {
   NonRetryableSpawnError,
   resolveConfiguredComputeProviderResources,
   getPrimaryPortFromConfig,
+  getComputeProviderCommandOutputSource,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -10,10 +11,12 @@ import {
   db,
   taskRuns,
   eq,
+  sql,
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   type ComputeProviderClient,
+  createCommandOutputTranscriptRecorder,
   buildComputeProviderMutationDetails,
   buildModalWorkerEnv,
   cleanupModalInstance,
@@ -39,6 +42,23 @@ import {
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
 const LAUNCH_DIAGNOSTIC_PROBE_TIMEOUT_MS = 15_000;
+function createCentralCommandOutputRecorder(runId: number) {
+  return createCommandOutputTranscriptRecorder({
+    write: async (entries, maxChars) => {
+      await db
+        .update(taskRuns)
+        .set({
+          log: sql<string>`right(coalesce(${taskRuns.log}, '') || ${entries}, ${maxChars})`,
+        })
+        .where(eq(taskRuns.id, runId));
+    },
+    onWriteError: (error) => {
+      console.warn(
+        `[spawnModalWorker] Failed to retain compute output for task run #${runId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  });
+}
 
 class DetachedWorkerLaunchError extends Error {
   public readonly details: Record<string, unknown>;
@@ -345,6 +365,10 @@ export async function spawnModalWorker(
     },
     { logPrefix: 'spawnModalWorker', logger: console },
   );
+  const computeLog =
+    getComputeProviderCommandOutputSource(vendor) === 'central'
+      ? createCentralCommandOutputRecorder(taskRun.id)
+      : undefined;
 
   const configuredResources = resolveConfiguredComputeProviderResources({
     provider: 'modal',
@@ -414,27 +438,37 @@ export async function spawnModalWorker(
     );
   });
 
-  const machine = await createModalMachine({
-    modalTokenId,
-    modalTokenSecret,
-    modalEndpoint,
-    modalEnvironment,
-    modalAppName,
-    modalBaseImageRef,
-    modalRegistryUsername,
-    modalRegistryPassword,
-    modalEcrOidcRoleArn,
-    modalEcrRegion,
-    namedPorts,
-    tags: modalTags,
-    timeoutMs: modalTimeoutMs,
-    localTarballPath,
-    createInstanceTimeoutMs: COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
-    bootstrapTimeoutMs: COMPUTE_BOOTSTRAP_TIMEOUT_MS,
-    computeClient,
-    onMutation: recordMutation,
-    ...launchOptions,
-  });
+  await computeLog?.append('command', 'sandbox provisioning started');
+  let machine: Awaited<ReturnType<typeof createModalMachine>>;
+  try {
+    machine = await createModalMachine({
+      modalTokenId,
+      modalTokenSecret,
+      modalEndpoint,
+      modalEnvironment,
+      modalAppName,
+      modalBaseImageRef,
+      modalRegistryUsername,
+      modalRegistryPassword,
+      modalEcrOidcRoleArn,
+      modalEcrRegion,
+      namedPorts,
+      tags: modalTags,
+      timeoutMs: modalTimeoutMs,
+      localTarballPath,
+      createInstanceTimeoutMs: COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
+      bootstrapTimeoutMs: COMPUTE_BOOTSTRAP_TIMEOUT_MS,
+      computeClient,
+      onMutation: recordMutation,
+      ...launchOptions,
+    });
+  } catch (error) {
+    await computeLog?.append(
+      'command',
+      `sandbox provisioning failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    throw error;
+  }
 
   const command = getWorkerLaunchCommand(taskRun);
   const args = getWorkerLaunchArgs(taskRun, machine.machineId);
@@ -504,6 +538,10 @@ export async function spawnModalWorker(
         phase: 'launch_worker',
       }),
     });
+    await computeLog?.append(
+      'command',
+      `worker ${args.join(' ')} started on ${machine.machineId}`,
+    );
 
     const result = await computeClient.runCommand({
       instanceId: machine.machineId,
@@ -521,9 +559,28 @@ export async function spawnModalWorker(
       }),
       detached: true,
       signal: AbortSignal.timeout(60_000),
-      ...(onWorkerExit
+      ...(computeLog
+        ? {
+            onOutput: (event: {
+              stream: 'stdout' | 'stderr';
+              data: string;
+            }) => {
+              void computeLog.append(event.stream, event.data);
+            },
+          }
+        : {}),
+      ...(onWorkerExit || computeLog
         ? {
             onExit: async ({ exitCode }: { exitCode: number }) => {
+              await computeLog?.append(
+                'command',
+                `worker exited with code ${exitCode}`,
+              );
+
+              if (!onWorkerExit) {
+                return;
+              }
+
               const disposition = await onWorkerExit({ exitCode });
 
               if (disposition === 'ignore') {
@@ -554,11 +611,16 @@ export async function spawnModalWorker(
           }
         : {}),
     });
+    await computeLog?.flush();
 
     // A detached worker must remain alive long enough to claim the run. Route
     // grace-period exits through the same classifier as later exits so the
     // first bootstrap failure gets its one durable replacement.
     if (result.exitCode !== null) {
+      await computeLog?.append(
+        'command',
+        `worker exited with code ${result.exitCode}`,
+      );
       // Without any captured output the exit is undiagnosable from logs, so
       // probe the still-alive sandbox before classification/cleanup.
       const probeDiagnostics =
@@ -617,6 +679,12 @@ export async function spawnModalWorker(
         exitCode: result.exitCode,
       }),
     });
+    await computeLog?.append(
+      'command',
+      result.commandId
+        ? `worker is running as command ${result.commandId}`
+        : 'worker is running',
+    );
 
     if (result.commandId) {
       await db
@@ -630,6 +698,10 @@ export async function spawnModalWorker(
       ...(result.commandId ? { sandboxCmdId: result.commandId } : {}),
     };
   } catch (error) {
+    await computeLog?.append(
+      'command',
+      `worker launch failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
     await recordMutation({
       provider: vendor,
       operation: 'run_command',

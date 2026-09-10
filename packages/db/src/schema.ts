@@ -84,6 +84,9 @@ import type {
   FastAgentSurface,
   ReasoningEffort,
   SessionStatus,
+  SessionWakeupReportPolicy,
+  SessionWakeupSchedule,
+  SessionWakeupStatus,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -150,6 +153,22 @@ export const users = pgTable(
   ],
 );
 
+export const instanceSkills = pgTable(
+  'instance_skills',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    content: text('content').notNull(),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('instance_skills_name_unique_idx').on(table.name)],
+);
+
 export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
@@ -175,6 +194,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   workspaceRoutingSettings: jsonb(
     'workspace_routing_settings',
   ).$type<WorkspaceRoutingSettings>(),
+  // N-1 rollback: router diagnostics were removed with the LLM router. The
+  // previous release still reads and writes these four columns; drop them
+  // only after that release is no longer the supported rollback target.
   routerDebugProvider: text('router_debug_provider'),
   routerDebugChannelId: text('router_debug_channel_id'),
   routerDebugDisabled: boolean('router_debug_disabled')
@@ -919,9 +941,14 @@ export const taskArtifacts = pgTable(
   'task_artifacts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    taskId: text('task_id')
-      .notNull()
-      .references(() => tasks.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
+    // Additive Session ownership keeps N-1 task-only writers safe. N-1 readers
+    // ignore these rows because their task joins cannot match a null task_id.
+    sessionId: uuid('session_id').references(() => sessions.id, {
+      onDelete: 'cascade',
+    }),
     runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
@@ -938,6 +965,7 @@ export const taskArtifacts = pgTable(
   },
   (table) => [
     index('task_artifacts_task_id_idx').on(table.taskId),
+    index('task_artifacts_session_id_idx').on(table.sessionId),
     index('task_artifacts_run_id_idx').on(table.runId),
     index('task_artifacts_uploaded_idx').on(table.uploaded),
     index('task_artifacts_created_at_idx').on(table.createdAt),
@@ -946,6 +974,13 @@ export const taskArtifacts = pgTable(
       table.taskId,
       table.path,
       table.version,
+    ),
+    uniqueIndex('task_artifacts_session_id_path_version_unique')
+      .on(table.sessionId, table.path, table.version)
+      .where(sql`${table.sessionId} IS NOT NULL`),
+    check(
+      'task_artifacts_owner_shape_check',
+      sql`(${table.taskId} IS NOT NULL) <> (${table.sessionId} IS NOT NULL)`,
     ),
   ],
 );
@@ -958,6 +993,10 @@ export const taskArtifactsRelations = relations(taskArtifacts, ({ one }) => ({
   run: one(taskRuns, {
     fields: [taskArtifacts.runId],
     references: [taskRuns.id],
+  }),
+  session: one(sessions, {
+    fields: [taskArtifacts.sessionId],
+    references: [sessions.id],
   }),
 }));
 
@@ -3336,6 +3375,7 @@ export const slackAuthTokens = pgTable(
     slackTeamId: text('slack_team_id').notNull(),
     channel: text('channel').notNull(),
     threadTs: text('thread_ts').notNull(),
+    messageTs: text('message_ts'),
     originalText: text('original_text').notNull(),
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -3358,9 +3398,12 @@ export const fastAgentConversations = pgTable(
   'fast_agent_conversations',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: text('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    // N-1 keeps writing user-owned rows. Automation-owned rows carry no Fast
+    // parent events, so an older binary safely falls back to its task-only UI.
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'cascade',
+    }),
+    ownerAutomation: text('owner_automation').$type<BackgroundAutomationKey>(),
     surface: text('surface').notNull().$type<FastAgentSurface>(),
     workspaceId: text('workspace_id').notNull(),
     conversationId: text('conversation_id').notNull(),
@@ -3394,6 +3437,17 @@ export const fastAgentConversations = pgTable(
       table.conversationId,
     ),
     index('fast_agent_conversations_user_idx').on(table.userId),
+    index('fast_agent_conversations_owner_automation_idx').on(
+      table.ownerAutomation,
+    ),
+    check(
+      'fast_agent_conversations_owner_shape_check',
+      sql`(
+        (${table.userId} is not null and ${table.ownerAutomation} is null)
+        or
+        (${table.userId} is null and ${table.ownerAutomation} is not null)
+      )`,
+    ),
     index('fast_agent_conversations_legacy_ids_idx').using(
       'gin',
       table.legacyConversationIds,
@@ -3427,6 +3481,31 @@ export const fastAgentParentEvents = pgTable(
     lastError: text('last_error'),
     deliveredAt: timestamp('delivered_at'),
     discardedAt: timestamp('discarded_at'),
+    /**
+     * 'inline' marks a human turn the accepting process persisted before
+     * running it itself (durable admission). Null rows were queued for the
+     * worker as before. Both drain through the same queue path.
+     */
+    admission: text('admission').$type<'inline'>(),
+    /**
+     * While set and in the future, a live inline owner is executing this
+     * row; the drain and recovery sweep leave it alone. The owner renews it
+     * as it works and clears it on interruption so recovery starts at once.
+     */
+    claimedUntil: timestamp('claimed_until'),
+    /**
+     * Durable retry scheduling for an inline-admitted turn: while set and
+     * in the future, the turn is waiting out an inference retry backoff
+     * with no live owner, and the drain and recovery sweep leave it alone
+     * until the time arrives. The previous release ignores this column and
+     * would re-run such a row immediately, which is safe (N-1 rollback).
+     */
+    retryAt: timestamp('retry_at'),
+    /**
+     * Automatic inference retries this turn has consumed across every
+     * owner, so the per-turn retry cap holds through restarts and handoffs.
+     */
+    inferenceRetries: integer('inference_retries').notNull().default(0),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3584,6 +3663,76 @@ export const fastAgentConversationsRelations = relations(
     session: one(sessions),
   }),
 );
+
+/**
+ * session_wakeups
+ *
+ * Messages a Fast conversation scheduled for itself. A row stays `active`
+ * until it has fired for the last time, was cancelled, or failed too many
+ * turns in a row; terminal rows are retained for history. `next_run_at` is
+ * the source of truth for firing: the BullMQ delayed job is only a wakeup
+ * hint, and claiming an occurrence is a compare-and-set on that column.
+ */
+export const sessionWakeups = pgTable(
+  'session_wakeups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    name: text('name').notNull(),
+    prompt: text('prompt').notNull(),
+    /** Whitespace-collapsed, lower-cased prompt used to detect duplicates. */
+    promptSignature: text('prompt_signature').notNull(),
+    schedule: jsonb('schedule').notNull().$type<SessionWakeupSchedule>(),
+    reportPolicy: text('report_policy')
+      .notNull()
+      .$type<SessionWakeupReportPolicy>(),
+    status: text('status')
+      .notNull()
+      .default('active')
+      .$type<SessionWakeupStatus>(),
+    runCount: integer('run_count').notNull().default(0),
+    maxRuns: integer('max_runs'),
+    until: timestamp('until'),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    nextRunAt: timestamp('next_run_at'),
+    lastFiredAt: timestamp('last_fired_at'),
+    lastError: text('last_error'),
+    completedAt: timestamp('completed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('session_wakeups_due_idx').on(table.status, table.nextRunAt),
+    index('session_wakeups_conversation_idx').on(
+      table.conversationId,
+      table.status,
+    ),
+    check(
+      'session_wakeups_status_check',
+      sql`${table.status} in ('active', 'completed', 'cancelled', 'failed')`,
+    ),
+    check(
+      'session_wakeups_report_policy_check',
+      sql`${table.reportPolicy} in ('always', 'only_when_notable')`,
+    ),
+  ],
+);
+
+export const sessionWakeupsRelations = relations(sessionWakeups, ({ one }) => ({
+  conversation: one(fastAgentConversations, {
+    fields: [sessionWakeups.conversationId],
+    references: [fastAgentConversations.id],
+  }),
+  createdByUser: one(users, {
+    fields: [sessionWakeups.createdByUserId],
+    references: [users.id],
+  }),
+}));
 
 export const fastAgentParentEventsRelations = relations(
   fastAgentParentEvents,
@@ -3795,6 +3944,12 @@ export const slackFastIntegrationCallsRelations = relations(
  * stores the workspace choices shown to the user.
  */
 
+/**
+ * N-1 rollback: no longer written since Linear sessions enter Fast Sessions
+ * (the workspace elicitation flow is gone). The previous release still reads
+ * and writes this table; drop it only after that release is no longer the
+ * supported rollback target.
+ */
 export const linearPendingSelections = pgTable(
   'linear_pending_selections',
   {
@@ -4169,10 +4324,13 @@ export const customAutomations = pgTable(
      * deployment default task model.
      */
     model: text('model'),
+    /** Optional reasoning override for the selected model. */
+    reasoningEffort: text('reasoning_effort').$type<ReasoningEffort>(),
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),
     allRepositories: boolean('all_repositories').notNull().default(false),
+    noRepositories: boolean('no_repositories').notNull().default(false),
     executionMode: text('execution_mode')
       .notNull()
       .default('sandbox_task')

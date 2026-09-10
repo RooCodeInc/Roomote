@@ -1,5 +1,4 @@
-import { Env } from '@roomote/env';
-import { AGENT_DISPLAY_NAME, formatErrorForLog } from '@roomote/types';
+import type { FastAgentReplyStream } from '@roomote/cloud-agents/server';
 import {
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
@@ -9,11 +8,16 @@ import {
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
-  buildStartedBlocks,
-  persistPostedSlackKickoff,
+  buildSlackThreadReplyFooterBlock,
+  getSlackThreadReplyFooterMessageTs,
   postSlackThreadMessageWithFooterText,
+  withSlackThreadReplyFooterLock,
   type SlackNotifier,
 } from '@roomote/slack';
+import {
+  buildDataVisualizationBlocks,
+  type DataVisualizationInput,
+} from '@roomote/types';
 
 import { apiLogger } from '../../../logging.js';
 
@@ -21,6 +25,8 @@ type SlackThreadMarkdownPostResult =
   | { status: 'posted'; messageId: string }
   | 'suppressed'
   | 'failed';
+
+const SLACK_MAX_MESSAGE_BLOCKS = 50;
 
 export async function postSlackThreadMarkdownMessage({
   slack,
@@ -30,6 +36,9 @@ export async function postSlackThreadMarkdownMessage({
   sourceMessageTs,
   conversationLog,
   fastSessionFooter,
+  images = [],
+  charts = [],
+  deliverVideos,
 }: {
   slack: SlackNotifier;
   channel: string;
@@ -43,7 +52,33 @@ export async function postSlackThreadMarkdownMessage({
   };
   /** Attach the sticky Fast session reply footer to this message. */
   fastSessionFooter?: { sessionId: string } & FastSessionReplyFooterContext;
+  images?: Array<{ url: string; altText: string }>;
+  /** Native Block Kit charts rendered after the Markdown body. */
+  charts?: DataVisualizationInput[];
+  /** Upload only after the source guard permits a successful text post. */
+  deliverVideos?: () => Promise<string>;
 }): Promise<SlackThreadMarkdownPostResult> {
+  const buildBodyBlocks = (bodyText: string) => {
+    const leadingBlocks = [
+      { type: 'markdown' as const, text: bodyText },
+      ...buildDataVisualizationBlocks(charts),
+    ];
+    const imageCapacity = Math.max(
+      0,
+      SLACK_MAX_MESSAGE_BLOCKS -
+        leadingBlocks.length -
+        (fastSessionFooter ? 1 : 0),
+    );
+
+    return [
+      ...leadingBlocks,
+      ...images.slice(0, imageCapacity).map((image) => ({
+        type: 'image' as const,
+        image_url: image.url,
+        alt_text: image.altText,
+      })),
+    ];
+  };
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
       channel,
@@ -67,7 +102,7 @@ export async function postSlackThreadMarkdownMessage({
         channel,
         threadTs,
         text,
-        bodyBlocks: [{ type: 'markdown', text }],
+        bodyBlocks: buildBodyBlocks(text),
         footerText: buildFastSessionReplyFooterText({
           provider: 'slack',
           ...fastSessionFooter,
@@ -77,16 +112,49 @@ export async function postSlackThreadMarkdownMessage({
         channel,
         thread_ts: threadTs,
         text,
-        blocks: [
-          {
-            type: 'markdown',
-            text,
-          },
-        ],
+        blocks: buildBodyBlocks(text),
       });
 
   if (!messageTs) {
     return 'failed';
+  }
+
+  const videoFallback = await deliverVideos?.();
+  if (videoFallback) {
+    text = [text, videoFallback].filter(Boolean).join('\n\n');
+    const updated = await withSlackThreadReplyFooterLock({
+      channel,
+      threadTs,
+      fn: async () => {
+        const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
+          channel,
+          threadTs,
+        );
+        return slack.updateMessage({
+          channel,
+          ts: messageTs,
+          message: {
+            text,
+            blocks: [
+              ...buildBodyBlocks(text),
+              ...(fastSessionFooter && footerMessageTs === messageTs
+                ? [
+                    buildSlackThreadReplyFooterBlock({
+                      footerText: buildFastSessionReplyFooterText({
+                        provider: 'slack',
+                        ...fastSessionFooter,
+                      }),
+                    }),
+                  ]
+                : []),
+            ],
+          },
+        });
+      },
+    });
+    if (!updated) {
+      throw new Error('Slack did not update the Fast video fallback reply.');
+    }
   }
 
   if (conversationLog) {
@@ -115,63 +183,42 @@ export async function postSlackThreadMarkdownMessage({
   return { status: 'posted', messageId: messageTs };
 }
 
-export async function postTaskSuggestionStartedMessage(params: {
-  slack: SlackNotifier;
-  channelId: string;
-  threadTs: string;
-  workspaceName: string;
-  runId: number | null;
-  initiatingSlackUserId: string;
-  taskId: string | null;
-  readinessNote?: string;
-}): Promise<void> {
-  const {
-    slack,
-    channelId,
-    threadTs,
-    workspaceName,
-    runId,
-    initiatingSlackUserId,
-    taskId,
-    readinessNote,
-  } = params;
+/**
+ * Applies the deleted-source rule to a streamed reply: the stream opens only
+ * while the triggering message is still in the thread, and a source deleted
+ * mid-stream ends it without a delivery so the regular post path suppresses
+ * the reply exactly as it would have.
+ */
+export function guardReplyStreamBySourceMessage(
+  stream: FastAgentReplyStream,
+  params: {
+    slack: Pick<SlackNotifier, 'hasMessageInThread'>;
+    channel: string;
+    threadTs: string;
+    sourceMessageTs: string;
+  },
+): FastAgentReplyStream {
+  const sourceMessagePresent = async () =>
+    (await params.slack.hasMessageInThread({
+      channel: params.channel,
+      threadTs: params.threadTs,
+      messageTs: params.sourceMessageTs,
+    })) !== false;
+  let presentAtOpen: Promise<boolean> | undefined;
 
-  const taskUrl = taskId ? new URL(`/task/${taskId}`, Env.R_APP_URL) : null;
-
-  if (taskUrl) {
-    taskUrl.searchParams.set('utm_source', 'slack');
-    taskUrl.searchParams.set('utm_medium', 'integration');
-    taskUrl.searchParams.set('utm_campaign', 'setup_suggestion_reaction');
-  }
-
-  try {
-    const startedMessageTs = await slack.postMessage({
-      channel: channelId,
-      thread_ts: threadTs,
-      blocks: buildStartedBlocks({
-        workspaceDisplayName: workspaceName,
-        runId,
-        taskId,
-        initiatingSlackUserId,
-        taskUrl: taskUrl?.toString(),
-        readinessNote,
-      }),
-    });
-
-    if (startedMessageTs && runId) {
-      await persistPostedSlackKickoff({
-        runId,
-        taskId,
-        messageTs: startedMessageTs,
-        agentName: AGENT_DISPLAY_NAME,
-        initiatingSlackUserId,
-        workspaceDisplayName: workspaceName,
-        workspaceOnly: false,
-      });
-    }
-  } catch (error) {
-    console.warn(
-      `[SlackWebhook] Failed to post task suggestion started message for ${channelId}:${threadTs}: ${formatErrorForLog(error)}`,
-    );
-  }
+  return {
+    append: async (text) => {
+      presentAtOpen ??= sourceMessagePresent();
+      if (await presentAtOpen) await stream.append(text);
+    },
+    finish: async (reply) => {
+      if (await sourceMessagePresent()) return stream.finish(reply);
+      apiLogger.debug(
+        `[SlackWebhook] Ending the streamed fast-agent reply because source message ${params.sourceMessageTs} is no longer in thread ${params.threadTs}`,
+      );
+      await stream.abort();
+      return undefined;
+    },
+    abort: () => stream.abort(),
+  };
 }

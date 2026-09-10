@@ -7,4 +7,3 @@ export {
   getTaskSuggestionFilterOptionsCommand,
   listTaskSuggestionHistoryCommand,
 } from './history';
-export { implementTaskSuggestionCommand } from './implement';

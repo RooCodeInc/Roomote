@@ -1,4 +1,4 @@
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import { NO_REPOSITORIES, RunStatus, TaskPayloadKind } from '@roomote/types';
 import type { TaskRun } from '@roomote/db/server';
 
 const {
@@ -225,6 +225,32 @@ describe('createSourceControlTokenForTaskRun', () => {
     expect(mockCreateTaskRunWorkerGitHubTokenWithMetadata).toHaveBeenCalledWith(
       taskRun,
     );
+  });
+
+  it('does not require or mint source-control credentials for Blank slate', async () => {
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: NO_REPOSITORIES,
+        description: 'Create a standalone artifact',
+      }),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'github',
+      token: '',
+      envVars: {},
+      source: 'app',
+      expiresAt: null,
+    });
+    expect(
+      mockCreateTaskRunWorkerGitHubTokenWithMetadata,
+    ).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunScopedGitLabTokens).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunGiteaCredentials).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunAdoCredentials).not.toHaveBeenCalled();
+    expect(mockCreateTaskRunBitbucketCredentials).not.toHaveBeenCalled();
   });
 
   it('creates GitLab token metadata from repo-scoped credentials', async () => {
@@ -945,6 +971,7 @@ describe('redactControlPlaneEnvVars', () => {
         DASHBOARD_PASSWORD: 'dash',
         DATABASE_URL: 'postgres://x',
         S3_SECRET_ACCESS_KEY: 's3',
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
         // Derived from the source-control secret catalog.
         GITLAB_WEBHOOK_SECRET: 'gl-webhook',
         GITLAB_CLIENT_SECRET: 'gl-client',
@@ -967,6 +994,7 @@ describe('redactControlPlaneEnvVars', () => {
       OPENAI_API_KEY: 'sk-test',
       ANTHROPIC_API_KEY: 'sk-ant',
       OPENROUTER_API_KEY: 'sk-or',
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
       MY_APP_CONFIG: 'value',
       GITLAB_TOKEN: 'glpat-scoped',
     });
@@ -979,6 +1007,33 @@ describe('redactControlPlaneEnvVars', () => {
 });
 
 describe('fetchResolvedRuntimeEnvVars', () => {
+  it('withholds the sandbox OpenRouter key from ordinary tasks', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars).not.toHaveProperty('SANDBOX_OPENROUTER_API_KEY');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+  });
+
+  it('admits the sandbox OpenRouter key only for environment-linked workers', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({});
+
+    const envVars = await fetchResolvedRuntimeEnvVars(
+      {
+        SANDBOX_OPENROUTER_API_KEY: 'sandbox-openrouter-key',
+        MY_APP_CONFIG: 'value',
+      },
+      { includeSandboxOpenRouterApiKey: true },
+    );
+
+    expect(envVars.SANDBOX_OPENROUTER_API_KEY).toBe('sandbox-openrouter-key');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+  });
+
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
     mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',

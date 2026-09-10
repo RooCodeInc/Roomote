@@ -16,6 +16,7 @@ import {
 import { useAuthenticateGitHubAccount } from '@/hooks/github';
 import { useAuthenticateSlackAccount } from '@/hooks/slack';
 import { useAuthenticateLinearAccount } from '@/hooks/linear';
+import { useEnvironments } from '@/hooks/environments';
 import {
   useAuthenticateAdoAccount,
   useAuthenticateBitbucketAccount,
@@ -39,6 +40,7 @@ import {
   X,
   Button,
   Spinner,
+  VectorSquare,
   Zap,
 } from '@/components/system';
 import { McpIcon } from '@/components/settings/McpIcon';
@@ -155,6 +157,7 @@ export function OnboardingCard() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const trpc = useTRPC();
+  const environments = useEnvironments({ enabled: isAdmin });
   const shouldShowSuggestedTasksCard =
     searchParams.get('link_suggested') === 'true';
   const onboarding = useQuery(trpc.onboarding.status.queryOptions());
@@ -425,6 +428,23 @@ export function OnboardingCard() {
   };
 
   const cards: CardConfig[] = [
+    {
+      id: 'create-environment',
+      icon: (
+        <VectorSquare
+          className="size-4 shrink-0 text-muted-foreground"
+          strokeWidth={1}
+        />
+      ),
+      label:
+        'Create an environment to get live previews, faster startup and better verification',
+      buttonLabel: 'Create',
+      onClick: () => router.push(SETTINGS_PATHS.newEnvironment),
+      visible:
+        isAdmin &&
+        environments.isSuccess &&
+        (environments.data?.length ?? 0) === 0,
+    },
     {
       id: 'automations',
       icon: (

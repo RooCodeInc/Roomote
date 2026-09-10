@@ -81,12 +81,3 @@ export function useUpdateWorkspaceRoutingSettings() {
     }),
   );
 }
-
-export function useAvailableEnvironments(repository?: string) {
-  const trpc = useTRPC();
-  return useQuery(
-    trpc.environments.available.queryOptions(
-      repository ? { repository } : undefined,
-    ),
-  );
-}

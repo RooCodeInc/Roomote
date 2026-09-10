@@ -299,6 +299,8 @@ services:
     public_domain: no
     env:
       <<: *app_service_env
+      # Optional capped OpenRouter key mapped into nested Roomote deployments.
+      SANDBOX_OPENROUTER_API_KEY: ''
       # The worker release archive is baked into the app image; the
       # controller uploads it into hosted sandboxes at spawn time.
       # The version-less name works because the controller reads the release

@@ -148,7 +148,7 @@ export async function publishFastAgentRequestUserInput(input: {
         }
 
         await fastAgentConversationRepository.getOrCreate({
-          userId: canonicalSession.userId,
+          owner: canonicalSession.owner,
           conversation: {
             ...canonicalSession.conversation,
             replyTarget: {

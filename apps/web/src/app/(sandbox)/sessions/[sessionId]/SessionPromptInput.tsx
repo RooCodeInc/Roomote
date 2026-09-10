@@ -1,14 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import type { ReasoningEffort } from '@roomote/types';
 
 import { ROOMOTE_FILE_ATTACHMENT_ACCEPT } from '@/lib/prompt-attachments';
-import { useUser } from '@/hooks/useUser';
 import { useVoiceDictation } from '@/hooks/useVoiceDictation';
+import { useAutoFocusOnce } from '@/hooks/useAutoFocusOnce';
 import {
   SUGGESTION_MIN_HISTORY_MESSAGES,
   useGhostSuggestion,
@@ -29,10 +29,11 @@ import {
   usePromptInputAttachments,
 } from '@/components/ai-elements';
 import { BasicTooltip } from '@/components/system';
+import { SessionModelSwitcher } from '@/components/tasks/SessionModelSwitcher';
 import { useTRPC, useTRPCClient } from '@/trpc/client';
 
 import { AttachmentsDisplay } from '../../task/[taskId]/prompt-input/AttachmentsDisplay';
-import { SessionModelSwitcher } from './SessionModelSwitcher';
+import { SessionWakeups } from './SessionWakeups';
 
 export type SessionPromptSubmission = PromptInputMessage & {
   model: string | null;
@@ -93,22 +94,20 @@ export function SessionPromptInput({
   const trpc = useTRPC();
   const trpcClient = useTRPCClient();
   const [prompt, setPrompt] = useState('');
+  const [isTextareaFocused, setIsTextareaFocused] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [model, setModel] = useState(initialModel ?? '');
   const [reasoningEffort, setReasoningEffort] =
     useState<ReasoningEffort | null>(initialReasoningEffort);
   const [isUpdatingModelSelection, setIsUpdatingModelSelection] =
     useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useAutoFocusOnce(textareaRef, !isBusy);
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => setPrompt(text),
     getPrefix: () => prompt,
     disabled: isBusy,
   });
-
-  // Experimental, deployment-wide opt-in. The server enforces the flag too;
-  // this just avoids pointless requests while it is off.
-  const { user } = useUser();
-  const suggestionsEnabled = user?.featureFlags?.composerSuggestions === true;
 
   const composerSuggestionQuery = useQuery(
     trpc.fastSessions.composerSuggestion.queryOptions(
@@ -122,7 +121,6 @@ export function SessionPromptInput({
         // the agent is still working, and each would otherwise generate and
         // surface a premature suggestion.
         enabled:
-          suggestionsEnabled &&
           !agentWorking &&
           historyMessageCount >= SUGGESTION_MIN_HISTORY_MESSAGES,
         staleTime: Number.POSITIVE_INFINITY,
@@ -162,6 +160,7 @@ export function SessionPromptInput({
     });
     if (sent) {
       setPrompt('');
+      setIsTextareaFocused(false);
       // Remount the root to clear held attachments.
       setResetKey((previous) => previous + 1);
     }
@@ -211,6 +210,7 @@ export function SessionPromptInput({
 
   return (
     <div className="mx-auto w-full max-w-4xl">
+      <SessionWakeups key={sessionId} sessionId={sessionId} />
       <PromptInputRoot
         key={`composer-${resetKey}`}
         onSubmit={handleSubmit}
@@ -220,10 +220,14 @@ export function SessionPromptInput({
       >
         <AttachmentsDisplay />
         <PromptInputBody>
-          <div className="relative">
+          <div className="flex items-start">
             <PromptInputTextarea
+              className="min-w-0 flex-1"
+              ref={textareaRef}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
+              onFocus={() => setIsTextareaFocused(true)}
+              onBlur={() => setIsTextareaFocused(false)}
               onKeyDown={(event) => {
                 handleSuggestionKeyDown(event);
               }}
@@ -237,14 +241,18 @@ export function SessionPromptInput({
                   Suggested message: {ghostSuggestion}. Press Tab to accept or
                   Escape to dismiss.
                 </span>
-                <button
-                  type="button"
-                  aria-label="Insert suggested message"
-                  onClick={acceptGhostSuggestion}
-                  className="absolute right-4 top-4 rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
-                >
-                  Tab
-                </button>
+                {isTextareaFocused && (
+                  <button
+                    type="button"
+                    aria-label="Insert suggested message"
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={acceptGhostSuggestion}
+                    className="mt-4 mr-4 shrink-0 whitespace-nowrap rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground/70 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  >
+                    <span className="md:hidden">Accept</span>
+                    <span className="hidden md:inline">Tab to accept</span>
+                  </button>
+                )}
               </>
             )}
           </div>

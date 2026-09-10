@@ -7,7 +7,7 @@ import {
   extractErrorDetails,
   isObservedTimeoutError,
   resolveComputeProviderTarget,
-  SANDBOX_SNAPSHOT_EXPIRY_MS,
+  getSnapshotExpiresAt,
   shouldCompleteTaskOnSnapshot,
   withoutCompleteTaskOnSnapshot,
 } from '@roomote/types';
@@ -721,9 +721,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   // resume window the snapshot no longer has.
   const snapshotCreatedAt = persistedSnapshotCreatedAt ?? now;
 
-  const snapshotExpiresAt = new Date(
-    snapshotCreatedAt.getTime() + SANDBOX_SNAPSHOT_EXPIRY_MS,
-  );
+  const snapshotExpiresAt = getSnapshotExpiresAt(snapshotCreatedAt, provider);
 
   const expectedSnapshotId = persistedSnapshotId ?? taskRun.snapshotId ?? null;
   const completed = await db.transaction(async (tx) => {
@@ -864,7 +862,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       queueAttempt,
       snapshotIntentId,
       triggerPath,
-      snapshotExpiresAt: snapshotExpiresAt.toISOString(),
+      snapshotExpiresAt: snapshotExpiresAt?.toISOString() ?? null,
       recoveredFromSnapshotting: Boolean(reconciledSnapshot),
       reconciledSnapshotCreatedAt:
         reconciledSnapshot?.createdAt.toISOString() ?? null,

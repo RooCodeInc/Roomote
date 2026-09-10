@@ -13,9 +13,11 @@ import {
   persistPrReviewEvent,
   recordPrReviewCycleState,
   releasePrReviewDeliveries,
+  releaseSupersededCanonicalPrReviewAction,
   renewPrReviewDeliveryClaim,
   slackInstallations,
   transitionCanonicalPrReviewDelivery,
+  withCanonicalPrReviewAutoDispatchFence,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -28,6 +30,11 @@ import {
 } from '@roomote/types';
 
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
+import {
+  dispatchPrReviewFollowUp,
+  type PrReviewFollowUpDispatchInput,
+  type PrReviewFollowUpDispatchResult,
+} from './pr-review-follow-up-dispatch';
 
 export const PR_REVIEW_NOTIFICATION_QUEUE_NAME = 'pr-review-notification-jobs';
 
@@ -164,6 +171,7 @@ export const prReviewNotificationRequestSchema = z.object({
     ])
     .optional(),
   followUpPrompt: z.string().nullable().optional(),
+  reviewActionSuperseded: z.boolean().optional(),
   targetTaskId: z.string().nullable().optional(),
   actingUserId: z.string().nullable().optional(),
   routeProvider: z
@@ -511,6 +519,27 @@ export async function schedulePrReviewNotificationJob({
   );
 }
 
+export async function retrySupersededPrReviewAction(
+  request: PrReviewNotificationRequest,
+): Promise<boolean> {
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return false;
+  }
+
+  const released = await releaseSupersededCanonicalPrReviewAction({
+    deliveryId: request.deliveryId,
+    leaseToken: request.leaseToken,
+  });
+  if (!released) return false;
+
+  await dispatchDuePrReviewNotifications();
+  return true;
+}
+
 export async function consumePendingPrReviewActivity(
   target: PrReviewNotificationTarget,
 ): Promise<PrReviewActivityEvent[]> {
@@ -761,6 +790,7 @@ export async function dispatchDuePrReviewNotifications(): Promise<number> {
               repositoryId: claim.repositoryId,
               deliveryState: claim.state,
               followUpPrompt: claim.followUpPrompt,
+              reviewActionSuperseded: claim.reviewActionSuperseded,
               targetTaskId: claim.targetTaskId,
               actingUserId: claim.actingUserId,
               routeProvider: claim.routeProvider,
@@ -931,7 +961,7 @@ export async function beginCanonicalPrReviewAutoDispatch(input: {
   return transitionCanonicalPrReviewDelivery({
     deliveryId: request.deliveryId,
     leaseToken: request.leaseToken,
-    expected: 'prepared',
+    expected: ['prepared', 'auto_dispatch_pending'],
     status: 'auto_dispatch_pending',
     values: {
       followUpPrompt: input.followUpPrompt,
@@ -962,7 +992,7 @@ export async function beginCanonicalPrReviewWebAutoDispatch(input: {
   return transitionCanonicalPrReviewDelivery({
     deliveryId: request.deliveryId,
     leaseToken: request.leaseToken,
-    expected: 'prepared',
+    expected: ['prepared', 'auto_dispatch_pending'],
     status: 'auto_dispatch_pending',
     values: {
       followUpPrompt: input.followUpPrompt,
@@ -970,6 +1000,40 @@ export async function beginCanonicalPrReviewWebAutoDispatch(input: {
       actingUserId: input.actingUserId,
     },
   });
+}
+
+export async function dispatchCanonicalPrReviewAutoFollowUp(input: {
+  request: PrReviewNotificationRequest;
+  followUpPrompt: string;
+  targetTaskId: string;
+  actingUserId: string;
+  route: PrReviewNotificationRoute | null;
+  dispatchInput: PrReviewFollowUpDispatchInput;
+}): Promise<PrReviewFollowUpDispatchResult | null> {
+  const { request, route } = input;
+  if (
+    request.ownershipVersion !== 'canonical' ||
+    !request.deliveryId ||
+    !request.leaseToken
+  ) {
+    return dispatchPrReviewFollowUp(input.dispatchInput);
+  }
+
+  const fenced = await withCanonicalPrReviewAutoDispatchFence(
+    {
+      deliveryId: request.deliveryId,
+      leaseToken: request.leaseToken,
+      followUpPrompt: input.followUpPrompt,
+      targetTaskId: input.targetTaskId,
+      actingUserId: input.actingUserId,
+      routeProvider: route?.provider ?? null,
+      routeWorkspaceId: route?.provider === 'slack' ? route.slackTeamId : null,
+      routeChannelId: route?.channelId ?? null,
+      routeThreadId: route?.threadId ?? null,
+    },
+    () => dispatchPrReviewFollowUp(input.dispatchInput),
+  );
+  return fenced.acquired ? fenced.result : null;
 }
 
 export async function releaseCanonicalPrReviewWebAutoDispatch(

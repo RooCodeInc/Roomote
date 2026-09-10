@@ -560,7 +560,7 @@ describe('Messages', () => {
       />,
     );
 
-    expect(screen.getByText('Worked for 17s')).toBeInTheDocument();
+    expect(screen.queryByText('Worked for 17s')).not.toBeInTheDocument();
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
   });
 
@@ -605,7 +605,7 @@ describe('Messages', () => {
     );
 
     expect(screen.getByText('Initial prompt')).toBeInTheDocument();
-    expect(screen.getByText('Worked for 7s')).toBeInTheDocument();
+    expect(screen.queryByText('Worked for 7s')).not.toBeInTheDocument();
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
   });
 
@@ -646,7 +646,7 @@ describe('Messages', () => {
       />,
     );
 
-    expect(screen.getByText('Worked for 10s')).toBeInTheDocument();
+    expect(screen.queryByText('Worked for 10s')).not.toBeInTheDocument();
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
   });
 
@@ -711,8 +711,7 @@ describe('Messages', () => {
       />,
     );
 
-    expect(screen.getByText('Worked for 1s')).toBeInTheDocument();
-    expect(screen.getByText('Worked for 8s')).toBeInTheDocument();
+    expect(screen.queryByText(/Worked for/)).not.toBeInTheDocument();
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
     expect(screen.getByText('todo-1')).toBeInTheDocument();
     expect(screen.getByText('reasoning-2')).toBeInTheDocument();

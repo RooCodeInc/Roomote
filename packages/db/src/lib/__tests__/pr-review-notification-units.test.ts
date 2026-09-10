@@ -20,13 +20,17 @@ import {
   prReviewNotificationUnitEvents,
   prReviewNotificationUnits,
   releaseCanonicalPrReviewActionDispatch,
+  releaseSupersededCanonicalPrReviewAction,
+  retireCanonicalPrReviewActionsForPullRequest,
   runFactory,
   taskFactory,
+  taskMessages,
   taskPullRequests,
   tasks,
   transitionCanonicalPrReviewDelivery,
   upsertPrReviewAutoPreference,
   userFactory,
+  withCanonicalPrReviewAutoDispatchFence,
 } from '../../server';
 import { RunStatus } from '@roomote/types';
 
@@ -1199,6 +1203,522 @@ describe('canonical PR review notification ownership', () => {
         prReviewAction: { deliveryId: firstDeliveryId, status: 'dismissed' },
       },
     });
+  });
+
+  it('retires only awaiting offers from older PR heads after a new commit', async () => {
+    const task = await taskFactory.create();
+    const run = await runFactory.create({ taskId: task.id });
+    const repository = `owner/new-commit-${task.id}`;
+    await associate(task.id, repository, 24);
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 24,
+        eventKey: `old-head-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const oldDeliveryId = await postAction(repository);
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: user.id,
+        conversationId: `new-commit-${randomUUID()}`,
+      })
+      .returning();
+    await Promise.all([
+      db.insert(fastAgentMessages).values({
+        conversationId: conversation!.id,
+        eventId: 'new-commit:assistant:0',
+        turnId: 'new-commit',
+        turnSeq: 1,
+        ts: 1,
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        contentBlocks: [{ type: 'text', text: 'Resolve this feedback?' }],
+        metadata: { visibleInTranscript: true },
+        payload: {
+          prReviewAction: { deliveryId: oldDeliveryId, status: 'pending' },
+        },
+        source: 'web',
+      }),
+      db.insert(taskMessages).values({
+        runId: run.id,
+        taskId: task.id,
+        ts: Date.now(),
+        eventType: 'roomote_runtime.assistant_message',
+        role: 'assistant',
+        protocol: 'roomote_runtime',
+        contentBlocks: [{ type: 'text', text: 'Resolve this feedback?' }],
+        payload: {
+          prReviewAction: { deliveryId: oldDeliveryId, status: 'pending' },
+        },
+      }),
+    ]);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 24,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        deliveryId: oldDeliveryId,
+        repository,
+        prNumber: 24,
+      }),
+    ]);
+    await expect(deliveryStatusOf(oldDeliveryId)).resolves.toBe('dismissed');
+    await expect(
+      db.query.fastAgentMessages.findFirst({
+        where: eq(fastAgentMessages.conversationId, conversation!.id),
+        columns: { payload: true },
+      }),
+    ).resolves.toMatchObject({
+      payload: {
+        prReviewAction: { deliveryId: oldDeliveryId, status: 'dismissed' },
+      },
+    });
+    await expect(
+      db.query.taskMessages.findFirst({
+        where: eq(taskMessages.taskId, task.id),
+        columns: { payload: true },
+      }),
+    ).resolves.toMatchObject({
+      payload: {
+        prReviewAction: { deliveryId: oldDeliveryId, status: 'dismissed' },
+      },
+    });
+
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 24,
+        eventKey: `new-head-${task.id}`,
+        headSha: 'new-head',
+      }),
+    );
+    const newDeliveryId = await postAction(repository);
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 24,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(newDeliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+  });
+
+  it('fences an older-head offer that is still posting', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/posting-new-commit-${task.id}`;
+    await associate(task.id, repository, 25);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 25,
+        eventKey: `posting-old-head-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = await claimToPromptPosting(repository);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 25,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ deliveryId: claim.deliveryId }),
+    ]);
+    await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe('dismissed');
+    await expect(
+      attachCanonicalPrReviewActionMessage(
+        claim.deliveryId,
+        'late-message',
+        claim.leaseToken,
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it.each(['claimed', 'prepared'] as const)(
+    'fences an older-head delivery in the %s state without discarding it',
+    async (state) => {
+      const task = await taskFactory.create();
+      const repository = `owner/${state}-new-commit-${task.id}`;
+      await associate(task.id, repository, 26);
+      await persistPrReviewEvent(
+        eventInput({
+          repository,
+          prNumber: 26,
+          eventKey: `${state}-old-head-${task.id}`,
+          headSha: 'old-head',
+        }),
+      );
+      const claim = (await claimForRepository(repository)).find(
+        ({ repository: claimedRepository }) => claimedRepository === repository,
+      );
+      if (!claim || claim.ownershipVersion !== 'canonical') {
+        throw new Error('expected canonical claim');
+      }
+      if (state === 'prepared') {
+        await transitionCanonicalPrReviewDelivery({
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+          expected: 'claimed',
+          status: 'prepared',
+        });
+      }
+
+      await expect(
+        retireCanonicalPrReviewActionsForPullRequest({
+          sourceControlProvider: 'github',
+          repository,
+          prNumber: 26,
+          currentHeadSha: 'new-head',
+        }),
+      ).resolves.toEqual([]);
+
+      await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(state);
+      await expect(
+        db.query.prReviewNotificationDeliveries.findFirst({
+          where: eq(prReviewNotificationDeliveries.id, claim.deliveryId),
+          columns: { actionClaimedAt: true },
+        }),
+      ).resolves.toEqual({ actionClaimedAt: expect.any(Date) });
+      if (state === 'claimed') {
+        await expect(
+          transitionCanonicalPrReviewDelivery({
+            deliveryId: claim.deliveryId,
+            leaseToken: claim.leaseToken,
+            expected: 'claimed',
+            status: 'prepared',
+          }),
+        ).resolves.toBe(true);
+      }
+      await expect(
+        transitionCanonicalPrReviewDelivery({
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+          expected: 'prepared',
+          status: 'prompt_posting',
+        }),
+      ).resolves.toBe(false);
+      await expect(
+        transitionCanonicalPrReviewDelivery({
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+          expected: 'prepared',
+          status: 'auto_dispatch_pending',
+        }),
+      ).resolves.toBe(false);
+      await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(
+        'prepared',
+      );
+      await db
+        .update(prReviewEvents)
+        .set({ superseded: true })
+        .where(eq(prReviewEvents.eventKey, `${state}-old-head-${task.id}`));
+      await expect(
+        releaseSupersededCanonicalPrReviewAction({
+          deliveryId: claim.deliveryId,
+          leaseToken: claim.leaseToken,
+        }),
+      ).resolves.toBe(true);
+      await expect(claimForRepository(repository, CLAIM_AT)).resolves.toEqual([
+        expect.objectContaining({
+          deliveryId: claim.deliveryId,
+          state: 'claimed',
+          reviewActionSuperseded: true,
+        }),
+      ]);
+    },
+  );
+
+  it('releases an automatic dispatch fenced before remediation starts', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/auto-dispatch-new-commit-${task.id}`;
+    await associate(task.id, repository, 30);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 30,
+        eventKey: `auto-dispatch-old-head-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'auto_dispatch_pending',
+    });
+
+    await retireCanonicalPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 30,
+      currentHeadSha: 'new-head',
+    });
+    await expect(
+      releaseSupersededCanonicalPrReviewAction({
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+      }),
+    ).resolves.toBe(true);
+    await expect(claimForRepository(repository, CLAIM_AT)).resolves.toEqual([
+      expect.objectContaining({
+        deliveryId: claim.deliveryId,
+        state: 'claimed',
+        reviewActionSuperseded: true,
+      }),
+    ]);
+  });
+
+  it('suppresses a superseded ordinary automatic dispatch after its lease expires', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/superseded-auto-dispatch-${task.id}`;
+    const eventKey = `superseded-auto-dispatch-${task.id}`;
+    await associate(task.id, repository, 31);
+    await persistPrReviewEvent(
+      eventInput({ repository, prNumber: 31, eventKey }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'auto_dispatch_pending',
+      values: { actionClaimedAt: CLAIM_AT },
+    });
+    await db
+      .update(prReviewEvents)
+      .set({ superseded: true })
+      .where(eq(prReviewEvents.eventKey, eventKey));
+
+    await expect(
+      claimForRepository(
+        repository,
+        new Date(CLAIM_AT.getTime() + 11 * 60 * 1000),
+      ),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(claim.deliveryId)).resolves.toBe(
+      'suppressed',
+    );
+  });
+
+  it('holds the old-head retirement fence through automatic dispatch', async () => {
+    const user = await userFactory.create();
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const repository = `owner/locked-auto-dispatch-${task.id}`;
+    await associate(task.id, repository, 33);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 33,
+        eventKey: `locked-auto-dispatch-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+
+    let releaseDispatch!: () => void;
+    const dispatchBlocked = new Promise<void>((resolve) => {
+      releaseDispatch = resolve;
+    });
+    let dispatchStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      dispatchStarted = resolve;
+    });
+    const order: string[] = [];
+    const dispatch = withCanonicalPrReviewAutoDispatchFence(
+      {
+        deliveryId: claim.deliveryId,
+        leaseToken: claim.leaseToken,
+        followUpPrompt: 'Resolve the review feedback.',
+        targetTaskId: task.id,
+        actingUserId: user.id,
+        routeProvider: 'slack',
+        routeWorkspaceId: 'T123',
+        routeChannelId: 'C123',
+        routeThreadId: '111.222',
+      },
+      async () => {
+        order.push('dispatch-start');
+        dispatchStarted();
+        await dispatchBlocked;
+        order.push('dispatch-end');
+        return 'queued';
+      },
+    );
+    await started;
+
+    const retirement = retireCanonicalPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber: 33,
+      currentHeadSha: 'new-head',
+    }).then((result) => {
+      order.push('retirement-end');
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(order).toEqual(['dispatch-start']);
+
+    releaseDispatch();
+    await expect(dispatch).resolves.toEqual({
+      acquired: true,
+      result: 'queued',
+    });
+    await expect(retirement).resolves.toEqual([]);
+    expect(order).toEqual(['dispatch-start', 'dispatch-end', 'retirement-end']);
+  });
+
+  it('leaves a pending older-head delivery for the reviewer text to be delivered', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/pending-new-commit-${task.id}`;
+    await associate(task.id, repository, 27);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 27,
+        eventKey: `pending-old-head-${task.id}`,
+        headSha: 'old-head',
+      }),
+    );
+    const [delivery] = await db
+      .select({ id: prReviewNotificationDeliveries.id })
+      .from(prReviewNotificationDeliveries)
+      .innerJoin(
+        prReviewNotificationUnits,
+        eq(
+          prReviewNotificationUnits.id,
+          prReviewNotificationDeliveries.notificationUnitId,
+        ),
+      )
+      .where(eq(prReviewNotificationUnits.repository, repository));
+    if (!delivery) throw new Error('expected a pending delivery');
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 27,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(delivery.id)).resolves.toBe('pending');
+    await expect(claimForRepository(repository)).resolves.toEqual([
+      expect.objectContaining({ deliveryId: delivery.id }),
+    ]);
+  });
+
+  it('treats an abbreviated recorded head as current when it prefixes the live head', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/short-sha-${task.id}`;
+    await associate(task.id, repository, 29);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 29,
+        eventKey: `short-sha-${task.id}`,
+        headSha: 'abc1234',
+      }),
+    );
+    const deliveryId = await postAction(repository);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 29,
+        currentHeadSha: 'abc1234def5678901234567890abcdef12345678',
+      }),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 29,
+        currentHeadSha: 'def5678abc1234567890abcdef1234567890abcd',
+      }),
+    ).resolves.toEqual([expect.objectContaining({ deliveryId })]);
+    await expect(deliveryStatusOf(deliveryId)).resolves.toBe('dismissed');
+  });
+
+  it('leaves an awaiting offer whose unit has no recorded head', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/headless-new-commit-${task.id}`;
+    await associate(task.id, repository, 28);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: 28,
+        eventKey: `headless-${task.id}`,
+      }),
+    );
+    const deliveryId = await postAction(repository);
+
+    await expect(
+      retireCanonicalPrReviewActionsForPullRequest({
+        sourceControlProvider: 'github',
+        repository,
+        prNumber: 28,
+        currentHeadSha: 'new-head',
+      }),
+    ).resolves.toEqual([]);
+    await expect(deliveryStatusOf(deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
   });
 
   it('keeps exactly one awaiting offer when two actions attach concurrently', async () => {

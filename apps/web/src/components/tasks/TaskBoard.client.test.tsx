@@ -151,4 +151,21 @@ describe('TaskBoard', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText('Completed task 7')).not.toBeInTheDocument();
   });
+
+  it('uses the automation icon instead of the initiating user avatar', () => {
+    render(
+      <TaskBoard
+        tasks={[
+          createTask({
+            attributionKind: 'automation',
+            initiatorAutomation: 'review_code',
+            participants: [],
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId('automation-icon')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Ada' })).not.toBeInTheDocument();
+  });
 });

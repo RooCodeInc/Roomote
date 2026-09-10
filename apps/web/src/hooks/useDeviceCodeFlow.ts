@@ -141,6 +141,10 @@ export function useDeviceCodeFlow<
       setDeviceAuth(null);
       setError(null);
       setFailureReason(null);
+      // A new open must be able to retry a failed start after its error is cleared.
+      if (startMutation.isError) {
+        startMutation.reset();
+      }
       return;
     }
 

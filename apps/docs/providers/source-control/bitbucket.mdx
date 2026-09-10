@@ -48,6 +48,70 @@ connection, synchronizes all accessible repositories, and registers repository w
 Bitbucket-backed tasks use `x-token-auth` for Git HTTPS credentials. OAuth API
 requests use bearer authentication.
 
+## Mention Roomote on pull requests
+
+Mention `@roomote` in a pull request comment to talk to Roomote about that
+pull request. Each pull request is a Roomote Session: Roomote reads the
+discussion, answers as a comment when no workspace is needed, and otherwise
+starts a task on the pull request's source branch and reports back in the same
+discussion. Mention it again to redirect it, ask a follow-up, or steer a
+running task. The commenter must have a linked Bitbucket account. Ask for a
+review in the mention (for example `@roomote review this`) and Roomote runs the
+Review Code automation's structured review on the current head, posts the
+findings on the pull request, and reports back in the same discussion.
+
+## API-first work in Fast
+
+With an active Bitbucket OAuth connection and a synced, active Bitbucket Cloud
+repository, deployment members and admins can use Fast for bounded API operations
+without a repository clone or coding task:
+
+| Operation | Available tools |
+| --- | --- |
+| Read files and directories at a ref | `get_file`, `list_directory` |
+| Search code in one connected repository | `search_code` |
+| Read commit history at a ref | `list_commits` |
+| Read a commit by SHA1 | `get_commit` |
+| Read a PR, its diff, or its comments | `get_pull_request`, `get_pull_request_diff`, `list_pull_request_comments` |
+| Change a PR title and/or description | `update_pull_request` |
+| Decline a PR | `decline_pull_request` |
+| Add a PR comment or reply | `add_pull_request_comment` |
+
+Every tool requires `repositoryFullName` as `workspace/repo`. PR operations also
+require `pullRequestNumber`. File and directory reads require `ref`; file reads
+also require `path`. Commit history requires `ref` (a commit SHA1 or ref name),
+while a single commit requires `hash` (a full or abbreviated hexadecimal SHA1,
+not a branch or tag name). Prefer the full SHA1; Bitbucket resolves abbreviated
+hashes and may reject ambiguous prefixes. Reading commits does not create commits.
+
+Title/description updates accept only those fields, not state changes. Comments
+use `body`; a reply additionally uses `parentCommentId` belonging to the same PR.
+Writes must match the requested action, and reading a PR does not authorize changing it.
+
+Reads are bounded: responses are limited to 1 MiB and list/search pages contain
+up to 50 entries. Request another page by its positive page number when needed.
+One page is not an exhaustive result. Code search accepts
+plain terms (letters, digits, underscores, spaces, dots, and hyphens), not query
+operators, `AND`/`OR`/`NOT`, or user-supplied repository filters. Roomote fixes the
+search to the connected repository and rejects scope or identity mismatches.
+
+<Warning>
+Bitbucket's code search API is deprecated November 1, 2026. Roomote reports
+search and response-size limitations and can use a coding task when a local
+checkout is substantially more appropriate for the investigation. Focused reads
+prefer APIs; broad investigations do not require an API attempt first. An
+authorization or repository-scope denial must never be bypassed through a task.
+</Warning>
+
+The Fast API does not support reopening or merging PRs, writing files, creating
+commits or PRs, or review administration such as approvals, reviewer changes, and
+thread resolution. A request for an actual code review still uses Roomote's
+structured review workflow; reading or summarizing a diff does not require it.
+
+Roomote reuses its native Bitbucket API client and existing deployment OAuth token
+refresh flow for these tools. No separately installed MCP server or additional
+authentication is required.
+
 ## Personal account linking
 
 Users may link personal Bitbucket accounts separately for commenter identity

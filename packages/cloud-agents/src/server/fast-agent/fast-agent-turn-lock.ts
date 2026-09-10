@@ -1,15 +1,33 @@
 import { acquireRedisLock } from '@roomote/redis';
-import type { FastAgentConversation } from './fast-agent-conversation';
+import type {
+  FastAgentConversation,
+  FastAgentTurnActivity,
+} from './fast-agent-conversation';
+import { releaseFastAgentDurableTurnClaim } from './fast-agent-conversation-repository';
 
 const FAST_AGENT_TURN_LOCK_PREFIX = 'fast-agent:conversation-lock:';
 const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
 const FAST_AGENT_TURN_LOCK_RENEW_MS =
   (FAST_AGENT_TURN_LOCK_TTL_SECONDS * 1_000) / 3;
 const FAST_AGENT_TURN_LOCK_RETRY_MS = 500;
+const FAST_AGENT_ACTIVITY_CLEANUP_TIMEOUT_MS = 5_000;
+type TurnActivityCleanup = Pick<FastAgentTurnActivity, 'settle' | 'dispose'>;
+const turnActivityRegistrations = new WeakMap<
+  AbortSignal,
+  (activity: TurnActivityCleanup) => () => void
+>();
 const activeFastAgentTurnLocks = new Set<FastAgentTurnLockHandle>();
 const shutdownCloseoutResolvers = new WeakMap<AbortSignal, () => void>();
 const shutdownCloseoutPendingSignals = new WeakSet<AbortSignal>();
 let processShutdownReason: FastAgentProcessShutdownError | null = null;
+
+/** Bind one invocation's surface cleanup to its actual Redis lock, not inference completion. */
+export function registerFastAgentTurnActivity(
+  signal: AbortSignal,
+  activity: TurnActivityCleanup,
+): (() => void) | undefined {
+  return turnActivityRegistrations.get(signal)?.(activity);
+}
 
 export class FastAgentTurnLockLostError extends Error {
   constructor() {
@@ -18,9 +36,14 @@ export class FastAgentTurnLockLostError extends Error {
   }
 }
 
+/**
+ * Abort reason for a Fast turn whose process is shutting down. Raised by
+ * every process that executes turns (the API for the turns it admits, the
+ * bullmq service for the turns the queue resumes).
+ */
 export class FastAgentProcessShutdownError extends Error {
-  constructor(signal: NodeJS.Signals) {
-    super(`Fast turn interrupted by API shutdown (${signal}).`);
+  constructor(public readonly signal: NodeJS.Signals) {
+    super(`Fast turn interrupted by process shutdown (${signal}).`);
     this.name = 'FastAgentProcessShutdownError';
   }
 }
@@ -32,6 +55,16 @@ export type FastAgentTurnLockHandle = (() => Promise<void>) & {
   /** Resolves after shutdown closeout delivery settles, without waiting for
    * unrelated inference cleanup that may itself be stuck. */
   shutdownCloseoutSettled: Promise<void>;
+  /**
+   * The inline-admitted durable row this turn executes, when durable
+   * admission applied. Bound by the accepting handler so a shutdown can
+   * release the row's claim even if the turn is interrupted before it
+   * reaches its own abort handling (for example during setup).
+   */
+  durableRowId?: string;
+  /** Wakes the queue for the bound row after a shutdown release so recovery
+   * does not wait for the periodic sweep. Best effort. */
+  durableResume?: () => Promise<void>;
 };
 
 /** Mark the user-visible shutdown closeout as posted and persisted (or as
@@ -59,6 +92,32 @@ export async function abortActiveFastAgentTurns(
   const activeLocks = [...activeFastAgentTurnLocks];
   await Promise.allSettled(
     activeLocks.map((lock) => lock.abortForShutdown(processShutdownReason!)),
+  );
+  // A turn interrupted before it reached its own abort handling (still in
+  // setup, no inference yet) never releases its durable claim, and the row
+  // would wait out the full claim lease before recovery. Release here for
+  // every bound row; the release is a guarded no-op for rows the turn
+  // already revoked or settled, so replay safety is unaffected.
+  await Promise.allSettled(
+    activeLocks
+      .filter((lock) => lock.durableRowId)
+      .map(async (lock) => {
+        const released = await releaseFastAgentDurableTurnClaim(
+          lock.durableRowId!,
+        ).catch((error) => {
+          console.warn(
+            `[Fast Agent] Failed to release durable turn claim during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return false;
+        });
+        if (released) {
+          await lock.durableResume?.().catch((error) => {
+            console.warn(
+              `[Fast Agent] Failed to wake durable turn resume during shutdown: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+        }
+      }),
   );
   return activeLocks.length;
 }
@@ -134,7 +193,35 @@ export async function acquireFastAgentTurnLock(params: {
     if (release) {
       const ownership = new AbortController();
       let redisReleased = false;
-      let turnSettled = false;
+      let turnSettlement: Promise<void> | undefined;
+      let ownershipLost = false;
+      let activity: TurnActivityCleanup | undefined;
+      let redisReleasePromise: Promise<void> | undefined;
+      const disposeActivity = (target = activity) => {
+        try {
+          void target?.dispose().catch((error) => {
+            console.warn(
+              '[Fast Agent] Failed to dispose surface activity:',
+              error,
+            );
+          });
+        } catch (error) {
+          console.warn(
+            '[Fast Agent] Failed to dispose surface activity:',
+            error,
+          );
+        }
+      };
+      turnActivityRegistrations.set(ownership.signal, (next) => {
+        if (ownership.signal.aborted || redisReleasePromise) {
+          disposeActivity(next);
+          return () => {};
+        }
+        activity = next;
+        return () => {
+          if (activity === next) activity = undefined;
+        };
+      });
       let renewalPending = false;
       const renewalTimer = setInterval(() => {
         if (renewalPending) return;
@@ -143,6 +230,9 @@ export async function acquireFastAgentTurnLock(params: {
           .renewDetailed()
           .then((result) => {
             if (!redisReleased && result === 'lost') {
+              ownershipLost = true;
+              // Abort reasons are immutable: also fence loss discovered during an earlier abort.
+              disposeActivity();
               ownership.abort(new FastAgentTurnLockLostError());
               clearInterval(renewalTimer);
               console.error(
@@ -156,11 +246,40 @@ export async function acquireFastAgentTurnLock(params: {
       }, FAST_AGENT_TURN_LOCK_RENEW_MS);
       renewalTimer.unref();
 
-      const releaseRedisTurnLock = async () => {
-        if (redisReleased) return;
-        redisReleased = true;
-        clearInterval(renewalTimer);
-        await release();
+      const releaseRedisTurnLock = () => {
+        redisReleasePromise ??= (async () => {
+          const cleanup = activity;
+          let deadline: ReturnType<typeof setTimeout> | undefined;
+          try {
+            if (cleanup) {
+              await Promise.race([
+                ownershipLost ? cleanup.dispose() : cleanup.settle(),
+                new Promise<void>((resolve) => {
+                  deadline = setTimeout(() => {
+                    console.warn(
+                      '[Fast Agent] Surface activity cleanup timed out before lock release.',
+                    );
+                    resolve();
+                  }, FAST_AGENT_ACTIVITY_CLEANUP_TIMEOUT_MS);
+                  deadline.unref();
+                }),
+              ]);
+            }
+          } catch (error) {
+            console.warn(
+              '[Fast Agent] Failed to settle surface activity before lock release:',
+              error,
+            );
+          } finally {
+            clearTimeout(deadline);
+            // Fence even when draining timed out; never wait for stuck inference here.
+            disposeActivity(cleanup);
+            redisReleased = true;
+            clearInterval(renewalTimer);
+            await release();
+          }
+        })();
+        return redisReleasePromise;
       };
       let shutdownCloseoutSettled = false;
       let resolveShutdownCloseout: (() => void) | undefined;
@@ -175,22 +294,23 @@ export async function acquireFastAgentTurnLock(params: {
         resolveShutdownCloseout?.();
       };
       shutdownCloseoutResolvers.set(ownership.signal, settleShutdownCloseout);
-      const releaseTurnLock = (async () => {
-        if (turnSettled) return;
-        turnSettled = true;
-        activeFastAgentTurnLocks.delete(releaseTurnLock);
-        notifyTurnSettleWaitersIfIdle();
-        try {
-          if (
-            ownership.signal.reason instanceof FastAgentProcessShutdownError
-          ) {
+      const releaseTurnLock = (() => {
+        turnSettlement ??= (async () => {
+          try {
+            if (
+              ownership.signal.reason instanceof FastAgentProcessShutdownError
+            ) {
+              settleShutdownCloseout();
+              await shutdownCloseoutPromise;
+            }
+            await releaseRedisTurnLock();
+          } finally {
             settleShutdownCloseout();
-            await shutdownCloseoutPromise;
+            activeFastAgentTurnLocks.delete(releaseTurnLock);
+            notifyTurnSettleWaitersIfIdle();
           }
-          await releaseRedisTurnLock();
-        } finally {
-          settleShutdownCloseout();
-        }
+        })();
+        return turnSettlement;
       }) as FastAgentTurnLockHandle;
       releaseTurnLock.signal = ownership.signal;
       releaseTurnLock.abort = async (reason) => {

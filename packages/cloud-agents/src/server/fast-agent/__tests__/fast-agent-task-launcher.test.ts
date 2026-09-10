@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   enqueueTask: vi.fn(),
+  findById: vi.fn(),
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/task-1'),
 }));
 
@@ -11,9 +12,18 @@ vi.mock('../../task-url', () => ({
   getTaskUrl: mocks.getTaskUrl,
 }));
 
-import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
+vi.mock('../fast-agent-conversation-repository', () => ({
+  fastAgentConversationRepository: { findById: mocks.findById },
+}));
 
 import {
+  ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  TaskPayloadKind,
+} from '@roomote/types';
+
+import {
+  createFastAgentTaskLauncher,
   createFastAgentSlackTaskLauncher,
   createFastAgentWebTaskLauncher,
 } from '../fast-agent-task-launcher';
@@ -21,6 +31,14 @@ import {
 describe('createFastAgentSlackTaskLauncher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.findById.mockResolvedValue({
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
+      },
+    });
     mocks.enqueueTask.mockImplementation(
       async (
         _input: unknown,
@@ -32,6 +50,32 @@ describe('createFastAgentSlackTaskLauncher', () => {
         return { taskId: 'task-1' };
       },
     );
+  });
+
+  it('rejects a missing parent before provider build side effects or enqueue', async () => {
+    mocks.findById.mockResolvedValueOnce(null);
+    const buildTask = vi.fn();
+    const postKickoff = vi.fn();
+    const launchTask = createFastAgentTaskLauncher({
+      userId: 'user-1',
+      surface: 'slack',
+      taskUrlCampaign: 'fast-delegation',
+      buildTask,
+    });
+    await expect(
+      launchTask({
+        prompt: 'Investigate the issue',
+        environmentId: null,
+        parentSessionId: 'missing-parent',
+        postKickoff,
+      }),
+    ).rejects.toThrow('Fast parent session was not found.');
+    expect(mocks.findById).toHaveBeenCalledExactlyOnceWith({
+      id: 'missing-parent',
+    });
+    expect(buildTask).not.toHaveBeenCalled();
+    expect(mocks.enqueueTask).not.toHaveBeenCalled();
+    expect(postKickoff).not.toHaveBeenCalled();
   });
 
   it('launches a communication-isolated child owned by the Fast parent', async () => {
@@ -67,6 +111,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
         branch: 'feature/source-branch',
         launchIdempotencyKey: 'artifact-build:launch-1',
         model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
         parentSessionId: '11111111-1111-4111-8111-111111111111',
         postKickoff,
       }),
@@ -111,6 +156,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
             harnessModelOverrides: {
               'opencode-server': 'anthropic/claude-sonnet-5',
             },
+            reasoningEffort: 'high',
           },
         },
         initiator: { kind: 'user', userId: 'user-1' },
@@ -128,6 +174,37 @@ describe('createFastAgentSlackTaskLauncher', () => {
       mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload,
     ).not.toHaveProperty('images');
     expect(order).toEqual(['kickoff', 'queued']);
+  });
+
+  it('uses the persisted automation identity instead of reconstructing it from Slack coordinates', async () => {
+    const conversation = {
+      surface: 'automation',
+      workspaceId: 'automation-workspace',
+      conversationId: 'automation-1',
+    };
+    mocks.findById.mockResolvedValueOnce({ conversation });
+
+    await createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+    })({
+      prompt: 'Investigate the report',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    expect(mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload).toMatchObject({
+      communicationProvider: 'slack',
+      communicationChannelId: 'C123',
+      communicationThreadId: '100.001',
+      fastAgentParent: {
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        conversation,
+      },
+    });
   });
 
   it('supports platform-event launches without a human message ID', async () => {
@@ -172,6 +249,28 @@ describe('createFastAgentSlackTaskLauncher', () => {
     const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
     expect(task.payload).toMatchObject({ repo: ALL_REPOSITORIES });
     expect(task.payload).not.toHaveProperty('environmentId');
+  });
+
+  it('lets a Session launch Blank slate instead of its inherited repository and environment', async () => {
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+      repoForPayload: 'acme/inherited',
+    });
+
+    await launchTask({
+      prompt: 'Create an artifact without source code',
+      environmentId: NO_REPOSITORIES,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    const payload = mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload;
+    expect(payload).toMatchObject({ repo: NO_REPOSITORIES });
+    expect(payload).not.toHaveProperty('environmentId');
+    expect(payload.repo).not.toBe('acme/inherited');
   });
 
   it('retains multiple Fast turn images in the child task payload', async () => {
@@ -388,6 +487,13 @@ describe('createFastAgentSlackTaskLauncher', () => {
 describe('createFastAgentWebTaskLauncher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.findById.mockResolvedValue({
+      conversation: {
+        surface: 'web',
+        workspaceId: 'workspace-1',
+        conversationId: 'conversation-1',
+      },
+    });
     mocks.enqueueTask.mockImplementation(
       async (
         _input: unknown,
@@ -401,21 +507,17 @@ describe('createFastAgentWebTaskLauncher', () => {
     );
   });
 
-  it('keeps the kickoff free of a duplicate task link', async () => {
+  it('attaches the child for parent settlement and keeps the kickoff free of a duplicate task link', async () => {
     const postKickoff = vi.fn();
 
     await createFastAgentWebTaskLauncher({
       userId: 'user-1',
-      conversation: {
-        surface: 'web',
-        workspaceId: 'workspace-1',
-        conversationId: 'conversation-1',
-      },
     })({
       prompt: 'Fix checkout',
       environmentId: null,
       branch: 'feature/source-branch',
       launchIdempotencyKey: 'artifact-build:launch-1',
+      reasoningEffort: 'xhigh',
       parentSessionId: '11111111-1111-4111-8111-111111111111',
       postKickoff,
     });
@@ -430,7 +532,19 @@ describe('createFastAgentWebTaskLauncher', () => {
         task: expect.objectContaining({
           payload: expect.objectContaining({
             branch: 'feature/source-branch',
+            communicationContextInherited: true,
+            reportConsumer: 'orchestrator',
+            fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+            fastAgentParent: {
+              sessionId: '11111111-1111-4111-8111-111111111111',
+              conversation: {
+                surface: 'web',
+                workspaceId: 'workspace-1',
+                conversationId: 'conversation-1',
+              },
+            },
             launchIdempotencyKey: 'artifact-build:launch-1',
+            reasoningEffort: 'xhigh',
           }),
         }),
       }),

@@ -36,14 +36,16 @@ describe('renderSlackLiveTaskCardForRun', () => {
     await expect(
       renderSlackLiveTaskCardForRun(42, {
         status: 'complete',
-        message: 'Ready for review.',
+        details: 'Running the tests.',
+        output: 'Ready for review.',
       }),
     ).resolves.toEqual({ card: true, updated: true });
 
     expect(mocks.renderSlackLiveTaskCard).toHaveBeenCalledWith({
       taskId: 'task-1',
       status: 'complete',
-      message: 'Ready for review.',
+      details: 'Running the tests.',
+      output: 'Ready for review.',
       taskTitle: 'Generated title',
     });
   });

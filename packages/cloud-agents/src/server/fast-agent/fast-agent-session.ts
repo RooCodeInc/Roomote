@@ -10,7 +10,11 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
-import type { RunStatus } from '@roomote/types';
+import type {
+  FastAgentConversationOwner,
+  ReasoningEffort,
+  RunStatus,
+} from '@roomote/types';
 import type { FastAgentConversation } from './fast-agent-conversation';
 import { fastAgentConversationRepository } from './fast-agent-conversation-repository';
 import type {
@@ -20,7 +24,11 @@ import type {
 
 type FastAgentSessionRecord = {
   id: string;
+  userId: string | null;
+  owner: FastAgentConversationOwner;
   title: string | null;
+  model: string | null;
+  reasoningEffort: ReasoningEffort | null;
   conversation: FastAgentConversation;
   compatibilityMessages: ModelMessage[];
   openCodeSessionId: string | null;
@@ -34,13 +42,33 @@ export type FastAgentActiveTask = {
 };
 
 export async function getOrCreateFastAgentSession({
+  owner,
   userId,
   conversation,
+  sessionId,
+  initialTitle,
+  initialModel,
+  initialReasoningEffort,
 }: {
-  userId: string;
+  owner?: FastAgentConversationOwner;
+  userId?: string;
   conversation: FastAgentConversation;
+  /** Session to bind a newly created conversation to; see the repository. */
+  sessionId?: string;
+  /** Title to seed only when this call creates the conversation. */
+  initialTitle?: string;
+  initialModel?: string;
+  initialReasoningEffort?: ReasoningEffort;
 }): Promise<FastAgentSessionRecord> {
-  return fastAgentConversationRepository.getOrCreate({ userId, conversation });
+  return fastAgentConversationRepository.getOrCreate({
+    ...(owner ? { owner } : {}),
+    ...(userId ? { userId } : {}),
+    conversation,
+    ...(sessionId ? { sessionId } : {}),
+    ...(initialTitle ? { initialTitle } : {}),
+    ...(initialModel !== undefined ? { initialModel } : {}),
+    ...(initialReasoningEffort !== undefined ? { initialReasoningEffort } : {}),
+  });
 }
 
 export async function hasFastAgentSession(
@@ -66,6 +94,7 @@ export async function getActiveFastAgentTasks(
         snapshotId: taskRuns.snapshotId,
         snapshotCreatedAt: taskRuns.snapshotCreatedAt,
         snapshotFailedAt: taskRuns.snapshotFailedAt,
+        vendor: taskRuns.vendor,
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
@@ -93,6 +122,7 @@ export async function getActiveFastAgentTasks(
         snapshotId: latestRunPerTask.snapshotId,
         snapshotCreatedAt: latestRunPerTask.snapshotCreatedAt,
         snapshotFailedAt: latestRunPerTask.snapshotFailedAt,
+        vendor: latestRunPerTask.vendor,
       }),
     )
     .orderBy(desc(latestRunPerTask.createdAt));
@@ -143,7 +173,7 @@ export async function setFastAgentOpenCodeSession({
   openCodeSessionId,
 }: {
   sessionId: string;
-  openCodeSessionId: string;
+  openCodeSessionId: string | null;
 }): Promise<void> {
   await fastAgentConversationRepository.setOpenCodeSession({
     conversationId: sessionId,

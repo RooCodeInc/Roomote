@@ -6,7 +6,10 @@ import {
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
 
-import { getLinearSessionIdFromResumePayload } from './linear-resume-payload';
+import {
+  getLinearFastParentSessionId,
+  getLinearSessionIdFromResumePayload,
+} from './linear-resume-payload';
 
 import type { ListenerOptions, RunTaskState } from './types';
 import {
@@ -48,13 +51,17 @@ export const startPolling = (options: ListenerOptions) => {
       });
   }
 
+  // Answers to a Linear elicitation reach the run through this poller, so a
+  // task delegated from a Linear Fast Session needs it as much as a direct
+  // Linear task does.
   if (
     taskRun.payloadKind === TaskPayloadKind.LinearAgentSession ||
     (taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
       !!(
         task?.linearSessionId ??
         getLinearSessionIdFromResumePayload(taskRun.payload)
-      ))
+      )) ||
+    getLinearFastParentSessionId(taskRun.payload) !== null
   ) {
     state.linearMessageInterval = createLinearMessageInterval(options);
   }

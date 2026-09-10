@@ -9,6 +9,9 @@ let linkedMcpIds: string[] = [];
 let orgHasLinear = false;
 let userHasLinkedLinear = false;
 let hasEnabledAutomations = true;
+let environments: unknown[] = [{}];
+let environmentsPending = false;
+let environmentsSuccess = true;
 
 const {
   mockPush,
@@ -33,6 +36,14 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({ isAdmin }),
+}));
+
+vi.mock('@/hooks/environments', () => ({
+  useEnvironments: () => ({
+    data: environments,
+    isPending: environmentsPending,
+    isSuccess: environmentsSuccess,
+  }),
 }));
 
 vi.mock('@/hooks/mcp-connections', () => ({
@@ -165,8 +176,63 @@ beforeEach(() => {
   orgHasLinear = false;
   userHasLinkedLinear = false;
   hasEnabledAutomations = true;
+  environments = [{}];
+  environmentsPending = false;
+  environmentsSuccess = true;
   localStorage.clear();
   vi.clearAllMocks();
+});
+
+it('prioritizes environment setup and persists its dismissal', () => {
+  environments = [];
+  hasEnabledAutomations = false;
+
+  render(<OnboardingCard />);
+
+  expect(
+    screen.getByText(
+      'Create an environment to get live previews, faster startup and better verification',
+    ),
+  ).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+  expect(mockPush).toHaveBeenCalledWith('/settings/environments/new');
+
+  dismissCard();
+  expect(
+    screen.getByText("Put your team's work on autopilot with automations"),
+  ).toBeInTheDocument();
+  expect(localStorage.getItem('OnboardingCardsDismissedByOrg')).toContain(
+    'create-environment',
+  );
+});
+
+it('offers environment setup only to admins after environments load', () => {
+  environments = [];
+  environmentsPending = true;
+  environmentsSuccess = false;
+
+  const { rerender } = render(<OnboardingCard />);
+  expect(
+    screen.queryByRole('button', { name: 'Create' }),
+  ).not.toBeInTheDocument();
+
+  environmentsPending = false;
+  environmentsSuccess = false;
+  rerender(<OnboardingCard />);
+  expect(
+    screen.queryByRole('button', { name: 'Create' }),
+  ).not.toBeInTheDocument();
+
+  environmentsSuccess = true;
+  rerender(<OnboardingCard />);
+  expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+
+  isAdmin = false;
+  rerender(<OnboardingCard />);
+  expect(
+    screen.queryByRole('button', { name: 'Create' }),
+  ).not.toBeInTheDocument();
 });
 
 it('prioritizes automations and opens the automations page', () => {

@@ -208,6 +208,9 @@ services:
     container_name: roomote-controller
     image: *roomote-app-image
     command: ['controller']
+    environment:
+      <<: *roomote-env
+      SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
     # Spawns and reaches task worker containers on the worker network.
     networks: [default, worker]
     stop_grace_period: 7m

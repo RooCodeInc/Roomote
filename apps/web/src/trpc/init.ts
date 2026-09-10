@@ -13,8 +13,10 @@ import { withProcedureTiming } from './request-timing';
 // See:
 // - https://trpc.io/docs/server/context
 // - https://trpc.io/docs/server/authorization
-export const createContext = async () => {
-  const auth = await authorize();
+export const createContext = async (options?: {
+  allowSessionRefresh?: boolean;
+}) => {
+  const auth = await authorize(options);
   return { auth };
 };
 

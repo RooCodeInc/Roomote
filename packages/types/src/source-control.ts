@@ -16,6 +16,14 @@ export type SourceControlTokenBackedProvider = Exclude<
   'github'
 >;
 export type SourceControlConnectionMode = 'app' | 'token';
+export type PullRequestDraftTransition =
+  | 'native'
+  | 'title_prefix'
+  | 'unsupported';
+
+export type SourceControlProviderCapabilities = {
+  pullRequestDraftTransition: PullRequestDraftTransition;
+};
 
 export type SourceControlTokenEnvVar =
   | 'GH_TOKEN'
@@ -68,6 +76,7 @@ export const sourceControlProviderDescriptors = {
     defaultHost: 'github.com',
     tokenEnvVar: 'GH_TOKEN',
     connectionMode: 'app',
+    capabilities: { pullRequestDraftTransition: 'native' },
   },
   gitlab: {
     provider: 'gitlab',
@@ -75,6 +84,7 @@ export const sourceControlProviderDescriptors = {
     defaultHost: 'gitlab.com',
     tokenEnvVar: 'GITLAB_TOKEN',
     connectionMode: 'token',
+    capabilities: { pullRequestDraftTransition: 'title_prefix' },
   },
   gitea: {
     provider: 'gitea',
@@ -82,6 +92,7 @@ export const sourceControlProviderDescriptors = {
     defaultHost: 'gitea.com',
     tokenEnvVar: 'GITEA_TOKEN',
     connectionMode: 'token',
+    capabilities: { pullRequestDraftTransition: 'title_prefix' },
   },
   ado: {
     provider: 'ado',
@@ -89,6 +100,7 @@ export const sourceControlProviderDescriptors = {
     defaultHost: 'dev.azure.com',
     tokenEnvVar: 'ADO_TOKEN',
     connectionMode: 'token',
+    capabilities: { pullRequestDraftTransition: 'native' },
   },
   bitbucket: {
     provider: 'bitbucket',
@@ -96,6 +108,7 @@ export const sourceControlProviderDescriptors = {
     defaultHost: 'bitbucket.org',
     tokenEnvVar: 'BITBUCKET_OAUTH',
     connectionMode: 'token',
+    capabilities: { pullRequestDraftTransition: 'native' },
   },
 } as const satisfies Record<
   SourceControlProvider,
@@ -105,8 +118,24 @@ export const sourceControlProviderDescriptors = {
     defaultHost: string;
     tokenEnvVar: SourceControlTokenEnvVar;
     connectionMode: SourceControlConnectionMode;
+    capabilities: SourceControlProviderCapabilities;
   }
 >;
+
+export function getSourceControlProviderCapabilities(
+  provider: SourceControlProvider,
+): SourceControlProviderCapabilities {
+  return sourceControlProviderDescriptors[provider].capabilities;
+}
+
+export function supportsPullRequestDraftTransition(
+  provider: SourceControlProvider,
+): boolean {
+  return (
+    getSourceControlProviderCapabilities(provider)
+      .pullRequestDraftTransition !== 'unsupported'
+  );
+}
 
 /**
  * Azure DevOps API permissions a Microsoft Entra app registration must be

@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   mockAssertAdmin,
   mockCompleteSetup,
+  mockGetSetupStatus,
   mockStartSetupFastSession,
   mockCaptureEvent,
 } = vi.hoisted(() => ({
   mockAssertAdmin: vi.fn(),
   mockCompleteSetup: vi.fn(),
+  mockGetSetupStatus: vi.fn(),
   mockStartSetupFastSession: vi.fn(),
   mockCaptureEvent: vi.fn(),
 }));
@@ -18,6 +20,10 @@ vi.mock('./shared', () => ({
 
 vi.mock('./index', () => ({
   completeSetupCommand: (...args: unknown[]) => mockCompleteSetup(...args),
+}));
+
+vi.mock('../setup-new', () => ({
+  getSetupNewStatusCommand: (...args: unknown[]) => mockGetSetupStatus(...args),
 }));
 
 vi.mock('../fast-sessions', () => ({
@@ -61,16 +67,40 @@ describe('completeSetupWithStarterTasksCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCompleteSetup.mockResolvedValue({ success: true });
+    mockGetSetupStatus.mockResolvedValue({
+      setupNewState: {
+        onboardingTaskId: 'legacy-onboarding-task',
+        onboardingTaskStartedAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
     mockStartSetupFastSession.mockResolvedValue({
       sessionId: 'setup-session-1',
       created: true,
     });
   });
 
+  it('rejects the retired path for new conversational setups', async () => {
+    mockGetSetupStatus.mockResolvedValue({
+      setupNewState: {
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+      },
+    });
+
+    await expect(
+      completeSetupWithStarterTasksCommand(buildAuth(), {
+        launchBatchId: '11111111-1111-4111-8111-111111111111',
+        selectedStarterTaskIds: ['speed-up-ci'],
+      }),
+    ).rejects.toThrow('already-started onboarding task');
+    expect(mockCompleteSetup).not.toHaveBeenCalled();
+    expect(mockStartSetupFastSession).not.toHaveBeenCalled();
+  });
+
   it('completes setup first, then starts one setup session carrying the selected starter tasks', async () => {
     const result = await completeSetupWithStarterTasksCommand(buildAuth(), {
       launchBatchId: '11111111-1111-4111-8111-111111111111',
-      selectedStarterTaskIds: ['speed-up-ci', 'security-scan'],
+      selectedStarterTaskIds: ['speed-up-ci', 'security-scan', 'address-todos'],
       anonymousAnalyticsEnabled: true,
       productUpdatesEnabled: false,
     });
@@ -101,6 +131,10 @@ describe('completeSetupWithStarterTasksCommand', () => {
               id: 'security-scan',
               prompt: getSetupStarterTask('security-scan').prompt,
             }),
+            expect.objectContaining({
+              id: 'address-todos',
+              prompt: getSetupStarterTask('address-todos').prompt,
+            }),
           ],
         }),
       },
@@ -115,8 +149,8 @@ describe('completeSetupWithStarterTasksCommand', () => {
       {
         userId: 'admin-1',
         properties: {
-          selectedCount: 2,
-          starterTaskIds: 'speed-up-ci,security-scan',
+          selectedCount: 3,
+          starterTaskIds: 'speed-up-ci,security-scan,address-todos',
           setupSessionCreated: true,
         },
       },

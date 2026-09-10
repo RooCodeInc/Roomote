@@ -230,25 +230,6 @@ Storybook:
 pnpm storybook
 ```
 
-## LLM Evaluations
-
-The LLM routing service uses [Promptfoo](https://www.promptfoo.dev/)
-evaluations to verify routing prompts against a live LLM.
-
-```sh
-pnpm evals
-pnpm eval:router
-pnpm eval:router:followup
-pnpm eval:router:view
-pnpm eval:router:share
-```
-
-Eval configs and datasets live in `packages/cloud-agents/evals/router/`.
-They are not run in CI by default. Runtime routing, title generation, and
-summaries use `R_SMALL_MODEL`, falling back to `R_MODEL`. Set
-`ROUTER_EVAL_PROVIDER` or `ROUTER_FOLLOWUP_EVAL_PROVIDER` to test a
-different promptfoo provider.
-
 ## Troubleshooting
 
 ### Database connection errors

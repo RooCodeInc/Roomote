@@ -1,5 +1,6 @@
 export type {
   WorkspaceConfig,
+  NoRepositoriesWorkspace,
   RepositoryWorkspace,
   RepositorySetWorkspace,
   AllRepositoriesWorkspace,

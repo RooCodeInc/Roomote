@@ -12,7 +12,6 @@ export function buildAzureWorkerEnv({
   diskImage,
 }: BuildWorkerEnvOptions & {
   deploymentSlug?: string;
-  environmentId?: string;
   diskImage: string;
 }): Record<string, string> {
   return {
@@ -20,6 +19,7 @@ export function buildAzureWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
+      environmentId,
     }),
     ...buildWorkerContextEnv({
       provider: 'azure',

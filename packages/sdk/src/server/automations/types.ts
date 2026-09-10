@@ -12,6 +12,8 @@ export type AutomationRunOpts = {
 export type AutomationJobResult = {
   /** Task launched by this pass, when the automation launches tasks. */
   launchedTaskId: string | null;
+  /** True when work was durably admitted but has not reached a terminal state. */
+  queued: boolean;
   /**
    * True when the pass did its work without launching a task (announcer /
    * manager stats posting directly to Slack, or an intentional no-op pass
@@ -26,6 +28,7 @@ export type AutomationJobResult = {
 export function emptyJobResult(): AutomationJobResult {
   return {
     launchedTaskId: null,
+    queued: false,
     completed: false,
     skippedReason: null,
     errors: [],
@@ -37,6 +40,7 @@ export function emptyJobResult(): AutomationJobResult {
  */
 export type AutomationRunNowResult =
   | { outcome: 'launched'; taskId: string }
+  | { outcome: 'queued' }
   | { outcome: 'completed' }
   | { outcome: 'skipped'; reason: string }
   | { outcome: 'failed'; error: string };

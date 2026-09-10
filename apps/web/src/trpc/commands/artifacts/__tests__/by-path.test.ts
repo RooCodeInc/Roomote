@@ -2,21 +2,33 @@ import type { UserAuthSuccess } from '@/types';
 
 const {
   mockGetArtifactByPath,
+  mockGetArtifactBySessionPath,
   mockGenerateDownloadUrl,
+  mockGenerateOwnedDownloadUrl,
   mockSignArtifactId,
   mockCurrentEpochSeconds,
+  mockFindReadableSession,
 } = vi.hoisted(() => ({
   mockGetArtifactByPath: vi.fn(),
+  mockGetArtifactBySessionPath: vi.fn(),
   mockGenerateDownloadUrl: vi.fn(),
+  mockGenerateOwnedDownloadUrl: vi.fn(),
   mockSignArtifactId: vi.fn(),
   mockCurrentEpochSeconds: vi.fn(),
+  mockFindReadableSession: vi.fn(),
 }));
 
 vi.mock('@/lib/server', () => ({
   getArtifactByPath: mockGetArtifactByPath,
+  getArtifactBySessionPath: mockGetArtifactBySessionPath,
   generateDownloadUrl: mockGenerateDownloadUrl,
+  generateOwnedDownloadUrl: mockGenerateOwnedDownloadUrl,
   signArtifactId: mockSignArtifactId,
   currentEpochSeconds: mockCurrentEpochSeconds,
+}));
+
+vi.mock('@/lib/server/sessions', () => ({
+  findReadableSession: mockFindReadableSession,
 }));
 
 import { getArtifactByPathCommand } from '../by-path';
@@ -55,8 +67,12 @@ describe('getArtifactByPathCommand', () => {
 
     mockGetArtifactByPath.mockResolvedValue(createArtifact());
     mockGenerateDownloadUrl.mockResolvedValue('https://example.test/download');
+    mockGenerateOwnedDownloadUrl.mockResolvedValue(
+      'https://example.test/session-download',
+    );
     mockSignArtifactId.mockReturnValue('sig');
     mockCurrentEpochSeconds.mockReturnValue(1_700_000_000);
+    mockFindReadableSession.mockResolvedValue({ id: 'session-1' });
   });
 
   afterEach(() => {
@@ -74,6 +90,7 @@ describe('getArtifactByPathCommand', () => {
     });
 
     expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockFindReadableSession).not.toHaveBeenCalled();
     expect(result?.content).toBeUndefined();
   });
 
@@ -99,6 +116,59 @@ describe('getArtifactByPathCommand', () => {
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     expect(result?.content).toBe('small text');
+  });
+
+  it('loads readable Session-owned artifacts from the Session storage namespace', async () => {
+    mockGetArtifactBySessionPath.mockResolvedValue(
+      createArtifact({
+        taskId: null,
+        sessionId: '11111111-1111-4111-8111-111111111111',
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response('session text'));
+
+    const result = await getArtifactByPathCommand(auth, {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      path: 'logs/output.txt',
+    });
+
+    expect(mockFindReadableSession).toHaveBeenCalledWith(
+      { userId: auth.userId, isAdmin: false },
+      '11111111-1111-4111-8111-111111111111',
+    );
+    expect(mockGetArtifactBySessionPath).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: '11111111-1111-4111-8111-111111111111',
+      }),
+    );
+    expect(mockGenerateOwnedDownloadUrl).toHaveBeenCalledWith(
+      { sessionId: '11111111-1111-4111-8111-111111111111' },
+      'artifact-1',
+      'logs/output.txt',
+      1,
+    );
+    expect(result).toMatchObject({
+      taskId: null,
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      content: 'session text',
+    });
+  });
+
+  it('rejects unreadable Sessions before loading or signing artifacts', async () => {
+    mockFindReadableSession.mockResolvedValue(null);
+
+    await expect(
+      getArtifactByPathCommand(auth, {
+        sessionId: 'missing-session',
+        path: 'logs/output.txt',
+      }),
+    ).resolves.toBeNull();
+
+    expect(mockGetArtifactBySessionPath).not.toHaveBeenCalled();
+    expect(mockGetArtifactByPath).not.toHaveBeenCalled();
+    expect(mockGenerateOwnedDownloadUrl).not.toHaveBeenCalled();
+    expect(mockGenerateDownloadUrl).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it.each([

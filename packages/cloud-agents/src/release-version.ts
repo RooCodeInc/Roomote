@@ -13,3 +13,21 @@ export function resolveRoomoteReleaseVersion(
 
   return undefined;
 }
+
+export function buildRoomoteReleaseIdentifier(
+  releaseVersion: string | undefined,
+  { commitSha, appEnv }: { commitSha?: string; appEnv?: string } = {},
+): string | null {
+  if (!releaseVersion) return null;
+
+  const sha = commitSha?.trim();
+  const commit = sha && /^[a-f0-9]{40}$/i.test(sha) ? sha : 'unknown';
+  const environment =
+    appEnv === 'production'
+      ? 'prod'
+      : appEnv === 'development' || appEnv === 'preview'
+        ? 'dev'
+        : undefined;
+
+  return `Roomote release ${releaseVersion} (${environment ? `${environment}, ` : ''}commit ${commit})`;
+}

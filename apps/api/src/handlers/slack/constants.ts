@@ -25,7 +25,6 @@ export const SLACK_WELCOME_MESSAGE_CHANNEL_LIMIT = 3;
 export const SLACK_ROUTING_LOCK_PREFIX = 'slack:routing-lock:';
 export const SLACK_SETUP_SUGGESTION_LOCK_PREFIX =
   'slack:setup-suggestion-reaction:';
-export const LEADING_FAST_COMMAND_MENTION_PATTERN = /^\s*<@[^>]+>[\s,:;.-]*/;
 const SETUP_ONBOARDING_SUGGESTION_TYPE = 'setup_onboarding';
 const SUGGESTED_TASKS_SUGGESTION_TYPE = 'suggested_tasks';
 export const TASK_SUGGESTION_TYPES = [

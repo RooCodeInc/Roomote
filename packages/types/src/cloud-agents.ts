@@ -11,6 +11,8 @@ export type PrAction = (typeof prActions)[number];
 
 export const DEFAULT_PR_ACTION: PrAction = 'draft';
 
+export const DEFAULT_MARK_ROOMOTE_PR_READY_AFTER_CLEAN_REVIEW = false;
+
 export function normalizePrAction(value: unknown): PrAction {
   return prActions.includes(value as PrAction)
     ? (value as PrAction)

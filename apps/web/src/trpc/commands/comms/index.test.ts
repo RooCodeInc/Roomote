@@ -1640,6 +1640,44 @@ describe('comms commands', () => {
     expect(mockTelegramRegisterCommands).toHaveBeenCalledOnce();
   });
 
+  it('generates the missing webhook secret when repairing a runtime token', async () => {
+    mockResolveTelegramRuntimeCredentials
+      .mockResolvedValueOnce({
+        botToken: 'runtime-token',
+        webhookSecret: null,
+        botUsername: 'RoomoteBot',
+      })
+      .mockResolvedValue({
+        botToken: 'runtime-token',
+        webhookSecret: 'generated-secret',
+        botUsername: 'RoomoteBot',
+      });
+    mockDbTransaction.mockImplementation(async (callback) =>
+      callback({} as never),
+    );
+
+    await expect(
+      repairTelegramWebhookCommand(buildMockAuth()),
+    ).resolves.toEqual({ repaired: true });
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        userId: 'comms-test-user',
+        values: [
+          {
+            name: 'R_TELEGRAM_WEBHOOK_SECRET',
+            value: expect.any(String),
+          },
+        ],
+      },
+    );
+    expect(mockTelegramRegisterWebhook).toHaveBeenCalledWith({
+      url: 'https://app.example.com/api/webhooks/telegram',
+      secretToken: 'generated-secret',
+    });
+  });
+
   describe('clearCommsAuthConfigCommand', () => {
     it('rejects non-admin users', async () => {
       await expect(

@@ -28,6 +28,22 @@ the task ID takes precedence if both identifiers are supplied. Compute logs,
 cancellation, environment-targeted launch, and task model controls remain
 task-specific operations.
 
+For extended coordination, clients can use `get_updates` instead of re-reading
+the full transcript. Each response contains only new user-visible
+narrative in chronological order, an opaque cursor for the next poll, current
+Session or task state, and an explicit response-needed flag. Tool calls, tool
+results, hidden reasoning, and transcript metadata are excluded. Reusing the
+cursor after no new activity returns an empty narrative delta rather than the
+same messages again; full transcript reads remain available for debugging.
+
+When relaying between Codex and Roomote, summarize substantive messages with
+the labels `Codex → Roomote` and `Roomote → Codex`. Relay questions or input
+needs promptly, skip narration for unchanged polls, and make the final answer
+self-contained. Relay summaries should cover visible narrative and decisions,
+not credentials, raw tool traces, hidden reasoning, or oversized internal
+payloads. Successful follow-up sends include the exact target and text accepted
+by Roomote so the client can summarize the outbound message without guessing.
+
 This is useful when you want to:
 
 - catch up on a Session that is already active
@@ -161,6 +177,18 @@ and connected-service access checks still apply to every request.
 
 You can revoke the connection from your MCP client. If a saved session expires
 or is revoked, Roomote asks you to approve access again in the browser.
+
+Access tokens last one hour. Clients that request refresh tokens can refresh
+access within a 30-day session; rotating a refresh token does not extend that
+session. The client registration is separate: each successful authorization
+code exchange or token refresh keeps the same client ID available for another
+90 days. Token expiration or revocation does not itself delete that registration
+or let a revoked token regain access.
+
+To limit unused registrations, initial registration must be followed by a
+successful authorization code exchange within one hour. After 90 days without
+a successful exchange or refresh, an activated registration expires. If that
+happens, remove and re-add Roomote in your MCP client to register again.
 
 ## Troubleshooting
 

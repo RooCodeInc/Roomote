@@ -36,11 +36,13 @@ export { alias } from 'drizzle-orm/pg-core';
 
 export * from './index';
 export * from './db';
+export * from './lib/artifacts';
 
 export * from './lib/map-raw-row';
 export * from './lib/legacy-task-inference-usage';
 export * from './lib/llm-usage';
 export * from './lib/deployment-auth-keypairs';
+export * from './lib/migration-readiness';
 export * from './lib/environment-variables';
 export * from './lib/task-id';
 export * from './lib/task-activity-timestamp';
@@ -58,6 +60,9 @@ export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
 export * from './lib/automations';
 export * from './lib/custom-automations';
+export * from './lib/custom-automation-access';
+export * from './lib/custom-skills';
+export * from './lib/session-wakeups';
 export * from './lib/background-automation-slack-threads';
 export * from './lib/task-run-events';
 export * from './lib/declarative-environments';
@@ -77,14 +82,15 @@ export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
 export * from './lib/record-task-kickoff-message';
 export * from './lib/slack-runtime-credentials';
+export * from './lib/slack-installations';
 export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
 export * from './lib/agentmail-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
-export * from './lib/router-debug-settings';
 export * from './lib/slack-fast-integration-calls';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
+export * from './lib/pr-ready-after-clean-review-settings';
 export * from './lib/account-link-help-settings';
 export * from './lib/setup-qualification';
 export * from './lib/repositories';
@@ -104,6 +110,7 @@ export * from './lib/managed-access';
 
 export {
   users,
+  instanceSkills,
   userRelations,
   deploymentSettings,
   licenseUsageObservations,
@@ -209,6 +216,8 @@ export {
   fastAgentMessagesRelations,
   fastAgentParentEvents,
   fastAgentParentEventsRelations,
+  sessionWakeups,
+  sessionWakeupsRelations,
   fastAgentProviderMessages,
   fastAgentProviderMessagesRelations,
   fastAgentPrFeedbackDeliveries,

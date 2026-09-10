@@ -17,6 +17,7 @@ export PREVIEW_AUTH_PUBLIC_KEY=test-preview-public
 export ENCRYPTION_KEY=12345678901234567890123456789012
 export ARTIFACT_SIGNING_KEY=12345678901234567890123456789012
 export DASHBOARD_PASSWORD=test-dashboard-password
+export ROOMOTE_APP_TMPFS_SIZE=768m
 
 docker compose --profile local-inference -f "$compose_file" config --format json >"$rendered_config"
 
@@ -32,6 +33,9 @@ jq -e '
   ([$apps[] | . as $name | $root.services[$name] | hardened] | all) and
   ([$apps[] | . as $name | $root.services[$name].image |
     endswith("/roomote-app:security-contract-test")] | all) and
+  ([$apps[] as $name |
+    any($root.services[$name].tmpfs[]?;
+      startswith("/tmp:") and contains("size=768m"))] | all) and
   # ROOMOTE_SERVICE selects the per-service env contract (packages/env) now
   # that every service shares one image.
   (.services.web.environment.ROOMOTE_SERVICE == "web") and

@@ -3,14 +3,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   answerQuestion: vi.fn(),
+  createArtifact: vi.fn(),
   createActivity: vi.fn(() => ({ start: vi.fn(), settle: vi.fn() })),
   findConversation: vi.fn(),
   findSession: vi.fn(),
   getActiveTasks: vi.fn(),
   lookupUser: vi.fn(),
+  persistAdmission: vi.fn(),
   postThreadMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
+  resolveSessionImages: vi.fn(),
+  deliverVideos: vi.fn(),
   releaseLock: vi.fn(),
+  wakeParentEventAt: vi.fn(),
+  wakeParentEventNow: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -30,12 +36,40 @@ vi.mock('@roomote/communication', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findSlackConversationSubjectByUserId: vi.fn(async () => null),
+  buildFastAgentArtifactCreator: vi.fn(() => mocks.createArtifact),
   findFastAgentSessionForProviderMessage: mocks.findSession,
+  persistFastAgentInlineHumanTurn: mocks.persistAdmission,
   recordFastAgentConversationMessageBestEffort: mocks.recordProviderMessage,
+  resolveFastAgentSessionImages: mocks.resolveSessionImages,
+  deliverFastAgentSessionVideos: mocks.deliverVideos,
   resolveUserMcpServerConfigs: vi.fn(async () => ({})),
+  wakeFastAgentParentEventAt: mocks.wakeParentEventAt,
+  wakeFastAgentParentEventNow: mocks.wakeParentEventNow,
 }));
 
 vi.mock('@roomote/slack', () => ({
+  postSlackThreadMessageWithFooterText: vi.fn(
+    async ({
+      slack,
+      channel,
+      threadTs,
+      text,
+      bodyBlocks,
+    }: {
+      slack: { postMessage: (params: unknown) => Promise<string> };
+      channel: string;
+      threadTs: string;
+      text: string;
+      bodyBlocks: unknown[];
+    }) =>
+      slack.postMessage({
+        channel,
+        thread_ts: threadTs,
+        text,
+        blocks: bodyBlocks,
+      }),
+  ),
   buildSlackThreadReplyFooterBlock: vi.fn(() => ({ type: 'context' })),
   createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
   createFastAgentSlackSessionActivity: mocks.createActivity,
@@ -77,6 +111,77 @@ describe('Fast Slack reaction input', () => {
       },
     });
     mocks.answerQuestion.mockResolvedValue('');
+    mocks.persistAdmission.mockResolvedValue(null);
+    mocks.resolveSessionImages.mockResolvedValue([]);
+  });
+
+  it('admits a reaction turn durably so an interruption resumes it with the same reaction', async () => {
+    // The row was still pending from an earlier attempt (a redelivered
+    // event), so this run is a resumption.
+    mocks.persistAdmission.mockResolvedValueOnce({
+      id: 'row-1',
+      eventKey: 'key-1',
+      resumed: true,
+    });
+    const slack = {
+      getMessage: vi.fn(async () => ({
+        text: 'React to this message with your favorite emoji.',
+        thread_ts: '100.000',
+      })),
+      normalizeIncomingText: vi.fn(async () => '@alice'),
+      updateMessage: vi.fn(),
+    };
+
+    await expect(
+      maybeRouteFastAgentReaction({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE' },
+          slack,
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'UALICE',
+          reaction: 'sparkling_heart',
+          item: { type: 'message', channel: 'C1', ts: '101.000' },
+          event_ts: '102.000',
+        },
+      }),
+    ).resolves.toBe(true);
+    await vi.waitFor(() => expect(mocks.answerQuestion).toHaveBeenCalledOnce());
+
+    expect(mocks.persistAdmission).toHaveBeenCalledWith({
+      parent: expect.objectContaining({ sessionId: 'session-1' }),
+      event: expect.objectContaining({
+        type: 'human_follow_up',
+        eventId: 'slack-reaction:102.000',
+        currentMessageId: 'slack-reaction:102.000',
+        userId: 'user-1',
+        senderExternalId: 'UALICE',
+        senderDisplayName: '@alice',
+        input: {
+          type: 'reaction',
+          externalInput: expect.objectContaining({
+            type: 'reaction_added',
+            reactions: [{ name: 'sparkling_heart' }],
+          }),
+        },
+      }),
+    });
+    expect((mocks.releaseLock as { durableRowId?: string }).durableRowId).toBe(
+      'row-1',
+    );
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        durableAdmission: { eventId: 'row-1' },
+        resumedAfterInterruption: true,
+        adapter: expect.objectContaining({
+          createArtifact: mocks.createArtifact,
+          requestDurableResume: expect.any(Function),
+          requestDurableRetry: expect.any(Function),
+        }),
+      }),
+    );
   });
 
   it('includes the Fast-authored message when a reaction can directly answer it', async () => {
@@ -143,6 +248,121 @@ describe('Fast Slack reaction input', () => {
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['', true],
+    ['[View video](https://roomote.example/video)', true],
+    ['', false],
+  ] as const)(
+    'attaches selected images and videos in a reaction reply with fallback %j (source present=%s)',
+    async (fallback, sourcePresent) => {
+      const { postSlackThreadMarkdownMessage } = await vi.importActual<
+        typeof import('../helpers/thread-posting.js')
+      >('../helpers/thread-posting.js');
+      let sourceDeleted = false;
+      mocks.postThreadMessage.mockImplementationOnce((params) => {
+        // Deletion after adapter preflight but before the posting guard.
+        sourceDeleted = !sourcePresent;
+        return postSlackThreadMarkdownMessage(params);
+      });
+      mocks.deliverVideos.mockResolvedValueOnce(fallback);
+      mocks.resolveSessionImages.mockResolvedValueOnce([
+        {
+          url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+          altText: 'result.png',
+          contentType: 'image/png',
+        },
+      ]);
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { postReply: (reply: unknown) => Promise<unknown> };
+        }) => {
+          await adapter.postReply({
+            purpose: 'closeout',
+            message: 'Here is the requested result.',
+            imageArtifactIds: ['artifact-1'],
+            videoArtifactIds: ['video-1'],
+          });
+          return '';
+        },
+      );
+      const slack = {
+        getMessage: vi.fn(async () => ({
+          text: 'Please attach the earlier screenshot.',
+          thread_ts: '100.000',
+        })),
+        normalizeIncomingText: vi.fn(async () => '@alice'),
+        hasMessageInThread: vi.fn(async () => !sourceDeleted),
+        postMessage: vi.fn(async () => '103.000'),
+        updateMessage: vi.fn(async () => true),
+      };
+
+      await expect(
+        maybeRouteFastAgentReaction({
+          context: {
+            teamId: 'T1',
+            slackInstallation: { botUserId: 'UROOMOTE' },
+            slack,
+          } as never,
+          event: {
+            type: 'reaction_added',
+            user: 'UALICE',
+            reaction: 'eyes',
+            item: { type: 'message', channel: 'C1', ts: '101.000' },
+            event_ts: '102.000',
+          },
+        }),
+      ).resolves.toBe(true);
+      await vi.waitFor(() => expect(mocks.releaseLock).toHaveBeenCalledOnce());
+
+      expect(mocks.resolveSessionImages).toHaveBeenCalledWith({
+        artifactIds: ['artifact-1'],
+        sessionId: 'session-1',
+      });
+      if (sourcePresent) {
+        expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
+          artifactIds: ['video-1'],
+          sessionId: 'session-1',
+          channelId: 'C1',
+          threadTs: '100.000',
+        });
+        expect(slack.postMessage.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.deliverVideos.mock.invocationCallOrder[0]!,
+        );
+      } else {
+        expect(mocks.deliverVideos).not.toHaveBeenCalled();
+        expect(slack.postMessage).not.toHaveBeenCalled();
+      }
+      expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: 'Here is the requested result.',
+          images: [
+            {
+              url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+              altText: 'result.png',
+            },
+          ],
+        }),
+      );
+      if (fallback) {
+        expect(slack.updateMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.objectContaining({
+              text: `Here is the requested result.\n\n${fallback}`,
+              blocks: expect.arrayContaining([
+                expect.objectContaining({
+                  type: 'image',
+                  alt_text: 'result.png',
+                }),
+              ]),
+            }),
+          }),
+        );
+      }
+    },
+  );
+
   it('does not route reactions from users who do not own the bound session', async () => {
     mocks.findSession.mockResolvedValue(null);
 
@@ -162,6 +382,47 @@ describe('Fast Slack reaction input', () => {
         },
       }),
     ).resolves.toBe(false);
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('does not start a user-scoped reaction turn for an ownerless session', async () => {
+    mocks.findSession.mockResolvedValue({
+      id: 'session-1',
+      userId: null,
+      owner: { kind: 'automation', automationKey: 'custom_automation' },
+      title: 'Weekly update',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T1',
+        conversationId: '100.000',
+        replyTarget: { channelId: 'C1', threadId: '100.000' },
+      },
+    });
+
+    await expect(
+      maybeRouteFastAgentReaction({
+        context: {
+          teamId: 'T1',
+          slackInstallation: { botUserId: 'UROOMOTE' },
+          slack: {
+            getMessage: vi.fn(async () => ({
+              text: 'Ownerless automation output',
+              thread_ts: '100.000',
+            })),
+            normalizeIncomingText: vi.fn(async () => '@alice'),
+          },
+        } as never,
+        event: {
+          type: 'reaction_added',
+          user: 'UALICE',
+          reaction: 'eyes',
+          item: { type: 'message', channel: 'C1', ts: '101.000' },
+          event_ts: '102.000',
+        },
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.acquireLock).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 });

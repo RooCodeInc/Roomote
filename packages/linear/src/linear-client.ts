@@ -446,6 +446,38 @@ export class LinearClient {
    *
    * @deprecated Use updateSessionExternalUrls instead for multiple URLs with labels.
    */
+  /**
+   * The issue an agent session belongs to, for binding delegated work to it
+   * after the webhook payload is gone. Null when Linear cannot resolve it.
+   */
+  async getAgentSessionIssue(sessionId: string): Promise<{
+    id: string;
+    identifier: string;
+    title: string;
+    url: string;
+    description?: string;
+  } | null> {
+    try {
+      const session = await this.client.agentSession(sessionId);
+      const issue = await session.issue;
+      if (!issue) {
+        return null;
+      }
+      return {
+        id: issue.id,
+        identifier: issue.identifier,
+        title: issue.title,
+        url: issue.url,
+        ...(issue.description ? { description: issue.description } : {}),
+      };
+    } catch (error) {
+      console.error(
+        `[LinearClient.getAgentSessionIssue] Failed to load the issue for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
   async updateSessionExternalUrl(
     sessionId: string,
     externalUrl: string | null,

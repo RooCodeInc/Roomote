@@ -15,6 +15,7 @@ import {
   and,
   db,
   eq,
+  fastAgentMessages,
   inArray,
   sql,
   taskMessages,
@@ -1332,6 +1333,7 @@ export async function triagePrReviewActivity({
 function filterHandledReviewEvents(
   events: PrReviewActivityEvent[],
   context: PrReviewTriageContext,
+  requireLiveHead: boolean,
 ): PrReviewActivityEvent[] {
   const handledCommentIds = new Set(
     (context.reviewThreads ?? []).flatMap((thread) =>
@@ -1363,12 +1365,22 @@ function filterHandledReviewEvents(
       }
     }
 
+    const requiresHeadVerification =
+      event.reviewHeadSha &&
+      (event.kind === 'review' ||
+        event.kind === 'review_comment' ||
+        event.kind === 'ci_failure' ||
+        event.kind === 'review_summary');
+    if (!context.currentHeadSha) {
+      return !requireLiveHead || !requiresHeadVerification;
+    }
+    const filtersAgainstCurrentHead =
+      event.reviewHeadSha &&
+      (event.kind === 'review' ||
+        event.kind === 'ci_failure' ||
+        event.kind === 'review_summary');
     return (
-      !context.currentHeadSha ||
-      !event.reviewHeadSha ||
-      (event.kind !== 'review' &&
-        event.kind !== 'ci_failure' &&
-        event.kind !== 'review_summary') ||
+      !filtersAgainstCurrentHead ||
       event.reviewHeadSha === context.currentHeadSha
     );
   });
@@ -1393,7 +1405,11 @@ export async function preparePrReviewNotificationDelivery({
     sourceControlProvider: request.sourceControlProvider,
     telemetry,
   });
-  const liveEvents = filterHandledReviewEvents(events, context);
+  const liveEvents = filterHandledReviewEvents(
+    events,
+    context,
+    normalizeSourceControlProvider(request.sourceControlProvider) === 'github',
+  );
   const eventsToTriage = context.latestTerminalReviewSummaryHeadSha
     ? liveEvents.filter(
         (event) =>
@@ -1568,6 +1584,26 @@ export async function updateTaskPrReviewOfferStatus(input: {
           sql<string>`${taskMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
           input.deliveryIds,
         ),
+      ),
+    );
+}
+
+export async function updateFastAgentPrReviewOfferStatus(input: {
+  deliveryIds: string[];
+  status: PrReviewActionOfferStatus;
+}): Promise<void> {
+  if (input.deliveryIds.length === 0) return;
+
+  await db
+    .update(fastAgentMessages)
+    .set({
+      payload: sql`jsonb_set(coalesce(${fastAgentMessages.payload}, '{}'::jsonb), '{prReviewAction,status}', to_jsonb(${input.status}::text), true)`,
+      updatedAt: new Date(),
+    })
+    .where(
+      inArray(
+        sql<string>`${fastAgentMessages.payload} -> 'prReviewAction' ->> 'deliveryId'`,
+        input.deliveryIds,
       ),
     );
 }

@@ -1,0 +1,455 @@
+const mocks = vi.hoisted(() => ({
+  updateWithFooter: vi.fn(),
+  recordMessage: vi.fn(),
+  deliverVideos: vi.fn(),
+}));
+
+vi.mock('@roomote/slack', () => ({
+  ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'quote',
+  updateSlackThreadMessageWithFooterText: mocks.updateWithFooter,
+}));
+vi.mock('@roomote/communication', () => ({
+  buildFastSessionReplyFooterText: () => 'footer',
+}));
+vi.mock('./fast-agent-provider-message', () => ({
+  recordFastAgentConversationMessageBestEffort: mocks.recordMessage,
+}));
+vi.mock('./fast-agent-session-videos', () => ({
+  deliverFastAgentSessionVideos: mocks.deliverVideos,
+}));
+
+import { createSlackFastReplyStream } from './fast-agent-slack-reply-stream';
+
+const conversation = {
+  surface: 'slack' as const,
+  workspaceId: 'T1',
+  conversationId: '100.1',
+  replyTarget: { channelId: 'C1', threadId: '100.1' },
+};
+
+function slackMock() {
+  return {
+    startMessageStream: vi.fn<() => Promise<string | null>>(
+      async () => '200.1',
+    ),
+    appendMessageStream: vi.fn(async () => true),
+    stopMessageStream: vi.fn(async () => true),
+    deleteMessage: vi.fn(async () => true),
+    updateMessage: vi.fn(async () => true),
+    getMessageBlocks: vi.fn(async () => []),
+  };
+}
+
+function build(slack: ReturnType<typeof slackMock>, quote: string | null) {
+  let pendingQuote = quote;
+  const onDelivered = vi.fn();
+  const stream = createSlackFastReplyStream({
+    slack,
+    conversation: conversation as never,
+    channelId: 'C1',
+    threadTs: '100.1',
+    recipientTeamId: 'T1',
+    recipientUserId: 'U1',
+    sessionId: 'session-1',
+    footerContext: {} as never,
+    getQuote: () => pendingQuote,
+    resolveImages: async () => [
+      {
+        url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+        altText: 'result.png',
+      },
+    ],
+    onDelivered: () => {
+      pendingQuote = null;
+      onDelivered();
+    },
+  });
+  return { stream, onDelivered, getPendingQuote: () => pendingQuote };
+}
+
+describe('createSlackFastReplyStream', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.updateWithFooter.mockResolvedValue(true);
+    mocks.recordMessage.mockResolvedValue(undefined);
+    mocks.deliverVideos.mockResolvedValue('');
+  });
+
+  it('starts on the first append, appends after, and finishes into the canonical reply body', async () => {
+    const slack = slackMock();
+    const { stream, onDelivered, getPendingQuote } = build(slack, '> Matt: hi');
+
+    await stream.append('Looking');
+    await stream.append(' at the logs');
+    expect(slack.startMessageStream).toHaveBeenCalledWith({
+      channel: 'C1',
+      threadTs: '100.1',
+      recipientTeamId: 'T1',
+      recipientUserId: 'U1',
+      markdownText: 'Looking',
+    });
+    expect(slack.appendMessageStream).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '200.1',
+      markdownText: ' at the logs',
+    });
+
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking at the logs.' }),
+    ).resolves.toEqual({ messageId: '200.1' });
+    expect(slack.stopMessageStream).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '200.1',
+      sessionStatus: 'processing',
+    });
+    expect(mocks.updateWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C1',
+        threadTs: '100.1',
+        messageTs: '200.1',
+        text: '> Matt: hi\nLooking at the logs.',
+        bodyBlocks: [
+          {
+            type: 'section',
+            block_id: 'quote',
+            text: { type: 'mrkdwn', text: '> Matt: hi' },
+          },
+          { type: 'markdown', text: 'Looking at the logs.' },
+        ],
+        footerText: 'footer',
+      }),
+    );
+    expect(mocks.recordMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1', messageId: '200.1' }),
+    );
+    expect(onDelivered).toHaveBeenCalledOnce();
+    expect(getPendingQuote()).toBeNull();
+    expect(mocks.deliverVideos).not.toHaveBeenCalled();
+    // Finishing twice or aborting afterwards does nothing more.
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'again' }),
+    ).resolves.toBeUndefined();
+    await stream.abort();
+    expect(slack.stopMessageStream).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves structured image artifact IDs when finalizing a streamed reply', async () => {
+    const slack = slackMock();
+    const { stream } = build(slack, null);
+
+    await stream.append('Preparing the result');
+    await stream.finish({
+      purpose: 'closeout',
+      message: 'Here is the requested result.',
+      imageArtifactIds: ['artifact-1'],
+    });
+
+    expect(mocks.updateWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bodyBlocks: [
+          {
+            type: 'markdown',
+            text: 'Here is the requested result.',
+          },
+          {
+            type: 'image',
+            image_url:
+              'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+            alt_text: 'result.png',
+          },
+        ],
+      }),
+    );
+  });
+
+  it.each(['', '[View video](https://roomote.example/video)'])(
+    'delivers only selected videos and appends the transport fallback %j',
+    async (fallback) => {
+      mocks.deliverVideos.mockResolvedValue(fallback);
+      const { stream } = build(slackMock(), null);
+      await stream.append('Preparing');
+      const reply = {
+        purpose: 'closeout' as const,
+        message: 'Result.',
+        videoArtifactIds: ['video-1'],
+      };
+      await stream.finish(reply);
+      await stream.finish(reply);
+      expect(mocks.deliverVideos).toHaveBeenCalledExactlyOnceWith({
+        artifactIds: ['video-1'],
+        sessionId: 'session-1',
+        channelId: 'C1',
+        threadTs: '100.1',
+      });
+      expect(mocks.updateWithFooter).toHaveBeenCalledTimes(fallback ? 2 : 1);
+      expect(mocks.updateWithFooter.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.deliverVideos.mock.invocationCallOrder[0]!,
+      );
+      if (fallback) {
+        expect(mocks.deliverVideos.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.updateWithFooter.mock.invocationCallOrder[1]!,
+        );
+      }
+      const text = ['Result.', fallback].filter(Boolean).join('\n\n');
+      expect(mocks.updateWithFooter).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text,
+          bodyBlocks: [{ type: 'markdown', text }],
+        }),
+      );
+    },
+  );
+
+  it('does not upload videos for an unopened or aborted stream', async () => {
+    const { stream } = build(slackMock(), null);
+    await stream.finish({
+      purpose: 'closeout',
+      message: 'Video.',
+      videoArtifactIds: ['video-1'],
+    });
+    await stream.append('Partial');
+    await stream.abort();
+    expect(mocks.deliverVideos).not.toHaveBeenCalled();
+  });
+
+  it('propagates video authorization rejection after applying the text reply', async () => {
+    mocks.deliverVideos.mockRejectedValueOnce(new Error('Unauthorized video'));
+    const { stream } = build(slackMock(), null);
+    await stream.append('Preparing');
+    await expect(
+      stream.finish({
+        purpose: 'closeout',
+        message: 'Result.',
+        videoArtifactIds: ['foreign-video'],
+      }),
+    ).rejects.toThrow('Unauthorized video');
+    expect(mocks.updateWithFooter).toHaveBeenCalledOnce();
+    expect(mocks.recordMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([false, new Error('rewrite failed')])(
+    'does not upload videos when the initial rewrite fails (%s)',
+    async (failure) => {
+      if (failure instanceof Error)
+        mocks.updateWithFooter.mockRejectedValueOnce(failure);
+      else mocks.updateWithFooter.mockResolvedValueOnce(failure);
+      const { stream, onDelivered } = build(slackMock(), null);
+      await stream.append('Preparing');
+      await expect(
+        stream.finish({
+          purpose: 'closeout',
+          message: 'Result.',
+          videoArtifactIds: ['video-1'],
+        }),
+      ).resolves.toBeUndefined();
+      expect(mocks.deliverVideos).not.toHaveBeenCalled();
+      expect(mocks.recordMessage).not.toHaveBeenCalled();
+      expect(onDelivered).not.toHaveBeenCalled();
+    },
+  );
+
+  it('retries video delivery normally when a failed text rewrite leaves an undeletable partial stream', async () => {
+    mocks.updateWithFooter.mockResolvedValueOnce(false);
+    const slack = slackMock();
+    slack.deleteMessage.mockResolvedValueOnce(false);
+    const { stream, onDelivered } = build(slack, null);
+    await stream.append('Preparing');
+    await expect(
+      stream.finish({
+        purpose: 'closeout',
+        message: 'Result.',
+        videoArtifactIds: ['video-1'],
+      }),
+    ).resolves.toBeUndefined();
+    expect(mocks.deliverVideos).not.toHaveBeenCalled();
+    expect(onDelivered).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'keeps accepted text and leaves video fallback to the normal post when its rewrite fails (throws=%s)',
+    async (throws) => {
+      const slack = slackMock();
+      mocks.updateWithFooter.mockResolvedValueOnce(true);
+      if (throws)
+        mocks.updateWithFooter.mockRejectedValueOnce(
+          new Error('rewrite failed'),
+        );
+      else mocks.updateWithFooter.mockResolvedValueOnce(false);
+      mocks.deliverVideos.mockResolvedValue(
+        '[View video](https://roomote.example/video)',
+      );
+      const { stream, onDelivered, getPendingQuote } = build(
+        slack,
+        '> Matt: hi',
+      );
+      await stream.append('Preparing');
+      await expect(
+        stream.finish({
+          purpose: 'closeout',
+          message: 'Result.',
+          imageArtifactIds: ['artifact-1'],
+          videoArtifactIds: ['video-1'],
+        }),
+      ).resolves.toBeUndefined();
+      expect(mocks.deliverVideos).toHaveBeenCalledOnce();
+      expect(mocks.updateWithFooter).toHaveBeenCalledTimes(2);
+      expect(slack.deleteMessage).not.toHaveBeenCalled();
+      expect(mocks.updateWithFooter).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          text: '> Matt: hi\nResult.\n\n[View video](https://roomote.example/video)',
+          bodyBlocks: [
+            {
+              type: 'section',
+              block_id: 'quote',
+              text: { type: 'mrkdwn', text: '> Matt: hi' },
+            },
+            {
+              type: 'markdown',
+              text: 'Result.\n\n[View video](https://roomote.example/video)',
+            },
+            {
+              type: 'image',
+              image_url:
+                'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+              alt_text: 'result.png',
+            },
+          ],
+          footerText: 'footer',
+        }),
+      );
+      expect(mocks.recordMessage).not.toHaveBeenCalled();
+      expect(onDelivered).not.toHaveBeenCalled();
+      expect(getPendingQuote()).toBe('> Matt: hi');
+      await stream.finish({
+        purpose: 'closeout',
+        message: 'Result.',
+        videoArtifactIds: ['video-1'],
+      });
+      expect(mocks.deliverVideos).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('yields nothing when the stream never opened so the caller posts normally', async () => {
+    const slack = slackMock();
+    slack.startMessageStream.mockResolvedValue(null);
+    const { stream, onDelivered } = build(slack, null);
+
+    await stream.append('Looking');
+    await stream.append(' more');
+    expect(slack.startMessageStream).toHaveBeenCalledTimes(1);
+    expect(slack.appendMessageStream).not.toHaveBeenCalled();
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Done.' }),
+    ).resolves.toBeUndefined();
+    expect(mocks.updateWithFooter).not.toHaveBeenCalled();
+    expect(onDelivered).not.toHaveBeenCalled();
+  });
+
+  it('stops appending after a failed append but still finishes with the full reply', async () => {
+    const slack = slackMock();
+    slack.appendMessageStream.mockResolvedValueOnce(false);
+    const { stream } = build(slack, null);
+
+    await stream.append('One');
+    await stream.append(' two');
+    await stream.append(' three');
+    expect(slack.appendMessageStream).toHaveBeenCalledTimes(1);
+
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'One two three.' }),
+    ).resolves.toEqual({ messageId: '200.1' });
+    expect(mocks.updateWithFooter).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'One two three.' }),
+    );
+  });
+
+  it('removes the partial stream before falling back to a normal post', async () => {
+    const slack = slackMock();
+    mocks.updateWithFooter.mockResolvedValue(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { stream, onDelivered, getPendingQuote } = build(slack, '> Matt: hi');
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
+    ).resolves.toBeUndefined();
+    expect(slack.stopMessageStream).toHaveBeenCalledTimes(1);
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '200.1',
+    });
+    expect(mocks.recordMessage).not.toHaveBeenCalled();
+    expect(onDelivered).not.toHaveBeenCalled();
+    expect(getPendingQuote()).toBe('> Matt: hi');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('did not accept the final body'),
+    );
+  });
+
+  it('keeps the partial stream as the delivery when it cannot be removed', async () => {
+    const slack = slackMock();
+    mocks.updateWithFooter.mockResolvedValue(false);
+    slack.deleteMessage.mockResolvedValue(false);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { stream, onDelivered } = build(slack, null);
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
+    ).resolves.toEqual({ messageId: '200.1' });
+    expect(mocks.recordMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1', messageId: '200.1' }),
+    );
+    expect(onDelivered).toHaveBeenCalledOnce();
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('partial stream could not be removed'),
+    );
+  });
+
+  it('removes the partial stream when the final rewrite throws', async () => {
+    const slack = slackMock();
+    mocks.updateWithFooter.mockRejectedValue(new Error('lock timed out'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { stream } = build(slack, null);
+
+    await stream.append('Looking');
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Looking.' }),
+    ).resolves.toBeUndefined();
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '200.1',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to apply the final body'),
+    );
+  });
+
+  it('aborts by stopping the stream and leaving its text', async () => {
+    const slack = slackMock();
+    const { stream } = build(slack, null);
+    await stream.append('Half');
+    await stream.abort();
+    expect(slack.stopMessageStream).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '200.1',
+      sessionStatus: 'processing',
+    });
+    expect(mocks.updateWithFooter).not.toHaveBeenCalled();
+  });
+
+  it.each(['ack', 'progress', 'closeout', 'clarification'] as const)(
+    'keeps processing after a %s message',
+    async (purpose) => {
+      const slack = slackMock();
+      const { stream } = build(slack, null);
+      await stream.append('Working');
+      await stream.finish({ purpose, message: 'Working' });
+      expect(slack.stopMessageStream).toHaveBeenCalledWith({
+        channel: 'C1',
+        ts: '200.1',
+        sessionStatus: 'processing',
+      });
+    },
+  );
+});

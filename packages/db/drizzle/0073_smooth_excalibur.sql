@@ -1,0 +1,1 @@
+ALTER TABLE "custom_automations" ADD COLUMN "reasoning_effort" text;

@@ -13,7 +13,9 @@ import {
   CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
   CUSTOM_AUTOMATION_MODEL_MAX_LENGTH,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   MAX_CUSTOM_AUTOMATIONS,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
@@ -38,6 +40,8 @@ export type CustomAutomationWriteInput = {
   cronExpression?: string | null;
   /** Optional provider/model launch override; null uses the deployment default. */
   model?: string | null;
+  /** Optional reasoning override for the selected model. */
+  reasoningEffort?: ReasoningEffort | null;
   environmentId: string;
   /** Full destination target, or {} when the automation has no report destination. */
   target: OptionalAutomationTarget;
@@ -47,12 +51,18 @@ export type CustomAutomationWriteInput = {
 function getExecutionTarget(environmentId: string): {
   executionMode: CustomAutomationExecutionMode;
   allRepositories: boolean;
+  noRepositories: boolean;
 } {
   return environmentId === FAST_EXECUTION
-    ? { executionMode: 'fast', allRepositories: false }
+    ? {
+        executionMode: 'fast',
+        allRepositories: false,
+        noRepositories: false,
+      }
     : {
         executionMode: 'sandbox_task',
         allRepositories: environmentId === ALL_REPOSITORIES,
+        noRepositories: environmentId === NO_REPOSITORIES,
       };
 }
 
@@ -65,6 +75,7 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   prompt: string;
   cronExpression: string | null;
   model: string | null;
+  reasoningEffort: ReasoningEffort | null;
 } {
   const name = normalizeName(input.name);
   const prompt = input.prompt.trim();
@@ -124,6 +135,11 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     }
   }
 
+  const reasoningEffort = input.reasoningEffort ?? null;
+  if (reasoningEffort && !model) {
+    throw new Error('Reasoning effort requires a model override.');
+  }
+
   if (!input.environmentId) {
     throw new Error('Environment is required.');
   }
@@ -139,7 +155,7 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
     );
   }
 
-  return { name, prompt, cronExpression, model };
+  return { name, prompt, cronExpression, model, reasoningEffort };
 }
 
 export type CustomAutomationWithCreator = CustomAutomation & {
@@ -189,7 +205,8 @@ export async function createCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model } = assertValidWriteInput(input);
+  const { name, prompt, cronExpression, model, reasoningEffort } =
+    assertValidWriteInput(input);
 
   const existingCount = await countCustomAutomations(client);
   if (existingCount >= MAX_CUSTOM_AUTOMATIONS) {
@@ -198,18 +215,23 @@ export async function createCustomAutomation(
     );
   }
 
-  const { executionMode, allRepositories } = getExecutionTarget(
+  const { executionMode, allRepositories, noRepositories } = getExecutionTarget(
     input.environmentId,
   );
   const environment =
-    allRepositories || executionMode === 'fast'
+    allRepositories || noRepositories || executionMode === 'fast'
       ? null
       : await client.query.environments.findFirst({
           columns: { id: true },
           where: eq(environments.id, input.environmentId),
         });
 
-  if (executionMode === 'sandbox_task' && !allRepositories && !environment) {
+  if (
+    executionMode === 'sandbox_task' &&
+    !allRepositories &&
+    !noRepositories &&
+    !environment
+  ) {
     throw new Error('Selected environment was not found.');
   }
 
@@ -222,11 +244,13 @@ export async function createCustomAutomation(
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
+      reasoningEffort,
       environmentId:
-        allRepositories || executionMode === 'fast'
+        allRepositories || noRepositories || executionMode === 'fast'
           ? null
           : input.environmentId,
       allRepositories,
+      noRepositories,
       executionMode,
       target: input.target,
       createdByUserId: input.createdByUserId ?? null,
@@ -245,25 +269,31 @@ export async function updateCustomAutomation(
   input: CustomAutomationWriteInput,
   client: DatabaseOrTransaction = db,
 ): Promise<CustomAutomation> {
-  const { name, prompt, cronExpression, model } = assertValidWriteInput(input);
+  const { name, prompt, cronExpression, model, reasoningEffort } =
+    assertValidWriteInput(input);
 
   const existing = await getCustomAutomationById(id, client);
   if (!existing) {
     throw new Error('Custom automation was not found.');
   }
 
-  const { executionMode, allRepositories } = getExecutionTarget(
+  const { executionMode, allRepositories, noRepositories } = getExecutionTarget(
     input.environmentId,
   );
   const environment =
-    allRepositories || executionMode === 'fast'
+    allRepositories || noRepositories || executionMode === 'fast'
       ? null
       : await client.query.environments.findFirst({
           columns: { id: true },
           where: eq(environments.id, input.environmentId),
         });
 
-  if (executionMode === 'sandbox_task' && !allRepositories && !environment) {
+  if (
+    executionMode === 'sandbox_task' &&
+    !allRepositories &&
+    !noRepositories &&
+    !environment
+  ) {
     throw new Error('Selected environment was not found.');
   }
 
@@ -276,11 +306,13 @@ export async function updateCustomAutomation(
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
+      reasoningEffort,
       environmentId:
-        allRepositories || executionMode === 'fast'
+        allRepositories || noRepositories || executionMode === 'fast'
           ? null
           : input.environmentId,
       allRepositories,
+      noRepositories,
       executionMode,
       target: input.target,
       updatedAt: new Date(),

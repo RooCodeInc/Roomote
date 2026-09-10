@@ -93,9 +93,11 @@ COPY apps/docs ./apps/docs/
 ARG R_APP_ENV
 ARG RELEASE_VERSION
 ARG RELEASE_PRODUCT_VERSION
+ARG GITHUB_SHA
 ENV R_APP_ENV=${R_APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
 ENV RELEASE_PRODUCT_VERSION=${RELEASE_PRODUCT_VERSION}
+ENV GITHUB_SHA=${GITHUB_SHA}
 
 # ---------------------------------------------------------------------------
 # web: Next.js standalone build. The placeholder env values only satisfy
@@ -297,9 +299,11 @@ RUN chmod +x /roomote/.docker/app/entrypoint.sh
 ARG R_APP_ENV
 ARG RELEASE_VERSION
 ARG RELEASE_PRODUCT_VERSION
+ARG GITHUB_SHA
 ENV R_APP_ENV=${R_APP_ENV}
 ENV RELEASE_VERSION=${RELEASE_VERSION}
 ENV RELEASE_PRODUCT_VERSION=${RELEASE_PRODUCT_VERSION}
+ENV GITHUB_SHA=${GITHUB_SHA}
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV HOME=/tmp
@@ -314,8 +318,9 @@ ARG OPENCODE_CLI_VERSION=1.18.10
 
 # Fast mode uses bounded, temporary partial Git fetches to discover
 # repository-defined skills without exposing a checkout to the model.
+# Native Slack video delivery converts WebM copies to H.264/AAC MP4.
 RUN apt -qq update && \
-  apt -qq install -y git && \
+  apt -qq install -y git ffmpeg util-linux && \
   rm -rf /var/lib/apt/lists/*
 
 # The install and version check run as root; with the image's HOME=/tmp they
@@ -333,6 +338,34 @@ RUN export HOME=/tmp/opencode-build \
   && test "$(/opt/opencode-cli/node_modules/.bin/opencode --version)" = "${OPENCODE_CLI_VERSION}" \
   && ln -sf /opt/opencode-cli/node_modules/.bin/opencode /usr/local/bin/opencode \
   && rm -rf /tmp/opencode-build
+
+# OpenCode Arborist-installs @opencode-ai/plugin into every config directory
+# it loads and blocks its first request on that install whenever a plugin is
+# configured. Fresh containers start with empty config dirs under /tmp, so the
+# first Fast turn after each deploy paid a cold registry install (minutes, or
+# a 300s timeout). Bake a complete install here; the runtime copies it into
+# each config dir before `opencode serve` (opencode-plugin-seed.ts), which
+# makes OpenCode's own install check a no-op. Same layout and path as the
+# worker image's sandbox seed. Root-owned and world-readable is enough: the
+# runtime only reads it.
+RUN export HOME=/tmp/opencode-build \
+  && mkdir -p /opt/roomote/opencode-plugin-seed \
+  && printf '%s\n' \
+    '{' \
+    '  "name": "opencode",' \
+    '  "private": true,' \
+    '  "dependencies": {' \
+    "    \"@opencode-ai/plugin\": \"${OPENCODE_CLI_VERSION}\"" \
+    '  }' \
+    '}' > /opt/roomote/opencode-plugin-seed/package.json \
+  && npm install --prefix /opt/roomote/opencode-plugin-seed \
+    --ignore-scripts --no-audit --no-fund \
+  && test -f /opt/roomote/opencode-plugin-seed/package-lock.json \
+  && test "$(node -p "require('/opt/roomote/opencode-plugin-seed/node_modules/@opencode-ai/plugin/package.json').version")" = "${OPENCODE_CLI_VERSION}" \
+  && chmod -R a+rX /opt/roomote \
+  && rm -rf /tmp/opencode-build
+
+ENV ROOMOTE_OPENCODE_PLUGIN_SEED_DIR=/opt/roomote/opencode-plugin-seed
 
 # GitHub PR prompt generation still uses the gh CLI in the API process. Keep
 # the installer isolated so only API-bearing runtime targets receive it.

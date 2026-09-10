@@ -12,6 +12,7 @@ const redisState = vi.hoisted(() => ({
   counters: new Map<string, number>(),
   shouldThrow: false,
 }));
+const mcpAuthState = vi.hoisted(() => ({ userId: 'user-123' }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/redis')>();
@@ -99,7 +100,7 @@ vi.mock('../middleware', async (importOriginal) => {
         if (authHeader === 'Bearer test-mcp-token') {
           c.set('authContext', {
             tokenType: 'mcp',
-            userId: 'user-123',
+            userId: mcpAuthState.userId,
             resource: getRoomoteMcpResourceUrl(
               Env.R_PUBLIC_URL ?? Env.R_APP_URL,
             ),
@@ -134,6 +135,16 @@ vi.mock('../middleware', async (importOriginal) => {
 });
 
 import { createApiApp } from '../server';
+import {
+  db,
+  eq,
+  fastAgentConversations,
+  fastAgentMessages,
+  sessionFactory,
+  sessions,
+  userFactory,
+  users,
+} from '@roomote/db/server';
 import { evaluateRoutePolicy } from '../middleware/routePolicyMiddleware';
 import { findRoutePolicyRule } from '../route-policies';
 
@@ -141,6 +152,7 @@ describe('route policy enforcement', () => {
   beforeEach(() => {
     redisState.counters.clear();
     redisState.shouldThrow = false;
+    mcpAuthState.userId = 'user-123';
   });
 
   describe('default-deny for unclassified paths', () => {
@@ -331,6 +343,7 @@ describe('route policy enforcement', () => {
           'search',
           'get_summary',
           'get_messages',
+          'get_updates',
           'send_message',
           'search_tasks',
           'launch',
@@ -533,6 +546,135 @@ describe('route policy enforcement', () => {
         error: 'Task run token does not match requested task run',
       });
     });
+
+    it('returns cursor-based Session narrative through the public MCP transport', async () => {
+      const owner = await userFactory.create();
+      mcpAuthState.userId = owner.id;
+      const [conversation] = await db
+        .insert(fastAgentConversations)
+        .values({
+          userId: owner.id,
+          surface: 'web',
+          workspaceId: owner.id,
+          conversationId: crypto.randomUUID(),
+        })
+        .returning();
+      const session = await sessionFactory.create({
+        ownerKind: 'user',
+        ownerUserId: owner.id,
+        fastConversationId: conversation!.id,
+      });
+      await db.insert(fastAgentMessages).values([
+        {
+          conversationId: conversation!.id,
+          eventId: 'mcp-user-turn',
+          turnId: 'mcp-turn-1',
+          turnSeq: 0,
+          ts: 1,
+          eventType: 'roomote_runtime.user_prompt',
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: 'Check the queue.' }],
+          payload: {},
+          source: 'web',
+        },
+        {
+          conversationId: conversation!.id,
+          eventId: 'mcp-tool-result',
+          turnId: 'mcp-turn-2',
+          turnSeq: 0,
+          ts: 2,
+          eventType: 'roomote_runtime.tool_result',
+          role: 'tool',
+          contentBlocks: [{ type: 'text', text: 'x'.repeat(100_000) }],
+          payload: {},
+          source: 'web',
+        },
+        {
+          conversationId: conversation!.id,
+          eventId: 'mcp-roomote-turn',
+          turnId: 'mcp-turn-3',
+          turnSeq: 0,
+          ts: 3,
+          eventType: 'roomote_runtime.assistant_message',
+          role: 'assistant',
+          contentBlocks: [{ type: 'text', text: 'The queue is healthy.' }],
+          payload: {},
+          source: 'web',
+        },
+      ]);
+
+      const callManageTasks = async (
+        action: 'get_messages' | 'get_updates',
+        cursor?: string,
+      ) => {
+        const response = await createApiApp().request('http://localhost/mcp', {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer test-mcp-token',
+            accept: 'application/json, text/event-stream',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: {
+              name: 'manage_tasks',
+              arguments: {
+                action,
+                sessionId: session.id,
+                ...(cursor ? { cursor } : {}),
+              },
+            },
+          }),
+        });
+        expect(response.status).toBe(200);
+        return (await response.json()) as {
+          result?: {
+            structuredContent?: Record<string, unknown>;
+          };
+        };
+      };
+
+      const legacy = await callManageTasks('get_messages');
+      const first = await callManageTasks('get_updates');
+      const firstUpdate = first.result?.structuredContent as
+        | {
+            narrative: Array<{ direction: string; text: string }>;
+            nextCursor: string;
+            state: { changed: boolean };
+          }
+        | undefined;
+      expect(Buffer.byteLength(JSON.stringify(legacy))).toBe(202_099);
+      expect(Buffer.byteLength(JSON.stringify(first))).toBe(2_091);
+      expect(firstUpdate?.narrative).toEqual([
+        expect.objectContaining({
+          direction: 'Codex → Roomote',
+          text: 'Check the queue.',
+        }),
+        expect.objectContaining({
+          direction: 'Roomote → Codex',
+          text: 'The queue is healthy.',
+        }),
+      ]);
+      expect(JSON.stringify(first)).not.toContain('x'.repeat(100));
+
+      const unchanged = await callManageTasks(
+        'get_updates',
+        firstUpdate!.nextCursor,
+      );
+      expect(unchanged.result?.structuredContent).toMatchObject({
+        narrative: [],
+        state: { changed: false },
+        nextCursor: firstUpdate!.nextCursor,
+      });
+
+      await db.delete(sessions).where(eq(sessions.id, session.id));
+      await db
+        .delete(fastAgentConversations)
+        .where(eq(fastAgentConversations.id, conversation!.id));
+      await db.delete(users).where(eq(users.id, owner.id));
+    });
   });
 
   describe('task-token routes', () => {
@@ -631,54 +773,60 @@ describe('route policy enforcement', () => {
       });
     });
 
-    it('keys the Teams auth resume limit on the state token, not the caller', async () => {
-      const app = createApiApp();
+    it.each(['teams', 'slack'])(
+      'keys the %s auth resume limit on the state token, not the caller',
+      async (provider) => {
+        const app = createApiApp();
 
-      const requestResume = (state: string) =>
-        app.request('http://localhost/api/webhooks/teams/auth/resume', {
-          method: 'POST',
-          body: JSON.stringify({ state }),
-          headers: { 'content-type': 'application/json' },
-        });
+        const requestResume = (state: string) =>
+          app.request(`http://localhost/api/webhooks/${provider}/auth/resume`, {
+            method: 'POST',
+            body: JSON.stringify({ state }),
+            headers: { 'content-type': 'application/json' },
+          });
 
-      // Hammering one token trips its 10/min bucket...
-      for (let attempt = 1; attempt <= 10; attempt += 1) {
-        const response = await requestResume('repeated-token');
+        // Hammering one token trips its 10/min bucket...
+        for (let attempt = 1; attempt <= 10; attempt += 1) {
+          const response = await requestResume('repeated-token');
 
-        // The mocked Redis has no pending token stored, so admitted
-        // requests reach the handler and fail there with 404.
-        expect(response.status).toBe(404);
-      }
+          // The mocked Redis has no pending token stored, so admitted
+          // requests reach the handler and fail there with 404.
+          expect(response.status).toBe(404);
+        }
 
-      const throttled = await requestResume('repeated-token');
-      expect(throttled.status).toBe(429);
+        const throttled = await requestResume('repeated-token');
+        expect(throttled.status).toBe(429);
 
-      // ...while other tokens (concurrent legitimate users arriving from
-      // the same web-app egress with no client headers) stay unaffected.
-      const otherToken = await requestResume('different-token');
-      expect(otherToken.status).toBe(404);
-    });
+        // ...while other tokens (concurrent legitimate users arriving from
+        // the same web-app egress with no client headers) stay unaffected.
+        const otherToken = await requestResume('different-token');
+        expect(otherToken.status).toBe(404);
+      },
+    );
 
-    it('applies a high global client ceiling to Teams auth resume', async () => {
-      seedRateLimitBucket(
-        'webhook-teams-auth-resume',
-        'client',
-        'unknown',
-        60,
-        100_000,
-      );
+    it.each(['teams', 'slack'])(
+      'applies a high global client ceiling to %s auth resume',
+      async (provider) => {
+        seedRateLimitBucket(
+          `webhook-${provider}-auth-resume`,
+          'client',
+          'unknown',
+          60,
+          100_000,
+        );
 
-      const response = await createApiApp().request(
-        'http://localhost/api/webhooks/teams/auth/resume',
-        {
-          method: 'POST',
-          body: JSON.stringify({ state: 'fresh-token' }),
-          headers: { 'content-type': 'application/json' },
-        },
-      );
+        const response = await createApiApp().request(
+          `http://localhost/api/webhooks/${provider}/auth/resume`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ state: 'fresh-token' }),
+            headers: { 'content-type': 'application/json' },
+          },
+        );
 
-      expect(response.status).toBe(429);
-    });
+        expect(response.status).toBe(429);
+      },
+    );
 
     it('fails open when the rate limit backend errors', async () => {
       redisState.shouldThrow = true;

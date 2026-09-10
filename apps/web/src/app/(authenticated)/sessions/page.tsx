@@ -80,7 +80,7 @@ export default async function SessionsPage({
   const columns = SESSION_STATUSES;
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-card">
+    <div className="flex h-full min-h-0 min-w-0 w-full flex-col bg-card">
       <div className="border-b-4 border-b-card bg-background p-4">
         <SessionsFilters
           userId={user ?? null}
@@ -104,7 +104,7 @@ export default async function SessionsPage({
             </EmptyHeader>
           </Empty>
         ) : view === 'board' ? (
-          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
             {columns.map((column) => (
               <section key={column} aria-labelledby={`session-${column}`}>
                 <h2
@@ -113,7 +113,7 @@ export default async function SessionsPage({
                 >
                   {getSessionStatusLabel(column)}
                 </h2>
-                <div className="divide-y rounded-lg border bg-card">
+                <div className="divide-y-2 divide-background bg-card">
                   {result.sessions
                     .filter((session) =>
                       column === 'ready'
@@ -127,6 +127,7 @@ export default async function SessionsPage({
                         session={session}
                         viewerUserId={authorizedUser.userId}
                         query={q}
+                        view="board"
                       />
                     ))}
                 </div>

@@ -11,6 +11,11 @@ import {
   NON_TASK_TOOL_PERMISSION_DENIALS,
   readOpenCodeDebugConfig,
 } from '../opencode-runtime';
+import {
+  isOpenCodePluginSeedComplete,
+  OPENCODE_PLUGIN_SEED_DIR_ENV,
+} from '../opencode-plugin-seed';
+import { writeOpenCodePluginSeedFixture } from './helpers/opencode-plugin-seed-fixture';
 
 describe('buildOpenCodeCliEnv', () => {
   const managedKeys = [
@@ -195,6 +200,7 @@ describe('buildOpenCodeCliEnv', () => {
           agent: {
             unsafe: { mode: 'subagent', tools: { bash: true } },
           },
+          subagent_depth: 10,
         }),
       },
       { preserveReasoning: true, promptOnlySubagents: true },
@@ -204,6 +210,7 @@ describe('buildOpenCodeCliEnv', () => {
     // Fast intentionally leaves OpenCode 1.18.10's 50 KiB / 2,000-line
     // defaults in force; the bridge takeover predicate shares those defaults.
     expect(config).not.toHaveProperty('tool_output');
+    expect(config.subagent_depth).toBe(2);
     expect(config.permission).toEqual({
       ...NON_TASK_TOOL_PERMISSION_DENIALS,
       task: 'allow',
@@ -222,6 +229,7 @@ describe('buildOpenCodeCliEnv', () => {
           '*': true,
           task: false,
           roomote_manage_custom_automations: false,
+          roomote_create_custom_skill: false,
           send_chat_reply: false,
         },
       });
@@ -802,5 +810,50 @@ describe('OpenCode SDK server shutdown', () => {
     expect(process.listenerCount('SIGTERM')).toBeGreaterThanOrEqual(1);
     expect(process.listenerCount('SIGINT')).toBeGreaterThanOrEqual(1);
     expect(process.listenerCount('SIGHUP')).toBeGreaterThanOrEqual(1);
+  });
+
+  it('seeds the plugin install into every config dir before spawning the server', async () => {
+    const fixturePath = path.join(fixtureDir, 'fixture-server.cjs');
+    const pidFilePath = path.join(fixtureDir, 'pids.json');
+    writeFileSync(fixturePath, FIXTURE_SERVER_SOURCE);
+    process.env.OPENCODE_COMMAND = `${process.execPath} ${fixturePath}`;
+    const seedDir = path.join(fixtureDir, 'seed');
+    writeOpenCodePluginSeedFixture(seedDir, '1.18.10');
+    const home = path.join(fixtureDir, 'home');
+    const sharedTools = path.join(fixtureDir, 'shared-tools');
+
+    const lease = await leaseOpenCodeSdkServer({
+      env: {
+        OPENCODE_FIXTURE_PID_FILE: pidFilePath,
+        HOME: home,
+        OPENCODE_CONFIG_DIR: sharedTools,
+        [OPENCODE_PLUGIN_SEED_DIR_ENV]: seedDir,
+      },
+      startTimeoutMs: 15_000,
+    });
+
+    try {
+      expect(
+        await waitFor(() => {
+          try {
+            readFileSync(pidFilePath, 'utf8');
+            return true;
+          } catch {
+            return false;
+          }
+        }, 5_000),
+      ).toBe(true);
+      const { serverPid, grandchildPid } = JSON.parse(
+        readFileSync(pidFilePath, 'utf8'),
+      ) as { serverPid: number; grandchildPid: number };
+      trackedPids = [serverPid, grandchildPid];
+
+      expect(isOpenCodePluginSeedComplete(sharedTools)).toBe(true);
+      expect(
+        isOpenCodePluginSeedComplete(path.join(home, '.config', 'opencode')),
+      ).toBe(true);
+    } finally {
+      lease.release();
+    }
   });
 });

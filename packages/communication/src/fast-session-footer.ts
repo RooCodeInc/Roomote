@@ -1,6 +1,7 @@
 import { Env } from '@roomote/env';
 import {
   and,
+  asc,
   db,
   eq,
   getSessionForFastConversation,
@@ -22,7 +23,12 @@ export type FastSessionFooterProvider =
   | 'discord'
   | 'teams'
   | 'telegram'
-  | 'agentmail';
+  | 'agentmail'
+  | 'github'
+  | 'gitlab'
+  | 'bitbucket'
+  | 'ado'
+  | 'gitea';
 
 export type FastSessionPullRequestReference = {
   number: number | null;
@@ -60,12 +66,10 @@ function collectFastSessionLinkedPrs(params: {
   return [...uniquePrs.values()];
 }
 
-export async function resolveFastSessionReplyFooterContext(params: {
-  sessionId: string;
-  pullRequest?: FastSessionPullRequestReference | null;
-  pullRequests?: readonly FastSessionPullRequestReference[];
-}): Promise<FastSessionReplyFooterContext> {
-  const session = await getSessionForFastConversation(db, params.sessionId);
+async function getFastSessionLinkedTaskIds(
+  sessionId: string,
+): Promise<string[]> {
+  const session = await getSessionForFastConversation(db, sessionId);
   const linkedTasks = session
     ? await db
         .select({ taskId: sessionTasks.taskId })
@@ -74,9 +78,21 @@ export async function resolveFastSessionReplyFooterContext(params: {
         .where(
           and(eq(sessionTasks.sessionId, session.id), isNull(tasks.deletedAt)),
         )
+        // Deterministic ordering so "the first task with a preview" is stable
+        // across footer rebuilds.
+        .orderBy(asc(sessionTasks.attachedAt), asc(sessionTasks.taskId))
     : [];
+  return linkedTasks.map(({ taskId }) => taskId);
+}
+
+export async function resolveFastSessionReplyFooterContext(params: {
+  sessionId: string;
+  pullRequest?: FastSessionPullRequestReference | null;
+  pullRequests?: readonly FastSessionPullRequestReference[];
+}): Promise<FastSessionReplyFooterContext> {
+  const linkedTaskIds = await getFastSessionLinkedTaskIds(params.sessionId);
   const contexts = await Promise.all(
-    linkedTasks.map(({ taskId }) =>
+    linkedTaskIds.map((taskId) =>
       resolveThreadReplyFooterContext({
         taskId,
         prRepo: null,
@@ -133,11 +149,20 @@ export function buildFastSessionReplyFooterText(params: {
 }): string {
   const sessionUrl = buildFastSessionUrl(params.provider, params.sessionId);
 
+  // Chat surfaces route any thread reply to the Session; source-control
+  // discussions only hear @-mentions, so the footer must say so.
+  const explicitMentionRequired =
+    params.provider === 'github' ||
+    params.provider === 'gitlab' ||
+    params.provider === 'bitbucket' ||
+    params.provider === 'ado' ||
+    params.provider === 'gitea';
+
   return buildThreadReplyFooterText({
     taskUrl: sessionUrl,
     linkedPrs: collectFastSessionLinkedPrs(params),
     livePreviewUrl: params.livePreviewUrl,
-    explicitMentionRequired: false,
+    explicitMentionRequired,
     ...(params.provider === 'slack'
       ? { formatLink: (label: string, url: string) => `<${url}|${label}>` }
       : params.provider === 'discord'
@@ -145,7 +170,12 @@ export function buildFastSessionReplyFooterText(params: {
             formatLink: formatMarkdownLink,
             formatFooterText: (text: string) => `-# ${text}`,
           }
-        : { formatLink: formatMarkdownLink }),
+        : params.provider === 'github'
+          ? {
+              formatLink: formatMarkdownLink,
+              formatFooterText: (text: string) => `<sub>${text}</sub>`,
+            }
+          : { formatLink: formatMarkdownLink }),
   });
 }
 

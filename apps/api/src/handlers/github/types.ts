@@ -109,6 +109,13 @@ export type WebhookPullRequestReviewSubmitted =
 export type WebhookCheckRunCompleted = Schemas['webhook-check-run-completed'];
 
 /**
+ * WebhookCheckRunRerequested
+ */
+
+export type WebhookCheckRunRerequested =
+  Schemas['webhook-check-run-rerequested'];
+
+/**
  * WebhookTaskProperties
  */
 

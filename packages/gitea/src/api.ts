@@ -1209,3 +1209,105 @@ export async function createTaskRunGiteaCredentials(
         : null,
   };
 }
+
+const giteaPullRequestDetailsSchema = z
+  .object({
+    number: z.number(),
+    title: z.string(),
+    body: z.string().nullable().optional(),
+    html_url: z.string().optional(),
+    head: z
+      .object({ ref: z.string().optional(), sha: z.string().optional() })
+      .passthrough()
+      .optional(),
+    base: z.object({ ref: z.string().optional() }).passthrough().optional(),
+  })
+  .passthrough();
+
+export type GiteaPullRequestDetails = z.infer<
+  typeof giteaPullRequestDetailsSchema
+>;
+
+/** Fetches a pull request by repository full name and number. */
+export async function getGiteaPullRequest({
+  repositoryFullName,
+  pullRequestNumber,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<GiteaPullRequestDetails> {
+  const giteaToken = token ?? (await resolveGiteaToken());
+
+  if (!giteaToken?.trim()) {
+    throw new Error('A Gitea token is required to read pull requests.');
+  }
+
+  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
+
+  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
+    throw new Error('A Gitea base URL is required to read pull requests.');
+  }
+
+  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
+  const { data } = await requestGiteaJson({
+    apiBaseUrl: apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+    fetchImpl,
+    path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pullRequestNumber}`,
+    params: {},
+    token: giteaToken,
+    schema: giteaPullRequestDetailsSchema,
+  });
+
+  return data;
+}
+
+/** Replaces the body of an existing issue or pull request comment. */
+export async function updateGiteaComment({
+  repositoryFullName,
+  commentId,
+  body,
+  token,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  commentId: number;
+  body: string;
+  token?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const giteaToken = token ?? (await resolveGiteaToken());
+
+  if (!giteaToken?.trim()) {
+    throw new Error('A Gitea token is required to update comments.');
+  }
+
+  const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
+
+  if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
+    throw new Error('A Gitea base URL is required to update comments.');
+  }
+
+  const { owner, repo } = splitGiteaRepositoryFullName(repositoryFullName);
+  await requestGiteaJson({
+    apiBaseUrl: apiBaseUrl ?? buildGiteaApiBaseUrl(resolvedBaseUrl!),
+    fetchImpl,
+    method: 'PATCH',
+    path: `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/comments/${commentId}`,
+    params: {},
+    token: giteaToken,
+    body: { body },
+    schema: z.object({ id: z.number() }).passthrough(),
+  });
+}

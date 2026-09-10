@@ -1,5 +1,6 @@
 const {
   mockFindFirstSlackInstallation,
+  mockFindActiveSlackInstallationForChannel,
   mockResolveTeamsCredentials,
   mockResolveTelegramCredentials,
   mockResolveDiscordCredentials,
@@ -10,6 +11,7 @@ const {
   mockFindUserDirectMessageDestination,
 } = vi.hoisted(() => ({
   mockFindFirstSlackInstallation: vi.fn(),
+  mockFindActiveSlackInstallationForChannel: vi.fn(),
   mockResolveTeamsCredentials: vi.fn(),
   mockResolveTelegramCredentials: vi.fn(),
   mockResolveDiscordCredentials: vi.fn(),
@@ -21,6 +23,8 @@ const {
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  findActiveSlackInstallationForChannel:
+    mockFindActiveSlackInstallationForChannel,
   db: {
     query: {
       slackInstallations: { findFirst: mockFindFirstSlackInstallation },
@@ -144,7 +148,10 @@ describe('resolveAutomationRuntimeDestination', () => {
     vi.clearAllMocks();
   });
 
-  it('returns a slack destination as-is', async () => {
+  it('binds the manager fallback to its resolved active Slack owner', async () => {
+    mockFindActiveSlackInstallationForChannel.mockResolvedValue({
+      teamId: 'T-B',
+    });
     await expect(
       resolveAutomationRuntimeDestination({
         runtime: {
@@ -160,7 +167,44 @@ describe('resolveAutomationRuntimeDestination', () => {
       provider: 'slack',
       channelId: 'C123',
       source: 'manager_channel',
+      teamId: 'T-B',
     });
+    expect(mockFindActiveSlackInstallationForChannel).toHaveBeenCalledWith(
+      'C123',
+    );
+  });
+
+  it('fails closed when the manager channel has no safe active installation', async () => {
+    mockFindActiveSlackInstallationForChannel.mockResolvedValue(null);
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C123',
+            source: 'manager_channel',
+          },
+        },
+        slackConnected: true,
+      }),
+    ).resolves.toBeNull();
+    expect(mockFindTeamsPrimaryConversation).not.toHaveBeenCalled();
+  });
+
+  it('preserves explicit Slack destinations without consulting manager ownership', async () => {
+    const destination = {
+      provider: 'slack',
+      channelId: 'C123',
+      teamId: 'T-EXPLICIT',
+      source: 'automation_target',
+    } as const;
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: { destination },
+        slackConnected: true,
+      }),
+    ).resolves.toEqual(destination);
+    expect(mockFindActiveSlackInstallationForChannel).not.toHaveBeenCalled();
   });
 
   it('ignores a saved slack destination after Slack disconnects and falls back', async () => {
@@ -330,6 +374,16 @@ describe('resolveAutomationRuntimeDestination', () => {
 });
 
 describe('payload fields and prompt context', () => {
+  it('stamps the resolved Slack team into task payloads', () => {
+    expect(
+      buildDestinationTaskPayloadFields({
+        provider: 'slack',
+        channelId: 'C123',
+        teamId: 'T-B',
+        source: 'manager_channel',
+      }),
+    ).toEqual({ teamId: 'T-B' });
+  });
   it('stamps nothing for slack destinations', () => {
     expect(
       buildDestinationTaskPayloadFields({

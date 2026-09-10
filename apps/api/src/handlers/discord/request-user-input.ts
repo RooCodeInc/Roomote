@@ -3,7 +3,6 @@ import {
   buildDiscordCancelledRequestUserInputText,
   getDiscordRequestUserInputCurrentQuestion,
   getPendingCommunicationRequestUserInput,
-  clearPendingCommunicationRequestUserInput,
   parseDiscordRequestUserInputAnswerCallbackData,
   parseDiscordRequestUserInputCancelCallbackData,
   submitPendingCommunicationRequestUserInputAnswer,
@@ -11,10 +10,7 @@ import {
 } from '@roomote/communication';
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
-import {
-  parseAcpRequestUserInputAnswerReply,
-  type AcpRequestUserInputAnswers,
-} from '@roomote/types';
+import { type AcpRequestUserInputAnswers } from '@roomote/types';
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
 
 import { apiLogger } from '../../logging.js';
@@ -148,88 +144,6 @@ async function finalizeDiscordRequestUserInputAnswer(params: {
     text: confirmationText,
   });
   return 'queued';
-}
-
-/**
- * Try to treat an inbound Discord message as an answer to a pending
- * request_user_input prompt. Returns true when the message was consumed.
- */
-export async function tryHandleDiscordRequestUserInputMessage(params: {
-  provider: DiscordCommunicationProvider;
-  applicationId: string;
-  channel: DiscordChannelContext;
-  activeRun: { id: number };
-  userId: string;
-  text: string;
-  replyToMessageId?: string;
-}): Promise<boolean> {
-  const conversationId = conversationIdForChannel(params.channel);
-  const pendingRequest = await getPendingCommunicationRequestUserInput(
-    'discord',
-    conversationId,
-  );
-
-  if (!pendingRequest) {
-    return false;
-  }
-
-  if (pendingRequest.runId !== params.activeRun.id) {
-    await clearPendingCommunicationRequestUserInput('discord', conversationId, {
-      requestId: pendingRequest.requestId,
-    }).catch(() => undefined);
-    return false;
-  }
-
-  if (pendingRequest.status === 'submitted') {
-    await postAlreadyReceivedNotice({
-      provider: params.provider,
-      applicationId: params.applicationId,
-      channel: params.channel,
-      replyToMessageId: params.replyToMessageId,
-    });
-    return true;
-  }
-
-  const parsedReply = parseAcpRequestUserInputAnswerReply(
-    pendingRequest.questions,
-    params.text,
-  );
-
-  if (!parsedReply) {
-    // Not a recognizable structured answer — fall through to normal follow-up.
-    return false;
-  }
-
-  if (parsedReply.resolution === 'cancelled') {
-    await finalizeDiscordRequestUserInputAnswer({
-      provider: params.provider,
-      applicationId: params.applicationId,
-      channel: params.channel,
-      activeRunId: params.activeRun.id,
-      pendingRequest,
-      answers: {},
-      userId: params.userId,
-      answerText: 'cancel',
-      replyToMessageId: params.replyToMessageId,
-      cancelled: true,
-    });
-    return true;
-  }
-
-  await finalizeDiscordRequestUserInputAnswer({
-    provider: params.provider,
-    applicationId: params.applicationId,
-    channel: params.channel,
-    activeRunId: params.activeRun.id,
-    pendingRequest,
-    answers: parsedReply.answers,
-    userId: params.userId,
-    answerText: Object.values(parsedReply.answers)
-      .flatMap((entry) => entry.answers)
-      .join(', '),
-    replyToMessageId: params.replyToMessageId,
-  });
-  return true;
 }
 
 /**

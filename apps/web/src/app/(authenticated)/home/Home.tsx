@@ -4,11 +4,7 @@ import Image from 'next/image';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { DiscordLogoIcon } from '@radix-ui/react-icons';
 
-import type { ComputeProvider } from '@roomote/types';
-
 import { cn } from '@/lib/utils';
-import { useEnvironments } from '@/hooks/environments';
-import { useAuthorizedUser } from '@/hooks/useUser';
 import {
   Button,
   Calendar,
@@ -25,6 +21,7 @@ import { NewTaskForm } from '@/components/tasks/NewTaskForm';
 
 import { OnboardingCard } from './OnboardingCard';
 import { BottomSheetTabs } from './BottomSheetTabs';
+import { HOME_HEADINGS } from './headings';
 import {
   HOME_PROMPT_PLACEHOLDERS,
   normalizeHomePromptPlaceholderIndex,
@@ -55,18 +52,14 @@ function persistFeedbackPromptDismissal(): void {
 }
 
 type HomeProps = {
+  initialHeading?: (typeof HOME_HEADINGS)[number];
   initialPlaceholderIndex: number;
-  defaultComputeProvider?: ComputeProvider;
-  availableComputeProviders?: readonly ComputeProvider[];
 };
 
 export function Home({
+  initialHeading = HOME_HEADINGS[0],
   initialPlaceholderIndex,
-  defaultComputeProvider,
-  availableComputeProviders,
 }: HomeProps) {
-  const environments = useEnvironments();
-  const { isAdmin } = useAuthorizedUser();
   const [isExiting, setIsExiting] = useState(false);
   const [isBottomSheetExpanded, setIsBottomSheetExpanded] = useState(false);
   const [isFeedbackPromptVisible, setIsFeedbackPromptVisible] = useState(false);
@@ -187,9 +180,6 @@ export function Home({
   }, []);
 
   const shouldDimMainForm = isBottomSheetExpanded && isShortViewport;
-  const hasAnyEnvironments = (environments.data?.length ?? 0) > 0;
-  const showNoEnvironmentsWarning =
-    isAdmin && !environments.isPending && !hasAnyEnvironments;
 
   return (
     <>
@@ -208,21 +198,19 @@ export function Home({
             )}
           >
             <h1 className="text-2xl tracking-tight font-bold animate-[enter-down_1s_1] pt-10 md:pt-0">
-              New Session
+              {initialHeading}
             </h1>
 
             <NewTaskForm
-              defaultComputeProvider={defaultComputeProvider}
-              availableComputeProviders={availableComputeProviders}
               onTaskStarted={handleTaskStarted}
               placeholder={activePromptPlaceholder}
               textareaMaxHeight={textareaMaxHeight}
               promptContainerRef={promptCardRef}
             />
 
-            <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
-              {!showNoEnvironmentsWarning && <OnboardingCard />}
-              {!showNoEnvironmentsWarning && isFeedbackPromptVisible ? (
+            <div className="flex flex-col flex-wrap gap-2 md:flex-row md:flex-nowrap md:items-center animate-[fade-in_1s_1_750ms_backwards]">
+              <OnboardingCard />
+              {isFeedbackPromptVisible ? (
                 <button
                   type="button"
                   onClick={() => setIsFeedbackDialogOpen(true)}

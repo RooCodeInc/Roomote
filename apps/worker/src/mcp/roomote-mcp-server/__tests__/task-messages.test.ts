@@ -89,6 +89,50 @@ describe('handleGetTaskMessages', () => {
     expect(text).toContain('Most recent message');
   });
 
+  it('labels linked subagent messages without changing parent message labels', async () => {
+    vi.mocked(tasksApiClient.getTaskMessages).mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'msg-child',
+          taskId: 'task-1',
+          ts: 1700000002,
+          eventType: 'roomote_runtime.tool_call',
+          role: 'assistant',
+          text: 'Capture screenshot',
+          images: [],
+          metadata: {
+            sessionId: 'session-child',
+            parentSessionId: 'session-parent',
+            agentType: 'proof-runner',
+            isSubagent: true,
+          },
+          visibleInTranscript: true,
+        },
+        {
+          id: 'msg-parent',
+          taskId: 'task-1',
+          ts: 1700000001,
+          eventType: 'roomote_runtime.assistant_text',
+          role: 'assistant',
+          text: 'Parent response',
+          images: [],
+          metadata: { sessionId: 'session-parent' },
+          visibleInTranscript: true,
+        },
+      ],
+      returned: 2,
+    });
+
+    const result = await handleGetTaskMessages({ taskId: 'task-1' }, config);
+    const text = result.content[0]?.text ?? '';
+
+    expect(text).toContain(
+      '[assistant] (roomote_runtime.tool_call) [subagent:proof-runner session:session-child parent:session-parent]',
+    );
+    expect(text).toContain('[assistant] (roomote_runtime.assistant_text)');
+    expect(text).not.toContain('(roomote_runtime.assistant_text) [subagent:');
+  });
+
   it('should return a message when no messages found', async () => {
     vi.mocked(tasksApiClient.getTaskMessages).mockResolvedValueOnce({
       messages: [],

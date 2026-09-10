@@ -20,6 +20,7 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+  getPrOriginFastAgentParent: vi.fn(async () => null),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -157,6 +158,29 @@ describe('handleBitbucketPullRequest', () => {
       'acme/backend',
       42,
       'draft',
+      { host: 'bitbucket.org' },
+    );
+  });
+
+  it.each([
+    [
+      'https://Bitbucket.Example:8443/acme/backend/pull-requests/42',
+      'bitbucket.example:8443',
+    ],
+    [undefined, null],
+    ['not-a-url', null],
+  ] as const)('scopes status updates using PR URL %s', async (href, host) => {
+    await handleBitbucketPullRequest(
+      makePayload({ links: { html: { href } } }),
+      'pullrequest:fulfilled',
+    );
+
+    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+      'bitbucket',
+      'acme/backend',
+      42,
+      'merged',
+      { host },
     );
   });
 
@@ -258,6 +282,7 @@ describe('handleBitbucketPullRequest', () => {
       'acme/backend',
       42,
       'merged',
+      { host: 'bitbucket.org' },
     );
     expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenLastCalledWith(
       expect.objectContaining({ targetBranch: 'main' }),
@@ -292,6 +317,7 @@ describe('handleBitbucketPullRequest', () => {
       'acme/backend',
       42,
       'closed',
+      { host: 'bitbucket.org' },
     );
     expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith(
       expect.objectContaining({

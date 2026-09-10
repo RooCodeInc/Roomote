@@ -4,8 +4,17 @@ import type {
   AcpToolCallPayload,
   AcpToolResultPayload,
   AcpEventType,
+  DataVisualizationBlock,
   TaskMessageRole,
 } from '@roomote/types';
+
+/** Artifact backing an inline transcript image, when the server knows it. */
+export interface AcpUiMessageImageArtifact {
+  url: string;
+  owner: { taskId: string } | { sessionId: string };
+  path: string;
+  version: number;
+}
 
 interface AcpUiMessageBase {
   id: string;
@@ -21,6 +30,8 @@ interface AcpUiMessageBase {
   updateType: AcpEventType;
   text?: string;
   images?: string[];
+  imageArtifacts?: AcpUiMessageImageArtifact[];
+  charts?: DataVisualizationBlock[];
   toolCallId?: string;
   previousTs?: number;
   userId?: string;

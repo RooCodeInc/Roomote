@@ -6,6 +6,14 @@ vi.mock('@roomote/redis', () => ({
   acquireRedisLock: acquireRedisLockMock,
 }));
 
+const { releaseDurableClaimMock } = vi.hoisted(() => ({
+  releaseDurableClaimMock: vi.fn(),
+}));
+
+vi.mock('../fast-agent-conversation-repository', () => ({
+  releaseFastAgentDurableTurnClaim: releaseDurableClaimMock,
+}));
+
 type TurnLockModule = typeof import('../fast-agent-turn-lock');
 
 const conversation = {
@@ -90,6 +98,49 @@ describe('Fast turn shutdown drain', () => {
     expect(straggler!.signal.aborted).toBe(false);
 
     await straggler!();
+  });
+
+  it('releases the durable claim of every bound turn during shutdown', async () => {
+    releaseDurableClaimMock.mockResolvedValue(true);
+    const resume = vi.fn().mockResolvedValue(undefined);
+    const boundLock = await turnLock.acquireFastAgentTurnLock({ conversation });
+    boundLock!.durableRowId = 'durable-row-1';
+    boundLock!.durableResume = resume;
+    const unboundLock = await turnLock.acquireFastAgentTurnLock({
+      conversation: otherConversation,
+    });
+
+    await expect(
+      turnLock.abortActiveFastAgentTurns(
+        new turnLock.FastAgentProcessShutdownError('SIGTERM'),
+      ),
+    ).resolves.toBe(2);
+
+    // A turn interrupted before it reached its own abort handling still gets
+    // its row handed to the queue and the queue woken; unbound turns are
+    // untouched.
+    expect(releaseDurableClaimMock).toHaveBeenCalledTimes(1);
+    expect(releaseDurableClaimMock).toHaveBeenCalledWith('durable-row-1');
+    expect(resume).toHaveBeenCalledOnce();
+    await boundLock!();
+    await unboundLock!();
+  });
+
+  it('does not wake the queue when the shutdown release found no pending row', async () => {
+    releaseDurableClaimMock.mockResolvedValue(false);
+    const resume = vi.fn().mockResolvedValue(undefined);
+    const settledLock = await turnLock.acquireFastAgentTurnLock({
+      conversation,
+    });
+    settledLock!.durableRowId = 'durable-row-2';
+    settledLock!.durableResume = resume;
+
+    await turnLock.abortActiveFastAgentTurns(
+      new turnLock.FastAgentProcessShutdownError('SIGTERM'),
+    );
+
+    expect(resume).not.toHaveBeenCalled();
+    await settledLock!();
   });
 
   it('aborts stragglers with the reason the drain began with', async () => {

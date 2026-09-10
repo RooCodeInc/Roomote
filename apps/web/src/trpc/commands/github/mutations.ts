@@ -875,16 +875,14 @@ export async function startAuthenticateGitHubAccountCommand(
     });
 
     if (baseUrl) {
-      const redirectUri = new URL('/github/callback', baseUrl);
-
-      if (
-        callbackBackground === 'accent' ||
-        callbackBackground === 'background'
-      ) {
-        redirectUri.searchParams.set('bg', callbackBackground);
-      }
-
-      params.set('redirect_uri', redirectUri.toString());
+      // GitHub Apps require `redirect_uri` to match a registered callback URL
+      // exactly, with no extra query parameters; anything else is rejected
+      // with "The redirect_uri is not associated with this application".
+      // The callback background hint travels in the signed state instead.
+      params.set(
+        'redirect_uri',
+        new URL('/github/callback', baseUrl).toString(),
+      );
     }
 
     return {

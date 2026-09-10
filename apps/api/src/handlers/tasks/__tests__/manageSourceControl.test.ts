@@ -152,6 +152,44 @@ describe('manageSourceControl', () => {
     });
   });
 
+  it('dispatches reviewer requests to the authenticated write surface', async () => {
+    mockWriteSourceControlPullRequestForTaskRun.mockResolvedValue({
+      success: true,
+      action: 'request_pull_request_reviewers',
+      provider: 'github',
+      repositoryFullName: 'acme/frontend',
+      number: 55,
+      threadId: null,
+      commentId: null,
+      url: null,
+      applied: true,
+      warnings: [],
+    });
+
+    const response = await createApp().request('/task-1/source_control', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        action: 'request_pull_request_reviewers',
+        repositoryFullName: 'acme/frontend',
+        prNumber: 55,
+        reviewers: ['alice'],
+        teamReviewers: ['platform'],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockClaimLatestUserMessageForReplyQuote).not.toHaveBeenCalled();
+    expect(mockWriteSourceControlPullRequestForTaskRun).toHaveBeenCalledWith({
+      taskRun: expect.objectContaining({ id: 123 }),
+      input: expect.objectContaining({
+        action: 'request_pull_request_reviewers',
+        reviewers: ['alice'],
+        teamReviewers: ['platform'],
+      }),
+    });
+  });
+
   it('defers unmapped provider errors until after repository scope validation', async () => {
     mockManageSourceControlIssueForTaskRun.mockRejectedValueOnce(
       new Error(

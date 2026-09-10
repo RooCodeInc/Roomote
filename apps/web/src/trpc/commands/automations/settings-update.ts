@@ -15,6 +15,8 @@ import {
 } from '@roomote/types';
 import {
   db,
+  automations,
+  eq,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   deploymentSettings,
   getAutomationByKey,
@@ -37,6 +39,7 @@ import { captureActivationAutomationChanged } from '@roomote/telemetry/server';
 import type { ActivationAutomation } from '@roomote/telemetry';
 
 import type { UserAuthSuccess } from '@/types';
+import { resolveCiFailureTriageRules } from './ci-failure-triage-routing';
 
 import {
   hasActiveGitHubInstallation,
@@ -338,6 +341,28 @@ export async function updateBackgroundAgentSettingsCommand(
       ? (input.platformIssueAlertsEnabled ??
         existingSettings.platformIssueAlertsEnabled)
       : existingSettings.platformIssueAlertsEnabled;
+  const savingCiRules =
+    input.savingAutomation === 'ciFailureTriage' &&
+    input.ciFailureTriageAdditionalRules !== undefined;
+  let ciRules: Awaited<ReturnType<typeof resolveCiFailureTriageRules>>;
+  const ciRulesText = input.ciFailureTriageAdditionalRules?.trim() ?? '';
+  if (savingCiRules) {
+    try {
+      ciRules = await resolveCiFailureTriageRules(
+        auth,
+        ciRulesText,
+        (await getAutomationByKey('ci_failure_triage'))?.settings ?? {},
+      );
+    } catch (error) {
+      return {
+        success: false,
+        fieldErrors: {
+          ciFailureTriageAdditionalRules:
+            error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+  }
   const shouldUpdateCallRoomoteViaEmoji =
     input.savingAutomation === 'callRoomoteViaEmoji';
   const callRoomoteViaEmojiEnabled = shouldUpdateCallRoomoteViaEmoji
@@ -1474,8 +1499,27 @@ export async function updateBackgroundAgentSettingsCommand(
       updatedAt: now,
     });
 
+    const ciSettings = savingCiRules
+      ? {
+          ...(
+            await tx.query.automations.findFirst({
+              where: eq(automations.key, 'ci_failure_triage'),
+            })
+          )?.settings,
+        }
+      : undefined;
+    if (ciSettings) {
+      if (!ciRules) {
+        delete ciSettings.additionalRules;
+        delete ciSettings.compiledRules;
+      } else {
+        ciSettings.additionalRules = ciRulesText;
+        ciSettings.compiledRules = ciRules;
+      }
+    }
     await upsertAutomation(tx, {
       key: 'ci_failure_triage',
+      ...(ciSettings ? { settings: ciSettings } : {}),
       enabled: ciFailureTriageFrequency !== 'off',
       schedule: { mode: ciFailureTriageFrequency },
       ...destinationUpsertFields('ciFailureTriage'),

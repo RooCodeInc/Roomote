@@ -2,6 +2,7 @@ import { db, inArray, taskFactory, taskRuns, tasks } from '@roomote/db/server';
 import {
   RunStatus,
   TaskPayloadKind,
+  type ComputeProvider,
   type FastAgentParent,
 } from '@roomote/types';
 
@@ -27,6 +28,7 @@ async function createRun(input: {
   snapshotId?: string;
   snapshotCreatedAt?: Date;
   snapshotFailedAt?: Date;
+  vendor?: ComputeProvider;
 }) {
   const [run] = await db
     .insert(taskRuns)
@@ -50,6 +52,7 @@ async function createRun(input: {
       snapshotId: input.snapshotId,
       snapshotCreatedAt: input.snapshotCreatedAt,
       snapshotFailedAt: input.snapshotFailedAt,
+      vendor: input.vendor,
     })
     .returning();
 
@@ -79,6 +82,7 @@ describe('getActiveFastAgentTasks', () => {
     const canceledSnapshotTask = await createTask('Canceled snapshot task');
     const failedSnapshotTask = await createTask('Failed snapshot task');
     const expiredTask = await createTask('Expired task');
+    const oldRoomoteTask = await createTask('Old Roomote snapshot');
     const otherSessionTask = await createTask('Other session');
     const deletedTask = await createTask(
       'Deleted task',
@@ -124,6 +128,15 @@ describe('getActiveFastAgentTasks', () => {
       fastAgentSessionId: SESSION_ID,
       snapshotId: 'snapshot-expired',
       snapshotCreatedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+    });
+    await createRun({
+      taskId: oldRoomoteTask.id,
+      status: RunStatus.Completed,
+      createdAt: new Date('2026-08-17T00:02:30Z'),
+      fastAgentSessionId: SESSION_ID,
+      snapshotId: 'snapshot-old-roomote',
+      snapshotCreatedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      vendor: 'roomote',
     });
     await createRun({
       taskId: canceledTask.id,
@@ -177,6 +190,11 @@ describe('getActiveFastAgentTasks', () => {
       {
         taskId: settledTask.id,
         title: 'Settled restart',
+        status: RunStatus.Completed,
+      },
+      {
+        taskId: oldRoomoteTask.id,
+        title: 'Old Roomote snapshot',
         status: RunStatus.Completed,
       },
     ]);

@@ -106,25 +106,25 @@ up on tasks on their behalf.
 2. confirm Roomote answers in Fast and includes a web continuation link
 3. reply to the Fast answer, or reply in the same Fast-owned topic, and confirm
    the same Fast session continues
-4. use `/new <request>` and confirm a fresh task opens in its own topic when
-   Threaded Mode is enabled
-5. when an environment confirmation appears, answer it with a button or a
-   natural reply
-6. reply in the task topic to send a follow-up
+4. use `/new <request>` and confirm a fresh conversation opens in its own
+   topic when Threaded Mode is enabled
+5. reply in the task topic to send a follow-up
 
-Ordinary messages from linked users start in Fast in private chats and from bot
-mentions in groups. A Fast-owned topic can continue without another mention,
-and a direct reply to a Fast message resumes the bound session even when the
-chat has no topics. Sessions are isolated by linked Roomote user. `/new` remains
-an explicit fresh-task command: it bypasses Fast and snapshot resume so the
-request starts a normal task, creating a topic when Telegram supports it.
+Every message from a linked user enters a Fast Session: in private chats
+directly, and in groups from bot mentions. Fast answers directly or delegates
+a task into the right environment. A Fast-owned topic can continue without
+another mention, and a direct reply to a Fast message resumes the bound
+session even when the chat has no topics. Sessions are isolated by linked
+Roomote user. `/new` starts a fresh conversation instead of continuing the
+current one, opening a new topic when Telegram supports it; in a plain private
+chat the request joins that chat's conversation.
 
-Existing task-only chats and topics keep their active-task,
-`request_user_input`, routing-confirmation, and resumable-snapshot behavior. If
-Fast cannot initialize a new session, Roomote safely falls back to that existing
-task router. Fast automation reports can target a Telegram chat, topic, or owner
-direct message; replies continue the report's Fast session, and its footer opens
-the same session in the web app.
+Existing task chats and topics keep their active-task, `request_user_input`,
+and resumable-snapshot behavior. If Fast cannot start a conversation, Roomote
+says so in the chat instead of starting a task another way. Fast automation
+reports can target a Telegram chat, topic, or owner direct message; replies
+continue the report's Fast session, and its footer opens the same session in
+the web app.
 
 Photos are passed to Fast or the task as image input. Supported text documents
 are downloaded server-side and their extracted content is added to the request;

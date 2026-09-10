@@ -39,6 +39,7 @@ import {
   eq,
   gte,
   inArray,
+  isNull,
   sql,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
@@ -976,7 +977,10 @@ async function claimAutomationRecommendationInitialRun(
       sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
     );
     const [settings] = await tx
-      .select({ setupNewState: deploymentSettings.setupNewState })
+      .select({
+        setupNewState: deploymentSettings.setupNewState,
+        setupCompletedAt: deploymentSettings.setupCompletedAt,
+      })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, 'default'))
       .limit(1);
@@ -986,6 +990,7 @@ async function claimAutomationRecommendationInitialRun(
       (item) => item.id === request.recommendationId,
     );
     if (
+      settings?.setupCompletedAt != null ||
       !batch ||
       batch.inputFingerprint !== request.fingerprint ||
       recommendationApplicationState(batch) !== 'applied' ||
@@ -1025,7 +1030,12 @@ async function claimAutomationRecommendationInitialRun(
         }),
         updatedAt: new Date(),
       })
-      .where(eq(deploymentSettings.id, 'default'));
+      .where(
+        and(
+          eq(deploymentSettings.id, 'default'),
+          isNull(deploymentSettings.setupCompletedAt),
+        ),
+      );
 
     return {
       claimedAt,
@@ -1069,13 +1079,21 @@ async function updateAutomationRecommendationInitialRun(
       sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
     );
     const [settings] = await tx
-      .select({ setupNewState: deploymentSettings.setupNewState })
+      .select({
+        setupNewState: deploymentSettings.setupNewState,
+        setupCompletedAt: deploymentSettings.setupCompletedAt,
+      })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, 'default'))
       .limit(1);
     const state = normalizeSetupNewState(settings?.setupNewState ?? {});
     const batch = state.automationRecommendations;
-    if (!batch || batch.inputFingerprint !== request.fingerprint) return;
+    if (
+      settings?.setupCompletedAt != null ||
+      !batch ||
+      batch.inputFingerprint !== request.fingerprint
+    )
+      return;
     const nextBatch = {
       ...batch,
       recommendations: batch.recommendations.map((item) =>
@@ -1091,7 +1109,12 @@ async function updateAutomationRecommendationInitialRun(
         }),
         updatedAt: new Date(),
       })
-      .where(eq(deploymentSettings.id, 'default'));
+      .where(
+        and(
+          eq(deploymentSettings.id, 'default'),
+          isNull(deploymentSettings.setupCompletedAt),
+        ),
+      );
   });
 }
 
@@ -1125,8 +1148,22 @@ export async function runAutomationRecommendationInitialRunJob(
       );
     if (!dispatchMarked) return;
 
-    const result =
-      candidate.source === 'built_in'
+    const result = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('setup-recommendation-dispatch'))`,
+      );
+      const [settings] = await tx
+        .select({ setupCompletedAt: deploymentSettings.setupCompletedAt })
+        .from(deploymentSettings)
+        .where(eq(deploymentSettings.id, 'default'))
+        .limit(1);
+      if (settings?.setupCompletedAt != null) {
+        return {
+          outcome: 'skipped' as const,
+          reason: 'Setup is already complete.',
+        };
+      }
+      return candidate.source === 'built_in'
         ? candidate.automationKey === 'review_code'
           ? {
               outcome: 'skipped' as const,
@@ -1139,6 +1176,7 @@ export async function runAutomationRecommendationInitialRunJob(
               outcome: 'failed' as const,
               error: 'Recommendation automation was not created.',
             };
+    });
 
     if (result.outcome === 'failed') {
       throw new Error(result.error);

@@ -1,4 +1,8 @@
 export {
+  resolveCiFailureTriageRepositoryDestination,
+  isCiFailureTriageRepositoryEnabled,
+} from './automations/ci-failure-triage-routing';
+export {
   type AppRouter,
   type AppRouterInput,
   type AppRouterOutput,
@@ -40,6 +44,7 @@ export {
   type RecordLlmUsageInput,
 } from './lib/task-runs/record-task-inference-usage';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
+export { stopTaskRun } from './lib/task-runs/stop-task-run';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
 export {
   enqueueTaskSleep,
@@ -108,6 +113,12 @@ export {
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
 export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  createFastAgentConversationArtifact,
+  createFastAgentSessionArtifact,
+  createSessionArtifact,
+} from './lib/artifacts/create-session-artifact';
+export { buildFastAgentArtifactCreator } from './lib/artifacts/fast-agent-artifact-creator';
 export {
   notifyFastAgentParentOnArtifact,
   type FastArtifactNotificationResult,
@@ -203,6 +214,7 @@ export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib
 
 export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
 export { syncFastAgentSlackTitleBestEffort } from './lib/fast-agent-slack-title-sync';
+export { requireFastSuggestionOriginSessionId } from './lib/fast-automation-suggestions';
 
 export {
   buildFastAgentParentEventKey,
@@ -211,12 +223,30 @@ export {
   FastAgentParentBusyError,
   FAST_AGENT_PARENT_EVENT_QUEUE_NAME,
   recoverPendingFastAgentParentEvents,
+  wakeFastAgentParentEventAt,
+  wakeFastAgentParentEventNow,
   type FastAgentParentEventQueueRequest,
 } from './lib/fast-agent-parent-event-queue';
 export {
+  SESSION_WAKEUP_FIRE_JOB_NAME,
+  SESSION_WAKEUP_QUEUE_NAME,
+  SESSION_WAKEUP_RECOVERY_LOOKAHEAD_MS,
+  fireSessionWakeup,
+  recoverPendingSessionWakeups,
+  type FireSessionWakeupResult,
+  type SessionWakeupFireJob,
+} from './lib/session-wakeups';
+export {
   admitFastAgentHumanFollowUp,
+  persistFastAgentInlineHumanTurn,
+  type FastAgentDurableTurn,
   type FastAgentHumanFollowUpAdmission,
 } from './lib/fast-agent-human-follow-up';
+export {
+  resolveFastAgentSessionImages,
+  type FastAgentReplyImage,
+} from './lib/fast-agent-session-images';
+export { deliverFastAgentSessionVideos } from './lib/fast-agent-session-videos';
 
 export {
   getCommunicationProviderAdapter,
@@ -322,6 +352,7 @@ export {
   beginCanonicalPrReviewWebAutoDispatch,
   completeCanonicalPrReviewAutoDispatch,
   consumePendingPrReviewActivity,
+  dispatchCanonicalPrReviewAutoFollowUp,
   dispatchDuePrReviewNotifications,
   enqueuePrReviewNotification,
   enqueuePrReviewNotificationInputSchema,
@@ -336,6 +367,7 @@ export {
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   requeuePendingPrReviewActivity,
+  retrySupersededPrReviewAction,
   resolvePrReviewNotificationRoute,
   schedulePrReviewNotificationJob,
   startPrReviewNotificationCycle,
@@ -353,6 +385,7 @@ export {
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   getTaskPrReviewOfferStatus,
+  updateFastAgentPrReviewOfferStatus,
   updateTaskPrReviewOfferStatus,
   triagePrReviewActivity,
   type PreparedPrReviewNotification,
@@ -361,6 +394,11 @@ export {
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
 export * from './lib/fast-agent-surface-reply';
+export * from './lib/linear-fast-session';
+export * from './lib/linear-fast-session-turn';
+export * from './lib/source-control-fast-delivery';
+export * from './lib/source-control-fast-session';
+export * from './lib/fast-agent-slack-reply-stream';
 export * from './lib/fast-agent-provider-message';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
 export * from './lib/task-runs/notify-fast-agent-parent-on-pull-request-conflict';
@@ -383,6 +421,10 @@ export {
 } from './lib/slack-conversation-log';
 
 export { updateTaskPrStatus } from './lib/pull-requests/update-task-pr-status';
+export {
+  markRoomotePullRequestReadyAfterCleanReview,
+  type MarkRoomotePullRequestReadyResult,
+} from './lib/pull-requests/mark-roomote-pull-request-ready';
 export {
   manageSourceControlIssueForTaskRun,
   sourceControlIssueInputSchema,

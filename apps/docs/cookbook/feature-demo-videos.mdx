@@ -36,6 +36,24 @@ narration configured, the demo gets a voice-over that leads each visual beat.
 3. The finished video is uploaded as a task artifact and linked in the reply
    (and embedded under `## Screencasts` when the task opens a PR).
 
+In Slack, ask Roomote to share the finished recording as a native video file.
+The Slack app needs `files:write`, including reinstall or admin reapproval for
+an existing installation. WebM delivery converts a copy to MP4 and keeps the
+original artifact. If native delivery fails or is unavailable, Roomote shares
+only a viewer link, without an error or unavailability explanation, and does
+not claim the video is attached. See [Slack video replies](/providers/communications/slack#video-replies).
+
+## Animation Recording
+
+For animation, drag interactions, or smooth-scroll reviews, ask for a short
+60 FPS recording, for example: `Record this animation at 60 FPS`. Ordinary
+recordings use 30 FPS; higher rates use more CPU and produce larger files.
+This requires a task runtime with agent-browser 0.37.0 or newer. Older sandbox
+snapshots may need updating before they support native high-FPS capture.
+Actual motion detail is limited by the page's repaint rate: a 60 FPS file alone
+does not guarantee 60 distinct captured frames per second. Roomote checks capture
+cadence and wall-clock pacing rather than increasing the exported frame rate.
+
 ## Narration
 
 Captioned demos work out of the box. For a voice-over in your own (cloned)

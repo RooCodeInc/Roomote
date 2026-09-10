@@ -1,4 +1,4 @@
-export type SessionPullRequest = {
+type SessionPullRequest = {
   repository: string;
   number: number;
   url: string;

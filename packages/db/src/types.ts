@@ -64,6 +64,7 @@ import type {
   environmentRepositoryMappings,
   automations,
   customAutomations,
+  sessionWakeups,
   trackedMessages,
 } from './schema';
 
@@ -587,6 +588,7 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   ciFailureTriageFrequency: CiFailureTriageFrequency;
   ciFailureTriageSlackChannelId: string | null;
   ciFailureTriageDiscordChannelId: string | null;
+  ciFailureTriageAdditionalRules?: string;
   ciFailureTriageLastRunAt: Date | null;
   ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
   mergeAnnouncerFrequency: MergeAnnouncerFrequency;
@@ -624,5 +626,16 @@ export type CustomAutomation = typeof customAutomations.$inferSelect;
 
 export type CreateCustomAutomation = Omit<
   typeof customAutomations.$inferInsert,
+  Timestamp
+>;
+
+/**
+ * session_wakeups
+ */
+
+export type SessionWakeup = typeof sessionWakeups.$inferSelect;
+
+export type CreateSessionWakeup = Omit<
+  typeof sessionWakeups.$inferInsert,
   Timestamp
 >;

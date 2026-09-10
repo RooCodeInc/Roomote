@@ -12,7 +12,11 @@ import {
   tasks,
   userFactory,
 } from '@roomote/db/server';
-import { ACP_ENVELOPE_EVENT_TYPES, TaskPayloadKind } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  SETUP_RECEIPT_INPUT_KIND,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import {
   refreshFastAgentSessionTitle,
@@ -185,6 +189,32 @@ describe('refreshFastAgentSessionTitle', () => {
       taskId: null,
       messages: [{ role: 'user', text: 'Find actionable regressions.' }],
     });
+  });
+
+  it('excludes transcript-only setup receipts from title generation', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation(user.id, 'setup-receipt');
+    await insertMessage({
+      conversationId: conversation.id,
+      eventId: 'setup-receipt:user',
+      role: 'user',
+      text: 'Sandbox configured with Modal.',
+      ts: 1,
+      eventType: 'roomote_runtime.user_prompt',
+      metadata: {
+        visibleInTranscript: true,
+        turnSource: 'platform_event',
+        inputKind: SETUP_RECEIPT_INPUT_KIND,
+      },
+    });
+
+    const refreshedTitle = await refreshFastAgentSessionTitle({
+      sessionId: conversation.id,
+      userId: user.id,
+    });
+
+    expect(refreshedTitle).toBeNull();
+    expect(generateLlmTaskTitle).not.toHaveBeenCalled();
   });
 
   it('does not regenerate before the next checkpoint and skips hidden prompts', async () => {

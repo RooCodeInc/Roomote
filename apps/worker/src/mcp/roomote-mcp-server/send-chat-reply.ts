@@ -1,4 +1,8 @@
 import { replyToChatThread } from './chat-api-client.js';
+import {
+  buildDataVisualizationBlocks,
+  type DataVisualizationInput,
+} from '@roomote/types';
 import { describeChatDeliveryFailure } from './chat-delivery-error.js';
 import {
   errorResultWithArtifacts,
@@ -59,6 +63,7 @@ export async function handleSendChatReply(
     summary?: string;
     imagePaths?: string[];
     imageArtifactIds?: string[];
+    charts?: DataVisualizationInput[];
     suggestions?: TaskSuggestionInput[];
     chatReplySurface?: ChatReplySurface;
   },
@@ -104,6 +109,12 @@ export async function handleSendChatReply(
     reachedDeliveryCall = true;
     const reply = await replyToChatThread(roomoteConfig, {
       ...(summary && { text: summary }),
+      ...(input.charts?.length && {
+        blocks: [
+          ...(summary ? [{ type: 'markdown', text: summary }] : []),
+          ...buildDataVisualizationBlocks(input.charts),
+        ],
+      }),
       ...(allArtifactIds.length > 0 && {
         images: allArtifactIds.map((artifactId) => ({ artifactId })),
       }),

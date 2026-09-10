@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { isMcpConnectionSnowflakeConfig } from '@roomote/types';
@@ -52,7 +52,7 @@ function createSnowflakeMcpServer(
   auth: McpAuthContext,
   config: Awaited<ReturnType<typeof resolveSnowflakeConnection>>,
 ) {
-  const server = new McpServer(SNOWFLAKE_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(SNOWFLAKE_MCP_SERVER_INFO, {
     instructions:
       'Use these Snowflake tools to inspect accessible databases, schemas, tables, and execute SQL statements within the configured workspace connection.',
   });

@@ -5,6 +5,7 @@ import { SSEProvider } from 'react-hooks-sse';
 
 import type { RunStatus as RunStatusValue } from '@roomote/types';
 import type { TaskRun } from '@roomote/db';
+import type { TaskRunProgress } from '@/types';
 
 import { getTaskRunError } from '@/lib/task-run-errors';
 
@@ -13,7 +14,7 @@ import { useStartupProgress } from './useStartupProgress';
 
 interface StartupProps {
   runId: number;
-  initialTaskRun?: TaskRun;
+  initialTaskRun?: TaskRunProgress;
   newTaskHref?: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }
@@ -48,7 +49,7 @@ export const Startup = ({
 
 interface StartupInnerProps {
   runId: number;
-  initialTaskRun?: TaskRun;
+  initialTaskRun?: TaskRunProgress;
   newTaskHref?: string;
   onStatusChange?: (status: RunStatusValue) => void;
 }

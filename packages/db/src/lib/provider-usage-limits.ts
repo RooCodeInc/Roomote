@@ -5,15 +5,21 @@ import {
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
+import { getChatGptSubscription } from './chatgpt-subscription';
+import { getGitHubCopilotAccessToken } from './github-copilot-subscription';
 import { fetchOpenRouterKeyDetails } from './provider-credit-balance';
 import { fingerprintProviderCredential } from './provider-credential-fingerprint';
 import { resolveModelProviderEnvValue } from './model-runtime-config';
 import {
+  fetchChatGptUsage,
+  fetchGitHubCopilotUsage,
   fetchKimiForCodingUsage,
   fetchOpenCodeGoUsage,
+  fetchXaiSubscriptionUsage,
   fetchZaiCodingPlanUsage,
   fetchZaiUsage,
 } from './subscription-provider-usage';
+import { getXaiSubscription } from './xai-subscription';
 
 export const PROVIDER_USAGE_WARNING_THRESHOLDS = [80, 90, 100] as const;
 
@@ -90,9 +96,11 @@ function sanitizeCredentialLabel(label: string | undefined): string | null {
 function toSubscriptionSnapshots(params: {
   usage: SubscriptionProviderUsage;
   providerName: string;
-  apiKey: string;
+  credentialIdentity: string;
 }): ProviderUsageLimitSnapshot[] {
-  const credentialFingerprint = fingerprintProviderCredential(params.apiKey);
+  const credentialFingerprint = fingerprintProviderCredential(
+    params.credentialIdentity,
+  );
 
   return params.usage.windows.flatMap((window) =>
     window.usedPercent === undefined
@@ -114,6 +122,59 @@ function toSubscriptionSnapshots(params: {
           },
         ],
   );
+}
+
+async function fetchChatGptUsageLimit(
+  options: UsageLimitFetchOptions,
+): Promise<ProviderUsageLimitSnapshot[]> {
+  const subscription = await getChatGptSubscription(options.executor);
+  if (!subscription || subscription.status !== 'connected') {
+    return [];
+  }
+
+  const usage = await fetchChatGptUsage(options);
+  if (!usage) {
+    return [];
+  }
+
+  return toSubscriptionSnapshots({
+    usage,
+    providerName: 'ChatGPT (subscription)',
+    credentialIdentity:
+      subscription.accountId ?? subscription.email ?? subscription.connectedAt,
+  });
+}
+
+async function fetchGitHubCopilotUsageLimit(
+  options: UsageLimitFetchOptions,
+): Promise<ProviderUsageLimitSnapshot[]> {
+  const accessToken = await getGitHubCopilotAccessToken(options.executor);
+  if (!accessToken) return [];
+
+  const usage = await fetchGitHubCopilotUsage(options);
+  return usage
+    ? toSubscriptionSnapshots({
+        usage,
+        providerName: 'GitHub Copilot',
+        credentialIdentity: accessToken,
+      })
+    : [];
+}
+
+async function fetchXaiSubscriptionUsageLimit(
+  options: UsageLimitFetchOptions,
+): Promise<ProviderUsageLimitSnapshot[]> {
+  const subscription = await getXaiSubscription(options.executor);
+  if (!subscription || subscription.status !== 'connected') return [];
+
+  const usage = await fetchXaiSubscriptionUsage(options);
+  return usage
+    ? toSubscriptionSnapshots({
+        usage,
+        providerName: 'xAI (Grok subscription)',
+        credentialIdentity: subscription.email ?? subscription.connectedAt,
+      })
+    : [];
 }
 
 async function fetchOpenRouterUsageLimit(
@@ -169,7 +230,7 @@ async function fetchApiKeySubscriptionUsage(
     ? toSubscriptionSnapshots({
         usage,
         providerName: provider.providerName,
-        apiKey,
+        credentialIdentity: apiKey,
       })
     : [];
 }
@@ -180,6 +241,9 @@ export async function getProviderUsageLimitSnapshots(
 ): Promise<ProviderUsageLimitSnapshot[]> {
   const results = await Promise.allSettled([
     fetchOpenRouterUsageLimit(options),
+    fetchChatGptUsageLimit(options),
+    fetchGitHubCopilotUsageLimit(options),
+    fetchXaiSubscriptionUsageLimit(options),
     ...API_KEY_USAGE_PROVIDERS.map((provider) =>
       fetchApiKeySubscriptionUsage(provider, options),
     ),

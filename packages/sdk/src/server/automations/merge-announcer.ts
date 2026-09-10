@@ -45,6 +45,7 @@ const MAX_COMMITS = 20;
 const MAX_COMMIT_MESSAGE_CHARS = 500;
 const MAX_PULL_REQUEST_TITLE_CHARS = 300;
 const MAX_PULL_REQUEST_BODY_CHARS = 4_000;
+const MAX_PULL_REQUEST_RAW_IMAGE_BODY_CHARS = 16_000;
 const MAX_PULL_REQUEST_FILES = 20;
 const MAX_PULL_REQUEST_FILE_PATH_CHARS = 300;
 const MAX_PULL_REQUEST_IMAGE_ALT_CHARS = 200;
@@ -308,16 +309,39 @@ async function resolveSelectedPullRequestImage(params: {
   getMediaType: (url: string) => Promise<string | null>;
 }): Promise<{ url: string; altText: string } | null> {
   if (!params.selectedUrl || !params.body?.trim()) return null;
+  // Reject oversized bodies rather than missing a colliding original outside
+  // the scan limit. Raw text needs extra room for secrets removed by redaction.
+  if (params.body.length > MAX_PULL_REQUEST_RAW_IMAGE_BODY_CHARS) return null;
+  const rawBody = params.body.slice(0, MAX_PULL_REQUEST_RAW_IMAGE_BODY_CHARS);
   const image = findPullRequestBodyImage(
     getBoundedPullRequestBody(params.body),
     params.selectedUrl,
   );
   if (!image) return null;
 
-  const mediaType = await params.getMediaType(image.url);
+  // The model sees redacted signatures; restore only an unambiguous original
+  // image reference after checking that its redacted form was in the prompt.
+  const originalUrls = new Set<string>();
+  for (const pattern of [MARKDOWN_IMAGE_PATTERN, HTML_IMAGE_PATTERN]) {
+    for (const match of rawBody.matchAll(pattern)) {
+      if (!findPullRequestBodyImage(redactSecrets(match[0]), image.url))
+        continue;
+      const url = normalizeAnonymousImageUrl(
+        pattern === MARKDOWN_IMAGE_PATTERN
+          ? (match[2] ?? match[3] ?? '')
+          : getHtmlImageAttribute(match[0], 'src'),
+      );
+      if (url) originalUrls.add(url);
+    }
+  }
+  if (originalUrls.size !== 1) return null;
+  const [url] = originalUrls;
+  if (!url) return null;
+
+  const mediaType = await params.getMediaType(url);
   return mediaType &&
     SUPPORTED_SLACK_IMAGE_MEDIA_TYPES.has(mediaType.toLowerCase())
-    ? image
+    ? { ...image, url }
     : null;
 }
 
@@ -416,12 +440,15 @@ function buildMergeAnnouncerNotification(params: {
 }) {
   const commitCount = params.event.commitCount ?? params.event.commits.length;
   const commitLabel = `${commitCount} ${commitCount === 1 ? 'commit' : 'commits'}`;
+  const repositoryLabel = params.event.pullRequest
+    ? `${params.repository.fullName}#${params.event.pullRequest.number}`
+    : params.repository.fullName;
   const summary = normalizeSummary(params.summary);
   const slackSummary = escapeSlackMrkdwnText(summary);
   const configureUrl = buildManagerSlackSettingsUrl(
     MERGE_ANNOUNCER_SETTINGS_HASH,
   );
-  const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${params.repository.fullName}**.`;
+  const markdownNarrative = `**${params.pusher}** pushed ${commitLabel} to **${params.branch}** in **${repositoryLabel}**.`;
   const changesUrl =
     params.event.pullRequest?.url ??
     params.event.compareUrl ??
@@ -439,7 +466,7 @@ function buildMergeAnnouncerNotification(params: {
 
   return {
     fallbackText: escapeSlackMrkdwnText(
-      `${params.pusher} pushed ${commitLabel} to ${params.branch} in ${params.repository.fullName}. ${summary}`,
+      `${params.pusher} pushed ${commitLabel} to ${params.branch} in ${repositoryLabel}. ${summary}`,
     ),
     slackBlocks: buildAutomationResultBlocks({
       title: 'Merge Announcer',
@@ -447,7 +474,7 @@ function buildMergeAnnouncerNotification(params: {
       configureUrl,
       subtitle: {
         type: 'plain_text',
-        text: `${params.repository.fullName} · ${params.branch} · ${params.pusher}`,
+        text: `${repositoryLabel} · ${params.branch} · ${params.pusher}`,
       },
       contentBlocks: [
         {

@@ -72,7 +72,8 @@ export type TaskArtifact = {
 
 export type ArtifactWithContent = {
   id: string;
-  taskId: string;
+  taskId: string | null;
+  sessionId?: string | null;
   path: string;
   version: number;
   artifactType: TaskArtifactType;
@@ -97,6 +98,12 @@ export type TaskRunWithPullRequest = TaskRun & {
     prUrl?: string;
   }>;
 };
+
+/** Public SSE progress; result.error is folded into error on the server. */
+export type TaskRunProgress = Pick<
+  TaskRun,
+  'id' | 'taskId' | 'status' | 'vendor' | 'error' | 'errorCode'
+>;
 
 export type TaskWithAssociations = Task & {
   attributionKind?: TaskCreatorKind | null;

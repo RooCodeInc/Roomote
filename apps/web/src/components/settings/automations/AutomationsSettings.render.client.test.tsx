@@ -11,6 +11,9 @@ const managerInstructionsPlaceholder =
   /Optional guidance for which ideas to prioritize or avoid/;
 
 const state = vi.hoisted(() => ({
+  isAdmin: true,
+  catalogQueryOptions: [] as Array<{ enabled?: boolean }>,
+  queriedKeys: [] as unknown[],
   customAutomationsPending: false,
   customAutomationRunPendingId: null as string | null,
   customAutomations: [] as Array<{
@@ -20,7 +23,8 @@ const state = vi.hoisted(() => ({
     enabled: boolean;
     scheduleMode: 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
-    model: null;
+    model: string | null;
+    reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
     executionMode?: 'sandbox_task' | 'fast';
     environmentId: string;
     target: {
@@ -319,7 +323,21 @@ vi.mock('sonner', () => ({
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (queryOptions: { queryKey?: unknown[] }) => {
+    state.queriedKeys.push(queryOptions.queryKey);
     const key1 = queryOptions.queryKey?.[1];
+    if (key1 === 'getCustomAutomationOptions') {
+      return {
+        isPending: state.settingsQuery.isPending,
+        data: {
+          capabilities: state.settingsQuery.data.capabilities,
+          managerSlackChannelId:
+            state.settingsQuery.data.settings.managerSlackChannelId,
+          managerDiscordChannelId:
+            state.settingsQuery.data.settings.managerDiscordChannelId,
+          effectiveTimeZone: 'UTC',
+        },
+      };
+    }
     if (key1 === 'listSlackChannels' || key1 === 'listDiscordChannels') {
       return key1 === 'listSlackChannels'
         ? state.slackChannelsQuery
@@ -347,6 +365,7 @@ vi.mock('@tanstack/react-query', () => ({
               id: 'anthropic/claude-sonnet-5',
               displayName: 'Claude Sonnet 5',
               isDefault: true,
+              metadata: { supportsReasoning: true },
             },
           ],
         },
@@ -428,9 +447,18 @@ vi.mock('@/hooks/slack', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ isAdmin: state.isAdmin }),
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     automations: {
+      getCustomAutomationOptions: {
+        queryOptions: () => ({
+          queryKey: ['automations', 'getCustomAutomationOptions'],
+        }),
+      },
       getSettings: {
         queryOptions: () => ({
           queryKey: ['automations', 'getSettings'],
@@ -438,14 +466,25 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['automations', 'getSettings'],
       },
       listSlackChannels: {
-        queryOptions: () => ({
-          queryKey: ['automations', 'listSlackChannels'],
-        }),
+        queryOptions: (
+          _input: undefined,
+          options: { enabled?: boolean } = {},
+        ) => {
+          state.catalogQueryOptions.push(options);
+          return { queryKey: ['automations', 'listSlackChannels'], ...options };
+        },
       },
       listDiscordChannels: {
-        queryOptions: () => ({
-          queryKey: ['automations', 'listDiscordChannels'],
-        }),
+        queryOptions: (
+          _input: undefined,
+          options: { enabled?: boolean } = {},
+        ) => {
+          state.catalogQueryOptions.push(options);
+          return {
+            queryKey: ['automations', 'listDiscordChannels'],
+            ...options,
+          };
+        },
       },
       listCustomAutomations: {
         queryOptions: () => ({
@@ -529,6 +568,41 @@ import {
   AutomationsSettings,
   getAutomationHistoryHref,
 } from './AutomationsSettings';
+import { CustomAutomationsSection } from './CustomAutomationsSection';
+
+it.each([false, true])(
+  'enables custom-editor channel catalogs only for admins (isAdmin=%s)',
+  (isAdmin) => {
+    state.isAdmin = isAdmin;
+    state.catalogQueryOptions = [];
+    try {
+      render(<CustomAutomationsSection />);
+      expect(state.catalogQueryOptions.length).toBeGreaterThanOrEqual(2);
+      expect(
+        state.catalogQueryOptions.every(
+          (options) => options.enabled === isAdmin,
+        ),
+      ).toBe(true);
+    } finally {
+      state.isAdmin = true;
+    }
+  },
+);
+
+it('opens the standalone custom editor without querying admin settings', () => {
+  state.queriedKeys = [];
+  render(<CustomAutomationsSection />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'New' }));
+  expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+  expect(state.queriedKeys).toContainEqual([
+    'automations',
+    'getCustomAutomationOptions',
+  ]);
+  expect(state.queriedKeys).not.toContainEqual(['automations', 'getSettings']);
+  expect(state.queriedKeys).not.toContainEqual(['miscSettings', 'get']);
+  expect(state.queriedKeys).not.toContainEqual(['comms', 'status']);
+});
 
 async function openSuggesterCard() {
   fireEvent.click(
@@ -1255,13 +1329,18 @@ describe('AutomationsSettings', () => {
       await screen.findByText('Daily, in All repositories →'),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'New' }));
-    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
     expect(
       screen.getByRole('option', { name: 'All repositories' }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: 'Blank slate' }),
+    ).toBeInTheDocument();
   });
 
-  it('offers Fast in the Environment menu and explains channel-less output', async () => {
+  it('offers no preference in the environment menu and explains channel-less output', async () => {
     state.customAutomations = [
       {
         id: 'automation-fast',
@@ -1270,7 +1349,8 @@ describe('AutomationsSettings', () => {
         enabled: true,
         scheduleMode: 'daily',
         cronExpression: null,
-        model: null,
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
         executionMode: 'fast',
         environmentId: '__fast__',
         target: {},
@@ -1288,28 +1368,43 @@ describe('AutomationsSettings', () => {
 
     render(<AutomationsSettings />);
 
-    expect(await screen.findByText('Daily, in Fast →')).toBeInTheDocument();
+    expect(await screen.findByText('Daily →')).toBeInTheDocument();
     expect(
       screen.getByText('No actionable regressions found.'),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole('link', {
+      screen.getByRole('link', {
         name: 'View previous runs for Fast daily digest',
       }),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Configure Fast daily digest' }),
     );
     expect(screen.getByText('Delegated task model')).toBeInTheDocument();
+    expect(screen.getByText('Effort')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', { name: 'Automation effort' }),
+    ).toHaveTextContent('High');
     expect(
       screen.getByText(
-        'This run is stored as a Fast conversation without posting to chat.',
+        'Each run is a Session in the web app and does not post to chat.',
       ),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    fireEvent.click(
+      screen.getByRole('combobox', { name: 'Preferred environment' }),
+    );
     expect(
-      screen.getByRole('option', { name: 'Fast (no sandbox)' }),
+      screen.getByRole('option', { name: 'Let Roomote decide' }),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('option', { name: 'Let Roomote decide' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(mutations.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'automation-fast',
+        model: 'anthropic/claude-sonnet-5',
+        reasoningEffort: 'high',
+      }),
+    );
   });
 
   it('humanizes custom schedules and shows the last run when available', async () => {
@@ -1394,7 +1489,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -1445,7 +1540,7 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });
@@ -1488,7 +1583,50 @@ describe('AutomationsSettings', () => {
 
     expect(
       screen.getByText(
-        'Each Fast run posts here, and replies continue the Fast session.',
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('explains that Telegram replies continue the Fast session', async () => {
+    state.settingsQuery.data.capabilities.telegramConnected = true;
+    state.customAutomations = [
+      {
+        id: 'automation-telegram-fast',
+        name: 'Telegram daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {
+          provider: 'telegram',
+          targetKind: 'telegram_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Telegram daily brief',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'Each run is a Session that reports findings and failures here, and replies continue it.',
       ),
     ).toBeInTheDocument();
   });

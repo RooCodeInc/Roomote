@@ -5,7 +5,7 @@ shape (`/opt/roomote`, `compose/docker-compose.prod.yml`, Caddy,
 `roomote-compose.service`):
 
 - **Self-serve one-command install** — a user runs [`install.sh`](install.sh)
-  on their own server via `curl -fsSL https://get.roomote.dev | bash` and
+  on their own server via `curl -fsSL https://get.roomote.dev | sudo bash` and
   finishes setup in the browser. The [`host/roomote`](host/roomote) CLI is
   installed alongside it for day-2 operations (`status`, `logs`, `upgrade`,
   `backup`, `restore`). See the One-Command Install section in
@@ -105,6 +105,14 @@ worker images in lockstep. The worker repository defaults to
 `ghcr.io/roocodeinc/roomote-worker` and can be overridden with
 `ROOMOTE_WORKER_IMAGE_REPO` (for forks or registry mirrors). Explicit values
 always win over the derived default.
+
+The optional Memory service follows the same release convention. With the
+`brain` Compose profile enabled and `GBRAIN_IMAGE` unset, production Compose
+pulls `${IMAGE_REGISTRY}/${IMAGE_NAMESPACE}/roomote-gbrain:${ROOMOTE_VERSION}`;
+official installs therefore use
+`ghcr.io/roocodeinc/roomote-gbrain:<matching-v*-release-tag>`. Set
+`GBRAIN_IMAGE` only to pin a complete custom image reference. Installer reruns
+and upgrades preserve that explicit override.
 
 The file must include the required production values from
 `.env.production.example`, especially:

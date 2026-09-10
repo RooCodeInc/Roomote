@@ -20,6 +20,7 @@ import {
 } from '@roomote/db/server';
 import type {
   AuthTokenContext,
+  ComputeProvider,
   TaskPayload,
   RunTokenContext,
   PullRequestStatus,
@@ -119,7 +120,12 @@ function resolveFollowUpPromptSource(options: {
 
 type SendMessageToTaskResult =
   | { success: true; result: unknown }
-  | { success: false; error: string; status: SendMessageErrorStatus };
+  | {
+      success: false;
+      error: string;
+      status: SendMessageErrorStatus;
+      delivery?: 'not_accepted';
+    };
 
 type LatestTaskRun = {
   id: number;
@@ -128,6 +134,7 @@ type LatestTaskRun = {
   actingUserId: string | null;
   snapshotId: string | null;
   snapshotCreatedAt: Date | null;
+  vendor: ComputeProvider | null;
   sourceRunId: number | null;
   payload: Record<string, unknown> | null;
   port: number | null;
@@ -207,9 +214,7 @@ async function fetchSandboxRpcResponseOrThrowIfNotReady(
   });
 }
 
-export async function getTrackedUserDisplayName(
-  userId: string,
-): Promise<string> {
+async function getTrackedUserDisplayName(userId: string): Promise<string> {
   const user = await db.query.users.findFirst({
     where: eq(users.id, userId),
     columns: {
@@ -524,7 +529,7 @@ async function resumeTaskFromSnapshot({
     return null;
   }
 
-  if (!isSnapshotResumable(sourceRun.snapshotCreatedAt)) {
+  if (!isSnapshotResumable(sourceRun.snapshotCreatedAt, sourceRun.vendor)) {
     return {
       success: false,
       error: EXPIRED_SNAPSHOT_RESUME_ERROR,
@@ -913,6 +918,7 @@ export async function sendMessageToTask({
       actingUserId: true,
       snapshotId: true,
       snapshotCreatedAt: true,
+      vendor: true,
       sourceRunId: true,
       payload: true,
       port: true,
@@ -955,6 +961,7 @@ export async function sendMessageToTask({
           id: run.id,
           taskId,
           payload: run.payload,
+          payloadKind: run.payloadKind,
         },
         feedbackSourceIds: [feedbackSourceId],
         reviewTaskId: fastHandoff.reviewTaskId,
@@ -1179,6 +1186,7 @@ export async function steerMessageToTask({
       actingUserId: true,
       snapshotId: true,
       snapshotCreatedAt: true,
+      vendor: true,
       sourceRunId: true,
       payload: true,
       port: true,
@@ -1186,7 +1194,12 @@ export async function steerMessageToTask({
     });
 
     if (!run) {
-      return { success: false, error: 'Task not found', status: 404 };
+      return {
+        success: false,
+        error: 'Task not found',
+        status: 404,
+        delivery: 'not_accepted',
+      };
     }
 
     const channelBindings = (await getTaskChannelBindings(taskId)) ?? null;
@@ -1211,6 +1224,7 @@ export async function steerMessageToTask({
         success: false,
         error: `Task is not active (status: ${run.status})`,
         status: 409,
+        delivery: 'not_accepted',
       };
     }
 
@@ -1219,10 +1233,12 @@ export async function steerMessageToTask({
         success: false,
         error: 'Task has no active sandbox. The worker may still be booting.',
         status: 409,
+        delivery: 'not_accepted',
       };
     }
 
     let didSwitchActingUser = false;
+    let promptSubmitted = false;
 
     try {
       await touchTaskActivity(db, taskId);
@@ -1257,6 +1273,7 @@ export async function steerMessageToTask({
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
           const goal = await getTaskGoalForRun(run.id);
+          promptSubmitted = true;
           return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
@@ -1293,12 +1310,19 @@ export async function steerMessageToTask({
         actingUserId: true,
         snapshotId: true,
         snapshotCreatedAt: true,
+        vendor: true,
         sourceRunId: true,
         payload: true,
         port: true,
         result: true,
       });
-      if (latestRun?.id === run.id && isExitedRunStatus(latestRun.status)) {
+      // A lost RPC response does not prove rejection. Resuming with the same
+      // prompt could repeat an instruction already accepted by the worker.
+      if (
+        !promptSubmitted &&
+        latestRun?.id === run.id &&
+        isExitedRunStatus(latestRun.status)
+      ) {
         const resumeResult = await resumeTaskFromSnapshot({
           taskId,
           userId,
@@ -1312,6 +1336,17 @@ export async function steerMessageToTask({
         if (resumeResult) {
           return resumeResult;
         }
+      }
+
+      if (!promptSubmitted) {
+        logHandlerError('steerMessageToTask', error);
+        return {
+          success: false,
+          error:
+            error instanceof Error ? error.message : 'Failed to send message',
+          status: 500,
+          delivery: 'not_accepted',
+        };
       }
 
       if (error instanceof SandboxNotReadyError) {

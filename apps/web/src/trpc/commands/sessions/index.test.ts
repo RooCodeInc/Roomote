@@ -27,7 +27,26 @@ vi.mock('@roomote/db/server', () => ({
 }));
 vi.mock('@roomote/telemetry/server', () => ({ captureEvent: vi.fn() }));
 
-import { getSessionByIdCommand } from './index';
+import { getSessionByIdCommand, sessionTimelineInputSchema } from './index';
+
+describe('sessionTimelineInputSchema', () => {
+  it('accepts a composite cursor returned by an omitted-since first poll', () => {
+    const sessionId = '00000000-0000-4000-8000-000000000000';
+    const firstPoll = sessionTimelineInputSchema.parse({ sessionId });
+    expect(firstPoll.since).toBeUndefined();
+
+    const returnedCursor = {
+      at: 100,
+      seenIdsAtTimestamp: ['fast:first'],
+    };
+    expect(
+      sessionTimelineInputSchema.parse({
+        sessionId,
+        since: returnedCursor,
+      }).since,
+    ).toEqual(returnedCursor);
+  });
+});
 
 describe('getSessionByIdCommand', () => {
   beforeEach(() => {

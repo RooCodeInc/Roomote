@@ -9,6 +9,28 @@ const offer = {
 };
 
 describe('PrReviewActionOffer', () => {
+  it('shows actions without a resolving question and hides them when superseded', () => {
+    const onAction = vi.fn();
+    const { container, rerender } = render(
+      <PrReviewActionOffer offer={offer} onAction={onAction} />,
+    );
+
+    expect(screen.queryByText(offer.question)).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole('button').map((button) => button.textContent),
+    ).toEqual(['Resolve these issues', 'Auto-resolve on this PR', 'Dismiss']);
+    expect(onAction).not.toHaveBeenCalled();
+
+    rerender(
+      <PrReviewActionOffer
+        offer={{ ...offer, status: 'dismissed' }}
+        onAction={onAction}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
   it('does not render an offer with dismissed state', () => {
     const { container } = render(
       <PrReviewActionOffer

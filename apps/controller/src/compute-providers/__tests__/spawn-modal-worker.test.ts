@@ -1,4 +1,5 @@
 import type { TaskRun } from '@roomote/db/server';
+import type { RunCommandInput } from '@roomote/compute-providers';
 import { TaskPayloadKind } from '@roomote/types';
 
 const mockCreateModalMachine = vi.fn();
@@ -19,6 +20,12 @@ const mockUpdateSet = vi.fn((_values: Record<string, unknown>) => ({
   where: mockUpdateWhere,
 }));
 const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSet }));
+const mockSql = vi.fn(
+  (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings,
+    values,
+  }),
+);
 const mockFindTask = vi.fn();
 const mockUpdateTaskRunMachine = vi.fn();
 const mockGetNamedPortsForTaskRun = vi.fn();
@@ -57,6 +64,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     },
     createComputeProviderMutationEventRecorder:
       mockCreateComputeProviderMutationEventRecorder,
+    sql: mockSql,
   };
 });
 
@@ -381,6 +389,143 @@ describe('spawnModalWorker', () => {
         Object.hasOwn(values, 'sandboxCmdId'),
       ),
     ).toBe(false);
+    expect(
+      mockUpdateSet.mock.calls.some(([values]) => Object.hasOwn(values, 'log')),
+    ).toBe(false);
+  });
+
+  it('retains timestamped stdout and stderr for Roomote-backed commands', async () => {
+    mockRunCommand.mockImplementationOnce(async (input: RunCommandInput) => {
+      input.onOutput?.({ stream: 'stdout', data: 'worker\0 ready\n' });
+      input.onOutput?.({ stream: 'stderr', data: 'setup warning\n' });
+      return { exitCode: null, commandId: 'exec-123' };
+    });
+
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          vendor: 'roomote',
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          vendor: 'roomote',
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).resolves.toEqual({
+      machineId: 'modal-machine-123',
+      sandboxCmdId: 'exec-123',
+    });
+
+    const retainedOutput = mockSql.mock.calls
+      .map((call) => call[2])
+      .filter(
+        (value): value is string =>
+          typeof value === 'string' && value.startsWith('['),
+      )
+      .join('');
+    expect(retainedOutput).toMatch(
+      /\[\d{4}-\d{2}-\d{2}T.*Z\] \[command\] sandbox provisioning started\n/,
+    );
+    expect(retainedOutput).toMatch(
+      /\[\d{4}-\d{2}-\d{2}T.*Z\] \[command\] worker run 123 started on modal-machine-123\n/,
+    );
+    expect(retainedOutput).toMatch(
+      /\[\d{4}-\d{2}-\d{2}T.*Z\] \[stdout\] worker ready\n/,
+    );
+    expect(retainedOutput).toMatch(
+      /\[\d{4}-\d{2}-\d{2}T.*Z\] \[stderr\] setup warning\n/,
+    );
+    expect(retainedOutput).toMatch(
+      /\[\d{4}-\d{2}-\d{2}T.*Z\] \[command\] worker is running as command exec-123\n/,
+    );
+    expect(retainedOutput).not.toContain('\0');
+  });
+
+  it('retains Roomote sandbox provisioning failures before command startup', async () => {
+    mockCreateModalMachine.mockRejectedValueOnce(
+      new Error('capacity unavailable'),
+    );
+
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          vendor: 'roomote',
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          vendor: 'roomote',
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).rejects.toThrow('capacity unavailable');
+
+    const retainedOutput = mockSql.mock.calls
+      .map((call) => call[2])
+      .filter(
+        (value): value is string =>
+          typeof value === 'string' && value.startsWith('['),
+      )
+      .join('');
+    expect(retainedOutput).toContain(
+      '[command] sandbox provisioning started\n',
+    );
+    expect(retainedOutput).toContain(
+      '[command] sandbox provisioning failed: capacity unavailable\n',
+    );
+    expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+
+  it('bounds retained Roomote output while preserving the newest text', async () => {
+    mockRunCommand.mockImplementationOnce(async (input: RunCommandInput) => {
+      input.onOutput?.({
+        stream: 'stdout',
+        data: `${'x'.repeat(300 * 1024)}LATEST_OUTPUT\n`,
+      });
+      return { exitCode: null, commandId: 'exec-large' };
+    });
+
+    await spawnModalWorker(
+      mockTaskRun({
+        vendor: 'roomote',
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        vendor: 'roomote',
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    const stdoutEntry = mockSql.mock.calls
+      .map((call) => call[2])
+      .find(
+        (value): value is string =>
+          typeof value === 'string' && value.includes('[stdout]'),
+      );
+    expect(stdoutEntry).toBeDefined();
+    expect(stdoutEntry!.length).toBeLessThanOrEqual(256 * 1024);
+    expect(stdoutEntry).toContain('LATEST_OUTPUT\n');
   });
 
   it('cleans up when a detached worker exits with code zero during launch', async () => {

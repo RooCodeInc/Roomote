@@ -1,5 +1,9 @@
 import type { UserAuthSuccess } from '@/types';
 
+vi.mock('@/lib/server/custom-automation-task-access', () => ({
+  requireTaskAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
 const { mockGetTaskSuggestableMessages, mockGenerateTrackedNonTaskObject } =
   vi.hoisted(() => ({
     mockGetTaskSuggestableMessages: vi.fn(),
@@ -45,22 +49,11 @@ function assistantRow(id: string, text: string): SuggestableRow {
 
 const auth = {
   userId: 'user-1',
-  featureFlags: { composerSuggestions: true },
 } as UserAuthSuccess;
-
-const flagOffAuth = { userId: 'user-1', featureFlags: {} } as UserAuthSuccess;
 
 describe('getComposerSuggestionCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it('returns null without loading history when the flag is off', async () => {
-    await expect(
-      getComposerSuggestionCommand(flagOffAuth, { taskId: 'task-1' }),
-    ).resolves.toEqual({ suggestion: null, messageCount: 0 });
-    expect(mockGetTaskSuggestableMessages).not.toHaveBeenCalled();
-    expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
   });
 
   it('returns null when the conversation is too short', async () => {

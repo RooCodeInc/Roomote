@@ -16,6 +16,7 @@ import {
 } from '@roomote/db/server';
 
 import { claimTelegramSuggestionLaunch } from '../setup-suggestions';
+import { claimCurrentThreadSuggestionByMessage } from '../../tasks/current-thread-suggestion-reaction';
 
 describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
   const workItemIds: string[] = [];
@@ -26,6 +27,8 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
     launchClaimedAt?: Date | null;
     channelId?: string;
     launchRouting?: 'router';
+    launchTarget?: string;
+    originSessionId?: string;
   }): Promise<string> {
     const [row] = await db
       .insert(workItems)
@@ -54,8 +57,14 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
       metadata: {
         suggestionType: 'setup_onboarding',
         suggestionKey: `source-task:${workItemId}`,
+        ...(overrides?.originSessionId
+          ? { originSessionId: overrides.originSessionId }
+          : {}),
         ...(overrides?.launchRouting
           ? { launchRouting: overrides.launchRouting }
+          : {}),
+        ...(overrides?.launchTarget
+          ? { launchTarget: overrides.launchTarget }
           : {}),
       },
     });
@@ -74,7 +83,9 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
   });
 
   it('claims an open work item exactly once and flips it to launching', async () => {
-    const workItemId = await seedSuggestionWorkItem();
+    const workItemId = await seedSuggestionWorkItem({
+      originSessionId: 'session-card',
+    });
 
     const claimed = await claimTelegramSuggestionLaunch({
       suggestionId: workItemId,
@@ -84,6 +95,8 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
     expect(claimed).not.toBeNull();
     expect(claimed?.id).toBe(workItemId);
     expect(claimed?.title).toBe('Fix the flaky test');
+    expect(claimed?.originSessionId).toBe('session-card');
+    expect(claimed?.sourceTaskId).toBeNull();
 
     const [row] = await db
       .select({
@@ -101,6 +114,25 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
     expect(claimed?.launchClaimedAt.getTime()).toBe(
       row?.launchClaimedAt?.getTime(),
     );
+  });
+
+  it('retains the taskless origin through the shared message-reaction claim', async () => {
+    const workItemId = await seedSuggestionWorkItem({
+      originSessionId: 'session-card',
+    });
+    const claimed = await claimCurrentThreadSuggestionByMessage({
+      surface: 'telegram',
+      channelId: chatId,
+      messageId: `msg:${workItemId}`,
+    });
+    expect(claimed).toMatchObject({
+      outcome: 'claimed',
+      suggestion: {
+        id: workItemId,
+        sourceTaskId: null,
+        originSessionId: 'session-card',
+      },
+    });
   });
 
   it('returns null for a second claim (double-tap is a no-op)', async () => {
@@ -134,6 +166,23 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
       targetRepositoryFullName: null,
       targetEnvironmentId: null,
       usesRouterLaunch: true,
+    });
+    expect(claimed?.launchTarget).toBeUndefined();
+  });
+
+  it("keeps the card's explicit launch target so a deleted environment fails loudly", async () => {
+    const workItemId = await seedSuggestionWorkItem({
+      launchTarget: '11111111-1111-4111-8111-111111111111',
+    });
+
+    const claimed = await claimTelegramSuggestionLaunch({
+      suggestionId: workItemId,
+      chatId,
+    });
+
+    expect(claimed).toMatchObject({
+      launchTarget: '11111111-1111-4111-8111-111111111111',
+      usesRouterLaunch: false,
     });
   });
 

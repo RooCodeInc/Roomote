@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { NullableOptionalsMcpServer } from '@roomote/cloud-agents/mcp-nullable-optionals';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { isMcpConnectionAsanaConfig } from '@roomote/types';
@@ -51,7 +51,7 @@ async function resolveAsanaConnection() {
 function createAsanaMcpServer(
   config: Awaited<ReturnType<typeof resolveAsanaConnection>>,
 ) {
-  const server = new McpServer(ASANA_MCP_SERVER_INFO, {
+  const server = new NullableOptionalsMcpServer(ASANA_MCP_SERVER_INFO, {
     instructions:
       'Use these Asana tools to inspect workspaces, projects, tasks, teams, comments, and users through the configured workspace token.',
   });

@@ -4,7 +4,6 @@ import {
   getDiscordMessageContent,
   isDiscordAudioAttachment,
   isDiscordBotMentioned,
-  stripDiscordBotMention,
   type DiscordGatewayEvent,
   type DiscordMessage,
 } from '@roomote/communication/discord-event';
@@ -46,7 +45,6 @@ import {
   startDiscordFastAgentResponse,
 } from './fast-agent.js';
 import { rememberPendingDiscordAccountLinkTask } from './pending-account-link-task.js';
-import { startNewDiscordTask } from './task-orchestration.js';
 import {
   discordMetadataForChannel,
   type DiscordChannelContext,
@@ -61,8 +59,8 @@ const CHANNEL_AUTO_START_CHANNEL_TYPES = new Set([0, 5]);
 // joins, boosts, thread-created, ...) that must not launch tasks.
 const CHANNEL_AUTO_START_MESSAGE_TYPES = new Set([0, 19]);
 
-const DISCORD_ROUTING_LOCK_PREFIX = 'discord:routing-lock:';
-const ROUTING_LOCK_TTL_SECONDS = 60;
+const DISCORD_AUTO_START_LOCK_PREFIX = 'discord:auto-start-lock:';
+const AUTO_START_LOCK_TTL_SECONDS = 60;
 
 async function sendLaunchFailureBestEffort(input: {
   provider: DiscordCommunicationProvider;
@@ -277,34 +275,6 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
     };
     launchOwnerUserId = mappedUserId;
     queuedMessageUserId = mappedUserId;
-
-    const defaultFastQuestion = stripDiscordBotMention(
-      getDiscordMessageContent(message),
-      botUserId,
-    );
-    if (defaultFastQuestion) {
-      void processDiscordFastAgentMessage({
-        event,
-        question: defaultFastQuestion,
-        sender: message.author,
-        senderUserId: mappedUserId,
-        provider,
-        applicationId: input.applicationId,
-        channel,
-        metadata: discordMetadataForChannel({
-          channel,
-          messageId: message.id,
-          anchorMessageId: message.id,
-        }),
-        conversationId: getDiscordFastConversationId(channel, message.id),
-        directedAtRoomote: true,
-      }).catch((error) => {
-        apiLogger.error(
-          `[DiscordChannelAutoStart] Failed to answer in Fast mode for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-      return true;
-    }
   }
 
   const messageAttachments = getDiscordMessageAttachments(message);
@@ -337,22 +307,22 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
     return true;
   }
 
-  const routingLockKey = `${DISCORD_ROUTING_LOCK_PREFIX}${message.id}`;
+  const launchLockKey = `${DISCORD_AUTO_START_LOCK_PREFIX}${message.id}`;
   const lockAcquired = await redis.set(
-    routingLockKey,
+    launchLockKey,
     '1',
     'EX',
-    ROUTING_LOCK_TTL_SECONDS,
+    AUTO_START_LOCK_TTL_SECONDS,
     'NX',
   );
   if (lockAcquired !== 'OK') {
     apiLogger.info(
-      `[DiscordChannelAutoStart] Skipping ${logContext}: routing lock already held`,
+      `[DiscordChannelAutoStart] Skipping ${logContext}: launch lock already held`,
     );
     return true;
   }
-  const releaseRoutingLock = async () => {
-    await redis.del(routingLockKey).catch(() => undefined);
+  const releaseLaunchLock = async () => {
+    await redis.del(launchLockKey).catch(() => undefined);
   };
 
   const metadata = discordMetadataForChannel({
@@ -360,10 +330,29 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
     messageId: message.id,
     anchorMessageId: message.id,
   });
+  // The queued message already folds forwarded content, attachment summaries
+  // and extracted attachment text into one prompt.
+  const fastEntry = {
+    event,
+    question: queuedMessage.text,
+    ...(processedAttachments.images.length
+      ? { images: processedAttachments.images }
+      : {}),
+    ...(matchedTarget.instructions?.trim()
+      ? { agentContext: matchedTarget.instructions.trim() }
+      : {}),
+    sender: message.author,
+    provider,
+    applicationId: input.applicationId,
+    channel,
+    metadata,
+    conversationId: getDiscordFastConversationId(channel, message.id),
+    directedAtRoomote: true,
+  };
 
-  // The Gateway delivery loop expects a fast 2xx; the launch-criteria LLM,
-  // routing, and thread creation continue in the background, exactly like the
-  // Slack webhook path.
+  // The Gateway delivery loop expects a fast 2xx; the launch-criteria LLM
+  // and the Fast turn continue in the background, exactly like the Slack
+  // webhook path.
   void (async () => {
     try {
       const launchCriteria = matchedTarget.launchCriteria?.trim();
@@ -393,100 +382,52 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
               isBotAuthored,
             });
           }
-          await releaseRoutingLock();
+          await releaseLaunchLock();
           return;
         }
       }
 
+      if (!isBotAuthored) {
+        // A linked person's post enters Fast under their own identity; the
+        // channel instructions ride along as context for the model.
+        await processDiscordFastAgentMessage({
+          ...fastEntry,
+          senderUserId: launchOwnerUserId!,
+        });
+        return;
+      }
+
       // Bot/webhook-authored feed messages get the same first hop as a human
       // post in this channel: a Fast turn under the automation launch
-      // identity (the guild installer), with the direct task launch below as
-      // the fallback — mirroring the Slack auto-start path. The launch gate
-      // above still decides whether the message warrants any response.
-      if (isBotAuthored) {
-        const installation = channel.guildId
-          ? await findDiscordInstallationByGuildId(channel.guildId)
-          : null;
-        const automationLaunchUserId = installation?.installedByUserId ?? null;
-
-        if (automationLaunchUserId) {
-          const fastStart = await startDiscordFastAgentResponse({
-            event,
-            question: queuedMessage.text,
-            sender: message.author,
-            senderUserId: automationLaunchUserId,
-            provider,
-            applicationId: input.applicationId,
-            channel,
-            metadata,
-            conversationId: getDiscordFastConversationId(channel, message.id),
-            directedAtRoomote: true,
-            delegatedTaskInitiator: initiator,
-          });
-
-          if (fastStart.accepted) {
-            apiLogger.info(
-              `[DiscordChannelAutoStart] Routed ${logContext} to Fast under the automation identity`,
-            );
-            return;
-          }
-
-          apiLogger.warn(
-            `[DiscordChannelAutoStart] Fast entry not accepted (${fastStart.reason}) for ${logContext}; falling back to direct task launch`,
-          );
-        } else {
-          apiLogger.warn(
-            `[DiscordChannelAutoStart] No installer launch identity for ${logContext}; falling back to direct task launch`,
-          );
-        }
-      }
-
-      let intakeAckPinned = false;
-      try {
-        await provider.addReaction({
-          channelId: channel.channelId,
-          messageId: message.id,
-          name: '👀',
-        });
-        intakeAckPinned = true;
-      } catch {
-        // The launch matters more than the acknowledgement.
-      }
-
-      const started = await startNewDiscordTask({
-        provider,
-        applicationId: input.applicationId,
-        requesterDiscordUserId: message.author.id,
-        ...(launchOwnerUserId ? { launchOwnerUserId } : {}),
-        queuedMessage,
-        metadata,
-        channel,
-        skipRoutingConfirmation: true,
-        channelAutoStart: {
-          ...(matchedTarget.instructions
-            ? { agentPromptPrefix: matchedTarget.instructions }
-            : {}),
-          initiator,
-        },
-        ...(intakeAckPinned ? { intakeAckPinned: true } : {}),
-        // Match normal gateway launches: explicit Discord reply targets belong
-        // in agent thread context, including monitored auto-start channels.
-        ...(message.message_reference?.message_id
-          ? {
-              replyToMessageId: message.message_reference.message_id,
-              ...(message.message_reference.channel_id
-                ? { replyToChannelId: message.message_reference.channel_id }
-                : {}),
-            }
-          : {}),
-      });
-
-      if (started.status !== 'started') {
-        apiLogger.info(
-          `[DiscordChannelAutoStart] No task launched for ${logContext}: ${started.status}`,
+      // identity (the guild installer). Without an installer there is nobody
+      // to act as, so the message is left alone and the gap is logged.
+      const installation = channel.guildId
+        ? await findDiscordInstallationByGuildId(channel.guildId)
+        : null;
+      const automationLaunchUserId = installation?.installedByUserId ?? null;
+      if (!automationLaunchUserId) {
+        apiLogger.warn(
+          `[DiscordChannelAutoStart] No installer launch identity for ${logContext}; the channel needs a linked installer before Roomote can respond to bot posts`,
         );
-        await releaseRoutingLock();
+        await releaseLaunchLock();
+        return;
       }
+
+      const fastStart = await startDiscordFastAgentResponse({
+        ...fastEntry,
+        senderUserId: automationLaunchUserId,
+        delegatedTaskInitiator: initiator,
+      });
+      if (fastStart.accepted) {
+        apiLogger.info(
+          `[DiscordChannelAutoStart] Routed ${logContext} to Fast under the automation identity`,
+        );
+        return;
+      }
+      apiLogger.warn(
+        `[DiscordChannelAutoStart] Fast entry not accepted (${fastStart.reason}) for ${logContext}`,
+      );
+      await releaseLaunchLock();
     } catch (error) {
       if (isDeploymentReadOnlyError(error)) {
         await provider
@@ -496,12 +437,12 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
             text: MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
           })
           .catch(() => undefined);
-        await releaseRoutingLock();
+        await releaseLaunchLock();
         return;
       }
 
       apiLogger.error(
-        `[DiscordChannelAutoStart] Failed to launch for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
+        `[DiscordChannelAutoStart] Failed to respond for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
       );
       await sendLaunchFailureBestEffort({
         provider,
@@ -509,7 +450,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         messageId: message.id,
         isBotAuthored,
       });
-      await releaseRoutingLock();
+      await releaseLaunchLock();
     }
   })();
 

@@ -1,4 +1,4 @@
-type FastAgentEntryMode = 'explicit' | 'default';
+type FastAgentEntryMode = 'default';
 
 export type FastAgentStartResult =
   | { accepted: true; abort: () => Promise<void> }
@@ -58,14 +58,9 @@ export function startAcceptedFastAgentTurn(input: {
 }
 
 export function resolveFastAgentEntryMode(params: {
-  explicitInvocation: boolean;
   userDefaultEnabled: boolean;
   fastAvailable?: boolean;
 }): FastAgentEntryMode | null {
-  if (params.explicitInvocation) {
-    return 'explicit';
-  }
-
   return params.userDefaultEnabled && params.fastAvailable !== false
     ? 'default'
     : null;

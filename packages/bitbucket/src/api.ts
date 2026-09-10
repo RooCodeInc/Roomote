@@ -375,6 +375,8 @@ async function requestBitbucketJson<T>({
   body,
   schema,
   absoluteUrl,
+  bounded = false,
+  text = false,
 }: {
   apiBaseUrl: string;
   fetchImpl?: typeof fetch;
@@ -387,22 +389,72 @@ async function requestBitbucketJson<T>({
   body?: Record<string, unknown>;
   schema: z.ZodType<T>;
   absoluteUrl?: string;
+  bounded?: boolean;
+  text?: boolean;
 }): Promise<{ data: T; response: Response }> {
-  const response = await fetchImpl(
-    absoluteUrl ?? buildBitbucketApiUrl(apiBaseUrl, path ?? '', params),
-    {
-      method,
-      headers: {
-        Accept: 'application/json',
-        Authorization:
-          (authScheme ?? 'basic') === 'bearer'
-            ? `Bearer ${token}`
-            : buildAuthorizationHeader(username ?? '', token),
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+  const url =
+    absoluteUrl ?? buildBitbucketApiUrl(apiBaseUrl, path ?? '', params);
+  const pullRequestDiff =
+    bounded && method === 'GET' && text
+      ? path?.match(
+          /^(\/repositories\/[^/]+\/[^/]+)\/pullrequests\/(\d+)\/diff$/,
+        )
+      : null;
+  const init: RequestInit = {
+    method,
+    ...(bounded
+      ? {
+          redirect: pullRequestDiff ? ('manual' as const) : ('error' as const),
+          signal: AbortSignal.timeout(15_000),
+        }
+      : {}),
+    headers: {
+      Accept: text ? 'text/plain' : 'application/json',
+      Authorization:
+        (authScheme ?? 'basic') === 'bearer'
+          ? `Bearer ${token}`
+          : buildAuthorizationHeader(username ?? '', token),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
-  );
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  };
+  let response = await fetchImpl(url, init);
+  // Bitbucket's PR diff is a documented redirect. Permit one same-repository
+  // hash diff only, never arbitrary provider links or automatic redirects.
+  if (pullRequestDiff && response.status === 302) {
+    await response.body?.cancel();
+    const location = response.headers.get('location');
+    if (
+      !location ||
+      /[%\\\x00-\x20]/.test(location) ||
+      location.split(/[/?#]/).some((part) => part === '.' || part === '..')
+    ) {
+      throw new Error('Unsafe Bitbucket diff redirect.');
+    }
+    const target = new URL(location, url);
+    const prefix = `/2.0${pullRequestDiff[1]}/diff/`;
+    if (
+      target.origin !== 'https://api.bitbucket.org' ||
+      target.username ||
+      target.password ||
+      target.hash ||
+      !target.pathname.startsWith(prefix) ||
+      !/^[a-fA-F0-9]{7,40}\.\.[a-fA-F0-9]{7,40}$/.test(
+        target.pathname.slice(prefix.length),
+      ) ||
+      [...target.searchParams].some(
+        ([key, value]) =>
+          !(key === 'from_pullrequest_id' && value === pullRequestDiff[2]) &&
+          !(key === 'topic' && value === 'true'),
+      )
+    ) {
+      throw new Error('Unsafe Bitbucket diff redirect.');
+    }
+    response = await fetchImpl(target.toString(), {
+      ...init,
+      redirect: 'error',
+    });
+  }
 
   if (method === 'DELETE' && [200, 204, 404].includes(response.status)) {
     return {
@@ -412,6 +464,7 @@ async function requestBitbucketJson<T>({
   }
 
   if (![200, 201].includes(response.status)) {
+    if (bounded) await response.body?.cancel();
     throw new BitbucketApiError(response.status, response.statusText);
   }
 
@@ -423,9 +476,41 @@ async function requestBitbucketJson<T>({
   }
 
   return {
-    data: schema.parse(await response.json()),
+    data: schema.parse(
+      bounded
+        ? await readBoundedBitbucketResponse(response, text)
+        : await response.json(),
+    ),
     response,
   };
+}
+
+async function readBoundedBitbucketResponse(
+  response: Response,
+  text: boolean,
+): Promise<unknown> {
+  const limit = 1_048_576;
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('Bitbucket response body is missing.');
+  let bytes = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    if (Number(response.headers.get('content-length')) > limit) {
+      throw new Error('Bitbucket response exceeds 1 MiB.');
+    }
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > limit) throw new Error('Bitbucket response exceeds 1 MiB.');
+      chunks.push(chunk.value);
+    }
+  } finally {
+    await reader.cancel();
+    reader.releaseLock();
+  }
+  const value = Buffer.concat(chunks).toString('utf8');
+  return text ? value : JSON.parse(value);
 }
 
 export async function resolveAuthIdentity({
@@ -1325,3 +1410,333 @@ export async function createTaskRunBitbucketCredentials(
     expiresAt: auth.expiresAt,
   };
 }
+
+const bitbucketPullRequestDetailsSchema = z
+  .object({
+    id: z.number(),
+    title: z.string(),
+    description: z.string().nullable().optional(),
+    source: z
+      .object({
+        branch: z
+          .object({ name: z.string().optional() })
+          .passthrough()
+          .optional(),
+        commit: z
+          .object({ hash: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+    destination: z
+      .object({
+        branch: z
+          .object({ name: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+    links: z
+      .object({
+        html: z
+          .object({ href: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export type BitbucketPullRequestDetails = z.infer<
+  typeof bitbucketPullRequestDetailsSchema
+>;
+
+/** Fetches a pull request by repository full name and number. */
+export async function getBitbucketPullRequest({
+  repositoryFullName,
+  pullRequestNumber,
+  token,
+  username,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  token?: string;
+  username?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<BitbucketPullRequestDetails> {
+  const auth = await resolveAuthIdentity({
+    token,
+    username,
+    baseUrl,
+    apiBaseUrl,
+    fetchImpl,
+  });
+  const { workspace, repo } =
+    splitBitbucketRepositoryFullName(repositoryFullName);
+  const { data } = await requestBitbucketJson({
+    apiBaseUrl: auth.apiBaseUrl,
+    fetchImpl,
+    path: `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests/${pullRequestNumber}`,
+    username: auth.username,
+    token: auth.token,
+    authScheme: auth.authScheme,
+    schema: bitbucketPullRequestDetailsSchema,
+  });
+
+  return data;
+}
+
+/** Replaces the body of an existing pull request comment. */
+export async function updateBitbucketPullRequestComment({
+  repositoryFullName,
+  pullRequestNumber,
+  commentId,
+  body,
+  token,
+  username,
+  baseUrl,
+  apiBaseUrl,
+  fetchImpl,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  commentId: number;
+  body: string;
+  token?: string;
+  username?: string;
+  baseUrl?: string;
+  apiBaseUrl?: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  const auth = await resolveAuthIdentity({
+    token,
+    username,
+    baseUrl,
+    apiBaseUrl,
+    fetchImpl,
+  });
+  const { workspace, repo } =
+    splitBitbucketRepositoryFullName(repositoryFullName);
+  await requestBitbucketJson({
+    apiBaseUrl: auth.apiBaseUrl,
+    fetchImpl,
+    method: 'PUT',
+    path: `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests/${pullRequestNumber}/comments/${commentId}`,
+    username: auth.username,
+    token: auth.token,
+    authScheme: auth.authScheme,
+    body: { content: { raw: body } },
+    schema: bitbucketCommentSchema,
+  });
+}
+
+export const bitbucketCommitHashSchema = z
+  .string()
+  .regex(/^[a-fA-F0-9]{1,40}$/)
+  .describe('Commit SHA1, full or abbreviated; not a branch or tag name.');
+
+const boundedRepositoryIdentitySchema = z.object({
+  uuid: z.string().min(1),
+  full_name: z.string().min(1),
+});
+const boundedCommentSchema = bitbucketCommentSchema.passthrough();
+const boundedCommitSchema = z
+  .object({ hash: z.string(), repository: boundedRepositoryIdentitySchema })
+  .passthrough();
+const boundedSearchMatchSchema = z
+  .object({
+    file: z
+      .object({
+        path: z.string(),
+        commit: z
+          .object({ repository: boundedRepositoryIdentitySchema })
+          .passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
+export type BitbucketBoundedPage<T> = { values: T[]; hasMore: boolean };
+export type BitbucketRepositoryClientOptions = {
+  repositoryFullName: string;
+  /** Fresh OAuth token supplied by the authenticated handler for this call. */
+  token: string;
+  fetchImpl?: typeof fetch;
+};
+
+/** Fixed-cloud, fixed-repository operations; never follows response links. */
+export function createBitbucketRepositoryClient(
+  options: BitbucketRepositoryClientOptions,
+) {
+  const { workspace, repo } = splitBitbucketRepositoryFullName(
+    options.repositoryFullName,
+  );
+  const segment = (value: string) => {
+    if (
+      !value ||
+      !/^[a-zA-Z0-9._-]+$/.test(value) ||
+      value === '.' ||
+      value === '..'
+    ) {
+      throw new Error('Invalid Bitbucket repository segment.');
+    }
+    return encodeURIComponent(value);
+  };
+  const root = `/repositories/${segment(workspace)}/${segment(repo)}`;
+  const id = (value: number) =>
+    z.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(value);
+  const sourcePath = (value: string) => {
+    if (
+      /[%\\\x00-\x1f\x7f]/.test(value) ||
+      (value &&
+        value.split('/').some((part) => !part || part === '.' || part === '..'))
+    ) {
+      throw new Error('Invalid Bitbucket source path.');
+    }
+    return value.split('/').map(encodeURIComponent).join('/');
+  };
+  const revision = (value: string) => {
+    if (!value) throw new Error('Bitbucket revision is required.');
+    sourcePath(value);
+    return encodeURIComponent(value);
+  };
+  const request = async <T>(
+    path: string,
+    schema: z.ZodType<T>,
+    params: Record<string, string | number> = {},
+    method: 'GET' | 'POST' | 'PUT' = 'GET',
+    body?: Record<string, unknown>,
+    text = false,
+  ): Promise<T> => {
+    const { data } = await requestBitbucketJson({
+      apiBaseUrl: 'https://api.bitbucket.org/2.0',
+      path,
+      schema,
+      params,
+      method,
+      body,
+      text,
+      token: options.token,
+      authScheme: 'bearer',
+      fetchImpl: options.fetchImpl,
+      bounded: true,
+    });
+    return data;
+  };
+  const page = async <T>(
+    path: string,
+    schema: z.ZodType<T>,
+    pageNumber = 1,
+    params: Record<string, string | number> = {},
+  ): Promise<BitbucketBoundedPage<T>> => {
+    const data = await request(
+      path,
+      z.object({
+        values: z.array(schema).max(50),
+        next: z.string().nullable().optional(),
+      }),
+      {
+        ...params,
+        page: id(pageNumber),
+        pagelen: 50,
+      },
+    );
+    return { values: data.values, hasMore: Boolean(data.next) };
+  };
+  const prPath = (number: number) => `${root}/pullrequests/${id(number)}`;
+  return {
+    getRepository: () => request(root, bitbucketRepositorySchema),
+    getFile: (ref: string, path: string) => {
+      if (!path) throw new Error('File path is required.');
+      return request(
+        `${root}/src/${revision(ref)}/${sourcePath(path)}`,
+        z.string(),
+        {},
+        'GET',
+        undefined,
+        true,
+      );
+    },
+    listDirectory: (ref: string, path = '', pageNumber = 1) =>
+      page(
+        `${root}/src/${revision(ref)}/${sourcePath(path)}`,
+        z.object({ path: z.string(), type: z.string() }).passthrough(),
+        pageNumber,
+      ),
+    searchCode: (terms: string, pageNumber = 1) => {
+      if (
+        !terms.trim() ||
+        !/^[a-zA-Z0-9_ .-]+$/.test(terms) ||
+        /\b(?:AND|OR|NOT)\b/i.test(terms)
+      ) {
+        throw new Error('Search accepts plain code terms, not query syntax.');
+      }
+      return page(
+        `/workspaces/${segment(workspace)}/search/code`,
+        boundedSearchMatchSchema,
+        pageNumber,
+        { search_query: `repo:${repo} ${terms.trim()}` },
+      );
+    },
+    listCommits: (ref: string, pageNumber = 1) =>
+      page(`${root}/commits/${revision(ref)}`, boundedCommitSchema, pageNumber),
+    getCommit: (hash: string) =>
+      request(
+        `${root}/commit/${bitbucketCommitHashSchema.parse(hash)}`,
+        boundedCommitSchema,
+      ),
+    getPullRequest: (number: number) =>
+      request(prPath(number), bitbucketPullRequestDetailsSchema),
+    getPullRequestDiff: (number: number) =>
+      request(`${prPath(number)}/diff`, z.string(), {}, 'GET', undefined, true),
+    listPullRequestComments: (number: number, pageNumber = 1) =>
+      page(`${prPath(number)}/comments`, boundedCommentSchema, pageNumber),
+    getPullRequestComment: (number: number, commentId: number) =>
+      request(
+        `${prPath(number)}/comments/${id(commentId)}`,
+        boundedCommentSchema,
+      ),
+    updatePullRequest: (
+      number: number,
+      changes: { title?: string; description?: string },
+    ) =>
+      request(prPath(number), bitbucketPullRequestDetailsSchema, {}, 'PUT', {
+        title: changes.title,
+        description: changes.description,
+      }),
+    declinePullRequest: (number: number) =>
+      request(
+        `${prPath(number)}/decline`,
+        bitbucketPullRequestDetailsSchema,
+        {},
+        'POST',
+      ),
+    createPullRequestComment: (
+      number: number,
+      body: string,
+      parentCommentId?: number,
+    ) =>
+      request(`${prPath(number)}/comments`, boundedCommentSchema, {}, 'POST', {
+        content: { raw: body },
+        ...(parentCommentId === undefined
+          ? {}
+          : { parent: { id: id(parentCommentId) } }),
+      }),
+  };
+}
+
+export type BitbucketRepositoryClient = ReturnType<
+  typeof createBitbucketRepositoryClient
+>;

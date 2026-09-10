@@ -42,6 +42,7 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { requireTaskAccess } from '@/lib/server/custom-automation-task-access';
 
 import {
   type ClaimedOutOfBandContext,
@@ -315,7 +316,7 @@ export async function clearEnvironmentSnapshotCommand(
 }
 
 export async function requestTaskRunSleepCommand(
-  _auth: UserAuthSuccess,
+  auth: UserAuthSuccess,
   input: { runId: number },
 ): Promise<SimpleResult> {
   try {
@@ -326,6 +327,8 @@ export async function requestTaskRunSleepCommand(
     if (!taskRun) {
       return { success: false, error: 'Task run not found' };
     }
+
+    await requireTaskAccess(auth, taskRun.taskId);
 
     if (!taskRun.machineId) {
       return { success: false, error: 'No machine associated with this job' };
@@ -417,6 +420,7 @@ export async function restoreTaskRunSnapshotCommand(
 
     // Conversation cargo (draft prompt, Slack/Linear channel bindings) lives
     // on the tasks row.
+    await requireTaskAccess(auth, sourceRun.taskId);
     const sourceTask = await db.query.tasks.findFirst({
       where: eq(tasks.id, sourceRun.taskId),
       columns: {
@@ -436,7 +440,7 @@ export async function restoreTaskRunSnapshotCommand(
       };
     }
 
-    if (!isSnapshotResumable(sourceRun.snapshotCreatedAt)) {
+    if (!isSnapshotResumable(sourceRun.snapshotCreatedAt, sourceRun.vendor)) {
       return {
         success: false,
         error: EXPIRED_SNAPSHOT_RESUME_ERROR,

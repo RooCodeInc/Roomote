@@ -1,9 +1,11 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
+  DEFAULT_SOURCE_CONTROL_PROVIDER,
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME,
   TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
@@ -266,6 +268,7 @@ export async function fetchResolvedRuntimeEnvVars(
   deploymentEnvVars?: Record<string, string>,
   options?: {
     sourceControlProvider?: SourceControlProvider | SourceControlProvider[];
+    includeSandboxOpenRouterApiKey?: boolean;
   },
 ): Promise<Record<string, string>> {
   const envVars =
@@ -274,7 +277,7 @@ export async function fetchResolvedRuntimeEnvVars(
     deploymentEnvVars: envVars,
   });
 
-  return redactControlPlaneEnvVars(
+  const resolvedEnvVars = redactControlPlaneEnvVars(
     redactSourceControlProviderEnvVars(
       redactInferenceGatewayProviderKeys(
         withLegacySnapshotModelEnvAliases({
@@ -285,6 +288,18 @@ export async function fetchResolvedRuntimeEnvVars(
       options?.sourceControlProvider,
     ),
   );
+
+  if (options?.includeSandboxOpenRouterApiKey) {
+    return resolvedEnvVars;
+  }
+
+  if (!(SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME in resolvedEnvVars)) {
+    return resolvedEnvVars;
+  }
+
+  const ordinaryTaskEnvVars = { ...resolvedEnvVars };
+  delete ordinaryTaskEnvVars[SANDBOX_OPENROUTER_API_KEY_ENV_VAR_NAME];
+  return ordinaryTaskEnvVars;
 }
 
 /**
@@ -453,6 +468,11 @@ export async function resolveTaskRunSourceControlProviders(
     repositoryProviders?: Record<string, unknown>;
     sourceControlProvider?: unknown;
   };
+  const workspace = resolveTaskWorkspace(taskRun.payload);
+
+  if (workspace.type === 'no_repositories') {
+    return [];
+  }
 
   if (
     payload.repositoryProviders &&
@@ -487,7 +507,6 @@ export async function resolveTaskRunSourceControlProviders(
   // shared resolver (covers every workspace shape). It returns undefined when
   // the provider is ambiguous or unknown, in which case fall back to the
   // GitHub default that resolveSourceControlProviderFromPayload applies.
-  const workspace = resolveTaskWorkspace(taskRun.payload);
   const resolvedProvider = await resolveWorkspaceSourceControlProvider(
     dbOrTx,
     workspace,
@@ -719,6 +738,15 @@ export async function createSourceControlTokenForTaskRun(
   } = {},
 ): Promise<SourceControlRuntimeToken | null> {
   const providers = await resolveTaskRunSourceControlProviders(taskRun);
+
+  if (providers.length === 0) {
+    return {
+      ...buildSourceControlTokenMetadata(DEFAULT_SOURCE_CONTROL_PROVIDER, ''),
+      envVars: {},
+      source: 'app',
+      expiresAt: null,
+    };
+  }
 
   // GitLab scoped tokens create revocable remote resources. Mint them last so
   // a later provider failure cannot orphan a successful GitLab token set.

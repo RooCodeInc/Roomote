@@ -109,6 +109,52 @@ function dependencies(params: {
 }
 
 describe('provider usage limit automation', () => {
+  it('uses the destination owner token rather than the first active installation', async () => {
+    const deps = dependencies({});
+    deps.overrides.getSlackBotToken
+      .mockResolvedValueOnce('xoxb-a')
+      .mockResolvedValueOnce('xoxb-b');
+    const createNotifier = vi.fn(() => ({ postMessage: deps.postMessage }));
+    const result = await providerUsageLimitJob(
+      {},
+      {
+        ...deps.overrides,
+        createNotifier,
+        resolveDestination: vi.fn().mockResolvedValue({
+          provider: 'slack',
+          channelId: 'C-MANAGER',
+          teamId: 'T-B',
+          source: 'manager_channel',
+        }),
+      },
+    );
+    expect(deps.overrides.getSlackBotToken).toHaveBeenLastCalledWith('T-B');
+    expect(createNotifier).toHaveBeenCalledWith('xoxb-b');
+    expect(result.completed).toBe(true);
+  });
+
+  it('does not claim thresholds or record outcomes when the selected owner is unavailable', async () => {
+    const deps = dependencies({});
+    deps.overrides.getSlackBotToken
+      .mockResolvedValueOnce('xoxb-a')
+      .mockResolvedValueOnce(null);
+    await providerUsageLimitJob(
+      {},
+      {
+        ...deps.overrides,
+        resolveDestination: vi.fn().mockResolvedValue({
+          provider: 'slack',
+          channelId: 'C-MANAGER',
+          teamId: 'T-B',
+          source: 'manager_channel',
+        }),
+      },
+    );
+    expect(deps.redis.set).not.toHaveBeenCalled();
+    expect(deps.recordOutcome).not.toHaveBeenCalled();
+    expect(deps.postMessage).not.toHaveBeenCalled();
+  });
+
   it('derives weekly periods from Monday UTC', () => {
     expect(
       getProviderUsageLimitPeriodId(
@@ -129,7 +175,7 @@ describe('provider usage limit automation', () => {
       title: { text: 'Inference Provider Usage Alert' },
       subtitle: {
         type: 'mrkdwn',
-        text: 'OpenRouter is at 90% ($90.00 of $100.00)',
+        text: 'OpenRouter is at 90%',
       },
       icon: {
         image_url: expect.stringContaining(
@@ -163,6 +209,28 @@ describe('provider usage limit automation', () => {
           ],
         },
       ],
+    });
+  });
+
+  it('keeps the alert concise when raw usage and limit are not reported', () => {
+    const message = buildProviderUsageLimitWarningMessage({
+      alerts: [
+        {
+          snapshot: snapshot({
+            providerName: 'ChatGPT (subscription)',
+            usedPercent: 89,
+            used: undefined,
+            limit: undefined,
+          }),
+          threshold: 85,
+        },
+      ],
+    });
+
+    expect(message.blocks[0]).toMatchObject({
+      subtitle: {
+        text: 'ChatGPT (subscription) is at 89%',
+      },
     });
   });
 
@@ -225,7 +293,7 @@ describe('provider usage limit automation', () => {
 
     expect(deps.postMessage).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(deps.postMessage.mock.calls[1]?.[0])).toContain(
-      'OpenRouter is at 100% ($100.00 of $100.00)',
+      'OpenRouter is at 100%',
     );
   });
 

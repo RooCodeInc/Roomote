@@ -502,15 +502,71 @@
     {
       "idx": 71,
       "version": "7",
-      "when": 1788206480608,
-      "tag": "0071_milky_the_fallen",
+      "when": 1788299034844,
+      "tag": "0071_remarkable_surge",
       "breakpoints": true
     },
     {
       "idx": 72,
       "version": "7",
-      "when": 1788236835780,
-      "tag": "0072_lethal_iron_fist",
+      "when": 1788330125016,
+      "tag": "0072_nice_triathlon",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1788362851471,
+      "tag": "0073_smooth_excalibur",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1788393553090,
+      "tag": "0074_modern_leo",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1788452210500,
+      "tag": "0075_elite_colonel_america",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1788530600978,
+      "tag": "0076_fearless_skullbuster",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1788560388583,
+      "tag": "0077_normal_lionheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1788884814843,
+      "tag": "0078_hesitant_punisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1788983310654,
+      "tag": "0079_tan_amazoness",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789010303926,
+      "tag": "0080_agentmail_channel",
       "breakpoints": true
     }
   ]

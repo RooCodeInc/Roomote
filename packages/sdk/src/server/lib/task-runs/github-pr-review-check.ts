@@ -166,7 +166,7 @@ function classifyReviewSummary(input: {
   };
 }
 
-function getTerminalReviewSummaryResult(input: {
+export function getTerminalReviewSummaryResult(input: {
   reviewSummaryBody?: string;
   expectedHeadSha: string;
 }) {
@@ -591,11 +591,16 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
   taskId: string;
   reviewHeadSha: string;
   reviewSummaryBody: string;
+  allowCompletedCheckUpdate?: boolean;
 }): Promise<void> {
   const repository = splitRepository(input.repository);
   if (!repository) {
     return;
   }
+
+  let releaseLifecycleLock:
+    | Awaited<ReturnType<typeof acquireGithubPrReviewLifecycleLock>>
+    | undefined;
 
   // Best-effort like the other check publishers: a checks-API failure must
   // not fail the webhook delivery that carried the summary.
@@ -610,6 +615,19 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
       return;
     }
 
+    releaseLifecycleLock = await acquireGithubPrReviewLifecycleLock(
+      input.repository,
+      input.prNumber,
+    );
+    if (!releaseLifecycleLock) {
+      console.warn(
+        `[githubPrReviewCheck] Could not acquire lifecycle lock for ${input.repository}#${input.prNumber}`,
+      );
+      return;
+    }
+
+    const signal = releaseLifecycleLock.signal;
+    signal.throwIfAborted();
     const linkage = await findGithubPrLinkage(input);
     if (!linkage?.githubCheckRunId || !linkage.githubReviewCommentId) {
       return;
@@ -621,9 +639,10 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
     const { data: checkRun } = await octokit.rest.checks.get({
       ...repository,
       check_run_id: linkage.githubCheckRunId,
+      request: { signal },
     });
     if (
-      checkRun.status === 'completed' ||
+      (checkRun.status === 'completed' && !input.allowCompletedCheckUpdate) ||
       !checkRun.head_sha.startsWith(input.reviewHeadSha)
     ) {
       return;
@@ -635,22 +654,25 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
     const owningRunId = Number(
       /^roomote-review:(\d+)$/.exec(checkRun.external_id ?? '')?.[1],
     );
-    let owningRunStartedAt: Date | undefined;
-    if (Number.isFinite(owningRunId)) {
-      const run = await db.query.taskRuns.findFirst({
-        where: eq(taskRuns.id, owningRunId),
-        columns: { startedAt: true, status: true },
-      });
-      const runCanOwnSummary =
-        run?.startedAt != null &&
-        (run.status === RunStatus.Running ||
-          run.status === RunStatus.Idle ||
-          run.status === RunStatus.Completed);
-      if (!runCanOwnSummary) {
-        return;
-      }
-      owningRunStartedAt = run.startedAt ?? undefined;
+    if (!Number.isFinite(owningRunId)) {
+      return;
     }
+    const run = await db.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.id, owningRunId),
+        eq(taskRuns.taskId, input.taskId),
+      ),
+      columns: { startedAt: true, status: true },
+    });
+    if (
+      !run?.startedAt ||
+      (run.status !== RunStatus.Running &&
+        run.status !== RunStatus.Idle &&
+        run.status !== RunStatus.Completed)
+    ) {
+      return;
+    }
+    const owningRunStartedAt = run.startedAt;
 
     // Decide from the live comment, not the webhook snapshot: if a newer
     // same-SHA cycle already reset the summary to in-progress, this yields
@@ -658,6 +680,7 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
     const { data: liveComment } = await octokit.rest.issues.getComment({
       ...repository,
       comment_id: linkage.githubReviewCommentId,
+      request: { signal },
     });
 
     // The owning run must also have authored the live terminal state: between
@@ -665,10 +688,8 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
     // comment can still hold a previous same-SHA cycle's terminal result. An
     // edit that predates the owning run's start belongs to an earlier cycle.
     if (
-      owningRunStartedAt &&
-      (!liveComment.updated_at ||
-        new Date(liveComment.updated_at).getTime() <
-          owningRunStartedAt.getTime())
+      !liveComment.updated_at ||
+      new Date(liveComment.updated_at).getTime() < owningRunStartedAt.getTime()
     ) {
       return;
     }
@@ -681,12 +702,21 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
       return;
     }
 
+    if (
+      checkRun.status === 'completed' &&
+      checkRun.conclusion === result.conclusion &&
+      checkRun.output?.title === result.title
+    ) {
+      return;
+    }
+
     await completeCheckRunWithResult({
       octokit,
       repository,
       checkRunId: linkage.githubCheckRunId,
       result,
       taskUrl: getReviewTaskUrl(input.taskId),
+      signal,
     });
   } catch (error) {
     console.error(
@@ -694,6 +724,8 @@ export async function completeGithubPrReviewCheckFromSummary(input: {
         error instanceof Error ? error.message : String(error)
       }`,
     );
+  } finally {
+    await releaseLifecycleLock?.();
   }
 }
 

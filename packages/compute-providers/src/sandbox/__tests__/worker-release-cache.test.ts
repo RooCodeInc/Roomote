@@ -40,7 +40,9 @@ function makeMatchingRefsResponse(entries: ReleaseListEntry[]) {
 function makeReleaseResponse(tag: string, assets = true) {
   return {
     tag_name: tag,
-    prerelease: tag.includes('-preview.'),
+    // Worker archives intentionally use GitHub prereleases so they do not
+    // replace the product release returned by /releases/latest.
+    prerelease: true,
     draft: false,
     assets: assets
       ? [{ name: `${tag}.tar.gz`, url: `https://api.github.com/asset/${tag}` }]
@@ -384,7 +386,7 @@ describe('getWorkerRelease', () => {
     );
   });
 
-  it('falls back to the releases list when matching refs returns 403', async () => {
+  it('finds stable worker prereleases when matching refs returns 403', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 403,

@@ -21,6 +21,10 @@ import {
   MessageUiOptionsProvider,
   type MessageUiOptions,
 } from '@/components/ai-elements/message-ui-options';
+import {
+  SlackMentionProvider,
+  type SlackMentionScope,
+} from '@/components/ai-elements/slack-mention-context';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { Lightbulb, Skeleton } from '@/components/system';
@@ -82,9 +86,7 @@ function NarrationWorkingReasoningMessage() {
       <MessageContent>
         <div className="flex items-center gap-2 text-sm font-light text-muted-foreground">
           <Lightbulb className="size-4" />
-          <Shimmer direction="rl" duration={1}>
-            Thinking...
-          </Shimmer>
+          <Shimmer>Thinking...</Shimmer>
         </div>
       </MessageContent>
     </Message>
@@ -161,34 +163,41 @@ const MessagesBase = ({
     taskPhase === 'running' &&
     !hasVisibleAssistantOutput(renderBlocks);
 
+  const slackMentionScope = useMemo<SlackMentionScope>(
+    () => ({ kind: 'task', taskId: session.taskId }),
+    [session.taskId],
+  );
+
   return (
     <MessageUiOptionsProvider value={resolvedMessageUiOptions}>
-      <Conversation
-        className="min-h-0 flex-1"
-        initial={hasAnchor ? false : initialScrollBehavior}
-      >
-        <ConversationContent
-          className={cn('ph-no-capture', conversationClassName)}
+      <SlackMentionProvider scope={slackMentionScope}>
+        <Conversation
+          className="min-h-0 flex-1"
+          initial={hasAnchor ? false : initialScrollBehavior}
         >
-          {shouldRenderSessionPrompt && sessionPrompt && (
-            <AcpTextMessage msg={sessionPrompt} />
-          )}
-          {!historyReady && <TranscriptSkeleton />}
-          <AcpTranscriptBlockList
-            blocks={renderBlocks}
-            showInternalMessages={showInternalMessages}
-            onSuppress={suppressMessage}
-          />
-          {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
-          {shouldShowNarrationWorkingReasoning && (
-            <NarrationWorkingReasoningMessage />
-          )}
-          {footer}
-        </ConversationContent>
-        <ConversationScrollButton />
-        {scrollRef && <ScrollBridge handleRef={scrollRef} />}
-        <ScrollToHash messages={messages} />
-      </Conversation>
+          <ConversationContent
+            className={cn('ph-no-capture', conversationClassName)}
+          >
+            {shouldRenderSessionPrompt && sessionPrompt && (
+              <AcpTextMessage msg={sessionPrompt} />
+            )}
+            {!historyReady && <TranscriptSkeleton />}
+            <AcpTranscriptBlockList
+              blocks={renderBlocks}
+              showInternalMessages={showInternalMessages}
+              onSuppress={suppressMessage}
+            />
+            {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
+            {shouldShowNarrationWorkingReasoning && (
+              <NarrationWorkingReasoningMessage />
+            )}
+            {footer}
+          </ConversationContent>
+          <ConversationScrollButton />
+          {scrollRef && <ScrollBridge handleRef={scrollRef} />}
+          <ScrollToHash messages={messages} />
+        </Conversation>
+      </SlackMentionProvider>
     </MessageUiOptionsProvider>
   );
 };

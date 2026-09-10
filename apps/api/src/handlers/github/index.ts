@@ -10,6 +10,7 @@ import {
 import {
   handleMergeAnnouncerPush,
   recordPrStatusChangeInTaskHistory,
+  retirePendingPrReviewActionsForPullRequest,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
 } from '@roomote/sdk/server';
@@ -24,6 +25,9 @@ import { handlePrOpen } from './handlePrOpen';
 import { handlePrReadyForReview } from './handlePrReadyForReview';
 import { handlePrReopen } from './handlePrReopen';
 import { handlePrSynchronize } from './handlePrSynchronize';
+import { handleCheckRunRerequested } from './handleCheckRunRerequested';
+import { getCurrentGitHubPrHeadSha } from './currentPrHead';
+import type { WebhookPullRequestSynchronize } from './types';
 import { handlePrComment } from './handlePrComment';
 import { handleGitHubIssueComment } from './handleGitHubIssueComment';
 import { handleGitHubIssueFixer } from './handleGitHubIssueFixer';
@@ -53,6 +57,7 @@ import { handleInstallationRepositoriesChange } from './handleInstallationReposi
 // Utilities:
 import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
+import { toHostFromUrl } from '../utils';
 import {
   enrichGitHubMergeAnnouncerEvent,
   normalizeGitHubPush,
@@ -65,8 +70,11 @@ function syncPrStatus(
   repo: string,
   prNumber: number,
   status: PullRequestStatus,
+  prUrl: string,
 ): Promise<void> {
-  return updateTaskPrStatus('github', repo, prNumber, status).catch((error) =>
+  return updateTaskPrStatus('github', repo, prNumber, status, {
+    host: toHostFromUrl(prUrl),
+  }).catch((error) =>
     console.warn(
       `[syncPrStatus] Failed to update PR status for ${repo}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
@@ -138,6 +146,49 @@ function syncPullRequestFact(params: {
       }`,
     ),
   );
+}
+
+/**
+ * Retires review offers whose controls belong to an older head once a PR
+ * receives a new commit. The live head is resolved from GitHub rather than
+ * trusted from the payload, so a late or redelivered `synchronize` for an
+ * older commit cannot dismiss offers for the actual current head. Runs
+ * best-effort in the background: the offers are cosmetic, and failing here
+ * must not block fact sync, mergeability checks, or review-on-commit.
+ */
+function retireStalePrReviewActions(
+  payload: WebhookPullRequestSynchronize,
+): void {
+  const repository = payload.repository.full_name;
+  const prNumber = payload.pull_request.number;
+  const installationId = payload.installation?.id;
+  if (!installationId) return;
+
+  void (async () => {
+    const currentHeadSha = await getCurrentGitHubPrHeadSha({
+      installationId,
+      repository,
+      prNumber,
+    });
+    if (!currentHeadSha) {
+      apiLogger.warn(
+        `[retireStalePrReviewActions] Skipping ${repository}#${prNumber}: live head unavailable`,
+      );
+      return;
+    }
+    await retirePendingPrReviewActionsForPullRequest({
+      sourceControlProvider: 'github',
+      repository,
+      prNumber,
+      currentHeadSha,
+    });
+  })().catch((error) => {
+    apiLogger.error(
+      `[retireStalePrReviewActions] Failed for ${repository}#${prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 }
 
 // Resolve through the deployment env resolver so a secret saved into
@@ -217,22 +268,12 @@ github.post('/', async (c) => {
         `${name}.${payload.action}`,
         payload,
         async () => {
+          // Mentions are not subject to the automated skip list: a person
+          // addressing this app by name gets a response even in repositories
+          // where unsolicited automations are suppressed. The handlers return
+          // `no_mention` for everything else.
           if (!payload.issue.pull_request) {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping comment webhook for ${payload.repository.full_name}`,
-              };
-            }
-
             return handleGitHubIssueComment(payload);
-          }
-
-          if (isRepoSkipped(payload.repository.full_name)) {
-            return {
-              status: 'ok' as const,
-              message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-            };
           }
 
           return handlePrComment(payload);
@@ -266,13 +307,6 @@ github.post('/', async (c) => {
 
     webhooks.on('issues.opened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping issue webhook for ${payload.repository.full_name}`,
-          };
-        }
-
         const mentionResult = await handleGitHubIssueComment({
           installation: payload.installation,
           repository: payload.repository,
@@ -280,6 +314,12 @@ github.post('/', async (c) => {
           issue: payload.issue,
           mentionBody: payload.issue.body ?? '',
         });
+
+        // Triage Issues is unsolicited automation, so the skip list applies
+        // to it but not to the body mention above.
+        if (isRepoSkipped(payload.repository.full_name)) {
+          return mentionResult;
+        }
 
         // Always run Triage Issues when enabled (immediate, like Review Code).
         // Mentions and Triage Issues are independent: a mention still starts a
@@ -313,6 +353,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           payload.pull_request.draft ? 'draft' : 'open',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -352,6 +393,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           payload.pull_request.draft ? 'draft' : 'open',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -407,6 +449,7 @@ github.post('/', async (c) => {
           },
         });
         await queueTrackedPullRequestMergeabilityCheck(payload);
+        retireStalePrReviewActions(payload);
 
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
@@ -441,6 +484,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           'open',
+          payload.pull_request.html_url,
         );
         await queueTrackedPullRequestMergeabilityCheck(payload);
         syncPullRequestFact({
@@ -480,6 +524,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           'draft',
+          payload.pull_request.html_url,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -514,16 +559,7 @@ github.post('/', async (c) => {
           id,
           `${name}.${payload.action}`,
           payload,
-          async () => {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping automated review handling for ${payload.repository.full_name}`,
-              };
-            }
-
-            return handlePrComment(payload);
-          },
+          async () => handlePrComment(payload),
         );
       },
     );
@@ -537,16 +573,7 @@ github.post('/', async (c) => {
           id,
           `${name}.${payload.action}`,
           payload,
-          async () => {
-            if (isRepoSkipped(payload.repository.full_name)) {
-              return {
-                status: 'ok' as const,
-                message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-              };
-            }
-
-            return handlePrComment(payload);
-          },
+          async () => handlePrComment(payload),
         );
       },
     );
@@ -620,6 +647,12 @@ github.post('/', async (c) => {
       );
     });
 
+    webhooks.on('check_run.rerequested', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+        handleCheckRunRerequested(payload),
+      ),
+    );
+
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
         const status = payload.pull_request.merged ? 'merged' : 'closed';
@@ -629,6 +662,7 @@ github.post('/', async (c) => {
           payload.repository.full_name,
           payload.pull_request.number,
           status,
+          { host: toHostFromUrl(payload.pull_request.html_url) },
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,

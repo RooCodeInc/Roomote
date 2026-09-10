@@ -659,6 +659,7 @@ export class ModalClient implements ComputeProviderClient {
         process.stdout,
         process.stderr,
         waitPromise,
+        input.onOutput,
         input.onExit,
       );
 
@@ -1283,6 +1284,7 @@ function streamInBackground(
   stdout: ReadableStream<string>,
   stderr: ReadableStream<string>,
   waitPromise: Promise<number>,
+  onOutput?: (event: CommandOutputEvent) => void,
   onExit?: (event: { exitCode: number }) => void | Promise<void>,
 ): void {
   const pipeStream = async (
@@ -1297,6 +1299,7 @@ function streamInBackground(
           const { value, done } = await reader.read();
 
           if (value) {
+            onOutput?.({ stream: streamName, data: value });
             const lines = value.trimEnd().split('\n');
 
             for (const line of lines) {

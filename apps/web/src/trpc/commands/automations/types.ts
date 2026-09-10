@@ -20,6 +20,7 @@ import type {
 
 export type BackgroundAgentFieldErrorKey =
   | 'general'
+  | 'ciFailureTriageAdditionalRules'
   | 'reviewerEnvironmentIds'
   | 'reviewerCollaborators'
   | 'reviewerExcludedAuthors'
@@ -266,6 +267,8 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   callRoomoteViaEmojiName?: string | null;
   callRoomoteViaEmojiInstructions?: string | null;
   issueFixerInstructions?: string | null;
+  /** Empty or null restores the default; omitted preserves saved rules. */
+  ciFailureTriageAdditionalRules?: string | null;
   channelAutoStartSlackChannels?: ChannelAutoStartInputRow[];
   /**
    * Optional with no default: older clients never send it, and their saves

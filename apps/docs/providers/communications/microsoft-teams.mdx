@@ -156,12 +156,12 @@ mention or eligible thread-reply signals used for task entry. Sessions are
 isolated by linked Roomote user even when several people share one Teams thread.
 Unlinked senders receive the account-link prompt instead of starting work.
 
-Replies to Fast messages continue the bound Fast session. Existing task-only
+Replies to Fast messages continue the bound Fast session. Existing task
 conversations keep their active-task and resumable-snapshot behavior, and Fast
-can delegate repository work into those normal Roomote tasks. If Fast cannot
-initialize a new session, Roomote safely falls back to the existing task router.
-Bot Framework and Microsoft Graph images, image-only messages, and transcribed
-audio continue through the same attachment handling.
+delegates repository work into normal Roomote tasks. If Fast cannot start a
+conversation, Roomote says so in the chat instead of starting a task another
+way. Bot Framework and Microsoft Graph images, image-only messages, and
+transcribed audio continue through the same attachment handling.
 
 When a task calls `request_user_input`, Teams accepts a text reply in the same
 conversation. Sensitive input remains in the web app; Teams does not currently

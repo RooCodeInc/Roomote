@@ -66,6 +66,7 @@ const DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID = Object.fromEntries(
 >;
 
 export type FormState = {
+  ciFailureTriageAdditionalRules?: string;
   callRoomoteViaEmojiEnabled: boolean;
   callRoomoteViaEmojiName: string;
   callRoomoteViaEmojiInstructions: string;
@@ -224,6 +225,9 @@ const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
     automation.id,
     [
       automation.frequencyField,
+      ...(automation.id === 'ciFailureTriage'
+        ? (['ciFailureTriageAdditionalRules'] as const)
+        : []),
       ...(DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID[
         automation.id as keyof typeof DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID
       ] ?? []),
@@ -342,6 +346,8 @@ export function buildAutomationSettingsSaveInput(
 
   return {
     savingAutomation: automationId,
+    ciFailureTriageAdditionalRules:
+      stateToSave.ciFailureTriageAdditionalRules ?? '',
     callRoomoteViaEmojiEnabled: stateToSave.callRoomoteViaEmojiEnabled,
     callRoomoteViaEmojiName: stateToSave.callRoomoteViaEmojiName.trim() || null,
     callRoomoteViaEmojiInstructions:

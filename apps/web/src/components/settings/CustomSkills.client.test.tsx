@@ -280,6 +280,7 @@ vi.mock('@/components/system', () => ({
   CardTitle: ({ children }: { children: ReactNode }) => <h3>{children}</h3>,
   ChartColumnIncreasing: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  ChevronDown: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Checkbox: ({
     checked,
     onCheckedChange,
@@ -316,6 +317,8 @@ vi.mock('@/components/system', () => ({
   }: { children: ReactNode } & HTMLAttributes<HTMLLabelElement>) => (
     <label {...props}>{children}</label>
   ),
+  Pencil: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Search: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Settings2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Skeleton: (props: HTMLAttributes<HTMLDivElement>) => <div {...props} />,
@@ -424,10 +427,35 @@ describe('CustomSkills settings', () => {
 
     expect(screen.getByText('Installed')).toBeInTheDocument();
     expect(screen.getByText('Alpha')).toBeInTheDocument();
-    expect(screen.getByText('Add a custom skill')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add Skill' })).toBeVisible();
+  });
+
+  it('shows a useful empty state when environments have no skills', async () => {
+    state.listData.installed = [];
+    renderCustomSkills();
+
     expect(
-      screen.getByRole('button', { name: 'Add a custom skill' }),
+      await screen.findByText(
+        'No environment-specific skills yet. Add a custom skill or install one from the marketplace.',
+      ),
     ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Add Skill' })).toBeVisible();
+    expect(
+      screen.getByPlaceholderText('Search by skill name or source'),
+    ).toBeVisible();
+  });
+
+  it('explains why management is unavailable when there are no environments', async () => {
+    state.listData.environments = [];
+    state.listData.installed = [];
+    renderCustomSkills();
+
+    expect(
+      await screen.findByText(
+        'No environments are available. Create an environment before adding an environment-specific skill.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Add Skill' })).toBeDisabled();
   });
 
   it('debounces search input before rendering marketplace results', async () => {
@@ -600,9 +628,8 @@ describe('CustomSkills settings', () => {
   it('lets users add a manual skill with separate fields', async () => {
     renderCustomSkills();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add a custom skill' }),
-    );
+    await screen.findByRole('heading', { name: 'Installed' });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Skill' }));
 
     fireEvent.change(screen.getByLabelText('Manual skill slug'), {
       target: { value: 'my manual/skill' },
@@ -668,6 +695,20 @@ describe('CustomSkills settings', () => {
     expect(screen.getByLabelText('Manual skill content')).toHaveValue(
       '# My Manual Skill\n',
     );
+    fireEvent.change(screen.getByLabelText('Manual skill content'), {
+      target: { value: '# Updated instructions' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Skill' }));
+
+    await waitFor(() => {
+      expect(saveManualMock.mock.calls[0]?.[0]).toEqual({
+        name: 'my-manual-skill',
+        description: 'Manual skill',
+        content: '# Updated instructions',
+        environmentIds: ['env-1'],
+        previousSkillId: 'manual@my-manual-skill#1234567890ab',
+      });
+    });
   });
 
   it('prompts before closing the manual editor with unsaved changes', async () => {
@@ -675,9 +716,8 @@ describe('CustomSkills settings', () => {
 
     renderCustomSkills();
 
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Add a custom skill' }),
-    );
+    await screen.findByRole('heading', { name: 'Installed' });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Skill' }));
     fireEvent.change(screen.getByLabelText('Manual skill description'), {
       target: { value: 'Changed description' },
     });
@@ -693,7 +733,7 @@ describe('CustomSkills settings', () => {
     confirmMock.mockRestore();
   });
 
-  it('toggles manual skill descriptions between clamped and expanded states', async () => {
+  it('uses the same compact description treatment as shared skills', async () => {
     state.listData.installed = [
       {
         kind: 'manual',
@@ -719,11 +759,9 @@ describe('CustomSkills settings', () => {
     );
 
     expect(description).toHaveClass('line-clamp-2');
-
-    fireEvent.click(screen.getByRole('button', { name: 'More' }));
-
-    expect(description).not.toHaveClass('line-clamp-2');
-    expect(screen.getByRole('button', { name: 'Less' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'More' }),
+    ).not.toBeInTheDocument();
   });
 
   it('removes an installed skill from all environments', async () => {
@@ -750,8 +788,42 @@ describe('CustomSkills settings', () => {
 
     expect(
       screen.getByText(
-        'No custom skills installed yet. Roomote itself has mad skills though.',
+        'No environment-specific skills yet. Add a custom skill or install one from the marketplace.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('removes a manual skill variant from its environments', async () => {
+    state.listData.installed = [
+      {
+        kind: 'manual',
+        source: 'manual',
+        name: 'my-manual-skill',
+        skillId: 'manual@my-manual-skill#1234567890ab',
+        isAllSelection: false,
+        installsLabel: null,
+        url: null,
+        description: 'Manual skill',
+        content: '# My Manual Skill\n',
+        environments: [{ id: 'env-1', name: 'Alpha' }],
+      },
+    ];
+    renderCustomSkills();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Remove my-manual-skill' }),
+    );
+    expect(
+      screen.getByText(
+        /from the environments currently using this manual skill variant/,
+      ),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Uninstall' }));
+
+    await waitFor(() => {
+      expect(removeMock.mock.calls[0]?.[0]).toEqual({
+        skillId: 'manual@my-manual-skill#1234567890ab',
+      });
+    });
   });
 });

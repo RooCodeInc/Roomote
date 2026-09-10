@@ -38,7 +38,7 @@ export function resolveNotionAccessToken(
 export async function notionApiRequestJson<T>(params: {
   config: McpConnectionNotionConfig;
   path: string;
-  method?: 'GET' | 'POST' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   query?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
 }): Promise<T> {

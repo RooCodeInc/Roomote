@@ -1,4 +1,9 @@
-import { TaskEventName, type TaskEvent } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  TaskEventName,
+  type AcpPersistedEnvelope,
+  type TaskEvent,
+} from '@roomote/types';
 
 import type { OpenCodeServerClient } from '../opencode-server/client';
 import { OpenCodeServerHarness } from '../opencode-server/harness';
@@ -251,7 +256,6 @@ describe('OpenCode subagent run tracking', () => {
           }),
         },
       });
-
       await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
 
       expect(client.abort).not.toHaveBeenCalled();
@@ -469,9 +473,13 @@ describe('OpenCode subagent run tracking', () => {
   it('keeps the background tracker across parent turn finish', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     harness.on('runtimeOutput', (event) => {
       outputs.push(event as unknown as Record<string, unknown>);
     });
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -516,6 +524,11 @@ describe('OpenCode subagent run tracking', () => {
       });
 
       expect(subagentActivityEvents(outputs).length).toBeGreaterThan(0);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) => envelope.metadata?.sessionId === 'ses_child_1',
+        ),
+      ).toBe(true);
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
@@ -525,9 +538,13 @@ describe('OpenCode subagent run tracking', () => {
   it('clears foreground trackers when the parent turn finishes', async () => {
     const { client, harness } = createHarness();
     const outputs: Array<Record<string, unknown>> = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     harness.on('runtimeOutput', (event) => {
       outputs.push(event as unknown as Record<string, unknown>);
     });
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -539,6 +556,7 @@ describe('OpenCode subagent run tracking', () => {
       });
 
       const settledCount = subagentActivityEvents(outputs).length;
+      const persistedCount = persistedEnvelopes.length;
 
       // Foreground spawn tracking ended with the turn: late child events are
       // inert.
@@ -549,11 +567,24 @@ describe('OpenCode subagent run tracking', () => {
         },
       });
       await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_child_late',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1, completed: 2 },
+          },
+        },
+      });
+      await client.emit({
         type: 'session.idle',
         properties: { sessionID: 'ses_child_1' },
       });
 
       expect(subagentActivityEvents(outputs)).toHaveLength(settledCount);
+      expect(persistedEnvelopes).toHaveLength(persistedCount);
+      expect(client.message).not.toHaveBeenCalled();
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
@@ -609,7 +640,7 @@ describe('OpenCode subagent settlement recovery', () => {
     }
   });
 
-  it('never aborts a child whose latest assistant message is still in flight', async () => {
+  it('bounds recovery when a terminal child leaves an incomplete assistant message', async () => {
     const { client, harness, logger } = createHarness();
 
     try {
@@ -617,9 +648,10 @@ describe('OpenCode subagent settlement recovery', () => {
       vi.useFakeTimers();
       await armSpawn(client, harness);
 
-      // The child looks terminal, but its persisted state says it is still
-      // mid-message — a silent revival or a lookup we cannot trust. Recovery
-      // must keep waiting instead of killing possibly-live work.
+      // Provider timeouts can leave the child terminal while its persisted
+      // assistant message never receives a completion timestamp. Preserve one
+      // conservative re-check, then recover the leaked spawn if no child event
+      // proves that work resumed.
       client.messages.mockResolvedValue([
         {
           info: {
@@ -637,26 +669,12 @@ describe('OpenCode subagent settlement recovery', () => {
         properties: { sessionID: 'ses_child_1' },
       });
 
-      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
 
       expect(client.abort).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('not aborting'),
       );
-
-      // Once the child's work is genuinely finished, the next re-check
-      // recovers the still-unsettled spawn.
-      client.messages.mockResolvedValue([
-        {
-          info: {
-            id: 'msg_child_live',
-            sessionID: 'ses_child_1',
-            role: 'assistant',
-            time: { created: 1, completed: 2 },
-          },
-          parts: [],
-        },
-      ] as unknown as OpenCodeSessionMessage[]);
 
       await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
 
@@ -718,6 +736,45 @@ describe('OpenCode subagent settlement recovery', () => {
         },
       });
 
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('cancels recovery when the child resumes during verification', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      let resolveMessages!: (messages: OpenCodeSessionMessage[]) => void;
+      client.messages.mockImplementationOnce(
+        () =>
+          new Promise<OpenCodeSessionMessage[]>((resolve) => {
+            resolveMessages = resolve;
+          }),
+      );
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
+      await vi.waitFor(() => expect(client.messages).toHaveBeenCalledOnce());
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'c_retry', command: 'ls' }),
+        },
+      });
+      resolveMessages([]);
+      await Promise.resolve();
       await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
 
       expect(client.abort).not.toHaveBeenCalled();
@@ -877,6 +934,193 @@ describe('OpenCode subagent settlement recovery', () => {
 describe('OpenCode visual proof deadline', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each(['pending', 'running', 'completed', 'error'])(
+    'ends proof at a %s judge handoff without waiting for turn completion',
+    async (status) => {
+      const { client, harness } = createHarness(undefined, {
+        visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+      });
+      try {
+        await connectHarness(harness, client);
+        vi.useFakeTimers();
+        await armSpawn(client, harness);
+        const proof = createSkillToolPart('capture-visual-proof');
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: proof },
+        });
+        await vi.advanceTimersByTimeAsync(4_000);
+        const judge = createTaskToolPart({
+          callId: 'judge_current',
+          status: 'pending',
+          input: { subagent_type: 'judge', prompt: 'Proof is not applicable.' },
+        });
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: judge },
+        });
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: { ...judge, state: { ...judge.state, status } } },
+        });
+        // Do not load another skill: the judge may stay queued through the
+        // original deadline without a workflow transition clearing it for us.
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: proof },
+        });
+        await vi.advanceTimersByTimeAsync(VISUAL_PROOF_TIMEOUT_MS * 2);
+        expect(client.abort).not.toHaveBeenCalled();
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it.each(['unidentified-pending', 'other-agent', 'child-session', 'upload'])(
+    'does not treat %s as a proof handoff',
+    async (kind) => {
+      const { client, harness } = createHarness(undefined, {
+        visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+      });
+      try {
+        await connectHarness(harness, client);
+        vi.useFakeTimers();
+        await armSpawn(client, harness);
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: createSkillToolPart('capture-visual-proof') },
+        });
+        await vi.advanceTimersByTimeAsync(4_000);
+        const part = createTaskToolPart({
+          callId: 'not_a_handoff',
+          status: kind === 'unidentified-pending' ? 'pending' : 'completed',
+          input:
+            kind === 'unidentified-pending'
+              ? { subagent_type: undefined }
+              : { subagent_type: kind === 'other-agent' ? 'general' : 'judge' },
+        });
+        if (kind === 'child-session') part.sessionID = 'ses_child_1';
+        if (kind === 'upload') {
+          part.tool = 'roomote_manage_artifacts';
+          part.state.output = 'Uploaded visual proof: artifactId=proof';
+        }
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part },
+        });
+        await vi.advanceTimersByTimeAsync(999);
+        expect(client.abort).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(client.abort).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'ses_1' }),
+        );
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it.each(['pending', 'running', 'completed', 'error'])(
+    'ignores late updates from a previously %s judge during a fresh proof attempt',
+    async (status) => {
+      const { client, harness } = createHarness(undefined, {
+        visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+      });
+      try {
+        await connectHarness(harness, client);
+        vi.useFakeTimers();
+        await armSpawn(client, harness);
+        const judge = createTaskToolPart({
+          callId: 'judge_previous',
+          status,
+          input: { subagent_type: 'judge' },
+        });
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: judge },
+        });
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part: createSkillToolPart('capture-visual-proof') },
+        });
+        await vi.advanceTimersByTimeAsync(4_000);
+        for (const lateStatus of ['running', 'completed']) {
+          await client.emit({
+            type: 'message.part.updated',
+            properties: {
+              part: { ...judge, state: { ...judge.state, status: lateStatus } },
+            },
+          });
+        }
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(client.abort).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'ses_1' }),
+        );
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
+
+  it('arms a fresh deadline after a judge handoff and ignores replays from the previous attempt', async () => {
+    const { client, harness } = createHarness(undefined, {
+      visualProofTimeoutMs: VISUAL_PROOF_TIMEOUT_MS,
+    });
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+      const proof = createSkillToolPart('capture-visual-proof');
+      const judge = createTaskToolPart({
+        callId: 'judge_first',
+        input: { subagent_type: 'judge' },
+      });
+      for (const part of [proof, judge]) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part },
+        });
+      }
+      const nextProof = {
+        ...proof,
+        id: 'proof_second',
+        callID: 'proof_second',
+      };
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part: nextProof },
+      });
+      await vi.advanceTimersByTimeAsync(4_000);
+      for (const part of [
+        proof,
+        nextProof,
+        { ...judge, state: { ...judge.state, status: 'completed' } },
+      ]) {
+        await client.emit({
+          type: 'message.part.updated',
+          properties: { part },
+        });
+      }
+      // Reloading capture during an attempt is a retry, not a fresh budget.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: { ...proof, id: 'proof_retry', callID: 'proof_retry' },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(999);
+      expect(client.abort).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
   });
 
   it('bounds the entire visual proof workflow and resumes with a timeout handoff', async () => {
@@ -1107,6 +1351,85 @@ describe('OpenCode subagent live activity', () => {
       const details = (activity[0]!.payload as Record<string, unknown>)
         .subagentActivity as Record<string, unknown>;
       expect(details.lastMessage).toBe('The latest child response.');
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('persists linked child tool lifecycle events with relationship metadata', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({
+            callId: 'child_call_1',
+            command: 'agent-browser screenshot --full-page',
+          }),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            ...createChildToolPart({
+              callId: 'child_call_1',
+              command: 'agent-browser screenshot --full-page',
+              status: 'completed',
+            }),
+            state: {
+              status: 'completed',
+              input: { command: 'agent-browser screenshot --full-page' },
+              output: 'Screenshot captured.',
+            },
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createSubtaskPart({
+            id: 'prt_child_subtask_1',
+            sessionID: 'ses_child_1',
+            messageID: 'msg_child_1',
+          }),
+        },
+      });
+
+      const parentSpawn = persistedEnvelopes.find(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
+          envelope.metadata?.sessionId === 'ses_1',
+      );
+      expect(parentSpawn?.payload).toMatchObject({
+        senderThreadId: 'ses_1',
+        receiverThreadIds: ['ses_child_1'],
+        agentType: 'proof-runner',
+      });
+
+      const childEvents = persistedEnvelopes.filter(
+        (envelope) => envelope.metadata?.sessionId === 'ses_child_1',
+      );
+      expect(childEvents.map((envelope) => envelope.eventType)).toEqual([
+        ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+        ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+        ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+      ]);
+      for (const childEvent of childEvents) {
+        expect(childEvent.metadata).toMatchObject({
+          sessionId: 'ses_child_1',
+          parentSessionId: 'ses_1',
+          agentType: 'proof-runner',
+          isSubagent: true,
+        });
+      }
     } finally {
       await harness.dispose();
     }

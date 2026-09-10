@@ -95,8 +95,9 @@ export interface McpConnectionOAuthConfig {
 /**
  * Organization-scoped Snowflake connection config stored in mcpConnections.authConfig.
  *
- * Secrets are expected to be encrypted before persistence. The current backend
- * accepts both encrypted and plaintext secret values so a later admin flow can
+ * Snowflake connections authenticate with a key pair only. Secrets are
+ * expected to be encrypted before persistence. The current backend accepts
+ * both encrypted and plaintext secret values so a later admin flow can
  * migrate the write path without breaking existing rows.
  */
 export interface McpConnectionSnowflakeConfig {
@@ -107,7 +108,6 @@ export interface McpConnectionSnowflakeConfig {
   warehouse?: string;
   database?: string;
   schema?: string;
-  encryptedPassword?: string;
   encryptedPrivateKey?: string;
   encryptedPrivateKeyPassphrase?: string;
   allowedStatementTypes?: string[];
@@ -383,6 +383,8 @@ export type McpIntegration = {
   authorizationParameters?: McpIntegrationAuthorizationParameter[];
   oauthClientEnv?: McpIntegrationOAuthClientEnv;
   oauthEndpoints?: McpIntegrationOAuthEndpoints;
+  /** RFC 8707 resource indicator sent throughout this integration's OAuth flow. */
+  oauthResource?: string;
   oauthScopes?: string[];
   oauthScopeSeparator?: ' ' | ',';
   oauthScopeMode?: McpIntegrationOauthScopeMode;
@@ -469,6 +471,8 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.linear.app/mcp',
     description: `Enable Linear so this deployment can route issue context and task entry through it.`,
     icon: 'linear',
+    instructions:
+      'Use Linear tools to read and update Linear issues. Add issue discussion with the dedicated comment-creation tool; do not pass comment text to an issue-update or status-update tool. Use issue-update tools only for issue fields such as status, title, description, assignee, or labels. Before calling a mutation tool, follow its advertised input schema exactly. If a Linear tool rejects a request, report the returned tool error verbatim instead of inferring a different failure reason.',
     connectionScope: 'deployment',
     connectionMode: 'oauth',
     serverMode: 'upstream_proxy',
@@ -489,6 +493,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.monday.com/mcp',
     description: `Inspect monday.com boards, items, updates, docs, and workspace context from ${PRODUCT_NAME} tasks`,
     icon: 'monday',
+    oauthResource: 'https://mcp.monday.com/mcp',
     oauthScopes: [...MONDAY_MCP_READ_ONLY_OAUTH_SCOPES],
     oauthScopeMode: 'read-only',
     serverMode: 'upstream_proxy',
@@ -893,6 +898,21 @@ export function getMcpIntegrationOauthEndpoints(
       : integrationOrId;
 
   return integration?.oauthEndpoints;
+}
+
+export function getMcpIntegrationOauthResource(
+  integrationOrId: McpIntegration | string | undefined,
+): string | undefined {
+  if (!integrationOrId) {
+    return undefined;
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.oauthResource;
 }
 
 export function getMcpIntegrationOauthScopeSeparator(

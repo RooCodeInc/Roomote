@@ -1,3 +1,5 @@
+import { dataVisualizationBlockSchema } from '@roomote/types';
+
 import type { SlackFile } from './types';
 
 const MAX_FORWARDED_MESSAGE_TEXT_LENGTH = 4_000;
@@ -242,6 +244,42 @@ function getSlackTextObjectText(value: unknown): string | undefined {
   return typeof value.text === 'string' ? value.text : undefined;
 }
 
+function formatDataVisualizationBlockText(
+  block: Record<string, unknown>,
+): string | undefined {
+  const parsed = dataVisualizationBlockSchema.safeParse(block);
+  if (!parsed.success) return undefined;
+
+  const visualization = parsed.data;
+  if (visualization.chart.type === 'pie') {
+    return [
+      `Chart: ${visualization.title}`,
+      ...visualization.chart.segments.map(
+        (segment) => `${segment.label}: ${segment.value}`,
+      ),
+    ].join('\n');
+  }
+
+  const chart = visualization.chart;
+
+  return [
+    `Chart: ${visualization.title}`,
+    [
+      chart.axis_config.x_label ?? 'Category',
+      ...chart.series.map((series) => series.name),
+    ].join(' | '),
+    ...chart.axis_config.categories.map((category) =>
+      [
+        category,
+        ...chart.series.map(
+          (series) =>
+            series.data.find((point) => point.label === category)!.value,
+        ),
+      ].join(' | '),
+    ),
+  ].join('\n');
+}
+
 function extractBlockText(
   blocks: unknown,
   parts: string[],
@@ -289,6 +327,13 @@ function extractBlockText(
           parts,
           seenParts,
           extractPlainTextFromBlocks([block]) ?? '',
+        );
+        break;
+      case 'data_visualization':
+        appendUniqueSlackBlockText(
+          parts,
+          seenParts,
+          formatDataVisualizationBlockText(block) ?? '',
         );
         break;
       default:

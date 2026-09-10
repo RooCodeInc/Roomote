@@ -24,6 +24,7 @@ import {
 import {
   acquireFastAgentTurnLock,
   getOrCreateFastAgentSession,
+  type FastAgentTurnLockHandle,
 } from '@roomote/cloud-agents/server';
 import {
   agentmailConversations,
@@ -598,7 +599,7 @@ function buildTurnQuestionText(
 async function deliverTurn(
   turn: DrainableTurn,
   conversation: AgentMailConversationRow,
-  turnSignal: AbortSignal,
+  turnLock: FastAgentTurnLockHandle,
 ) {
   if (!turn.bodyText && !conversation.subject?.trim()) {
     return;
@@ -656,7 +657,7 @@ async function deliverTurn(
       question: buildTurnQuestionText(turn, conversation),
       currentMessageId: turn.providerMessageId,
     },
-    turnSignal,
+    turnLock,
   );
   if (!continued) {
     console.warn(
@@ -700,7 +701,7 @@ export async function drainAgentMailInboundTurns(
   try {
     let turn: DrainableTurn | null = first;
     while (turn) {
-      await deliverTurn(turn, conversation, turnLock.signal);
+      await deliverTurn(turn, conversation, turnLock);
       // Consumed only after delivery: a crash mid-turn leaves the row
       // pending and the sweeper re-triggers the drain. Delivery is
       // idempotent (queueCommunicationMessageOnce; Fast turns re-run).

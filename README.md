@@ -134,7 +134,7 @@ You now have a working cloud coding agent. Total time: ~6 minutes.
 SSH into a fresh Ubuntu/Debian machine (4 GB RAM recommended) and run:
 
 ```sh
-curl -fsSL https://get.roomote.dev | bash
+curl -fsSL https://get.roomote.dev | sudo bash
 ```
 
 The installer handles Docker, secrets, and the Compose stack. It prints a setup

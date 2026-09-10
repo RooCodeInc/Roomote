@@ -11,12 +11,14 @@ import {
   resolveEffectiveModelRuntimeEnv,
 } from '@roomote/db/server';
 import {
+  isReasoningEffort,
   toBedrockMantleRuntimeModelId,
   type ReasoningEffort,
 } from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
+import { decodeInferenceErrorEnvelope } from './inference-error-envelope';
 import {
   DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
   leaseOpenCodeSdkServer,
@@ -111,6 +113,8 @@ export const NON_TASK_INFERENCE_SURFACES = {
   chatVideoDescription: 'chat_video_description',
   composerSuggestionGeneration: 'composer_suggestion_generation',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
+  ciFailureTriageRulesResolution: 'ci_failure_triage_rules_resolution',
+  fastAgentImageInspection: 'fast_agent_image_inspection',
   fastAgentQuestionAnswering: 'fast_agent',
   inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
@@ -217,12 +221,48 @@ export type NonTaskOpenCodeSession = {
   id?: string;
 };
 
+export type NonTaskOpenCodeMessageTokens = {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
 export type NonTaskOpenCodeCompletedMessage = {
   id: string | null;
   sessionId: string;
   createdAtMs: number | null;
   completedAtMs: number | null;
+  /** Provider usage OpenCode attached to the message, when reported. */
+  tokens?: NonTaskOpenCodeMessageTokens;
 };
+
+/**
+ * How long each step before the OpenCode prompt request took. Lets callers
+ * separate server spawn, session validation, and session creation from the
+ * model's own latency.
+ */
+export type NonTaskOpenCodePromptSetupTiming = {
+  serverLeaseMs: number;
+  sessionValidateMs?: number;
+  sessionCreateMs?: number;
+  eventSubscribeMs?: number;
+  totalMs: number;
+};
+
+function readNonTaskOpenCodeMessageTokens(
+  info: NonTaskOpenCodeMessageInfo,
+): NonTaskOpenCodeMessageTokens | undefined {
+  if (!info.tokens) return undefined;
+  return {
+    input: asFiniteNumber(info.tokens.input) ?? 0,
+    output: asFiniteNumber(info.tokens.output) ?? 0,
+    reasoning: asFiniteNumber(info.tokens.reasoning) ?? 0,
+    cacheRead: asFiniteNumber(info.tokens.cache?.read) ?? 0,
+    cacheWrite: asFiniteNumber(info.tokens.cache?.write) ?? 0,
+  };
+}
 
 export type NonTaskOpenCodeAssistantMessage = {
   id: string;
@@ -237,6 +277,31 @@ export type NonTaskOpenCodeNativeSteer = (input: {
   files?: NonTaskPromptFile[];
 }) => Promise<void>;
 
+export type NonTaskOpenCodeTaskPart = {
+  partId: string;
+  messageId: string;
+  sessionId: string;
+  toolCallId: string;
+  title: string;
+  status: 'in_progress' | 'completed' | 'failed';
+  input: Record<string, unknown>;
+  output?: unknown;
+  error?: unknown;
+  childSessionId?: string;
+  agentType?: string;
+};
+
+/** A streamed assistant text part from the parent OpenCode session. */
+export type NonTaskOpenCodeAssistantText = {
+  messageId: string;
+  partId: string;
+  /** Full text of the part so far, when the event carries it. */
+  text?: string;
+  /** Text appended since the previous update, when only a delta is known. */
+  delta?: string;
+  completed: boolean;
+};
+
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
@@ -247,11 +312,19 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   onAssistantMessageStarted?: (
     message: NonTaskOpenCodeAssistantMessage,
   ) => Promise<void> | void;
-  onPromptStarted?: () => void;
+  onAssistantMessageCompleted?: (
+    message: NonTaskOpenCodeCompletedMessage,
+  ) => Promise<void> | void;
+  onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
   onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
   onNativeSteerClosed?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
+  onParentTaskPartUpdated?: (
+    part: NonTaskOpenCodeTaskPart,
+  ) => Promise<void> | void;
+  /** Live assistant text from the parent session, part by part. */
+  onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
   permission?: PermissionRuleset;
   promptOnlySubagents?: boolean;
   signal?: AbortSignal;
@@ -331,6 +404,111 @@ function asFiniteNumber(value: unknown): number | undefined {
   }
 
   return undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function normalizeParentOpenCodeTextPart(
+  value: unknown,
+  parentSessionId: string,
+  delta: string | undefined,
+): NonTaskOpenCodeAssistantText | undefined {
+  const part = asRecord(value);
+  if (part?.type !== 'text' || part.sessionID !== parentSessionId) {
+    return undefined;
+  }
+  const partId = asString(part.id);
+  const messageId = asString(part.messageID);
+  if (!partId || !messageId) return undefined;
+  const time = asRecord(part.time);
+  // Verbatim, never trimmed: a boundary space belongs to the reply text and
+  // the next delta is appended directly after it.
+  return {
+    messageId,
+    partId,
+    text: typeof part.text === 'string' ? part.text : '',
+    ...(delta !== undefined ? { delta } : {}),
+    completed: asFiniteNumber(time?.end) !== undefined,
+  };
+}
+
+/**
+ * Newer OpenCode servers stream text through a dedicated
+ * `message.part.delta` event that the pinned SDK does not type yet; the
+ * matching `message.part.updated` still carries the full text on completion.
+ */
+function isOpenCodeTextPartDeltaEvent(
+  event: { type: string; properties?: unknown },
+  parentSessionId: string,
+): event is {
+  type: 'message.part.delta';
+  properties: {
+    sessionID: string;
+    messageID: string;
+    partID: string;
+    field: string;
+    delta: string;
+  };
+} {
+  if (event.type !== 'message.part.delta') return false;
+  const properties = asRecord(event.properties);
+  return (
+    properties?.sessionID === parentSessionId &&
+    properties.field === 'text' &&
+    typeof properties.messageID === 'string' &&
+    typeof properties.partID === 'string' &&
+    typeof properties.delta === 'string'
+  );
+}
+
+function normalizeParentOpenCodeTaskPart(
+  value: unknown,
+  parentSessionId: string,
+): NonTaskOpenCodeTaskPart | undefined {
+  const part = asRecord(value);
+  if (
+    part?.type !== 'tool' ||
+    part.tool !== 'task' ||
+    part.sessionID !== parentSessionId
+  ) {
+    return undefined;
+  }
+
+  const partId = asString(part.id);
+  const messageId = asString(part.messageID);
+  if (!partId || !messageId) return undefined;
+
+  const state = asRecord(part.state);
+  const input = asRecord(state?.input) ?? {};
+  const metadata = asRecord(state?.metadata);
+  const rawStatus = asString(state?.status);
+  const childSessionId =
+    asString(metadata?.sessionId) ?? asString(metadata?.jobId);
+  const agentType = asString(input.subagent_type);
+  const status =
+    rawStatus === 'completed'
+      ? 'completed'
+      : ['error', 'failed', 'cancelled', 'canceled'].includes(rawStatus ?? '')
+        ? 'failed'
+        : 'in_progress';
+
+  return {
+    partId,
+    messageId,
+    sessionId: parentSessionId,
+    toolCallId: asString(part.callID) ?? partId,
+    title: asString(state?.title) ?? 'task',
+    status,
+    input,
+    ...(state && 'output' in state ? { output: state.output } : {}),
+    ...(state && 'error' in state ? { error: state.error } : {}),
+    ...(childSessionId ? { childSessionId } : {}),
+    ...(agentType ? { agentType } : {}),
+  };
 }
 
 function openCodeTimestampToDate(value: unknown): Date | undefined {
@@ -714,34 +892,18 @@ type NonTaskSdkPromptOptions = {
   >;
 };
 
-async function resolveModelForInputModality(
-  params: GenerateTrackedNonTaskTextParams,
-  runtime: {
-    model: string;
-    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
-  },
-): Promise<string> {
-  const modality = params.requiredInputModality;
-  if (!modality) {
-    return runtime.model;
-  }
-
-  const modalityModels =
-    modality === 'image' || modality === 'video'
-      ? [
-          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-        ]
-      : [
-          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
-        ];
-  const candidates = [
-    params.model,
-    ...modalityModels,
-    runtime.resolvedModelRuntimeEnv.R_MODEL,
-    runtime.model,
-  ]
+/**
+ * Returns the first candidate model whose OpenCode provider catalog entry
+ * accepts `modality` input and produces text output, or undefined when none
+ * does. Leases (or reuses) the helper server for `env` for the lookup.
+ */
+async function findModelSupportingInputModality(input: {
+  env: NonTaskModelRuntimeEnv;
+  modality: NonTaskInputModality;
+  candidates: Array<string | undefined>;
+  timeoutMs?: number | null;
+}): Promise<string | undefined> {
+  const candidates = input.candidates
     .map((candidate) =>
       candidate ? toBedrockMantleRuntimeModelId(candidate) : candidate,
     )
@@ -749,9 +911,12 @@ async function resolveModelForInputModality(
       (candidate, index, values): candidate is string =>
         Boolean(candidate) && values.indexOf(candidate) === index,
     );
-  const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  const timeoutMs = input.timeoutMs === undefined ? 120_000 : input.timeoutMs;
   const server = await leaseOpenCodeSdkServer({
-    env: runtime.resolvedModelRuntimeEnv,
+    env: input.env,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -780,7 +945,7 @@ async function resolveModelForInputModality(
       const model = provider?.models[modelID];
 
       if (
-        model?.capabilities.input[modality] &&
+        model?.capabilities.input[input.modality] &&
         model.capabilities.output.text
       ) {
         return candidate;
@@ -790,7 +955,118 @@ async function resolveModelForInputModality(
     server.release();
   }
 
-  throw new NonTaskInputModalityUnsupportedError(modality);
+  return undefined;
+}
+
+async function resolveModelForInputModality(
+  params: GenerateTrackedNonTaskTextParams,
+  runtime: {
+    model: string;
+    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
+  },
+): Promise<string> {
+  const modality = params.requiredInputModality;
+  if (!modality) {
+    return runtime.model;
+  }
+
+  const modalityModels =
+    modality === 'image' || modality === 'video'
+      ? [
+          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+        ]
+      : [
+          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+        ];
+  const model = await findModelSupportingInputModality({
+    env: runtime.resolvedModelRuntimeEnv,
+    modality,
+    candidates: [
+      params.model,
+      ...modalityModels,
+      runtime.resolvedModelRuntimeEnv.R_MODEL,
+      runtime.model,
+    ],
+    timeoutMs: params.timeoutMs,
+  });
+  if (!model) {
+    throw new NonTaskInputModalityUnsupportedError(modality);
+  }
+  return model;
+}
+
+/**
+ * How a native (Fast) session should receive input of a given modality.
+ *
+ * `direct`: the session model accepts the modality itself, so the files ride
+ * along as prompt parts. `helper`: the session model cannot read the input;
+ * the session keeps running on its own model and a separate helper model
+ * (the deployment vision model, then the helper model, then the coding model)
+ * inspects the files on request. The session model is never swapped for the
+ * modality. This is the same split tasks use, where a hidden visual subagent
+ * reads images for a coding model that cannot.
+ */
+export type NonTaskInputModalityDelivery =
+  | { delivery: 'direct'; model: string }
+  | {
+      delivery: 'helper';
+      model: string;
+      helperModel: string;
+      helperReasoningEffort?: ReasoningEffort;
+    };
+
+export async function resolveNonTaskInputModalityDelivery(params: {
+  modality: NonTaskInputModality;
+  model?: string;
+  modelRole?: 'primary' | 'small' | 'orchestration';
+  reasoningEffort?: ReasoningEffort;
+  timeoutMs?: number | null;
+}): Promise<NonTaskInputModalityDelivery> {
+  const runtime = await resolveNonTaskModelRuntime(
+    params.model,
+    params.modelRole,
+    params.reasoningEffort,
+  );
+  const env = runtime.resolvedModelRuntimeEnv;
+  const sessionModel = runtime.model;
+  const helperCandidates = [env.R_VISION_MODEL, env.R_SMALL_MODEL, env.R_MODEL]
+    .map((candidate) =>
+      candidate ? toBedrockMantleRuntimeModelId(candidate) : candidate,
+    )
+    .filter(
+      (candidate): candidate is string =>
+        Boolean(candidate) && candidate !== sessionModel,
+    );
+  const model = await findModelSupportingInputModality({
+    env,
+    modality: params.modality,
+    candidates: [sessionModel, ...helperCandidates],
+    timeoutMs: params.timeoutMs,
+  });
+  if (!model) {
+    throw new NonTaskInputModalityUnsupportedError(params.modality);
+  }
+  if (model === sessionModel) {
+    return { delivery: 'direct', model: sessionModel };
+  }
+  const runtimeModelId = (candidate: string | undefined) =>
+    candidate ? toBedrockMantleRuntimeModelId(candidate) : undefined;
+  const helperReasoningEffort =
+    model === runtimeModelId(env.R_VISION_MODEL)
+      ? env.R_VISION_MODEL_REASONING_EFFORT
+      : model === runtimeModelId(env.R_SMALL_MODEL)
+        ? env.R_SMALL_MODEL_REASONING_EFFORT
+        : undefined;
+  return {
+    delivery: 'helper',
+    model: sessionModel,
+    helperModel: model,
+    ...(isReasoningEffort(helperReasoningEffort)
+      ? { helperReasoningEffort }
+      : {}),
+  };
 }
 
 /**
@@ -812,7 +1088,7 @@ async function runNonTaskSdkPrompt(
     directory?: string;
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
-    onPromptStarted?: () => void;
+    onPromptStarted?: (setup: NonTaskOpenCodePromptSetupTiming) => void;
     onNativeSteerReady?: (steer: NonTaskOpenCodeNativeSteer) => void;
     onNativeSteerClosed?: () => void;
     onMessageCompleted?: (
@@ -821,8 +1097,15 @@ async function runNonTaskSdkPrompt(
     onAssistantMessageStarted?: (
       message: NonTaskOpenCodeAssistantMessage,
     ) => Promise<void> | void;
+    onAssistantMessageCompleted?: (
+      message: NonTaskOpenCodeCompletedMessage,
+    ) => Promise<void> | void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     onSubagentSessionReady?: (sessionID: string) => Promise<void> | void;
+    onParentTaskPartUpdated?: (
+      part: NonTaskOpenCodeTaskPart,
+    ) => Promise<void> | void;
+    onAssistantTextUpdated?: (text: NonTaskOpenCodeAssistantText) => void;
     permission?: PermissionRuleset;
     preserveReasoning?: boolean;
     promptOnlySubagents?: boolean;
@@ -844,6 +1127,11 @@ async function runNonTaskSdkPrompt(
     `OpenCode structured prompt failed (model ${model})`;
   const sessionDirectory =
     options.directory ?? resolveNonTaskSessionDirectory();
+  const setupStartedAtMs = Date.now();
+  const setupTiming: NonTaskOpenCodePromptSetupTiming = {
+    serverLeaseMs: 0,
+    totalMs: 0,
+  };
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
@@ -855,6 +1143,7 @@ async function runNonTaskSdkPrompt(
         : Math.min(timeoutMs, DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS),
     useConfiguredServer: options.useConfiguredServer,
   });
+  setupTiming.serverLeaseMs = Date.now() - setupStartedAtMs;
   const abortController = new AbortController();
   const timeout =
     timeoutMs === null
@@ -886,6 +1175,7 @@ async function runNonTaskSdkPrompt(
     });
     let sessionId = options.session?.id;
     if (sessionId && options.validateSession) {
+      const validateStartedAtMs = Date.now();
       const validationResult = await client.session.messages(
         {
           sessionID: sessionId,
@@ -906,8 +1196,10 @@ async function runNonTaskSdkPrompt(
       if (!validationResult.data || validationResult.data.length === 0) {
         throw new NonTaskOpenCodeSessionNotFoundError();
       }
+      setupTiming.sessionValidateMs = Date.now() - validateStartedAtMs;
     }
     if (!sessionId) {
+      const createStartedAtMs = Date.now();
       const sessionResult = await client.session.create(
         {
           directory: sessionDirectory,
@@ -927,6 +1219,7 @@ async function runNonTaskSdkPrompt(
       if (options.session) {
         options.session.id = sessionId;
       }
+      setupTiming.sessionCreateMs = Date.now() - createStartedAtMs;
     }
     await options.onSessionReady?.(sessionId);
 
@@ -991,19 +1284,28 @@ async function runNonTaskSdkPrompt(
     });
     let eventMonitor: Promise<void> | undefined;
     const observedAssistantMessageIds = new Set<string>();
+    const completedAssistantMessageIds = new Set<string>();
+    // Reasoning parts stream deltas under the same `field: "text"`; only
+    // parts announced as text parts are reply text.
+    const assistantTextPartIds = new Set<string>();
     const needsEventMonitor = Boolean(
       params.onProviderRetry ||
       options.onAssistantMessageStarted ||
+      options.onAssistantMessageCompleted ||
       options.onSubagentSessionReady ||
+      options.onParentTaskPartUpdated ||
+      options.onAssistantTextUpdated ||
       options.trackSessionTreeUsage,
     );
 
     if (needsEventMonitor) {
       try {
+        const subscribeStartedAtMs = Date.now();
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
           { signal: eventAbortController.signal },
         );
+        setupTiming.eventSubscribeMs = Date.now() - subscribeStartedAtMs;
         eventMonitor = (async () => {
           try {
             for await (const event of subscription.stream) {
@@ -1024,6 +1326,45 @@ async function runNonTaskSdkPrompt(
                   rejectSessionError(error);
                   return;
                 }
+              } else if (event.type === 'message.part.updated') {
+                const taskPart = normalizeParentOpenCodeTaskPart(
+                  event.properties.part,
+                  sessionId,
+                );
+                if (taskPart) {
+                  try {
+                    await options.onParentTaskPartUpdated?.(taskPart);
+                  } catch (error) {
+                    rejectSessionError(error);
+                    return;
+                  }
+                }
+                const streamedDelta = asRecord(event.properties)?.delta;
+                const assistantText = normalizeParentOpenCodeTextPart(
+                  event.properties.part,
+                  sessionId,
+                  // Older servers attach the streamed delta to this event.
+                  typeof streamedDelta === 'string' ? streamedDelta : undefined,
+                );
+                // Parts carry no role; the user prompt's own text part must
+                // never read as reply text.
+                if (
+                  assistantText &&
+                  observedAssistantMessageIds.has(assistantText.messageId)
+                ) {
+                  assistantTextPartIds.add(assistantText.partId);
+                  options.onAssistantTextUpdated?.(assistantText);
+                }
+              } else if (
+                isOpenCodeTextPartDeltaEvent(event, sessionId) &&
+                assistantTextPartIds.has(event.properties.partID)
+              ) {
+                options.onAssistantTextUpdated?.({
+                  messageId: event.properties.messageID,
+                  partId: event.properties.partID,
+                  delta: event.properties.delta,
+                  completed: false,
+                });
               } else if (
                 event.type === 'message.updated' &&
                 event.properties.info.role === 'assistant' &&
@@ -1043,6 +1384,28 @@ async function runNonTaskSdkPrompt(
                       sessionId,
                       parentId: asString(info.parentID) ?? null,
                       createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                    });
+                  } catch (error) {
+                    rejectSessionError(error);
+                    return;
+                  }
+                }
+                if (
+                  info.sessionID === sessionId &&
+                  messageId &&
+                  info.time.completed !== undefined &&
+                  !completedAssistantMessageIds.has(messageId)
+                ) {
+                  completedAssistantMessageIds.add(messageId);
+                  try {
+                    const tokens = readNonTaskOpenCodeMessageTokens(info);
+                    await options.onAssistantMessageCompleted?.({
+                      id: messageId,
+                      sessionId,
+                      createdAtMs: asFiniteNumber(info.time.created) ?? null,
+                      completedAtMs:
+                        asFiniteNumber(info.time.completed) ?? null,
+                      ...(tokens ? { tokens } : {}),
                     });
                   } catch (error) {
                     rejectSessionError(error);
@@ -1138,7 +1501,8 @@ async function runNonTaskSdkPrompt(
 
     try {
       const turnStartedAtMs = Date.now();
-      options.onPromptStarted?.();
+      setupTiming.totalMs = turnStartedAtMs - setupStartedAtMs;
+      options.onPromptStarted?.(setupTiming);
       const promptRequest = client.session.prompt(
         {
           sessionID: sessionId,
@@ -1149,31 +1513,8 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      options.onNativeSteerReady?.(async (input) => {
-        const result = await client.session.promptAsync(
-          {
-            sessionID: sessionId,
-            directory: sessionDirectory,
-            messageID: input.messageId,
-            parts: [
-              { type: 'text', text: input.text },
-              ...(input.files ?? []).map((file) => ({
-                type: 'file' as const,
-                mime: file.mime,
-                ...(file.filename ? { filename: file.filename } : {}),
-                url: file.url,
-              })),
-            ],
-          },
-          { signal: abortController.signal },
-        );
-        if (result.error) {
-          throw new NonTaskOpenCodePromptError(
-            result.error,
-            'OpenCode native Fast steer failed',
-          );
-        }
-      });
+      // promptAsync has no owned completion contract. Leave native steering
+      // unavailable so human follow-ups use the durable whole-turn queue.
       let promptResult: Awaited<typeof promptRequest>;
       try {
         promptResult = needsEventMonitor
@@ -1329,6 +1670,9 @@ async function runNonTaskSdkPrompt(
       }
 
       try {
+        const finalTokens = readNonTaskOpenCodeMessageTokens(
+          promptResult.data.info,
+        );
         await options.onMessageCompleted?.({
           id: asString(promptResult.data.info.id) ?? null,
           sessionId,
@@ -1336,6 +1680,7 @@ async function runNonTaskSdkPrompt(
             asFiniteNumber(promptResult.data.info.time?.created) ?? null,
           completedAtMs:
             asFiniteNumber(promptResult.data.info.time?.completed) ?? null,
+          ...(finalTokens ? { tokens: finalTokens } : {}),
         });
       } catch (error) {
         console.warn(
@@ -1446,7 +1791,10 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
     params.modelRole,
     params.reasoningEffort,
   );
-  const model = await resolveModelForInputModality(params, runtime);
+  // A native session always runs on its own model. Callers decide up front,
+  // via resolveNonTaskInputModalityDelivery, whether attached files ride along
+  // as prompt parts or are inspected by a helper model instead.
+  const model = runtime.model;
   options.onModelResolved?.(model);
   const data = await runNonTaskSdkPrompt(
     params,
@@ -1477,9 +1825,12 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onNativeSteerReady: options.onNativeSteerReady,
       onNativeSteerClosed: options.onNativeSteerClosed,
       onAssistantMessageStarted: options.onAssistantMessageStarted,
+      onAssistantMessageCompleted: options.onAssistantMessageCompleted,
       onMessageCompleted: options.onMessageCompleted,
       onSessionReady: options.onSessionReady,
       onSubagentSessionReady: options.onSubagentSessionReady,
+      onParentTaskPartUpdated: options.onParentTaskPartUpdated,
+      onAssistantTextUpdated: options.onAssistantTextUpdated,
       permission: options.permission,
       preserveReasoning: true,
       promptOnlySubagents: options.promptOnlySubagents,
@@ -1566,32 +1917,8 @@ function unwrapNonTaskInferenceError(error: unknown): unknown {
 }
 
 function findInferenceErrorStatusCode(error: unknown): number | undefined {
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const seen = new Set<object>();
-
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || current.depth > 4) {
-      continue;
-    }
-
-    const { value, depth } = current;
-    if (typeof value === 'string') {
-      try {
-        pending.push({ value: JSON.parse(value), depth: depth + 1 });
-      } catch {
-        // Provider prose is handled by the fallback signatures below.
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object' || seen.has(value)) {
-      continue;
-    }
-
-    seen.add(value);
-    const record = value as Record<string, unknown>;
+  for (const record of decodeInferenceErrorEnvelope(error, 'classification')) {
+    if (typeof record === 'string') continue;
     for (const key of ['statusCode', 'status', 'code'] as const) {
       const candidate = record[key];
       const parsed =
@@ -1609,58 +1936,22 @@ function findInferenceErrorStatusCode(error: unknown): number | undefined {
         return parsed;
       }
     }
-
-    for (const nested of Object.values(record)) {
-      pending.push({ value: nested, depth: depth + 1 });
-    }
   }
 
   return undefined;
 }
 
 function isInferenceErrorExplicitlyNonRetryable(error: unknown): boolean {
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const seen = new Set<object>();
-
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || current.depth > 4) continue;
-
-    const { value, depth } = current;
-    if (typeof value === 'string') {
-      try {
-        pending.push({ value: JSON.parse(value), depth: depth + 1 });
-      } catch {
-        // Provider prose is classified separately below.
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object' || seen.has(value)) continue;
-
-    seen.add(value);
-    const record = value as Record<string, unknown>;
+  for (const record of decodeInferenceErrorEnvelope(error, 'classification')) {
+    if (typeof record === 'string') continue;
     if (record.isRetryable === false) return true;
-    for (const nested of Object.values(record)) {
-      pending.push({ value: nested, depth: depth + 1 });
-    }
   }
 
   return false;
 }
 
 function isContentFilterInferenceError(error: unknown): boolean {
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: error, depth: 0 },
-  ];
-  const seen = new Set<object>();
-
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || current.depth > 4) continue;
-
-    const { value, depth } = current;
+  for (const value of decodeInferenceErrorEnvelope(error, 'content-filter')) {
     if (typeof value === 'string') {
       const normalized = value.toLowerCase();
       if (
@@ -1671,24 +1962,6 @@ function isContentFilterInferenceError(error: unknown): boolean {
       ) {
         return true;
       }
-
-      try {
-        pending.push({ value: JSON.parse(value), depth: depth + 1 });
-      } catch {
-        // The recognized provider message signatures above are sufficient.
-      }
-      continue;
-    }
-    if (!value || typeof value !== 'object' || seen.has(value)) continue;
-
-    seen.add(value);
-    const record = value as Record<string, unknown>;
-    pending.push(
-      { value: record.name, depth: depth + 1 },
-      { value: record.message, depth: depth + 1 },
-    );
-    for (const nested of Object.values(value)) {
-      pending.push({ value: nested, depth: depth + 1 });
     }
   }
 

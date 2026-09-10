@@ -290,6 +290,8 @@ export async function handlePrSynchronize({
             branchName: pr.head.ref,
             prBody: pr.body ?? null,
             reviewerSettings: currentTarget.settings,
+            repositoryId: currentTarget.repo.id,
+            host: currentTarget.repo.host ?? toHostFromUrl(pr.html_url),
           });
 
           await enqueueActivePrReviewFollowUp({
@@ -398,6 +400,8 @@ export async function handlePrSynchronize({
         branchName: pr.head.ref,
         prBody: pr.body ?? null,
         reviewerSettings: currentTarget.settings,
+        repositoryId: currentTarget.repo.id,
+        host: currentTarget.repo.host ?? toHostFromUrl(pr.html_url),
       });
 
       const launch = await enqueueTask({

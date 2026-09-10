@@ -462,6 +462,7 @@ export async function processActiveRunMessage(
         }),
         slack.normalizeIncomingText(
           stripLeadingRawSlackMention(event.authoredText ?? event.text),
+          { preserveMentions: true },
         ),
         getLatestSlackBotReply(event.channel, threadId),
       ]);

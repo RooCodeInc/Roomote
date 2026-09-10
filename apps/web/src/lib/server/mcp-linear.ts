@@ -1,6 +1,5 @@
 import { LinearClient } from '@linear/sdk';
 
-import { buildTaskStartingText } from '@roomote/communication/chat-messages';
 import {
   db,
   mcpConnections,
@@ -13,20 +12,17 @@ import {
   getMcpOauthReplay,
   getValidAccessToken,
   getLinearDeploymentMetadata,
+  getLinearUserMetadata,
   LINEAR_ORG_CONNECTION_ROLE,
   LINEAR_USER_CONNECTION_ROLE,
+  startLinearFastSessionTurn,
 } from '@roomote/sdk/server';
 import {
-  createLinearAgentRun,
   createLinearClient,
   enrichSessionComments,
   parseAgentSessionEventPayload,
-  resolveLinearTaskDestination,
 } from '@roomote/linear';
 import type { OAuthTokens } from '@roomote/types';
-
-import { Env } from '@/lib/server/env';
-import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 
 type McpConnectionRecord = Awaited<
   ReturnType<typeof db.query.mcpConnections.findFirst>
@@ -58,6 +54,33 @@ function replayMatchesLinearIdentity(
   );
 }
 
+function connectionMatchesLinearIdentity(
+  connection: NonNullable<McpConnectionRecord>,
+  identity: {
+    linearOrganizationId: string;
+    appUserId?: string;
+    linearUserId?: string;
+  },
+) {
+  if (connection.connectionRole === LINEAR_ORG_CONNECTION_ROLE) {
+    const metadata = getLinearDeploymentMetadata(connection.authConfig);
+    return (
+      metadata?.linearOrganizationId === identity.linearOrganizationId &&
+      metadata.appUserId === identity.appUserId
+    );
+  }
+
+  if (connection.connectionRole === LINEAR_USER_CONNECTION_ROLE) {
+    const metadata = getLinearUserMetadata(connection.authConfig);
+    return (
+      metadata?.linearOrganizationId === identity.linearOrganizationId &&
+      metadata.linearUserId === identity.linearUserId
+    );
+  }
+
+  return false;
+}
+
 async function storeLinearConnection(input: {
   connection: NonNullable<McpConnectionRecord>;
   tokens: OAuthTokens;
@@ -75,6 +98,10 @@ async function storeLinearConnection(input: {
     typeof input.connection.authConfig === 'object'
       ? (input.connection.authConfig as Record<string, unknown>)
       : {};
+  const preserveExistingRefreshToken =
+    input.tokens.refresh_token === undefined &&
+    Boolean(input.connection.refreshToken) &&
+    connectionMatchesLinearIdentity(input.connection, input);
 
   await db
     .update(mcpConnections)
@@ -88,7 +115,9 @@ async function storeLinearConnection(input: {
         ...(input.linearUserId ? { linearUserId: input.linearUserId } : {}),
       } as NonNullable<McpConnectionRecord>['authConfig'],
       accessToken: input.tokens.access_token,
-      refreshToken: input.tokens.refresh_token || null,
+      ...(preserveExistingRefreshToken
+        ? {}
+        : { refreshToken: input.tokens.refresh_token || null }),
       tokenExpiresAt,
       scopes: input.tokens.scope
         ? input.tokens.scope.split(/[\s,]+/).filter(Boolean)
@@ -150,63 +179,18 @@ async function resumeLinearReplay(input: {
     linearClient,
     payload.agentSession,
   );
-  const destinationResult = await resolveLinearTaskDestination({
+  const started = await startLinearFastSessionTurn({
     payload,
     agentSession: enrichedSession,
     userId: input.userId,
     linearClient,
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
   });
 
-  if (destinationResult.status === 'platform_answer') {
-    await linearClient.emitResponse(sessionId, destinationResult.answer);
-    return;
-  }
-
-  if (destinationResult.status === 'awaiting_selection') {
-    return;
-  }
-
-  if (destinationResult.status === 'error') {
+  if (started.status !== 'queued') {
     await linearClient.emitError(
       sessionId,
-      `Failed to start workspace selection: ${destinationResult.message}`,
+      "Roomote couldn't start a conversation right now. Please try again in a moment.",
     );
-    return;
-  }
-
-  const { destination } = destinationResult;
-
-  await linearClient.emitThought(
-    sessionId,
-    buildTaskStartingText({
-      workspaceDisplayName: destination.workspaceDisplayName,
-      kickoffMessage: destination.kickoffMessage,
-    }),
-    true,
-  );
-
-  const runResult = await createLinearAgentRun({
-    agentSession: enrichedSession,
-    payload,
-    userId: input.userId,
-    repo: destination.workspaceSelection.repo,
-    environmentId: destination.workspaceSelection.environmentId,
-  });
-
-  if (runResult.status === 'error') {
-    await linearClient.emitError(
-      sessionId,
-      `Failed to start agent: ${runResult.message}`,
-    );
-    return;
-  }
-
-  if ('taskId' in runResult) {
-    const baseUrl = getPublicAppUrl(Env);
-    await linearClient.updateSessionExternalUrls(sessionId, [
-      { label: 'Open task', url: `${baseUrl}/task/${runResult.taskId}` },
-    ]);
   }
 }
 

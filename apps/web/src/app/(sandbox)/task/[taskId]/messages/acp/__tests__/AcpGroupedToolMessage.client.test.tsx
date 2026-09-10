@@ -1,7 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { AlertCircle, FileIcon } from '@/components/system';
+import { AlertCircle, Telescope } from '@/components/system';
+import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
+import { resolveTaskRobotIconId } from '@/lib/task-robot-icons';
 
 import { AcpGroupedToolMessage } from '../AcpGroupedToolMessage';
 import type { GroupedToolCallRenderBlock } from '../render-blocks';
@@ -25,10 +27,13 @@ vi.mock('@/components/ai-elements', () => ({
     icon?: unknown;
     state?: string;
     collapsible?: boolean;
+    iconElement?: ReactNode;
+    iconAction?: { label: string; onClick: () => void };
   }) => {
     toolHeaderSpy(props);
     return (
       <div>
+        {props.iconElement}
         {props.action}
         {props.object ? ` ${props.object}` : ''}
       </div>
@@ -141,7 +146,7 @@ describe('AcpGroupedToolMessage', () => {
 
     expect(toolHeaderSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        icon: FileIcon,
+        icon: Telescope,
         state: 'input-available',
       }),
     );
@@ -158,6 +163,128 @@ describe('AcpGroupedToolMessage', () => {
       expect.objectContaining({
         icon: AlertCircle,
         state: 'output-error',
+      }),
+    );
+  });
+
+  it.each([true, false])(
+    'uses individual identity and only a uniform group header (uniform=%s)',
+    (uniform) => {
+      const group = buildGroup();
+      group.action = 'Completed';
+      const taskIds = ['child-a', uniform ? 'child-a' : 'child-b'];
+      group.items.forEach((item, index) => {
+        Object.assign(item.msg.data, {
+          kind: 'mcp',
+          toolName: 'manage_tasks',
+          mcpToolName: 'manage_tasks',
+          rawInput: { action: 'get_messages', taskId: taskIds[index] },
+        });
+      });
+      const onOpenTask = vi.fn();
+      const { container } = render(
+        <TaskRobotIconProvider
+          sessionId="session-1"
+          orderedTaskIds={['child-a', 'child-b']}
+          onOpenTask={onOpenTask}
+        >
+          <AcpGroupedToolMessage group={group} />
+        </TaskRobotIconProvider>,
+      );
+      const iconA = resolveTaskRobotIconId({
+        sessionId: 'session-1',
+        orderedTaskIds: ['child-a', 'child-b'],
+        taskId: 'child-a',
+      });
+      const iconB = resolveTaskRobotIconId({
+        sessionId: 'session-1',
+        orderedTaskIds: ['child-a', 'child-b'],
+        taskId: 'child-b',
+      });
+      expect(
+        container.querySelectorAll(`[data-task-robot-icon="${iconA}"]`),
+      ).toHaveLength(uniform ? 3 : 1);
+      expect(
+        container.querySelectorAll(`[data-task-robot-icon="${iconB}"]`),
+      ).toHaveLength(uniform ? 0 : 1);
+      expect(toolHeaderSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          iconElement: uniform ? expect.anything() : undefined,
+          iconAction: uniform
+            ? expect.objectContaining({ label: 'Focus task prompt' })
+            : undefined,
+        }),
+      );
+      for (const button of screen.getAllByRole('button', {
+        name: 'Focus task prompt',
+      }))
+        fireEvent.click(button);
+      expect(onOpenTask.mock.calls).toEqual(taskIds.map((taskId) => [taskId]));
+    },
+  );
+
+  it('does not use an unknown item as a group identity and keeps it nonclickable', () => {
+    const group = buildGroup();
+    group.items.forEach((item) =>
+      Object.assign(item.msg.data, {
+        kind: 'mcp',
+        toolName: 'manage_tasks',
+        mcpToolName: 'manage_tasks',
+        rawInput: { arguments: { action: 'launch' } },
+      }),
+    );
+    const { container } = render(<AcpGroupedToolMessage group={group} />);
+    expect(container.querySelectorAll('[data-task-robot-icon]')).toHaveLength(
+      2,
+    );
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        iconElement: undefined,
+        iconAction: undefined,
+      }),
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Focus task prompt' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('preserves unrelated item icons when a group contains a failure', () => {
+    const group = buildGroup();
+    group.items[0]!.msg.data.status = 'failed';
+    const { container } = render(<AcpGroupedToolMessage group={group} />);
+    expect(
+      container.querySelector('.lucide-circle-alert'),
+    ).not.toBeInTheDocument();
+    expect(
+      container.querySelector('[data-task-robot-icon]'),
+    ).not.toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ icon: AlertCircle, state: 'output-error' }),
+    );
+  });
+
+  it('preserves failure and running state on individual task items', () => {
+    const group = buildGroup();
+    group.items.forEach((item, index) =>
+      Object.assign(item.msg.data, {
+        kind: 'mcp',
+        toolName: 'manage_tasks',
+        mcpToolName: 'manage_tasks',
+        status: index === 0 ? 'failed' : 'in_progress',
+        rawInput: { action: 'get_messages', taskId: 'child-a' },
+      }),
+    );
+    const { container } = render(<AcpGroupedToolMessage group={group} />);
+    expect(container.querySelectorAll('[data-task-robot-icon]')).toHaveLength(
+      1,
+    );
+    expect(screen.getByLabelText('Running')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-circle-alert')).toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        icon: AlertCircle,
+        state: 'output-error',
+        iconElement: undefined,
       }),
     );
   });

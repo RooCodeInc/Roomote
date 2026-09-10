@@ -104,6 +104,11 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         roomoteModel: 'anthropic/claude-sonnet-4',
         roomoteVisionModel: 'anthropic/claude-opus-4.7',
       },
+      taskModelSettings: {
+        models: [],
+        allowedModelIds: [],
+        defaultModelId: 'openrouter/z-ai/glm-5.2',
+      },
     });
 
     const env = await resolveEffectiveModelRuntimeEnv({
@@ -129,6 +134,62 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
       R_MODEL_ENV_KEYS: 'OPENAI_API_KEY',
       OPENAI_API_KEY: 'sk-runtime',
+    });
+  });
+
+  it('uses the task model catalog default when no runtime model override is configured', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {},
+      taskModelSettings: {
+        models: [
+          {
+            id: 'openrouter/z-ai/glm-5.2',
+            displayName: 'GLM 5.2',
+            family: 'GLM',
+          },
+        ],
+        allowedModelIds: ['openrouter/z-ai/glm-5.2'],
+        defaultModelId: 'openrouter/z-ai/glm-5.2',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: { OPENROUTER_API_KEY: 'sk-openrouter' },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY',
+      OPENROUTER_API_KEY: 'sk-openrouter',
+    });
+  });
+
+  it('keeps explicit orchestration and coding models ahead of the catalog default', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {},
+      taskModelSettings: {
+        models: [],
+        allowedModelIds: [],
+        defaultModelId: 'openrouter/z-ai/glm-5.2',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.4',
+        R_ORCHESTRATION_MODEL: 'anthropic/claude-sonnet-4',
+      },
+      deploymentEnvVars: {
+        OPENROUTER_API_KEY: 'sk-openrouter',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_ORCHESTRATION_MODEL: 'anthropic/claude-sonnet-4',
     });
   });
 

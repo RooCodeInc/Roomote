@@ -4,17 +4,18 @@ import type { ProviderCreditBalance } from '@roomote/types';
 
 import { Progress } from '@/components/system';
 import { cn } from '@/lib/utils';
+import { formatCurrency } from '@/lib/formatters';
 
 function formatMoney(amount: number, currency = 'USD'): string {
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat(currency === 'USD' ? 'en-US' : undefined, {
       style: 'currency',
       currency,
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `$${amount.toFixed(2)}`;
+    return formatCurrency(Number(amount.toFixed(2)));
   }
 }
 

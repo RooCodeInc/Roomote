@@ -3,6 +3,7 @@
 const {
   mockCompleteGithubPrReviewCheckFromSummary,
   mockEnqueuePrReviewNotification,
+  mockMarkRoomotePullRequestReadyAfterCleanReview,
   mockStartPrReviewNotificationCycle,
 } = vi.hoisted(() => ({
   mockCompleteGithubPrReviewCheckFromSummary: vi
@@ -11,6 +12,9 @@ const {
   mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
     notifiedTaskCount: 1,
   }),
+  mockMarkRoomotePullRequestReadyAfterCleanReview: vi
+    .fn()
+    .mockResolvedValue('review_not_clean'),
   mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -30,6 +34,8 @@ vi.mock('@roomote/sdk/server', () => ({
   completeGithubPrReviewCheckFromSummary:
     mockCompleteGithubPrReviewCheckFromSummary,
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
+  markRoomotePullRequestReadyAfterCleanReview:
+    mockMarkRoomotePullRequestReadyAfterCleanReview,
   startPrReviewNotificationCycle: mockStartPrReviewNotificationCycle,
 }));
 
@@ -924,6 +930,32 @@ describe('queuePrReviewSummaryNotification', () => {
       taskId: 'x',
       reviewHeadSha,
       reviewSummaryBody: TERMINAL_SUMMARY_BODY,
+    });
+  });
+
+  it('reconciles a terminal summary rewrite without notifying the completed task', async () => {
+    const cleanBody = TERMINAL_SUMMARY_BODY.replace(
+      '1 minor doc note; no blocking issues.',
+      '**All 1 issue addressed.**',
+    ).replace('- [ ] Update the doc comment', '- [x] Update the doc comment');
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: cleanBody,
+        previousBody: TERMINAL_SUMMARY_BODY,
+      }),
+    );
+
+    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
+    expect(mockCompleteGithubPrReviewCheckFromSummary).toHaveBeenCalledWith({
+      installationId: 1,
+      repository: 'owner/repo',
+      prNumber: 42,
+      taskId: 'x',
+      reviewHeadSha,
+      reviewSummaryBody: cleanBody,
+      allowCompletedCheckUpdate: true,
     });
   });
 

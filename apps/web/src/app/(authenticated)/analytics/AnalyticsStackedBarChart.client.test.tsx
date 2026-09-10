@@ -7,6 +7,7 @@ import { AnalyticsStackedBarChart } from './AnalyticsStackedBarChart';
 const mockRechartsState = vi.hoisted(() => ({
   tooltipProps: null as Record<string, unknown> | null,
   barProps: [] as Array<Record<string, unknown>>,
+  yAxisProps: [] as Array<Record<string, unknown>>,
   tooltipPayload: [
     { name: 'Radia Perlman', value: 2, color: '#ff9900' },
     { name: 'John Richmond', value: 1, color: '#3366ff' },
@@ -29,7 +30,10 @@ vi.mock('recharts', async () => {
     ),
     CartesianGrid: () => null,
     XAxis: () => null,
-    YAxis: () => null,
+    YAxis: (props: Record<string, unknown>) => {
+      mockRechartsState.yAxisProps.push(props);
+      return null;
+    },
     Bar: (props: Record<string, unknown>) => {
       mockRechartsState.barProps.push(props);
       return null;
@@ -132,10 +136,37 @@ const PALETTE_CHART: AnalyticsChartResponse = {
   ],
 };
 
+const COST_CHART: AnalyticsChartResponse = {
+  object: 'costs',
+  viewBy: 'provider',
+  metric: 'cost',
+  total: 2,
+  tokenTotal: 1_500_000,
+  series: [
+    {
+      key: 'openai',
+      label: 'OpenAI',
+      total: 2,
+      tokenTotal: 1_500_000,
+    },
+  ],
+  buckets: [
+    {
+      key: '2026-03-27',
+      label: 'Mar 27',
+      total: 2,
+      tokenTotal: 1_500_000,
+      segments: { openai: 2 },
+      tokenSegments: { openai: 1_500_000 },
+    },
+  ],
+};
+
 describe('AnalyticsStackedBarChart', () => {
   beforeEach(() => {
     mockRechartsState.tooltipProps = null;
     mockRechartsState.barProps = [];
+    mockRechartsState.yAxisProps = [];
     mockRechartsState.tooltipPayload = [
       { name: 'Radia Perlman', value: 2, color: '#ff9900' },
       { name: 'John Richmond', value: 1, color: '#3366ff' },
@@ -299,6 +330,71 @@ describe('AnalyticsStackedBarChart', () => {
       'var(--color-chart-3)',
       'var(--color-chart-4)',
     ]);
+  });
+
+  it('renders cost and token stacks with matching colors and separate axes', () => {
+    const onSelectSegment = vi.fn();
+    render(
+      <AnalyticsStackedBarChart
+        axisLabel="Cost (USD)"
+        chart={COST_CHART}
+        granularity="day"
+        isLoading={false}
+        isError={false}
+        onResetFilters={vi.fn()}
+        onSelectSegment={onSelectSegment}
+      />,
+    );
+
+    expect(mockRechartsState.yAxisProps).toEqual([
+      expect.objectContaining({ yAxisId: 'cost' }),
+      expect.objectContaining({ yAxisId: 'tokens', orientation: 'right' }),
+    ]);
+    expect(mockRechartsState.barProps).toEqual([
+      expect.objectContaining({
+        dataKey: 'openai',
+        fill: 'var(--color-chart-1)',
+        stackId: 'cost',
+        unit: 'cost',
+        yAxisId: 'cost',
+      }),
+      expect.objectContaining({
+        dataKey: 'tokens:openai',
+        fill: 'var(--color-chart-1)',
+        fillOpacity: 0.5,
+        stackId: 'tokens',
+        unit: 'tokens',
+        yAxisId: 'tokens',
+      }),
+    ]);
+
+    const costBarClick = mockRechartsState.barProps[0]?.onClick as (
+      data: unknown,
+    ) => void;
+    costBarClick({
+      payload: { bucketKey: '2026-03-27', label: 'Mar 27' },
+    });
+    expect(onSelectSegment).toHaveBeenLastCalledWith({
+      bucketKey: '2026-03-27',
+      bucketLabel: 'Mar 27',
+      seriesKey: 'openai',
+      seriesLabel: 'OpenAI',
+      metric: 'cost',
+    });
+
+    const tokenBarClick = mockRechartsState.barProps[1]?.onClick as (
+      data: unknown,
+    ) => void;
+    tokenBarClick({
+      payload: { bucketKey: '2026-03-27', label: 'Mar 27' },
+    });
+    expect(onSelectSegment).toHaveBeenLastCalledWith({
+      bucketKey: '2026-03-27',
+      bucketLabel: 'Mar 27',
+      seriesKey: 'openai',
+      seriesLabel: 'OpenAI',
+      metric: 'tokens',
+    });
   });
 
   it('passes display labels to recharts while keeping stable series keys', () => {

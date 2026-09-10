@@ -26,6 +26,7 @@ import {
 } from '../opencode-server/harness';
 import type {
   OpenCodeGlobalEvent,
+  OpenCodeMessageInfo,
   OpenCodeSessionMessage,
 } from '../opencode-server/types';
 
@@ -491,12 +492,16 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('records inference usage for completed child-session (subagent) assistant messages', async () => {
+  it('persists linked child-session assistant messages and records their usage', async () => {
     const { client, harness } = createHarness();
     const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
     harness.subscribeRuntimeInferenceUsage((event) =>
       inferenceUsageEvents.push(event),
+    );
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
     );
 
     try {
@@ -516,7 +521,30 @@ describe('OpenCodeServerHarness', () => {
         expect(client.promptAsync).toHaveBeenCalledTimes(1);
       });
 
-      const childAssistantInfo = {
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'prt_task_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_1',
+            type: 'tool',
+            tool: 'task',
+            callID: 'call_task_1',
+            state: {
+              status: 'running',
+              input: {
+                description: 'Explore the code',
+                prompt: 'Inspect the implementation.',
+                subagent_type: 'explore',
+              },
+              metadata: { sessionId: 'ses_child_1' },
+            },
+          },
+        },
+      });
+
+      const childAssistantInfo: OpenCodeMessageInfo = {
         id: 'msg_child_1',
         sessionID: 'ses_child_1',
         role: 'assistant',
@@ -538,6 +566,18 @@ describe('OpenCodeServerHarness', () => {
           },
         },
       };
+      client.message.mockResolvedValue({
+        info: childAssistantInfo,
+        parts: [
+          {
+            id: 'prt_child_text_1',
+            sessionID: 'ses_child_1',
+            messageID: 'msg_child_1',
+            type: 'text',
+            text: 'Child investigation complete.',
+          },
+        ],
+      });
 
       // Incomplete child assistant messages are ignored.
       await client.emit({
@@ -581,8 +621,26 @@ describe('OpenCodeServerHarness', () => {
           messageCompletedAt: new Date(20),
         },
       ]);
-      // Child-session usage never reaches the main-session transcript fetch.
-      expect(client.message).not.toHaveBeenCalled();
+      expect(client.message).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'ses_child_1',
+          messageId: 'msg_child_1',
+        }),
+      );
+      expect(persistedEnvelopes).toContainEqual(
+        expect.objectContaining({
+          eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+          contentBlocks: [
+            { type: 'text', text: 'Child investigation complete.' },
+          ],
+          metadata: expect.objectContaining({
+            sessionId: 'ses_child_1',
+            parentSessionId: 'ses_1',
+            agentType: 'explore',
+            isSubagent: true,
+          }),
+        }),
+      );
     } finally {
       harness.dispose();
     }
@@ -5528,6 +5586,122 @@ describe('OpenCodeServerHarness', () => {
       harness.dispose();
     }
   });
+
+  it.each(['completed', 'error'] as const)(
+    'preserves canonical tool identity from running through %s events',
+    async (terminalStatus) => {
+      const { client, harness } = createHarness(undefined, {
+        mcpServerNames: ['roomote'],
+      });
+      const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+      const runtimeOutputEvents: AcpMessage[] = [];
+      harness.subscribeRuntimePersistedEnvelope((envelope) =>
+        persistedEnvelopes.push(envelope),
+      );
+      harness.subscribeRuntimeOutput((event) =>
+        runtimeOutputEvents.push(event),
+      );
+
+      const cases = [
+        { tool: 'read', input: { filePath: 'src/app.ts' } },
+        {
+          tool: 'apply_patch',
+          input: { patchText: '*** Delete File: old.ts' },
+        },
+        { tool: 'skill', input: { name: 'capture-visual-proof' } },
+        { tool: 'bash', input: { command: 'git diff' } },
+        { tool: 'custom_formatter', input: { path: 'src/app.ts' } },
+        { tool: 'mcp:roomote/get_task', input: { taskId: 'task_1' } },
+        { tool: 'roomote_send_chat_reply', input: { message: 'hello' } },
+      ];
+
+      try {
+        await connectHarness(harness, client);
+        for (const { tool, input } of cases) {
+          const callId = `call_${tool}`;
+          for (const status of ['running', terminalStatus] as const) {
+            await client.emit({
+              type: 'message.part.updated',
+              properties: {
+                part: {
+                  id: `part_${tool}`,
+                  sessionID: 'ses_1',
+                  messageID: 'msg_1',
+                  type: 'tool',
+                  callID: callId,
+                  tool,
+                  state: {
+                    status,
+                    input,
+                    title:
+                      status === 'running'
+                        ? 'roomote_send_chat_reply'
+                        : 'Result prose',
+                    ...(status === 'completed'
+                      ? { output: 'Success. Updated files.' }
+                      : {}),
+                    ...(status === 'error' ? { error: 'Tool failed' } : {}),
+                  },
+                },
+              },
+            });
+          }
+
+          const mcpToolName =
+            tool === 'mcp:roomote/get_task'
+              ? 'get_task'
+              : tool === 'roomote_send_chat_reply'
+                ? 'send_chat_reply'
+                : null;
+          const identity = {
+            toolName: mcpToolName ?? tool,
+            isMcp: mcpToolName !== null,
+            mcpToolName,
+            mcpServerName: mcpToolName ? 'roomote' : null,
+            rawInput: input,
+          };
+          const calls = persistedEnvelopes.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCall &&
+              event.payload.toolCallId === callId,
+          );
+          const updates = runtimeOutputEvents.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate &&
+              event.payload.toolCallId === callId,
+          );
+          const results = persistedEnvelopes.filter(
+            (event) =>
+              event.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult &&
+              event.payload.toolCallId === callId,
+          );
+          expect(calls).toHaveLength(1);
+          expect(updates.length).toBeGreaterThan(0);
+          expect(results).toHaveLength(1);
+          for (const event of [...calls, ...updates, ...results]) {
+            expect(event.payload).toMatchObject(identity);
+            expect(event.payload.serverName ?? null).toBe(
+              mcpToolName ? 'roomote' : null,
+            );
+          }
+          expect(calls[0]?.payload).toMatchObject({
+            status: 'in_progress',
+            title: 'roomote_send_chat_reply',
+          });
+          expect(results[0]?.payload).toMatchObject({
+            status: terminalStatus === 'error' ? 'failed' : 'completed',
+            title: 'Result prose',
+            output:
+              terminalStatus === 'error'
+                ? 'Tool failed'
+                : 'Success. Updated files.',
+          });
+        }
+      } finally {
+        harness.dispose();
+      }
+    },
+  );
 
   it('normalizes OpenCode read, search, and MCP tool categories', async () => {
     const { client, harness } = createHarness(undefined, {

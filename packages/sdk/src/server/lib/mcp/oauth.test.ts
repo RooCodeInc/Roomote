@@ -312,6 +312,25 @@ describe('exchangeCodeForTokens', () => {
     expect(params.get('client_id')).toBe('client-id');
     expect(params.has('client_secret')).toBe(false);
   });
+
+  it('includes the resource indicator in the token exchange', async () => {
+    await exchangeCodeForTokens(
+      'https://provider.example.com/token',
+      'auth-code',
+      'code-verifier',
+      {
+        client_id: 'client-id',
+        token_endpoint_auth_method: 'none',
+      },
+      'https://app.example.com/api/mcp-oauth/callback',
+      { resource: 'https://mcp.example.com/mcp' },
+    );
+
+    const [, init] = mockFetch.mock.calls[0] ?? [];
+    const params = new URLSearchParams(String(init?.body));
+
+    expect(params.get('resource')).toBe('https://mcp.example.com/mcp');
+  });
 });
 
 describe('refreshOAuthToken', () => {
@@ -342,6 +361,23 @@ describe('refreshOAuthToken', () => {
 
     expect(params.get('client_id')).toBe('client-id');
     expect(params.has('client_secret')).toBe(false);
+  });
+
+  it('includes the resource indicator in refresh-token requests', async () => {
+    await refreshOAuthToken(
+      'https://provider.example.com/token',
+      {
+        client_id: 'client-id',
+        token_endpoint_auth_method: 'none',
+      },
+      'refresh-token',
+      { resource: 'https://mcp.example.com/mcp' },
+    );
+
+    const [, init] = mockFetch.mock.calls[0] ?? [];
+    const params = new URLSearchParams(String(init?.body));
+
+    expect(params.get('resource')).toBe('https://mcp.example.com/mcp');
   });
 
   it('carries the structured RFC 6749 error code on token-endpoint failures', async () => {

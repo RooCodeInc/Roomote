@@ -30,7 +30,7 @@
             "first_name": "Grace",
             "username": "grace_mock"
           },
-          "text": "!fast what does the /new command do on Telegram?"
+          "text": "what does the /new command do on Telegram?"
         }
       }
     },
@@ -47,7 +47,7 @@
             "first_name": "Grace",
             "username": "grace_mock"
           },
-          "text": "!fast what does the /new command do on Telegram?"
+          "text": "what does the /new command do on Telegram?"
         }
       }
     }

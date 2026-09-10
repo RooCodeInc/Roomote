@@ -19,6 +19,7 @@ type ManageSourceControlParams = {
     | 'create_pull_request_comment'
     | 'create_pull_request_review_comment'
     | 'resolve_pull_request_thread'
+    | 'request_pull_request_reviewers'
     | 'submit_pull_request_review'
     | 'dismiss_pull_request_review'
     | 'update_pull_request_comment'
@@ -35,6 +36,8 @@ type ManageSourceControlParams = {
   reviewId?: string;
   resolved?: boolean;
   reviewEvent?: 'approve' | 'request_changes' | 'comment';
+  reviewers?: string[];
+  teamReviewers?: string[];
   path?: string;
   line?: number;
   side?: 'LEFT' | 'RIGHT';
@@ -232,6 +235,22 @@ export async function handleManageSourceControl(
       );
     }
 
+    const reviewers = params.reviewers
+      ?.map((reviewer) => reviewer.trim())
+      .filter(Boolean);
+    const teamReviewers = params.teamReviewers
+      ?.map((reviewer) => reviewer.trim())
+      .filter(Boolean);
+    if (
+      params.action === 'request_pull_request_reviewers' &&
+      !reviewers?.length &&
+      !teamReviewers?.length
+    ) {
+      return errorResult(
+        'reviewers or teamReviewers is required for request_pull_request_reviewers',
+      );
+    }
+
     if (params.action === 'dismiss_pull_request_review') {
       if (!params.reviewId?.trim()) {
         return errorResult(
@@ -262,6 +281,8 @@ export async function handleManageSourceControl(
         body: params.body,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,
+        reviewers,
+        teamReviewers,
         path,
         line: params.line,
         side: params.side,

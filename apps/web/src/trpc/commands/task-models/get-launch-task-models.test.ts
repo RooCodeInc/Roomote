@@ -79,6 +79,8 @@ function buildMockAuth(): UserAuthSuccess {
 
 describe('getLaunchTaskModelsCommand', () => {
   const originalOrchestrationModel = process.env.R_ORCHESTRATION_MODEL;
+  const originalOrchestrationReasoningEffort =
+    process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -88,6 +90,7 @@ describe('getLaunchTaskModelsCommand', () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
     mockSyncConnectedXaiTaskModels.mockResolvedValue(0);
     delete process.env.R_ORCHESTRATION_MODEL;
+    delete process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
   });
 
   afterAll(() => {
@@ -95,6 +98,12 @@ describe('getLaunchTaskModelsCommand', () => {
       delete process.env.R_ORCHESTRATION_MODEL;
     } else {
       process.env.R_ORCHESTRATION_MODEL = originalOrchestrationModel;
+    }
+    if (originalOrchestrationReasoningEffort === undefined) {
+      delete process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
+    } else {
+      process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT =
+        originalOrchestrationReasoningEffort;
     }
   });
 
@@ -174,5 +183,29 @@ describe('getLaunchTaskModelsCommand', () => {
         expect.objectContaining({ id: 'xai/grok-env-only' }),
       ]),
     );
+  });
+
+  it('returns the effective orchestration reasoning default', async () => {
+    process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT = 'xhigh';
+    mockFindDeploymentSettings.mockResolvedValue({
+      taskModelSettings: {
+        models: [
+          {
+            id: 'xai/grok-4.6',
+            displayName: 'Grok 4.6',
+            family: 'Grok',
+          },
+        ],
+        allowedModelIds: ['xai/grok-4.6'],
+        defaultModelId: 'xai/grok-4.6',
+      },
+      runtimeModelConfig: {
+        roomoteOrchestrationModelReasoningEffort: 'high',
+      },
+    });
+
+    const result = await getLaunchTaskModelsCommand(buildMockAuth());
+
+    expect(result.defaultFastReasoningEffort).toBe('xhigh');
   });
 });

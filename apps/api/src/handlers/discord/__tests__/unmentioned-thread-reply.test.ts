@@ -64,6 +64,7 @@ async function routeDecision(
     mappedUserId?: string | null;
     ownedThreadUserId?: string | null;
     isRoomoteThread?: boolean;
+    isAutomationReportThread?: boolean;
     isOpenConversationThread?: boolean;
     botUserId?: string;
   } = {},
@@ -82,6 +83,7 @@ async function routeDecision(
         ? 'roomote-user-1'
         : options.ownedThreadUserId,
     isOpenConversationThread: options.isOpenConversationThread,
+    isAutomationReportThread: options.isAutomationReportThread,
     fetchThreadMessages: fetchThreadMessagesMock,
   });
 }
@@ -104,6 +106,37 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
 
     await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(true);
   });
+
+  it('routes a linked first-time reply to a bot-authored automation report', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([botHistory(THREAD_ROOT_ID)]);
+
+    await expect(
+      routeDecision(threadReplyMessage({}), {
+        ownedThreadUserId: null,
+        isAutomationReportThread: true,
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it.each([
+    humanHistory('300', USER_2, 'interesting report'),
+    humanHistory('300', USER_1, `cc <@${USER_3}> for visibility`),
+  ])(
+    'keeps automation report interjection and chatter guards for $text',
+    async (interjection) => {
+      fetchThreadMessagesMock.mockResolvedValue([
+        botHistory(THREAD_ROOT_ID),
+        interjection,
+      ]);
+
+      await expect(
+        routeDecision(threadReplyMessage({}), {
+          ownedThreadUserId: null,
+          isAutomationReportThread: true,
+        }),
+      ).resolves.toBe(false);
+    },
+  );
 
   it("routes Matt when he joins Dan's open fast-agent thread", async () => {
     fetchThreadMessagesMock.mockResolvedValue([

@@ -339,6 +339,66 @@ describe('handleManageSourceControl issue actions', () => {
     );
   });
 
+  it('normalizes and forwards pull request reviewer targets', async () => {
+    vi.mocked(tasksApiClient.writeSourceControl).mockResolvedValueOnce({
+      success: true,
+      action: 'request_pull_request_reviewers',
+      provider: 'github',
+      repositoryFullName: 'acme/web',
+      number: 12,
+      applied: true,
+      warnings: [],
+    } as never);
+
+    const result = await handleManageSourceControl(
+      {
+        action: 'request_pull_request_reviewers',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        reviewers: [' alice ', ''],
+        teamReviewers: [' platform '],
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: true,
+      applied: true,
+    });
+    expect(tasksApiClient.writeSourceControl).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      expect.objectContaining({
+        action: 'request_pull_request_reviewers',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        reviewers: ['alice'],
+        teamReviewers: ['platform'],
+      }),
+    );
+  });
+
+  it('requires at least one pull request reviewer target', async () => {
+    const result = await handleManageSourceControl(
+      {
+        action: 'request_pull_request_reviewers',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        reviewers: ['  '],
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error:
+        'reviewers or teamReviewers is required for request_pull_request_reviewers',
+    });
+    expect(tasksApiClient.writeSourceControl).not.toHaveBeenCalled();
+  });
+
   it('requires path, a positive integer line, and a body for inline review comments', async () => {
     const missingPath = await handleManageSourceControl(
       {

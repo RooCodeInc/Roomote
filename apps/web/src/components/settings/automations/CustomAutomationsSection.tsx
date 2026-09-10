@@ -7,9 +7,11 @@ import { toast } from 'sonner';
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
@@ -46,6 +48,9 @@ import {
 } from '@/components/system';
 
 import { ModelSelect } from '@/components/tasks/ModelSelect';
+import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
+import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
+import { useAuthorizedUser } from '@/hooks/useUser';
 
 import {
   AutomationDestinationPicker,
@@ -66,6 +71,7 @@ type CustomAutomationFormState = {
   cronExpression: string;
   /** Provider/model launch override; empty string means deployment default. */
   model: string;
+  reasoningEffort: ReasoningEffort | null;
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
@@ -79,6 +85,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   environmentId: '',
   cronExpression: '',
   model: '',
+  reasoningEffort: null,
   targetProvider: 'slack',
   targetMode: 'channel',
   targetChannelId: '',
@@ -147,6 +154,9 @@ function CustomAutomationRunButton({
                 onClick: () => window.open(`/task/${result.taskId}`, '_blank'),
               },
             });
+            break;
+          case 'queued':
+            toast.success(`${automation.name} was queued to run.`);
             break;
           case 'completed':
             toast.success(`${automation.name} ran successfully.`);
@@ -231,6 +241,7 @@ function formFromRow(
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
     model: row.model ?? '',
+    reasoningEffort: row.reasoningEffort,
     targetProvider: targetIsConnected ? target.provider : 'none',
     targetMode: target.mode,
     targetChannelId: targetIsConnected ? target.channelId : '',
@@ -247,6 +258,7 @@ function writeInputFromRow(row: CustomAutomationListItem) {
     scheduleMode: row.scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
+    reasoningEffort: row.reasoningEffort,
     environmentId: row.environmentId ?? '',
     ...(target.provider !== 'none'
       ? {
@@ -270,6 +282,7 @@ function scheduleSummaryLine(summary: string, timeZone: string): string {
 }
 
 export function CustomAutomationsSection() {
+  const { isAdmin } = useAuthorizedUser();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listQuery = useQuery(
@@ -277,13 +290,19 @@ export function CustomAutomationsSection() {
   );
   const environmentsQuery = useQuery(trpc.environments.list.queryOptions());
   const slackChannelsQuery = useQuery(
-    trpc.automations.listSlackChannels.queryOptions(),
+    trpc.automations.listSlackChannels.queryOptions(undefined, {
+      enabled: isAdmin,
+    }),
   );
   const discordChannelsQuery = useQuery(
-    trpc.automations.listDiscordChannels.queryOptions(),
+    trpc.automations.listDiscordChannels.queryOptions(undefined, {
+      enabled: isAdmin,
+    }),
   );
-  const settingsQuery = useQuery(trpc.automations.getSettings.queryOptions());
-  const miscSettingsQuery = useQuery(trpc.miscSettings.get.queryOptions());
+  const optionsQuery = useQuery(
+    trpc.automations.getCustomAutomationOptions.queryOptions(),
+  );
+  const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -293,12 +312,11 @@ export function CustomAutomationsSection() {
 
   // New destinations default to the shared manager channel, matching where
   // the other automations report by default.
-  const managerSlackChannelId =
-    settingsQuery.data?.settings.managerSlackChannelId ?? '';
+  const managerSlackChannelId = optionsQuery.data?.managerSlackChannelId ?? '';
   const managerDiscordChannelId =
-    settingsQuery.data?.settings.managerDiscordChannelId ?? '';
-  const capabilities = settingsQuery.data?.capabilities;
-  const capabilitiesLoaded = !settingsQuery.isPending && Boolean(capabilities);
+    optionsQuery.data?.managerDiscordChannelId ?? '';
+  const capabilities = optionsQuery.data?.capabilities;
+  const capabilitiesLoaded = !optionsQuery.isPending && Boolean(capabilities);
   const connectedDestinationOptions = useMemo(
     () =>
       capabilitiesLoaded
@@ -321,8 +339,9 @@ export function CustomAutomationsSection() {
 
   const environmentOptions = useMemo(
     () => [
-      { id: FAST_EXECUTION, name: 'Fast (no sandbox)' },
+      { id: FAST_EXECUTION, name: 'Let Roomote decide' },
       { id: ALL_REPOSITORIES, name: 'All repositories' },
+      { id: NO_REPOSITORIES, name: 'Blank slate' },
       ...(environmentsQuery.data ?? []).map((environment) => ({
         id: environment.id,
         name: environment.name,
@@ -448,7 +467,7 @@ export function CustomAutomationsSection() {
 
   // Valid five-field cron is parsed and previewed entirely client-side; the
   // server round trip (and its LLM fallback) is only for natural language.
-  const schedulingTimeZone = miscSettingsQuery.data?.effectiveTimeZone;
+  const schedulingTimeZone = optionsQuery.data?.effectiveTimeZone;
   const clientParsedCron = useMemo(
     () =>
       schedulingTimeZone
@@ -470,6 +489,12 @@ export function CustomAutomationsSection() {
     updateMutation.isPending ||
     deleteMutation.isPending ||
     toggleMutation.isPending;
+  const selectedModel = taskModelsQuery.data?.models.find(
+    (model) => model.id === form.model,
+  );
+  const selectedModelSupportsReasoning = Boolean(
+    selectedModel && selectedModel.metadata?.supportsReasoning !== false,
+  );
 
   const closeEditor = () => {
     setIsCreating(false);
@@ -584,6 +609,7 @@ export function CustomAutomationsSection() {
       cronExpression:
         form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
       model: form.model || null,
+      reasoningEffort: form.model ? form.reasoningEffort : null,
       environmentId: form.environmentId,
       ...(form.targetProvider !== 'none'
         ? {
@@ -722,7 +748,9 @@ export function CustomAutomationsSection() {
 
         <div className="flex flex-col gap-4 sm:flex-row">
           <div className="space-y-2 sm:w-52">
-            <Label htmlFor="custom-automation-environment">Environment</Label>
+            <Label htmlFor="custom-automation-environment">
+              Preferred environment
+            </Label>
             <Select
               value={form.environmentId || undefined}
               disabled={busy || environmentOptions.length === 0}
@@ -749,24 +777,45 @@ export function CustomAutomationsSection() {
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label>
-              {form.environmentId === FAST_EXECUTION
-                ? 'Delegated task model'
-                : 'Model'}
-            </Label>
+          <div className="min-w-0 flex-1 space-y-2">
+            <Label>Delegated task model</Label>
             <ModelSelect
               size="default"
               ariaLabel="Automation model"
               value={form.model}
-              emptyOptionLabel={
-                form.environmentId === FAST_EXECUTION
-                  ? 'Default delegated task model'
-                  : 'Default coding model'
-              }
+              emptyOptionLabel="Default delegated task model"
+              className="w-full"
               disabled={busy}
-              onValueChange={(value) =>
-                setForm((current) => ({ ...current, model: value }))
+              onValueChange={(value) => {
+                const nextModel = taskModelsQuery.data?.models.find(
+                  (model) => model.id === value,
+                );
+                const supportsReasoning = Boolean(
+                  nextModel && nextModel.metadata?.supportsReasoning !== false,
+                );
+                setForm((current) => ({
+                  ...current,
+                  model: value,
+                  reasoningEffort: supportsReasoning
+                    ? current.reasoningEffort
+                    : null,
+                }));
+              }}
+            />
+          </div>
+
+          <div className="space-y-2 sm:w-40">
+            <Label>Effort</Label>
+            <ReasoningEffortSelect
+              value={form.reasoningEffort}
+              defaultEffort="medium"
+              emptyOptionLabel="Model default"
+              ariaLabel="Automation effort"
+              className="w-full"
+              size="default"
+              disabled={busy || !selectedModelSupportsReasoning}
+              onChange={(reasoningEffort) =>
+                setForm((current) => ({ ...current, reasoningEffort }))
               }
             />
           </div>
@@ -774,6 +823,7 @@ export function CustomAutomationsSection() {
 
         <div className="space-y-2">
           <AutomationDestinationPicker
+            channelCatalogAvailable={isAdmin}
             id="custom-automation-destination"
             value={{
               provider: form.targetProvider,
@@ -795,15 +845,11 @@ export function CustomAutomationsSection() {
               }))
             }
           />
-          {form.environmentId === FAST_EXECUTION ? (
-            <p className="text-sm text-muted-foreground">
-              {form.targetProvider === 'none'
-                ? 'This run is stored as a Fast conversation without posting to chat.'
-                : form.targetProvider === 'telegram'
-                  ? 'Each Fast run posts here. Continue the session from the web app; chat replies on this provider do not resume Fast yet.'
-                  : 'Each Fast run posts here, and replies continue the Fast session.'}
-            </p>
-          ) : null}
+          <p className="text-sm text-muted-foreground">
+            {form.targetProvider === 'none'
+              ? 'Each run is a Session in the web app and does not post to chat.'
+              : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
+          </p>
         </div>
 
         <div className="flex items-center justify-between gap-3">
@@ -857,11 +903,9 @@ export function CustomAutomationsSection() {
             disabled={busy || atCap || !capabilitiesLoaded}
             onClick={() => {
               const managerProvider =
-                managerSlackChannelId &&
-                settingsQuery.data?.capabilities.slackConnected
+                managerSlackChannelId && capabilities?.slackConnected
                   ? 'slack'
-                  : managerDiscordChannelId &&
-                      settingsQuery.data?.capabilities.discordConnected
+                  : managerDiscordChannelId && capabilities?.discordConnected
                     ? 'discord'
                     : null;
               const targetProvider =
@@ -929,7 +973,7 @@ export function CustomAutomationsSection() {
               {rows.map((row) => {
                 const environmentName =
                   row.executionMode === 'fast'
-                    ? 'Fast'
+                    ? null
                     : (environmentOptions.find(
                         (environment) => environment.id === row.environmentId,
                       )?.name ?? 'Environment missing');
@@ -983,7 +1027,10 @@ export function CustomAutomationsSection() {
                       <p className="text-sm font-semibold">{row.name}</p>
                       <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
                         <span>
-                          {cadenceLabel(row)}, in {environmentName} →
+                          {cadenceLabel(row)}
+                          {environmentName
+                            ? `, in ${environmentName}`
+                            : ''} →
                         </span>
                         {target.provider !== 'none' ? (
                           <BrandIcon
@@ -1013,18 +1060,18 @@ export function CustomAutomationsSection() {
                           </>
                         ) : null}
                       </p>
-                      {row.executionMode === 'fast' && row.latestFastResult ? (
+                      {row.latestFastResult ? (
                         <p className="line-clamp-2 text-xs text-muted-foreground">
                           {row.latestFastResult}
                         </p>
                       ) : null}
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
-                      {row.executionMode !== 'fast' ? (
+                      {historyFilter ? (
                         <BasicTooltip content="View previous runs">
                           <Button asChild size="icon" variant="ghost">
                             <Link
-                              href={`/tasks?userId=${encodeURIComponent(historyFilter!)}`}
+                              href={`/tasks?userId=${encodeURIComponent(historyFilter)}`}
                               aria-label={`View previous runs for ${row.name}`}
                             >
                               <RotateCcwClock />

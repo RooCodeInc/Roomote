@@ -35,10 +35,12 @@ function SubmitButton({
   isBusy,
   disabledReason,
   icon,
+  submitWithMetaKey,
 }: {
   isBusy: boolean;
   disabledReason?: string;
   icon?: ReactNode;
+  submitWithMetaKey: boolean;
 }) {
   const isDisabled = isBusy || Boolean(disabledReason);
   const button = (
@@ -47,6 +49,7 @@ function SubmitButton({
       variant="default"
       size="sm"
       className="group size-8 overflow-clip"
+      tooltip={submitWithMetaKey ? 'Send (Cmd/Ctrl + Enter)' : 'Send (Enter)'}
     >
       {icon ?? (
         <SendHorizontal className="fill-background group-[:not(:disabled):hover]:animate-fly-through" />
@@ -112,6 +115,8 @@ type TaskPromptInputProps = {
   animateContainer?: boolean;
   /** Optional content rendered inside the prompt box, below the input. */
   suggestion?: ReactNode;
+  /** Optional controls rendered after the attachment action. */
+  tools?: ReactNode;
   /** Optional reason that disables the submit button and explains why. */
   submitDisabledReason?: string;
   /** When true, submit on Cmd/Ctrl+Enter instead of plain Enter. */
@@ -131,6 +136,7 @@ export function TaskPromptInput({
   textareaMaxHeight,
   animateContainer = true,
   suggestion,
+  tools,
   submitDisabledReason,
   submitWithMetaKey = true,
   submitIcon,
@@ -147,7 +153,7 @@ export function TaskPromptInput({
       className={cn(
         'flex flex-col gap-2',
         surface === 'default' &&
-          'border rounded-lg p-2 bg-card border-input focus-within:border-accent-bright-foreground',
+          'border rounded-lg p-2 bg-card border-input outline-0 outline-offset-[-2px] outline-accent-foreground transition-[outline-width] has-[textarea:focus]:outline-2',
         animateContainer &&
           surface === 'default' &&
           'animate-[enter-down_1s_1_200ms_backwards]',
@@ -187,6 +193,7 @@ export function TaskPromptInput({
                 <PromptInputActionAddAttachments />
               </PromptInputActionMenuContent>
             </PromptInputActionMenu>
+            {tools}
           </PromptInputTools>
           <div className="flex items-center gap-1">
             <VoiceDictationButton
@@ -202,6 +209,7 @@ export function TaskPromptInput({
                 isBusy={isBusy}
                 disabledReason={submitDisabledReason}
                 icon={submitIcon}
+                submitWithMetaKey={submitWithMetaKey}
               />
             </div>
           </div>

@@ -14,6 +14,7 @@ import {
 } from '@roomote/db/server';
 import {
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   rebaseRoomoteModelIdToUpstream,
   ROOMOTE_INFERENCE_API_KEY_ENV_VAR_NAME,
   ROOMOTE_INFERENCE_PROVIDER_ID,
@@ -1158,7 +1159,13 @@ export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
 
   return {
     defaultModelId: defaultModel.id,
+    defaultReasoningEffort:
+      runtimeModels.codingModel.reasoningEffort ??
+      DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding,
     defaultFastModelId,
+    defaultFastReasoningEffort:
+      runtimeModels.orchestrationModel.reasoningEffort ??
+      DEFAULT_MODEL_ROLE_REASONING_EFFORTS.orchestration,
     chatgptConnected,
     openaiConnected: isApiKeyProviderConnected('openai'),
     // Display-grouping inputs: `xai/` models group under the Grok
