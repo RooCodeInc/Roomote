@@ -14,6 +14,7 @@ import {
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
+import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
@@ -21,16 +22,11 @@ import { useStartFastSession } from '@/hooks/task-runs';
 import { useLiveVoice } from '@/hooks/useLiveVoice';
 import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 
-import {
-  LiveVoiceStatusBar,
-  type PromptInputMessage,
-} from '@/components/ai-elements';
+import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
 
 const DEFAULT_PROMPT_PLACEHOLDER = 'What do you want to do?';
-/** Opens the new session straight into a voice conversation. */
-const VOICE_AUTOSTART_QUERY = 'voice=1';
 
 type SubmissionSnapshot = {
   description?: string;
@@ -119,7 +115,7 @@ export function NewTaskForm({
         onTaskStarted?.();
         router.push(
           options.voice
-            ? `/sessions/${sessionId}?${VOICE_AUTOSTART_QUERY}`
+            ? sessionPathWithVoiceAutostart(sessionId)
             : `/sessions/${sessionId}`,
         );
       } catch (error) {
@@ -216,10 +212,14 @@ export function NewTaskForm({
     model: selectedModelOverrideId,
     reasoningEffort: selectedReasoningEffort,
   };
-  const stopLiveVoiceRef = useRef<() => void>(() => undefined);
+  const stopLiveVoiceRef = useRef<(options?: { silent?: boolean }) => void>(
+    () => undefined,
+  );
 
   const handleVoiceUtterance = useCallback((utterance: string) => {
-    stopLiveVoiceRef.current();
+    // The conversation continues in the new Session, which plays its own
+    // start cue, so this handoff ends quietly.
+    stopLiveVoiceRef.current({ silent: true });
     const {
       promptText: typed,
       model,
@@ -332,17 +332,6 @@ export function NewTaskForm({
           showVoice
             ? { active: voiceActive, onToggle: handleVoiceToggle }
             : undefined
-        }
-        banner={
-          showVoice && liveVoice.status !== 'idle' ? (
-            <LiveVoiceStatusBar
-              status={liveVoice.status}
-              interimTranscript={liveVoice.interimTranscript}
-              thinking={isBusy}
-              error={liveVoice.error}
-              onStop={liveVoice.stop}
-            />
-          ) : null
         }
         tools={
           <SessionModelSwitcher

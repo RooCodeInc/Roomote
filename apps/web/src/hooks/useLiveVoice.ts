@@ -1,14 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
 import { useTRPCClient } from '@/trpc/client';
+import { playVoiceCue } from '@/lib/voice-cues';
 import { chunkSpeakableText, toSpeakableText } from '@/lib/voice-speech';
 
 const DELEGATION_TRANSCRIPT_SETTLE_MS = 250;
 const SESSION_START_TIMEOUT_MS = 15_000;
 
-export type LiveVoiceStatus =
+type LiveVoiceStatus =
   | 'idle'
   | 'connecting'
   | 'listening'
@@ -24,10 +26,12 @@ interface UseLiveVoiceOptions {
 interface UseLiveVoiceReturn {
   active: boolean;
   status: LiveVoiceStatus;
-  interimTranscript: string;
-  error: string | null;
   start: () => Promise<void>;
-  stop: () => void;
+  /**
+   * End the conversation. `silent` skips the stop cue for handoffs where
+   * voice continues elsewhere (a new Session opening in voice mode).
+   */
+  stop: (options?: { silent?: boolean }) => void;
   /** Return verified Fast output to GPT-Live for natural spoken delivery. */
   speak: (markdown: string, delegationId: string | null) => void;
 }
@@ -72,8 +76,12 @@ export function useLiveVoice({
   const trpcClient = useTRPCClient();
   const [active, setActive] = useState(false);
   const [status, setStatus] = useState<LiveVoiceStatus>('idle');
-  const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // The composer has no status strip, so failures surface as a toast.
+  useEffect(() => {
+    if (error) toast.error(error);
+  }, [error]);
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -89,6 +97,7 @@ export function useLiveVoice({
   const pendingDelegationsRef = useRef<string[]>([]);
   const delegationTimerRef = useRef<number | null>(null);
   const speakingTimerRef = useRef<number | null>(null);
+  const deliveryChainRef = useRef<Promise<void>>(Promise.resolve());
 
   const flushDelegation = useCallback(() => {
     delegationTimerRef.current = null;
@@ -101,9 +110,27 @@ export function useLiveVoice({
 
     pendingDelegationsRef.current.shift();
     inputTranscriptRef.current = '';
-    setInterimTranscript('');
-    onUtteranceRef.current(utterance, delegationId);
-  }, []);
+    const generation = startGenerationRef.current;
+
+    // Raw speech-to-text is full of disfluencies and misheard terms, so the
+    // utterance is cleaned before it enters the transcript. Delivery is
+    // chained so back-to-back requests keep their spoken order, and a
+    // conversation ended mid-cleanup drops its in-flight request like any
+    // other pending delegation.
+    deliveryChainRef.current = deliveryChainRef.current.then(async () => {
+      let text = utterance;
+      try {
+        const cleaned = await trpcClient.voice.cleanTranscript.mutate({
+          text: utterance,
+        });
+        if (cleaned.text.trim()) text = cleaned.text.trim();
+      } catch {
+        // The raw transcript still carries the request.
+      }
+      if (startGenerationRef.current !== generation) return;
+      onUtteranceRef.current(text, delegationId);
+    });
+  }, [trpcClient]);
 
   const scheduleDelegationFlush = useCallback(() => {
     if (delegationTimerRef.current !== null) {
@@ -128,7 +155,6 @@ export function useLiveVoice({
         case 'session.input_transcript.delta':
           if (event.delta) {
             inputTranscriptRef.current += event.delta;
-            setInterimTranscript(inputTranscriptRef.current);
             setStatus('listening');
             if (pendingDelegationsRef.current.length > 0) {
               scheduleDelegationFlush();
@@ -178,40 +204,46 @@ export function useLiveVoice({
     [],
   );
 
-  const stop = useCallback(() => {
-    startGenerationRef.current += 1;
-    connectingRef.current = false;
-    activeRef.current = false;
+  const stop = useCallback(
+    (options?: { silent?: boolean }) => {
+      // Only a conversation that was actually open gets a closing cue; an
+      // aborted handshake never announced itself.
+      const wasActive = activeRef.current;
+      startGenerationRef.current += 1;
+      connectingRef.current = false;
+      activeRef.current = false;
 
-    if (delegationTimerRef.current !== null) {
-      window.clearTimeout(delegationTimerRef.current);
-      delegationTimerRef.current = null;
-    }
-    if (speakingTimerRef.current !== null) {
-      window.clearTimeout(speakingTimerRef.current);
-      speakingTimerRef.current = null;
-    }
+      if (delegationTimerRef.current !== null) {
+        window.clearTimeout(delegationTimerRef.current);
+        delegationTimerRef.current = null;
+      }
+      if (speakingTimerRef.current !== null) {
+        window.clearTimeout(speakingTimerRef.current);
+        speakingTimerRef.current = null;
+      }
 
-    const peer = peerRef.current;
-    const channel = dataChannelRef.current;
-    const mic = micStreamRef.current;
-    const audio = outputAudioRef.current;
-    peerRef.current = null;
-    dataChannelRef.current = null;
-    micStreamRef.current = null;
-    outputAudioRef.current = null;
+      const peer = peerRef.current;
+      const channel = dataChannelRef.current;
+      const mic = micStreamRef.current;
+      const audio = outputAudioRef.current;
+      peerRef.current = null;
+      dataChannelRef.current = null;
+      micStreamRef.current = null;
+      outputAudioRef.current = null;
 
-    if (channel?.readyState === 'open') {
-      channel.send(JSON.stringify({ type: 'session.close' }));
-    }
-    release(peer, channel, mic, audio);
+      if (channel?.readyState === 'open') {
+        channel.send(JSON.stringify({ type: 'session.close' }));
+      }
+      release(peer, channel, mic, audio);
 
-    inputTranscriptRef.current = '';
-    pendingDelegationsRef.current = [];
-    setActive(false);
-    setStatus('idle');
-    setInterimTranscript('');
-  }, [release]);
+      inputTranscriptRef.current = '';
+      pendingDelegationsRef.current = [];
+      setActive(false);
+      setStatus('idle');
+      if (wasActive && !options?.silent) playVoiceCue('stop');
+    },
+    [release],
+  );
 
   const start = useCallback(async () => {
     if (activeRef.current || connectingRef.current || disabled) return;
@@ -331,7 +363,9 @@ export function useLiveVoice({
       activeRef.current = true;
       setActive(true);
       setStatus('listening');
+      playVoiceCue('start');
     } catch (caught) {
+      console.error('[voice] Could not start the voice conversation', caught);
       release(peer, channel, mic, audio);
       if (isStale()) return;
       if (peerRef.current === peer) peerRef.current = null;
@@ -366,13 +400,11 @@ export function useLiveVoice({
     }
   }, []);
 
-  useEffect(() => stop, [stop]);
+  useEffect(() => () => stop(), [stop]);
 
   return {
     active,
     status,
-    interimTranscript,
-    error,
     start,
     stop,
     speak,

@@ -2,13 +2,21 @@ import { act, renderHook } from '@testing-library/react';
 
 import { useLiveVoice } from './useLiveVoice';
 
-const { createLiveSessionMutate } = vi.hoisted(() => ({
-  createLiveSessionMutate: vi.fn(),
-}));
+const { createLiveSessionMutate, cleanTranscriptMutate, playVoiceCue } =
+  vi.hoisted(() => ({
+    createLiveSessionMutate: vi.fn(),
+    cleanTranscriptMutate: vi.fn(),
+    playVoiceCue: vi.fn(),
+  }));
+
+vi.mock('@/lib/voice-cues', () => ({ playVoiceCue }));
 
 vi.mock('@/trpc/client', () => ({
   useTRPCClient: () => ({
-    voice: { createLiveSession: { mutate: createLiveSessionMutate } },
+    voice: {
+      createLiveSession: { mutate: createLiveSessionMutate },
+      cleanTranscript: { mutate: cleanTranscriptMutate },
+    },
   }),
 }));
 
@@ -72,6 +80,9 @@ describe('useLiveVoice', () => {
       sessionId: 'live_123',
       sdp: 'answer-sdp',
     });
+    cleanTranscriptMutate.mockImplementation(
+      async ({ text }: { text: string }) => ({ text: `${text}.` }),
+    );
     vi.stubGlobal('RTCPeerConnection', FakePeer);
     vi.stubGlobal(
       'Audio',
@@ -94,7 +105,7 @@ describe('useLiveVoice', () => {
     vi.unstubAllGlobals();
   });
 
-  it('delegates transcript text to Fast and returns Fast output to GPT-Live', async () => {
+  it('delegates cleaned transcript text to Fast and returns Fast output to GPT-Live', async () => {
     const onUtterance = vi.fn();
     const { result } = renderHook(() => useLiveVoice({ onUtterance }));
 
@@ -122,12 +133,15 @@ describe('useLiveVoice', () => {
       });
       vi.advanceTimersByTime(250);
     });
+    await act(async () => {});
 
+    expect(cleanTranscriptMutate).toHaveBeenCalledWith({
+      text: 'Check the build status',
+    });
     expect(onUtterance).toHaveBeenCalledWith(
-      'Check the build status',
+      'Check the build status.',
       'item_123',
     );
-    expect(result.current.interimTranscript).toBe('');
 
     act(() =>
       result.current.speak(
@@ -176,5 +190,108 @@ describe('useLiveVoice', () => {
       await starting;
     });
     expect(result.current.active).toBe(false);
+  });
+
+  it('falls back to the raw transcript when cleanup fails', async () => {
+    cleanTranscriptMutate.mockRejectedValue(new Error('offline'));
+    const onUtterance = vi.fn();
+    const { result } = renderHook(() => useLiveVoice({ onUtterance }));
+
+    await act(async () => result.current.start());
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        delegation: { id: 'item_123', target: 'client' },
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'um check the the build',
+        start_ms: 0,
+        end_ms: 400,
+      });
+      vi.advanceTimersByTime(250);
+    });
+    await act(async () => {});
+
+    expect(onUtterance).toHaveBeenCalledWith(
+      'um check the the build',
+      'item_123',
+    );
+  });
+
+  it('drops an utterance whose cleanup finishes after voice is ended', async () => {
+    let finishCleanup: (value: { text: string }) => void = () => undefined;
+    cleanTranscriptMutate.mockImplementation(
+      () =>
+        new Promise<{ text: string }>((resolve) => {
+          finishCleanup = resolve;
+        }),
+    );
+    const onUtterance = vi.fn();
+    const { result } = renderHook(() => useLiveVoice({ onUtterance }));
+
+    await act(async () => result.current.start());
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        delegation: { id: 'item_123', target: 'client' },
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'never mind',
+        start_ms: 0,
+        end_ms: 400,
+      });
+      vi.advanceTimersByTime(250);
+    });
+    act(() => result.current.stop());
+    await act(async () => {
+      finishCleanup({ text: 'Never mind.' });
+    });
+
+    expect(onUtterance).not.toHaveBeenCalled();
+  });
+
+  it('plays a cue when the conversation opens and when it closes', async () => {
+    const { result } = renderHook(() => useLiveVoice({ onUtterance: vi.fn() }));
+
+    await act(async () => result.current.start());
+    expect(playVoiceCue).toHaveBeenCalledWith('start');
+
+    act(() => result.current.stop());
+    expect(playVoiceCue).toHaveBeenCalledWith('stop');
+  });
+
+  it('stays quiet for a silent stop and for an aborted handshake', async () => {
+    let finishHandshake: (value: {
+      sessionId: string;
+      sdp: string;
+    }) => void = () => undefined;
+    createLiveSessionMutate.mockImplementationOnce(
+      () =>
+        new Promise<{ sessionId: string; sdp: string }>((resolve) => {
+          finishHandshake = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useLiveVoice({ onUtterance: vi.fn() }));
+
+    // Ending while still connecting: nothing was announced, so no closing cue.
+    let starting: Promise<void> = Promise.resolve();
+    await act(async () => {
+      starting = result.current.start();
+      await Promise.resolve();
+    });
+    act(() => result.current.stop());
+    await act(async () => {
+      finishHandshake({ sessionId: 'live_123', sdp: 'answer-sdp' });
+      await starting;
+    });
+    expect(playVoiceCue).not.toHaveBeenCalled();
+
+    // A handoff to a new Session ends silently.
+    await act(async () => result.current.start());
+    playVoiceCue.mockClear();
+    act(() => result.current.stop({ silent: true }));
+    expect(playVoiceCue).not.toHaveBeenCalled();
   });
 });

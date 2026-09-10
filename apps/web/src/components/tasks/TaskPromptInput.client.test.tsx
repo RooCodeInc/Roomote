@@ -163,13 +163,11 @@ describe('TaskPromptInput', () => {
         onSubmit={() => {}}
         placeholder="Describe a task"
         voice={{ active: false, onToggle }}
-        banner={<div data-testid="voice-banner">Listening</div>}
       />,
     );
     fireEvent.click(
       screen.getByRole('button', { name: /^voice conversation$/i }),
     );
     expect(onToggle).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId('voice-banner')).toBeInTheDocument();
   });
 });

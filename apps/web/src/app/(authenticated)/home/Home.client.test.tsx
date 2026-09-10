@@ -114,8 +114,6 @@ vi.mock('@/hooks/useLiveVoice', () => ({
     return {
       active: voiceState.active,
       status: voiceState.active ? 'listening' : 'idle',
-      interimTranscript: '',
-      error: null,
       start: voiceState.start,
       stop: voiceState.stop,
       speak: vi.fn(),
@@ -175,7 +173,6 @@ vi.mock('@/components/tasks', async () => {
       submitWithMetaKey,
       tools,
       voice,
-      banner,
     }: {
       onSubmit: (message: PromptInputMessage) => Promise<void> | void;
       onPromptTextChange?: (value: string) => void;
@@ -185,7 +182,6 @@ vi.mock('@/components/tasks', async () => {
       submitWithMetaKey?: boolean;
       tools?: import('react').ReactNode;
       voice?: { active: boolean; onToggle: () => void };
-      banner?: import('react').ReactNode;
     }) => {
       capturedSubmitWithMetaKey = submitWithMetaKey;
 
@@ -204,7 +200,6 @@ vi.mock('@/components/tasks', async () => {
             }
           }}
         >
-          {banner}
           <button type="button" aria-label="Add attachments">
             +
           </button>

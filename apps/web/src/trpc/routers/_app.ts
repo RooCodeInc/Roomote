@@ -49,6 +49,7 @@ import {
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
+  cleanVoiceTranscriptCommand,
   createVoiceLiveSessionCommand,
   getVoiceStatusCommand,
 } from '../commands/voice';
@@ -3028,8 +3029,17 @@ export const appRouter = createRouter({
   voice: createRouter({
     status: protectedProcedure.query(() => getVoiceStatusCommand()),
     createLiveSession: protectedProcedure
-      .input(z.object({ sdp: z.string().trim().min(1).max(65_536) }))
-      .mutation(({ input }) => createVoiceLiveSessionCommand(input)),
+      // Never trim the SDP: it must keep its trailing CRLF or GPT-Live
+      // rejects the offer with "failed to unmarshal SDP: EOF".
+      .input(z.object({ sdp: z.string().min(1).max(65_536) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createVoiceLiveSessionCommand(auth, input),
+      ),
+    cleanTranscript: protectedProcedure
+      .input(z.object({ text: z.string().trim().min(1).max(8_000) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        cleanVoiceTranscriptCommand(auth, input),
+      ),
   }),
 
   sessions: createRouter({

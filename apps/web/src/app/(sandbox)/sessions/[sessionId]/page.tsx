@@ -22,10 +22,8 @@ import { WorkspaceHeader } from '@/components/layout';
 import { SessionViewers } from '@/components/sessions/SessionViewers';
 
 import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
-import {
-  FastSessionTranscript,
-  VOICE_AUTOSTART_QUERY_PARAM,
-} from './FastSessionTranscript';
+import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
+import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
 import {
   SessionHeaderPullRequests,
@@ -102,8 +100,7 @@ export default async function SessionDetailPage({
   const { sessionId } = await params;
   const { authorizedUser, unifiedSession, session } =
     await getSessionPageData(sessionId);
-  const autoStartVoice =
-    (await searchParams)?.[VOICE_AUTOSTART_QUERY_PARAM] === '1';
+  const autoStartVoice = hasVoiceAutostartFlag(await searchParams);
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
   const modelEnv: Record<string, string> =

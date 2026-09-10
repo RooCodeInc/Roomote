@@ -29,7 +29,6 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
-  LiveVoiceStatusBar,
   Message,
   MessageContent,
   MessageUiOptionsProvider,
@@ -57,6 +56,7 @@ import {
 import { useNarrationMode } from '@/hooks/useNarrationMode';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { truncatePageTitle } from '@/lib/page-title';
+import { VOICE_AUTOSTART_QUERY_PARAM } from '@/lib/voice-autostart';
 import {
   clearPendingFastSessionLaunch,
   getPendingFastSessionLaunch,
@@ -273,7 +273,6 @@ export function pendingResponseReducer(
 }
 
 /** Query param that opens a session straight into a voice conversation. */
-export const VOICE_AUTOSTART_QUERY_PARAM = 'voice';
 
 function ThinkingMessage() {
   return (
@@ -931,16 +930,19 @@ export function FastSessionTranscript({
   // up: voice starts once the deployment confirms it is configured, with no
   // cutoff so the reply to that first utterance is spoken. The flag is
   // dropped from the URL so a reload does not restart the conversation.
-  const autoStartedVoiceRef = useRef(false);
+  //
+  // No "already started" ref guard here: React StrictMode (dev) mounts,
+  // unmounts, and remounts effects, and the simulated unmount runs the voice
+  // hook's cleanup, which stops the handshake. The effect must be able to
+  // start again on the remount, which its dependencies already ensure.
   const startLiveVoiceRef = useRef(liveVoice.start);
   startLiveVoiceRef.current = liveVoice.start;
 
   useEffect(() => {
-    if (!autoStartVoice || !voiceEnabled || autoStartedVoiceRef.current) {
+    if (!autoStartVoice || !voiceEnabled) {
       return;
     }
 
-    autoStartedVoiceRef.current = true;
     voiceCutoffTsRef.current = 0;
     spokenMessageIdsRef.current.clear();
     voiceDelegationByTurnIdRef.current.clear();
@@ -1062,15 +1064,6 @@ export function FastSessionTranscript({
         </Conversation>
         {canReply && !pendingInputRequest ? (
           <div className="mx-auto w-full shrink-0 overflow-clip rounded-t-md rounded-b-3xl border-2 border-background bg-card outline-0 outline-offset-[-2px] outline-accent-foreground transition-[background-color,border-color,outline-width] has-[textarea:focus]:outline-2 @[56rem]:rounded-t-lg">
-            {liveVoice.status !== 'idle' ? (
-              <LiveVoiceStatusBar
-                status={liveVoice.status}
-                interimTranscript={liveVoice.interimTranscript}
-                thinking={agentWorking}
-                error={liveVoice.error}
-                onStop={liveVoice.stop}
-              />
-            ) : null}
             <SessionPromptInput
               sessionId={sessionId}
               isBusy={isSending}
@@ -1087,7 +1080,8 @@ export function FastSessionTranscript({
                 voiceEnabled
                   ? {
                       enabled: true,
-                      active: liveVoice.active,
+                      active:
+                        liveVoice.active || liveVoice.status === 'connecting',
                       onToggle: handleVoiceToggle,
                     }
                   : undefined

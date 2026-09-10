@@ -130,8 +130,6 @@ type TaskPromptInputProps = {
    * conversation rather than filling the textarea.
    */
   voice?: TaskPromptVoiceControls;
-  /** Optional strip rendered inside the prompt box above the input. */
-  banner?: ReactNode;
 };
 
 type TaskPromptVoiceControls = {
@@ -157,7 +155,6 @@ export function TaskPromptInput({
   submitIcon,
   surface = 'default',
   voice,
-  banner,
 }: TaskPromptInputProps) {
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => onPromptTextChange(text),
@@ -176,7 +173,6 @@ export function TaskPromptInput({
           'animate-[enter-down_1s_1_200ms_backwards]',
       )}
     >
-      {banner}
       <PromptInputRoot
         key={promptKey}
         onSubmit={onSubmit}

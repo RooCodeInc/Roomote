@@ -75,8 +75,6 @@ vi.mock('@/hooks/useLiveVoice', () => ({
     return {
       active: liveVoiceState.active,
       status: liveVoiceState.status,
-      interimTranscript: '',
-      error: null,
       start: liveVoiceState.start,
       stop: liveVoiceState.stop,
       speak: liveVoiceState.speak,
@@ -2257,8 +2255,10 @@ describe('FastSessionTranscript', () => {
         />,
       );
 
+      // The button lights up as soon as the handshake starts; there is no
+      // separate status strip, so it is the only voice control on screen.
       const toggle = await screen.findByRole('button', {
-        name: /^voice conversation$/i,
+        name: /^end voice conversation$/i,
       });
       fireEvent.click(toggle);
       expect(liveVoiceState.stop).toHaveBeenCalledTimes(1);

@@ -27,14 +27,18 @@ and receives only the negotiated session answer; it never receives the API key.
 
 1. Select the voice button in a composer: in an open Session, or on the home
    page and the **New Session** dialog to start a fresh Session by speaking.
-2. Grant microphone access when the browser asks.
-3. Speak naturally. GPT-Live shows the live transcript and delegates requests
-   to the Fast Session. From the home page or dialog, your first delegated
-   request starts the Session and opens it already in voice mode.
+2. Grant microphone access when the browser asks. A short rising tone
+   confirms the conversation is open; a falling tone marks the end.
+3. Speak naturally. GPT-Live delegates requests to the Fast Session, and each
+   spoken request is cleaned up (filler words, false starts, and misheard
+   terms) before it appears in the transcript as if you had typed it. From the
+   home page or dialog, your first delegated request starts the Session and
+   opens it already in voice mode.
 4. GPT-Live speaks verified Fast output as it arrives. Speak at any time to
    interrupt; GPT-Live continues listening while it speaks, and corrections
    are sent back through the same Fast Session.
-5. Select **End** (or the voice button again) to return to typing.
+5. Select the voice button again to return to typing. The button stays
+   highlighted while the conversation is active.
 
 Voice input requires a browser with microphone and WebRTC support, which
 includes current Chrome, Edge, Safari, and Firefox.
@@ -46,6 +50,11 @@ an answer, reasoning, or an action go through the same Fast reply path as typed
 messages. That preserves the Session's selected model, tools, permissions, and
 transcript. Fast output is cleaned for speech before it is returned to
 GPT-Live, so code blocks and raw URLs are not read character-by-character.
+
+GPT-Live is told which repositories, environments, and integrations the Fast
+Session can reach, so naming one of them is treated as a request to delegate
+rather than something to ask about. The same names guide transcript cleanup,
+so a misheard repository name is corrected to the real one.
 
 Brief greetings and clarifying questions can stay in the live conversation and
 do not start duplicate Fast work. Ending voice stops the microphone; Fast work
