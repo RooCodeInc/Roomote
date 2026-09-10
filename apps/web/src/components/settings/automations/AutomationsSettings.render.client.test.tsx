@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from '@testing-library/react';
 import { toast } from 'sonner';
@@ -1029,11 +1030,14 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     await screen.findByText('Triage Dependabot Alerts');
-    const providerSupport = screen.getAllByText(/GitHub only/)[0]!;
-    expect(providerSupport.tagName).toBe('SPAN');
-    expect(providerSupport.closest('[role="row"]')).toHaveTextContent(
-      'Triage Dependabot Alerts',
+    const dependabotRow = screen
+      .getByText('Triage Dependabot Alerts')
+      .closest('[role="row"]');
+    expect(dependabotRow).not.toBeNull();
+    const providerSupport = within(dependabotRow as HTMLElement).getByText(
+      /GitHub only/,
     );
+    expect(providerSupport.tagName).toBe('SPAN');
   });
 
   it('renders custom and built-in automations in one list by default', async () => {
@@ -1051,6 +1055,75 @@ describe('AutomationsSettings', () => {
       'sr-only',
     );
     expect(screen.queryByText('Available')).not.toBeInTheDocument();
+  });
+
+  it('orders the unified list alphabetically without changing query data', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-z',
+        name: 'Zulu custom automation',
+        prompt: 'Run last alphabetically.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      {
+        id: 'automation-a',
+        name: 'Aardvark custom automation',
+        prompt: 'Run first alphabetically.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    await screen.findByText('Aardvark custom automation');
+    const orderedRows = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.textContent ?? '');
+
+    expect(orderedRows[0]).toContain('Aardvark custom automation');
+    expect(orderedRows[1]).toContain('Alert on Config Errors');
+    expect(orderedRows.at(-1)).toContain('Zulu custom automation');
+    expect(
+      state.customAutomations.map((automation) => automation.name),
+    ).toEqual(['Zulu custom automation', 'Aardvark custom automation']);
+
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'Run first alphabetically' } },
+    );
+    const customRow = screen
+      .getByText('Aardvark custom automation')
+      .closest('[role="row"]');
+    expect(customRow?.nextElementSibling).toBe(
+      screen.getByText('No built-in automations match your search.'),
+    );
   });
 
   it('uses the left switch as the built-in configuration entry point', async () => {
