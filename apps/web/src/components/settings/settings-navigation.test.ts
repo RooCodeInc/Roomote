@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { getSettingsNavigationItem } from './settings-navigation';
 
 describe('settings navigation', () => {
-  it('shows the empty state for Experimental settings', () => {
+  it('describes Experimental settings with active opt-in features', () => {
     expect(getSettingsNavigationItem('experimental')?.description).toBe(
-      'No experimental features at the moment. Check back soon.',
+      'Try opt-in features that may change while they are being evaluated.',
     );
   });
 });
