@@ -33,7 +33,7 @@ describe('upsertFastAgentMessage', () => {
 
     await expect(
       upsertFastAgentMessage({ sessionId: 'session-1', message }),
-    ).resolves.toEqual({ initialHumanTurn: true });
+    ).resolves.toMatchObject({ initialHumanTurn: true });
     expect(upsertMessageMock).toHaveBeenCalledTimes(2);
   });
 

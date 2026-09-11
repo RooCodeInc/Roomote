@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { AcpRequestUserInputQuestion } from '@roomote/types';
 
 import type { CommunicationMessageButton } from './provider';
@@ -20,7 +22,14 @@ function questionAllowsCustomAnswer(
 }
 
 function requestToken(requestId: string): string {
-  return requestId.slice(-8);
+  return createHash('sha256').update(requestId).digest('hex').slice(0, 24);
+}
+
+export function matchesDiscordRequestUserInputRequestToken(
+  requestId: string,
+  token: string,
+): boolean {
+  return token === requestToken(requestId) || token === requestId.slice(-8);
 }
 
 export function getDiscordRequestUserInputCurrentQuestion(params: {
@@ -70,9 +79,10 @@ export function parseDiscordRequestUserInputAnswerCallbackData(
   optionIndex: number;
   requestToken: string;
 } | null {
-  const match = /^discord:rui:(\d+):(\d+):(\d+):([A-Za-z0-9_-]{1,16})$/u.exec(
-    value ?? '',
-  );
+  const match =
+    /^discord:rui:(\d+):(\d+):(\d+):([a-f0-9]{24}|[A-Za-z0-9_-]{8})$/u.exec(
+      value ?? '',
+    );
   if (!match) {
     return null;
   }
@@ -104,9 +114,10 @@ export function parseDiscordRequestUserInputAnswerCallbackData(
 export function parseDiscordRequestUserInputCancelCallbackData(
   value: string | undefined,
 ): { runId: number; requestToken: string } | null {
-  const match = /^discord:rui_cancel:(\d+):([A-Za-z0-9_-]{1,16})$/u.exec(
-    value ?? '',
-  );
+  const match =
+    /^discord:rui_cancel:(\d+):([a-f0-9]{24}|[A-Za-z0-9_-]{8})$/u.exec(
+      value ?? '',
+    );
   if (!match) {
     return null;
   }
