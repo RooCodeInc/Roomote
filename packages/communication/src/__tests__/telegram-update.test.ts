@@ -7,6 +7,7 @@ import {
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessageReaction,
   isNewTelegramThumbsUpReaction,
+  isTelegramHelpCommand,
   isTelegramStartCommand,
   isTelegramTaskEntryUpdate,
   parseTelegramUpdate,
@@ -43,6 +44,23 @@ describe('Telegram update helpers', () => {
     expect(isTelegramStartCommand(parse(buildUpdate('/start', 'group')))).toBe(
       false,
     );
+  });
+
+  it('recognizes /help commands in private chats only', () => {
+    const parse = (text: string, chatType = 'private') =>
+      parseTelegramUpdate({
+        update_id: 1,
+        message: {
+          message_id: 2,
+          chat: { id: 3, type: chatType },
+          text,
+        },
+      }).data!;
+
+    expect(isTelegramHelpCommand(parse('/help'))).toBe(true);
+    expect(isTelegramHelpCommand(parse('/help@my_bot'))).toBe(true);
+    expect(isTelegramHelpCommand(parse('/help me'))).toBe(false);
+    expect(isTelegramHelpCommand(parse('/help', 'group'))).toBe(false);
   });
 
   it('parses callback_query updates', () => {
@@ -153,6 +171,33 @@ describe('Telegram update helpers', () => {
       communicationProvider: 'telegram',
       communicationChannelId: '-100456',
       communicationMessageId: '42',
+    });
+  });
+
+  it('includes compact replied-to message context', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 1002,
+      message: {
+        message_id: 43,
+        text: 'What does this mean?',
+        from: { id: 123, first_name: 'Ada' },
+        chat: { id: 456, type: 'private' },
+        reply_to_message: {
+          message_id: 42,
+          text: 'Use the existing provider-neutral envelope.\nDo not copy the whole update.',
+          from: { id: 999, is_bot: true, first_name: 'Roomote' },
+          chat: { id: 456, type: 'private' },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({
+      text: 'What does this mean?',
+      agentContext:
+        'The person is replying to this Telegram message:\n{"message_id":"42","author":"Roomote","content":"Use the existing provider-neutral envelope. Do not copy the whole update."}',
     });
   });
 

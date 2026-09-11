@@ -449,6 +449,7 @@ describe('deliverFastAgentParentEvent', () => {
       provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       sendChatAction: mocks.telegramTyping,
+      sendMessageDraft: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
     });
     mocks.agentMailPostMessage.mockResolvedValue({
@@ -2093,17 +2094,24 @@ describe('deliverFastAgentParentEvent', () => {
         try {
           adapter.activity.start();
           await vi.advanceTimersByTimeAsync(0);
-          expect(typing).toHaveBeenCalledWith(replyTarget);
+          expect(typing).toHaveBeenCalledWith(
+            surface === 'telegram'
+              ? expect.objectContaining({
+                  ...replyTarget,
+                  draftId: expect.any(Number),
+                })
+              : replyTarget,
+          );
           await vi.advanceTimersByTimeAsync(
-            surface === 'discord' ? 8_000 : 4_000,
+            surface === 'discord' ? 8_000 : 25_000,
           );
           expect(typing).toHaveBeenCalledTimes(2);
           const reply = { purpose: 'closeout', message: 'Working' };
           await adapter.postReply(reply);
-          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
           expect(typing).toHaveBeenCalledTimes(3);
           await adapter.replaceReply({ messageId: '123' }, reply);
-          await vi.advanceTimersByTimeAsync(0);
+          await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
           expect(typing).toHaveBeenCalledTimes(4);
           const editMessage =
             surface === 'discord'

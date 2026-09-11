@@ -23,6 +23,7 @@ import {
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
   isTelegramStartCommand,
+  isTelegramHelpCommand,
   isTelegramTaskEntryUpdate,
   isNewTelegramThumbsUpReaction,
   parseTelegramUpdate,
@@ -45,6 +46,7 @@ import {
   isTelegramLinkCode,
   isFastAgentProviderMessage,
   queueFastAgentSurfaceReply,
+  recordFastAgentConversationMessageBestEffort,
   restoreTelegramLinkCode,
 } from '@roomote/sdk/server';
 import {
@@ -72,6 +74,7 @@ import {
 const TELEGRAM_COMMAND_HELP = [
   '*Available commands*',
   '`/start` — show this welcome message.',
+  '`/help` — show command help.',
   '`/new <request>` — start a fresh conversation instead of continuing the current one; when topics are available, it opens a new topic.',
 ].join('\n');
 
@@ -102,6 +105,7 @@ import { attachTelegramMediaToQueuedMessage } from './attachments.js';
 import {
   claimTelegramLinkNudge,
   claimTelegramUpdate,
+  consumeTelegramImplicitTopic,
   releaseTelegramUpdateClaim,
   rememberTelegramImplicitTopic,
   verifyTelegramWebhookSecret,
@@ -405,7 +409,7 @@ telegram.post('/', async (c) => {
   // A bare /start is Telegram's "open the bot" gesture, so greet the sender
   // even before they have linked an account — unlinked senders still need the
   // welcome and account-linking guidance.
-  if (isTelegramStartCommand(update)) {
+  if (isTelegramStartCommand(update) || isTelegramHelpCommand(update)) {
     if (senderUserId) {
       await captureTelegramPrimaryChatBestEffort({
         chatId: String(message.chat.id),
@@ -610,6 +614,9 @@ telegram.post('/', async (c) => {
       senderDisplayName,
       question,
       currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+      ...(fastMessage.agentContext
+        ? { agentContext: fastMessage.agentContext }
+        : {}),
       ...(fastMessage.images ? { images: fastMessage.images } : {}),
     });
     if (!continued) {
@@ -622,10 +629,6 @@ telegram.post('/', async (c) => {
         reason: 'fast_session_delivery_unavailable',
       });
     }
-    await ackTelegramMessageBestEffort({
-      chatId: metadata.communicationChannelId,
-      messageId: metadata.communicationMessageId,
-    });
     return c.json({ ok: true, fastAnswered: true, fastContinued: true });
   }
   const activeRun = repliedToAutomationReport
@@ -780,13 +783,11 @@ telegram.post('/', async (c) => {
     queuedMessage.text = newTaskCommand.text;
   }
 
-  // Ack before routing so the sender sees pickup while the router runs.
-  await ackTelegramMessageBestEffort({
-    chatId: metadata.communicationChannelId,
-    messageId: metadata.communicationMessageId,
-  });
-
   if (completedRun) {
+    await ackTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      messageId: metadata.communicationMessageId,
+    });
     try {
       const resumeLaunch = await resumeTelegramTaskFromSnapshot({
         completedRun,
@@ -856,6 +857,8 @@ telegram.post('/', async (c) => {
       ? metadata.communicationChannelId
       : queuedMessage.ts);
   let currentMessageId = metadata.communicationMessageId ?? queuedMessage.ts;
+  let createdTopicThreadId: string | undefined;
+  let topicRootMessageId: string | undefined;
 
   if (newTaskCommand) {
     // `/new` opens a fresh conversation. Where Telegram supports topics it
@@ -904,9 +907,11 @@ telegram.post('/', async (c) => {
         channelId: metadata.communicationChannelId,
         threadId: topic.threadId,
       };
+      createdTopicThreadId = topic.threadId;
       providerConversationId = topic.threadId;
       if (topicRootMessage?.messageId) {
         currentMessageId = topicRootMessage.messageId;
+        topicRootMessageId = topicRootMessage.messageId;
       }
     } else if (!isTelegramPrivateChat(message)) {
       // No topic support in this group: the command message anchors a
@@ -943,12 +948,42 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, queued: false, fastUnavailable: true });
   }
 
+  const managedTopicThreadId =
+    createdTopicThreadId ??
+    (metadata.communicationThreadId &&
+    (await consumeTelegramImplicitTopic({
+      chatId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+    }))
+      ? metadata.communicationThreadId
+      : undefined);
+  if (managedTopicThreadId) {
+    // A forum topic's service-message id is also its thread id. Persisting it
+    // distinguishes Roomote-created/implicit topics from user-owned topics on
+    // every later Fast turn without adding provider-specific session state.
+    await recordFastAgentConversationMessageBestEffort({
+      sessionId: session.id,
+      conversation: fastConversation,
+      messageId: managedTopicThreadId,
+    });
+    if (topicRootMessageId && topicRootMessageId !== managedTopicThreadId) {
+      await recordFastAgentConversationMessageBestEffort({
+        sessionId: session.id,
+        conversation: fastConversation,
+        messageId: topicRootMessageId,
+      });
+    }
+  }
+
   void continueFastAgentSurfaceReply({
     sessionId: session.id,
     userId: senderUserId,
     senderDisplayName,
     question: queuedMessage.text.trim(),
     currentMessageId,
+    ...(queuedMessage.agentContext
+      ? { agentContext: queuedMessage.agentContext }
+      : {}),
     ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
   })
     .then((continued) => {

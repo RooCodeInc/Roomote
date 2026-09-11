@@ -117,6 +117,7 @@ import {
   type TelegramLiveTaskStreamProvider,
 } from './telegram-live-task-stream';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
+import { createFastAgentTelegramActivity } from './fast-agent-telegram-activity';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
 import {
@@ -1866,9 +1867,9 @@ async function createTelegramFastAgentParentTurn(
   }
   const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
   const conversation = session.conversation;
-  const activity = createFastAgentTypingActivity({
-    sendTyping: () => provider.sendChatAction(conversation.replyTarget),
-    intervalMs: 4_000,
+  const activity = createFastAgentTelegramActivity({
+    provider,
+    replyTarget: conversation.replyTarget,
   });
   const replaceReply = createTelegramFastReplyReplacer({
     provider,

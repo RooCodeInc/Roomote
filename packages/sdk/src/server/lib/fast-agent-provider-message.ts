@@ -212,3 +212,24 @@ export async function isFastAgentProviderMessage(input: {
   });
   return Boolean(binding);
 }
+
+/** Telegram uses the topic service-message id as the topic's thread id. */
+export async function isFastAgentManagedTelegramTopic(input: {
+  sessionId: string;
+  workspaceId: string;
+  channelId: string;
+  threadId: string;
+}): Promise<boolean> {
+  const binding = await db.query.fastAgentProviderMessages.findFirst({
+    where: and(
+      eq(fastAgentProviderMessages.conversationId, input.sessionId),
+      eq(fastAgentProviderMessages.provider, 'telegram'),
+      eq(fastAgentProviderMessages.workspaceId, input.workspaceId),
+      eq(fastAgentProviderMessages.channelId, input.channelId),
+      eq(fastAgentProviderMessages.threadId, input.threadId),
+      eq(fastAgentProviderMessages.messageId, input.threadId),
+    ),
+    columns: { id: true },
+  });
+  return Boolean(binding);
+}

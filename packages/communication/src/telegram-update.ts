@@ -83,6 +83,19 @@ const telegramVoiceSchema = z
   })
   .passthrough();
 
+const telegramRepliedToMessageSchema = z
+  .object({
+    message_id: z.number().int(),
+    text: z.string().optional(),
+    caption: z.string().optional(),
+    photo: z.array(telegramPhotoSizeSchema).optional(),
+    document: telegramDocumentSchema.optional(),
+    audio: telegramAudioSchema.optional(),
+    voice: telegramVoiceSchema.optional(),
+    from: telegramUserSchema.optional(),
+  })
+  .passthrough();
+
 const telegramMessageSchema = z
   .object({
     message_id: z.number().int(),
@@ -99,6 +112,7 @@ const telegramMessageSchema = z
     entities: z.array(telegramMessageEntitySchema).optional(),
     caption_entities: z.array(telegramMessageEntitySchema).optional(),
     forum_topic_created: telegramForumTopicCreatedSchema.optional(),
+    reply_to_message: telegramRepliedToMessageSchema.optional(),
   })
   .passthrough();
 
@@ -166,6 +180,50 @@ function cleanOptionalString(value: string | undefined): string | undefined {
 
 function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
+}
+
+const TELEGRAM_REPLY_CONTENT_MAX_LENGTH = 500;
+
+function getTelegramMessageContent(message: {
+  text?: string;
+  caption?: string;
+  photo?: unknown[];
+  document?: { file_name?: string };
+  audio?: { file_name?: string };
+  voice?: unknown;
+}): string | undefined {
+  const text = normalizeWhitespace(message.text ?? message.caption ?? '');
+  if (text) {
+    return text.length <= TELEGRAM_REPLY_CONTENT_MAX_LENGTH
+      ? text
+      : `${text.slice(0, TELEGRAM_REPLY_CONTENT_MAX_LENGTH - 3).trimEnd()}...`;
+  }
+
+  return message.photo?.length
+    ? 'Image attachment'
+    : message.document
+      ? `Document attachment${message.document.file_name ? `: ${message.document.file_name}` : ''}`
+      : message.audio
+        ? `Audio attachment${message.audio.file_name ? `: ${message.audio.file_name}` : ''}`
+        : message.voice
+          ? 'Audio attachment: voice message'
+          : undefined;
+}
+
+export function getTelegramRepliedToMessageContext(
+  message: TelegramMessage,
+): string | undefined {
+  const repliedTo = message.reply_to_message;
+  if (!repliedTo) {
+    return undefined;
+  }
+
+  const content = getTelegramMessageContent(repliedTo);
+  return `The person is replying to this Telegram message:\n${JSON.stringify({
+    message_id: String(repliedTo.message_id),
+    author: formatTelegramUser(repliedTo),
+    ...(content ? { content } : {}),
+  })}`;
 }
 
 function readEntityText(
@@ -261,7 +319,9 @@ export function isTelegramImplicitTopicCreatedMessage(
   return message.forum_topic_created?.is_name_implicit === true;
 }
 
-export function formatTelegramUser(message: TelegramMessage): string {
+export function formatTelegramUser(message: {
+  from?: z.infer<typeof telegramUserSchema>;
+}): string {
   const from = message.from;
 
   if (!from) {
@@ -520,6 +580,17 @@ export function isTelegramStartCommand(update: TelegramUpdate): boolean {
   return /^\/start(@[A-Za-z0-9_]+)?$/u.test(message.text.trim());
 }
 
+/** A bare `/help` uses the same private-chat help response as `/start`. */
+export function isTelegramHelpCommand(update: TelegramUpdate): boolean {
+  const message = getTelegramUpdateMessage(update);
+
+  if (!message?.text || !isTelegramPrivateChat(message)) {
+    return false;
+  }
+
+  return /^\/help(@[A-Za-z0-9_]+)?$/u.test(message.text.trim());
+}
+
 export function isTelegramTaskEntryUpdate(
   update: TelegramUpdate,
   options: TelegramBotMentionOptions = {},
@@ -682,6 +753,8 @@ export function telegramUpdateToQueuedCommunicationMessage(
     return null;
   }
 
+  const agentContext = getTelegramRepliedToMessageContext(message);
+
   return {
     provider: 'telegram',
     text,
@@ -689,6 +762,7 @@ export function telegramUpdateToQueuedCommunicationMessage(
     ...(options.userId ? { userId: options.userId } : {}),
     ts: String(message.message_id),
     channel: getTelegramChatId(message),
+    ...(agentContext ? { agentContext } : {}),
     ...(getTelegramMessageThreadId(message)
       ? { threadTs: getTelegramMessageThreadId(message) }
       : {}),

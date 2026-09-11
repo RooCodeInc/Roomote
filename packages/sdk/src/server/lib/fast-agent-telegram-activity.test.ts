@@ -1,0 +1,175 @@
+import {
+  FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS,
+  FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS,
+  FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS,
+  FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS,
+  createFastAgentTelegramActivity,
+} from './fast-agent-telegram-activity';
+
+describe('Fast Telegram activity', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('refreshes one native Thinking draft below its TTL in private chats', async () => {
+    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const activity = createFastAgentTelegramActivity({
+      provider: {
+        sendMessageDraft,
+        sendChatAction: vi.fn(),
+      },
+      replyTarget: { channelId: '123', threadId: '77' },
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendMessageDraft).toHaveBeenCalledTimes(1);
+    const firstDraftId = sendMessageDraft.mock.calls[0]![0].draftId;
+    expect(sendMessageDraft).toHaveBeenCalledWith({
+      channelId: '123',
+      threadId: '77',
+      draftId: firstDraftId,
+      text: '',
+    });
+
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);
+    expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+    expect(sendMessageDraft.mock.calls[1]![0].draftId).toBe(firstDraftId);
+    await activity.settle();
+  });
+
+  it('restores Thinking after an intermediate post but cancels it on true completion', async () => {
+    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const activity = createFastAgentTelegramActivity({
+      provider: {
+        sendMessageDraft,
+        sendChatAction: vi.fn(),
+      },
+      replyTarget: { channelId: '123' },
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(0);
+    activity.reassert();
+    await vi.advanceTimersByTimeAsync(
+      FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS - 1,
+    );
+    expect(sendMessageDraft).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+
+    activity.reassert();
+    await activity.settle();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS);
+    expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces partial text into one paced native draft and finalizes normally', async () => {
+    const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
+    const deliver = vi.fn().mockResolvedValue({ messageId: 'final-1' });
+    const activity = createFastAgentTelegramActivity({
+      provider: { sendMessageDraft, sendChatAction: vi.fn() },
+      replyTarget: { channelId: '123' },
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const stream = activity.createReplyStream(deliver);
+    await stream.append('Partial ');
+    await stream.append('answer');
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS);
+    expect(sendMessageDraft).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: 'Partial answer' }),
+    );
+
+    await expect(
+      stream.finish({ purpose: 'closeout', message: 'Final answer' }),
+    ).resolves.toEqual({ messageId: 'final-1' });
+    expect(deliver).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Final answer',
+    });
+    await activity.settle();
+  });
+
+  it('drains an issued draft before final delivery and fences late writes', async () => {
+    let resolveDraft!: () => void;
+    const draft = new Promise<void>((resolve) => {
+      resolveDraft = resolve;
+    });
+    const sendMessageDraft = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockReturnValueOnce(draft);
+    const deliver = vi.fn().mockResolvedValue({ messageId: 'final-1' });
+    const activity = createFastAgentTelegramActivity({
+      provider: { sendMessageDraft, sendChatAction: vi.fn() },
+      replyTarget: { channelId: '123' },
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const stream = activity.createReplyStream(deliver);
+    await stream.append('Partial');
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS);
+    const finishing = stream.finish({
+      purpose: 'closeout',
+      message: 'Final',
+    });
+    expect(deliver).not.toHaveBeenCalled();
+    resolveDraft();
+    await finishing;
+    expect(deliver).toHaveBeenCalledOnce();
+    await activity.settle();
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);
+    expect(sendMessageDraft).toHaveBeenCalledTimes(2);
+    await activity.dispose();
+  });
+
+  it('retains ordinary typing in group chats where drafts are unsupported', async () => {
+    const sendChatAction = vi.fn().mockResolvedValue(undefined);
+    const sendMessageDraft = vi.fn();
+    const activity = createFastAgentTelegramActivity({
+      provider: { sendMessageDraft, sendChatAction },
+      replyTarget: { channelId: '-100123', threadId: '77' },
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendChatAction).toHaveBeenCalledWith({
+      channelId: '-100123',
+      threadId: '77',
+    });
+    expect(sendMessageDraft).not.toHaveBeenCalled();
+    expect(activity.supportsReplyStream).toBe(false);
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS);
+    expect(sendChatAction).toHaveBeenCalledTimes(2);
+    await activity.dispose();
+  });
+
+  it('falls back to a typing heartbeat when Telegram rejects live drafts', async () => {
+    const sendMessageDraft = vi
+      .fn()
+      .mockRejectedValue(new Error('method unavailable'));
+    const sendChatAction = vi.fn().mockResolvedValue(undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const activity = createFastAgentTelegramActivity({
+      provider: { sendMessageDraft, sendChatAction },
+      replyTarget: { channelId: '123', threadId: '77' },
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendMessageDraft).toHaveBeenCalledOnce();
+    expect(sendChatAction).toHaveBeenCalledWith({
+      channelId: '123',
+      threadId: '77',
+    });
+    expect(warn).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS);
+    expect(sendMessageDraft).toHaveBeenCalledOnce();
+    expect(sendChatAction).toHaveBeenCalledTimes(2);
+    await activity.dispose();
+    warn.mockRestore();
+  });
+});

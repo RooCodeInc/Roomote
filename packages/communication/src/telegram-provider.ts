@@ -464,6 +464,45 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
   }
 
+  /** Update a private-chat live draft. Empty text shows native Thinking. */
+  async sendMessageDraft(input: {
+    channelId: string;
+    draftId: number;
+    threadId?: string;
+    text?: string;
+  }): Promise<void> {
+    if (!Number.isSafeInteger(input.draftId) || input.draftId === 0) {
+      throw new Error(
+        'Telegram sendMessageDraft requires a non-zero draft id.',
+      );
+    }
+    if ((input.text?.length ?? 0) > TELEGRAM_MAX_MESSAGE_LENGTH) {
+      throw new Error(
+        `Telegram sendMessageDraft text exceeds ${TELEGRAM_MAX_MESSAGE_LENGTH} characters.`,
+      );
+    }
+
+    const chatId = Number(input.channelId);
+    if (!Number.isSafeInteger(chatId) || chatId <= 0) {
+      throw new Error('Telegram sendMessageDraft requires a private-chat id.');
+    }
+    const threadId = parsePositiveInteger(input.threadId);
+    await this.callBotApi('sendMessageDraft', {
+      chat_id: chatId,
+      draft_id: input.draftId,
+      text: input.text ?? '',
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    });
+  }
+
+  async sendThinkingDraft(input: {
+    channelId: string;
+    draftId: number;
+    threadId?: string;
+  }): Promise<void> {
+    await this.sendMessageDraft(input);
+  }
+
   /**
    * Read the bot capability flag Telegram exposes for private-chat Threaded
    * Mode. This avoids probing createForumTopic for bots that have it disabled.
@@ -559,6 +598,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('setMyCommands', {
       commands: [
         { command: 'start', description: 'Show welcome and command help' },
+        { command: 'help', description: 'Show command help' },
         { command: 'new', description: 'Start a fresh task' },
       ],
     });
@@ -665,6 +705,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       'setWebhook',
       'setMyCommands',
       'sendChatAction',
+      'sendMessageDraft',
       'editMessageText',
       'editMessageReplyMarkup',
       'editForumTopic',

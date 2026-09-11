@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
+  telegramEditForumTopic: vi.fn(),
   telegramTyping: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordTyping: vi.fn(),
@@ -175,7 +176,9 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       editMessageText: mocks.telegramEditMessage,
+      editForumTopic: mocks.telegramEditForumTopic,
       sendChatAction: mocks.telegramTyping,
+      sendMessageDraft: mocks.telegramTyping,
     });
     mocks.createDiscordProvider.mockResolvedValue({
       triggerTyping: mocks.discordTyping,
@@ -220,9 +223,16 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       try {
         delivery!.adapter.activity!.start();
         await vi.advanceTimersByTimeAsync(0);
-        expect(typing).toHaveBeenCalledWith(replyTarget);
+        expect(typing).toHaveBeenCalledWith(
+          surface === 'telegram'
+            ? expect.objectContaining({
+                ...replyTarget,
+                draftId: expect.any(Number),
+              })
+            : replyTarget,
+        );
         await vi.advanceTimersByTimeAsync(
-          surface === 'discord' ? 8_000 : 4_000,
+          surface === 'discord' ? 8_000 : 25_000,
         );
         expect(typing).toHaveBeenCalledTimes(2);
         await delivery!.adapter.activity!.settle({ keepProcessing: true });
@@ -234,6 +244,117 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       }
     },
   );
+
+  it('streams a private Telegram reply through its native draft before final delivery', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: '123', threadId: '77' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: null,
+      question: 'Explain this',
+      currentMessageId: '42',
+    });
+    const adapter = delivery!.adapter;
+    expect(adapter.createReplyStream).toBeTypeOf('function');
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      adapter.activity!.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const stream = adapter.createReplyStream!();
+      await stream.append('Partial answer');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(mocks.telegramTyping).toHaveBeenLastCalledWith(
+        expect.objectContaining({ threadId: '77', text: 'Partial answer' }),
+      );
+      await expect(
+        stream.finish({ purpose: 'closeout', message: 'Final answer' }),
+      ).resolves.toEqual({ messageId: 'telegram-message-2' });
+      expect(mocks.telegramPostMessage).toHaveBeenCalled();
+      await adapter.activity!.settle();
+    } finally {
+      await adapter.activity!.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not offer Telegram draft streaming in groups', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: '-100123', threadId: '77' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: null,
+      question: 'Explain this',
+    });
+
+    expect(delivery!.adapter.createReplyStream).toBeUndefined();
+  });
+
+  it('syncs generated titles to a managed Telegram Fast topic', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      title: 'Generated Fast title',
+      replyTarget: { channelId: 'telegram-chat', threadId: '77' },
+    });
+    await db.insert(fastAgentProviderMessages).values({
+      conversationId: conversation.id,
+      provider: 'telegram',
+      workspaceId: conversation.workspaceId,
+      channelId: 'telegram-chat',
+      threadId: '77',
+      messageId: '77',
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Start here',
+      currentMessageId: '78',
+    });
+    delivery!.adapter.activity?.updateTitle?.('Generated Fast title');
+    await delivery!.adapter.activity?.dispose();
+
+    expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({
+      channelId: 'telegram-chat',
+      threadId: '77',
+      name: 'Generated Fast title',
+    });
+  });
+
+  it('does not rename a user-owned Telegram topic', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      title: 'Generated Fast title',
+      replyTarget: { channelId: 'telegram-chat', threadId: '77' },
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Continue here',
+      currentMessageId: '78',
+    });
+    delivery!.adapter.activity?.updateTitle?.('Generated Fast title');
+    await delivery!.adapter.activity?.dispose();
+
+    expect(mocks.telegramEditForumTopic).not.toHaveBeenCalled();
+  });
 
   it.each(['discord', 'telegram'] as const)(
     'reasserts %s after successful posts and replacements but not after a late post',
@@ -267,10 +388,10 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         adapter.activity!.start();
         await vi.advanceTimersByTimeAsync(0);
         await adapter.postReply(reply);
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
         expect(typing).toHaveBeenCalledTimes(2);
         await adapter.replaceReply!({ messageId: '123' }, reply);
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
         expect(typing).toHaveBeenCalledTimes(3);
         editMessage.mockRejectedValueOnce(new Error('edit failed'));
         await expect(

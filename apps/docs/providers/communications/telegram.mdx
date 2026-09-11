@@ -19,8 +19,8 @@ Use `<public-url>` below for your stable public Roomote URL.
 Message `@BotFather` in Telegram and create or select a bot. In the Roomote UI
 (**Settings > Communications > Telegram**), enter the bot token, then save.
 Roomote reads the bot identity from Telegram, generates a webhook secret,
-registers the Bot API webhook, and adds `/start` and `/new` to the bot's command
-menu for you.
+registers the Bot API webhook, and adds `/start`, `/help`, and `/new` to the
+bot's command menu for you.
 
 In BotFather, open **Bot Settings > Threaded Mode** and enable it. Roomote will
 then create a separate topic in your private bot chat for each new task. If
@@ -118,6 +118,15 @@ session even when the chat has no topics. Sessions are isolated by linked
 Roomote user. `/new` starts a fresh conversation instead of continuing the
 current one, opening a new topic when Telegram supports it; in a plain private
 chat the request joins that chat's conversation.
+
+While a private-chat Fast turn is running, Telegram shows its native
+**Thinking** status. Roomote refreshes the temporary draft for long turns and
+starts filling that draft with the response when generation takes long enough
+to stream. The completed response is always sent as a normal message so it
+remains in the conversation. Roomote keeps activity active across intermediate
+replies while more work remains, and a final reply clears it naturally.
+Telegram does not support native drafts in group chats, so groups use
+Telegram's standard typing status and receive completed replies instead.
 
 Existing task chats and topics keep their active-task, `request_user_input`,
 and resumable-snapshot behavior. If Fast cannot start a conversation, Roomote
