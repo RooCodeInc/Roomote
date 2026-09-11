@@ -148,15 +148,24 @@ describe('YamlEnvironmentEditor', () => {
 
 describe('VisualEnvironmentEditor', () => {
   it('omits the repositories section when the config has none', () => {
+    const onChange = vi.fn();
+
     render(
       <VisualEnvironmentEditor
         config={{ name: 'Tools', repositories: [] }}
-        onChange={vi.fn()}
+        onChange={onChange}
       />,
     );
 
     expect(screen.queryByText('Repositories')).not.toBeInTheDocument();
     expect(screen.queryByText(/no repositories/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Repo' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositories: [{ repository: '', commands: [] }],
+      }),
+    );
   });
 
   it('preserves intentionally empty environment variable values', () => {

@@ -280,7 +280,25 @@ export function VisualEnvironmentEditor({
         </div>
       </SectionShell>
 
-      {config.repositories.length > 0 ? (
+      {config.repositories.length === 0 ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              onChange(
+                updateEnvironmentConfig(config, (draft) => {
+                  draft.repositories = [{ repository: '', commands: [] }];
+                }),
+              )
+            }
+          >
+            <Plus />
+            Add Repo
+          </Button>
+        </div>
+      ) : (
         <SectionShell
           icon={GitBranch}
           title="Repositories"
@@ -338,7 +356,7 @@ export function VisualEnvironmentEditor({
             ))}
           </div>
         </SectionShell>
-      ) : null}
+      )}
 
       <SectionShell
         icon={Container}
