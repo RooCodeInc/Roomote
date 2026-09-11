@@ -267,6 +267,8 @@ export interface HarnessInferenceUsageEvent {
    * `build`) or a subagent name (for example `explore` or `visual`).
    */
   agent?: string;
+  /** Packaged workflow active for a primary-session inference request. */
+  workflowSkill?: string;
   inputTokens: number;
   outputTokens: number;
   reasoningTokens: number;

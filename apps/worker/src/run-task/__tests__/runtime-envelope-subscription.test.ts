@@ -313,6 +313,7 @@ describe('subscribeHarnessCallbacks', () => {
       providerId: 'openrouter',
       modelId: 'openai/gpt-5.4',
       agent: 'explore',
+      workflowSkill: 'implement-changes',
       inputTokens: 10,
       outputTokens: 5,
       reasoningTokens: 2,
@@ -344,6 +345,7 @@ describe('subscribeHarnessCallbacks', () => {
       costSource: 'opencode_message',
       messageCreatedAt: new Date('2026-07-01T12:00:00.000Z'),
       messageCompletedAt: new Date('2026-07-01T12:00:01.000Z'),
+      details: { workflowSkill: 'implement-changes' },
     });
 
     const unsubscribePromise = unsubscribe();
