@@ -1,34 +1,16 @@
 RUNNING
-⏳ Roomote task
-Running · 2m 5s
-Implement Telegram live task updates
+Fixing bug...
 
-Current activity
-Running focused tests. The payload and lifecycle suites are passing.
-
-Progress
-Running focused tests.
-The payload and lifecycle suites are passing.
+Updating the task lifecycle and rerunning focused tests.
 
 WAITING
-⏸️ Roomote task
-Waiting for input · 2m 30s
-Implement Telegram live task updates
-
-Current activity
 Waiting for your input…
 
 COMPLETED
-✅ Roomote task
-Completed · 3m
-Implement Telegram live task updates
+Completed.
 
 FAILED
-⚠️ Roomote task
-Failed · 45s
-Implement Telegram live task updates
+Task failed.
 
 STOPPED
-⏹️ Roomote task
-Stopped · 30s
-Implement Telegram live task updates
+Stopped.

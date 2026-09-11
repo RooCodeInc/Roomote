@@ -1236,7 +1236,6 @@ export function createFastAgentCommunicationTaskLauncher(params: {
             startTelegramLiveTaskStream({
               provider: params.telegramLiveTaskProvider!,
               taskRun,
-              prompt: context.prompt,
               taskUrl: context.taskUrl,
               channelId: params.conversation.replyTarget.channelId,
               ...(params.conversation.replyTarget.threadId

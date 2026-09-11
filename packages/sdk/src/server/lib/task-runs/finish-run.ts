@@ -75,7 +75,7 @@ import {
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
-import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
+import { settleLiveTaskMessageOnExit } from './settle-live-task-message-on-exit';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -434,7 +434,7 @@ export const finishRun = async ({
   }
   // The worker settles its own card on exit; this covers runs finalized
   // here without one (reaper, failed bootstrap). Never throws.
-  void settleSlackLiveTaskCardOnExit(run, status, run.task.title);
+  void settleLiveTaskMessageOnExit(run, status, run.task.title);
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.

@@ -40,7 +40,6 @@ export async function renderSlackLiveTaskCardForRun(
       status: input.status,
       ...(input.details ? { details: input.details } : {}),
       ...(input.output ? { output: input.output } : {}),
-      taskTitle: run.task?.title,
     });
   }
 

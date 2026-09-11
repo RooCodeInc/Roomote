@@ -58,7 +58,6 @@ describe('renderSlackLiveTaskCardForRun', () => {
       taskId: 'task-1',
       status: 'in_progress',
       details: 'Running the tests.',
-      taskTitle: 'Generated title',
     });
     expect(mocks.renderSlackLiveTaskCard).not.toHaveBeenCalled();
   });

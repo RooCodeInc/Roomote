@@ -8,15 +8,12 @@ export type TelegramLiveTaskStatus =
   | 'stopped';
 
 export interface TelegramLiveTaskMessageContent {
-  title: string;
   status: TelegramLiveTaskStatus;
-  elapsedSeconds?: number;
   progress?: string;
   taskUrl?: string;
 }
 
-const TELEGRAM_LIVE_TASK_TITLE_MAX_LENGTH = 160;
-const TELEGRAM_LIVE_TASK_ACTIVITY_MAX_LENGTH = 120;
+const TELEGRAM_LIVE_TASK_SUMMARY_MAX_LENGTH = 120;
 
 function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
@@ -42,51 +39,34 @@ function escapeHtmlWithinBudget(text: string, maxLength: number): string {
   return escaped;
 }
 
-function formatElapsed(seconds: number | undefined): string | undefined {
-  if (seconds === undefined || seconds < 0) return undefined;
-  if (seconds < 60) return `${Math.floor(seconds)}s`;
-
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = Math.floor(seconds % 60);
-  if (minutes < 60) {
-    return remainingSeconds > 0
-      ? `${minutes}m ${remainingSeconds}s`
-      : `${minutes}m`;
-  }
-
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
-}
-
-function statusLabel(status: TelegramLiveTaskStatus): string {
+function getStatusText(status: TelegramLiveTaskStatus): string {
   switch (status) {
     case 'running':
-      return 'Running';
+      return 'Starting task…';
     case 'waiting':
-      return 'Waiting for input';
+      return 'Waiting for your input…';
     case 'completed':
-      return 'Completed';
+      return 'Completed.';
     case 'failed':
-      return 'Failed';
+      return 'Task failed.';
     case 'stopped':
-      return 'Stopped';
+      return 'Stopped.';
   }
 }
 
-function statusIcon(status: TelegramLiveTaskStatus): string {
-  switch (status) {
-    case 'running':
-      return '⏳';
-    case 'waiting':
-      return '⏸️';
-    case 'completed':
-      return '✅';
-    case 'failed':
-      return '⚠️';
-    case 'stopped':
-      return '⏹️';
-  }
+function buildRunningContent(progress: string): {
+  summary: string;
+  details?: string;
+} {
+  const [firstLine = '', ...remainingLines] = progress.split('\n');
+  const normalizedFirstLine = firstLine.replace(/\s+/g, ' ').trim();
+  const summary = truncate(
+    normalizedFirstLine || progress.replace(/\s+/g, ' ').trim(),
+    TELEGRAM_LIVE_TASK_SUMMARY_MAX_LENGTH,
+  );
+  const remaining = remainingLines.join('\n').trim();
+  const details = remaining || (summary !== progress ? progress : undefined);
+  return { summary, ...(details ? { details } : {}) };
 }
 
 export function buildTelegramLiveTaskMessage(
@@ -96,60 +76,31 @@ export function buildTelegramLiveTaskMessage(
   htmlText: string;
   buttons?: Array<Array<{ text: string; url: string }>>;
 } {
-  const title = truncate(
-    content.title.replace(/\s+/g, ' ').trim(),
-    TELEGRAM_LIVE_TASK_TITLE_MAX_LENGTH,
-  );
-  const elapsed = formatElapsed(content.elapsedSeconds);
-  const status = `${statusLabel(content.status)}${elapsed ? ` · ${elapsed}` : ''}`;
-  const progress = content.progress?.trim();
-  const showExpandedProgress = Boolean(
-    progress && content.status === 'running',
-  );
-  const activity = progress
-    ? truncate(
-        progress.replace(/\s+/g, ' '),
-        TELEGRAM_LIVE_TASK_ACTIVITY_MAX_LENGTH,
-      )
-    : content.status === 'running'
-      ? 'Preparing workspace…'
-      : undefined;
-  const plainPrefix = [
-    `${statusIcon(content.status)} Roomote task`,
-    status,
-    title,
-    ...(activity ? ['', 'Current activity', activity] : []),
-  ].join('\n');
-  const plainProgress = showExpandedProgress ? `\n\nProgress\n${progress}` : '';
+  const progress = content.progress?.trim() || getStatusText(content.status);
+  const running =
+    content.status === 'running' ? buildRunningContent(progress) : null;
   const text = truncate(
-    `${plainPrefix}${plainProgress}`,
+    running?.details
+      ? `${running.summary}\n\n${running.details}`
+      : (running?.summary ?? progress),
     TELEGRAM_MAX_MESSAGE_LENGTH,
   );
-
-  const htmlPrefix = [
-    `<b>${statusIcon(content.status)} Roomote task</b>`,
-    escapeHtml(status),
-    escapeHtml(title),
-    ...(activity ? ['', '<b>Current activity</b>', escapeHtml(activity)] : []),
-  ].join('\n');
-  const htmlProgressPrefix = '\n\n<blockquote expandable><b>Progress</b>\n';
-  const htmlProgressSuffix = '</blockquote>';
-  const htmlText =
-    showExpandedProgress && progress
-      ? `${htmlPrefix}${htmlProgressPrefix}${escapeHtmlWithinBudget(
-          progress,
-          TELEGRAM_MAX_MESSAGE_LENGTH -
-            htmlPrefix.length -
-            htmlProgressPrefix.length -
-            htmlProgressSuffix.length,
-        )}${htmlProgressSuffix}`
-      : htmlPrefix;
+  const htmlPrefix = '<blockquote expandable>';
+  const htmlSuffix = '</blockquote>';
+  const htmlText = running
+    ? `${htmlPrefix}${escapeHtmlWithinBudget(
+        running.details
+          ? `${running.summary}\n\n${running.details}`
+          : running.summary,
+        TELEGRAM_MAX_MESSAGE_LENGTH - htmlPrefix.length - htmlSuffix.length,
+      )}${htmlSuffix}`
+    : escapeHtml(progress);
 
   return {
     text,
     htmlText,
     ...(content.taskUrl
-      ? { buttons: [[{ text: 'Open in Roomote', url: content.taskUrl }]] }
+      ? { buttons: [[{ text: 'Open task', url: content.taskUrl }]] }
       : {}),
   };
 }

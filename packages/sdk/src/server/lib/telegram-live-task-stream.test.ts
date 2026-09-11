@@ -58,7 +58,6 @@ describe('Telegram live task stream', () => {
         editMessageText: mocks.editMessageText,
       },
       taskRun: { id: 42, taskId: 'task-1' },
-      prompt: 'Implement Telegram live updates',
       taskUrl: 'https://roomote.example/tasks/task-1',
       channelId: '-1001',
       threadId: '77',
@@ -71,11 +70,11 @@ describe('Telegram live task stream', () => {
     expect(mocks.postMessage).toHaveBeenCalledWith({
       channelId: '-1001',
       threadId: '77',
-      text: expect.stringContaining('Roomote task\nRunning · 0s'),
+      text: 'Starting task…',
       buttons: [
         [
           {
-            text: 'Open in Roomote',
+            text: 'Open task',
             url: expect.stringContaining('task=task-1'),
           },
         ],
@@ -93,18 +92,16 @@ describe('Telegram live task stream', () => {
       taskId: 'task-1',
       status: 'in_progress',
       details: 'Running tests.\nChecking Telegram fallback behavior.',
-      taskTitle: 'Telegram live task prototype',
     });
 
     expect(mocks.editMessageText).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '-1001',
         messageId: '88',
-        text: expect.stringContaining(
-          'Progress\nRunning tests.\nChecking Telegram fallback behavior.',
-        ),
-        htmlText: expect.stringContaining('<blockquote expandable>'),
-        buttons: [[{ text: 'Open in Roomote', url: expect.any(String) }]],
+        text: 'Running tests.\n\nChecking Telegram fallback behavior.',
+        htmlText:
+          '<blockquote expandable>Running tests.\n\nChecking Telegram fallback behavior.</blockquote>',
+        buttons: [[{ text: 'Open task', url: expect.any(String) }]],
       }),
     );
   });
@@ -121,7 +118,7 @@ describe('Telegram live task stream', () => {
 
     expect(mocks.editMessageText).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringContaining('Waiting for input'),
+        text: 'Waiting for your input…',
       }),
     );
   });
@@ -140,15 +137,19 @@ describe('Telegram live task stream', () => {
         taskId: 'task-1',
         status,
         ...(output ? { output } : {}),
-        taskTitle: 'Telegram live task prototype',
       });
 
       const edit = mocks.editMessageText.mock.calls[0]?.[0] as {
         text: string;
         htmlText: string;
       };
-      expect(edit.text).toContain(label);
-      expect(edit.text).not.toContain('Result');
+      expect(edit.text).toBe(
+        label === 'Completed'
+          ? 'Completed.'
+          : label === 'Failed'
+            ? 'Task failed.'
+            : 'Stopped.',
+      );
       expect(edit.text).not.toContain('Authoritative final response.');
       expect(edit.text).not.toContain('Stopped because of an error.');
     },
@@ -169,7 +170,7 @@ describe('Telegram live task stream', () => {
     );
   });
 
-  it('suppresses later edits after Telegram reports a permanently missing message', async () => {
+  it('suppresses edits across later runs after a permanent message failure', async () => {
     await start();
     mocks.editMessageText.mockRejectedValue(
       new Error(
@@ -184,5 +185,18 @@ describe('Telegram live task stream', () => {
         details: 'Working',
       }),
     ).resolves.toEqual({ card: false, updated: false });
+
+    mocks.editMessageText.mockResolvedValue(undefined);
+    await expect(
+      renderTelegramLiveTaskStream({
+        taskId: 'task-1',
+        status: 'in_progress',
+        details: 'A later run is working',
+      }),
+    ).resolves.toEqual({ card: false, updated: false });
+    expect(mocks.editMessageText).toHaveBeenCalledOnce();
+
+    await start();
+    expect(mocks.postMessage).toHaveBeenCalledOnce();
   });
 });

@@ -4,13 +4,13 @@ import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
 import { settleTelegramLiveTaskStreamForRun } from '../telegram-live-task-stream';
 
 /**
- * Settle a run's Slack task card for terminations the worker never sees
+ * Settle a run's provider-native live task message for terminations the worker never sees
  * (cancel before dequeue, reaper finalization, failed bootstrap). Only
  * Failed/Canceled are settled here: a run completes only through a live
  * worker, which renders the real output itself. Never throws: callers run
  * this detached from the settle path.
  */
-export async function settleSlackLiveTaskCardOnExit(
+export async function settleLiveTaskMessageOnExit(
   run: { id: number; taskId: string; payload: unknown },
   status: RunStatus,
   taskTitle?: string | null,
@@ -30,11 +30,10 @@ export async function settleSlackLiveTaskCardOnExit(
       taskId: run.taskId,
       payload: run.payload,
       status,
-      taskTitle,
     });
   } catch (error) {
     console.error(
-      `[settleSlackLiveTaskCardOnExit] Failed for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
+      `[settleLiveTaskMessageOnExit] Failed for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

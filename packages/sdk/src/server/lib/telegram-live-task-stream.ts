@@ -10,6 +10,7 @@ import { RunStatus } from '@roomote/types';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 
 const TELEGRAM_LIVE_TASK_STREAM_TTL_SECONDS = 7 * 24 * 60 * 60;
+const TELEGRAM_LIVE_TASK_STREAM_UNAVAILABLE = 'unavailable';
 const TRACKING_UNAVAILABLE_MESSAGE =
   'Live updates are unavailable; open Roomote to follow progress.';
 
@@ -22,9 +23,7 @@ interface TelegramLiveTaskStreamData {
   channelId: string;
   messageId: string;
   taskId: string;
-  startedAt: number;
   threadId?: string;
-  title: string;
   taskUrl?: string;
 }
 
@@ -39,18 +38,17 @@ function getTelegramLiveTaskStreamKey(taskId: string): string {
 
 async function getTelegramLiveTaskStreamData(
   taskId: string,
-): Promise<TelegramLiveTaskStreamData | null> {
+): Promise<TelegramLiveTaskStreamData | false | null> {
   const raw = await getRedis().get(getTelegramLiveTaskStreamKey(taskId));
   if (!raw) return null;
+  if (raw === TELEGRAM_LIVE_TASK_STREAM_UNAVAILABLE) return false;
 
   try {
     const parsed = JSON.parse(raw) as Partial<TelegramLiveTaskStreamData>;
     if (
       typeof parsed.channelId !== 'string' ||
       typeof parsed.messageId !== 'string' ||
-      typeof parsed.taskId !== 'string' ||
-      typeof parsed.startedAt !== 'number' ||
-      typeof parsed.title !== 'string'
+      typeof parsed.taskId !== 'string'
     ) {
       return null;
     }
@@ -58,6 +56,17 @@ async function getTelegramLiveTaskStreamData(
   } catch {
     return null;
   }
+}
+
+async function markTelegramLiveTaskStreamUnavailable(
+  taskId: string,
+): Promise<void> {
+  await getRedis().set(
+    getTelegramLiveTaskStreamKey(taskId),
+    TELEGRAM_LIVE_TASK_STREAM_UNAVAILABLE,
+    'EX',
+    TELEGRAM_LIVE_TASK_STREAM_TTL_SECONDS,
+  );
 }
 
 async function setTelegramLiveTaskStreamData(
@@ -87,7 +96,6 @@ function isPermanentlyUneditable(error: unknown): boolean {
 export async function startTelegramLiveTaskStream(input: {
   provider: TelegramLiveTaskStreamProvider;
   taskRun: { id: number; taskId: string };
-  prompt: string;
   taskUrl: string;
   channelId: string;
   threadId?: string;
@@ -105,12 +113,12 @@ export async function startTelegramLiveTaskStream(input: {
         })
       : input.taskUrl;
 
-    if (await getTelegramLiveTaskStreamData(input.taskRun.taskId)) return;
+    if ((await getTelegramLiveTaskStreamData(input.taskRun.taskId)) !== null) {
+      return;
+    }
 
     const message = buildTelegramLiveTaskMessage({
-      title: input.prompt,
       status: 'running',
-      elapsedSeconds: 0,
       taskUrl: destinationUrl,
     });
     const posted = await input.provider.postMessage({
@@ -125,9 +133,7 @@ export async function startTelegramLiveTaskStream(input: {
       channelId: input.channelId,
       messageId: posted.messageId,
       taskId: input.taskRun.taskId,
-      startedAt: Date.now(),
       ...(input.threadId ? { threadId: input.threadId } : {}),
-      title: input.prompt,
       taskUrl: destinationUrl,
     });
   } catch (error) {
@@ -141,7 +147,6 @@ export async function startTelegramLiveTaskStream(input: {
         channelId: input.channelId,
         messageId: postedMessageId,
         ...buildTelegramLiveTaskMessage({
-          title: input.prompt,
           status: 'failed',
           progress: TRACKING_UNAVAILABLE_MESSAGE,
           taskUrl: destinationUrl,
@@ -160,7 +165,6 @@ export async function renderTelegramLiveTaskStream(input: {
   status: 'in_progress' | 'complete' | 'error';
   details?: string;
   output?: string;
-  taskTitle?: string | null;
 }): Promise<TelegramLiveTaskRenderResult> {
   const data = await getTelegramLiveTaskStreamData(input.taskId);
   if (!data) return { card: false, updated: false };
@@ -184,12 +188,7 @@ export async function renderTelegramLiveTaskStream(input: {
       channelId: data.channelId,
       messageId: data.messageId,
       ...buildTelegramLiveTaskMessage({
-        title: input.taskTitle?.trim() || data.title,
         status,
-        elapsedSeconds: Math.max(
-          0,
-          Math.floor((Date.now() - data.startedAt) / 1000),
-        ),
         // Final output is delivered by the owning Fast Session. The canonical
         // Telegram status message never duplicates that authoritative reply.
         ...((status === 'running' || status === 'waiting') && input.details
@@ -203,9 +202,18 @@ export async function renderTelegramLiveTaskStream(input: {
     console.error(
       `[telegram] Failed to edit live task message for task ${input.taskId}: ${describeError(error)}`,
     );
-    return isPermanentlyUneditable(error)
-      ? { card: false, updated: false }
-      : { card: true, updated: false };
+    if (!isPermanentlyUneditable(error)) {
+      return { card: true, updated: false };
+    }
+
+    await markTelegramLiveTaskStreamUnavailable(input.taskId).catch(
+      (markError) => {
+        console.error(
+          `[telegram] Failed to mark live task message unavailable for task ${input.taskId}: ${describeError(markError)}`,
+        );
+      },
+    );
+    return { card: false, updated: false };
   }
 }
 
@@ -213,7 +221,6 @@ export async function settleTelegramLiveTaskStreamForRun(input: {
   taskId: string;
   payload: unknown;
   status: RunStatus.Failed | RunStatus.Canceled;
-  taskTitle?: string | null;
 }): Promise<void> {
   if (
     input.payload === null ||
@@ -230,7 +237,6 @@ export async function settleTelegramLiveTaskStreamForRun(input: {
       input.status === RunStatus.Canceled
         ? 'Stopped.'
         : 'Stopped because of an error.',
-    taskTitle: input.taskTitle,
   }).catch((error) => {
     console.error(
       `[telegram] Failed to settle live task message for task ${input.taskId}: ${describeError(error)}`,
