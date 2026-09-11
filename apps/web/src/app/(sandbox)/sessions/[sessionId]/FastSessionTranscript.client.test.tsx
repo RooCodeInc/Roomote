@@ -2456,6 +2456,64 @@ describe('FastSessionTranscript', () => {
       );
     });
 
+    it('does not replay an earlier voice sentence when the call restarts before persistence', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      replyMutate.mockResolvedValue({ success: true });
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onUtterance?.('Check the build', 'item_1');
+      });
+      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
+      const turnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent('assistant-1:event', 'Build passed. More', 11, turnId),
+        );
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(
+        screen.getByRole('button', { name: /^end voice conversation$/i }),
+      );
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      rerender(transcript());
+      fireEvent.click(
+        await screen.findByRole('button', { name: /^voice conversation$/i }),
+      );
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      rerender(transcript());
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit(
+          'chunk',
+          chunkEvent('assistant-1:event', ' details. Tail', 11, turnId),
+        );
+      });
+      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
+      expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
+        'More details.',
+        'item_1',
+      );
+      expect(
+        screen.queryByText('Build passed. More details. Tail'),
+      ).not.toBeInTheDocument();
+    });
+
     it('shows what is being said on the call as it is spoken, then hands over to the persisted row', async () => {
       voiceStatusQuery.mockResolvedValue({ enabled: true });
       liveVoiceState.active = true;

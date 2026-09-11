@@ -1192,7 +1192,8 @@ export function FastSessionTranscript({
     for (const message of serverMessages.values()) {
       voiceCutoffTsRef.current = Math.max(voiceCutoffTsRef.current, message.ts);
     }
-    spokenSentenceCountsRef.current.clear();
+    // Message IDs are unique across calls, so retaining cursors prevents an
+    // in-flight reply from the previous call from replaying after a restart.
     pendingUtterancesRef.current = [];
     void liveVoice.start();
   }, [liveVoice, serverMessages]);
