@@ -137,10 +137,10 @@ export async function cleanVoiceTranscriptCommand(
 const VOICE_MESSAGE_SOURCE = 'voice';
 
 /**
- * Record one spoken turn of a voice call in the Session transcript: legacy
- * direct user speech (`user`), or what the voice said directly (`assistant`).
- * Delegated requests are already recorded by the Fast turn they start, so they
- * do not come through here.
+ * Record one spoken turn of a voice call in the Session transcript: what the
+ * person said when the voice answered them directly (`user`), or what the
+ * voice said (`assistant`). Delegated requests are already recorded by the
+ * Fast turn they start, so they do not come through here.
  *
  * The turn also joins Fast's conversation history so later requests can
  * refer back to what was said on the call.
