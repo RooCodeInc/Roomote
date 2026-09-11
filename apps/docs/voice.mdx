@@ -20,6 +20,10 @@ Voice is opt-in: the deployment's general `OPENAI_API_KEY` is not used, so
 enabling OpenAI for task inference does not turn voice on. See the
 [Voice integration](/integrations/voice) page for details.
 
+The Voice integration settings include the GPT-Live voice selection and an
+AI-generated audio preview. Existing selections are preserved. New and unset
+connections default to Marin, one of OpenAI's recommended voices.
+
 When the voice key is not configured the voice button does not appear. The key
 stays on the control plane. The browser sends its WebRTC connection offer to Roomote
 and receives only the negotiated session answer; it never receives the API key.

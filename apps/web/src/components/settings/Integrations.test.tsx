@@ -51,6 +51,7 @@ const state = vi.hoisted(() => ({
   voiceConnection: null as null | {
     authStatus?: string | null;
     source?: 'environment' | 'connection';
+    voiceId?: string;
   },
   grafanaConnection: null as null | {
     authStatus?: string | null;
@@ -115,6 +116,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
     saveVoiceConnection: vi.fn(),
+    previewVoice: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
@@ -303,6 +305,10 @@ vi.mock('@/hooks/mcp-connections', () => ({
     isPending: false,
     mutate: mutations.saveVoiceConnection,
   }),
+  usePreviewVoice: () => ({
+    isPending: false,
+    mutate: mutations.previewVoice,
+  }),
   useVoiceConnection: () => ({
     data: state.voiceConnection,
     isPending: false,
@@ -432,6 +438,7 @@ vi.mock('@/components/system', () => ({
   LinearLogo: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" data-icon="plus" />,
+  Play: () => <svg aria-hidden="true" data-icon="play" />,
   PlugIcon: () => <svg aria-hidden="true" />,
   RefreshCw: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="refresh-cw" />
@@ -2215,7 +2222,36 @@ describe('Integrations settings', () => {
     fireEvent.submit(input.closest('form') as HTMLFormElement);
 
     expect(mutations.saveVoiceConnection).toHaveBeenCalledWith(
-      { apiKey: 'sk-voice-123' },
+      { apiKey: 'sk-voice-123', voiceId: 'marin' },
+      expect.anything(),
+    );
+  });
+
+  it('preserves the saved voice and previews another supported option', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [{ mcpId: 'voice', enabled: true }];
+    state.userConnections = [
+      { id: 'voice-1', mcpId: 'voice', authStatus: 'authenticated' },
+    ];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'connection',
+      voiceId: 'cedar',
+    };
+
+    render(<Integrations />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit Voice connection' }),
+    );
+
+    expect(screen.getByRole('button', { name: 'Cedar' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Coral' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Preview Coral voice' }),
+    );
+
+    expect(mutations.previewVoice).toHaveBeenCalledWith(
+      { apiKey: '', voiceId: 'coral' },
       expect.anything(),
     );
   });
