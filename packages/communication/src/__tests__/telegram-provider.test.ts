@@ -74,7 +74,7 @@ describe('TelegramCommunicationProvider', () => {
       'https://telegram.example.test/botbot-token/sendMessageDraft',
       expect.objectContaining({
         body: JSON.stringify({
-          chat_id: '123',
+          chat_id: 123,
           draft_id: 42,
           text: '',
           message_thread_id: 77,
@@ -93,6 +93,19 @@ describe('TelegramCommunicationProvider', () => {
     await expect(
       provider.sendThinkingDraft({ channelId: '123', draftId: 0 }),
     ).rejects.toThrow('requires a non-zero draft id');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects native Thinking outside a numeric private chat', async () => {
+    const fetchMock = vi.fn();
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.sendThinkingDraft({ channelId: '-100123', draftId: 42 }),
+    ).rejects.toThrow('requires a private-chat id');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
