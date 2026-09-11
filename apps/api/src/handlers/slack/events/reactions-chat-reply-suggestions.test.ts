@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   startFastAgentResponse: vi.fn(),
   getConfiguration: vi.fn(),
   routeFastReaction: vi.fn(),
+  eq: vi.fn((...args: unknown[]) => args),
 }));
 
 const claimedAt = new Date('2026-08-06T00:00:00.000Z');
@@ -87,7 +88,7 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => args),
-  eq: vi.fn((...args) => args),
+  eq: mocks.eq,
   sql: vi.fn((strings, ...values) => ['sql', strings, values]),
   trackedMessages: {
     id: 'id',
@@ -484,6 +485,7 @@ describe('chat reply suggestion reactions', () => {
           }),
         }),
       );
+      expect(mocks.eq).toHaveBeenCalledWith('launchClaimedAt', claimedAt);
       expect(updateBuilder.set).toHaveBeenLastCalledWith(
         expect.objectContaining({ threadTs: 'execution-thread-ts' }),
       );
@@ -666,6 +668,12 @@ describe('chat reply suggestion reactions', () => {
     });
 
     expect(updateBuilder.returning).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.eq.mock.calls.filter(([column]) => column === 'launchClaimedAt'),
+    ).toEqual([
+      ['launchClaimedAt', claimedAt],
+      ['launchClaimedAt', claimedAt],
+    ]);
     expect(slack.deleteMessage).not.toHaveBeenCalled();
   });
 
