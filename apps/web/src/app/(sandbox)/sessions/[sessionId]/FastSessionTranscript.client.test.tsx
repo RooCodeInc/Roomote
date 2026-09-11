@@ -3179,6 +3179,53 @@ describe('FastSessionTranscript', () => {
       expect(screen.getByText('Call ended · 9s')).toBeInTheDocument();
     });
 
+    it('persists the call end only after a delayed call start finishes', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      let resolveStart!: (value: { eventId: string }) => void;
+      recordVoiceCallEventMutate.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStart = resolve;
+          }),
+      );
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = 1_000;
+      rerender(transcript());
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith({
+          sessionId: 'session-1',
+          phase: 'started',
+        }),
+      );
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      rerender(transcript());
+      expect(recordVoiceCallEventMutate).toHaveBeenCalledTimes(1);
+
+      resolveStart({ eventId: 'voice-call:started' });
+      await waitFor(() => {
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledTimes(2);
+        expect(recordVoiceCallEventMutate).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            sessionId: 'session-1',
+            phase: 'ended',
+          }),
+        );
+      });
+    });
+
     it('attributes a streamed first reply to its own delegation even after a second request', async () => {
       voiceStatusQuery.mockResolvedValue({ enabled: true });
       liveVoiceState.active = true;
