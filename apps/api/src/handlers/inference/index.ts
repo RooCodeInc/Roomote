@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import {
   formatSingleLineLog,
   rebaseRoomoteModelIdToUpstream,
+  rewriteCloudflareAiGatewayRequestBody,
   ROOMOTE_INFERENCE_PROVIDER_ID,
 } from '@roomote/types';
 import {
@@ -434,6 +435,12 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
     if (copilotRequestBodyHasVisionContent(bodyText)) {
       injectedHeaders['Copilot-Vision-Request'] = 'true';
     }
+  }
+
+  if (providerId === 'cloudflare-ai-gateway' && method === 'POST') {
+    const bodyText = await c.req.text();
+    requestBody = rewriteCloudflareAiGatewayRequestBody(bodyText);
+    useDuplexHalf = false;
   }
 
   // Roomote model ids are an aliased namespace over OpenRouter; rewrite a

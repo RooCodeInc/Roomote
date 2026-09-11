@@ -1,6 +1,8 @@
 import {
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  getSetupModelProviderAdditionalEnvFields,
   normalizeTaskModelId,
+  SETUP_MODEL_PROVIDER_CATALOG,
   TASK_MODEL_ROLE_DESCRIPTORS,
   TASK_MODEL_ROLES,
 } from '@roomote/types';
@@ -132,6 +134,12 @@ import {
 const PROVIDER_ENV_VAR_NAMES = [
   'R_TRIAL_OPENROUTER_API_KEY',
   'OPENROUTER_API_KEY',
+  'AI_GATEWAY_API_KEY',
+  'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+  'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+  'CLOUDFLARE_AI_GATEWAY_ID',
+  'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+  'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
   'OPENAI_API_KEY',
   'AZURE_API_KEY',
   'AZURE_RESOURCE_NAME',
@@ -1771,17 +1779,27 @@ describe('task model provider commands', () => {
 
     const result = await getTaskModelProviderSetupCommand(buildMockAuth());
 
+    const catalogNonSecretEnvNames = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => [
+        ...(provider.authKind === 'endpoint' && provider.envVarName
+          ? [provider.envVarName]
+          : []),
+        ...getSetupModelProviderAdditionalEnvFields(provider)
+          .filter((field) => !field.secret)
+          .map((field) => field.envVarName),
+      ],
+    );
+
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
-      'AZURE_RESOURCE_NAME',
-      'AZURE_COGNITIVE_SERVICES_RESOURCE_NAME',
-      'AWS_REGION',
-      'ZAI_REGION',
-      'ZAI_CODING_PLAN_REGION',
-      'OPENAI_COMPATIBLE_BASE_URL',
-      'LITELLM_BASE_URL',
-      'OLLAMA_BASE_URL',
-      'VLLM_BASE_URL',
+      ...new Set([...catalogNonSecretEnvNames, 'OPENAI_COMPATIBLE_BASE_URL']),
     ]);
+    expect(catalogNonSecretEnvNames).toEqual(
+      expect.arrayContaining([
+        'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+        'CLOUDFLARE_AI_GATEWAY_ID',
+        'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+      ]),
+    );
     expect(
       result.providerSetup.providers.find(
         (provider) => provider.id === 'amazon-bedrock',
