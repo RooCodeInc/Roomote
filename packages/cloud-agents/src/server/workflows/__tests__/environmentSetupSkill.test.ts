@@ -137,6 +137,18 @@ describe('environment-setup guidance', () => {
     expect(skillContent).toContain(
       'When the task explicitly identifies an existing environment to revise, update that environment instead of creating a duplicate.',
     );
+    expect(skillContent).toContain(
+      'treat the complete current environment definition supplied in the trusted task context as the baseline',
+    );
+    expect(skillContent).toContain(
+      'Preserve every unrelated field verbatim, especially `agentInstructions`, `skills`, `manualSkills`, environment variables, MCP servers, services, Docker projects, ports, and setup commands.',
+    );
+    expect(skillContent).toContain(
+      'The update API replaces the full definition, so an omitted field is a deletion; never regenerate an existing definition from repository evidence alone.',
+    );
+    expect(skillContent).toContain(
+      'never submit a newly derived partial replacement',
+    );
   });
 
   it('tells the agent to keep environment names plain instead of decorated variants', () => {

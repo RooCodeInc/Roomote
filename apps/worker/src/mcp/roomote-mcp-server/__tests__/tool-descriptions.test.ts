@@ -1191,6 +1191,12 @@ describe('roomote MCP tool descriptions', () => {
     expect(definitionSchema).toBeInstanceOf(z.ZodString);
     expect(definitionSchema).not.toBeInstanceOf(z.ZodUnion);
     expect(definitionField.description).toContain('YAML or JSON string');
+    expect(definitionField.description).toContain(
+      'An update replaces the full definition',
+    );
+    expect(definitionField.description).toContain(
+      'preserve every field that is not intentionally changing',
+    );
   });
 
   it('forwards issueNumber from manage_source_control tool params', async () => {
