@@ -10,6 +10,7 @@ const policy = {
   origin: 'https://api.example.com:8443',
   headerName: 'authorization',
   headerPrefix: 'Bearer ',
+  allowedMethods: ['GET', 'HEAD'],
   expiresAt: new Date(Date.now() + 3600000).toISOString(),
   createdAt: new Date().toISOString(),
 };
@@ -70,7 +71,7 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
   ).toBeEnabled();
   expect(
     screen.getByRole('button', { name: 'Allow for this Session' }),
-  ).toHaveAccessibleDescription('For https://api.example.com:8443');
+  ).toHaveAccessibleDescription('For https://api.example.com:8443 - GET, HEAD');
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
   expect(
     screen.queryByText(
@@ -107,7 +108,11 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
       method: 'POST',
       cache: 'no-store',
       credentials: 'same-origin',
-      body: JSON.stringify({ pendingRef, secret: credential }),
+      body: JSON.stringify({
+        pendingRef,
+        secret: credential,
+        allowedMethods: policy.allowedMethods,
+      }),
     }),
   );
   expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -124,6 +129,70 @@ it('prefills a single-key consent flow and reports server-scheduled continuation
   expect(log).not.toHaveBeenCalled();
   expect(error).not.toHaveBeenCalled();
 });
+it.each([
+  { allowedMethods: ['GET'] },
+  { allowedMethods: ['GET', 'POST'] },
+  { allowedMethods: ['GET', 'POST', 'DELETE'] },
+])(
+  'submits the exact prepared method set %j only to the secure endpoint',
+  async ({ allowedMethods }) => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          pending: [{ ...pending, allowedMethods }],
+          secrets: [],
+        }),
+      ),
+    );
+    await open();
+    const scope = allowedMethods.some(
+      (method) => !['GET', 'HEAD'].includes(method),
+    )
+      ? ' (allows writes)'
+      : '';
+    const destination = document.getElementById(
+      'session-secret-destination',
+    )!.textContent;
+    fill();
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          secret: { ...metadata, allowedMethods },
+          resumed: true,
+        }),
+        { status: 201 },
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Allow for this Session' }),
+    );
+    await screen.findByRole('status');
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({
+      pendingRef,
+      secret: credential,
+      allowedMethods,
+    });
+    expect(destination).toBe(
+      `For ${policy.origin} - ${allowedMethods.join(', ')}${scope}`,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      fetchMock.mock.calls.every(
+        ([url]) => url === `/api/sessions/${sessionId}/secrets`,
+      ),
+    ).toBe(true);
+    expect(document.body.textContent).not.toContain(credential);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Manage approved secrets' }),
+    );
+    expect(
+      screen.getByText(
+        `${allowedMethods.join(', ')} requests send your key in the`,
+        { exact: false },
+      ),
+    ).toBeInTheDocument();
+  },
+);
 it.each([401, 403, 500])(
   'does not echo failed loading response %s',
   async (status) => {
@@ -175,7 +244,9 @@ it.each([
       screen.getByRole('heading', { name: `Add your ${label} API key` }),
     ).toBeInTheDocument();
     expect(document.querySelector('img')).toBeNull();
-    expect(screen.getByText(`For ${canonicalOrigin}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`For ${canonicalOrigin} - GET, HEAD`),
+    ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledOnce();
     fill();
     expect(
@@ -260,7 +331,9 @@ it('clears key and reveal state when selecting a different prepared request', as
   });
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
-  expect(screen.getByText('For https://second.example')).toBeInTheDocument();
+  expect(
+    screen.getByText('For https://second.example - GET, HEAD'),
+  ).toBeInTheDocument();
 });
 it('clears the key and asks for a new request when the prepared approval has expired', async () => {
   fetchMock.mockResolvedValueOnce(
@@ -282,24 +355,30 @@ it('clears the key and asks for a new request when the prepared approval has exp
   expect(screen.getByLabelText('API key')).toHaveValue('');
   expect(fetchMock).toHaveBeenCalledOnce();
 });
-it('clears key on failed save and close without echoing response content', async () => {
-  await open();
-  fill();
-  fireEvent.click(screen.getByRole('button', { name: 'Show value' }));
-  fetchMock.mockResolvedValueOnce(new Response(credential, { status: 400 }));
-  fireEvent.click(
-    screen.getByRole('button', { name: 'Allow for this Session' }),
-  );
-  await screen.findByRole('alert');
-  expect(screen.getByLabelText('API key')).toHaveValue('');
-  expect(screen.getByLabelText('API key')).toHaveAttribute('type', 'password');
-  expect(fetchMock).toHaveBeenCalledTimes(2);
-  expect(document.body.textContent).not.toContain(credential);
-  fill();
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Session secrets' }));
-  expect(await screen.findByLabelText('API key')).toHaveValue('');
-});
+it.each([400, 500])(
+  'clears key on denied save (%s) and close without echoing response content',
+  async (status) => {
+    await open();
+    fill();
+    fireEvent.click(screen.getByRole('button', { name: 'Show value' }));
+    fetchMock.mockResolvedValueOnce(new Response(credential, { status }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Allow for this Session' }),
+    );
+    await screen.findByRole('alert');
+    expect(screen.getByLabelText('API key')).toHaveValue('');
+    expect(screen.getByLabelText('API key')).toHaveAttribute(
+      'type',
+      'password',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(document.body.textContent).not.toContain(credential);
+    fill();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Session secrets' }));
+    expect(await screen.findByLabelText('API key')).toHaveValue('');
+  },
+);
 it('revokes without exposing references and clears any entered key', async () => {
   fetchMock.mockResolvedValueOnce(
     new Response(JSON.stringify({ pending: [pending], secrets: [metadata] })),

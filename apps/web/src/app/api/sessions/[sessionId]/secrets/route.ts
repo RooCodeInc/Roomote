@@ -131,7 +131,7 @@ async function handle(
         ) {
           await replyToFastSessionCommand(auth, {
             sessionId: session.fastConversationId,
-            text: 'I saved an API key approval securely for this Session. Check list_session_secrets or the HTTP broker list_integrations for ready approvals and continue the requested GET or HEAD request through the broker. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.',
+            text: 'I saved an API key approval securely for this Session. Check list_session_secrets for ready approvals and continue the requested work using only the approved methods and destination. Attached coding runs may use this same approval. Ask for the request path if it is not already specified. Never ask me to paste credentials into chat.',
           });
           resumed = true;
         }

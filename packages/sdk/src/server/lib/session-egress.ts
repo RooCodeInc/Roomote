@@ -66,8 +66,16 @@ function constantTimeEquals(presented: string, expected: string): boolean {
 }
 
 function bearer(header: string | undefined): string | null {
-  const match = header?.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || null;
+  if (
+    !header ||
+    header.slice(0, 6).toLowerCase() !== 'bearer' ||
+    !/\s/.test(header[6] ?? '') ||
+    /[\r\n]/.test(header)
+  )
+    return null;
+  // Fixed scheme boundary plus linear scans; no overlapping whitespace matches.
+  const token = header.slice(7).trim();
+  return token && !/[\u2028\u2029]/.test(token) ? token : null;
 }
 
 export async function authenticateSessionEgressPrincipal(
@@ -137,7 +145,12 @@ export async function issueSubstitutes(
   const id = parse(workloadIdSchema, workloadId);
   const result = await issueSessionEgressSubstitutes(id);
   if (!result) throw new SessionEgressRequestError(404, 'workload_not_found');
-  return result;
+  return {
+    ...result,
+    substitutes: result.substitutes.filter((issue) =>
+      isOriginAllowed(issue.origin),
+    ),
+  };
 }
 
 export async function renewLease(workloadId: unknown, input: unknown) {
@@ -191,7 +204,9 @@ export function createSessionEgressControllerClient(options: {
   fetch?: typeof globalThis.fetch;
 }) {
   const doFetch = options.fetch ?? globalThis.fetch;
-  const base = `${options.apiBaseUrl.replace(/\/+$/, '')}${SESSION_EGRESS_CONTROL_PLANE_PATH}`;
+  let end = options.apiBaseUrl.length;
+  while (end > 0 && options.apiBaseUrl[end - 1] === '/') end--;
+  const base = `${options.apiBaseUrl.slice(0, end)}${SESSION_EGRESS_CONTROL_PLANE_PATH}`;
   async function call<T>(
     method: 'POST' | 'DELETE',
     path: string,

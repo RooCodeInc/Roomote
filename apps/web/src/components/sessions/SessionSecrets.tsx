@@ -189,6 +189,7 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                     const parsed = sessionSecretCreateSchema.safeParse({
                       pendingRef: selected.pendingRef,
                       secret: new FormData(event.currentTarget).get('secret'),
+                      allowedMethods: selected.allowedMethods,
                     });
                     if (
                       !parsed.success ||
@@ -247,7 +248,13 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                       id="session-secret-destination"
                       className="break-all text-sm text-muted-foreground"
                     >
-                      For {new URL(selected.origin).origin}
+                      For {new URL(selected.origin).origin} -{' '}
+                      {selected.allowedMethods.join(', ')}
+                      {selected.allowedMethods.some(
+                        (method) => method !== 'GET' && method !== 'HEAD',
+                      )
+                        ? ' (allows writes)'
+                        : ''}
                     </p>
                     <div className="space-y-1">
                       <Label htmlFor="session-secret-value">API key</Label>
@@ -318,8 +325,8 @@ function SessionSecretsForm({ sessionId }: { sessionId: string }) {
                   </p>
                   <p className="break-all">{secret.origin}</p>
                   <p>
-                    GET and HEAD requests send your key in the{' '}
-                    <code>{secret.headerName}</code> header
+                    {secret.allowedMethods.join(', ')} requests send your key in
+                    the <code>{secret.headerName}</code> header
                     {secret.headerPrefix ? (
                       <>
                         {' '}

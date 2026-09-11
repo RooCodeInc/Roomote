@@ -37,6 +37,7 @@ const plaintext = 'never-expose-this-secret';
 const createArgs = {
   pendingRef: secretRef,
   secret: plaintext,
+  allowedMethods: ['GET', 'POST'],
 };
 const metadata = { secretRef, label: 'API' };
 const auth = { success: true, userId: 'cookie-user' };
@@ -191,6 +192,8 @@ describe('session secret route boundary', () => {
   it('uses fixed nonsecret continuation text independent of the saved credential metadata', async () => {
     await POST(request('POST', createArgs), props);
     const text = mocks.reply.mock.calls[0]![1].text;
+    expect(text).not.toContain('GET or HEAD');
+    expect(text).toContain('approved methods');
     const otherRef = '603dbf6f-baea-446f-83fd-63923f9d464a';
     const otherSecret = 'another-private-key-canary';
     mocks.create.mockResolvedValueOnce({
@@ -209,6 +212,53 @@ describe('session secret route boundary', () => {
     for (const value of [otherRef, otherSecret, 'untrusted-label-canary'])
       expect(text).not.toContain(value);
   });
+
+  it.each([{ allowedMethods: ['GET'] }, { allowedMethods: ['GET', 'POST'] }])(
+    'preserves prepared methods %j through listing and approval',
+    async ({ allowedMethods }) => {
+      const prepared = { pendingRef: secretRef, label: 'API', allowedMethods };
+      const saved = { ...metadata, allowedMethods };
+      mocks.list.mockResolvedValueOnce({ pending: [prepared], secrets: [] });
+      const listing = await GET(request('GET'), props);
+      expect(listing.status).toBe(200);
+      expect(await listing.json()).toEqual({
+        pending: [prepared],
+        secrets: [],
+      });
+      mocks.create.mockResolvedValueOnce(saved);
+      const args = { ...createArgs, allowedMethods };
+      const response = await POST(request('POST', args), props);
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ secret: saved, resumed: true });
+      expect(mocks.create).toHaveBeenCalledWith(
+        { sessionId, userId: auth.userId },
+        args,
+      );
+      expect(JSON.stringify(mocks.reply.mock.calls)).not.toContain(plaintext);
+    },
+  );
+
+  it.each([
+    { allowedMethods: undefined },
+    { allowedMethods: ['GET'] },
+    { allowedMethods: ['GET', 'POST', 'DELETE'] },
+  ])(
+    'does not resume or expose a key when the SDK denies omitted or mismatched methods %j',
+    async ({ allowedMethods }) => {
+      // Exact prepared-policy matching belongs to the SDK, not a second route lookup.
+      mocks.create.mockRejectedValueOnce(new Error(plaintext));
+      const args = { ...createArgs, allowedMethods };
+      await expectError(await POST(request('POST', args), props), 500);
+      expect(mocks.create).toHaveBeenCalledWith(
+        { sessionId, userId: auth.userId },
+        allowedMethods === undefined
+          ? { pendingRef: secretRef, secret: plaintext }
+          : args,
+      );
+      expect(mocks.findSession).not.toHaveBeenCalled();
+      expect(mocks.reply).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     undefined,
