@@ -2540,13 +2540,20 @@ describe('resolveOpenCodeSmallModel', () => {
   });
 
   it('uses an audio-capable configured model for native file prompts', async () => {
-    process.env = {
-      ...originalEnv,
-      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
-    };
+    process.env = { ...originalEnv };
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.6-terra',
       R_SMALL_MODEL: 'openrouter/google/gemini-3.6-flash',
+      OPENROUTER_API_KEY: 'test-key',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'openrouter/openai/gpt-5.6-terra',
+        small_model: 'openrouter/google/gemini-3.6-flash',
+        provider: {
+          openrouter: {
+            options: { apiKey: '{env:OPENROUTER_API_KEY}' },
+          },
+        },
+      }),
     });
     configProvidersMock.mockResolvedValue({
       data: {
@@ -2587,6 +2594,7 @@ describe('resolveOpenCodeSmallModel', () => {
       surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
       prompt: 'Transcribe the audio.',
       requiredInputModality: 'audio',
+      reasoningEffort: 'low',
       files: [
         {
           mime: 'audio/mp4',
@@ -2618,6 +2626,26 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
       expect.anything(),
     );
+    expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
+      R_MODEL_REASONING_EFFORT: 'low',
+      R_SMALL_MODEL_REASONING_EFFORT: 'low',
+      R_VISION_MODEL_REASONING_EFFORT: 'low',
+    });
+    expect(
+      JSON.parse(
+        spawnMock.mock.calls.at(-1)?.[2]?.env?.OPENCODE_CONFIG_CONTENT ?? '{}',
+      ),
+    ).toMatchObject({
+      provider: {
+        openrouter: {
+          models: {
+            'google/gemini-3.6-flash': {
+              options: { reasoning: { effort: 'low' } },
+            },
+          },
+        },
+      },
+    });
   });
 
   it('prefers the configured vision model for video prompts', async () => {

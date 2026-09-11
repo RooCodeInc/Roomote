@@ -427,12 +427,19 @@ function mergeReasoningIntoConfigContent(
   configContent: string,
   env: NodeJS.ProcessEnv,
 ): string {
-  const rawModel = env.R_MODEL?.trim();
-  const reasoningEffort = normalizeOptionalReasoningEffort(
-    env.R_MODEL_REASONING_EFFORT?.trim(),
-  );
-
-  if (!rawModel || !reasoningEffort || isTaskModelIdDisabled(rawModel)) {
+  const roleModels = [
+    [env.R_MODEL?.trim(), env.R_MODEL_REASONING_EFFORT?.trim()],
+    [env.R_SMALL_MODEL?.trim(), env.R_SMALL_MODEL_REASONING_EFFORT?.trim()],
+    [env.R_VISION_MODEL?.trim(), env.R_VISION_MODEL_REASONING_EFFORT?.trim()],
+  ] as const;
+  if (
+    !roleModels.some(
+      ([model, effort]) =>
+        model &&
+        normalizeOptionalReasoningEffort(effort) &&
+        !isTaskModelIdDisabled(model),
+    )
+  ) {
     return configContent;
   }
 
@@ -455,18 +462,23 @@ function mergeReasoningIntoConfigContent(
         ? (config.provider as Record<string, unknown>)
         : {};
     const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
-    const model = collectOpenRouterVariantModelAlias(
-      variantAliases,
-      toBedrockMantleRuntimeModelId(rawModel),
-    );
-    const provider = mergeOpenRouterVariantAliasModels(
-      mergeOpenCodeModelReasoningOptions(
-        existingProvider,
+    let provider = existingProvider;
+    for (const [rawModel, rawEffort] of roleModels) {
+      const reasoningEffort = normalizeOptionalReasoningEffort(rawEffort);
+      if (!rawModel || !reasoningEffort || isTaskModelIdDisabled(rawModel)) {
+        continue;
+      }
+      const model = collectOpenRouterVariantModelAlias(
+        variantAliases,
+        toBedrockMantleRuntimeModelId(rawModel),
+      );
+      provider = mergeOpenCodeModelReasoningOptions(
+        provider,
         model,
         reasoningEffort,
-      ),
-      variantAliases,
-    );
+      );
+    }
+    provider = mergeOpenRouterVariantAliasModels(provider, variantAliases);
 
     return JSON.stringify({ ...config, provider });
   } catch {

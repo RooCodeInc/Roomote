@@ -851,6 +851,8 @@ async function resolveNonTaskModelRuntime(
     selectedRuntimeEnv = {
       ...selectedRuntimeEnv,
       R_MODEL_REASONING_EFFORT: reasoningEffort,
+      R_SMALL_MODEL_REASONING_EFFORT: reasoningEffort,
+      R_VISION_MODEL_REASONING_EFFORT: reasoningEffort,
     };
   }
 
@@ -1137,7 +1139,8 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
-    preserveReasoning: options.preserveReasoning,
+    preserveReasoning:
+      options.preserveReasoning ?? Boolean(params.reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
     startTimeoutMs:
       timeoutMs === null
