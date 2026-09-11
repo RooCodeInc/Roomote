@@ -1097,7 +1097,7 @@ const sharedTaskPayloadSchema = z.object({
   fastAgentParent: fastAgentParentSchema.optional(),
   /** Explicit consumer for the coding agent's completion report. */
   reportConsumer: taskReportConsumerSchema.optional(),
-  /** Native Slack task card in the parent thread of a Fast-mode delegation.
+  /** Provider-native live task message for a Fast-mode delegation.
    * Inherited onto every snapshot resume by the queue so the card follows
    * the task. */
   liveTaskStream: z.boolean().optional(),

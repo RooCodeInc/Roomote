@@ -40,6 +40,8 @@ export type CommunicationPostMessageInput = {
   /** Stable logical-send key used by providers that support deduplication. */
   idempotencyKey?: string;
   text?: string;
+  /** Provider-native HTML with `text` retained as the plain-text fallback. */
+  htmlText?: string;
   blocks?: unknown[];
   images?: Array<{ url: string; altText: string; contentType?: string }>;
   serviceUrl?: string;

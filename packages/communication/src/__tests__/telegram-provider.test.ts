@@ -411,6 +411,48 @@ describe('TelegramCommunicationProvider', () => {
     expect(secondBody.text).toBe('**broken markdown');
   });
 
+  it('posts provider-native expandable HTML with a plain-text fallback', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            ok: false,
+            error_code: 400,
+            description: 'Bad Request: unsupported expandable blockquote',
+          },
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 102 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      text: 'Starting task…',
+      htmlText: '<blockquote expandable>Starting task…</blockquote>',
+    });
+
+    const firstBody = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { text: string; parse_mode?: string };
+    const secondBody = JSON.parse(
+      (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
+    ) as { text: string; parse_mode?: string };
+    expect(firstBody).toMatchObject({
+      text: '<blockquote expandable>Starting task…</blockquote>',
+      parse_mode: 'HTML',
+    });
+    expect(secondBody).toMatchObject({ text: 'Starting task…' });
+    expect(secondBody.parse_mode).toBeUndefined();
+  });
+
   it('splits long messages into multiple sends and anchors the reply on the first', async () => {
     const fetchMock = vi
       .fn()
@@ -466,6 +508,77 @@ describe('TelegramCommunicationProvider', () => {
         text: '   ',
       }),
     ).rejects.toThrow('Telegram postMessage requires text or images');
+  });
+
+  it('treats an unchanged edit as an idempotent success', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        {
+          ok: false,
+          error_code: 400,
+          description: 'Bad Request: message is not modified',
+        },
+        400,
+      ),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.editMessageText({
+        channelId: '123',
+        messageId: '42',
+        text: 'Still running',
+      }),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('falls back to plain text when provider-native expandable HTML is rejected', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            ok: false,
+            error_code: 400,
+            description: 'Bad Request: unsupported expandable blockquote',
+          },
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.editMessageText({
+      channelId: '123',
+      messageId: '42',
+      text: 'Roomote task\nRunning\n\nProgress\nWorking',
+      htmlText:
+        '<b>Roomote task</b>\nRunning\n\n<blockquote expandable>Working</blockquote>',
+    });
+
+    const firstBody = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { text: string; parse_mode?: string };
+    const secondBody = JSON.parse(
+      (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
+    ) as { text: string; parse_mode?: string };
+    expect(firstBody).toMatchObject({
+      text: '<b>Roomote task</b>\nRunning\n\n<blockquote expandable>Working</blockquote>',
+      parse_mode: 'HTML',
+    });
+    expect(secondBody).toMatchObject({
+      text: 'Roomote task\nRunning\n\nProgress\nWorking',
+    });
+    expect(secondBody.parse_mode).toBeUndefined();
   });
 
   it('sends images as native photos with captions', async () => {
