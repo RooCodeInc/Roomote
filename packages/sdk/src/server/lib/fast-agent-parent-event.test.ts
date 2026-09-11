@@ -1878,7 +1878,7 @@ describe('deliverFastAgentParentEvent', () => {
             type: 'actions',
             elements: expect.arrayContaining([
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_task',
+                action_id: 'late_bound_automation_view_session',
               }),
               expect.objectContaining({
                 action_id: 'late_bound_automation_configure',
@@ -1932,7 +1932,7 @@ describe('deliverFastAgentParentEvent', () => {
             type: 'actions',
             elements: expect.arrayContaining([
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_task',
+                action_id: 'late_bound_automation_view_session',
               }),
             ]),
           }),
