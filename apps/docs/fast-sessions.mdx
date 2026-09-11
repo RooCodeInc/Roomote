@@ -116,9 +116,10 @@ work, or wake a sleeping task without leaving the Session. Choose **Open full
 workspace** for terminal, logs, diff, and preview tools.
 
 To stop just one active coding task, select **Stop** on its Session card. This
-requires execution access and stops the displayed task run without stopping the
-parent Session or sibling tasks. Cancellation errors appear on the card; check
-the resulting task status rather than assuming the request succeeded.
+requires execution access and terminally cancels the displayed task run,
+shutting down that run's sandbox without stopping the parent Session or sibling
+tasks. Cancellation errors appear on the card; check the resulting task status
+rather than assuming the request succeeded.
 
 On desktop, you can keep several task workspaces open beside the Session,
 resize them, and switch between the conversation and task panels without losing
@@ -257,6 +258,15 @@ check it. The offer names the outcome, evidence source, timing, and stop bound.
 Fast waits for your acceptance before scheduling; an explicit request to monitor
 already gives that permission. Before scheduling, it rechecks access and reuses
 an equivalent active check rather than duplicating monitoring or notifications.
+
+Coding work that Fast starts for your request is a separate exception. The
+Session follows its own running tasks without asking for additional monitoring
+consent, reports important milestones, blockers, or needed input, and can send a
+factual status after roughly ten minutes without a useful update. It may also
+correct a running task when inspected evidence shows that it has drifted from
+the accepted request. This follow-through is hidden from the scheduled wakeup
+list and ends when no linked task is running; it does not change the consent and
+finite-bound rules for monitoring an external process.
 
 For ongoing-process monitoring, Fast uses a one-shot check or sets a finite run
 count or end time on a recurring schedule at any cadence, without automatic
