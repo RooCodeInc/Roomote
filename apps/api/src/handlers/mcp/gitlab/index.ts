@@ -43,6 +43,7 @@ const pageToken = z
   .min(1)
   .regex(/^[A-Za-z0-9_+/=-]+$/);
 const mr = { project_id: project, merge_request_iid: id };
+const commitSha = z.string().regex(/^[a-fA-F0-9]{40}$/);
 export const schemas = {
   get_file_contents: z.strictObject({
     project_id: project,
@@ -106,6 +107,11 @@ export const schemas = {
     description: z.string().optional(),
     state_event: z.enum(['close', 'reopen']).optional(),
   }),
+  merge_merge_request: z.strictObject({
+    ...mr,
+    expected_head_sha: commitSha,
+    squash: z.boolean().optional(),
+  }),
   create_merge_request_note: z.strictObject({ ...mr, body: text }),
   create_merge_request_discussion_note: z.strictObject({
     ...mr,
@@ -118,6 +124,7 @@ const isToolName = (name: string): name is ToolName =>
   Object.hasOwn(schemas, name);
 const writes = new Set<ToolName>([
   'update_merge_request',
+  'merge_merge_request',
   'create_merge_request_note',
   'create_merge_request_discussion_note',
 ]);
@@ -265,6 +272,7 @@ export function createGitlabMcp() {
         (
           await requestGitLab({ ...options, path: mrPath + suffix }, [200])
         ).json();
+      let writeTarget: Awaited<ReturnType<typeof getGitLabMergeRequest>>;
       if (writes.has(call.name as ToolName)) {
         const details = await getGitLabMergeRequest(mrOptions);
         if (
@@ -274,6 +282,7 @@ export function createGitlabMcp() {
           Number(details.id) <= 0
         )
           throw new Error('Ownership mismatch');
+        writeTarget = details;
         if (args.discussion_id) {
           const discussion = await read(`/discussions/${args.discussion_id}`);
           if (
@@ -333,6 +342,50 @@ export function createGitlabMcp() {
         };
       } else if (call.name === 'get_merge_request') {
         payload = await getGitLabMergeRequest(mrOptions);
+      } else if (call.name === 'merge_merge_request') {
+        if (
+          writeTarget!.state !== 'opened' ||
+          writeTarget!.sha?.toLowerCase() !==
+            String(args.expected_head_sha).toLowerCase()
+        )
+          throw new OperationError(
+            'Merge request is not open at the expected head SHA. Read it again before merging.',
+          );
+        console.info(
+          JSON.stringify({
+            event: 'source_control_mcp_merge_authorized',
+            provider: 'gitlab',
+            userId: auth.userId,
+            repositoryId: repo.id,
+            repositoryFullName: repo.fullName,
+            targetNumber: Number(args.merge_request_iid),
+          }),
+        );
+        let mergeError: unknown;
+        try {
+          await requestGitLab(
+            {
+              ...options,
+              path: `${mrPath}/merge`,
+              method: 'PUT',
+              body: {
+                sha: args.expected_head_sha,
+                ...(args.squash === undefined ? {} : { squash: args.squash }),
+              },
+            },
+            [200],
+          );
+        } catch (error) {
+          mergeError = error;
+        }
+        const verified = await getGitLabMergeRequest(mrOptions);
+        if (verified.state !== 'merged') {
+          if (mergeError) throw mergeError;
+          throw new OperationError(
+            'GitLab did not confirm the merge. Inspect the merge request before retrying.',
+          );
+        }
+        payload = verified;
       } else if (call.name === 'create_merge_request_note') {
         payload = await createGitLabMergeRequestNote({
           ...mrOptions,

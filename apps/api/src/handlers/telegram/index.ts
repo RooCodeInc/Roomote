@@ -612,6 +612,9 @@ telegram.post('/', async (c) => {
       senderDisplayName,
       question,
       currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+      ...(fastMessage.agentContext
+        ? { agentContext: fastMessage.agentContext }
+        : {}),
       ...(fastMessage.images ? { images: fastMessage.images } : {}),
     });
     if (!continued) {
@@ -624,10 +627,6 @@ telegram.post('/', async (c) => {
         reason: 'fast_session_delivery_unavailable',
       });
     }
-    await ackTelegramMessageBestEffort({
-      chatId: metadata.communicationChannelId,
-      messageId: metadata.communicationMessageId,
-    });
     return c.json({ ok: true, fastAnswered: true, fastContinued: true });
   }
   const activeRun = repliedToAutomationReport
@@ -782,13 +781,11 @@ telegram.post('/', async (c) => {
     queuedMessage.text = newTaskCommand.text;
   }
 
-  // Ack before routing so the sender sees pickup while the router runs.
-  await ackTelegramMessageBestEffort({
-    chatId: metadata.communicationChannelId,
-    messageId: metadata.communicationMessageId,
-  });
-
   if (completedRun) {
+    await ackTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      messageId: metadata.communicationMessageId,
+    });
     try {
       const resumeLaunch = await resumeTelegramTaskFromSnapshot({
         completedRun,
@@ -982,6 +979,9 @@ telegram.post('/', async (c) => {
     senderDisplayName,
     question: queuedMessage.text.trim(),
     currentMessageId,
+    ...(queuedMessage.agentContext
+      ? { agentContext: queuedMessage.agentContext }
+      : {}),
     ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
   })
     .then((continued) => {

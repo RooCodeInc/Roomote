@@ -610,7 +610,7 @@ describe('Telegram webhook handler', () => {
     });
   });
 
-  it('uses Fast for a linked Telegram direct message', async () => {
+  it('uses Fast for a linked Telegram direct message without an automatic reaction', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     getFastSessionMock.mockResolvedValueOnce({
       id: '11111111-1111-4111-8111-111111111111',
@@ -639,10 +639,11 @@ describe('Telegram webhook handler', () => {
       question: 'continue the task',
       currentMessageId: '456',
     });
+    expect(addReactionMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('continues a Telegram Fast reply before ordinary task routing', async () => {
+  it('continues a Telegram Fast reply without an automatic reaction', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     findFastReplySessionMock.mockResolvedValueOnce({
       id: '22222222-2222-4222-8222-222222222222',
@@ -685,8 +686,11 @@ describe('Telegram webhook handler', () => {
         sessionId: '22222222-2222-4222-8222-222222222222',
         userId: 'mapped-user-1',
         question: 'continue the task',
+        agentContext:
+          'The person is replying to this Telegram message:\n{"message_id":"400","author":"Telegram user","content":"Fast answer"}',
       }),
     );
+    expect(addReactionMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
@@ -1343,6 +1347,11 @@ describe('Telegram webhook handler', () => {
         text: expect.stringContaining('Reconnected this Telegram chat'),
       }),
     );
+    expect(addReactionMock).toHaveBeenCalledExactlyOnceWith({
+      channelId: '222',
+      messageId: '456',
+      name: 'eyes',
+    });
   });
 
   it('does not silently resume a completed task from a user-owned forum topic', async () => {
@@ -1439,7 +1448,13 @@ describe('Telegram webhook handler', () => {
       createTelegramUpdate({
         message: {
           text: 'Follow up on the first report',
-          reply_to_message: { message_id: 900, date: 1, chat: { id: 222 } },
+          reply_to_message: {
+            message_id: 900,
+            date: 1,
+            text: 'Earlier release report',
+            from: { id: 999, is_bot: true, first_name: 'Roomote' },
+            chat: { id: 222 },
+          },
         },
       }),
     );
@@ -1452,7 +1467,11 @@ describe('Telegram webhook handler', () => {
     expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       55,
-      expect.objectContaining({ text: 'Follow up on the first report' }),
+      expect.objectContaining({
+        text: 'Follow up on the first report',
+        agentContext:
+          'The person is replying to this Telegram message:\n{"message_id":"900","author":"Roomote","content":"Earlier release report"}',
+      }),
     );
     expect(taskRunsFindFirstMock).toHaveBeenCalledTimes(1);
   });

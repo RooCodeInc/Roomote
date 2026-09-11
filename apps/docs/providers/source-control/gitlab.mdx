@@ -152,6 +152,7 @@ rejected. Inputs listed as optional below may be omitted.
 | `get_merge_request` | Reads an existing MR; no inputs beyond `project_id` and `merge_request_iid`. |
 | `list_merge_request_diffs`, `get_merge_request_notes`, `mr_discussions` | Read an MR's diffs, notes, or discussions. Optional `page` and `per_page`. |
 | `update_merge_request` | Optional nonempty `title`, `description` (may be empty), and `state_event` (`close` or `reopen`). At least one must be supplied; no other fields can be changed. |
+| `merge_merge_request` | Required `expected_head_sha`, the freshly read 40-character MR head SHA; optional `squash`. Merges only an open MR at that head. GitLab remains authoritative for approvals, pipelines, branch protections, permissions, and merge eligibility. |
 | `create_merge_request_note` | Required nonempty `body`. Adds a top-level MR note. |
 | `create_merge_request_discussion_note` | Required nonempty `body` and `discussion_id` containing only letters, digits, underscores, or hyphens. Replies to an existing discussion on that MR. |
 
@@ -178,7 +179,7 @@ repository on the configured host, and valid deployment OAuth access. MR writes
 also verify the target MR and, for replies, its discussion before sending the write.
 
 These native tools do not expose file or branch writes, MR
-creation or merging, approvals, thread resolution, note editing/deletion, issue
+creation, approvals, thread resolution, note editing/deletion, issue
 tools, CI tools, or arbitrary GraphQL. Fast uses available APIs first for this
 supported scope. Local checkout inspection, edits, commands, and validation
 still need a task. Task authorization and structured code reviews are unchanged.
@@ -196,5 +197,7 @@ still need a task. Task authorization and structured code reviews are unchanged.
 3. Test writes only with explicit authorization on a designated disposable MR.
    Specify the exact note, reply, or reversible title/state change, inspect the
    result in GitLab, and restore any changed fields. Never mutate arbitrary MRs
-   as a connectivity check. Successful discovery or reads do not prove live
+   as a connectivity check. For a merge, Fast reads the MR immediately before
+   the mutation, binds it to `expected_head_sha`, and reads it again before
+   reporting success or retrying an ambiguous result. Successful discovery or reads do not prove live
    authorized writes; verify each required operation before relying on it.

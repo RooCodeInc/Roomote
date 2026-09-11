@@ -23,8 +23,11 @@ const mocks = vi.hoisted(() => ({
   },
   getBitbucketOAuthConnection: vi.fn(),
   resolveBitbucketInstanceHost: vi.fn(),
+  resolveGiteaInstanceHost: vi.fn(),
+  resolveAdoInstanceHost: vi.fn(),
   findMember: vi.fn(),
-  findRepository: vi.fn(),
+  findBitbucketRepository: vi.fn(),
+  findNativeMergeRepository: vi.fn(),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => ({
@@ -35,6 +38,14 @@ vi.mock('@roomote/env', async (importOriginal) => ({
 vi.mock('@roomote/bitbucket', () => ({
   getBitbucketOAuthConnection: mocks.getBitbucketOAuthConnection,
   resolveBitbucketInstanceHost: mocks.resolveBitbucketInstanceHost,
+}));
+
+vi.mock('@roomote/gitea', () => ({
+  resolveGiteaInstanceHost: mocks.resolveGiteaInstanceHost,
+}));
+
+vi.mock('@roomote/ado', () => ({
+  resolveAdoInstanceHost: mocks.resolveAdoInstanceHost,
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -58,7 +69,10 @@ vi.mock('@roomote/db/server', () => ({
             ([column]) => column === 'provider',
           )?.[1];
           if (provider === 'gitlab') return mocks.findGitlabRepository(options);
-          if (provider === 'bitbucket') return mocks.findRepository(options);
+          if (provider === 'bitbucket')
+            return mocks.findBitbucketRepository(options);
+          if (provider === 'gitea' || provider === 'ado')
+            return mocks.findNativeMergeRepository(options);
           throw new Error(`Unexpected repository provider: ${provider}`);
         },
       },
@@ -138,8 +152,13 @@ describe('fast-agent integration broker', () => {
     mocks.findGitlabConnection.mockResolvedValue(undefined);
     mocks.getBitbucketOAuthConnection.mockResolvedValue(null);
     mocks.resolveBitbucketInstanceHost.mockResolvedValue('bitbucket.org');
+    mocks.resolveGiteaInstanceHost.mockResolvedValue('gitea.example');
+    mocks.resolveAdoInstanceHost.mockResolvedValue('dev.azure.com');
     mocks.findMember.mockResolvedValue({ role: 'member' });
-    mocks.findRepository.mockResolvedValue({ externalRepoId: 'repo-uuid' });
+    mocks.findBitbucketRepository.mockResolvedValue({
+      externalRepoId: 'repo-uuid',
+    });
+    mocks.findNativeMergeRepository.mockResolvedValue(undefined);
     mocks.beginIntegrationCall.mockResolvedValue({
       id: 'audit-1',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
@@ -507,6 +526,7 @@ describe('fast-agent integration broker', () => {
       { name: 'actions_list', inputSchema: { type: 'object' } },
       { name: 'get_job_logs', inputSchema: { type: 'object' } },
       { name: 'update_pull_request', inputSchema: { type: 'object' } },
+      { name: 'merge_pull_request', inputSchema: { type: 'object' } },
       { name: 'add_issue_comment', inputSchema: { type: 'object' } },
       {
         name: 'add_reply_to_pull_request_comment',
@@ -527,11 +547,12 @@ describe('fast-agent integration broker', () => {
       'actions_list',
       'get_job_logs',
       'update_pull_request',
+      'merge_pull_request',
       'add_issue_comment',
       'add_reply_to_pull_request_comment',
     ]);
     expect(integrations[0]?.description).toContain(
-      'including reviewer requests, draft status, and comment reactions',
+      'including reviewer requests, draft status, merges, and comment reactions',
     );
     expect(integrations[0]?.description).toContain(
       'Follow the discovered native tool descriptions and schemas',
@@ -542,6 +563,45 @@ describe('fast-agent integration broker', () => {
       signal: expect.any(AbortSignal),
     });
   });
+
+  it.each([
+    ['gitea', 'Gitea'],
+    ['ado', 'Azure DevOps'],
+  ] as const)(
+    'exposes minimal native merge tools for %s',
+    async (provider, name) => {
+      mocks.findNativeMergeRepository.mockImplementation(
+        (options: { where: [string, unknown][] }) =>
+          options.where.some(
+            ([column, value]) => column === 'provider' && value === provider,
+          )
+            ? { externalRepoId: 'repository-id' }
+            : undefined,
+      );
+      mocks.listMcpTools.mockResolvedValue([
+        { name: 'get_pull_request', inputSchema: { type: 'object' } },
+        { name: 'merge_pull_request', inputSchema: { type: 'object' } },
+      ]);
+
+      const integrations = await listFastAgentIntegrations(auditContext);
+
+      expect(integrations).toEqual([
+        expect.objectContaining({
+          id: provider,
+          name,
+          tools: [
+            { name: 'get_pull_request', inputSchema: { type: 'object' } },
+            { name: 'merge_pull_request', inputSchema: { type: 'object' } },
+          ],
+        }),
+      ]);
+      expect(mocks.listMcpTools).toHaveBeenCalledWith({
+        url: `https://api.example.com/api/mcp/${provider}`,
+        headers: { Authorization: 'Bearer control-plane-token' },
+        signal: expect.any(AbortSignal),
+      });
+    },
+  );
 
   it('discovers GitLab from the existing connection without reading secrets and refreshes broker auth at call time', async () => {
     mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
@@ -698,7 +758,7 @@ describe('fast-agent integration broker', () => {
       ],
     );
     expect(mocks.findGitlabRepository).toHaveBeenCalledOnce();
-    expect(mocks.findRepository).toHaveBeenCalledOnce();
+    expect(mocks.findBitbucketRepository).toHaveBeenCalledOnce();
 
     mocks.findGitlabRepository.mockResolvedValue(undefined);
     expect(
@@ -706,7 +766,7 @@ describe('fast-agent integration broker', () => {
     ).toEqual(['bitbucket']);
 
     mocks.findGitlabRepository.mockResolvedValue({ id: 'repo-1' });
-    mocks.findRepository.mockResolvedValue(undefined);
+    mocks.findBitbucketRepository.mockResolvedValue(undefined);
     expect(
       (await listFastAgentIntegrations(auditContext)).map(({ id }) => id),
     ).toEqual(['gitlab']);
@@ -736,10 +796,10 @@ describe('fast-agent integration broker', () => {
     'omits Bitbucket without an active connected Cloud repository: %j',
     async (repository) => {
       mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
-      mocks.findRepository.mockResolvedValue(repository);
+      mocks.findBitbucketRepository.mockResolvedValue(repository);
       expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
       expect(mocks.listMcpTools).not.toHaveBeenCalled();
-      expect(mocks.findRepository).toHaveBeenCalledWith({
+      expect(mocks.findBitbucketRepository).toHaveBeenCalledWith({
         where: [
           ['provider', 'bitbucket'],
           ['host', 'bitbucket.org'],
@@ -757,7 +817,7 @@ describe('fast-agent integration broker', () => {
     expect(available.map((integration) => integration.id)).toEqual([
       'bitbucket',
     ]);
-    expect(mocks.findRepository).toHaveBeenCalledWith({
+    expect(mocks.findBitbucketRepository).toHaveBeenCalledWith({
       where: [
         ['provider', 'bitbucket'],
         ['host', 'www.bitbucket.org'],
@@ -778,9 +838,9 @@ describe('fast-agent integration broker', () => {
   it('omits Bitbucket when no repository matches the configured www host', async () => {
     mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
     mocks.resolveBitbucketInstanceHost.mockResolvedValue('www.bitbucket.org');
-    mocks.findRepository.mockResolvedValue(undefined);
+    mocks.findBitbucketRepository.mockResolvedValue(undefined);
     expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
-    expect(mocks.findRepository).toHaveBeenCalledWith({
+    expect(mocks.findBitbucketRepository).toHaveBeenCalledWith({
       where: [
         ['provider', 'bitbucket'],
         ['host', 'www.bitbucket.org'],
@@ -797,7 +857,7 @@ describe('fast-agent integration broker', () => {
       mocks.getBitbucketOAuthConnection.mockResolvedValue({ status: 'active' });
       mocks.resolveBitbucketInstanceHost.mockResolvedValue(host);
       expect(await listFastAgentIntegrations(auditContext)).toEqual([]);
-      expect(mocks.findRepository).not.toHaveBeenCalled();
+      expect(mocks.findBitbucketRepository).not.toHaveBeenCalled();
       expect(mocks.listMcpTools).not.toHaveBeenCalled();
     },
   );
@@ -935,6 +995,16 @@ describe('fast-agent integration broker', () => {
         base: 'develop',
         draft: false,
         maintainer_can_modify: true,
+      },
+    },
+    {
+      name: 'merge_pull_request',
+      args: {
+        owner: 'example',
+        repo: 'repo',
+        pullNumber: 42,
+        merge_method: 'squash',
+        expectedHeadSha: 'abc123',
       },
     },
     {
