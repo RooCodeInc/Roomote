@@ -60,8 +60,7 @@ export function stripVoiceAnnotations(text: string): string {
       // of one turn and a stray "ckle]" at the start of the next.
       .replace(/\[[a-z][a-z\s'-]{0,40}$/i, '')
       .replace(/^[a-z][a-z\s'-]{0,40}\]/i, '')
-      .replace(/[ \t]{2,}/g, ' ')
-      .replace(/^[ \t]+|[ \t]+$/gm, '')
+      .replace(/\s+/g, ' ')
       .trim()
   );
 }
