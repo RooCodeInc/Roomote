@@ -4,6 +4,7 @@ export * from './acp';
 export * from './api-url';
 export * from './auth';
 export * from './automation-label';
+export * from './automation-results';
 export * from './background-agents';
 export * from './background-automation-registry';
 export * from './automation-recommendations';

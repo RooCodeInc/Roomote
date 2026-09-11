@@ -143,6 +143,7 @@ export {
   OctagonAlert,
   Moon,
   Music2Icon,
+  NotepadText,
   PanelLeftClose,
   PanelLeftOpen,
   PaperclipIcon,

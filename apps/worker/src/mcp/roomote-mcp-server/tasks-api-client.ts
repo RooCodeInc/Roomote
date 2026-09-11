@@ -219,6 +219,23 @@ export async function getTaskSummary(
   );
 }
 
+export async function recordAutomationResult(
+  config: RoomoteConfig,
+  taskId: string,
+  params: { content: string; dedupeKey: string },
+): Promise<{ recorded: boolean }> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/automation_result`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to record automation result',
+  );
+}
+
 export async function getTaskGoal(
   config: RoomoteConfig,
   runId: number,

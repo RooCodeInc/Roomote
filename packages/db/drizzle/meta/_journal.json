@@ -582,6 +582,13 @@
       "when": 1789097339420,
       "tag": "0082_public_purifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1789126468752,
+      "tag": "0083_majestic_silver_sable",
+      "breakpoints": true
     }
   ]
 }

@@ -101,6 +101,7 @@ vi.mock('@/components/system', () => ({
   PanelLeftOpen: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" />,
   Rows4: () => <svg aria-hidden="true" />,
+  NotepadText: () => <svg aria-hidden="true" />,
   Search: () => <svg aria-hidden="true" />,
   Settings: () => <svg aria-hidden="true" />,
   Zap: () => <svg aria-hidden="true" />,
@@ -158,6 +159,10 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
+vi.mock('@/hooks/useResultsPage', () => ({
+  useResultsPage: () => ({ enabled: false, isLoading: false }),
+}));
+
 vi.mock('@/hooks/tasks', () => ({
   useLiveTaskStatus: (taskId: string | null) => useLiveTaskStatusMock(taskId),
   useTaskPins: () => ({
@@ -174,6 +179,9 @@ vi.mock('@/trpc/client', () => ({
     },
     tasks: {
       search: { queryOptions: queryOptionsMock },
+    },
+    results: {
+      unreadCount: { queryOptions: () => ({ queryKey: ['results'] }) },
     },
   }),
 }));

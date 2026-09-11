@@ -178,7 +178,6 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
       'Try opt-in features that may change while they are being evaluated.',
     href: SETTINGS_PATHS.experimental,
     icon: FlaskConical,
-    adminOnly: true,
     newGroup: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.experimental),
   },

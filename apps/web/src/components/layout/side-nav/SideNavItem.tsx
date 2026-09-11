@@ -39,6 +39,7 @@ type SideNavItemProps = Omit<
   highlight?: boolean;
   focusableWhenDisabled?: boolean;
   useNativeLink?: boolean;
+  badgeCount?: number;
   linkProps?: Omit<
     ComponentPropsWithoutRef<'a'>,
     'aria-current' | 'aria-label' | 'children' | 'className' | 'href'
@@ -61,6 +62,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
       highlight = false,
       focusableWhenDisabled = false,
       useNativeLink = false,
+      badgeCount = 0,
       linkProps,
       asChild = false,
       disabled = false,
@@ -105,6 +107,11 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
         {(children ?? Icon) ? (
           <span className="relative inline-flex shrink-0 items-center justify-center">
             {children ?? (Icon ? <Icon /> : null)}
+            {badgeCount > 0 ? (
+              <span className="pointer-events-none absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-semibold leading-none text-destructive-foreground">
+                {badgeCount > 99 ? '99+' : badgeCount}
+              </span>
+            ) : null}
             {!asChild && highlight ? (
               <span
                 className={cn(
