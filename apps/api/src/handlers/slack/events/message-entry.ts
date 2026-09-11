@@ -204,7 +204,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  // Fast receives the discussion and applies the thread-scoped advisory;
+  // Fast receives the discussion and peer-mention reminders as context;
   // peer mentions remain an admission cutoff only for legacy task threads.
   if (
     await hasBoundSlackFastAgentSession({

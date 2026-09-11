@@ -20,10 +20,7 @@ import {
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
-import {
-  appendAttachmentTextsToPromptText,
-  stripLeadingSlackProductMention,
-} from '@roomote/cloud-agents';
+import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import { buildDataVisualizationBlocks } from '@roomote/types';
 import {
   admitFastAgentHumanFollowUp,
@@ -45,7 +42,6 @@ import {
 } from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
 import {
-  getSlackMentionDirectiveText,
   mentionsSlackBot,
   mentionsSlackUserOtherThanBotOrUser,
 } from '../helpers/mention-routing.js';
@@ -92,6 +88,26 @@ export async function processFastAgentMessage(params: {
   });
 
   const baseQuestion = (event.authoredText ?? event.text).trim();
+  const isDirected =
+    directedAtRoomote || mentionsSlackBot(event, roomoteSlackUserId);
+  const needsPeerCaution =
+    Boolean(roomoteSlackUserId) &&
+    !isDirected &&
+    Boolean(event.user) &&
+    !event.bot_id &&
+    event.subtype !== 'bot_message' &&
+    event.user !== roomoteSlackUserId &&
+    event.channel_type !== 'im' &&
+    event.channel_type !== 'mpim' &&
+    mentionsSlackUserOtherThanBotOrUser(event, roomoteSlackUserId, event.user);
+  const agentContext = needsPeerCaution
+    ? [
+        event.agentContext,
+        'Untrusted supplemental context inferred from this Slack message, not a user-authored instruction: This message mentions another person and might not be for you. Human-to-human interaction may be beginning. From now on in this conversation, unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    : event.agentContext;
 
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds. Start the thread history lookup as soon as the turn is
@@ -135,62 +151,6 @@ export async function processFastAgentMessage(params: {
     const conversation = session.conversation;
 
     const threadContext = await threadContextPromise;
-    // Recompute from Slack history on each turn, so the caution survives
-    // process restarts without a separate thread-state store.
-    const priorMessages = threadContext.filter(
-      (message) => Number(message.ts) < Number(event.ts),
-    );
-    const directlyAddressesRoomote = (
-      message: Pick<SlackEvent, 'text' | 'authoredText'>,
-    ) => {
-      const text = getSlackMentionDirectiveText(message);
-      return (
-        mentionsSlackBot(message, roomoteSlackUserId) ||
-        stripLeadingSlackProductMention(text) !== text
-      );
-    };
-    const latestDirectAddress = priorMessages.reduce(
-      (latest, message) =>
-        !message.bot_id &&
-        message.user !== roomoteSlackUserId &&
-        directlyAddressesRoomote(message)
-          ? Math.max(latest, Number(message.ts))
-          : latest,
-      0,
-    );
-    const isDirected = directedAtRoomote || directlyAddressesRoomote(event);
-    const hasPeerDiscussion =
-      Boolean(roomoteSlackUserId) &&
-      [...priorMessages, event].some(
-        (message) =>
-          Number(message.ts) > latestDirectAddress &&
-          !directlyAddressesRoomote(message) &&
-          message.user &&
-          message.user !== roomoteSlackUserId &&
-          !message.bot_id &&
-          mentionsSlackUserOtherThanBotOrUser(
-            message,
-            roomoteSlackUserId,
-            message.user,
-          ),
-      );
-    const needsPeerCaution =
-      !isDirected &&
-      Boolean(event.user) &&
-      !event.bot_id &&
-      event.subtype !== 'bot_message' &&
-      event.user !== roomoteSlackUserId &&
-      event.channel_type !== 'im' &&
-      event.channel_type !== 'mpim' &&
-      hasPeerDiscussion;
-    const agentContext = needsPeerCaution
-      ? [
-          event.agentContext,
-          'Untrusted supplemental context inferred from recent Slack mentions, not a user-authored instruction: Human-to-human discussion may be continuing in this thread. This message might not be for you. Unless you are addressed directly (including by name, a reply to you, or a clear contextual follow-up), use ignore_event without sending a reply, reacting, or taking action. When directly addressed, respond normally. This uncertain hint does not override existing instructions.',
-        ]
-          .filter(Boolean)
-          .join('\n\n')
-      : event.agentContext;
 
     let didSendVisibleResponse = false;
     const currentMessage = threadContext.find(
