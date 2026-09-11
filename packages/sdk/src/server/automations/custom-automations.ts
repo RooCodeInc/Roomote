@@ -58,6 +58,7 @@ import { enqueueFastAgentParentEvent } from '../lib/fast-agent-parent-event-queu
 import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
 import {
   canStartAgentMailConversationWithUser,
+  listAvailableAgentMailOutboundIdentities,
   prepareAgentMailConversation,
 } from '../lib/agentmail/outbound';
 
@@ -192,6 +193,41 @@ async function resolveDestination(
       ? { serviceUrl: target.metadata.serviceUrl }
       : {}),
   };
+}
+
+async function resolveOwnerFallbackDestination(
+  ownerUserId: string,
+): Promise<CustomAutomationDestination | null> {
+  for (const provider of await listConnectedCommunicationProviders()) {
+    try {
+      const destination = await findUserDirectMessageDestination(
+        provider,
+        ownerUserId,
+      );
+      if (destination) {
+        return {
+          provider,
+          ...destination,
+          source: 'automation_target',
+        };
+      }
+    } catch (error) {
+      console.warn(
+        `${LOG_PREFIX} Failed to resolve owner fallback DM on ${provider}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const [identity] =
+    await listAvailableAgentMailOutboundIdentities(ownerUserId);
+  return identity
+    ? {
+        provider: 'email',
+        userId: ownerUserId,
+        identityId: identity.id,
+        source: 'automation_target',
+      }
+    : null;
 }
 
 function isFastDeliveryTarget(target: AutomationTarget): boolean {
@@ -692,6 +728,10 @@ async function launchCustomAutomationRow(
       });
       return result;
     }
+  } else if (automation.createdByUserId) {
+    destination = await resolveOwnerFallbackDestination(
+      automation.createdByUserId,
+    );
   }
 
   // The short claim fence prevents concurrent launchers from double-launching
