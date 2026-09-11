@@ -879,6 +879,33 @@ describe('buildAcpRenderBlocks', () => {
     });
   });
 
+  it('uses natural timer wording for grouped manage_wakeups calls and items', () => {
+    const entries = buildAcpRenderBlocks(
+      [1, 2].map((ts) =>
+        explorationToolMessage({
+          id: `timer-${ts}`,
+          ts,
+          title: 'manage_wakeups',
+          kind: 'mcp',
+          toolName: 'manage_wakeups',
+          text: JSON.stringify({ success: true, count: 0, wakeups: [] }),
+          payload: { rawInput: { arguments: { action: 'list' } } },
+        }),
+      ),
+    );
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: 'tool_group',
+      action: 'Used',
+      objectSummary: '2 timer calls',
+      items: [
+        { objectLabel: 'Listed timers' },
+        { objectLabel: 'Listed timers' },
+      ],
+    });
+  });
+
   it('groups edit tools with edit-specific summary labels', () => {
     const entries = buildAcpRenderBlocks([
       explorationToolMessage({

@@ -169,7 +169,12 @@ export function resolveToolPresentation(
     providerKind === 'mcp' && serverName
       ? getMcpIntegration(serverName)
       : undefined;
-  const displayName = toolName ? formatToolIdentifier(toolName) : 'Tool';
+  const displayName =
+    toolName === 'manage_wakeups'
+      ? 'Timer'
+      : toolName
+        ? formatToolIdentifier(toolName)
+        : 'Tool';
   const providerLabel =
     serverName === 'roomote' || serverName === 'gbrain'
       ? undefined

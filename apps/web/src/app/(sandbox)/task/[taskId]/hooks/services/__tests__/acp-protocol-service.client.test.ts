@@ -208,6 +208,21 @@ describe('AcpProtocolService', () => {
         },
       },
       {
+        label: 'historical namespaced Roomote wakeup tool',
+        payload: {
+          kind: 'mcp',
+          title: 'mcp__roomote__manage_wakeups',
+          rawInput: { arguments: { action: 'list' } },
+        },
+        identity: {
+          toolName: 'manage_wakeups',
+          serverName: 'roomote',
+          mcpToolName: 'manage_wakeups',
+          mcpServerName: 'roomote',
+          isMcp: true,
+        },
+      },
+      {
         label: 'on-demand integration',
         payload: {
           kind: 'mcp',
