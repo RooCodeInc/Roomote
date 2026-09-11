@@ -138,6 +138,22 @@ mention (for example `@roomote review this`) and Roomote runs the Review Code
 automation's structured review on the current head, posts the findings on the
 pull request, and reports back in the same discussion.
 
+## Native pull request merging in Fast
+
+Active members and admins can ask Fast to read and complete a pull request in
+an active connected Azure DevOps Git repository without starting a coding task.
+The bounded `get_pull_request` and `merge_pull_request` tools require
+`repositoryFullName` as `organization/project/repository`, a positive
+`pullRequestNumber`, and the freshly read 40-character `expectedHeadSha`.
+`mergeMethod` can be `noFastForward`, `squash`, `rebase`, or `rebaseMerge`.
+
+Fast completes a PR only after an explicit request in the current human message.
+It reads the PR immediately before the mutation, sends the expected source
+commit, never requests policy bypass or source-branch deletion, and reads the PR
+again before reporting success or retrying an ambiguous result. Azure DevOps
+remains authoritative for policies, reviews, permissions, and merge eligibility.
+These tools do not expose other branch/file writes or repository administration.
+
 ## Current limits
 
 Classic TFVC repositories and non-Git build repository types are not triaged.

@@ -42,6 +42,7 @@ const repositoryArgs = z.object({
 });
 const writeToolNames = [
   'update_pull_request',
+  'merge_pull_request',
   'add_issue_comment',
   'add_reply_to_pull_request_comment',
 ];

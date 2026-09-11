@@ -135,6 +135,7 @@ beforeEach(async () => {
     project_id: Number(externalId),
     title: 'A merge request',
     state: 'opened',
+    sha: commit,
   };
   discussion = {
     id: 'thread',
@@ -244,11 +245,11 @@ describe.each(['/gitlab', '/gitlab/'])('mounted routing %s', (path) => {
   );
 });
 
-it('advertises twelve native strict tools without provider traffic or credential refresh', async () => {
+it('advertises thirteen native strict tools without provider traffic or credential refresh', async () => {
   const response = await request();
   expect(response.status).toBe(200);
   const { result } = await response.json();
-  expect(result.tools).toHaveLength(12);
+  expect(result.tools).toHaveLength(13);
   expect(result.tools.map((tool: Tool) => tool.name).sort()).toEqual(
     Object.keys(schemas).sort(),
   );
@@ -486,22 +487,80 @@ it.each([
     expect(traffic.every((item) => item.init?.method === 'GET')).toBe(true);
   },
 );
-it.each(['update_merge_request', 'create_merge_request_note'])(
-  'checks project ownership for %s, not only replies',
-  async (name) => {
-    mrObject.project_id = 1;
+it.each([
+  'update_merge_request',
+  'merge_merge_request',
+  'create_merge_request_note',
+])('checks project ownership for %s, not only replies', async (name) => {
+  mrObject.project_id = 1;
+  expect(
+    (
+      await mrCall(
+        name,
+        name === 'update_merge_request'
+          ? { title: 'new' }
+          : name === 'merge_merge_request'
+            ? { expected_head_sha: commit }
+            : { body: 'new' },
+      )
+    ).status,
+  ).toBe(400);
+  expect(traffic).toHaveLength(1);
+  expect(traffic[0]?.init?.method).toBe('GET');
+});
+
+it('merges only the freshly read head and trusts verified state after an ambiguous response', async () => {
+  const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+  providerResponse = (url, init) => {
+    if (url.pathname.endsWith('/merge') && init?.method === 'PUT') {
+      mrObject.state = 'merged';
+      return Response.json({ message: 'timeout after merge' }, { status: 500 });
+    }
+    return Response.json(mrObject);
+  };
+  try {
     expect(
       (
-        await mrCall(
-          name,
-          name === 'update_merge_request' ? { title: 'new' } : { body: 'new' },
-        )
+        await mrCall('merge_merge_request', {
+          expected_head_sha: commit,
+          squash: true,
+        })
       ).status,
-    ).toBe(400);
-    expect(traffic).toHaveLength(1);
-    expect(traffic[0]?.init?.method).toBe('GET');
-  },
-);
+    ).toBe(200);
+    expect(traffic.map(({ init }) => init?.method ?? 'GET')).toEqual([
+      'GET',
+      'PUT',
+      'GET',
+    ]);
+    expect(JSON.parse(String(traffic[1]?.init?.body))).toEqual({
+      sha: commit,
+      squash: true,
+    });
+    const audit = JSON.parse(log.mock.calls[0]![0]);
+    expect(audit).toMatchObject({
+      provider: 'gitlab',
+      userId,
+      repositoryId,
+      repositoryFullName: fullName,
+      targetNumber: 7,
+    });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(commit);
+  } finally {
+    log.mockRestore();
+  }
+});
+
+it('rejects a stale merge head before mutation', async () => {
+  expect(
+    (
+      await mrCall('merge_merge_request', {
+        expected_head_sha: 'b'.repeat(40),
+      })
+    ).status,
+  ).toBe(400);
+  expect(traffic).toHaveLength(1);
+  expect(traffic[0]?.init?.method).toBe('GET');
+});
 it.each([
   [
     'update_merge_request',
