@@ -1450,13 +1450,15 @@ function AutomationCard({
         }
         enabledControl={
           <BasicTooltip content={actionLabel}>
-            <Switch
-              checked={iconEnabled}
-              disabled={disabled}
-              className="border-border data-[state=unchecked]:bg-muted"
-              aria-label={`${actionLabel} enabled state`}
-              onCheckedChange={() => onOpenChange(true)}
-            />
+            <span className="inline-flex">
+              <Switch
+                checked={iconEnabled}
+                disabled={disabled}
+                className="border-border data-[state=unchecked]:bg-muted"
+                aria-label={`${actionLabel} enabled state`}
+                onCheckedChange={() => onOpenChange(true)}
+              />
+            </span>
           </BasicTooltip>
         }
         actions={
