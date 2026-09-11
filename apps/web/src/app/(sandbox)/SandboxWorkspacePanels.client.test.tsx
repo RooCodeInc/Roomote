@@ -1,4 +1,4 @@
-import { StrictMode, useEffect } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { act, fireEvent, render } from '@testing-library/react';
 
 const useMediaQueryMock = vi.hoisted(() => vi.fn(() => false));
@@ -57,14 +57,32 @@ describe('ResponsiveWorkspacePanels', () => {
     ['mobile', false, true],
     ['desktop', true, false],
   ])(
-    'preserves the main panel when resizing from %s across the breakpoint',
+    'preserves one coherent main lifecycle when resizing from %s across the breakpoint',
     (_layout, initialMatch, nextMatch) => {
       useMediaQueryMock.mockReturnValue(initialMatch);
+      const initialized = vi.fn();
       const unmounted = vi.fn();
+      const callback = vi.fn();
 
       function StatefulMain() {
-        useEffect(() => () => unmounted(), []);
-        return <textarea aria-label="Main conversation" defaultValue="draft" />;
+        const [callbackCount, setCallbackCount] = useState(0);
+        useEffect(() => {
+          initialized();
+          const handleVoiceEvent = () => {
+            callback();
+            setCallbackCount((count) => count + 1);
+          };
+          window.addEventListener('voice-session-event', handleVoiceEvent);
+          return () => {
+            window.removeEventListener('voice-session-event', handleVoiceEvent);
+            unmounted();
+          };
+        }, []);
+        return (
+          <output aria-label="Voice session callback count">
+            {callbackCount}
+          </output>
+        );
       }
 
       const view = render(
@@ -74,7 +92,9 @@ describe('ResponsiveWorkspacePanels', () => {
           panel={<div>Panel</div>}
         />,
       );
-      const main = view.getByLabelText('Main conversation');
+      const main = view.getByLabelText('Voice session callback count');
+      fireEvent(window, new Event('voice-session-event'));
+      expect(main).toHaveTextContent('1');
 
       useMediaQueryMock.mockReturnValue(nextMatch);
       view.rerender(
@@ -85,7 +105,12 @@ describe('ResponsiveWorkspacePanels', () => {
         />,
       );
 
-      expect(view.getByLabelText('Main conversation')).toBe(main);
+      fireEvent(window, new Event('voice-session-event'));
+
+      expect(view.getByLabelText('Voice session callback count')).toBe(main);
+      expect(main).toHaveTextContent('2');
+      expect(initialized).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledTimes(2);
       expect(unmounted).not.toHaveBeenCalled();
     },
   );
