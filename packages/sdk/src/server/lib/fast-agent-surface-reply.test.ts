@@ -178,7 +178,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       editMessageText: mocks.telegramEditMessage,
       editForumTopic: mocks.telegramEditForumTopic,
       sendChatAction: mocks.telegramTyping,
-      sendThinkingDraft: mocks.telegramTyping,
+      sendMessageDraft: mocks.telegramTyping,
     });
     mocks.createDiscordProvider.mockResolvedValue({
       triggerTyping: mocks.discordTyping,
@@ -244,6 +244,61 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       }
     },
   );
+
+  it('streams a private Telegram reply through its native draft before final delivery', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: '123', threadId: '77' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: null,
+      question: 'Explain this',
+      currentMessageId: '42',
+    });
+    const adapter = delivery!.adapter;
+    expect(adapter.createReplyStream).toBeTypeOf('function');
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      adapter.activity!.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const stream = adapter.createReplyStream!();
+      await stream.append('Partial answer');
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(mocks.telegramTyping).toHaveBeenLastCalledWith(
+        expect.objectContaining({ threadId: '77', text: 'Partial answer' }),
+      );
+      await expect(
+        stream.finish({ purpose: 'closeout', message: 'Final answer' }),
+      ).resolves.toEqual({ messageId: 'telegram-message-2' });
+      expect(mocks.telegramPostMessage).toHaveBeenCalled();
+      await adapter.activity!.settle();
+    } finally {
+      await adapter.activity!.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not offer Telegram draft streaming in groups', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      replyTarget: { channelId: '-100123', threadId: '77' },
+    });
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: null,
+      question: 'Explain this',
+    });
+
+    expect(delivery!.adapter.createReplyStream).toBeUndefined();
+  });
 
   it('syncs generated titles to a managed Telegram Fast topic', async () => {
     const user = await userFactory.create();

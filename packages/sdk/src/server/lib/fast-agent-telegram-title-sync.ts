@@ -51,14 +51,16 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
   }
 }
 
-export function addFastAgentTelegramTopicTitleSync(input: {
-  activity: FastAgentTurnActivity & { reassert: () => void };
+export function addFastAgentTelegramTopicTitleSync<
+  T extends FastAgentTurnActivity & { reassert: () => void },
+>(input: {
+  activity: T;
   provider: TelegramTopicTitleProvider;
   sessionId: string;
   channelId: string;
   threadId: string;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
-}): FastAgentTurnActivity & { reassert: () => void } {
+}): T & { updateTitle: (title: string | null) => void } {
   let lastRequestedTitle: string | null | undefined;
   let titleUpdate = Promise.resolve();
 
@@ -74,5 +76,5 @@ export function addFastAgentTelegramTopicTitleSync(input: {
     async dispose() {
       await Promise.all([input.activity.dispose(), titleUpdate]);
     },
-  };
+  } as T & { updateTitle: (title: string | null) => void };
 }

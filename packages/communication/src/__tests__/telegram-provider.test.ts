@@ -83,6 +83,29 @@ describe('TelegramCommunicationProvider', () => {
     );
   });
 
+  it('streams text through the same native Telegram draft', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.sendMessageDraft({
+      channelId: '123',
+      draftId: 42,
+      text: 'A partial response',
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      chat_id: 123,
+      draft_id: 42,
+      text: 'A partial response',
+    });
+  });
+
   it('rejects an invalid native Thinking draft id before calling Telegram', async () => {
     const fetchMock = vi.fn();
     const provider = new TelegramCommunicationProvider({
@@ -96,7 +119,24 @@ describe('TelegramCommunicationProvider', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects native Thinking outside a numeric private chat', async () => {
+  it('rejects an oversized live draft before calling Telegram', async () => {
+    const fetchMock = vi.fn();
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.sendMessageDraft({
+        channelId: '123',
+        draftId: 42,
+        text: 'x'.repeat(4_097),
+      }),
+    ).rejects.toThrow('exceeds 4096 characters');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects live drafts outside a numeric private chat', async () => {
     const fetchMock = vi.fn();
     const provider = new TelegramCommunicationProvider({
       botToken: 'bot-token',
