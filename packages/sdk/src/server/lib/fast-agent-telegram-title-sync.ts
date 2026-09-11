@@ -7,7 +7,7 @@ import type { TelegramCommunicationProvider } from '@roomote/communication/teleg
 
 type TelegramTopicTitleProvider = Pick<
   TelegramCommunicationProvider,
-  'editForumTopic'
+  'editForumTopic' | 'resolveForumTopicIconCustomEmojiId'
 >;
 
 export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
@@ -15,6 +15,7 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
   sessionId: string;
   channelId: string;
   threadId: string;
+  emoji?: string | null;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
 }): Promise<void> {
   try {
@@ -30,10 +31,16 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
       }
 
       const title = buildCommunicationTaskThreadName(session.title);
+      const iconCustomEmojiId = input.emoji
+        ? await input.provider
+            .resolveForumTopicIconCustomEmojiId([input.emoji])
+            .catch(() => undefined)
+        : undefined;
       await input.provider.editForumTopic({
         channelId: input.channelId,
         threadId: input.threadId,
         name: title,
+        ...(iconCustomEmojiId ? { iconCustomEmojiId } : {}),
       });
 
       const latest = await input.resolveSession();
@@ -60,21 +67,38 @@ export function addFastAgentTelegramTopicTitleSync<
   channelId: string;
   threadId: string;
   resolveSession: () => Promise<FastAgentConversationRecord | null>;
-}): T & { updateTitle: (title: string | null) => void } {
+}): T & {
+  updateTitle: (
+    title: string | null,
+    metadata?: { emoji?: string | null },
+  ) => void;
+} {
   let lastRequestedTitle: string | null | undefined;
+  let lastRequestedEmoji: string | null | undefined;
   let titleUpdate = Promise.resolve();
 
   return {
     ...input.activity,
-    updateTitle(title) {
-      if (!title || title === lastRequestedTitle) return;
+    updateTitle(title, metadata) {
+      const emoji = metadata?.emoji;
+      if (
+        !title ||
+        (title === lastRequestedTitle && emoji === lastRequestedEmoji)
+      )
+        return;
       lastRequestedTitle = title;
+      lastRequestedEmoji = emoji;
       titleUpdate = titleUpdate.then(() =>
-        syncFastAgentTelegramTopicTitleBestEffort(input),
+        syncFastAgentTelegramTopicTitleBestEffort({ ...input, emoji }),
       );
     },
     async dispose() {
       await Promise.all([input.activity.dispose(), titleUpdate]);
     },
-  } as T & { updateTitle: (title: string | null) => void };
+  } as T & {
+    updateTitle: (
+      title: string | null,
+      metadata?: { emoji?: string | null },
+    ) => void;
+  };
 }

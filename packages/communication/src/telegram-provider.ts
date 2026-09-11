@@ -94,6 +94,9 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly maxRetries: number;
+  private forumTopicIconStickers?: Promise<
+    Array<{ emoji?: string; customEmojiId: string }>
+  >;
 
   constructor(private readonly options: TelegramCommunicationProviderOptions) {
     this.apiBaseUrl = options.apiBaseUrl ?? getTelegramApiBaseUrl();
@@ -548,11 +551,44 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     };
   }
 
-  /** Rename an existing forum topic, including private-chat bot topics. */
+  /** Resolve the first requested emoji that Telegram supports as a topic icon. */
+  async resolveForumTopicIconCustomEmojiId(
+    emojis: readonly string[],
+  ): Promise<string | undefined> {
+    this.forumTopicIconStickers ??= this.callBotApi(
+      'getForumTopicIconStickers',
+      {},
+    ).then((result) =>
+      (Array.isArray(result) ? result : []).flatMap((sticker) => {
+        if (!sticker || typeof sticker !== 'object') return [];
+        const { emoji, custom_emoji_id: customEmojiId } = sticker as {
+          emoji?: unknown;
+          custom_emoji_id?: unknown;
+        };
+        return typeof customEmojiId === 'string'
+          ? [
+              {
+                ...(typeof emoji === 'string' ? { emoji } : {}),
+                customEmojiId,
+              },
+            ]
+          : [];
+      }),
+    );
+    const stickers = await this.forumTopicIconStickers;
+    for (const emoji of emojis) {
+      const sticker = stickers.find((candidate) => candidate.emoji === emoji);
+      if (sticker) return sticker.customEmojiId;
+    }
+    return undefined;
+  }
+
+  /** Update an existing forum topic, including private-chat bot topics. */
   async editForumTopic(input: {
     channelId: string;
     threadId: string;
     name: string;
+    iconCustomEmojiId?: string;
   }): Promise<void> {
     const threadId = parsePositiveInteger(input.threadId);
 
@@ -564,6 +600,9 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       chat_id: input.channelId,
       message_thread_id: threadId,
       name: input.name,
+      ...(input.iconCustomEmojiId
+        ? { icon_custom_emoji_id: input.iconCustomEmojiId }
+        : {}),
     });
   }
 
@@ -702,6 +741,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       'getMe',
       'getFile',
       'getWebhookInfo',
+      'getForumTopicIconStickers',
       'setWebhook',
       'setMyCommands',
       'sendChatAction',
