@@ -1,6 +1,8 @@
 import { RunStatus } from '@roomote/types';
 import { settleSlackLiveTaskCardForRun } from '@roomote/slack';
 
+import { settleTelegramLiveTaskStreamForRun } from '../telegram-live-task-stream';
+
 /**
  * Settle a run's Slack task card for terminations the worker never sees
  * (cancel before dequeue, reaper finalization, failed bootstrap). Only
@@ -19,6 +21,12 @@ export async function settleSlackLiveTaskCardOnExit(
 
   try {
     await settleSlackLiveTaskCardForRun({
+      taskId: run.taskId,
+      payload: run.payload,
+      status,
+      taskTitle,
+    });
+    await settleTelegramLiveTaskStreamForRun({
       taskId: run.taskId,
       payload: run.payload,
       status,

@@ -340,6 +340,8 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     channelId: string;
     messageId: string;
     text: string;
+    /** Provider-native HTML with `text` retained as the plain-text fallback. */
+    htmlText?: string;
     textFormat?: 'plain' | 'markdown';
     buttons?: CommunicationMessageButton[][];
   }): Promise<void> {
@@ -347,8 +349,9 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     const firstChunk = useMarkdown
       ? chunkTelegramMarkdownAsHtml(input.text)[0]
       : null;
-    const attempts: Array<{ text: string; parseMode?: 'HTML' }> =
-      firstChunk?.html
+    const attempts: Array<{ text: string; parseMode?: 'HTML' }> = input.htmlText
+      ? [{ text: input.htmlText, parseMode: 'HTML' }, { text: input.text }]
+      : firstChunk?.html
         ? [
             { text: firstChunk.html, parseMode: 'HTML' },
             { text: firstChunk.markdown },
@@ -386,6 +389,12 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       }
 
       const description = parsed?.description;
+      if (
+        response.status === 400 &&
+        description?.toLowerCase().includes('message is not modified')
+      ) {
+        return;
+      }
       lastError = new Error(
         `Telegram editMessageText failed${
           response.status ? ` (${response.status})` : ''
@@ -395,7 +404,8 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       const isEntityParseError =
         attempt.parseMode === 'HTML' &&
         response.status === 400 &&
-        Boolean(description?.toLowerCase().includes("can't parse entities"));
+        (Boolean(input.htmlText) ||
+          Boolean(description?.toLowerCase().includes("can't parse entities")));
 
       if (!isEntityParseError) {
         throw lastError;

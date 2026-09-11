@@ -66,7 +66,7 @@ import {
   type FastAgentSourceControlReplyTarget,
   type FastAgentParent,
   type PullRequestStatus,
-  type RunStatus,
+  RunStatus,
   type TaskRunErrorCode,
   type SourceControlProvider,
   type StandardTask,
@@ -111,6 +111,11 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
 import { AgentMailRecipientUnavailableError } from './agentmail/outbound';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
+import {
+  settleTelegramLiveTaskStreamForRun,
+  startTelegramLiveTaskStream,
+  type TelegramLiveTaskStreamProvider,
+} from './telegram-live-task-stream';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
@@ -1209,6 +1214,8 @@ export function createFastAgentCommunicationTaskLauncher(params: {
   serviceUrl?: string;
   /** Set when the conversation is a custom automation run. */
   automation?: FastAutomationLaunchContext | null;
+  /** Enables Telegram's single-message live task status for Fast delegation. */
+  telegramLiveTaskProvider?: TelegramLiveTaskStreamProvider;
 }): LaunchFastAgentTask {
   const { payload: automationPayload, ...automationLaunchOptions } =
     params.automation
@@ -1221,6 +1228,29 @@ export function createFastAgentCommunicationTaskLauncher(params: {
     userId: params.userId,
     surface: params.conversation.surface,
     taskUrlCampaign: 'fast-delegation',
+    ...(params.telegramLiveTaskProvider &&
+    params.conversation.surface === 'telegram'
+      ? {
+          rendersTaskLink: true,
+          afterKickoff: (taskRun, context) =>
+            startTelegramLiveTaskStream({
+              provider: params.telegramLiveTaskProvider!,
+              taskRun,
+              prompt: context.prompt,
+              taskUrl: context.taskUrl,
+              channelId: params.conversation.replyTarget.channelId,
+              ...(params.conversation.replyTarget.threadId
+                ? { threadId: params.conversation.replyTarget.threadId }
+                : {}),
+            }),
+          onQueueFailure: (taskRun) =>
+            settleTelegramLiveTaskStreamForRun({
+              taskId: taskRun.taskId,
+              payload: { liveTaskStream: true },
+              status: RunStatus.Canceled,
+            }),
+        }
+      : {}),
     ...automationLaunchOptions,
     buildTask: ({
       prompt,
@@ -1235,6 +1265,10 @@ export function createFastAgentCommunicationTaskLauncher(params: {
         description: prompt,
         ...automationPayload,
         communicationProvider: params.conversation.surface,
+        ...(params.telegramLiveTaskProvider &&
+        params.conversation.surface === 'telegram'
+          ? { liveTaskStream: true }
+          : {}),
         communicationChannelId: params.conversation.replyTarget.channelId,
         ...(params.conversation.surface === 'agentmail'
           ? { communicationThreadId: params.conversation.conversationId }
@@ -1852,6 +1886,7 @@ async function createTelegramFastAgentParentTurn(
       launchTask: createFastAgentCommunicationTaskLauncher({
         userId: actorUserId,
         conversation,
+        telegramLiveTaskProvider: provider,
         automation: await resolveFastAutomationLaunchContext({
           event: params.event,
           conversation,

@@ -617,6 +617,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
+          telegramLiveTaskProvider: provider,
         }),
         postReply: async ({ message }) => {
           const posted = await postTextThreadReplyWithFooter({
