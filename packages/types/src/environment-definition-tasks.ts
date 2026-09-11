@@ -102,7 +102,7 @@ For each empty repository, follow the skill's empty-repository bootstrap: push e
   const setupTarget =
     orderedRepositories.length > 0
       ? `this repository set:\n${repositoryLines}${emptyRepositorySection}`
-      : `a repository-free workspace. Do not look for or create a repository. The environment must use an explicit \`repositories: []\` and may configure repository-independent tools, services, environment variables, ports, MCP servers, skills, or agent instructions when supported by the user's guidance.`;
+      : `a repository-free workspace. Do not look for or create a repository. Omit \`repositories\` and configure only repository-independent tools, services, environment variables, ports, MCP servers, skills, or agent instructions supported by the user's guidance.`;
 
   return `$environment-setup
 

@@ -145,7 +145,7 @@ agentInstructions: |
 | ------------------------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `name`                    | string            | yes      | Environment name, 1–100 characters.                                                                                       |
 | `description`             | string            | no       | Short summary, up to 500 characters.                                                                                      |
-| `repositories`            | list              | yes      | At least one repository. See [Repositories](#repositories).                                                               |
+| `repositories`            | list              | no       | Repositories to clone. Defaults to none. See [Repositories](#repositories).                                                |
 | `initialUrl`              | string            | no       | Absolute URL or `about:blank` that the preview surface opens first.                                                       |
 | `agentInstructions`       | string            | no       | Guidance attached to every task, up to 10,000 characters.                                                                 |
 | `tool_versions`           | map               | no       | Tools installed at the shared workspace root via mise.                                                                    |
@@ -169,10 +169,11 @@ opens first, so point it at the app entry a reviewer would expect, for example
 
 ## Repositories
 
-`repositories` is a required list, but it can be empty. Use `repositories: []`
-for an environment that only needs repository-independent services, tools,
-environment variables, integrations, skills, ports, or agent guidance. Each
-listed repository is cloned onto the shared workspace.
+`repositories` is optional and defaults to an empty list. Omit it for an
+environment that only needs repository-independent services, tools,
+environment variables, integrations, skills, ports, or agent guidance. An
+empty list is also accepted. Each listed repository is cloned onto the shared
+workspace.
 
 | Field           | Type   | Required | Notes                                                             |
 | --------------- | ------ | -------- | ----------------------------------------------------------------- |

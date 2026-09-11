@@ -477,11 +477,13 @@ describe('environmentConfigSchema', () => {
     });
   });
 
-  it('still requires an explicit repositories array', () => {
+  it('defaults omitted repositories to an empty array', () => {
     expect(
-      environmentConfigSchema.safeParse({ name: 'Missing repositories' })
-        .success,
-    ).toBe(false);
+      environmentConfigSchema.parse({ name: 'Repository-free workspace' }),
+    ).toEqual({
+      name: 'Repository-free workspace',
+      repositories: [],
+    });
   });
 
   it.each([

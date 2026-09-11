@@ -319,7 +319,6 @@ describe('createEnvironment attribution', () => {
       body: JSON.stringify({
         config: {
           name: 'Repository-free Environment',
-          repositories: [],
           services: ['postgres16'],
         },
       }),

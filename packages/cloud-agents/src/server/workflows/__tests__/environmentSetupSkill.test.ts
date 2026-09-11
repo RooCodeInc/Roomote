@@ -137,9 +137,11 @@ describe('environment-setup guidance', () => {
     expect(skillContent).toContain(
       'When the task explicitly has no repositories, treat that as a supported repository-free environment',
     );
-    expect(skillContent).toContain('use `repositories: []`');
     expect(skillContent).toContain(
-      '<field name="repositories" required="true" type="RepositoryConfig[]" min_items="0" />',
+      'omit `repositories` from the environment definition',
+    );
+    expect(skillContent).toContain(
+      '<field name="repositories" required="false" type="RepositoryConfig[]" />',
     );
   });
 

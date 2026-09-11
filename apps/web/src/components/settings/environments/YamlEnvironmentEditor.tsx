@@ -46,8 +46,8 @@ import { VisualEnvironmentEditor } from './VisualEnvironmentEditor';
 function getDefaultYamlTemplate(repositoryNames: string[] = []) {
   const repositoryYaml =
     repositoryNames.length > 0
-      ? `repositories:\n${repositoryNames.map((name) => `  - repository: ${name}`).join('\n')}`
-      : 'repositories: []';
+      ? `# Optional: Repositories to include in this environment.\nrepositories:\n${repositoryNames.map((name) => `  - repository: ${name}`).join('\n')}`
+      : '';
 
   return `# Environment Configuration
 name: My Environment
@@ -59,7 +59,6 @@ description: A brief description of this environment.
 #   This is a monorepo. The frontend is in packages/web and the API is in packages/api.
 #   Always run tests before committing changes.
 
-# Optional: Repositories to include in this environment. Keep this as [] for a repository-free workspace.
 ${repositoryYaml}
 
 # Optional: Shared mise tool versions for the workspace root.

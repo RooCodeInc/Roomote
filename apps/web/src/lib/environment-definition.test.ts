@@ -65,7 +65,7 @@ describe('environment definition helpers', () => {
     const prompt = buildCreateEnvironmentDefinitionPrompt([]);
 
     expect(prompt).toContain('a repository-free workspace');
-    expect(prompt).toContain('repositories: []');
+    expect(prompt).toContain('Omit `repositories`');
     expect(buildEnvironmentDefinitionWorkspacePayload([])).toEqual({
       repo: '__no_repositories__',
     });
@@ -203,7 +203,7 @@ describe('environment definition helpers', () => {
     });
 
     expect(prompt).toContain('This is a repository-free environment.');
-    expect(prompt).toContain('repositories: []');
+    expect(prompt).not.toContain('repositories:');
   });
 
   it('directs preview repair tasks through the public preview URL', () => {
