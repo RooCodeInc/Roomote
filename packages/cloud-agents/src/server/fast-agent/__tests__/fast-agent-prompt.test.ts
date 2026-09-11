@@ -775,6 +775,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'the runtime silently ensures this conversation has exactly one internal session-wide one-shot check',
     );
+    expect(prompt).toContain(
+      '"in 1m" while a voice call is active, otherwise "in 10m"',
+    );
     expect(prompt).toContain('Do not create another wakeup for this purpose');
     expect(prompt).toContain('passing "internal": true');
     expect(prompt).toContain(
@@ -855,6 +858,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'ensure exactly one equivalent next one-shot check exists for "in 10m"',
     );
+    expect(prompt).toContain(
+      'latest persisted call start/end marker at wake time, not the originating turn',
+    );
+    expect(prompt).toContain(
+      'cancel an otherwise equivalent own-task check with the wrong cadence',
+    );
     expect(prompt).toContain('passing "internal": true');
     expect(prompt).toContain('If no task remains running, do not rearm');
     expect(prompt).toContain('otherwise call "ignore_event"');
@@ -887,6 +896,28 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('after 12 runs');
     expect(prompt).not.toContain(
       'post exactly one brief consolidated factual status for the Session on every check',
+    );
+  });
+
+  it('uses the same concise follow-through contract at the voice cadence', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+      voiceMode: true,
+    });
+
+    expect(prompt).toContain(
+      'user-visible work update in this conversation for roughly 1 minute',
+    );
+    expect(prompt).toContain(
+      'ensure exactly one equivalent next one-shot check exists for "in 1m"',
+    );
+    expect(prompt).toContain(
+      'Keep routine voice updates especially concise, applying these same reporting and repetition rules rather than inventing another suppression policy',
+    );
+    expect(prompt).toContain(
+      'do not narrate routine logs, invent progress, repeat an already reported development',
     );
   });
 

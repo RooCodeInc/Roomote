@@ -63,6 +63,7 @@ const mocks = vi.hoisted(() => ({
   updateSourceControlComment: vi.fn(),
   linearEmitResponse: vi.fn(),
   createConversationArtifact: vi.fn(),
+  isVoiceCallActive: vi.fn(),
 }));
 
 vi.mock('./fast-agent-session-videos', () => ({
@@ -172,6 +173,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       return { success: true, taskId: 'child-task-1', taskUrl };
     },
   createFastAgentWebTaskLauncher: vi.fn(() => mocks.launchTask),
+  isFastAgentVoiceCallActive: mocks.isVoiceCallActive,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -394,6 +396,7 @@ describe('deliverFastAgentParentEvent', () => {
       completionEmoji: 'white_check_mark',
     });
     mocks.resolveUserMcpServerConfigs.mockResolvedValue({});
+    mocks.isVoiceCallActive.mockResolvedValue(false);
     mocks.postSlackSuggestions.mockResolvedValue(undefined);
     mocks.postDiscordSuggestions.mockResolvedValue(undefined);
     mocks.postTeamsSuggestions.mockResolvedValue(undefined);
@@ -3723,6 +3726,34 @@ describe('deliverFastAgentParentEvent', () => {
         platformEventVisibility: 'required',
         userId: 'user-1',
       }),
+    );
+  });
+
+  it('resolves current voice activity when a scheduled wakeup runs', async () => {
+    mocks.findWakeup.mockResolvedValueOnce({ status: 'completed' });
+    mocks.findWakeupSession.mockResolvedValueOnce({ archivedAt: null });
+    mocks.isVoiceCallActive.mockResolvedValueOnce(true);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'scheduled_wakeup',
+        eventId: 'wakeup-voice:1',
+        wakeupId: 'wakeup-voice',
+        name: 'Follow through on session tasks',
+        prompt: 'Check the tasks in this conversation.',
+        runNumber: 1,
+        maxRuns: null,
+        firedAt: '2026-09-04T17:10:00.000Z',
+        nextRunAt: null,
+        reportPolicy: 'only_when_notable',
+        createdByUserId: 'user-1',
+      },
+    });
+
+    expect(mocks.isVoiceCallActive).toHaveBeenCalledWith(parent.sessionId);
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ voiceMode: true }),
     );
   });
 

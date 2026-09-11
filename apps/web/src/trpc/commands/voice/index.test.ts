@@ -39,15 +39,21 @@ vi.mock('@/lib/server/voice-context', () => ({
   loadVoiceWorkspaceContext: vi.fn(async () => voiceContext),
 }));
 
-const { mockUpsertFastAgentMessage, mockAppendFastAgentVisibleMessages } =
-  vi.hoisted(() => ({
-    mockUpsertFastAgentMessage: vi.fn(),
-    mockAppendFastAgentVisibleMessages: vi.fn(),
-  }));
+const {
+  mockUpsertFastAgentMessage,
+  mockAppendFastAgentVisibleMessages,
+  mockRefreshOwnTaskFollowThroughWakeupCadence,
+} = vi.hoisted(() => ({
+  mockUpsertFastAgentMessage: vi.fn(),
+  mockAppendFastAgentVisibleMessages: vi.fn(),
+  mockRefreshOwnTaskFollowThroughWakeupCadence: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   upsertFastAgentMessage: mockUpsertFastAgentMessage,
   appendFastAgentVisibleMessages: mockAppendFastAgentVisibleMessages,
+  refreshOwnTaskFollowThroughWakeupCadence:
+    mockRefreshOwnTaskFollowThroughWakeupCadence,
 }));
 
 const mockFindAccessibleFastSession = vi.hoisted(() => vi.fn());
@@ -74,6 +80,7 @@ import {
 beforeEach(() => {
   vi.clearAllMocks();
   mockResolveVoiceId.mockResolvedValue('marin');
+  mockRefreshOwnTaskFollowThroughWakeupCadence.mockResolvedValue(null);
 });
 
 describe('getVoiceStatusCommand', () => {
@@ -324,5 +331,9 @@ describe('recordVoiceCallEventCommand', () => {
         }),
       }),
     );
+    expect(mockRefreshOwnTaskFollowThroughWakeupCadence).toHaveBeenCalledWith({
+      conversationId: 'fast-1',
+      userId: 'user-1',
+    });
   });
 });
