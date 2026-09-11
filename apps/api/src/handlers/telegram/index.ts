@@ -622,10 +622,6 @@ telegram.post('/', async (c) => {
         reason: 'fast_session_delivery_unavailable',
       });
     }
-    await ackTelegramMessageBestEffort({
-      chatId: metadata.communicationChannelId,
-      messageId: metadata.communicationMessageId,
-    });
     return c.json({ ok: true, fastAnswered: true, fastContinued: true });
   }
   const activeRun = repliedToAutomationReport
@@ -779,12 +775,6 @@ telegram.post('/', async (c) => {
     // task description instead of the generically stripped message text.
     queuedMessage.text = newTaskCommand.text;
   }
-
-  // Ack before routing so the sender sees pickup while the router runs.
-  await ackTelegramMessageBestEffort({
-    chatId: metadata.communicationChannelId,
-    messageId: metadata.communicationMessageId,
-  });
 
   if (completedRun) {
     try {
