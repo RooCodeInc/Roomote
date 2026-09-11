@@ -232,6 +232,50 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it("lists the owner's Email identities when the tool scopes list_destinations to an automation", async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'automation-1',
+        createdByUserId: 'member-2',
+        target: {},
+      });
+      mockListAvailableAgentMailOutboundIdentities.mockResolvedValue([
+        {
+          id: 'verified:member-2:digest',
+          emailAddress: 'member@example.com',
+          kind: 'verified',
+        },
+      ]);
+
+      const result = await handler({
+        action: 'list_destinations',
+        automationId: 'automation-1',
+      });
+
+      expect(mockListAvailableAgentMailOutboundIdentities).toHaveBeenCalledWith(
+        'member-2',
+      );
+      expect(result).toMatchObject({
+        structuredContent: {
+          emailIdentities: [
+            {
+              id: 'verified:member-2:digest',
+              emailAddress: 'member@example.com',
+              kind: 'verified',
+            },
+          ],
+        },
+      });
+    });
+
     it('returns compact automation records without changing the API response', async () => {
       const authContext: AuthTokenContext = {
         userId: 'admin-1',

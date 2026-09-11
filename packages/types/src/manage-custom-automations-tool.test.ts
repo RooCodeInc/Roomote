@@ -400,6 +400,18 @@ describe('manage custom automations tool contract', () => {
       request: { path: '/destinations', method: 'GET' },
     });
     expect(
+      buildManageCustomAutomationsRequest({
+        action: 'list_destinations',
+        automationId: 'automation 1',
+      }),
+    ).toEqual({
+      ok: true,
+      request: {
+        path: '/destinations?automationId=automation%201',
+        method: 'GET',
+      },
+    });
+    expect(
       compactManageCustomAutomationsResult('list_destinations', {
         emailIdentities: [
           {

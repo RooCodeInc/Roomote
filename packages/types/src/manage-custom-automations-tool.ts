@@ -24,7 +24,9 @@ export const manageCustomAutomationsFieldSchemas = {
   automationId: z
     .string()
     .optional()
-    .describe('Required for inspect, update, delete, and run_now.'),
+    .describe(
+      "Required for inspect, update, delete, and run_now. Pass it with list_destinations when updating an existing automation so Email identities are listed for that automation's owner.",
+    ),
   name: z.string().optional(),
   prompt: z
     .string()
@@ -297,7 +299,17 @@ export function buildManageCustomAutomationsRequest(
     case 'list_models':
       return { ok: true, request: { path: '/models', method: 'GET' } };
     case 'list_destinations':
-      return { ok: true, request: { path: '/destinations', method: 'GET' } };
+      // Email identities belong to the automation owner, so an admin editing
+      // someone else's automation scopes the list to that automation.
+      return {
+        ok: true,
+        request: {
+          path: params.automationId
+            ? `/destinations?automationId=${encodeURIComponent(params.automationId)}`
+            : '/destinations',
+          method: 'GET',
+        },
+      };
     case 'resolve_schedule':
       if (!params.schedule) {
         return { ok: false, error: 'schedule is required' };
