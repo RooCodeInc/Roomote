@@ -11,7 +11,13 @@ if [[ ! -f "$ARCHIVE" ]]; then
     "https://codeload.github.com/ironsh/iron-proxy/tar.gz/$IRON_GIT_SHA" --output "$ARCHIVE.part"
   mv "$ARCHIVE.part" "$ARCHIVE"
 fi
-printf '%s  %s\n' "$IRON_ARCHIVE_SHA256" "$ARCHIVE" | sha256sum --check --status
+# Node is already required by archive validation and the source overlay patcher.
+node --input-type=module - "$ARCHIVE" "$IRON_ARCHIVE_SHA256" <<'JS'
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+const actual = createHash('sha256').update(readFileSync(process.argv[2])).digest('hex');
+if (actual !== process.argv[3]) throw new Error('archive SHA256 mismatch');
+JS
 # The SHA-addressed archive and exact top-level name are both verified before extraction.
 tar -tzf "$ARCHIVE" | node "$ROOT/verify-archive.mjs" "$IRON_GIT_SHA"
 rm -rf "$SOURCE" # Only our ignored, SHA-addressed generated source directory.

@@ -3,12 +3,46 @@ package echo
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 )
 
 const cred = "sk-live-Qm9vayBvZiBTZWNyZXRz+/=="
+
+func TestUnicodeJSONEncodings(t *testing.T) {
+	for _, format := range []string{"\\u%04x", "\\u%04X"} {
+		t.Run(format, func(t *testing.T) {
+			var escaped strings.Builder
+			for _, r := range cred {
+				fmt.Fprintf(&escaped, format, r)
+			}
+			body := []byte(`"` + escaped.String() + `"`)
+			var decoded string
+			if err := json.Unmarshal(body, &decoded); err != nil || decoded != cred {
+				t.Fatalf("invalid credential JSON: %q, %v", decoded, err)
+			}
+			s := New(cred)
+			if !s.Contains(body) {
+				t.Error("missed valid unicode-escaped JSON")
+			}
+			for split := 2; split < len(body)-2; split++ {
+				st := s.NewStream()
+				out, err := st.Feed(body[:split])
+				if err != nil || len(out) != 0 {
+					t.Fatalf("split %d: first chunk not held: %q, %v", split, out, err)
+				}
+				out, err = st.Feed(body[split:])
+				if !errors.Is(err, ErrEcho) || len(out) != 0 {
+					t.Fatalf("split %d: echo not suppressed: %q, %v", split, out, err)
+				}
+			}
+		})
+	}
+}
 
 func TestContainsEncodings(t *testing.T) {
 	s := New(cred)

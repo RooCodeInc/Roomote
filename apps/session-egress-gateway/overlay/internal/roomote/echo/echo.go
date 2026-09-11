@@ -67,17 +67,18 @@ func New(value string) *Scanner {
 	}
 	add(lowerEscapes(url.QueryEscape(value)))
 	add(lowerEscapes(url.PathEscape(value)))
-	var percent, unicode strings.Builder
+	var percent, unicode, unicodeUpper strings.Builder
 	for _, b := range raw {
 		fmt.Fprintf(&percent, "%%%02X", b)
 	}
 	for _, r := range value {
 		fmt.Fprintf(&unicode, "\\u%04x", r)
+		fmt.Fprintf(&unicodeUpper, "\\u%04X", r)
 	}
 	add(percent.String())
 	add(lowerEscapes(percent.String()))
 	add(unicode.String())
-	add(strings.ToUpper(unicode.String()))
+	add(unicodeUpper.String())
 	add(hex.EncodeToString(raw))
 	add(strings.ToUpper(hex.EncodeToString(raw)))
 	encoded, _ := json.Marshal(value) // A string is always JSON encodable.
