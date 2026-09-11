@@ -1749,8 +1749,8 @@ export function Integrations({
   );
   const voiceConnectionSummary = useMemo(
     () =>
-      (userMcpConnections.data ?? []).find((entry) => entry.mcpId === 'voice'),
-    [userMcpConnections.data],
+      (effectiveIntegrations.data ?? []).find((entry) => entry.id === 'voice'),
+    [effectiveIntegrations.data],
   );
   const isVoiceConnected =
     voiceConnectionSummary?.authStatus === 'authenticated';
