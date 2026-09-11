@@ -20,6 +20,10 @@ identifier, username, role, and PKCS8 PEM-encoded private key. Add the matching
 public key to the Snowflake user first. Supply the private-key passphrase too
 when the key is encrypted.
 
+Roomote supports Snowflake key-pair authentication only. Password and
+programmatic access token authentication are not supported; rotate an existing
+password- or token-based connection to an RSA key pair before using it again.
+
 Generate a dedicated encrypted RSA key on a secure operator machine. Keep the
 private key out of shell arguments, repositories, chat, and logs. For example,
 run `umask 077`, then use `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -aes-256-cbc -out roomote_snowflake_key.p8` and enter the passphrase interactively. Export only the public key with `openssl pkey -in roomote_snowflake_key.p8 -pubout -out roomote_snowflake_key.pub`.
