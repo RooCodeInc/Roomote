@@ -505,6 +505,20 @@ describe('custom-automations MCP routes', () => {
       });
     });
 
+    it('excludes shared channel defaults from destination discovery', async () => {
+      const { app } = createApp();
+
+      const response = await app.request('/custom-automations/destinations');
+
+      expect(response.status).toBe(200);
+      expect(mockResolveDefaultAutomationTarget).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ownerUserId: 'member-1',
+          includeSharedChannels: false,
+        }),
+      );
+    });
+
     it.each(['other', null])(
       'denies every ID operation for owner %s without side effects',
       async (createdByUserId) => {

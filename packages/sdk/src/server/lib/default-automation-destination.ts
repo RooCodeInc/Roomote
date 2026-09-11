@@ -46,6 +46,7 @@ type DefaultAutomationTargetParams = {
   ownerUserId: string;
   capabilities: AutomationDestinationCapabilities;
   existingTarget?: OptionalAutomationTarget | null;
+  includeSharedChannels?: boolean;
   includeSetupHandoff?: boolean;
   client?: DatabaseOrTransaction;
 };
@@ -59,6 +60,7 @@ export async function resolveDefaultAutomationTarget({
   ownerUserId,
   capabilities,
   existingTarget,
+  includeSharedChannels = true,
   includeSetupHandoff = false,
   client = db,
 }: DefaultAutomationTargetParams): Promise<AutomationTarget | null> {
@@ -72,16 +74,18 @@ export async function resolveDefaultAutomationTarget({
     return supported ? existingTarget : null;
   }
 
-  const settings = await client.query.deploymentSettings
-    .findFirst({
-      where: eq(deploymentSettings.id, 'default'),
-      columns: {
-        managerSlackChannelId: true,
-        managerDiscordChannelId: true,
-        setupNewState: true,
-      },
-    })
-    .catch(() => null);
+  const settings = includeSharedChannels
+    ? await client.query.deploymentSettings
+        .findFirst({
+          where: eq(deploymentSettings.id, 'default'),
+          columns: {
+            managerSlackChannelId: true,
+            managerDiscordChannelId: true,
+            setupNewState: true,
+          },
+        })
+        .catch(() => null)
+    : null;
 
   const channelCandidates: AutomationTarget[] = [];
   if (settings?.managerSlackChannelId?.trim()) {
@@ -127,7 +131,7 @@ export async function resolveDefaultAutomationTarget({
 
   // These persisted primary conversations are channel-level defaults, so they
   // precede owner DMs just like an explicitly configured manager channel.
-  if (capabilities.chatProviders.includes('teams')) {
+  if (includeSharedChannels && capabilities.chatProviders.includes('teams')) {
     try {
       const primary = await findTeamsPrimaryConversation();
       if (primary) {
@@ -141,7 +145,10 @@ export async function resolveDefaultAutomationTarget({
       // Continue to the next configured channel convention.
     }
   }
-  if (capabilities.chatProviders.includes('telegram')) {
+  if (
+    includeSharedChannels &&
+    capabilities.chatProviders.includes('telegram')
+  ) {
     try {
       const chatId = await findTelegramPrimaryChatId();
       if (chatId) {
@@ -155,7 +162,7 @@ export async function resolveDefaultAutomationTarget({
       // Continue to the next configured channel convention.
     }
   }
-  if (capabilities.chatProviders.includes('discord')) {
+  if (includeSharedChannels && capabilities.chatProviders.includes('discord')) {
     try {
       const primary = await findDiscordDefaultDestination();
       if (primary) {

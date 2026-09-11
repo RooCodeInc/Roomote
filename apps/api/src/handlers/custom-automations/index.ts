@@ -417,6 +417,7 @@ customAutomationsRouter.get('/destinations', async (c) => {
       ownerUserId,
       capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
       existingTarget,
+      includeSharedChannels: c.get('customAutomationUser').role === 'admin',
     }),
   ]);
   return c.json({

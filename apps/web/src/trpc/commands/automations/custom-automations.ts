@@ -364,6 +364,7 @@ export async function getCustomAutomationOptionsCommand(
         ownerUserId,
         capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
         existingTarget: automation?.target,
+        includeSharedChannels: auth.isAdmin,
       }),
     ]);
 

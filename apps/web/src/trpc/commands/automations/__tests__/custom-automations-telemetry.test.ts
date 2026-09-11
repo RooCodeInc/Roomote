@@ -305,6 +305,12 @@ describe('custom automation ownership', () => {
     expect(
       mocks.getBackgroundAgentSettingsForDeployment,
     ).not.toHaveBeenCalled();
+    expect(mocks.resolveDefaultAutomationTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 'member-1',
+        includeSharedChannels: false,
+      }),
+    );
   });
 
   it("lists the automation owner's Email identities when an admin edits on their behalf", async () => {

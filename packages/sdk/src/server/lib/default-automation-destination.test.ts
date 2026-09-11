@@ -173,6 +173,32 @@ describe('resolveDefaultAutomationTarget', () => {
     expect(mocks.directMessage).not.toHaveBeenCalled();
   });
 
+  it('skips shared channel defaults for member-owned automation options', async () => {
+    mocks.settings.mockResolvedValue({
+      managerSlackChannelId: 'C12345678',
+      setupNewState: {},
+    });
+    mocks.teamsPrimary.mockResolvedValue({
+      conversationId: 'teams-channel',
+      serviceUrl: 'https://teams.example.test',
+    });
+    mocks.directMessage.mockResolvedValue({ channelId: 'D123' });
+
+    await expect(
+      resolveDefaultAutomationTarget({
+        ownerUserId: 'user-1',
+        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        includeSharedChannels: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'slack',
+      targetKind: 'slack_user',
+      externalRef: 'user-1',
+    });
+    expect(mocks.settings).not.toHaveBeenCalled();
+    expect(mocks.teamsPrimary).not.toHaveBeenCalled();
+  });
+
   it('preserves a supported explicit target without probing defaults', async () => {
     const explicit = {
       provider: 'discord' as const,
