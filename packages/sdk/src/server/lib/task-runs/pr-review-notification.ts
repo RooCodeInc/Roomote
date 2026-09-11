@@ -52,19 +52,17 @@ export const PR_REVIEW_NOTIFICATION_DEBOUNCE_MS = 1 * 60 * 1000;
 export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 5 * 60 * 1000;
 
 /**
- * Delay before re-checking an owner task that is still actively running when
- * the notification job fires. The notification is intentionally held until
- * the task goes idle.
+ * Delay before re-checking a notification target that is still active. Fast
+ * tasks wait for their parent Session conversation; direct tasks wait for the
+ * task itself.
  */
 export const PR_REVIEW_NOTIFICATION_DEFER_MS = 5 * 60 * 1000;
 
 /**
- * Upper bound on idle-wait deferrals. The notification only posts while the
- * owning task is idle, so once the cap is reached the pending feedback is
- * dropped instead of being posted mid-run. At the 5-minute recheck interval
- * this cap roughly matches the 24-hour pending-events TTL, so it mainly
- * protects against tasks stuck in a running state scheduling deferral jobs
- * forever.
+ * Upper bound on idle-wait deferrals. Once the cap is reached, pending feedback
+ * is dropped instead of interrupting an active conversation. At the 5-minute
+ * recheck interval this cap roughly matches the 24-hour pending-events TTL, so
+ * it mainly protects against stale activity scheduling deferral jobs forever.
  */
 export const PR_REVIEW_NOTIFICATION_MAX_DEFERRALS = 288;
 
@@ -694,7 +692,7 @@ export async function migrateLegacyPrReviewNotificationRequest(
  * originating conversation route, but web-only tasks are enqueued too so the
  * summary can land in task history.
  * The notification is informational only: it tells the user about the review
- * feedback once the task is idle. No agent turn is started.
+ * feedback once its user-facing conversation is idle. No agent turn is started.
  */
 export async function enqueuePrReviewNotification(
   input: EnqueuePrReviewNotificationInput,
