@@ -126,7 +126,6 @@ export async function startTelegramLiveTaskStream(input: {
       ...(input.threadId ? { threadId: input.threadId } : {}),
       text: message.text,
       htmlText: message.htmlText,
-      ...(message.buttons ? { buttons: message.buttons } : {}),
     });
     postedMessageId = posted.messageId;
 

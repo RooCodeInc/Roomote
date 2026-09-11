@@ -70,16 +70,12 @@ describe('Telegram live task stream', () => {
     expect(mocks.postMessage).toHaveBeenCalledWith({
       channelId: '-1001',
       threadId: '77',
-      text: 'Starting task…',
-      htmlText: '<blockquote expandable>Starting task…</blockquote>',
-      buttons: [
-        [
-          {
-            text: 'Open task',
-            url: expect.stringContaining('task=task-1'),
-          },
-        ],
-      ],
+      text: expect.stringMatching(
+        /^Starting task…\n\nOpen in Roomote: .*task=task-1/,
+      ),
+      htmlText: expect.stringMatching(
+        /^<blockquote expandable>Starting task…<\/blockquote>\n\n<a href=".*task=task-1.*">Open in Roomote<\/a>/,
+      ),
     });
 
     await start();
@@ -99,10 +95,12 @@ describe('Telegram live task stream', () => {
       expect.objectContaining({
         channelId: '-1001',
         messageId: '88',
-        text: 'Running tests.\n\nChecking Telegram fallback behavior.',
-        htmlText:
-          '<blockquote expandable>Running tests.\n\nChecking Telegram fallback behavior.</blockquote>',
-        buttons: [[{ text: 'Open task', url: expect.any(String) }]],
+        text: expect.stringMatching(
+          /^Running tests\.\n\nChecking Telegram fallback behavior\.\n\nOpen in Roomote:/,
+        ),
+        htmlText: expect.stringMatching(
+          /^<blockquote expandable>Running tests\.\n\nChecking Telegram fallback behavior\.<\/blockquote>\n\n<a href=/,
+        ),
       }),
     );
   });
@@ -119,7 +117,9 @@ describe('Telegram live task stream', () => {
 
     expect(mocks.editMessageText).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'Waiting for your input…',
+        text: expect.stringMatching(
+          /^Waiting for your input…\n\nOpen in Roomote:/,
+        ),
       }),
     );
   });
@@ -144,12 +144,10 @@ describe('Telegram live task stream', () => {
         text: string;
         htmlText: string;
       };
-      expect(edit.text).toBe(
-        label === 'Completed'
-          ? 'Completed.'
-          : label === 'Failed'
-            ? 'Task failed.'
-            : 'Stopped.',
+      expect(edit.text).toMatch(
+        new RegExp(
+          `^${label === 'Completed' ? 'Completed\\.' : label === 'Failed' ? 'Task failed\\.' : 'Stopped\\.'}\\n\\nOpen in Roomote:`,
+        ),
       );
       expect(edit.text).not.toContain('Authoritative final response.');
       expect(edit.text).not.toContain('Stopped because of an error.');

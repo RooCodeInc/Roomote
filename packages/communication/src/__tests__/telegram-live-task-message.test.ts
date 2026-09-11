@@ -12,20 +12,19 @@ describe('buildTelegramLiveTaskMessage', () => {
         status: 'running',
         progress:
           'Fixing bug…\nUpdating the task lifecycle and rerunning focused tests.',
-        taskUrl: 'https://roomote.example/tasks/task-1',
+        taskUrl:
+          'https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram',
       }),
     ).toEqual({
-      text: 'Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.',
+      text: [
+        'Fixing bug…',
+        '',
+        'Updating the task lifecycle and rerunning focused tests.',
+        '',
+        'Open in Roomote: https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram',
+      ].join('\n'),
       htmlText:
-        '<blockquote expandable>Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>',
-      buttons: [
-        [
-          {
-            text: 'Open task',
-            url: 'https://roomote.example/tasks/task-1',
-          },
-        ],
-      ],
+        '<blockquote expandable>Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>\n\n<a href="https://roomote.example/sessions/session-1?task=task-1&amp;utm_source=telegram">Open in Roomote</a>',
     });
   });
 
@@ -59,26 +58,29 @@ describe('buildTelegramLiveTaskMessage', () => {
   });
 
   it('matches the checked-in compact text demo fixture', () => {
+    const taskUrl =
+      'https://roomote.example/sessions/session-1?task=task-1&utm_source=telegram';
     const running = buildTelegramLiveTaskMessage({
       status: 'running',
       progress:
         'Fixing bug…\nUpdating the task lifecycle and rerunning focused tests.',
+      taskUrl,
     });
     const fixture = [
       'RUNNING',
       running.text,
       '',
       'WAITING',
-      buildTelegramLiveTaskMessage({ status: 'waiting' }).text,
+      buildTelegramLiveTaskMessage({ status: 'waiting', taskUrl }).text,
       '',
       'COMPLETED',
-      buildTelegramLiveTaskMessage({ status: 'completed' }).text,
+      buildTelegramLiveTaskMessage({ status: 'completed', taskUrl }).text,
       '',
       'FAILED',
-      buildTelegramLiveTaskMessage({ status: 'failed' }).text,
+      buildTelegramLiveTaskMessage({ status: 'failed', taskUrl }).text,
       '',
       'STOPPED',
-      buildTelegramLiveTaskMessage({ status: 'stopped' }).text,
+      buildTelegramLiveTaskMessage({ status: 'stopped', taskUrl }).text,
       '',
     ].join('\n');
 

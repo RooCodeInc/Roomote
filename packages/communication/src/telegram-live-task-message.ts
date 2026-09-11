@@ -27,6 +27,10 @@ function escapeHtml(text: string): string {
     .replaceAll('>', '&gt;');
 }
 
+function escapeHtmlAttribute(text: string): string {
+  return escapeHtml(text).replaceAll('"', '&quot;');
+}
+
 function escapeHtmlWithinBudget(text: string, maxLength: number): string {
   let escaped = '';
   for (const character of text) {
@@ -74,33 +78,41 @@ export function buildTelegramLiveTaskMessage(
 ): {
   text: string;
   htmlText: string;
-  buttons?: Array<Array<{ text: string; url: string }>>;
 } {
   const progress = content.progress?.trim() || getStatusText(content.status);
   const running =
     content.status === 'running' ? buildRunningContent(progress) : null;
-  const text = truncate(
+  const plainFooter = content.taskUrl
+    ? `\n\nOpen in Roomote: ${content.taskUrl}`
+    : '';
+  const text = `${truncate(
     running?.details
       ? `${running.summary}\n\n${running.details}`
       : (running?.summary ?? progress),
-    TELEGRAM_MAX_MESSAGE_LENGTH,
-  );
+    TELEGRAM_MAX_MESSAGE_LENGTH - plainFooter.length,
+  )}${plainFooter}`;
   const htmlPrefix = '<blockquote expandable>';
   const htmlSuffix = '</blockquote>';
-  const htmlText = running
+  const htmlFooter = content.taskUrl
+    ? `\n\n<a href="${escapeHtmlAttribute(content.taskUrl)}">Open in Roomote</a>`
+    : '';
+  const htmlBody = running
     ? `${htmlPrefix}${escapeHtmlWithinBudget(
         running.details
           ? `${running.summary}\n\n${running.details}`
           : running.summary,
-        TELEGRAM_MAX_MESSAGE_LENGTH - htmlPrefix.length - htmlSuffix.length,
+        TELEGRAM_MAX_MESSAGE_LENGTH -
+          htmlPrefix.length -
+          htmlSuffix.length -
+          htmlFooter.length,
       )}${htmlSuffix}`
-    : escapeHtml(progress);
+    : escapeHtmlWithinBudget(
+        progress,
+        TELEGRAM_MAX_MESSAGE_LENGTH - htmlFooter.length,
+      );
 
   return {
     text,
-    htmlText,
-    ...(content.taskUrl
-      ? { buttons: [[{ text: 'Open task', url: content.taskUrl }]] }
-      : {}),
+    htmlText: `${htmlBody}${htmlFooter}`,
   };
 }
