@@ -44,11 +44,10 @@ import { configToYaml } from './yaml-utils';
 import { VisualEnvironmentEditor } from './VisualEnvironmentEditor';
 
 function getDefaultYamlTemplate(repositoryNames: string[] = []) {
-  const repoLines =
+  const repositoryYaml =
     repositoryNames.length > 0
-      ? repositoryNames.map((name) => `  - repository: ${name}`).join('\n')
-      : `  - repository: owner/repo-1
-  - repository: owner/repo-2`;
+      ? `# Optional: Repositories to include in this environment.\nrepositories:\n${repositoryNames.map((name) => `  - repository: ${name}`).join('\n')}`
+      : '';
 
   return `# Environment Configuration
 name: My Environment
@@ -60,9 +59,7 @@ description: A brief description of this environment.
 #   This is a monorepo. The frontend is in packages/web and the API is in packages/api.
 #   Always run tests before committing changes.
 
-# Required: Repositories to include in this environment.
-repositories:
-${repoLines}
+${repositoryYaml}
 
 # Optional: Shared mise tool versions for the workspace root.
 # Useful for workspace-root commands and as a fallback when a repo
@@ -71,23 +68,6 @@ ${repoLines}
 #   node: "22.14.0"
 #   python: "3.12.1"
 #
-# Optional: You can specify repo-local fallback tool versions and commands
-# to run in each repository.
-# repositories:
-#   - repository: owner/repo-name
-#     branch: main
-#     tool_versions:
-#       node: "20.11.0"
-#       python: "3.12.1"
-#     commands:
-#       - name: Install dependencies
-#         run: pnpm install
-#         timeout: 120
-#       - name: Start web server
-#         run: pnpm dev
-#         detached: true
-#         logfile: /tmp/dev-server.log
-
 # Optional: Services to start (redis, postgres, etc.)
 # services:
 #   - redis7

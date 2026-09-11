@@ -1,10 +1,27 @@
 import YAML from 'yaml';
 
-import type { EnvironmentConfig } from '@roomote/types';
+import {
+  environmentConfigSchema,
+  type EnvironmentConfig,
+} from '@roomote/types';
 
 import { configToYaml } from './yaml-utils';
 
 describe('configToYaml', () => {
+  it('omits an empty repository set from user-authored YAML', () => {
+    const yaml = configToYaml({
+      name: 'Repository-free Env',
+      repositories: [],
+    });
+
+    expect(YAML.parse(yaml)).toEqual({
+      name: 'Repository-free Env',
+    });
+    expect(
+      environmentConfigSchema.parse(YAML.parse(yaml)).repositories,
+    ).toEqual([]);
+  });
+
   it('omits the deprecated desktop flag when serializing environment config', () => {
     const config: EnvironmentConfig = {
       name: 'Desktop Env',

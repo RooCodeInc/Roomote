@@ -21,7 +21,7 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
         <title>Confirm target repository context</title>
         <description>Anchor analysis to explicit repository facts provided by the task.</description>
         <actions>
-          <action>Use each provided repository identifier exactly as supplied by the task. Do not shorten, reconstruct, or infer it from the checkout directory. Repository identifiers may have more than two slash-separated segments; Azure DevOps uses `organization/project/repository`.</action>
+          <action>Use each provided repository identifier exactly as supplied by the task. Do not shorten, reconstruct, or infer it from the checkout directory. Repository identifiers may have more than two slash-separated segments; Azure DevOps uses `organization/project/repository`. Only perform repository-specific inspection and validation when repository identifiers are provided.</action>
           <action>If default branch is unknown, infer it from repository metadata; otherwise use the provided value.</action>
           <action>Treat the repositories named in the task or environment as already checked out and available in the current workspace; inspect and validate those existing checkouts instead of re-cloning them.</action>
           <action>Treat repository context as:
@@ -244,7 +244,7 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
 <field name="description" required="false" type="string" />
 <field name="initialUrl" required="false" type="absolute URL | about:blank" />
 <field name="agentInstructions" required="false" type="string" />
-<field name="repositories" required="true" type="RepositoryConfig[]" min_items="1" />
+<field name="repositories" required="false" type="RepositoryConfig[]" />
 <field name="env" required="false" type="Record<string, string>" />
 <field name="ports" required="false" type="NamedPort[]" />
 <field name="services" required="false" type="ServiceConfig[]" />

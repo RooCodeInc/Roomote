@@ -59,11 +59,11 @@ function formatRepositoriesForPrompt(
             .join(', ')
         : environment.repositoryNames.length > 0
           ? environment.repositoryNames.join(', ')
-          : 'No repositories configured';
+          : null;
       const description = environment.description
         ? ` (${environment.description})`
         : '';
-      return `- ${environment.name} [id: ${environment.id}]${description}: ${repos}`;
+      return `- ${environment.name} [id: ${environment.id}]${description}${repos ? `: ${repos}` : ''}`;
     }),
   ].join('\n');
 }

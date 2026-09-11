@@ -40,7 +40,8 @@ describe('formatVoiceWorkspaceContext', () => {
       'Repositories the backend can work in (it can also run against all of them at once): RooCodeInc/Roomote, RooCodeInc/Roo-Code.',
     );
     expect(text).toContain('- Roomote (main product): RooCodeInc/Roomote');
-    expect(text).toContain('- Docs: no repositories listed');
+    expect(text).toContain('- Docs');
+    expect(text).not.toContain('no repositories listed');
     expect(text).toContain('Integrations the backend can use: GitHub, Slack.');
   });
 

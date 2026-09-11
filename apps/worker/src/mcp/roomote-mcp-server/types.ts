@@ -289,7 +289,7 @@ export interface EnvironmentInfo {
   id: string;
   name: string;
   description: string | null;
-  repositories: RepoInfo[];
+  repositories?: RepoInfo[];
 }
 
 export interface ListEnvironmentsResponse {

@@ -416,6 +416,17 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('Roomote release');
   });
 
+  it('omits repository details for environments without them', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [
+        { id: 'env-tools', name: 'Tools', repositoryNames: [] },
+      ],
+    });
+
+    expect(prompt).toContain('- Tools [id: env-tools]');
+    expect(prompt).not.toContain('No repositories configured');
+  });
+
   it('describes native OpenCode tools and Roomote orchestration policy', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [

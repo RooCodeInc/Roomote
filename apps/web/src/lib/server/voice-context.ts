@@ -131,7 +131,7 @@ export function formatVoiceWorkspaceContext(
   }
 
   if (context.environments.length > 0) {
-    lines.push('Environments, each a named group of those repositories:');
+    lines.push('Environments available for task routing:');
     let remaining = MAX_PROMPT_REPOSITORIES;
     for (const environment of context.environments) {
       const repos = environment.repositoryNames.slice(
@@ -145,11 +145,13 @@ export function formatVoiceWorkspaceContext(
             (environment.repositoryNames.length > repos.length
               ? ', and more'
               : '')
-          : 'no repositories listed';
+          : null;
       const description = environment.description
         ? ` (${environment.description})`
         : '';
-      lines.push(`- ${environment.name}${description}: ${repoText}`);
+      lines.push(
+        `- ${environment.name}${description}${repoText ? `: ${repoText}` : ''}`,
+      );
     }
   } else if (context.repositoryNames.length === 0) {
     lines.push(

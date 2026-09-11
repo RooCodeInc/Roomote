@@ -1744,7 +1744,7 @@ export const appRouter = createRouter({
     startDefinitionTask: protectedProcedure
       .input(
         z.object({
-          repositoryIds: z.array(z.string().uuid()).min(1),
+          repositoryIds: z.array(z.string().uuid()),
           environmentId: z.string().optional(),
           changeRequest: z.string().trim().min(1).max(8_000).optional(),
           selectedModelId: z.string().trim().min(1).optional(),
@@ -2650,7 +2650,7 @@ export const appRouter = createRouter({
             .array(
               z.object({
                 name: z.string().min(1).max(100),
-                repositoryIds: z.array(z.string().uuid()).min(1),
+                repositoryIds: z.array(z.string().uuid()),
                 installCommand: z.string().max(500).optional(),
                 testCommand: z.string().max(500).optional(),
               }),
