@@ -4534,6 +4534,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           }),
         ).resolves.toEqual({
           success: true,
+          availableToolCount: 1,
           tools: [
             expect.objectContaining({
               integrationId: 'github',
@@ -7047,6 +7048,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       },
     ]);
     const toolResults: unknown[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -7105,6 +7107,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     // Lookups need no acknowledgement and return the schema to call with.
     expect(toolResults[0]).toEqual({
       success: true,
+      availableToolCount: 2,
       tools: [
         {
           integrationId: 'github',
@@ -7118,7 +7121,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       success: false,
       error: expect.stringContaining('"missing"'),
     });
-    expect(toolResults[2]).toEqual({ success: true, tools: [] });
+    expect(toolResults[2]).toEqual({
+      success: true,
+      tools: [],
+      availableToolCount: 2,
+      emptyReason: 'no_filter_match',
+      guidance: expect.stringContaining('only integrationId'),
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'conversationId="100.1" messageId="100.2" queryTermCount=1 availableIntegrationCount=1 availableToolCount=2 emptyReason="no_filter_match"',
+      ),
+    );
     // Calls follow the same gate as natively mounted MCP tools.
     expect(toolResults[3]).toEqual({
       success: false,
