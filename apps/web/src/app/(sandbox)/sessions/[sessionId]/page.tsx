@@ -144,7 +144,7 @@ export default async function SessionDetailPage({
       authorizedUser.isAdmin &&
       unifiedSession.id === (await findDeploymentSetupSessionId());
     const setupTimelineExtras = isSetupSession ? (
-      <div className="space-y-3">
+      <div className="space-y-3" key="setup-timeline-extras">
         <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
         <SetupSandboxCard />
         <SetupAutomationRecommendationsCard sessionId={unifiedSession.id} />
