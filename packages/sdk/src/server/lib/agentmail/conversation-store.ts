@@ -137,15 +137,45 @@ export async function advanceAgentMailInboundAnchor(input: {
 export async function recordAgentMailOutboundMessage(input: {
   conversationId: string;
   messageId: string;
+  providerThreadId?: string;
 }): Promise<void> {
-  await db
-    .update(agentmailConversations)
-    .set({
-      latestOutboundMessageId: input.messageId,
-      version: sql`${agentmailConversations.version} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(eq(agentmailConversations.id, input.conversationId));
+  await db.transaction(async (tx) => {
+    const conversation = await tx.query.agentmailConversations.findFirst({
+      where: eq(agentmailConversations.id, input.conversationId),
+    });
+    if (!conversation) return;
+
+    const completesPreparedConversation = Boolean(
+      input.providerThreadId &&
+      conversation.providerThreadId.startsWith('pending:'),
+    );
+    const providerThreadId = completesPreparedConversation
+      ? input.providerThreadId!
+      : conversation.providerThreadId;
+    await tx
+      .update(agentmailConversations)
+      .set({
+        providerThreadId,
+        latestOutboundMessageId: input.messageId,
+        version: sql`${agentmailConversations.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(agentmailConversations.id, input.conversationId));
+
+    if (completesPreparedConversation) {
+      await tx
+        .insert(agentmailConversationParticipants)
+        .values({
+          conversationId: conversation.id,
+          inboxId: conversation.inboxId,
+          providerThreadId,
+          userId: conversation.ownerUserId,
+          role: 'owner',
+          source: 'outbound',
+        })
+        .onConflictDoNothing();
+    }
+  });
 }
 
 type AgentMailConversationResolution = {

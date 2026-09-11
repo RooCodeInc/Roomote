@@ -42,8 +42,8 @@ class FakeDataChannel extends EventTarget {
 class FakePeer extends EventTarget {
   static instance: FakePeer;
   readonly channel = new FakeDataChannel();
-  connectionState: RTCPeerConnectionState = 'connected';
   iceGatheringState: RTCIceGatheringState = 'complete';
+  connectionState: RTCPeerConnectionState = 'new';
   localDescription: RTCSessionDescription | null = null;
 
   constructor() {
@@ -345,7 +345,6 @@ describe('useLiveVoice', () => {
     expect(restartedPeer.channel.readyState).toBe('open');
     expect(stopTrack).toHaveBeenCalledTimes(1);
   });
-
   it('stays quiet for a silent stop and for an aborted handshake', async () => {
     let finishHandshake: (value: {
       sessionId: string;

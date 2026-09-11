@@ -16,6 +16,7 @@ import {
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
   listAgentMailOutboundIdentities,
+  prepareAgentMailConversation,
   resolveAgentMailOutboundAddress,
   resolveAgentMailOutboundIdentity,
   sendAgentMailSystemEmail,
@@ -186,6 +187,76 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+  });
+
+  it('does not send until the prepared automation conversation has a report', async () => {
+    const accountEmail = uniqueEmail('automation-prepared');
+    const user = await createVerifiedUser(accountEmail);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          message_id: `<${randomUUID()}@agentmail.to>`,
+          thread_id: 'thread_final_report',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const prepared = await prepareAgentMailConversation({
+      userId: user.id,
+      identityId: identity!.id,
+      subject: 'Automation report',
+      conversationKey: `automation-run-${randomUUID()}`,
+    });
+    expect(prepared).not.toBeNull();
+    expect(requests).toHaveLength(0);
+
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    await provider!.postMessage({
+      channelId: INBOX,
+      threadId: prepared!.conversationId,
+      text: 'Final report',
+      textFormat: 'markdown',
+      idempotencyKey: 'automation-final-report',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toContain('/messages/send');
+    expect(requests[0]!.body).toMatchObject({
+      to: [accountEmail.toLowerCase()],
+      subject: 'Automation report',
+      text: expect.stringContaining('Final report'),
+    });
+    expect(String(requests[0]!.body.text)).not.toContain('is running');
+    const conversation = await db.query.agentmailConversations.findFirst({
+      where: eq(agentmailConversations.id, prepared!.conversationId),
+    });
+    expect(conversation).toMatchObject({
+      providerThreadId: 'thread_final_report',
+      latestOutboundMessageId: expect.any(String),
+    });
+    const participant =
+      await db.query.agentmailConversationParticipants.findFirst({
+        where: eq(
+          agentmailConversationParticipants.conversationId,
+          prepared!.conversationId,
+        ),
+      });
+    expect(participant).toMatchObject({
+      userId: user.id,
+      providerThreadId: 'thread_final_report',
+      source: 'outbound',
+    });
   });
 
   it('sends with List-Unsubscribe headers and records a replyable conversation', async () => {

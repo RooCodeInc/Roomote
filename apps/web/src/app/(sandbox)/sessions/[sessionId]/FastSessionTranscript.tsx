@@ -1127,11 +1127,20 @@ export function FastSessionTranscript({
     liveVoice.deliveringUtterances > 0 || voiceRequestsInFlight > 0;
   requestInFlightRef.current = requestInFlight;
   useEffect(() => {
+    if (!liveVoiceActive) {
+      heldSpokenTurnsRef.current = [];
+      setLiveVoiceTurns((current) =>
+        current.user === null && current.assistant === null
+          ? current
+          : { user: null, assistant: null },
+      );
+      return;
+    }
     if (requestInFlight || heldSpokenTurnsRef.current.length === 0) return;
     const held = heldSpokenTurnsRef.current;
     heldSpokenTurnsRef.current = [];
     for (const text of held) recordVoiceTurn('assistant', text);
-  }, [requestInFlight, recordVoiceTurn]);
+  }, [liveVoiceActive, requestInFlight, recordVoiceTurn]);
   const callStartedAtRef = useRef<number | null>(null);
   useEffect(() => {
     if (liveVoice.active && liveVoice.startedAt !== null) {

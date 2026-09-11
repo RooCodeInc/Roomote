@@ -435,6 +435,7 @@ export function CustomAutomationsSection({
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const cronExpressionRef = useRef<HTMLInputElement>(null);
   // Email identities belong to the automation owner (runs execute as the
   // creator), so editing an existing automation lists the owner's identities
   // rather than the viewer's. Same shape as the base options query.
@@ -904,6 +905,7 @@ export function CustomAutomationsSection({
             <Select
               value={form.scheduleMode}
               disabled={busy}
+              handoffTargetOnSelect={cronExpressionRef}
               onValueChange={(value) => {
                 setResolvedCron(null);
                 setScheduleSummary(null);
@@ -930,6 +932,7 @@ export function CustomAutomationsSection({
 
             {form.scheduleMode === 'cron' ? (
               <Input
+                ref={cronExpressionRef}
                 id="custom-automation-cron"
                 aria-label="Custom schedule"
                 className="flex-1"
@@ -1156,7 +1159,10 @@ export function CustomAutomationsSection({
     ) : null;
 
   return (
-    <section className="space-y-3" aria-label="Automations">
+    <section
+      className="space-y-3 md:flex md:min-h-0 md:flex-1 md:flex-col md:gap-3 md:space-y-0"
+      aria-label="Automations"
+    >
       <AutomationListToolbar
         filter={filter}
         search={search}
@@ -1176,7 +1182,10 @@ export function CustomAutomationsSection({
         {isCreating || editingId ? renderEditor() : null}
       </Dialog>
 
-      <Card variant="snug" className="gap-0 p-0">
+      <Card
+        variant="snug"
+        className="gap-0 p-0 md:min-h-0 md:flex-1 md:overflow-y-auto"
+      >
         <CardContent className="p-0!">
           <div role="table" aria-label="Automations">
             <AutomationListHeader />
@@ -1223,7 +1232,9 @@ export function CustomAutomationsSection({
                     target.provider === 'none'
                       ? ''
                       : target.mode === 'direct_message'
-                        ? 'DM me'
+                        ? target.provider === 'email'
+                          ? 'me'
+                          : 'DM me'
                         : target.provider === 'slack'
                           ? (slackOptions.find(
                               (option) =>

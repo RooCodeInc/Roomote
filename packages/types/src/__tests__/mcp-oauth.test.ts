@@ -1,4 +1,5 @@
 import {
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
   getMcpIntegration,
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationConnectionScope,
@@ -10,6 +11,7 @@ import {
   isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionVoiceConfig,
+  OPENAI_REALTIME_VOICE_OPTIONS,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
@@ -282,6 +284,20 @@ describe('Voice credential-only integration', () => {
       isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: 'enc' }),
     ).toBe(true);
     expect(
+      isMcpConnectionVoiceConfig({
+        type: 'voice',
+        encryptedApiKey: 'enc',
+        voiceId: 'cedar',
+      }),
+    ).toBe(true);
+    expect(
+      isMcpConnectionVoiceConfig({
+        type: 'voice',
+        encryptedApiKey: 'enc',
+        voiceId: 'unsupported',
+      } as never),
+    ).toBe(false);
+    expect(
       isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: '' }),
     ).toBe(false);
     expect(
@@ -292,5 +308,14 @@ describe('Voice credential-only integration', () => {
       }),
     ).toBe(false);
     expect(isMcpConnectionVoiceConfig(null)).toBe(false);
+  });
+
+  it('defaults to a documented Australian voice when available, otherwise a provider recommendation', () => {
+    const australianVoice = OPENAI_REALTIME_VOICE_OPTIONS.find(
+      (voice) => voice.locale === 'en-AU',
+    );
+
+    expect(australianVoice).toBeUndefined();
+    expect(DEFAULT_OPENAI_REALTIME_VOICE_ID).toBe('marin');
   });
 });

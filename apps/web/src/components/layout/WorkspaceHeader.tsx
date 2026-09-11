@@ -1,3 +1,5 @@
+import { Children, cloneElement, isValidElement } from 'react';
+
 import { cn } from '@/lib/utils';
 
 type WorkspaceHeaderProps = React.ComponentProps<'header'> & {
@@ -12,6 +14,14 @@ export function WorkspaceHeader({
   actions,
   ...props
 }: WorkspaceHeaderProps) {
+  const headerChildren = Children.toArray(children)
+    .concat(Children.toArray(actions))
+    .map((child, index) =>
+      isValidElement(child)
+        ? cloneElement(child, { key: `workspace-header-child-${index}` })
+        : child,
+    );
+
   return (
     <header
       className={cn(
@@ -26,8 +36,7 @@ export function WorkspaceHeader({
           contentClassName,
         )}
       >
-        {children}
-        {actions}
+        {headerChildren}
       </div>
     </header>
   );

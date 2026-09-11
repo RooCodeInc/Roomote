@@ -107,9 +107,12 @@ export * from './lib/webhook-retention';
 export * from './lib/brain';
 export * from './lib/fast-agent-memory';
 export * from './lib/managed-access';
+export * from './lib/user-personalization';
 
 export {
   users,
+  userPersonalizations,
+  userPersonalizationRelations,
   instanceSkills,
   userRelations,
   deploymentSettings,

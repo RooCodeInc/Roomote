@@ -2833,6 +2833,70 @@ describe('deliverFastAgentParentEvent', () => {
     },
   );
 
+  it.each([
+    {
+      path: 'Fast-only result',
+      event: {
+        type: 'automation_triggered' as const,
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule' as const,
+      },
+      expectedText: 'The proof is ready.',
+    },
+    {
+      path: 'delegated sandbox result',
+      event: {
+        type: 'task_settled' as const,
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed' as const,
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+      expectedText: 'The proof is ready.',
+    },
+    {
+      path: 'delegated sandbox failure',
+      event: {
+        type: 'task_settled' as const,
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'failed' as const,
+        error: 'sandbox unavailable',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+      expectedText: 'The delegated task failed: sandbox unavailable',
+    },
+  ])('delivers the $path by Email', async ({ event, expectedText }) => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'agentmail',
+          workspaceId: 'roomote@agentmail.test',
+          conversationId: 'agentmail-conversation-1',
+          replyTarget: { channelId: 'roomote@agentmail.test' },
+        },
+      },
+      event,
+    });
+
+    expect(mocks.agentMailPostMessage).toHaveBeenCalledOnce();
+    expect(mocks.agentMailPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'roomote@agentmail.test',
+        threadId: 'agentmail-conversation-1',
+        text: expect.stringContaining(expectedText),
+      }),
+    );
+  });
+
   it('keeps delegating as the automation after its task settles on Teams', async () => {
     mocks.findTeamsConversationRoute.mockResolvedValueOnce({
       serviceUrl: 'https://smba.example.com/amer/',

@@ -41,7 +41,9 @@ vi.mock('./env', () => ({
 import {
   cleanVoiceTranscript,
   createVoiceLiveSession,
+  createVoicePreview,
   resolveVoiceOpenAiKey,
+  resolveVoiceId,
 } from './voice';
 import type { VoiceWorkspaceContext } from './voice-context';
 
@@ -73,6 +75,7 @@ describe('createVoiceLiveSession', () => {
         apiKey: 'sk-test',
         sdp: 'offer-sdp',
         context,
+        voiceId: 'cedar',
       }),
     ).resolves.toEqual({ sessionId: 'live_123', sdp: 'answer-sdp' });
 
@@ -93,6 +96,7 @@ describe('createVoiceLiveSession', () => {
     expect(body).toMatchObject({
       session: {
         model: 'gpt-live-1',
+        voice: 'cedar',
         delegation: { type: 'client' },
       },
       transport: { type: 'webrtc', sdp: 'offer-sdp' },
@@ -132,6 +136,30 @@ describe('createVoiceLiveSession', () => {
     );
   });
 
+  it('creates a short preview through OpenAI speech with the selected voice', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      createVoicePreview({ apiKey: 'sk-test', voiceId: 'marin' }),
+    ).resolves.toEqual({ audioBase64: 'AQID', mimeType: 'audio/mpeg' });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'https://api.openai.com/v1/audio/speech',
+    );
+    expect(JSON.parse(String(request.body))).toEqual({
+      model: 'gpt-4o-mini-tts',
+      voice: 'marin',
+      input: "Hi, I'm Roomote. Let's build something great.",
+      response_format: 'mp3',
+    });
+  });
+
   it('rejects an incomplete Live response', async () => {
     vi.stubGlobal(
       'fetch',
@@ -143,6 +171,7 @@ describe('createVoiceLiveSession', () => {
         apiKey: 'sk-test',
         sdp: 'offer-sdp',
         context,
+        voiceId: 'marin',
       }),
     ).rejects.toThrow('OpenAI Live session response was incomplete');
   });
@@ -212,5 +241,49 @@ describe('resolveVoiceOpenAiKey', () => {
     resolveModelProviderEnvValue.mockResolvedValueOnce(' sk-env ');
     await expect(resolveVoiceOpenAiKey()).resolves.toBe('sk-env');
     expect(findConnection).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveVoiceId', () => {
+  beforeEach(() => {
+    resolveModelProviderEnvValue.mockReset();
+    resolveModelProviderEnvValue.mockResolvedValue(undefined);
+    findConnection.mockReset();
+  });
+
+  it('uses the visible default when the environment manages the Voice key', async () => {
+    resolveModelProviderEnvValue.mockResolvedValue('sk-env');
+    findConnection.mockResolvedValue({
+      authConfig: {
+        type: 'voice',
+        encryptedApiKey: 'enc:key',
+        voiceId: 'cedar',
+      },
+    });
+
+    await expect(resolveVoiceId()).resolves.toBe('marin');
+    expect(findConnection).not.toHaveBeenCalled();
+  });
+
+  it('preserves a stored voice selection', async () => {
+    findConnection.mockResolvedValue({
+      authConfig: {
+        type: 'voice',
+        encryptedApiKey: 'enc:key',
+        voiceId: 'cedar',
+      },
+    });
+
+    await expect(resolveVoiceId()).resolves.toBe('cedar');
+  });
+
+  it('uses the provider-recommended default for legacy and new configurations', async () => {
+    findConnection.mockResolvedValue({
+      authConfig: { type: 'voice', encryptedApiKey: 'enc:key' },
+    });
+    await expect(resolveVoiceId()).resolves.toBe('marin');
+
+    findConnection.mockResolvedValue(null);
+    await expect(resolveVoiceId()).resolves.toBe('marin');
   });
 });
