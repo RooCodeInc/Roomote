@@ -32,6 +32,7 @@ const {
   mockListConnectedCommunicationProviders,
   mockCanStartAgentMailConversationWithUser,
   mockListAvailableAgentMailOutboundIdentities,
+  mockResolveDefaultAutomationTarget,
   mockResolveCustomAutomationSchedule,
   mockRunCustomAutomationNow,
   mockCaptureActivationCustomAutomationChanged,
@@ -47,6 +48,7 @@ const {
   mockListConnectedCommunicationProviders: vi.fn(),
   mockCanStartAgentMailConversationWithUser: vi.fn(),
   mockListAvailableAgentMailOutboundIdentities: vi.fn(),
+  mockResolveDefaultAutomationTarget: vi.fn(),
   mockResolveCustomAutomationSchedule: vi.fn(),
   mockRunCustomAutomationNow: vi.fn(),
   mockCaptureActivationCustomAutomationChanged: vi.fn(),
@@ -67,11 +69,16 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES: {
+    chatProviders: ['slack', 'teams', 'telegram', 'discord'],
+    email: true,
+  },
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
   canStartAgentMailConversationWithUser:
     mockCanStartAgentMailConversationWithUser,
   listAvailableAgentMailOutboundIdentities:
     mockListAvailableAgentMailOutboundIdentities,
+  resolveDefaultAutomationTarget: mockResolveDefaultAutomationTarget,
   resolveCustomAutomationSchedule: mockResolveCustomAutomationSchedule,
   runCustomAutomationNow: mockRunCustomAutomationNow,
 }));
@@ -189,6 +196,7 @@ describe('custom-automations MCP routes', () => {
         kind: 'verified',
       },
     ]);
+    mockResolveDefaultAutomationTarget.mockResolvedValue(null);
     mockGetDeploymentTaskModelOptions.mockResolvedValue({
       models: ENABLED_MODELS,
       defaultModelId: 'openai/gpt-5.6-luna',
@@ -851,6 +859,13 @@ describe('custom-automations MCP routes', () => {
 
     it('lists and stores only a server-verified Email identity', async () => {
       const { app } = createApp();
+      const defaultTarget = {
+        provider: 'email' as const,
+        targetKind: 'email_user' as const,
+        externalRef: 'admin-1',
+        metadata: { emailIdentityId: 'verified:admin-1:digest' },
+      };
+      mockResolveDefaultAutomationTarget.mockResolvedValue(defaultTarget);
       mockResolveCustomAutomationSchedule.mockResolvedValue({
         status: 'resolved',
         scheduleMode: 'daily',
@@ -870,6 +885,7 @@ describe('custom-automations MCP routes', () => {
             kind: 'verified',
           },
         ],
+        defaultTarget,
       });
       const res = await postCreate(
         app,

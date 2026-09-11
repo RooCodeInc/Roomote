@@ -15,8 +15,10 @@ import {
   type CustomAutomation,
 } from '@roomote/db/server';
 import {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
   listConnectedCommunicationProviders,
   listAvailableAgentMailOutboundIdentities,
+  resolveDefaultAutomationTarget,
   resolveCustomAutomationSchedule,
   resolveDeploymentTimeZone,
   runCustomAutomationNow,
@@ -327,16 +329,21 @@ export async function getCustomAutomationOptionsCommand(
   // Email identities belong to the automation owner (runs execute as the
   // creator), so editing someone else's automation lists the owner's
   // identities rather than the viewer's.
-  const ownerUserId = input.automationId
-    ? ((await getOwnedAutomation(auth, input.automationId)).createdByUserId ??
-      auth.userId)
-    : auth.userId;
-  const [providers, emailIdentities, { timeZone }, settings] =
+  const automation = input.automationId
+    ? await getOwnedAutomation(auth, input.automationId)
+    : null;
+  const ownerUserId = automation?.createdByUserId ?? auth.userId;
+  const [providers, emailIdentities, { timeZone }, settings, defaultTarget] =
     await Promise.all([
       listConnectedCommunicationProviders(),
       listAvailableAgentMailOutboundIdentities(ownerUserId),
       resolveDeploymentTimeZone(),
       auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
+      resolveDefaultAutomationTarget({
+        ownerUserId,
+        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+        existingTarget: automation?.target,
+      }),
     ]);
 
   return {
@@ -351,6 +358,7 @@ export async function getCustomAutomationOptionsCommand(
     // Channel catalogs are bot-scoped, not evidence of a member's access.
     managerSlackChannelId: settings?.managerSlackChannelId ?? null,
     managerDiscordChannelId: settings?.managerDiscordChannelId ?? null,
+    defaultTarget,
     effectiveTimeZone: timeZone,
   };
 }

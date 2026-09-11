@@ -40,6 +40,11 @@ export {
   type AutomationSignalPrefetchJob,
 } from './lib/automation-recommendations';
 export {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+  resolveDefaultAutomationTarget,
+  type AutomationDestinationCapabilities,
+} from './lib/default-automation-destination';
+export {
   recordLlmUsage,
   type RecordLlmUsageInput,
 } from './lib/task-runs/record-task-inference-usage';

@@ -20,6 +20,7 @@ import {
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
+  type OptionalAutomationTarget,
   type ReasoningEffort,
 } from '@roomote/types';
 
@@ -260,12 +261,12 @@ function CustomAutomationRunButton({
   );
 }
 
-function targetFromRow(row: CustomAutomationListItem): {
+function targetFromAutomationTarget(target: OptionalAutomationTarget): {
   provider: CustomAutomationFormState['targetProvider'];
   mode: CustomAutomationFormState['targetMode'];
   channelId: string;
 } {
-  if (!row.target.provider || !row.target.externalRef) {
+  if (!target.provider || !target.externalRef) {
     return {
       provider: 'none',
       mode: 'channel',
@@ -274,24 +275,28 @@ function targetFromRow(row: CustomAutomationListItem): {
   }
 
   const provider =
-    row.target.provider === 'discord' ||
-    row.target.provider === 'teams' ||
-    row.target.provider === 'telegram' ||
-    row.target.provider === 'email'
-      ? row.target.provider
+    target.provider === 'discord' ||
+    target.provider === 'teams' ||
+    target.provider === 'telegram' ||
+    target.provider === 'email'
+      ? target.provider
       : 'slack';
   return {
     provider,
-    mode: isBackgroundAutomationUserTargetKind(row.target.targetKind)
+    mode: isBackgroundAutomationUserTargetKind(target.targetKind)
       ? 'direct_message'
       : 'channel',
     channelId:
-      row.target.provider === 'email'
-        ? (getAutomationTargetEmailIdentityId(row.target) ?? '')
-        : isBackgroundAutomationUserTargetKind(row.target.targetKind)
+      target.provider === 'email'
+        ? (getAutomationTargetEmailIdentityId(target) ?? '')
+        : isBackgroundAutomationUserTargetKind(target.targetKind)
           ? ''
-          : (row.target.externalRef ?? ''),
+          : (target.externalRef ?? ''),
   };
+}
+
+function targetFromRow(row: CustomAutomationListItem) {
+  return targetFromAutomationTarget(row.target);
 }
 
 function formFromRow(
@@ -1125,29 +1130,16 @@ export function CustomAutomationsSection({
         size="sm"
         disabled={busy || atCap || !capabilitiesLoaded}
         onClick={() => {
-          const managerProvider =
-            managerSlackChannelId && capabilities?.slackConnected
-              ? 'slack'
-              : managerDiscordChannelId && capabilities?.discordConnected
-                ? 'discord'
-                : null;
-          const targetProvider =
-            managerProvider ?? connectedDestinationOptions[0]?.value ?? 'none';
+          const target = targetFromAutomationTarget(
+            optionsQuery.data?.defaultTarget ?? {},
+          );
           setIsCreating(true);
           setEditingId(null);
           setForm({
             ...EMPTY_FORM,
-            targetProvider,
-            targetMode:
-              targetProvider === 'email' ? 'direct_message' : 'channel',
-            targetChannelId:
-              targetProvider === 'slack'
-                ? managerSlackChannelId
-                : targetProvider === 'discord'
-                  ? managerDiscordChannelId
-                  : targetProvider === 'email'
-                    ? (emailOptions[0]?.id ?? '')
-                    : '',
+            targetProvider: target.provider,
+            targetMode: target.mode,
+            targetChannelId: target.channelId,
           });
           setResolvedCron(null);
           setScheduleSummary(null);

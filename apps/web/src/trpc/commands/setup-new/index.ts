@@ -7,6 +7,7 @@ import {
 } from '@roomote/telemetry/server';
 import {
   db,
+  automations,
   deploymentSettings,
   environments,
   environmentVariables,
@@ -42,8 +43,10 @@ import {
 import {
   AUTOMATION_RECOMMENDATION_REPOSITORY_CAP,
   buildAutomationRecommendationFingerprint,
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
   enqueueAutomationRecommendationInitialRun,
   enqueueAutomationRecommendations,
+  resolveDefaultAutomationTarget,
 } from '@roomote/sdk/server';
 import {
   buildRecommendedDeploymentModelConfig,
@@ -106,6 +109,9 @@ import {
   AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
   AUTOMATION_RECOMMENDATION_CATALOG,
   ALL_REPOSITORIES,
+  getTriggerableBackgroundAutomationDescriptorByKey,
+  isAutomationDestinationTarget,
+  isConfiguredAutomationTarget,
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -2598,12 +2604,39 @@ async function applySetupRecommendationInTx(
   candidate: (typeof AUTOMATION_RECOMMENDATION_CATALOG)[number],
 ): Promise<string | null> {
   if (candidate.source === 'built_in') {
+    const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+      candidate.automationKey,
+    );
+    const existing = descriptor?.usesManagerChannel
+      ? await tx.query.automations.findFirst({
+          where: eq(automations.key, candidate.automationKey),
+          columns: { targets: true },
+        })
+      : null;
+    const existingTarget = existing?.targets.find(
+      isAutomationDestinationTarget,
+    );
+    const defaultTarget =
+      enabled && descriptor?.usesManagerChannel && !existingTarget
+        ? await resolveDefaultAutomationTarget({
+            ownerUserId: auth.userId,
+            capabilities: {
+              chatProviders: descriptor.supportedCommunicationProviders,
+              email: false,
+            },
+            includeSetupHandoff: true,
+            client: tx,
+          })
+        : null;
     await upsertAutomation(tx, {
       key: candidate.automationKey,
       enabled,
       schedule: {
         mode: enabled ? candidate.defaultScheduleMode : 'off',
       },
+      ...(defaultTarget
+        ? { targets: [...(existing?.targets ?? []), defaultTarget] }
+        : {}),
     });
     return null;
   }
@@ -2611,6 +2644,15 @@ async function applySetupRecommendationInTx(
   const existing = recommendation.automationId
     ? await getCustomAutomationById(recommendation.automationId, tx)
     : null;
+  const reportTarget =
+    enabled && !isConfiguredAutomationTarget(existing?.target)
+      ? await resolveDefaultAutomationTarget({
+          ownerUserId: auth.userId,
+          capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+          includeSetupHandoff: true,
+          client: tx,
+        })
+      : null;
   const automation = existing
     ? await updateCustomAutomation(
         existing.id,
@@ -2620,7 +2662,9 @@ async function applySetupRecommendationInTx(
           enabled,
           scheduleMode: candidate.template.scheduleMode,
           environmentId: ALL_REPOSITORIES,
-          target: {},
+          target: isConfiguredAutomationTarget(existing.target)
+            ? existing.target
+            : (reportTarget ?? {}),
         },
         tx,
       )
@@ -2631,7 +2675,7 @@ async function applySetupRecommendationInTx(
           enabled,
           scheduleMode: candidate.template.scheduleMode,
           environmentId: ALL_REPOSITORIES,
-          target: {},
+          target: reportTarget ?? {},
           createdByUserId: auth.userId,
         },
         tx,

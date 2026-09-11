@@ -16,10 +16,12 @@ import {
   users,
 } from '@roomote/db/server';
 import {
+  CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
   listConnectedCommunicationProviders,
   listAvailableAgentMailOutboundIdentities,
   canStartAgentMailConversationWithUser,
   resolveCustomAutomationSchedule,
+  resolveDefaultAutomationTarget,
   runCustomAutomationNow,
 } from '@roomote/sdk/server';
 import {
@@ -397,16 +399,26 @@ customAutomationsRouter.get('/models', async (c) =>
 customAutomationsRouter.get('/destinations', async (c) => {
   const automationId = c.req.query('automationId');
   let ownerUserId = actorId(c);
+  let existingTarget: OptionalAutomationTarget | null = null;
   if (automationId) {
     const automation = await getCustomAutomationById(automationId);
     if (!automation || !canManage(c, automation)) {
       return c.json({ error: 'Custom automation was not found.' }, 404);
     }
     ownerUserId = automation.createdByUserId ?? ownerUserId;
+    existingTarget = automation.target;
   }
+  const [emailIdentities, defaultTarget] = await Promise.all([
+    listAvailableAgentMailOutboundIdentities(ownerUserId),
+    resolveDefaultAutomationTarget({
+      ownerUserId,
+      capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      existingTarget,
+    }),
+  ]);
   return c.json({
-    emailIdentities:
-      await listAvailableAgentMailOutboundIdentities(ownerUserId),
+    emailIdentities,
+    defaultTarget,
   });
 });
 
