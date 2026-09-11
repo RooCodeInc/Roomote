@@ -56,6 +56,14 @@ type ChangeEmailResult = {
   data?: { status: boolean; message?: string | null } | null;
   error?: { code?: string; message?: string; status?: number } | null;
 };
+type SendVerificationEmailInput = {
+  callbackURL?: string;
+  email: string;
+};
+type SendVerificationEmailResult = {
+  data?: { status: boolean } | null;
+  error?: { code?: string; message?: string; status?: number } | null;
+};
 type RoomoteAuthClient = BaseAuthClient & {
   signIn: BaseAuthClient['signIn'] & {
     oauth2(input: OAuth2SignInInput): Promise<OAuth2SignInResult>;
@@ -67,6 +75,9 @@ type RoomoteAuthClient = BaseAuthClient & {
   resetPassword(input: ResetPasswordInput): Promise<ResetPasswordResult>;
   changePassword(input: ChangePasswordInput): Promise<ChangePasswordResult>;
   changeEmail(input: ChangeEmailInput): Promise<ChangeEmailResult>;
+  sendVerificationEmail(
+    input: SendVerificationEmailInput,
+  ): Promise<SendVerificationEmailResult>;
 };
 
 export const authClient: RoomoteAuthClient = createAuthClient({

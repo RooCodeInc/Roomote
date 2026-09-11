@@ -1,4 +1,12 @@
-import { agentmailUserMappings, db, eq } from '@roomote/db/server';
+import {
+  agentmailUserMappings,
+  and,
+  asc,
+  authUsers,
+  db,
+  eq,
+  resolveAgentMailRuntimeCredentials,
+} from '@roomote/db/server';
 import {
   redispatchAgentMailEventsForSender,
   verifyAgentMailEmailLinkToken,
@@ -6,6 +14,7 @@ import {
 import { TRPCError } from '@trpc/server';
 
 import type { UserAuthSuccess } from '@/types';
+import { isEmailChannelEnabled } from '@/lib/server/env';
 
 const INVALID_EMAIL_LINK_TOKEN_MESSAGE =
   'This link is invalid or has expired. Send another email to get a fresh link.';
@@ -21,6 +30,40 @@ function verifyEmailLinkTokenOrThrow(token: string) {
   }
 
   return verified;
+}
+
+export async function getLinkedEmailAccountsCommand(auth: UserAuthSuccess) {
+  const emailEnabled = isEmailChannelEnabled();
+  const [authUser, senderMappings, credentials] = await Promise.all([
+    db.query.authUsers.findFirst({
+      where: eq(authUsers.id, auth.userId),
+      columns: { email: true, emailVerified: true },
+    }),
+    db.query.agentmailUserMappings.findMany({
+      where: and(
+        eq(agentmailUserMappings.userId, auth.userId),
+        eq(agentmailUserMappings.source, 'link_code'),
+      ),
+      orderBy: [asc(agentmailUserMappings.createdAt)],
+      columns: { emailAddress: true },
+    }),
+    auth.isAdmin && emailEnabled
+      ? resolveAgentMailRuntimeCredentials()
+      : Promise.resolve(null),
+  ]);
+
+  return {
+    emailEnabled,
+    primaryEmail: authUser
+      ? {
+          emailAddress: authUser.email,
+          verified: authUser.emailVerified,
+        }
+      : null,
+    senderAddresses: senderMappings.map(({ emailAddress }) => emailAddress),
+    canViewInboxAddress: auth.isAdmin,
+    inboxAddress: credentials?.inboxId ?? null,
+  };
 }
 
 export async function previewEmailLinkCommand(

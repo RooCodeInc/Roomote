@@ -4,6 +4,9 @@ const {
   mockVerifyAgentMailEmailLinkToken,
   mockRedispatchAgentMailEventsForSender,
   mockFindFirst,
+  mockFindMany,
+  mockAuthUserFindFirst,
+  mockIsEmailChannelEnabled,
   mockInsert,
   mockValues,
   mockOnConflictDoNothing,
@@ -20,6 +23,9 @@ const {
     mockVerifyAgentMailEmailLinkToken: vi.fn(),
     mockRedispatchAgentMailEventsForSender: vi.fn(),
     mockFindFirst: vi.fn(),
+    mockFindMany: vi.fn(),
+    mockAuthUserFindFirst: vi.fn(),
+    mockIsEmailChannelEnabled: vi.fn(),
     mockInsert,
     mockValues,
     mockOnConflictDoNothing,
@@ -30,13 +36,34 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     insert: mockInsert,
-    query: { agentmailUserMappings: { findFirst: mockFindFirst } },
+    query: {
+      agentmailUserMappings: {
+        findFirst: mockFindFirst,
+        findMany: mockFindMany,
+      },
+      authUsers: { findFirst: mockAuthUserFindFirst },
+    },
   },
   agentmailUserMappings: {
     id: 'agentmail_user_mappings.id',
     emailAddress: 'agentmail_user_mappings.email_address',
+    userId: 'agentmail_user_mappings.user_id',
+    source: 'agentmail_user_mappings.source',
+    createdAt: 'agentmail_user_mappings.created_at',
   },
+  authUsers: { id: 'auth_users.id' },
+  and: vi.fn((...conditions) => conditions),
+  asc: vi.fn((column) => column),
   eq: vi.fn(),
+  resolveAgentMailRuntimeCredentials: vi.fn(async () => ({
+    apiKey: 'api-key',
+    webhookSecret: 'webhook-secret',
+    inboxId: 'roomote@example.com',
+  })),
+}));
+
+vi.mock('@/lib/server/env', () => ({
+  isEmailChannelEnabled: mockIsEmailChannelEnabled,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -44,9 +71,70 @@ vi.mock('@roomote/sdk/server', () => ({
   redispatchAgentMailEventsForSender: mockRedispatchAgentMailEventsForSender,
 }));
 
-import { linkEmailAddressCommand, previewEmailLinkCommand } from './email-link';
+import {
+  getLinkedEmailAccountsCommand,
+  linkEmailAddressCommand,
+  previewEmailLinkCommand,
+} from './email-link';
 
 const mockAuth = { userId: 'user-1' } as UserAuthSuccess;
+
+describe('getLinkedEmailAccountsCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    mockAuthUserFindFirst.mockResolvedValue({
+      email: 'login@example.com',
+      emailVerified: false,
+    });
+    mockFindMany.mockResolvedValue([{ emailAddress: 'sender@example.com' }]);
+  });
+
+  it('keeps login verification and explicit sender links distinct', async () => {
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: true,
+      }),
+    ).resolves.toEqual({
+      emailEnabled: true,
+      primaryEmail: {
+        emailAddress: 'login@example.com',
+        verified: false,
+      },
+      senderAddresses: ['sender@example.com'],
+      canViewInboxAddress: true,
+      inboxAddress: 'roomote@example.com',
+    });
+  });
+
+  it('does not expose the deployment inbox address to non-admins', async () => {
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: false,
+      }),
+    ).resolves.toMatchObject({
+      canViewInboxAddress: false,
+      inboxAddress: null,
+    });
+  });
+
+  it('reports an email-disabled deployment without inbox information', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(false);
+
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: true,
+      }),
+    ).resolves.toMatchObject({
+      emailEnabled: false,
+      canViewInboxAddress: true,
+      inboxAddress: null,
+    });
+  });
+});
 
 describe('previewEmailLinkCommand', () => {
   beforeEach(() => {
