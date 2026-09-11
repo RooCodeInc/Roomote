@@ -667,7 +667,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       personalizationWrites.map(
         (message) => message.metadata?.visibleInTranscript,
       ),
-    ).toEqual([false, false]);
+    ).toEqual([true, true]);
+    expect(
+      personalizationWrites.map((message) => message.payload?.output),
+    ).toEqual(['Personalization updated', 'Personalization updated']);
   });
 
   it('refreshes shared agent guidance for each subsequent turn', async () => {

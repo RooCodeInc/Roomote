@@ -28,7 +28,10 @@ describe('personalization transcript privacy', () => {
     const serialized = JSON.stringify(sanitized);
 
     expect(serialized).not.toContain('PRIVATE_SENTINEL');
-    expect(sanitized.metadata).toMatchObject({ visibleInTranscript: false });
+    expect(sanitized.metadata).toMatchObject({ visibleInTranscript: true });
+    expect(sanitized.contentBlocks).toEqual([
+      { type: 'text', text: 'Personalization updated' },
+    ]);
     expect(sanitized.payload).toMatchObject({ private: true });
   });
 

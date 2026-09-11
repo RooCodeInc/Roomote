@@ -87,7 +87,10 @@ import {
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
-import { resolveUserPersonalizationContext } from '../user-personalization';
+import {
+  resolveUserPersonalizationContext,
+  resolveUserPersonalizationUpdate,
+} from '../user-personalization';
 import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
@@ -2554,8 +2557,7 @@ export async function answerFastAgentQuestion({
     const isMcp = Boolean(mcpServerName && mcpToolName);
     const visibleInTranscript =
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
-      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction &&
-      title !== FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
+      title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
     const privatePersonalization =
       title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
@@ -2609,9 +2611,9 @@ export async function answerFastAgentQuestion({
   ) => {
     const privatePersonalization =
       event.title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
-    const { output, truncated } = serializeFastAgentToolOutput(
-      privatePersonalization ? { saved: true } : result,
-    );
+    const { output, truncated } = privatePersonalization
+      ? { output: 'Personalization updated', truncated: false }
+      : serializeFastAgentToolOutput(result);
     const failed =
       result !== null &&
       typeof result === 'object' &&
@@ -4443,9 +4445,18 @@ export async function answerFastAgentQuestion({
               };
             }
             const args = updatePersonalizationArgsSchema.parse(call.args);
-            const result = await appendLearnedUserPreference({
+            const decision = await resolveUserPersonalizationUpdate({
               userId,
               ...args,
+            });
+            if (decision.action === 'ignore' || !decision.preference) {
+              return { success: false, saved: false, reason: 'no_change' };
+            }
+            const result = await appendLearnedUserPreference({
+              userId,
+              preference: decision.preference,
+              confidence: args.confidence,
+              supersedes: decision.supersedes,
             });
             return result.saved
               ? { success: true, saved: true }

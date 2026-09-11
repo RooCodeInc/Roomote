@@ -130,13 +130,14 @@ export function sanitizePrivatePersonalizationEnvelope(
   }
 
   return {
-    contentBlocks: [],
-    metadata: withTranscriptVisibility(envelope.metadata, false),
+    contentBlocks: [{ type: 'text', text: 'Personalization updated' }],
+    metadata: withTranscriptVisibility(envelope.metadata, true),
     payload: {
       toolCallId: payloadRecord?.toolCallId ?? updateRecord?.toolCallId,
       title: 'update_personalization',
       toolName: 'update_personalization',
       status: payloadRecord?.status ?? updateRecord?.status,
+      output: 'Personalization updated',
       private: true,
     },
   };

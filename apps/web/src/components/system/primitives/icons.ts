@@ -19,6 +19,7 @@ export {
   AtSignIcon,
   AudioLines,
   BookOpenText,
+  BookHeart,
   BookCopy,
   BookMarked,
   Brain,

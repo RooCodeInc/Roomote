@@ -8,6 +8,7 @@ import {
   taskRuns,
   tasks,
 } from '@roomote/db/server';
+import { resolveUserPersonalizationUpdate } from '@roomote/cloud-agents/server';
 import { TaskPayloadKind } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -77,9 +78,20 @@ export async function updatePersonalization(
       return c.json({ saved: false, reason: 'not_human_initiated' }, 200);
     }
 
-    const result = await appendLearnedUserPreference({
+    const decision = await resolveUserPersonalizationUpdate({
       userId: run.actingUserId,
       ...parsed.data,
+      taskId: String(runId),
+    });
+    if (decision.action === 'ignore' || !decision.preference) {
+      return c.json({ saved: false, reason: 'no_change' }, 200);
+    }
+
+    const result = await appendLearnedUserPreference({
+      userId: run.actingUserId,
+      preference: decision.preference,
+      confidence: parsed.data.confidence,
+      supersedes: decision.supersedes,
     });
     return c.json(result, 200);
   } catch (error) {

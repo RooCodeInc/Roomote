@@ -126,9 +126,10 @@ export async function appendLearnedUserPreference(input: {
   userId: string;
   preference: string;
   confidence: 'explicit' | 'inferred';
+  supersedes?: string[];
 }): Promise<{
   saved: boolean;
-  reason?: 'disabled' | 'duplicate' | 'full' | 'reset_boundary';
+  reason?: 'disabled' | 'duplicate' | 'full' | 'reset_boundary' | 'no_change';
 }> {
   const preference = input.preference
     .trim()
@@ -160,11 +161,30 @@ export async function appendLearnedUserPreference(input: {
       return { saved: false, reason: 'duplicate' };
     }
 
-    const current = input.confidence === 'explicit' ? explicit : inferred;
+    const superseded = new Set(
+      (input.supersedes ?? []).map((value) => value.trim().toLocaleLowerCase()),
+    );
+    const removeSuperseded = (value: string) =>
+      value
+        .split('\n')
+        .filter(
+          (line) =>
+            !superseded.has(
+              line
+                .replace(/^[-*]\s*/, '')
+                .trim()
+                .toLocaleLowerCase(),
+            ),
+        )
+        .join('\n');
+    const nextExplicit = removeSuperseded(explicit);
+    const nextInferred = removeSuperseded(inferred);
+    const current =
+      input.confidence === 'explicit' ? nextExplicit : nextInferred;
     const addition = `- ${preference}`;
     if (
-      [manual, explicit, inferred, addition].filter(Boolean).join('\n').length >
-      USER_PERSONALIZATION_MAX_CHARS
+      [manual, nextExplicit, nextInferred, addition].filter(Boolean).join('\n')
+        .length > USER_PERSONALIZATION_MAX_CHARS
     ) {
       return { saved: false, reason: 'full' };
     }
@@ -176,6 +196,9 @@ export async function appendLearnedUserPreference(input: {
         ...(input.confidence === 'explicit'
           ? { explicitConversationInstructions: next, resetAt: null }
           : { inferredInstructions: next }),
+        ...(input.confidence === 'explicit'
+          ? { inferredInstructions: nextInferred || null }
+          : {}),
         version: sql`${userPersonalizations.version} + 1`,
         updatedAt: new Date(),
       })

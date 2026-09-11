@@ -112,6 +112,28 @@ describe('user personalization', () => {
     );
   });
 
+  it('removes superseded learned preferences before adding a correction', async () => {
+    const user = await userFactory.create();
+    await appendLearnedUserPreference({
+      userId: user.id,
+      preference: 'Use pirate language.',
+      confidence: 'explicit',
+    });
+
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Use normal professional language.',
+        confidence: 'explicit',
+        supersedes: ['Use pirate language.'],
+      }),
+    ).resolves.toEqual({ saved: true });
+
+    await expect(getUserPersonalization(user.id)).resolves.toMatchObject({
+      instructions: 'Use normal professional language.',
+    });
+  });
+
   it('reset clears every learned layer without changing the opt-out choice', async () => {
     const user = await userFactory.create();
     await updateUserPersonalization({
