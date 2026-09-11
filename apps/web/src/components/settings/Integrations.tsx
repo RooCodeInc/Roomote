@@ -29,8 +29,6 @@ import {
   useGranolaConnection,
   useElevenLabsConnection,
   useVoiceConnection,
-  useDeploymentMcpEnablements,
-  useMcpOauthReadiness,
   useEffectiveMcpIntegrations,
   useNotionConnection,
   useRipplingConnection,
