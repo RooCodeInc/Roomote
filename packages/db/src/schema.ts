@@ -154,6 +154,26 @@ export const users = pgTable(
   ],
 );
 
+/** Private, actor-owned instructions used only while serving that user. */
+export const userPersonalizations = pgTable('user_personalizations', {
+  userId: text('user_id')
+    .notNull()
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  manualInstructions: encryptedText('manual_instructions'),
+  explicitConversationInstructions: encryptedText(
+    'explicit_conversation_instructions',
+  ),
+  inferredInstructions: encryptedText('inferred_instructions'),
+  learnFromConversations: boolean('learn_from_conversations')
+    .notNull()
+    .default(true),
+  version: integer('version').notNull().default(0),
+  resetAt: timestamp('reset_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 export const instanceSkills = pgTable(
   'instance_skills',
   {
@@ -179,6 +199,16 @@ export const userRelations = relations(users, ({ many }) => ({
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
+
+export const userPersonalizationRelations = relations(
+  userPersonalizations,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userPersonalizations.userId],
+      references: [users.id],
+    }),
+  }),
+);
 
 /**
  * deployment_settings
@@ -3482,6 +3512,28 @@ export const fastAgentConversations = pgTable(
       table.legacyConversationIds,
     ),
   ],
+);
+
+/**
+ * Private personalization captured independently for each participant when
+ * they first speak in a Fast conversation. These encrypted values deliberately
+ * live outside shared conversation and transcript records.
+ */
+export const fastAgentPersonalizationSnapshots = pgTable(
+  'fast_agent_personalization_snapshots',
+  {
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    displayName: encryptedText('display_name'),
+    instructions: encryptedText('instructions').notNull(),
+    learnFromConversations: boolean('learn_from_conversations').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.conversationId, table.userId] })],
 );
 
 /**

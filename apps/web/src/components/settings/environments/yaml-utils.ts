@@ -30,7 +30,7 @@ export function configToYaml(config: EnvironmentConfig): string {
     cleanConfig.tool_versions = config.tool_versions;
   }
 
-  if (config.repositories && config.repositories.length > 0) {
+  if (config.repositories.length > 0) {
     cleanConfig.repositories = config.repositories.map((repo) => {
       const cleanRepo: Record<string, unknown> = {
         repository: repo.repository,

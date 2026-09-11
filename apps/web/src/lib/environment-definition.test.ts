@@ -2,6 +2,7 @@ import {
   appendEnvironmentDefinitionGuidance,
   buildEnvironmentDefinitionWorkspacePayload,
   buildCreateEnvironmentDefinitionPrompt,
+  buildTaskTypePromptAndWorkspacePayload,
   RunStatus,
   getEnvironmentDefinitionIdFromPayload,
   normalizeRepositorySelection,
@@ -58,6 +59,40 @@ describe('environment definition helpers', () => {
     expect(prompt).toContain(
       'Create the environment when validation is sufficient.',
     );
+  });
+
+  it('omits repository context from a blank-slate create prompt', () => {
+    const prompt = buildCreateEnvironmentDefinitionPrompt([]);
+
+    expect(prompt).toContain('Set up a Roomote environment');
+    expect(prompt).not.toContain('repository-free');
+    expect(prompt).not.toContain('for this repository set:');
+    expect(buildEnvironmentDefinitionWorkspacePayload([])).toEqual({
+      repo: '__no_repositories__',
+    });
+  });
+
+  it('routes environment-definition launches without repository context to blank slate', () => {
+    const result = buildTaskTypePromptAndWorkspacePayload({
+      type: 'environment-definition',
+      setupGuidance: 'Install database tools.',
+    });
+
+    expect(result.workspacePayload).toEqual({ repo: '__no_repositories__' });
+    expect(result.taskPrompt).not.toContain('repository-free');
+    expect(result.taskPrompt).not.toContain('for this repository set:');
+  });
+
+  it('preserves a scalar repository for environment-definition launches', () => {
+    expect(
+      buildTaskTypePromptAndWorkspacePayload({
+        type: 'environment-definition',
+        repo: 'acme/api',
+      }),
+    ).toMatchObject({
+      workspacePayload: { repo: 'acme/api' },
+      taskPrompt: expect.stringContaining('- acme/api'),
+    });
   });
 
   it('flags empty repositories in the create prompt with bootstrap instructions', () => {
@@ -157,6 +192,39 @@ describe('environment definition helpers', () => {
     );
     expect(prompt).toContain('action "update" and environmentId "env-123"');
     expect(prompt).toContain('name: Roomote App');
+  });
+
+  it('omits repository context from an update prompt when the config has none', () => {
+    const prompt = buildUpdateEnvironmentDefinitionPrompt({
+      environmentId: 'env-blank',
+      environmentName: 'Service tools',
+      repositoryFullNames: [],
+      config: { name: 'Service tools', repositories: [] },
+    });
+
+    expect(prompt).not.toContain('repository-free');
+    expect(prompt).not.toContain('Repositories to inspect:');
+    expect(prompt).not.toContain('not selected for inspection');
+  });
+
+  it('protects persisted repositories when none were selected for inspection', () => {
+    const prompt = buildUpdateEnvironmentDefinitionPrompt({
+      environmentId: 'env-existing',
+      environmentName: 'Existing app',
+      repositoryFullNames: [],
+      config: {
+        name: 'Existing app',
+        repositories: [{ repository: 'acme/api' }],
+      },
+    });
+
+    expect(prompt).toContain(
+      "The environment's repositories are listed in the YAML below but were not selected for inspection in this task.",
+    );
+    expect(prompt).toContain(
+      'Do not change repository configuration unless the user explicitly requested it.',
+    );
+    expect(prompt).toContain('repository: acme/api');
   });
 
   it('directs preview repair tasks through the public preview URL', () => {

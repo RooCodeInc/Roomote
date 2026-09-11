@@ -3,6 +3,7 @@ import type { LucideProps } from 'lucide-react';
 
 import {
   type LucideIcon,
+  BookHeart,
   BookOpenText,
   BrandIcon,
   Bot,
@@ -40,6 +41,7 @@ export function toolIconForKey(key: ToolIconKey): LucideIcon {
   if (key === 'task') return Zap;
   if (key === 'message') return MessageSquareText;
   if (key === 'memory') return BookOpenText;
+  if (key === 'book-heart') return BookHeart;
   if (key === 'artifact') return HardDriveUpload;
   if (key === 'widget') return GalleryVerticalEnd;
   if (key === 'roomote') return RoomoteR;

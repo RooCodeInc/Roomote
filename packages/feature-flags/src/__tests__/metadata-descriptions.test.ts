@@ -11,21 +11,13 @@ describe('metadata descriptions', () => {
     'visual_proof_auto_screencast',
     'background_subagents',
     'opencode_background_subagents',
+    'opencode_code_mode',
     'composerSuggestions',
   ])('classifies removed experiment metadata %s as legacy', (key) => {
     expect(getBooleanMetadataDescriptorByKey(key)).toEqual({
       kind: 'legacy',
       description: null,
       group: null,
-    });
-  });
-
-  it('classifies Code Mode as an active experiment', () => {
-    expect(getBooleanMetadataDescriptorByKey('opencode_code_mode')).toEqual({
-      kind: 'experimental',
-      description:
-        'Defer eligible tools and discover them when needed, reducing the tool definitions sent with each request.',
-      group: 'Code Mode',
     });
   });
 

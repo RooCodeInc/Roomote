@@ -6,7 +6,9 @@ import {
   buildSelectedTaskSessionUrl,
 } from '../fast-session-footer';
 import {
+  AGENTMAIL_MAX_TEXT_LENGTH,
   buildAgentMailEmailBody,
+  buildAgentMailButtonSections,
   escapeAgentMailHtml,
 } from '../agentmail-format';
 
@@ -151,6 +153,27 @@ describe('buildFastSessionReplyFooterText', () => {
     expect(body.html).not.toContain('--');
     expect(body.text).toContain(
       `\n\n--\nReply anytime · Open in Roomote (${buildFastSessionUrl('agentmail', sessionId)})`,
+    );
+  });
+
+  it('keeps the trusted email footer when an oversized reply has action sections', () => {
+    const sessionId = '11111111-1111-4111-8111-111111111111';
+    const markdown = buildFastSessionReplyFooterText({
+      provider: 'agentmail',
+      sessionId,
+    });
+    const body = buildAgentMailEmailBody(
+      `${'a'.repeat(AGENTMAIL_MAX_TEXT_LENGTH)}\n\n${markdown}`,
+    );
+    const actions = buildAgentMailButtonSections([
+      [{ text: '<Review>', url: 'https://roomote.example/action?a=1&b=2' }],
+    ]);
+
+    expect(`${body.html}${actions.html}`).toContain(
+      `>Open in Roomote</a></p></div><div><a href="https://roomote.example/action?a=1&amp;b=2"`,
+    );
+    expect(`${body.text}\n\n${actions.text}`).toContain(
+      `\n--\nReply anytime · Open in Roomote (${buildFastSessionUrl('agentmail', sessionId)})\n\n<Review>: https://roomote.example/action?a=1&b=2`,
     );
   });
 

@@ -11,12 +11,15 @@ import {
 } from '@roomote/db/server';
 import {
   filterMcpToolDefinitions,
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
   getDefaultMcpConnectionRole,
   getAllowedIntegrationMcpToolNames,
   getMcpIntegration,
+  getMcpIntegrationConnectionMode,
   getMcpIntegrationConnectionScope,
   getMcpIntegrationDefaultDisabledTools,
   type McpConnectionRole,
+  type OpenAiRealtimeVoiceId,
   isMcpConnectionAsanaConfig,
   isMcpConnectionNotionConfig,
   isMcpConnectionRipplingConfig,
@@ -33,6 +36,7 @@ import {
   MCP_INTEGRATIONS,
   normalizeGrafanaBaseUrl,
   type McpIntegration,
+  type EffectiveMcpIntegration,
   type McpToolsListJsonRpcPayload,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
@@ -574,6 +578,107 @@ export function getCuratedIntegrationsAvailabilityCommand() {
   };
 }
 
+/** Resolve catalog metadata and actor-scoped state without exposing credentials. */
+export async function getEffectiveMcpIntegrationsCommand(
+  auth: UserAuthSuccess,
+): Promise<EffectiveMcpIntegration[]> {
+  const integrationIds = getMcpIntegrationIds();
+  const deploymentScopedIds = integrationIds.filter((id) =>
+    isDeploymentScopedMcpIntegration(id),
+  );
+  const userScopedIds = integrationIds.filter(
+    (id) => !isDeploymentScopedMcpIntegration(id),
+  );
+  const visibilityFilters = [
+    ...(deploymentScopedIds.length > 0
+      ? [
+          and(
+            isNull(mcpConnections.userId),
+            inArray(mcpConnections.mcpId, deploymentScopedIds),
+          ),
+        ]
+      : []),
+    ...(userScopedIds.length > 0
+      ? [
+          and(
+            eq(mcpConnections.userId, auth.userId),
+            inArray(mcpConnections.mcpId, userScopedIds),
+          ),
+        ]
+      : []),
+  ];
+  const [enablements, connections, oauthReadiness] = await Promise.all([
+    db.query.deploymentMcpEnablements.findMany({
+      where: inArray(deploymentMcpEnablements.mcpId, integrationIds),
+      columns: { mcpId: true, enabled: true },
+    }),
+    visibilityFilters.length > 0
+      ? db.query.mcpConnections.findMany({
+          where: or(...visibilityFilters),
+          orderBy: (table, { desc }) => [desc(table.createdAt)],
+          columns: {
+            mcpId: true,
+            enabled: true,
+            authStatus: true,
+          },
+        })
+      : Promise.resolve([]),
+    Promise.all(
+      MCP_INTEGRATIONS.map((integration) =>
+        getDeploymentStaticOauthReadiness(Env, integration),
+      ),
+    ),
+  ]);
+  const enabledById = new Map(
+    enablements.map((entry) => [entry.mcpId, entry.enabled]),
+  );
+  const connectionById = new Map<string, (typeof connections)[number]>();
+  for (const connection of connections) {
+    if (!connectionById.has(connection.mcpId)) {
+      connectionById.set(connection.mcpId, connection);
+    }
+  }
+  const available = !areCuratedIntegrationsDisabled(
+    Env.R_CURATED_INTEGRATIONS_DISABLED,
+  );
+
+  return MCP_INTEGRATIONS.map((integration, index) => {
+    const enabled = enabledById.get(integration.id) ?? false;
+    const connection = connectionById.get(integration.id);
+    const authStatus = connection?.enabled
+      ? (connection.authStatus ?? null)
+      : null;
+    const connected = authStatus === 'authenticated';
+    const serverMode = integration.serverMode ?? 'upstream_proxy';
+    const status = !available
+      ? 'unavailable'
+      : enabled
+        ? connected
+          ? 'connected'
+          : 'needs_connection'
+        : 'not_enabled';
+
+    return {
+      id: integration.id,
+      name: integration.name,
+      description: integration.description,
+      icon: integration.icon,
+      connectionScope: getMcpIntegrationConnectionScope(integration),
+      connectionMode: getMcpIntegrationConnectionMode(integration),
+      serverMode,
+      available,
+      enabled,
+      authStatus,
+      oauthReadiness: oauthReadiness[index]!,
+      status,
+      capabilities: {
+        agentTools: serverMode !== 'credential_only',
+        toolManagement: serverMode === 'upstream_proxy',
+      },
+    } satisfies EffectiveMcpIntegration;
+  });
+}
+
 /**
  * Return public-safe OAuth setup status for integrations that require a
  * deployment-configured client. Credential names and values never leave the
@@ -902,12 +1007,17 @@ export async function getVoiceConnectionCommand(
 ): Promise<{
   authStatus: 'pending' | 'authenticated' | 'error' | null;
   source: 'environment' | 'connection';
+  voiceId?: OpenAiRealtimeVoiceId;
 } | null> {
   assertAdmin(auth);
 
   const envKey = await resolveModelProviderEnvValue(['R_VOICE_OPENAI_API_KEY']);
   if (envKey?.trim()) {
-    return { authStatus: 'authenticated', source: 'environment' };
+    return {
+      authStatus: 'authenticated',
+      source: 'environment',
+      voiceId: DEFAULT_OPENAI_REALTIME_VOICE_ID,
+    };
   }
 
   const connection = await db.query.mcpConnections.findFirst({
@@ -928,6 +1038,7 @@ export async function getVoiceConnectionCommand(
   return {
     authStatus: connection.authStatus,
     source: 'connection',
+    voiceId: connection.authConfig.voiceId ?? DEFAULT_OPENAI_REALTIME_VOICE_ID,
   };
 }
 
@@ -1658,6 +1769,7 @@ export async function saveVoiceConnectionCommand(
   const authConfig = {
     type: 'voice' as const,
     encryptedApiKey: nextEncryptedApiKey,
+    voiceId: input.voiceId,
   };
 
   await db

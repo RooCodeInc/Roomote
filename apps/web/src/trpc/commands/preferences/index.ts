@@ -1,4 +1,15 @@
-import { and, db, eq, isNull, sql, users } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  getUserPersonalization,
+  isNull,
+  sql,
+  updateUserPersonalization,
+  UserPersonalizationConflictError,
+  users,
+} from '@roomote/db/server';
+import { TRPCError } from '@trpc/server';
 import { headers } from 'next/headers';
 
 import type { UserAuthSuccess } from '@/types';
@@ -159,4 +170,40 @@ export async function updatePersonalPreferencesCommand(
   }
 
   return normalizePersonalPreferences(normalizeMetadata(updatedUser.metadata));
+}
+
+export async function getUserPersonalizationCommand(auth: UserAuthSuccess) {
+  const settings = await getUserPersonalization(auth.userId);
+  return {
+    instructions: settings.instructions,
+    learnFromConversations: settings.learnFromConversations,
+    version: settings.version,
+  };
+}
+
+export async function updateUserPersonalizationCommand(
+  auth: UserAuthSuccess,
+  input: {
+    expectedVersion: number;
+    instructions?: string;
+    learnFromConversations?: boolean;
+    reset?: boolean;
+  },
+) {
+  try {
+    const settings = await updateUserPersonalization({
+      userId: auth.userId,
+      ...input,
+    });
+    return {
+      instructions: settings.instructions,
+      learnFromConversations: settings.learnFromConversations,
+      version: settings.version,
+    };
+  } catch (error) {
+    if (error instanceof UserPersonalizationConflictError) {
+      throw new TRPCError({ code: 'CONFLICT', message: error.message });
+    }
+    throw error;
+  }
 }

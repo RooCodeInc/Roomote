@@ -43,6 +43,7 @@ class FakePeer extends EventTarget {
   static instance: FakePeer;
   readonly channel = new FakeDataChannel();
   iceGatheringState: RTCIceGatheringState = 'complete';
+  connectionState: RTCPeerConnectionState = 'new';
   localDescription: RTCSessionDescription | null = null;
 
   constructor() {
@@ -64,6 +65,11 @@ class FakePeer extends EventTarget {
     this.channel.emit({ type: 'session.started' });
   }
   close() {}
+
+  setConnectionState(connectionState: RTCPeerConnectionState) {
+    this.connectionState = connectionState;
+    this.dispatchEvent(new Event('connectionstatechange'));
+  }
 }
 
 const stopTrack = vi.fn();
@@ -262,6 +268,83 @@ describe('useLiveVoice', () => {
     expect(playVoiceCue).toHaveBeenCalledWith('stop');
   });
 
+  it.each(['failed', 'closed'] as const)(
+    'ends and releases an active conversation when the peer connection is %s',
+    async (connectionState) => {
+      const onSpokenTurn = vi.fn();
+      const { result } = renderHook(() =>
+        useLiveVoice({ onUtterance: vi.fn(), onSpokenTurn }),
+      );
+
+      await act(async () => result.current.start());
+      const peer = FakePeer.instance;
+      act(() => {
+        peer.channel.emit({
+          type: 'session.output_transcript.delta',
+          delta: 'The call is ending.',
+        });
+      });
+
+      act(() => peer.setConnectionState(connectionState));
+
+      expect(result.current.active).toBe(false);
+      expect(result.current.status).toBe('idle');
+      expect(result.current.startedAt).toBeNull();
+      expect(stopTrack).toHaveBeenCalledTimes(1);
+      expect(peer.channel.readyState).toBe('closed');
+      expect(onSpokenTurn).toHaveBeenCalledWith('The call is ending.');
+      expect(playVoiceCue).toHaveBeenLastCalledWith('stop');
+
+      peer.channel.dispatchEvent(new Event('close'));
+      expect(stopTrack).toHaveBeenCalledTimes(1);
+      expect(playVoiceCue).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('allows a disconnected peer to recover, then ends it after the grace period', async () => {
+    const { result } = renderHook(() => useLiveVoice({ onUtterance: vi.fn() }));
+
+    await act(async () => result.current.start());
+    const peer = FakePeer.instance;
+
+    act(() => {
+      peer.setConnectionState('disconnected');
+      vi.advanceTimersByTime(2_999);
+      peer.setConnectionState('connected');
+      vi.advanceTimersByTime(1);
+    });
+    expect(result.current.active).toBe(true);
+    expect(stopTrack).not.toHaveBeenCalled();
+
+    act(() => {
+      peer.setConnectionState('disconnected');
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(result.current.active).toBe(false);
+    expect(stopTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores terminal events from an old peer after a manual restart', async () => {
+    const { result } = renderHook(() => useLiveVoice({ onUtterance: vi.fn() }));
+
+    await act(async () => result.current.start());
+    const oldPeer = FakePeer.instance;
+    act(() => oldPeer.setConnectionState('failed'));
+
+    await act(async () => result.current.start());
+    const restartedPeer = FakePeer.instance;
+    expect(restartedPeer).not.toBe(oldPeer);
+    expect(result.current.active).toBe(true);
+
+    act(() => {
+      oldPeer.setConnectionState('closed');
+      oldPeer.channel.dispatchEvent(new Event('close'));
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(result.current.active).toBe(true);
+    expect(restartedPeer.channel.readyState).toBe('open');
+    expect(stopTrack).toHaveBeenCalledTimes(1);
+  });
   it('stays quiet for a silent stop and for an aborted handshake', async () => {
     let finishHandshake: (value: {
       sessionId: string;

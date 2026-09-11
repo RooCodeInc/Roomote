@@ -8,6 +8,8 @@ import {
   desc,
   eq,
   getCanonicalPrReviewAction,
+  getSessionForFastConversation,
+  isSessionConversationResponding,
   slackInstallations,
   taskPullRequests,
   taskRuns,
@@ -72,6 +74,26 @@ function isLiveTaskTurn(run: typeof taskRuns.$inferSelect): boolean {
     run.workerHeartbeatAt != null &&
     Date.now() - run.workerHeartbeatAt.getTime() >= WORKER_HEARTBEAT_STALE_MS
   );
+}
+
+async function getNotificationActivity(
+  run: typeof taskRuns.$inferSelect,
+): Promise<{ active: boolean; source: 'fast_session' | 'task' }> {
+  const fastParent = getFastAgentParentFromPayload(run.payload);
+  if (fastParent) {
+    const session = await getSessionForFastConversation(
+      db,
+      fastParent.sessionId,
+    );
+    if (session) {
+      return {
+        active: isSessionConversationResponding(session),
+        source: 'fast_session',
+      };
+    }
+  }
+
+  return { active: isLiveTaskTurn(run), source: 'task' };
 }
 
 function findTaskPullRequestForNotification(data: PrReviewNotificationRequest) {
@@ -409,8 +431,9 @@ async function postPrReviewNotification({
 
 /**
  * Posts an informational message about new PR review feedback into the owning
- * task's originating conversation once that task
- * is idle. This never starts an agent turn or changes any code on its own.
+ * task's originating conversation once that conversation is idle. Fast tasks
+ * use their parent Session's responding lease; direct tasks use task activity.
+ * This never starts an agent turn or changes any code on its own.
  */
 export const prReviewNotificationJob = async (
   job: PrReviewNotificationJob,
@@ -466,13 +489,9 @@ export const prReviewNotificationJob = async (
     return;
   }
 
-  const isExecutingTurn = isTaskExecutingTurn(
-    latestJob.status,
-    latestJob.taskPhase,
-  );
-  const isWorkerHeartbeatStale = isExecutingTurn && !isLiveTaskTurn(latestJob);
+  const activity = await getNotificationActivity(latestJob);
 
-  if (isExecutingTurn && !isWorkerHeartbeatStale) {
+  if (activity.active) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
       await schedulePrReviewNotificationJob({
         request: { ...data, deferrals: data.deferrals + 1 },
@@ -480,20 +499,24 @@ export const prReviewNotificationJob = async (
       });
 
       console.log(
-        `[PrReviewNotification] Task ${data.taskId} is still running, deferred notification for ${data.repository}#${data.prNumber} (deferral ${data.deferrals + 1})`,
+        `[PrReviewNotification] ${activity.source === 'fast_session' ? 'Fast Session is responding' : `Task ${data.taskId} is still running`}, deferred notification for ${data.repository}#${data.prNumber} (deferral ${data.deferrals + 1})`,
       );
       return;
     }
 
     console.warn(
-      `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
+      `[PrReviewNotification] ${activity.source === 'fast_session' ? 'Fast Session never stopped responding' : `Task ${data.taskId} never went idle`} after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
     );
     await consumePendingPrReviewActivity(target);
     await finalizePrReviewNotificationRequest(data, 'suppressed');
     return;
   }
 
-  if (isExecutingTurn && isWorkerHeartbeatStale) {
+  if (
+    activity.source === 'task' &&
+    isTaskExecutingTurn(latestJob.status, latestJob.taskPhase) &&
+    !activity.active
+  ) {
     console.warn(
       `[PrReviewNotification] Task ${data.taskId} has a stale worker heartbeat while its phase is running; delivering pending review activity for ${data.repository}#${data.prNumber}`,
     );
@@ -576,9 +599,12 @@ export const prReviewNotificationJob = async (
       ]);
     const taskChangedDuringPreparation =
       latestBeforeDelivery?.id !== latestJob.id;
+    const latestActivity = latestBeforeDelivery
+      ? await getNotificationActivity(latestBeforeDelivery)
+      : null;
     if (
       latestBeforeDelivery &&
-      (taskChangedDuringPreparation || isLiveTaskTurn(latestBeforeDelivery))
+      (taskChangedDuringPreparation || latestActivity?.active)
     ) {
       if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
         await schedulePrReviewNotificationJob({

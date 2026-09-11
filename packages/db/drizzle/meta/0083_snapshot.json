@@ -1,5 +1,5 @@
 {
-  "id": "eb1673d6-9e20-4c16-8871-ac17a62ea5f9",
+  "id": "4cd7cc92-5763-4018-a17c-75b80631315e",
   "prevId": "4ec88f44-95c7-41b0-b8ae-0ac16ba1d666",
   "version": "7",
   "dialect": "postgresql",
@@ -1137,205 +1137,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.automation_results": {
-      "name": "automation_results",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "automation_key": {
-          "name": "automation_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "custom_automation_id": {
-          "name": "custom_automation_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source_task_id": {
-          "name": "source_task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "automation_name": {
-          "name": "automation_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content": {
-          "name": "content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "priority": {
-          "name": "priority",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'normal'"
-        },
-        "dedupe_key": {
-          "name": "dedupe_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "accepted_at": {
-          "name": "accepted_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ignored_at": {
-          "name": "ignored_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "automation_results_dedupe_key_unique_idx": {
-          "name": "automation_results_dedupe_key_unique_idx",
-          "columns": [
-            {
-              "expression": "dedupe_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "automation_results_inbox_idx": {
-          "name": "automation_results_inbox_idx",
-          "columns": [
-            {
-              "expression": "priority",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "automation_results_user_id_idx": {
-          "name": "automation_results_user_id_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "automation_results_source_task_id_idx": {
-          "name": "automation_results_source_task_id_idx",
-          "columns": [
-            {
-              "expression": "source_task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "automation_results_automation_key_automations_key_fk": {
-          "name": "automation_results_automation_key_automations_key_fk",
-          "tableFrom": "automation_results",
-          "tableTo": "automations",
-          "columnsFrom": ["automation_key"],
-          "columnsTo": ["key"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "automation_results_custom_automation_id_custom_automations_id_fk": {
-          "name": "automation_results_custom_automation_id_custom_automations_id_fk",
-          "tableFrom": "automation_results",
-          "tableTo": "custom_automations",
-          "columnsFrom": ["custom_automation_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "automation_results_source_task_id_tasks_id_fk": {
-          "name": "automation_results_source_task_id_tasks_id_fk",
-          "tableFrom": "automation_results",
-          "tableTo": "tasks",
-          "columnsFrom": ["source_task_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "automation_results_user_id_users_id_fk": {
-          "name": "automation_results_user_id_users_id_fk",
-          "tableFrom": "automation_results",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.automations": {
       "name": "automations",
       "schema": "",
@@ -2135,13 +1936,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
-        },
-        "result_priority": {
-          "name": "result_priority",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'normal'"
         },
         "enabled": {
           "name": "enabled",
@@ -14783,6 +14577,87 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.user_personalizations": {
+      "name": "user_personalizations",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "manual_instructions": {
+          "name": "manual_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "explicit_conversation_instructions": {
+          "name": "explicit_conversation_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inferred_instructions": {
+          "name": "inferred_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "learn_from_conversations": {
+          "name": "learn_from_conversations",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "reset_at": {
+          "name": "reset_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "user_personalizations_user_id_users_id_fk": {
+          "name": "user_personalizations_user_id_users_id_fk",
+          "tableFrom": "user_personalizations",
+          "tableTo": "users",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.users": {
       "name": "users",
       "schema": "",
@@ -15238,36 +15113,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "result_accepted_at": {
-          "name": "result_accepted_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result_ignored_at": {
-          "name": "result_ignored_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result_automation_name": {
-          "name": "result_automation_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result_priority": {
-          "name": "result_priority",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result_user_id": {
-          "name": "result_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -15450,15 +15295,6 @@
           "tableFrom": "work_items",
           "tableTo": "tasks",
           "columnsFrom": ["launched_task_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "work_items_result_user_id_users_id_fk": {
-          "name": "work_items_result_user_id_users_id_fk",
-          "tableFrom": "work_items",
-          "tableTo": "users",
-          "columnsFrom": ["result_user_id"],
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"

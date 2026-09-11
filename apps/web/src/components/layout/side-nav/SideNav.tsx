@@ -28,7 +28,6 @@ import {
   useHydrateLayoutStore,
   useLayoutStore,
 } from '@/hooks/useLayoutOptions';
-import { useRecentSessions } from '@/hooks/useRecentSessions';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLiveTaskStatus, useTaskPins } from '@/hooks/tasks';
 import { useTRPC } from '@/trpc/client';
@@ -82,7 +81,6 @@ export const SideNav = ({
       enabled: resultsEnabled,
     }),
   );
-  const { recentSessionIds } = useRecentSessions();
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   const { pinnedTaskIds, setTaskPinned, isTaskPinMutationPending } =
     useTaskPins();
@@ -120,33 +118,19 @@ export const SideNav = ({
     () => new Set(pinnedTaskIds),
     [pinnedTaskIds],
   );
-  const recentSessionIdsForQuery = useMemo(
-    () => recentSessionIds.slice(0, SIDE_NAV_MAX_VISIBLE_SESSIONS),
-    [recentSessionIds],
-  );
   const { data: recentSessionsResult } = useQuery(
     trpc.sessions.list.queryOptions(
       {
-        ids: recentSessionIdsForQuery,
+        ownedOnly: true,
         limit: SIDE_NAV_MAX_VISIBLE_SESSIONS,
       },
       {
-        enabled: isSideNavExpanded && recentSessionIdsForQuery.length > 0,
+        enabled: isSideNavExpanded,
         placeholderData: keepPreviousData,
       },
     ),
   );
-  const recentSessions = useMemo(() => {
-    const sessionsById = new Map(
-      (recentSessionsResult?.sessions ?? []).map((session) => [
-        session.id,
-        session,
-      ]),
-    );
-    return recentSessionIdsForQuery
-      .map((sessionId) => sessionsById.get(sessionId))
-      .filter((session): session is NonNullable<typeof session> => !!session);
-  }, [recentSessionIdsForQuery, recentSessionsResult?.sessions]);
+  const recentSessions = recentSessionsResult?.sessions ?? [];
   const visibleNavItems = useMemo(
     () => getVisiblePrimaryNavItems({ isAdmin, resultsEnabled }),
     [isAdmin, resultsEnabled],

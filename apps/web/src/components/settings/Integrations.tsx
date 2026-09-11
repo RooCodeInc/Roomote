@@ -1,15 +1,18 @@
 'use client';
 
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
 import {
   getMcpIntegrationConnectionMode,
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
   isSelfServeMcpIntegration,
   isDeploymentScopedMcpIntegration,
   MCP_INTEGRATIONS,
+  OPENAI_REALTIME_VOICE_OPTIONS,
+  type OpenAiRealtimeVoiceId,
 } from '@roomote/types';
 
 import {
@@ -21,14 +24,12 @@ import {
 import {
   useAsanaConnection,
   useConnectMcp,
-  useCuratedIntegrationsAvailability,
   useDisconnectMcp,
   useGrafanaConnection,
   useGranolaConnection,
   useElevenLabsConnection,
   useVoiceConnection,
-  useDeploymentMcpEnablements,
-  useMcpOauthReadiness,
+  useEffectiveMcpIntegrations,
   useNotionConnection,
   useRipplingConnection,
   useSaveAsanaConnection,
@@ -38,12 +39,12 @@ import {
   useSaveGranolaConnection,
   useSaveElevenLabsConnection,
   useSaveVoiceConnection,
+  usePreviewVoice,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
   useSaveXConnection,
   useSetDeploymentMcpEnabled,
   useSnowflakeConnection,
-  useUserMcpConnections,
   useVercelConnection,
   useXConnection,
 } from '@/hooks/mcp-connections';
@@ -83,8 +84,13 @@ import {
   LinearLogo,
   Pencil,
   Plus,
+  Play,
   RefreshCw,
   Settings2,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
   Spinner,
   Textarea,
   TriangleAlert,
@@ -216,6 +222,12 @@ type ElevenLabsConnectionData = {
 
 type VoiceFormState = {
   apiKey: string;
+  voiceId: OpenAiRealtimeVoiceId;
+};
+
+type VoiceConnectionData = {
+  authStatus?: 'pending' | 'authenticated' | 'error' | null;
+  voiceId?: OpenAiRealtimeVoiceId;
 };
 
 type GrafanaFormState = {
@@ -273,7 +285,16 @@ function buildEmptyGranolaForm(): GranolaFormState {
 }
 
 function buildEmptyVoiceForm(): VoiceFormState {
-  return { apiKey: '' };
+  return { apiKey: '', voiceId: DEFAULT_OPENAI_REALTIME_VOICE_ID };
+}
+
+function buildVoiceForm(
+  connection: VoiceConnectionData | null | undefined,
+): VoiceFormState {
+  return {
+    apiKey: '',
+    voiceId: connection?.voiceId ?? DEFAULT_OPENAI_REALTIME_VOICE_ID,
+  };
 }
 
 function buildEmptyElevenLabsForm(): ElevenLabsFormState {
@@ -419,7 +440,8 @@ function getVoiceFieldErrors(
     return {};
   }
 
-  return { apiKey: result.error.flatten().fieldErrors.apiKey };
+  const fieldErrors = result.error.flatten().fieldErrors;
+  return { apiKey: fieldErrors.apiKey, voiceId: fieldErrors.voiceId };
 }
 
 function getElevenLabsFieldErrors(
@@ -1172,8 +1194,39 @@ function VoiceConnectionFields({
   allowBlankApiKey: boolean;
   onFieldChange: (field: keyof VoiceFormState, value: string) => void;
 }) {
+  const previewVoice = usePreviewVoice();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const selectedVoice = OPENAI_REALTIME_VOICE_OPTIONS.find(
+    (option) => option.id === form.voiceId,
+  );
   const fieldClassName =
     'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+    },
+    [],
+  );
+
+  const handlePreview = () => {
+    audioRef.current?.pause();
+    setPreviewError(null);
+    previewVoice.mutate(
+      { apiKey: form.apiKey, voiceId: form.voiceId },
+      {
+        onSuccess: ({ audioBase64, mimeType }) => {
+          const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
+          audioRef.current = audio;
+          void audio.play().catch(() => {
+            setPreviewError('Your browser blocked audio playback. Try again.');
+          });
+        },
+        onError: (error) => setPreviewError(error.message),
+      },
+    );
+  };
 
   return (
     <>
@@ -1199,6 +1252,55 @@ function VoiceConnectionFields({
         ) : null}
         {fieldErrors.apiKey ? (
           <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
+        ) : null}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="voice-selection">Voice</Label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Select
+            value={form.voiceId}
+            onValueChange={(value) =>
+              onFieldChange('voiceId', value as OpenAiRealtimeVoiceId)
+            }
+          >
+            <SelectTrigger id="voice-selection" className="w-full sm:flex-1">
+              <span>{selectedVoice?.label ?? 'Select a voice'}</span>
+            </SelectTrigger>
+            <SelectContent>
+              {OPENAI_REALTIME_VOICE_OPTIONS.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handlePreview}
+            disabled={previewVoice.isPending}
+            aria-label={`Preview ${selectedVoice?.label ?? form.voiceId} voice`}
+            className="w-full sm:w-auto"
+          >
+            {previewVoice.isPending ? <Spinner /> : <Play />}
+            Preview
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Hear an AI-generated sample. OpenAI currently recommends Marin and
+          Cedar for best quality.
+        </p>
+        {fieldErrors.voiceId ? (
+          <p className="text-sm text-destructive">{fieldErrors.voiceId[0]}</p>
+        ) : null}
+        {previewError ? (
+          <p
+            className="text-sm text-destructive"
+            role="status"
+            aria-live="polite"
+          >
+            {previewError}
+          </p>
         ) : null}
       </div>
       {formError ? (
@@ -1454,7 +1556,11 @@ function VercelConnectionFields({
   );
 }
 
-export function Integrations() {
+export function Integrations({
+  integrationIds,
+}: {
+  integrationIds?: readonly string[];
+} = {}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { isAdmin } = useAuthorizedUser();
@@ -1562,22 +1668,21 @@ export function Integrations() {
   const [isLinearOauthSetupOpen, setIsLinearOauthSetupOpen] = useState(false);
 
   const linearInstallation = useLinearInstallation();
-  const connectLinear = useConnectLinear(`${pathname}?service=linear`);
+  const connectLinear = useConnectLinear(
+    integrationIds === undefined ? `${pathname}?service=linear` : pathname,
+  );
   const disconnectLinear = useDisconnectLinear();
 
-  const deploymentEnablements = useDeploymentMcpEnablements();
-  const integrationsAvailability = useCuratedIntegrationsAvailability();
-  const oauthReadiness = useMcpOauthReadiness();
-  const linearOauthStatus = oauthReadiness.data?.find(
-    (entry) => entry.mcpId === 'linear',
-  )?.status;
+  const effectiveIntegrations = useEffectiveMcpIntegrations();
+  const linearOauthStatus = effectiveIntegrations.data?.find(
+    (entry) => entry.id === 'linear',
+  )?.oauthReadiness;
   const linearOauthUnavailable =
     linearOauthStatus === 'missing' || linearOauthStatus === 'partial';
   const linearOauthSetup = useLinearOauthSetup(
     isAdmin && (linearOauthUnavailable || isLinearOauthSetupOpen),
   );
   const setDeploymentEnabled = useSetDeploymentMcpEnabled();
-  const userMcpConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
   const disconnectMcp = useDisconnectMcp();
   const saveAsanaConnection = useSaveAsanaConnection();
@@ -1591,12 +1696,12 @@ export function Integrations() {
   const saveVercelConnection = useSaveVercelConnection();
   const saveXConnection = useSaveXConnection();
   const asanaConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'asana',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'asana',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isAsanaConnected =
     asanaConnectionSummary?.authStatus === 'authenticated';
   const asanaConnection = useAsanaConnection(
@@ -1604,8 +1709,8 @@ export function Integrations() {
   );
   const notionConnectionSummary = useMemo(
     () =>
-      (userMcpConnections.data ?? []).find((entry) => entry.mcpId === 'notion'),
-    [userMcpConnections.data],
+      (effectiveIntegrations.data ?? []).find((entry) => entry.id === 'notion'),
+    [effectiveIntegrations.data],
   );
   const notionConnection = useNotionConnection(
     isAdmin &&
@@ -1617,10 +1722,10 @@ export function Integrations() {
     notionConnection.data?.authStatus === 'authenticated';
   const ripplingConnectionSummary = useMemo(
     () =>
-      (userMcpConnections.data ?? []).find(
-        (entry) => entry.mcpId === 'rippling',
+      (effectiveIntegrations.data ?? []).find(
+        (entry) => entry.id === 'rippling',
       ),
-    [userMcpConnections.data],
+    [effectiveIntegrations.data],
   );
   const ripplingConnection = useRipplingConnection(
     isAdmin &&
@@ -1631,12 +1736,12 @@ export function Integrations() {
     ripplingConnectionSummary?.authStatus === 'authenticated' &&
     ripplingConnection.data?.authStatus === 'authenticated';
   const granolaConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'granola',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'granola',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isGranolaConnected =
     granolaConnectionSummary?.authStatus === 'authenticated';
   const granolaConnection = useGranolaConnection(
@@ -1644,8 +1749,8 @@ export function Integrations() {
   );
   const voiceConnectionSummary = useMemo(
     () =>
-      (userMcpConnections.data ?? []).find((entry) => entry.mcpId === 'voice'),
-    [userMcpConnections.data],
+      (effectiveIntegrations.data ?? []).find((entry) => entry.id === 'voice'),
+    [effectiveIntegrations.data],
   );
   const isVoiceConnected =
     voiceConnectionSummary?.authStatus === 'authenticated';
@@ -1655,60 +1760,60 @@ export function Integrations() {
   const voiceConfiguredByEnvironment =
     voiceConnection.data?.source === 'environment';
   const elevenLabsConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'elevenlabs',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'elevenlabs',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isElevenLabsConnected =
     elevenLabsConnectionSummary?.authStatus === 'authenticated';
   const elevenLabsConnection = useElevenLabsConnection(
     isAdmin && (isElevenLabsConnected || isElevenLabsDialogOpen),
   );
   const grafanaConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'grafana',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'grafana',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isGrafanaConnected =
     grafanaConnectionSummary?.authStatus === 'authenticated';
   const grafanaConnection = useGrafanaConnection(
     isAdmin && (isGrafanaConnected || isGrafanaDialogOpen),
   );
   const snowflakeConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'snowflake',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'snowflake',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isSnowflakeConnected =
     snowflakeConnectionSummary?.authStatus === 'authenticated';
   const snowflakeConnection = useSnowflakeConnection(
     isAdmin && (isSnowflakeConnected || isSnowflakeDialogOpen),
   );
   const vercelConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'vercel',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'vercel',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isVercelConnected =
     vercelConnectionSummary?.authStatus === 'authenticated';
   const vercelConnection = useVercelConnection(
     isAdmin && (isVercelConnected || isVercelDialogOpen),
   );
   const xConnectionSummary = useMemo(() => {
-    const connection = (userMcpConnections.data ?? []).find(
-      (entry) => entry.mcpId === 'x',
+    const connection = (effectiveIntegrations.data ?? []).find(
+      (entry) => entry.id === 'x',
     );
 
     return connection;
-  }, [userMcpConnections.data]);
+  }, [effectiveIntegrations.data]);
   const isXConnected = xConnectionSummary?.authStatus === 'authenticated';
   const xConnection = useXConnection(
     isAdmin && (isXConnected || isXDialogOpen),
@@ -1775,8 +1880,13 @@ export function Integrations() {
 
     setVoiceFieldErrors({});
     setVoiceFormError(null);
-    setVoiceForm(buildEmptyVoiceForm());
-  }, [voiceConnection.isPending, isVoiceConnected, isVoiceDialogOpen]);
+    setVoiceForm(buildVoiceForm(voiceConnection.data));
+  }, [
+    voiceConnection.data,
+    voiceConnection.isPending,
+    isVoiceConnected,
+    isVoiceDialogOpen,
+  ]);
 
   useEffect(() => {
     if (!isElevenLabsDialogOpen) {
@@ -1890,13 +2000,13 @@ export function Integrations() {
   const items = useMemo<IntegrationItem[]>(() => {
     const visibleMcpIntegrations = MCP_INTEGRATIONS;
     const orgEnablementMap = new Map(
-      (deploymentEnablements.data ?? []).map((entry) => [
-        entry.mcpId,
+      (effectiveIntegrations.data ?? []).map((entry) => [
+        entry.id,
         entry.enabled,
       ]),
     );
     const userConnectionMap = new Map(
-      (userMcpConnections.data ?? []).map((entry) => [entry.mcpId, entry]),
+      (effectiveIntegrations.data ?? []).map((entry) => [entry.id, entry]),
     );
     const canSetUpLinearOauth = isAdmin && linearOauthUnavailable;
     const canConfigureLinearOauth = isAdmin && !linearOauthUnavailable;
@@ -1955,7 +2065,7 @@ export function Integrations() {
         isMcpBased: false,
         isPending:
           linearInstallation.isPending ||
-          (!linearInstallation.data && oauthReadiness.isPending) ||
+          (!linearInstallation.data && effectiveIntegrations.isPending) ||
           connectLinear.isPending ||
           disconnectLinear.isPending,
         status: linearOauthUnavailable
@@ -2368,7 +2478,13 @@ export function Integrations() {
         }),
     ];
 
-    return sortIntegrationItems(baseItems, highlightedIntegrationId);
+    return integrationIds === undefined
+      ? sortIntegrationItems(baseItems, highlightedIntegrationId)
+      : [...new Set(integrationIds)].flatMap((id) =>
+          baseItems.filter(
+            (item) => item.id === (id === 'sentry' ? 'sentry-mcp' : id),
+          ),
+        );
   }, [
     connectLinear,
     connectMcp,
@@ -2384,7 +2500,7 @@ export function Integrations() {
     linearOauthSetup.isPending,
     linearOauthStatus,
     linearOauthUnavailable,
-    oauthReadiness.isPending,
+    effectiveIntegrations.isPending,
     isAdmin,
     isGrafanaDialogOpen,
     isGranolaDialogOpen,
@@ -2399,8 +2515,9 @@ export function Integrations() {
     saveElevenLabsConnection.isPending,
     saveVoiceConnection.isPending,
     saveVercelConnection.isPending,
-    deploymentEnablements.data,
+    effectiveIntegrations.data,
     pathname,
+    integrationIds,
     setDeploymentEnabled,
     saveSnowflakeConnection.isPending,
     asanaConnection.isPending,
@@ -2419,7 +2536,6 @@ export function Integrations() {
     xConnection.isPending,
     isXDialogOpen,
     highlightedIntegrationId,
-    userMcpConnections.data,
   ]);
 
   const {
@@ -2921,6 +3037,7 @@ export function Integrations() {
 
     const parsed = saveVoiceConnectionSchema.safeParse({
       apiKey: voiceForm.apiKey,
+      voiceId: voiceForm.voiceId,
     });
     if (!parsed.success) {
       setVoiceFieldErrors(getVoiceFieldErrors(parsed));
@@ -3101,7 +3218,11 @@ export function Integrations() {
     });
   };
 
-  if (integrationsAvailability.data?.enabled === false) {
+  if (
+    effectiveIntegrations.data?.some(
+      (integration) => integration.status === 'unavailable',
+    )
+  ) {
     return (
       <div className="space-y-8">
         <Alert>
@@ -3111,7 +3232,7 @@ export function Integrations() {
             instance.
           </AlertDescription>
         </Alert>
-        {customMcpEnabled ? (
+        {integrationIds === undefined && customMcpEnabled ? (
           <>
             {customMcpDialogs}
             <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
@@ -3395,32 +3516,42 @@ export function Integrations() {
           deepLinkDialogItem.onAction?.();
         }}
       />
-      {customMcpDialogs}
-      {customMcpEnabled ? (
-        <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
-      ) : null}
-      <IntegrationSection
-        id="installed-integrations"
-        title="Connected"
-        items={installed}
-        emptyState={
-          <p className="text-sm text-muted-foreground">
-            You haven&apos;t connected any integrations yet.
-          </p>
-        }
-      />
-      {configured.length > 0 && (
+      {integrationIds !== undefined ? (
         <IntegrationSection
-          id="configured-integrations"
-          title="Configured"
-          items={configured}
+          id="selected-integrations"
+          title="Integrations"
+          items={items}
         />
+      ) : (
+        <>
+          {customMcpDialogs}
+          {customMcpEnabled ? (
+            <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
+          ) : null}
+          <IntegrationSection
+            id="installed-integrations"
+            title="Connected"
+            items={installed}
+            emptyState={
+              <p className="text-sm text-muted-foreground">
+                You haven&apos;t connected any integrations yet.
+              </p>
+            }
+          />
+          {configured.length > 0 && (
+            <IntegrationSection
+              id="configured-integrations"
+              title="Configured"
+              items={configured}
+            />
+          )}
+          <IntegrationSection
+            id="available-integrations"
+            title="Available"
+            items={available}
+          />
+        </>
       )}
-      <IntegrationSection
-        id="available-integrations"
-        title="Available"
-        items={available}
-      />
     </div>
   );
 }

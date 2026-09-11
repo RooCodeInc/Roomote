@@ -13,8 +13,8 @@ export function AutomationsSettingsPage() {
   const { isAdmin } = useAuthorizedUser();
 
   return (
-    <div className="min-h-full w-full overflow-auto bg-background px-4 py-8 md:px-8">
-      <div className="max-w-8xl space-y-6">
+    <div className="min-h-full w-full overflow-auto bg-background px-4 py-8 md:h-full md:min-h-0 md:overflow-hidden md:px-8">
+      <div className="max-w-8xl space-y-6 md:flex md:h-full md:min-h-0 md:flex-col md:gap-6 md:space-y-0">
         <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-semibold text-foreground">

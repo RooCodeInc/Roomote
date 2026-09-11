@@ -1,9 +1,9 @@
 export { PACKAGED_AUTOMATION_SKILL_INVOCATIONS } from '../../packaged-skill-invocations';
 
-import { PACKAGED_SKILL_INVOCATIONS } from '../../packaged-skill-invocations';
+import { PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS } from '../../packaged-skill-invocations';
 
 const PACKAGED_SKILL_INVOCATION_SET = new Set<string>(
-  PACKAGED_SKILL_INVOCATIONS,
+  PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS,
 );
 
 // This only governs authoritative Roomote-packaged first-hop routing in

@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
   matchIntegrationTools,
+  parseMcpToolResult,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -198,6 +199,6 @@ async function callOnDemandMcpTool(
     );
     // Pass the upstream content through unchanged; OpenCode renders it the
     // same way it would a natively mounted MCP result.
-    return result as ToolResult;
+    return parseMcpToolResult(result).result as ToolResult;
   });
 }

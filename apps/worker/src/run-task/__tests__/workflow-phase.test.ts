@@ -27,4 +27,14 @@ describe('workflow phase selection', () => {
       getFollowUpWorkflowPhase('$implement-changes\nProceed with the fix.'),
     ).toBe('implement-changes');
   });
+
+  it('does not pin Fast-only Doctor invocations as sandbox workflow phases', () => {
+    expect(
+      getInitialWorkflowPhase({
+        prompt: '$doctor\nCheck this environment.',
+        requestedWorkKind: 'unknown',
+      }),
+    ).toBe('plan-repo-implementation');
+    expect(getFollowUpWorkflowPhase('$doctor\nCheck again.')).toBeNull();
+  });
 });

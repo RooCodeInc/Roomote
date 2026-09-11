@@ -38,6 +38,10 @@ import {
 } from './dequeue-helpers';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import { markGithubPrReviewCheckInProgress } from './github-pr-review-check';
+import {
+  appendPrivateTaskPersonalization,
+  getPrivateTaskPersonalizationInstructions,
+} from './task-personalization';
 
 /**
  * Task-level launch context returned alongside the run. The worker previously
@@ -640,6 +644,15 @@ export const dequeueTaskRun = async (
       await cancelAndReleaseTaskRun(result.taskRun, message, tag);
       return undefined;
     }
+
+    result.harnessInstructions = appendPrivateTaskPersonalization(
+      result.harnessInstructions,
+      await getPrivateTaskPersonalizationInstructions({
+        actingUserId: result.taskRun.actingUserId,
+        initiatorKind: txResult.task.initiatorKind,
+        payloadKind: result.taskRun.payloadKind,
+      }),
+    );
 
     const { error: _, ...rest } = result;
     return rest;

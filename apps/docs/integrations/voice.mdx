@@ -1,7 +1,7 @@
 ---
 title: Voice
 description: Let your team talk to Roomote on a voice call.
-icon: 'audio-lines'
+icon: 'openai'
 ---
 
 Connect Voice when you want people to [talk to Roomote](/voice) on a call from
@@ -14,6 +14,11 @@ OpenAI API key from a project that has GPT-Live access. We recommend a key
 separate from any key used for task inference, so voice can be billed and
 revoked on its own.
 
+The setup dialog also lets the admin choose any voice supported by GPT-Live and
+play a short AI-generated preview before saving. New and previously unset
+connections use Marin, one of OpenAI's recommended voices. Existing voice
+selections stay unchanged.
+
 ## What to expect
 
 Voice is a credential-only integration. Roomote uses the key on the control
@@ -24,4 +29,5 @@ its WebRTC connection offer to Roomote and receives only the negotiated answer.
 Self-hosted operators can instead set `R_VOICE_OPENAI_API_KEY`. When both are
 present the environment variable is used. Roomote's general `OPENAI_API_KEY`
 is never used for voice, so enabling OpenAI for task inference does not turn
-voice on.
+voice on. An environment-managed connection is read-only in Settings and uses
+Marin because it has no stored voice selection.

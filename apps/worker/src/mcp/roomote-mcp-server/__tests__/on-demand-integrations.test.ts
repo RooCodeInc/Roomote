@@ -189,4 +189,29 @@ describe('on-demand integration tools', () => {
     expect(missing.success).toBe(false);
     expect(callTool).toHaveBeenCalledTimes(1);
   });
+
+  it('preserves an upstream MCP error result unchanged', async () => {
+    const upstreamResult = {
+      isError: true,
+      structuredContent: { id: '', external_id: 0 },
+      content: [
+        {
+          type: 'text' as const,
+          text: 'missing_required_fields: severity_id is required',
+        },
+      ],
+    };
+
+    await expect(
+      callOnDemandIntegrationTool(
+        catalog,
+        {
+          integrationId: 'linear',
+          toolName: 'incident_create',
+          args: { name: 'Database unavailable' },
+        },
+        vi.fn(async () => upstreamResult),
+      ),
+    ).resolves.toEqual(upstreamResult);
+  });
 });

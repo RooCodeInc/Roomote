@@ -25,6 +25,7 @@ import {
   isSetupModelProviderId,
   isOpenAiCompatibleProviderId,
   customMcpServerInputSchema,
+  isOpenAiRealtimeVoiceId,
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
@@ -53,6 +54,7 @@ import {
   cleanVoiceTranscriptCommand,
   createVoiceLiveSessionCommand,
   getVoiceStatusCommand,
+  previewVoiceCommand,
   recordVoiceCallEventCommand,
   recordVoiceTurnCommand,
 } from '../commands/voice';
@@ -202,6 +204,8 @@ import {
   acceptCookieConsentCommand,
   setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
+  getUserPersonalizationCommand,
+  updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
   type EnvironmentConfigVersionDetail,
@@ -253,6 +257,7 @@ import {
 } from '../commands/sandbox-session';
 import {
   getDeploymentMcpEnablementsCommand,
+  getEffectiveMcpIntegrationsCommand,
   getCuratedIntegrationsAvailabilityCommand,
   getMcpOauthReadinessCommand,
   setDeploymentMcpEnabledCommand,
@@ -487,10 +492,6 @@ import {
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
-import {
-  getExperimentalSettingsCommand,
-  setOpenCodeCodeModeCommand,
-} from '../commands/experimental-settings';
 import {
   backfillBrainTaskMemoriesCommand,
   getBrainPageCommand,
@@ -1637,6 +1638,29 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         updatePersonalPreferencesCommand(auth, input),
       ),
+    getPersonalization: protectedProcedure.query(({ ctx: { auth } }) =>
+      getUserPersonalizationCommand(auth),
+    ),
+    updatePersonalization: protectedProcedure
+      .input(
+        z
+          .object({
+            expectedVersion: z.number().int().nonnegative(),
+            instructions: z.string().max(8_000).optional(),
+            learnFromConversations: z.boolean().optional(),
+            reset: z.literal(true).optional(),
+          })
+          .refine(
+            (input) =>
+              input.instructions !== undefined ||
+              input.learnFromConversations !== undefined ||
+              input.reset === true,
+            { message: 'Expected a personalization change.' },
+          ),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateUserPersonalizationCommand(auth, input),
+      ),
   }),
 
   environments: createRouter({
@@ -1732,7 +1756,7 @@ export const appRouter = createRouter({
     startDefinitionTask: protectedProcedure
       .input(
         z.object({
-          repositoryIds: z.array(z.string().uuid()).min(1),
+          repositoryIds: z.array(z.string().uuid()),
           environmentId: z.string().optional(),
           changeRequest: z.string().trim().min(1).max(8_000).optional(),
           selectedModelId: z.string().trim().min(1).optional(),
@@ -1924,6 +1948,10 @@ export const appRouter = createRouter({
 
     deploymentEnablements: protectedProcedure.query(({ ctx: { auth } }) =>
       getDeploymentMcpEnablementsCommand(auth),
+    ),
+
+    effectiveIntegrations: protectedProcedure.query(({ ctx: { auth } }) =>
+      getEffectiveMcpIntegrationsCommand(auth),
     ),
 
     oauthReadiness: protectedProcedure.query(({ ctx: { auth } }) =>
@@ -2638,7 +2666,7 @@ export const appRouter = createRouter({
             .array(
               z.object({
                 name: z.string().min(1).max(100),
-                repositoryIds: z.array(z.string().uuid()).min(1),
+                repositoryIds: z.array(z.string().uuid()),
                 installCommand: z.string().max(500).optional(),
                 testCommand: z.string().max(500).optional(),
               }),
@@ -3066,6 +3094,14 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         createVoiceLiveSessionCommand(auth, input),
       ),
+    preview: protectedProcedure
+      .input(
+        z.object({
+          apiKey: z.string().transform((value) => value.trim()),
+          voiceId: z.string().refine(isOpenAiRealtimeVoiceId),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => previewVoiceCommand(auth, input)),
     cleanTranscript: protectedProcedure
       .input(z.object({ text: z.string().trim().min(1).max(8_000) }))
       .mutation(({ ctx: { auth }, input }) =>
@@ -3380,17 +3416,6 @@ export const appRouter = createRouter({
       .input(z.object({ timeZone: z.string().trim().min(1).max(100) }))
       .mutation(({ ctx: { auth }, input }) =>
         setDeploymentTimeZoneCommand(auth, input),
-      ),
-  }),
-
-  experimentalSettings: createRouter({
-    get: protectedProcedure.query(({ ctx: { auth } }) =>
-      getExperimentalSettingsCommand(auth),
-    ),
-    setOpenCodeCodeMode: protectedProcedure
-      .input(z.object({ enabled: z.boolean() }))
-      .mutation(({ ctx: { auth }, input }) =>
-        setOpenCodeCodeModeCommand(auth, input),
       ),
   }),
 

@@ -8,6 +8,7 @@ import type {
 } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { toast } from 'sonner';
+import { MCP_INTEGRATIONS } from '@roomote/types';
 
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 
@@ -51,6 +52,7 @@ const state = vi.hoisted(() => ({
   voiceConnection: null as null | {
     authStatus?: string | null;
     source?: 'environment' | 'connection';
+    voiceId?: string;
   },
   grafanaConnection: null as null | {
     authStatus?: string | null;
@@ -98,6 +100,7 @@ const state = vi.hoisted(() => ({
     },
   },
   linearRedirectPath: '',
+  pathname: '/settings/integrations',
   searchParams: '',
 }));
 
@@ -115,6 +118,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
     saveVoiceConnection: vi.fn(),
+    previewVoice: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
@@ -155,7 +159,7 @@ function cloneMcpToolsData() {
 }
 
 vi.mock('next/navigation', () => ({
-  usePathname: () => '/settings/integrations',
+  usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.searchParams),
 }));
 
@@ -232,6 +236,34 @@ vi.mock('@/hooks/mcp-connections', () => ({
     data: state.userConnections,
     isPending: false,
   }),
+  useEffectiveMcpIntegrations: () => ({
+    data: MCP_INTEGRATIONS.map((integration) => {
+      const enabled = state.deploymentEnablements.some(
+        (entry) => entry.mcpId === integration.id && entry.enabled,
+      );
+      const connection = state.userConnections.find(
+        (entry) => entry.mcpId === integration.id,
+      );
+      const oauthReadiness =
+        state.oauthReadiness.find((entry) => entry.mcpId === integration.id)
+          ?.status ?? 'not_required';
+      return {
+        id: integration.id,
+        available: state.integrationsEnabled,
+        enabled,
+        authStatus: connection?.authStatus ?? null,
+        oauthReadiness,
+        status: !state.integrationsEnabled
+          ? 'unavailable'
+          : enabled
+            ? connection?.authStatus === 'authenticated'
+              ? 'connected'
+              : 'needs_connection'
+            : 'not_enabled',
+      };
+    }),
+    isPending: false,
+  }),
   useMcpConnectionTools: () => ({
     data: cloneMcpToolsData(),
     isPending: false,
@@ -302,6 +334,10 @@ vi.mock('@/hooks/mcp-connections', () => ({
   useSaveVoiceConnection: () => ({
     isPending: false,
     mutate: mutations.saveVoiceConnection,
+  }),
+  usePreviewVoice: () => ({
+    isPending: false,
+    mutate: mutations.previewVoice,
   }),
   useVoiceConnection: () => ({
     data: state.voiceConnection,
@@ -432,6 +468,7 @@ vi.mock('@/components/system', () => ({
   LinearLogo: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" data-icon="plus" />,
+  Play: () => <svg aria-hidden="true" data-icon="play" />,
   PlugIcon: () => <svg aria-hidden="true" />,
   RefreshCw: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="refresh-cw" />
@@ -529,6 +566,7 @@ describe('Integrations settings', () => {
       linearOrganizationName: 'Roomote',
     };
     state.linearRedirectPath = '';
+    state.pathname = '/settings/integrations';
     state.asanaConnection = null;
     state.notionConnection = null;
     state.ripplingConnection = null;
@@ -563,6 +601,60 @@ describe('Integrations settings', () => {
 
     expect(state.linearRedirectPath).toBe(
       '/settings/integrations?service=linear',
+    );
+  });
+
+  it('renders only requested integrations in passed order without custom servers or groups', () => {
+    render(<Integrations integrationIds={['notion', 'sentry', 'linear']} />);
+    expect(
+      screen.getAllByRole('heading').map((heading) => heading.textContent),
+    ).toEqual(['Integrations', 'Notion', 'Sentry', 'Linear']);
+    expect(screen.queryByText('Add custom server')).not.toBeInTheDocument();
+  });
+
+  it('does not leak custom servers when filtered integrations are disabled', () => {
+    state.integrationsEnabled = false;
+    render(<Integrations integrationIds={['notion']} />);
+    expect(
+      screen.getByText('Integrations disabled by deployment operator'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Add custom server')).not.toBeInTheDocument();
+  });
+
+  it('preserves the embedded pathname for Linear and MCP OAuth', () => {
+    state.pathname = '/sessions/setup-session';
+    state.linearInstallation = null;
+    render(<Integrations integrationIds={['linear', 'pylon']} />);
+    expect(state.linearRedirectPath).toBe('/sessions/setup-session');
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Connect and enable Pylon' }),
+    );
+    expect(mutations.connectMcp).toHaveBeenCalledWith(
+      { mcpId: 'pylon', redirectTo: '/sessions/setup-session' },
+      expect.any(Object),
+    );
+  });
+
+  it('keeps filtered deployment configuration read-only for non-admins', () => {
+    state.isAdmin = false;
+    render(<Integrations integrationIds={['notion']} />);
+    expect(screen.getByRole('heading', { name: 'Notion' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Configure Notion' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('clears an embedded secret on cancellation without saving', () => {
+    render(<Integrations integrationIds={['notion']} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+    fireEvent.change(screen.getByLabelText('Internal integration secret'), {
+      target: { value: 'test-secret' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+    expect(screen.getByLabelText('Internal integration secret')).toHaveValue(
+      '',
     );
   });
 
@@ -2215,7 +2307,36 @@ describe('Integrations settings', () => {
     fireEvent.submit(input.closest('form') as HTMLFormElement);
 
     expect(mutations.saveVoiceConnection).toHaveBeenCalledWith(
-      { apiKey: 'sk-voice-123' },
+      { apiKey: 'sk-voice-123', voiceId: 'marin' },
+      expect.anything(),
+    );
+  });
+
+  it('preserves the saved voice and previews another supported option', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [{ mcpId: 'voice', enabled: true }];
+    state.userConnections = [
+      { id: 'voice-1', mcpId: 'voice', authStatus: 'authenticated' },
+    ];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'connection',
+      voiceId: 'cedar',
+    };
+
+    render(<Integrations />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit Voice connection' }),
+    );
+
+    expect(screen.getByRole('button', { name: 'Cedar' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Coral' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Preview Coral voice' }),
+    );
+
+    expect(mutations.previewVoice).toHaveBeenCalledWith(
+      { apiKey: '', voiceId: 'coral' },
       expect.anything(),
     );
   });

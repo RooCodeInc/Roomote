@@ -32,8 +32,6 @@ export function getBooleanMetadataDescriptorByKey(
 export const ANONYMOUS_ANALYTICS_METADATA_KEY =
   'anonymous_analytics_enabled' as const;
 
-export const OPENCODE_CODE_MODE_METADATA_KEY = 'opencode_code_mode' as const;
-
 export function isAnonymousAnalyticsEnabledFromMetadata(
   metadata: unknown,
   cloudEnabled = false,
@@ -44,11 +42,4 @@ export function isAnonymousAnalyticsEnabledFromMetadata(
   if (!(ANONYMOUS_ANALYTICS_METADATA_KEY in normalizedMetadata)) return true;
 
   return coerceToBoolean(normalizedMetadata[ANONYMOUS_ANALYTICS_METADATA_KEY]);
-}
-
-export function isOpenCodeCodeModeEnabledFromMetadata(
-  metadata: unknown,
-): boolean {
-  const normalizedMetadata = normalizeMetadataRecord(metadata);
-  return coerceToBoolean(normalizedMetadata[OPENCODE_CODE_MODE_METADATA_KEY]);
 }

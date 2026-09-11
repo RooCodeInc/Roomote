@@ -416,6 +416,17 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('Roomote release');
   });
 
+  it('omits repository details for environments without them', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [
+        { id: 'env-tools', name: 'Tools', repositoryNames: [] },
+      ],
+    });
+
+    expect(prompt).toContain('- Tools [id: env-tools]');
+    expect(prompt).not.toContain('No repositories configured');
+  });
+
   it('describes native OpenCode tools and Roomote orchestration policy', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [
@@ -665,7 +676,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'The task card or a separate task link keeps the started work associated with this conversation',
     );
     expect(prompt).not.toContain('explaining what is being delegated');
-    expect(prompt).toContain('launch multiple independent tasks in one turn');
+    expect(prompt).toContain('proactively launch multiple tasks in one turn');
     expect(prompt).toContain('the turn remains open for more tools');
     expect(prompt).toContain(
       'use a closeout or clarification only for additional user-useful outcome',
@@ -1250,6 +1261,27 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),
+    );
+  });
+
+  it('proactively parallelizes only cleanly independent coding scopes', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'When a request cleanly separates into clearly independent, low-conflict scopes and parallel execution would improve throughput',
+    );
+    expect(prompt).toContain('proactively launch multiple tasks in one turn');
+    expect(prompt).toContain(
+      'Give each task a distinct outcome and non-overlapping file or subsystem ownership so they do not duplicate work',
+    );
+    expect(prompt).toContain(
+      'Keep the work in one task when scopes may touch the same files, depend on shared intermediate decisions, are tightly coupled, or require ordered sequencing',
+    );
+    expect(prompt).toContain(
+      'Use "send_task_message" when an active or resumable task is listed above and the user clearly gives that task a new instruction',
+    );
+    expect(prompt).toContain(
+      'When multiple tasks are listed, route a follow-up only when the intended task is unambiguous',
     );
   });
 

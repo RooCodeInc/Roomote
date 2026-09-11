@@ -35,7 +35,6 @@ const {
     pathname: '/tasks',
     user: { isAdmin: true },
     isSideNavExpanded: false,
-    recentSessionIds: ['session-2', 'session-1'],
     pinnedTaskIds: ['task-3', 'task-1'],
     tasks: [
       { id: 'task-1', title: 'Task 1' },
@@ -43,8 +42,8 @@ const {
       { id: 'task-3', title: 'Task 3' },
     ],
     sessions: [
-      { id: 'session-1', title: 'Session 1' },
       { id: 'session-2', title: 'Session 2' },
+      { id: 'session-1', title: 'Session 1' },
     ],
   },
 }));
@@ -149,10 +148,6 @@ vi.mock('@/hooks/useLayoutOptions', () => ({
       isSideNavExpanded: state.isSideNavExpanded,
       setSideNavExpanded: setSideNavExpandedMock,
     }),
-}));
-
-vi.mock('@/hooks/useRecentSessions', () => ({
-  useRecentSessions: () => ({ recentSessionIds: state.recentSessionIds }),
 }));
 
 vi.mock('@/hooks/useUser', () => ({
@@ -283,7 +278,6 @@ describe('SideNav recent sessions', () => {
     state.pathname = '/tasks';
     state.user.isAdmin = true;
     state.isSideNavExpanded = false;
-    state.recentSessionIds = ['session-2', 'session-1'];
     state.pinnedTaskIds = ['task-3', 'task-1'];
     state.tasks = [
       { id: 'task-1', title: 'Task 1' },
@@ -291,8 +285,8 @@ describe('SideNav recent sessions', () => {
       { id: 'task-3', title: 'Task 3' },
     ];
     state.sessions = [
-      { id: 'session-1', title: 'Session 1' },
       { id: 'session-2', title: 'Session 2' },
+      { id: 'session-1', title: 'Session 1' },
     ];
     useLiveTaskStatusMock.mockReturnValue(null);
     vi.mocked(window.matchMedia).mockImplementation((query) => ({
@@ -337,14 +331,17 @@ describe('SideNav recent sessions', () => {
       expect.objectContaining({ enabled: true }),
     );
     expect(sessionsQueryOptionsMock).toHaveBeenCalledWith(
-      { ids: ['session-2', 'session-1'], limit: 20 },
+      { ownedOnly: true, limit: 20 },
       expect.objectContaining({ enabled: true }),
     );
   });
 
-  it('keeps recent sessions in visit order and omits unavailable ids', () => {
+  it('keeps recent sessions in server activity order', () => {
     state.isSideNavExpanded = true;
-    state.recentSessionIds = ['session-2', 'missing-session', 'session-1'];
+    state.sessions = [
+      { id: 'session-2', title: 'Newer session' },
+      { id: 'session-1', title: 'Older session' },
+    ];
 
     render(<SideNav />);
 
@@ -355,6 +352,26 @@ describe('SideNav recent sessions', () => {
     ]);
     expect(sessionItems[0]).toHaveAttribute('href', '/sessions/session-2');
     expect(sessionItems[1]).toHaveAttribute('href', '/sessions/session-1');
+  });
+
+  it('does not reorder recent sessions when one is opened', () => {
+    state.isSideNavExpanded = true;
+    state.sessions = [
+      { id: 'session-2', title: 'Newer session' },
+      { id: 'session-1', title: 'Older session' },
+    ];
+    const view = render(<SideNav />);
+
+    state.pathname = '/sessions/session-1';
+    view.rerender(<SideNav />);
+
+    expect(
+      screen.getAllByTestId(/^session-item-/).map((item) => item.textContent),
+    ).toEqual(['session-2', 'session-1']);
+    expect(screen.getByTestId('session-item-session-1')).toHaveAttribute(
+      'data-active',
+      'true',
+    );
   });
 
   it('marks the active session and active pinned task on detail subroutes', () => {
@@ -403,7 +420,7 @@ describe('SideNav recent sessions', () => {
       expect.objectContaining({ enabled: false }),
     );
     expect(sessionsQueryOptionsMock).toHaveBeenCalledWith(
-      { ids: ['session-2', 'session-1'], limit: 20 },
+      { ownedOnly: true, limit: 20 },
       expect.objectContaining({ enabled: false }),
     );
   });

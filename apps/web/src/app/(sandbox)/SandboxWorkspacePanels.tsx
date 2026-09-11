@@ -91,14 +91,9 @@ export function ResponsiveWorkspacePanels({
   const isMdOrLarger = useMediaQuery('(min-width: 768px)', {
     initializeWithValue: false,
   });
-  if (!isMdOrLarger) {
-    return (
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {isPanelOpen ? panel : main}
-      </div>
-    );
-  }
 
+  // Keep the main subtree mounted when a rotation crosses the breakpoint. It
+  // owns session-scoped resources such as an active voice conversation.
   return (
     <DesktopWorkspacePanels
       main={main}
@@ -109,10 +104,11 @@ export function ResponsiveWorkspacePanels({
       }
       mainSize={mainSize}
       panelSize={panelSize}
-      mainMinSize={mainMinSize}
-      panelMinSize={panelMinSize}
+      mainMinSize={isMdOrLarger ? mainMinSize : 0}
+      panelMinSize={isMdOrLarger ? panelMinSize : 0}
       dimUnfocusedPanelIds={dimUnfocusedPanelIds}
       layoutWidth={layoutWidth}
+      mobilePanelId={isMdOrLarger ? undefined : isPanelOpen ? panelId : null}
     />
   );
 }
@@ -127,6 +123,7 @@ interface DesktopPanelsProps {
   panelMinSize: number;
   dimUnfocusedPanelIds: readonly string[];
   layoutWidth?: number;
+  mobilePanelId: string | null | undefined;
 }
 interface DesktopPanelsState {
   panels: WorkspacePanel[];
@@ -345,7 +342,7 @@ class DesktopWorkspacePanels extends Component<
   }
 
   render() {
-    const { main, dimUnfocusedPanelIds } = this.props;
+    const { main, dimUnfocusedPanelIds, mobilePanelId } = this.props;
     const { mainMinSize, panelMinSize } = this.state;
     const panelCount = this.state.activeIds.length;
     const equalPanelSize = 100 / (panelCount + 1);
@@ -397,12 +394,20 @@ class DesktopWorkspacePanels extends Component<
             data-dim-when-unfocused={
               dimUnfocusedPanelIds.includes('main') || undefined
             }
-            className="flex min-h-0 min-w-0 flex-col"
+            inert={mobilePanelId ? true : undefined}
+            aria-hidden={mobilePanelId ? true : undefined}
+            className={cn(
+              'flex min-h-0 min-w-0 flex-col max-md:!grow max-md:!basis-full',
+              mobilePanelId && 'max-md:hidden',
+            )}
           >
             {main}
           </ResizablePanel>
           {this.state.panels.map((additionalPanel, index) => {
             const exiting = !this.state.activeIds.includes(additionalPanel.id);
+            const hiddenOnMobile =
+              mobilePanelId !== undefined &&
+              additionalPanel.id !== mobilePanelId;
             return (
               <Fragment key={additionalPanel.id}>
                 <ResizableDivider
@@ -413,6 +418,7 @@ class DesktopWorkspacePanels extends Component<
                   }}
                   disabled={exiting}
                   style={exiting ? { width: 0 } : undefined}
+                  className="max-md:hidden"
                 />
                 <ResizablePanel
                   id={additionalPanel.id}
@@ -426,14 +432,18 @@ class DesktopWorkspacePanels extends Component<
                   }
                   minSize={exiting ? 0 : panelMinSize}
                   maxSize={exiting ? 0 : undefined}
-                  inert={exiting || undefined}
+                  inert={exiting || hiddenOnMobile || undefined}
+                  aria-hidden={hiddenOnMobile || undefined}
                   data-dim-when-unfocused={
                     dimUnfocusedPanelIds.includes(additionalPanel.id) ||
                     undefined
                   }
-                  className="flex min-h-0 min-w-0 flex-col border-card"
+                  className={cn(
+                    'flex min-h-0 min-w-0 flex-col border-card max-md:!grow max-md:!basis-full',
+                    additionalPanel.id !== mobilePanelId && 'max-md:hidden',
+                  )}
                 >
-                  <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l-2 border-card">
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-card md:border-l-2">
                     {additionalPanel.content}
                   </div>
                 </ResizablePanel>

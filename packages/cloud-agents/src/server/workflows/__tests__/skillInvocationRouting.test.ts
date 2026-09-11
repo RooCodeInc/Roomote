@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+  PACKAGED_SKILL_INVOCATIONS,
+  PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS,
+} from '../../../packaged-skill-invocations';
 import { isRecognizedInitialSkillInvocation } from '../skillInvocationRouting';
 
 describe('packaged skill invocation routing', () => {
@@ -125,9 +129,11 @@ describe('packaged skill invocation routing', () => {
     expect(generalSkill).not.toContain('read the applicable repo-local');
   });
 
-  it('recognizes Doctor as a first-class packaged workflow', () => {
+  it('keeps Doctor packaged for Fast without routing it into sandbox tasks', () => {
+    expect(PACKAGED_SKILL_INVOCATIONS).toContain('doctor');
+    expect(PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS).not.toContain('doctor');
     expect(isRecognizedInitialSkillInvocation({ skillName: 'doctor' })).toBe(
-      true,
+      false,
     );
     expect(readPackagedSkill('doctor')).toContain('name: doctor');
   });

@@ -135,6 +135,10 @@ describe('AutomationDestinationPicker', () => {
     expect(
       screen.getByRole('combobox', { name: 'Email address' }),
     ).toHaveTextContent('owner@example.com · Verified');
+    expect(
+      screen.queryByRole('combobox', { name: 'Email destination type' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('DM me')).not.toBeInTheDocument();
   });
 
   it('opens a newly required Discord channel Select after provider selection', async () => {

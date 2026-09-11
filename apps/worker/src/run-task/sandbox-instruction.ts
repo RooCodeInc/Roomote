@@ -117,9 +117,10 @@ export function sanitizeEnvironmentConfigForPrompt(
     initialUrl: environmentConfig.initialUrl,
     ports: environmentConfig.ports?.map(sanitizeNamedPortForPrompt),
     tool_versions: environmentConfig.tool_versions,
-    repositories: environmentConfig.repositories.map(
-      sanitizeRepositoryForPrompt,
-    ),
+    repositories:
+      environmentConfig.repositories.length > 0
+        ? environmentConfig.repositories.map(sanitizeRepositoryForPrompt)
+        : undefined,
     services: environmentConfig.services?.map(sanitizeServiceForPrompt),
     docker_projects: environmentConfig.docker_projects?.map(
       sanitizeDockerProjectForPrompt,
@@ -179,6 +180,7 @@ export function buildSandboxInstruction(
 ): string | undefined {
   const lines: string[] = [
     'You are running inside a cloud sandbox. Your filesystem and processes are isolated to this sandbox instance.',
+    'Your sandbox user has passwordless `sudo`. When a missing system dependency blocks authorized work and `apt-get` is available, install only the necessary package in this sandbox rather than stopping; use noninteractive commands where suitable (for example, `sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y <package>`). These changes affect only this sandbox, not the host, and do not persist to other tasks or production; prefer existing or repository-managed tools and avoid unnecessary installs.',
   ];
   if (environmentConfig) {
     const safeConfig = sanitizeEnvironmentConfigForPrompt(environmentConfig);

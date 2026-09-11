@@ -4,14 +4,20 @@ import {
   appendFastAgentVisibleMessages,
   upsertFastAgentMessage,
 } from '@roomote/cloud-agents/server';
-import { ACP_ENVELOPE_EVENT_TYPES, getUserDisplayName } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  getUserDisplayName,
+  type OpenAiRealtimeVoiceId,
+} from '@roomote/types';
 
 import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
 
 import {
   cleanVoiceTranscript,
+  createVoicePreview,
   createVoiceLiveSession,
   resolveVoiceOpenAiKey,
+  resolveVoiceId,
   type VoiceLiveSession,
 } from '@/lib/server/voice';
 import { loadVoiceWorkspaceContext } from '@/lib/server/voice-context';
@@ -34,7 +40,10 @@ export async function createVoiceLiveSessionCommand(
   auth: UserAuthSuccess,
   input: { sdp: string },
 ): Promise<VoiceLiveSession> {
-  const apiKey = await resolveVoiceOpenAiKey();
+  const [apiKey, voiceId] = await Promise.all([
+    resolveVoiceOpenAiKey(),
+    resolveVoiceId(),
+  ]);
 
   if (!apiKey) {
     throw new TRPCError({
@@ -46,12 +55,45 @@ export async function createVoiceLiveSessionCommand(
   const context = await loadVoiceWorkspaceContext(auth.userId);
 
   try {
-    return await createVoiceLiveSession({ apiKey, sdp: input.sdp, context });
+    return await createVoiceLiveSession({
+      apiKey,
+      sdp: input.sdp,
+      context,
+      voiceId,
+    });
   } catch (error) {
     console.error('[voice] Failed to create GPT-Live session', error);
     throw new TRPCError({
       code: 'BAD_GATEWAY',
       message: 'Failed to start a voice session',
+      cause: error,
+    });
+  }
+}
+
+export async function previewVoiceCommand(
+  auth: UserAuthSuccess,
+  input: { apiKey: string; voiceId: OpenAiRealtimeVoiceId },
+): Promise<{ audioBase64: string; mimeType: 'audio/mpeg' }> {
+  if (!auth.isAdmin) {
+    throw new TRPCError({ code: 'FORBIDDEN' });
+  }
+
+  const apiKey = input.apiKey.trim() || (await resolveVoiceOpenAiKey());
+  if (!apiKey) {
+    throw new TRPCError({
+      code: 'PRECONDITION_FAILED',
+      message: 'Enter an OpenAI API key before previewing a voice',
+    });
+  }
+
+  try {
+    return await createVoicePreview({ apiKey, voiceId: input.voiceId });
+  } catch (error) {
+    console.error('[voice] Failed to create voice preview', error);
+    throw new TRPCError({
+      code: 'BAD_GATEWAY',
+      message: 'Failed to preview voice',
       cause: error,
     });
   }

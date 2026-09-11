@@ -2023,6 +2023,8 @@ describe('AutomationsSettings', () => {
     ];
 
     const { rerender } = render(<AutomationsSettings />);
+    expect(await screen.findByText('Email me')).toBeInTheDocument();
+    expect(screen.queryByText('Email DM me')).not.toBeInTheDocument();
     fireEvent.click(
       await screen.findByRole('button', {
         name: 'Configure Weekly Email report',

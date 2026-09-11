@@ -69,6 +69,7 @@ describe('tool presentation resolver', () => {
     ['manage_source_control', 'pull-request'],
     ['manage_environments', 'environment'],
     ['save_task_memory', 'memory'],
+    ['update_personalization', 'book-heart'],
     ['request_environment_variables', 'terminal'],
     ['report_platform_issue', 'alert'],
     ['submit_automation_work_items', 'task'],
@@ -724,6 +725,28 @@ describe('tool presentation policy', () => {
         groupingMode: 'standalone',
       });
     }
+  });
+
+  it('renders personalization updates as a standalone non-expandable receipt', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({ toolName: 'update_personalization', status: 'completed' }),
+      ),
+    ).toMatchObject({
+      verb: 'Personalization',
+      object: 'updated',
+      iconKey: 'book-heart',
+    });
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({ toolName: 'update_personalization' }),
+      ),
+    ).toMatchObject({
+      rowVisibility: 'visible',
+      detailMode: 'none',
+      activityMode: 'keep-visible',
+      groupingMode: 'standalone',
+    });
   });
 
   it.each([

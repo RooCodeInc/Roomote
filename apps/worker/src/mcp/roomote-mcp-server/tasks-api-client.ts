@@ -8,7 +8,6 @@ import type {
   SourceControlProvider,
   SuggestionCategory,
   SuggestionPriority,
-  TaskLaunchRequest,
   WorkspaceReadiness,
   RoomoteSearchSessionsResponse,
   RoomoteSessionMessagesResponse,
@@ -23,12 +22,10 @@ import type {
   TaskSummaryResponse,
   TaskComputeLogsResponse,
   TaskMessagesResponse,
-  LaunchTaskResponse,
   CancelTaskResponse,
   StopTaskResponse,
   UpdateTaskModelSelectionResponse,
   SendMessageResponse,
-  ListEnvironmentsResponse,
   ListTaskModelsResponse,
   CreateEnvironmentResponse,
   UpdateEnvironmentResponse,
@@ -337,25 +334,6 @@ export async function getTaskUpdates(
     `/api/mcp/tasks/${encodeURIComponent(taskId)}/updates${qs}`,
     {},
     'Failed to get task updates',
-  );
-}
-
-/**
- * Launch a new task via the platform API.
- */
-export async function launchTask(
-  config: RoomoteConfig,
-  params: TaskLaunchRequest,
-): Promise<LaunchTaskResponse> {
-  return apiFetch(
-    config,
-    '/api/mcp/tasks',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    },
-    'Failed to launch task',
   );
 }
 
@@ -676,20 +654,6 @@ export async function steerMessageToTask(
 }
 
 /**
- * List environments via the platform API.
- */
-export async function listEnvironments(
-  config: RoomoteConfig,
-): Promise<ListEnvironmentsResponse> {
-  return apiFetch(
-    config,
-    '/api/mcp/environments',
-    {},
-    'Failed to list environments',
-  );
-}
-
-/**
  * Create a new environment via the platform API.
  */
 export async function createEnvironment(
@@ -779,5 +743,22 @@ export async function saveTaskMemory(
       body: JSON.stringify(params),
     },
     'Failed to save task memory',
+  );
+}
+
+export async function updatePersonalization(
+  config: RoomoteConfig,
+  runId: number,
+  params: { preference: string; confidence: 'explicit' | 'inferred' },
+): Promise<{ saved: boolean; reason?: string }> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/personalization`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to update personalization',
   );
 }

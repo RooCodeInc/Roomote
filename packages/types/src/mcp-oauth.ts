@@ -171,6 +171,46 @@ export interface McpConnectionElevenLabsConfig {
   voiceId: string;
 }
 
+export interface OpenAiRealtimeVoiceOption {
+  id: string;
+  label: string;
+  locale?: string;
+  recommended?: boolean;
+}
+
+/** Voice metadata documented for OpenAI Realtime sessions. */
+export const OPENAI_REALTIME_VOICE_OPTIONS = [
+  { id: 'alloy', label: 'Alloy', locale: undefined, recommended: false },
+  { id: 'ash', label: 'Ash', locale: undefined, recommended: false },
+  { id: 'ballad', label: 'Ballad', locale: undefined, recommended: false },
+  { id: 'coral', label: 'Coral', locale: undefined, recommended: false },
+  { id: 'echo', label: 'Echo', locale: undefined, recommended: false },
+  { id: 'sage', label: 'Sage', locale: undefined, recommended: false },
+  { id: 'shimmer', label: 'Shimmer', locale: undefined, recommended: false },
+  { id: 'verse', label: 'Verse', locale: undefined, recommended: false },
+  { id: 'marin', label: 'Marin', locale: undefined, recommended: true },
+  { id: 'cedar', label: 'Cedar', locale: undefined, recommended: true },
+] as const satisfies readonly OpenAiRealtimeVoiceOption[];
+
+export type OpenAiRealtimeVoiceId =
+  (typeof OPENAI_REALTIME_VOICE_OPTIONS)[number]['id'];
+
+export function isOpenAiRealtimeVoiceId(
+  value: unknown,
+): value is OpenAiRealtimeVoiceId {
+  return (
+    typeof value === 'string' &&
+    OPENAI_REALTIME_VOICE_OPTIONS.some((option) => option.id === value)
+  );
+}
+
+/** Prefer a documented Australian voice, then OpenAI's first recommended voice. */
+export const DEFAULT_OPENAI_REALTIME_VOICE_ID: OpenAiRealtimeVoiceId =
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.locale === 'en-AU')
+    ?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.recommended)?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS[0]!.id;
+
 /**
  * Deployment-scoped Voice connection config stored in
  * mcpConnections.authConfig.
@@ -184,6 +224,7 @@ export interface McpConnectionElevenLabsConfig {
 export interface McpConnectionVoiceConfig {
   type: 'voice';
   encryptedApiKey: string;
+  voiceId?: OpenAiRealtimeVoiceId;
 }
 
 /**
@@ -358,6 +399,38 @@ export type McpIntegrationServerMode =
   | 'upstream_proxy'
   | 'native'
   | 'credential_only';
+
+export type EffectiveMcpIntegrationStatus =
+  | 'unavailable'
+  | 'not_enabled'
+  | 'needs_connection'
+  | 'connected';
+
+export type McpIntegrationOauthReadiness =
+  | 'not_required'
+  | 'ready'
+  | 'missing'
+  | 'partial';
+
+/** Public-safe, actor-scoped integration state for product UI. */
+export type EffectiveMcpIntegration = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  connectionScope: 'user' | 'deployment';
+  connectionMode: McpIntegrationConnectionMode;
+  serverMode: McpIntegrationServerMode;
+  available: boolean;
+  enabled: boolean;
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  oauthReadiness: McpIntegrationOauthReadiness;
+  status: EffectiveMcpIntegrationStatus;
+  capabilities: {
+    agentTools: boolean;
+    toolManagement: boolean;
+  };
+};
 
 export type McpIntegrationCategory = 'memory';
 
@@ -1070,7 +1143,10 @@ export function isMcpConnectionVoiceConfig(
     authConfig.type === 'voice' &&
     'encryptedApiKey' in authConfig &&
     typeof authConfig.encryptedApiKey === 'string' &&
-    authConfig.encryptedApiKey.length > 0,
+    authConfig.encryptedApiKey.length > 0 &&
+    (!('voiceId' in authConfig) ||
+      authConfig.voiceId === undefined ||
+      isOpenAiRealtimeVoiceId(authConfig.voiceId)),
   );
 }
 

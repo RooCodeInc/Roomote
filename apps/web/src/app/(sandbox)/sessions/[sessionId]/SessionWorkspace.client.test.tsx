@@ -592,7 +592,12 @@ describe('SessionWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Session info' }));
 
-    expect(screen.queryByText('Session transcript')).not.toBeInTheDocument();
+    const hiddenTranscriptPanel = screen
+      .getByText('Session transcript')
+      .closest('[data-slot=resizable-panel]');
+    expect(hiddenTranscriptPanel).toHaveClass('max-md:hidden');
+    expect(hiddenTranscriptPanel).toHaveAttribute('inert');
+    expect(hiddenTranscriptPanel).toHaveAttribute('aria-hidden', 'true');
     expect(
       screen.getByRole('heading', { name: 'Session Info' }),
     ).toBeInTheDocument();
@@ -883,9 +888,12 @@ describe('SessionWorkspace', () => {
 
       expect(screen.getByLabelText('Full task task-1')).toBeInTheDocument();
       if (isMobile) {
-        expect(
-          screen.queryByText('Session transcript'),
-        ).not.toBeInTheDocument();
+        const hiddenTranscriptPanel = screen
+          .getByText('Session transcript')
+          .closest('[data-slot=resizable-panel]');
+        expect(hiddenTranscriptPanel).toHaveClass('max-md:hidden');
+        expect(hiddenTranscriptPanel).toHaveAttribute('inert');
+        expect(hiddenTranscriptPanel).toHaveAttribute('aria-hidden', 'true');
       } else {
         expect(screen.getByText('Session transcript')).toBeInTheDocument();
       }
@@ -933,9 +941,12 @@ describe('SessionWorkspace', () => {
 
       expect(screen.getByLabelText('Full task task-1')).toBeInTheDocument();
       if (isMobile) {
-        expect(
-          screen.queryByText('Session transcript'),
-        ).not.toBeInTheDocument();
+        const hiddenTranscriptPanel = screen
+          .getByText('Session transcript')
+          .closest('[data-slot=resizable-panel]');
+        expect(hiddenTranscriptPanel).toHaveClass('max-md:hidden');
+        expect(hiddenTranscriptPanel).toHaveAttribute('inert');
+        expect(hiddenTranscriptPanel).toHaveAttribute('aria-hidden', 'true');
       } else {
         expect(screen.getByText('Session transcript')).toBeInTheDocument();
       }

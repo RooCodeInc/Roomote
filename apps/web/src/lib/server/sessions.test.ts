@@ -204,9 +204,12 @@ describe('unified Session queries', () => {
     const ownerAuth = { userId: owner.id, isAdmin: false };
     const otherAuth = { userId: other.id, isAdmin: false };
     expect(
-      (await getSessions(ownerAuth, { ids: [session.id] })).sessions.map(
-        (row) => row.id,
-      ),
+      (
+        await getSessions(ownerAuth, {
+          ids: [session.id],
+          ownedOnly: true,
+        })
+      ).sessions.map((row) => row.id),
     ).toEqual([session.id]);
     expect(
       (await getSessions(otherAuth, { ids: [session.id] })).sessions,
@@ -218,7 +221,12 @@ describe('unified Session queries', () => {
       .delete(customAutomations)
       .where(eq(customAutomations.id, automation!.id));
     expect(
-      (await getSessions(ownerAuth, { ids: [session.id] })).sessions,
+      (
+        await getSessions(ownerAuth, {
+          ids: [session.id],
+          ownedOnly: true,
+        })
+      ).sessions,
     ).toEqual([]);
     await expect(getSessionById(ownerAuth, session.id)).resolves.toMatchObject({
       id: session.id,
@@ -480,6 +488,44 @@ describe('unified Session queries', () => {
     );
 
     expect(result.sessions.map((session) => session.id)).toEqual([included.id]);
+  });
+
+  it('lists only owned Sessions in descending activity order', async () => {
+    const owner = await userFactory.create();
+    const other = await userFactory.create();
+    const olderOwned = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 100,
+    });
+    const newerOwned = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: owner.id,
+      activityAt: 300,
+    });
+    const participated = await sessionFactory.create({
+      ownerKind: 'user',
+      ownerUserId: other.id,
+      activityAt: 400,
+    });
+    await db.insert(sessionParticipants).values({
+      sessionId: participated.id,
+      userId: owner.id,
+      role: 'member',
+    });
+
+    const result = await getSessions(
+      { userId: owner.id, isAdmin: true },
+      {
+        ids: [olderOwned.id, newerOwned.id, participated.id],
+        ownedOnly: true,
+      },
+    );
+
+    expect(result.sessions.map((session) => session.id)).toEqual([
+      newerOwned.id,
+      olderOwned.id,
+    ]);
   });
 
   it('filters Session owners by automation creator values', async () => {

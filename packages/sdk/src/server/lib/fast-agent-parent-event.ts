@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  buildFastAgentSetupAdapter,
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
@@ -2330,6 +2331,8 @@ type FastAgentParentEventDeliveryParams = {
    * immediately after an interruption, or at a scheduled retry time. */
   requestDurableResume?: () => Promise<void>;
   requestDurableRetry?: (retryAt: Date) => Promise<void>;
+  /** Schedule the next setup state turn after a server-only preset completion. */
+  onSetupIntegrationDiscoveryCompleted?: () => Promise<void>;
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -2598,6 +2601,9 @@ export async function deliverFastAgentParentEventWithLock(
       ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
       ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
       ...(humanFollowUp?.voiceMode ? { voiceMode: true } : {}),
+      ...(humanFollowUp?.setupContext
+        ? { setupSnapshot: humanFollowUp.setupContext.setupSnapshot }
+        : {}),
       ...(humanFollowUp
         ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
         : {}),
@@ -2658,6 +2664,16 @@ export async function deliverFastAgentParentEventWithLock(
         createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
         ...parentTurn.adapter,
         launchTask: parentTurn.adapter.launchTask,
+        ...(humanFollowUp?.setupContext
+          ? buildFastAgentSetupAdapter(humanFollowUp.setupContext, {
+              ...(params.onSetupIntegrationDiscoveryCompleted
+                ? {
+                    onIntegrationDiscoveryCompleted:
+                      params.onSetupIntegrationDiscoveryCompleted,
+                  }
+                : {}),
+            })
+          : {}),
         ...(wakeupGuard
           ? {
               postReply: wakeupGuard.guardPostReply(
