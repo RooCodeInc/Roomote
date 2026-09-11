@@ -7,7 +7,9 @@ import {
   db,
   getAutomationRuntime,
   recordAutomationRunOutcome,
+  pullRequestFacts,
   slackInstallations,
+  sql,
   taskPullRequests,
   tasks,
   and,
@@ -60,6 +62,7 @@ interface MergedPullRequest {
   prTitle: string;
   prUrl: string;
   mergedAt: Date;
+  attribution: { login: string | null; displayName: string | null } | null;
 }
 
 type AnnouncerFrequency = 'daily' | 'weekly';
@@ -69,6 +72,30 @@ const WINDOW_DAYS: Record<AnnouncerFrequency, number> = {
   weekly: 7,
 };
 const MAX_DETAIL_MESSAGE_CHARS = 3_000;
+
+const ROOMOTE_PR_ATTRIBUTION_PATTERN =
+  /<!-- roomote:pr-attribution:start -->Opened on behalf of (?<value>.+?)\.<!-- roomote:pr-attribution:end -->/u;
+
+export function getRoomotePullRequestAttribution(body: string | null): {
+  login: string | null;
+  displayName: string | null;
+} | null {
+  const value = ROOMOTE_PR_ATTRIBUTION_PATTERN.exec(
+    body ?? '',
+  )?.groups?.value?.trim();
+  if (!value) return null;
+
+  return value.startsWith('@')
+    ? { login: value.slice(1), displayName: null }
+    : { login: null, displayName: value };
+}
+
+function formatPullRequestAttribution(pullRequest: MergedPullRequest) {
+  const value = pullRequest.attribution?.login
+    ? `@${pullRequest.attribution.login}`
+    : pullRequest.attribution?.displayName;
+  return value ? ` — opened on behalf of ${value}` : '';
+}
 
 async function findEligibleDeployments(): Promise<DeploymentContext[]> {
   // Merged-PR data comes from the provider-neutral taskPullRequests table,
@@ -101,6 +128,12 @@ async function findEligibleDeployments(): Promise<DeploymentContext[]> {
 async function getMergedPullRequests(
   since: Date,
 ): Promise<MergedPullRequest[]> {
+  // Facts supply the remote merge timestamp. The association update is a
+  // fallback for legacy rows or a sync that has not reached this PR yet.
+  const mergedAt =
+    sql<Date>`coalesce(${pullRequestFacts.mergedAtRemote}, ${taskPullRequests.updatedAt})`.mapWith(
+      taskPullRequests.updatedAt,
+    );
   const rows = await db
     .select({
       repo: taskPullRequests.repository,
@@ -110,19 +143,27 @@ async function getMergedPullRequests(
       prNumber: taskPullRequests.prNumber,
       prTitle: taskPullRequests.prTitle,
       prUrl: taskPullRequests.prUrl,
-      mergedAt: taskPullRequests.detectedAt,
+      mergedAt,
+      attributionBody: pullRequestFacts.body,
     })
     .from(taskPullRequests)
+    .leftJoin(
+      pullRequestFacts,
+      and(
+        eq(taskPullRequests.repositoryId, pullRequestFacts.repositoryId),
+        eq(taskPullRequests.prNumber, pullRequestFacts.prNumber),
+      ),
+    )
     .innerJoin(tasks, eq(taskPullRequests.taskId, tasks.id))
     .where(
       and(
         eq(taskPullRequests.status, 'merged'),
         isNotNull(taskPullRequests.repository),
         isNotNull(taskPullRequests.prNumber),
-        gte(taskPullRequests.detectedAt, since),
+        gte(mergedAt, since),
       ),
     )
-    .orderBy(taskPullRequests.detectedAt)
+    .orderBy(mergedAt)
     .limit(500);
 
   const deduped = new Map<string, MergedPullRequest>();
@@ -203,6 +244,7 @@ async function getMergedPullRequests(
       prTitle: row.prTitle ?? `${row.repo}#${row.prNumber}`,
       prUrl: row.prUrl,
       mergedAt: row.mergedAt,
+      attribution: getRoomotePullRequestAttribution(row.attributionBody),
     });
   }
 
@@ -216,7 +258,10 @@ function buildAnnouncerSummaryPrompt(
   routingInstructions?: string | null,
 ): string {
   const items = mergedPullRequests
-    .map((pr) => `- ${pr.repo}#${pr.prNumber}: ${pr.prTitle} (${pr.prUrl})`)
+    .map(
+      (pr) =>
+        `- ${pr.repo}#${pr.prNumber}: ${pr.prTitle} (${pr.prUrl})${formatPullRequestAttribution(pr)}`,
+    )
     .join('\n');
 
   return `You are writing the top-level summary for an engineering automation that reports merged pull requests.
@@ -266,7 +311,7 @@ function buildAnnouncerDetailThreadMessages(
     let lines = [`**${repo}**`];
 
     for (const pullRequest of sortedPullRequests) {
-      const line = `- ${pullRequest.prTitle} [#${pullRequest.prNumber}](${pullRequest.prUrl})`;
+      const line = `- ${pullRequest.prTitle} [#${pullRequest.prNumber}](${pullRequest.prUrl})${formatPullRequestAttribution(pullRequest)}`;
       const nextMessage = [...lines, line].join('\n');
 
       if (nextMessage.length > MAX_DETAIL_MESSAGE_CHARS && lines.length > 1) {

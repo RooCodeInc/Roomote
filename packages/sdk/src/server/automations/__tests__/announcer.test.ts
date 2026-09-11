@@ -1,5 +1,6 @@
 const {
   slackInstallationsTable,
+  pullRequestFactsTable,
   taskPullRequestsTable,
   repositoriesTable,
   mockSlackInstallationRows,
@@ -17,11 +18,19 @@ const {
   mockEnqueueTask,
   mockSlackNotifier,
   mockAdapterPostMessage,
+  mockGte,
+  mockSql,
 } = vi.hoisted(() => ({
   slackInstallationsTable: {
     botAccessToken: 'botAccessToken',
     teamId: 'teamId',
     isActive: 'isActive',
+  },
+  pullRequestFactsTable: {
+    repositoryId: 'factRepositoryId',
+    prNumber: 'factPrNumber',
+    mergedAtRemote: 'mergedAtRemote',
+    body: 'body',
   },
   taskPullRequestsTable: {
     repository: 'repository',
@@ -32,6 +41,7 @@ const {
     prTitle: 'prTitle',
     prUrl: 'prUrl',
     detectedAt: 'detectedAt',
+    updatedAt: 'updatedAt',
     status: 'status',
     taskId: 'taskId',
   },
@@ -57,6 +67,10 @@ const {
   mockEnqueueTask: vi.fn(),
   mockSlackNotifier: vi.fn(),
   mockAdapterPostMessage: vi.fn(),
+  mockGte: vi.fn(),
+  mockSql: vi.fn(() => ({
+    mapWith: () => ({ expression: 'mergedAt' }),
+  })),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -71,6 +85,15 @@ vi.mock('@roomote/db/server', () => ({
         }
 
         return {
+          leftJoin: () => ({
+            innerJoin: () => ({
+              where: () => ({
+                orderBy: () => ({
+                  limit: () => mockMergedPullRequestRows(),
+                }),
+              }),
+            }),
+          }),
           innerJoin: () => ({
             where: () => ({
               orderBy: () => ({
@@ -87,15 +110,17 @@ vi.mock('@roomote/db/server', () => ({
   upsertBackgroundAutomationSlackThread:
     mockUpsertBackgroundAutomationSlackThread,
   slackInstallations: slackInstallationsTable,
+  pullRequestFacts: pullRequestFactsTable,
   taskPullRequests: taskPullRequestsTable,
   repositories: repositoriesTable,
   tasks: { id: 'id' },
   and: vi.fn(),
   eq: vi.fn(),
-  gte: vi.fn(),
+  gte: mockGte,
   isNotNull: vi.fn(),
   inArray: vi.fn(),
   or: vi.fn(),
+  sql: mockSql,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -173,7 +198,7 @@ vi.mock('../custom-automation-schedule', () => ({
   })),
 }));
 
-import { announcerJob } from '../announcer';
+import { announcerJob, getRoomotePullRequestAttribution } from '../announcer';
 
 const MERGED_PR_ROWS = [
   {
@@ -185,6 +210,7 @@ const MERGED_PR_ROWS = [
     prTitle: 'Fix bug',
     prUrl: 'https://github.com/acme/app/pull/1',
     mergedAt: new Date('2026-07-12T00:00:00Z'),
+    attributionBody: null,
   },
   {
     repo: 'acme/app',
@@ -195,6 +221,7 @@ const MERGED_PR_ROWS = [
     prTitle: 'Add thing',
     prUrl: 'https://github.com/acme/app/pull/2',
     mergedAt: new Date('2026-07-12T01:00:00Z'),
+    attributionBody: null,
   },
 ];
 
@@ -247,6 +274,69 @@ describe('announcerJob non-Slack posting', () => {
       provider: 'telegram',
       postMessage: mockAdapterPostMessage,
     });
+  });
+
+  it('uses the remote merge timestamp for the report window', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+
+    await announcerJob({ manualTrigger: true });
+
+    expect(mockSql).toHaveBeenCalledWith(
+      ['coalesce(', ', ', ')'],
+      'mergedAtRemote',
+      'updatedAt',
+    );
+    expect(mockGte).toHaveBeenCalledWith(
+      expect.objectContaining({ expression: 'mergedAt' }),
+      expect.any(Date),
+    );
+  });
+
+  it('includes both login and display-name Roomote attribution in report details', async () => {
+    mockMergedPullRequestRows.mockResolvedValue([
+      {
+        ...MERGED_PR_ROWS[0],
+        attributionBody:
+          '> <!-- roomote:pr-attribution:start -->Opened on behalf of @daniel-lxs.<!-- roomote:pr-attribution:end -->',
+      },
+      {
+        ...MERGED_PR_ROWS[1],
+        attributionBody:
+          '> <!-- roomote:pr-attribution:start -->Opened on behalf of Daniel Riccio.<!-- roomote:pr-attribution:end -->',
+      },
+    ]);
+    mockResolveAutomationRuntimeDestination.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '-100555',
+    });
+
+    await announcerJob({ manualTrigger: true });
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            description: expect.stringContaining(
+              'opened on behalf of @daniel-lxs',
+            ),
+          }),
+        }),
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            description: expect.stringContaining(
+              'opened on behalf of Daniel Riccio',
+            ),
+          }),
+        }),
+      }),
+    );
   });
 
   it('launches a visible task for the telegram report', async () => {
@@ -438,5 +528,20 @@ describe('announcerJob non-Slack posting', () => {
     expect(result.completed).toBe(false);
     expect(result.skippedReason).toBe('Announcer channel is not configured.');
     expect(mockAdapterPostMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('getRoomotePullRequestAttribution', () => {
+  it.each([
+    [
+      '<!-- roomote:pr-attribution:start -->Opened on behalf of @daniel-lxs.<!-- roomote:pr-attribution:end -->',
+      { login: 'daniel-lxs', displayName: null },
+    ],
+    [
+      '<!-- roomote:pr-attribution:start -->Opened on behalf of Daniel Riccio.<!-- roomote:pr-attribution:end -->',
+      { login: null, displayName: 'Daniel Riccio' },
+    ],
+  ])('parses %s', (body, expected) => {
+    expect(getRoomotePullRequestAttribution(body)).toEqual(expected);
   });
 });
