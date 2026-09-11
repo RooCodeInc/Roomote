@@ -299,7 +299,7 @@ describe('declarative environments', () => {
 
     await writeFile(
       path.join(definitionsDir, 'a-invalid.yaml'),
-      YAML.stringify({ name: 'missing repositories' }),
+      YAML.stringify({ repositories: [] }),
     );
     await writeFile(
       path.join(definitionsDir, 'b-broken.yaml'),
