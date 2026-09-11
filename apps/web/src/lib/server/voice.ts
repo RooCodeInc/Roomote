@@ -209,7 +209,7 @@ export async function createVoiceLiveSession(options: {
     body: JSON.stringify({
       session: {
         model: VOICE_LIVE_MODEL,
-        voice: options.voiceId,
+        audio: { output: { voice: options.voiceId } },
         instructions: buildVoiceLiveInstructions(options.context),
         delegation: { type: 'client' },
       },

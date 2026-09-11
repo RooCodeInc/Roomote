@@ -58,7 +58,7 @@ afterEach(() => {
 });
 
 describe('createVoiceLiveSession', () => {
-  it('creates a GPT-Live WebRTC session with client delegation', async () => {
+  it('creates a GPT-Live WebRTC session with nested voice config and client delegation', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -96,11 +96,12 @@ describe('createVoiceLiveSession', () => {
     expect(body).toMatchObject({
       session: {
         model: 'gpt-live-1',
-        voice: 'cedar',
+        audio: { output: { voice: 'cedar' } },
         delegation: { type: 'client' },
       },
       transport: { type: 'webrtc', sdp: 'offer-sdp' },
     });
+    expect(body.session).not.toHaveProperty('voice');
     // GPT-Live must know what the backend can reach so a repository name is
     // delegated instead of questioned.
     expect(body.session.instructions).toContain('RooCodeInc/Roomote');
