@@ -649,6 +649,7 @@ describe('Bitbucket MCP bounded operations', () => {
     client.mergePullRequest.mockRejectedValue(new Error('ambiguous failure'));
     client.getPullRequest
       .mockResolvedValueOnce(pullRequest())
+      .mockResolvedValueOnce(pullRequest())
       .mockResolvedValueOnce({ ...pullRequest(), state: 'MERGED' });
     try {
       const { body } = await request('merge_pull_request', {
@@ -660,7 +661,7 @@ describe('Bitbucket MCP bounded operations', () => {
         mergeStrategy: undefined,
       });
       expect(client.getCommit).toHaveBeenCalledWith('a'.repeat(12));
-      expect(client.getPullRequest).toHaveBeenCalledTimes(2);
+      expect(client.getPullRequest).toHaveBeenCalledTimes(3);
       const audit = JSON.parse(log.mock.calls[0]![0]);
       expect(audit).toMatchObject({
         provider: 'bitbucket',
@@ -681,6 +682,27 @@ describe('Bitbucket MCP bounded operations', () => {
       expectedHeadSha: 'b'.repeat(40),
     });
     expect(body.result.isError).toBe(true);
+    expect(client.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  it('does not merge when the PR head changes after the authorization read', async () => {
+    client.getPullRequest
+      .mockResolvedValueOnce(pullRequest())
+      .mockResolvedValueOnce({
+        ...pullRequest(),
+        source: { commit: { hash: 'b'.repeat(12) } },
+      });
+    client.getCommit.mockResolvedValueOnce({
+      hash: 'b'.repeat(40),
+      repository: identity,
+    });
+    const { body } = await request('merge_pull_request', {
+      pullRequestNumber: 7,
+      expectedHeadSha: 'a'.repeat(40),
+    });
+    expect(body.result.isError).toBe(true);
+    expect(client.getPullRequest).toHaveBeenCalledTimes(2);
+    expect(client.getCommit).toHaveBeenCalledWith('b'.repeat(12));
     expect(client.mergePullRequest).not.toHaveBeenCalled();
   });
 

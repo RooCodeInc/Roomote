@@ -242,6 +242,13 @@ it.each(['gitea', 'ado'] as const)(
       expect(body.result.isError).not.toBe(true);
       expect(merge).toHaveBeenCalledOnce();
       expect(get).toHaveBeenCalledTimes(2);
+      if (provider === 'ado') {
+        for (const call of mocks.adoGet.mock.calls)
+          expect(call[0]).toMatchObject({ organization: 'organization' });
+        expect(mocks.adoMerge).toHaveBeenCalledWith(
+          expect.objectContaining({ organization: 'organization' }),
+        );
+      }
       const audit = JSON.parse(log.mock.calls[0]![0]);
       expect(audit).toMatchObject({
         provider,

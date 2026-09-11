@@ -281,8 +281,12 @@ function createServer(auth: Variables['authContext']) {
         .optional(),
     },
     false,
-    async (input, client, check, pullRequest, connected) => {
-      if (pullRequest?.state !== 'OPEN' || !pullRequest.source?.commit?.hash)
+    async (input, client, check, _pullRequest, connected) => {
+      const pullRequest = await client.getPullRequest(input.pullRequestNumber);
+      if (pullRequest.id !== input.pullRequestNumber)
+        throw new McpProxyError(403, 'Pull request identity mismatch');
+      check(pullRequest.destination?.repository);
+      if (pullRequest.state !== 'OPEN' || !pullRequest.source?.commit?.hash)
         throw new McpProxyError(
           409,
           'Pull request is not open at the expected head SHA. Read it again before merging.',

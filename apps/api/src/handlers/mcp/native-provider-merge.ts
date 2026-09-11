@@ -5,6 +5,7 @@ import { and, db, eq, isNull, repositories, users } from '@roomote/db/server';
 import {
   getAdoPullRequest,
   mergeAdoPullRequest,
+  parseAdoRepositoryFullName,
   resolveAdoInstanceHost,
   resolveAdoToken,
   type AdoPullRequestDetails,
@@ -183,6 +184,9 @@ function createNativeProviderMergeMcp(provider: Provider) {
               if (provider === 'ado') {
                 const token = await resolveAdoToken();
                 if (!token) throw new Error('Azure DevOps token unavailable');
+                const { organization } = parseAdoRepositoryFullName(
+                  repository.fullName,
+                );
                 await mergeAdoPullRequest({
                   repositoryId: repository.externalRepoId,
                   pullRequestNumber: input.pullRequestNumber,
@@ -194,6 +198,7 @@ function createNativeProviderMergeMcp(provider: Provider) {
                     | 'rebaseMerge'
                     | undefined,
                   token,
+                  organization,
                 });
               } else {
                 const [token, baseUrl] = await Promise.all([
@@ -290,10 +295,12 @@ async function readAndAuthorizePullRequest({
   if (provider === 'ado') {
     const token = await resolveAdoToken();
     if (!token) throw new McpProxyError(403, 'Azure DevOps token unavailable');
+    const { organization } = parseAdoRepositoryFullName(repository.fullName);
     const details = await getAdoPullRequest({
       repositoryId: repository.externalRepoId,
       pullRequestNumber,
       token,
+      organization,
     });
     if (
       details.pullRequestId !== pullRequestNumber ||
