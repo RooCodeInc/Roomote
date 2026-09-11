@@ -770,6 +770,7 @@ export function CustomAutomationsSection({
 
     setForm((current) =>
       current.targetProvider === 'none' ||
+      current.targetProvider === 'email' ||
       connectedDestinationProviders.includes(current.targetProvider)
         ? current
         : {

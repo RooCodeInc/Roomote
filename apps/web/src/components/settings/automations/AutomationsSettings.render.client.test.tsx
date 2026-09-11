@@ -30,7 +30,7 @@ const state = vi.hoisted(() => ({
     executionMode?: 'sandbox_task' | 'fast';
     environmentId: string;
     target: {
-      provider?: 'slack' | 'discord' | 'teams' | 'telegram';
+      provider?: 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
       externalRef?: string;
       targetKind?:
         | 'slack_channel'
@@ -40,7 +40,8 @@ const state = vi.hoisted(() => ({
         | 'teams_channel'
         | 'teams_user'
         | 'telegram_chat'
-        | 'telegram_user';
+        | 'telegram_user'
+        | 'email_user';
       metadata?: Record<string, unknown>;
     };
     lastRunAt: Date | null;
@@ -1542,7 +1543,7 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('High');
     expect(
       screen.getByText(
-        'Each run is a Session in the web app and does not post to chat.',
+        'Each run is a Session in the web app and does not send a report.',
       ),
     ).toBeInTheDocument();
     fireEvent.click(
@@ -1990,6 +1991,57 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('combobox', { name: 'Destination provider' }),
     ).toHaveTextContent('Slack');
+  });
+
+  it('preserves a saved unavailable Email destination when capabilities finish loading', async () => {
+    state.settingsQuery.isPending = true;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Weekly Email report',
+        prompt: 'Summarize the week.',
+        enabled: true,
+        scheduleMode: 'weekly',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: 'verified:user-1:address-digest',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    const { rerender } = render(<AutomationsSettings />);
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Weekly Email report',
+      }),
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Email');
+
+    state.settingsQuery.isPending = false;
+    rerender(<AutomationsSettings />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('combobox', { name: 'Destination provider' }),
+      ).toHaveTextContent('Email');
+      expect(
+        screen.getByRole('combobox', { name: 'Email address' }),
+      ).toHaveTextContent('Email · No longer available');
+    });
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
