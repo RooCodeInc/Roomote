@@ -135,7 +135,7 @@ describe('user personalization', () => {
     ).resolves.toEqual({ saved: true });
 
     await expect(getUserPersonalization(user.id)).resolves.toMatchObject({
-      instructions: 'Use normal professional language.',
+      instructions: '- Use normal professional language.',
     });
   });
 
