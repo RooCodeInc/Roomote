@@ -166,11 +166,15 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('preserves reasoning options for Fast native sessions', () => {
+  it('keeps coding reasoning when Fast roles share a model', () => {
     const env = buildOpenCodeCliEnv(
       {
         R_MODEL: 'openrouter/z-ai/glm-5.2',
-        R_MODEL_REASONING_EFFORT: 'low',
+        R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_VISION_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_MODEL_REASONING_EFFORT: 'high',
+        R_SMALL_MODEL_REASONING_EFFORT: 'low',
+        R_VISION_MODEL_REASONING_EFFORT: 'medium',
       },
       { preserveReasoning: true },
     );
@@ -183,7 +187,7 @@ describe('buildOpenCodeCliEnv', () => {
         openrouter: {
           models: {
             'z-ai/glm-5.2': {
-              options: { reasoning: { effort: 'low' } },
+              options: { reasoning: { effort: 'high' } },
             },
           },
         },

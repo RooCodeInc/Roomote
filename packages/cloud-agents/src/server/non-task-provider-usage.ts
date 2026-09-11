@@ -778,7 +778,6 @@ function isOpenCodeSessionInvalid(error: unknown): boolean {
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
-  reasoningEffort?: ReasoningEffort,
 ): Promise<{
   model: string;
   resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
@@ -843,17 +842,6 @@ async function resolveNonTaskModelRuntime(
         selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
       }
     }
-  }
-
-  if (reasoningEffort) {
-    // The lease cache keys on env, so an explicit effort gets its own server
-    // rather than mutating a shared lease.
-    selectedRuntimeEnv = {
-      ...selectedRuntimeEnv,
-      R_MODEL_REASONING_EFFORT: reasoningEffort,
-      R_SMALL_MODEL_REASONING_EFFORT: reasoningEffort,
-      R_VISION_MODEL_REASONING_EFFORT: reasoningEffort,
-    };
   }
 
   return {
@@ -1031,7 +1019,6 @@ export async function resolveNonTaskInputModalityDelivery(params: {
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
-    params.reasoningEffort,
   );
   const env = runtime.resolvedModelRuntimeEnv;
   const sessionModel = runtime.model;
@@ -1142,6 +1129,9 @@ async function runNonTaskSdkPrompt(
     preserveReasoning:
       options.preserveReasoning ?? Boolean(params.reasoningEffort),
     promptOnlySubagents: options.promptOnlySubagents,
+    reasoningOverride: params.reasoningEffort
+      ? { model, effort: params.reasoningEffort }
+      : undefined,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -1742,7 +1732,6 @@ export async function generateTrackedNonTaskText(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
-    params.reasoningEffort,
   );
   const model = await resolveModelForInputModality(params, runtime);
 
@@ -1794,7 +1783,6 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
   const runtime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
-    params.reasoningEffort,
   );
   // A native session always runs on its own model. Callers decide up front,
   // via resolveNonTaskInputModalityDelivery, whether attached files ride along
@@ -1866,7 +1854,6 @@ async function generateTrackedNonTaskObjectWithSdk<
   const resolvedRuntime = await resolveNonTaskModelRuntime(
     params.model,
     params.modelRole,
-    params.reasoningEffort,
   );
 
   const data = await runNonTaskSdkPrompt(

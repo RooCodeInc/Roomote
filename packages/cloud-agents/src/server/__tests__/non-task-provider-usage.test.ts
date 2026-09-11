@@ -2635,11 +2635,6 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
       expect.anything(),
     );
-    expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
-      R_MODEL_REASONING_EFFORT: 'low',
-      R_SMALL_MODEL_REASONING_EFFORT: 'low',
-      R_VISION_MODEL_REASONING_EFFORT: 'low',
-    });
     expect(
       JSON.parse(
         spawnMock.mock.calls.at(-1)?.[2]?.env?.OPENCODE_CONFIG_CONTENT ?? '{}',
@@ -2660,6 +2655,97 @@ describe('resolveOpenCodeSmallModel', () => {
       },
     });
   });
+
+  it.each([
+    {
+      role: 'primary',
+      runtimeEnv: {
+        R_MODEL: 'openrouter/google/gemini-primary',
+        R_SMALL_MODEL: 'openrouter/openai/text-small',
+      },
+      selectedModel: 'google/gemini-primary',
+    },
+    {
+      role: 'vision',
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/text-primary',
+        R_SMALL_MODEL: 'openrouter/openai/text-small',
+        R_VISION_MODEL: 'openrouter/google/gemini-vision',
+      },
+      selectedModel: 'google/gemini-vision',
+    },
+  ])(
+    'applies audio reasoning only to the selected $role model',
+    async ({ runtimeEnv, selectedModel }) => {
+      process.env = { ...originalEnv };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        ...runtimeEnv,
+        OPENROUTER_API_KEY: 'test-key',
+        OPENCODE_CONFIG_CONTENT: '',
+      });
+      configProvidersMock.mockResolvedValue({
+        data: {
+          providers: [
+            {
+              id: 'openrouter',
+              models: Object.fromEntries(
+                Object.values(runtimeEnv).map((model) => [
+                  model.slice('openrouter/'.length),
+                  {
+                    capabilities: {
+                      input: { audio: model.endsWith(selectedModel) },
+                      output: { text: true },
+                    },
+                  },
+                ]),
+              ),
+            },
+          ],
+          default: {},
+        },
+        error: undefined,
+      });
+      sessionPromptMock.mockResolvedValue({
+        data: {
+          info: { error: null },
+          parts: [{ type: 'text', text: 'Deploy the fix.' }],
+        },
+        error: undefined,
+      });
+
+      const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+        await import('../non-task-provider-usage.js');
+      await generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+        prompt: 'Transcribe the audio.',
+        requiredInputModality: 'audio',
+        reasoningEffort: 'low',
+      });
+
+      expect(sessionPromptMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: { providerID: 'openrouter', modelID: selectedModel },
+        }),
+        expect.anything(),
+      );
+      expect(
+        JSON.parse(
+          spawnMock.mock.calls.at(-1)?.[2]?.env?.OPENCODE_CONFIG_CONTENT ??
+            '{}',
+        ),
+      ).toMatchObject({
+        provider: {
+          openrouter: {
+            models: {
+              [selectedModel]: {
+                options: { reasoning: { effort: 'low' } },
+              },
+            },
+          },
+        },
+      });
+    },
+  );
 
   it('prefers the configured vision model for video prompts', async () => {
     process.env = {
