@@ -77,6 +77,12 @@ Generated HTML artifacts open in a sandboxed **Preview** by default. Switch to
 **Code** to inspect the saved HTML source without executing it in the page that
 runs the Roomote dashboard.
 
+If Live Preview cannot load, the panel distinguishes a failed status check from
+a page-load timeout or environment setup problem. Select **Try again** to repeat
+the failed check or reload the preview. When a completed task is asleep and has
+a restorable snapshot, select **Wake up** to resume it before opening Live
+Preview. An expired snapshot cannot be resumed; start a new task instead.
+
 ### Native widget styling
 
 Roomote widgets inherit the task view's selected light or dark theme. Agents can
