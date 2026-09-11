@@ -118,12 +118,24 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     // free-floating chronological send simply omit replyToMessageId.
     const replyToMessageId = parsePositiveInteger(input.replyToMessageId);
     const useMarkdown = input.textFormat === 'markdown';
-    const chunks: Array<{ markdown: string; html: string | null }> = text
-      ? useMarkdown
-        ? chunkTelegramMarkdownAsHtml(text)
-        : chunkTelegramMarkdown(text, TELEGRAM_MAX_MESSAGE_LENGTH).map(
-            (chunk) => ({ markdown: chunk, html: null }),
-          )
+    const chunks: Array<{
+      markdown: string;
+      html: string | null;
+      fallbackOnHtmlError?: boolean;
+    }> = text
+      ? input.htmlText
+        ? [
+            {
+              markdown: text,
+              html: input.htmlText,
+              fallbackOnHtmlError: true,
+            },
+          ]
+        : useMarkdown
+          ? chunkTelegramMarkdownAsHtml(text)
+          : chunkTelegramMarkdown(text, TELEGRAM_MAX_MESSAGE_LENGTH).map(
+              (chunk) => ({ markdown: chunk, html: null }),
+            )
       : [];
 
     let firstResult: {
@@ -143,6 +155,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         chatId: input.channelId,
         markdown: chunk.markdown,
         html: chunk.html,
+        fallbackOnHtmlError: chunk.fallbackOnHtmlError,
         threadId,
         // Reply threading only anchors the first message of a long reply;
         // buttons attach to the last message so they sit under the content.
@@ -245,6 +258,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     chatId: string;
     markdown: string;
     html: string | null;
+    fallbackOnHtmlError?: boolean;
     threadId?: number;
     replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
@@ -309,7 +323,8 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       const isEntityParseError =
         attempt.parseMode === 'HTML' &&
         response.status === 400 &&
-        Boolean(description?.toLowerCase().includes("can't parse entities"));
+        (params.fallbackOnHtmlError === true ||
+          Boolean(description?.toLowerCase().includes("can't parse entities")));
 
       if (!isEntityParseError) {
         throw lastError;

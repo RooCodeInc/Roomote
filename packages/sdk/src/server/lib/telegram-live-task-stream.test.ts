@@ -71,6 +71,7 @@ describe('Telegram live task stream', () => {
       channelId: '-1001',
       threadId: '77',
       text: 'Starting task…',
+      htmlText: '<blockquote expandable>Starting task…</blockquote>',
       buttons: [
         [
           {

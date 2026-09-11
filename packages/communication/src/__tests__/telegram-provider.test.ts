@@ -315,6 +315,48 @@ describe('TelegramCommunicationProvider', () => {
     expect(secondBody.text).toBe('**broken markdown');
   });
 
+  it('posts provider-native expandable HTML with a plain-text fallback', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            ok: false,
+            error_code: 400,
+            description: 'Bad Request: unsupported expandable blockquote',
+          },
+          400,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 102 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '123',
+      text: 'Starting task…',
+      htmlText: '<blockquote expandable>Starting task…</blockquote>',
+    });
+
+    const firstBody = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { text: string; parse_mode?: string };
+    const secondBody = JSON.parse(
+      (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
+    ) as { text: string; parse_mode?: string };
+    expect(firstBody).toMatchObject({
+      text: '<blockquote expandable>Starting task…</blockquote>',
+      parse_mode: 'HTML',
+    });
+    expect(secondBody).toMatchObject({ text: 'Starting task…' });
+    expect(secondBody.parse_mode).toBeUndefined();
+  });
+
   it('splits long messages into multiple sends and anchors the reply on the first', async () => {
     const fetchMock = vi
       .fn()

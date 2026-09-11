@@ -11,13 +11,13 @@ describe('buildTelegramLiveTaskMessage', () => {
       buildTelegramLiveTaskMessage({
         status: 'running',
         progress:
-          'Fixing bug...\nUpdating the task lifecycle and rerunning focused tests.',
+          'Fixing bug…\nUpdating the task lifecycle and rerunning focused tests.',
         taskUrl: 'https://roomote.example/tasks/task-1',
       }),
     ).toEqual({
-      text: 'Fixing bug...\n\nUpdating the task lifecycle and rerunning focused tests.',
+      text: 'Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.',
       htmlText:
-        '<blockquote expandable>Fixing bug...\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>',
+        '<blockquote expandable>Fixing bug…\n\nUpdating the task lifecycle and rerunning focused tests.</blockquote>',
       buttons: [
         [
           {
@@ -62,7 +62,7 @@ describe('buildTelegramLiveTaskMessage', () => {
     const running = buildTelegramLiveTaskMessage({
       status: 'running',
       progress:
-        'Fixing bug...\nUpdating the task lifecycle and rerunning focused tests.',
+        'Fixing bug…\nUpdating the task lifecycle and rerunning focused tests.',
     });
     const fixture = [
       'RUNNING',

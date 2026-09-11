@@ -1,5 +1,5 @@
 RUNNING
-Fixing bug...
+Fixing bug…
 
 Updating the task lifecycle and rerunning focused tests.
 
