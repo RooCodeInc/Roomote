@@ -158,12 +158,30 @@ function cadenceLabel(
     : 'Custom schedule';
 }
 
-function nextRunLabel(nextRunAt: Date | string, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-US', {
+export function nextRunLabel(
+  nextRunAt: Date | string,
+  timeZone: string,
+  now = new Date(),
+): string {
+  const nextRunDate = new Date(nextRunAt);
+  const yearFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone,
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(nextRunAt));
+    year: 'numeric',
+  });
+  const date = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    ...(yearFormatter.format(nextRunDate) === yearFormatter.format(now)
+      ? {}
+      : { year: 'numeric' }),
+  }).format(nextRunDate);
+  const time = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(nextRunDate);
+  return `Next run ${date} at ${time}`;
 }
 
 // Fast runs settle asynchronously, so refresh sparsely through the existing
@@ -1315,20 +1333,15 @@ export function CustomAutomationsSection({
                                 </span>
                               </>
                             ) : null}
-                            {row.nextRunAt && schedulingTimeZone ? (
-                              <>
-                                {' · Next run '}
-                                <span
-                                  title={new Date(row.nextRunAt).toISOString()}
-                                >
-                                  {nextRunLabel(
-                                    row.nextRunAt,
-                                    schedulingTimeZone,
-                                  )}
-                                </span>
-                              </>
-                            ) : null}
                           </span>
+                          {row.nextRunAt && schedulingTimeZone ? (
+                            <span
+                              className="basis-full"
+                              title={new Date(row.nextRunAt).toISOString()}
+                            >
+                              {nextRunLabel(row.nextRunAt, schedulingTimeZone)}
+                            </span>
+                          ) : null}
                         </>
                       }
                       actions={
