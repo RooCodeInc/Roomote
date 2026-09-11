@@ -3,14 +3,19 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Streamdown } from 'streamdown';
 import removeMd from 'remove-markdown';
+import { toast } from 'sonner';
 
 import {
   Badge,
+  BasicTooltip,
   Button,
+  Card,
+  CardContent,
+  Check,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -18,13 +23,10 @@ import {
   EmptyHeader,
   EmptyTitle,
   Skeleton,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  X,
 } from '@/components/system';
+import { NewTaskForm } from '@/components/tasks/NewTaskForm';
+import { TaskAutomationIcon } from '@/components/tasks/TaskAutomationIcon';
 import { formatDistanceToNowCompact } from '@/lib/formatters';
 import { useResultsPage } from '@/hooks/useResultsPage';
 import { useTRPC } from '@/trpc/client';
@@ -45,18 +47,41 @@ function resultPreview(result: ResultInboxItem) {
   );
 }
 
+function resultTitle(result: ResultInboxItem) {
+  const title = result.title ?? resultPreview(result);
+  return title.length > 140 ? `${title.slice(0, 137)}...` : title;
+}
+
+function resultPrompt(result: ResultInboxItem) {
+  return result.title
+    ? `${result.title}\n\n${result.content}`.trim()
+    : result.content;
+}
+
+function AutomationAvatar({ result }: { result: ResultInboxItem }) {
+  return (
+    <span className="flex size-5 shrink-0 items-center justify-center overflow-clip rounded-full border border-border bg-white ring-1 ring-card dark:bg-muted">
+      <TaskAutomationIcon
+        automationKey={result.automationKey}
+        className="size-4"
+      />
+    </span>
+  );
+}
+
 export function ResultsPage() {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const { enabled, isLoading: isFlagLoading } = useResultsPage();
   const [selected, setSelected] = useState<ResultInboxItem | null>(null);
+  const listQueryKey = trpc.results.list.queryKey();
   const listQuery = useQuery(
     trpc.results.list.queryOptions(undefined, { enabled }),
   );
   const invalidate = async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: trpc.results.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: listQueryKey }),
       queryClient.invalidateQueries({
         queryKey: trpc.results.unreadCount.queryKey(),
       }),
@@ -64,14 +89,44 @@ export function ResultsPage() {
   };
   const actionMutation = useMutation(
     trpc.results.act.mutationOptions({
-      onSuccess: () => {
-        setSelected(null);
-        void invalidate();
+      onMutate: async (variables) => {
+        await queryClient.cancelQueries({ queryKey: listQueryKey });
+        const previous =
+          queryClient.getQueryData<ResultInboxItem[]>(listQueryKey);
+        queryClient.setQueryData<ResultInboxItem[]>(listQueryKey, (results) =>
+          results?.filter(
+            (result) =>
+              result.id !== variables.id || result.kind !== variables.kind,
+          ),
+        );
+        if (selected?.id === variables.id && selected.kind === variables.kind) {
+          setSelected(null);
+        }
+        return { previous };
       },
+      onError: (error, _variables, context) => {
+        queryClient.setQueryData(listQueryKey, context?.previous);
+        toast.error(error.message);
+      },
+      onSettled: () => void invalidate(),
     }),
   );
   const clearMutation = useMutation(
-    trpc.results.clear.mutationOptions({ onSuccess: () => void invalidate() }),
+    trpc.results.clear.mutationOptions({
+      onMutate: async () => {
+        await queryClient.cancelQueries({ queryKey: listQueryKey });
+        const previous =
+          queryClient.getQueryData<ResultInboxItem[]>(listQueryKey);
+        queryClient.setQueryData<ResultInboxItem[]>(listQueryKey, []);
+        setSelected(null);
+        return { previous };
+      },
+      onError: (error, _variables, context) => {
+        queryClient.setQueryData(listQueryKey, context?.previous);
+        toast.error(error.message);
+      },
+      onSettled: () => void invalidate(),
+    }),
   );
 
   useEffect(() => {
@@ -81,26 +136,31 @@ export function ResultsPage() {
   if (isFlagLoading || !enabled || listQuery.isPending) {
     return (
       <div className="min-h-full w-full space-y-6 overflow-auto bg-background px-4 py-8 md:px-8">
-        <Skeleton className="h-8 w-32" />
+        <Skeleton className="h-8 w-52" />
         <Skeleton className="h-64 w-full" />
       </div>
     );
   }
 
   const results = listQuery.data ?? [];
+  const actOnResult = (result: ResultInboxItem, action: 'accept' | 'ignore') =>
+    actionMutation.mutate({ id: result.id, kind: result.kind, action });
 
   return (
     <div className="min-h-full w-full overflow-auto bg-background px-4 py-8 md:px-8">
       <div className="max-w-8xl space-y-6">
         <header className="flex items-center justify-between gap-4">
-          <h1 className="text-2xl font-semibold text-foreground">Results</h1>
+          <h1 className="text-2xl font-semibold text-foreground">
+            Automation Results
+          </h1>
           {results.length > 0 ? (
             <Button
+              size="sm"
               variant="outline"
               disabled={clearMutation.isPending}
               onClick={() => clearMutation.mutate()}
             >
-              Clear
+              Clear all
             </Button>
           ) : null}
         </header>
@@ -112,21 +172,26 @@ export function ResultsPage() {
             </EmptyHeader>
           </Empty>
         ) : (
-          <div className="overflow-hidden rounded-xl border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Automation</TableHead>
-                  <TableHead>Result</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead className="text-right">Date</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+          <Card variant="snug" className="gap-0 p-0">
+            <CardContent className="p-0!">
+              <div
+                role="row"
+                className="hidden grid-cols-[6rem_7rem_minmax(0,4fr)_minmax(0,6fr)_5rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+              >
+                <span role="columnheader">Priority</span>
+                <span role="columnheader">Date</span>
+                <span role="columnheader">Automation</span>
+                <span role="columnheader">Result</span>
+                <span role="columnheader" className="sr-only">
+                  Actions
+                </span>
+              </div>
+              <div role="rowgroup" className="divide-y divide-background">
                 {results.map((result) => (
-                  <TableRow
+                  <div
                     key={`${result.kind}:${result.id}`}
-                    className="cursor-pointer"
+                    role="row"
+                    className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[6rem_7rem_minmax(0,4fr)_minmax(0,6fr)_5rem] md:items-center md:gap-4 md:px-4 md:py-3"
                     tabIndex={0}
                     onClick={() => setSelected(result)}
                     onKeyDown={(event) => {
@@ -136,27 +201,74 @@ export function ResultsPage() {
                       }
                     }}
                   >
-                    <TableCell className="font-semibold">
-                      {result.automationName}
-                    </TableCell>
-                    <TableCell className="max-w-xl truncate">
-                      {resultPreview(result)}
-                    </TableCell>
-                    <TableCell>
+                    <div role="cell" className="col-start-1 row-start-1">
                       <Badge variant={priorityVariant(result.priority)}>
                         {result.priority}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
+                    </div>
+                    <div
+                      role="cell"
+                      className="col-start-1 row-start-2 text-xs text-muted-foreground md:col-start-2 md:row-start-1 md:text-sm"
+                    >
                       {formatDistanceToNowCompact(result.createdAt, {
                         addSuffix: true,
                       })}
-                    </TableCell>
-                  </TableRow>
+                    </div>
+                    <div
+                      role="cell"
+                      className="col-start-2 row-start-1 flex min-w-0 items-center gap-2 md:col-start-3"
+                    >
+                      <AutomationAvatar result={result} />
+                      <span className="truncate text-sm font-semibold">
+                        {result.automationName}
+                      </span>
+                    </div>
+                    <div
+                      role="cell"
+                      className="col-span-2 col-start-1 row-start-3 min-w-0 text-sm text-muted-foreground/80 md:col-span-1 md:col-start-4 md:row-start-1"
+                    >
+                      <p className="line-clamp-3 break-words">
+                        {resultPreview(result)}
+                      </p>
+                    </div>
+                    <div
+                      role="cell"
+                      className="col-start-3 row-span-2 row-start-1 flex items-start justify-end gap-1 md:col-start-5 md:row-span-1 md:items-center"
+                    >
+                      <BasicTooltip content="Accept">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Accept ${resultTitle(result)}`}
+                          disabled={actionMutation.isPending}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            actOnResult(result, 'accept');
+                          }}
+                        >
+                          <Check />
+                        </Button>
+                      </BasicTooltip>
+                      <BasicTooltip content="Clear">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label={`Clear ${resultTitle(result)}`}
+                          disabled={actionMutation.isPending}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            actOnResult(result, 'ignore');
+                          }}
+                        >
+                          <X />
+                        </Button>
+                      </BasicTooltip>
+                    </div>
+                  </div>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
+              </div>
+            </CardContent>
+          </Card>
         )}
       </div>
 
@@ -164,48 +276,43 @@ export function ResultsPage() {
         open={selected !== null}
         onOpenChange={(open) => !open && setSelected(null)}
       >
-        <DialogContent size="4xl" aria-describedby={undefined}>
+        <DialogContent size="4xl">
           {selected ? (
             <>
               <DialogHeader>
-                <DialogTitle>{selected.automationName}</DialogTitle>
-                <div className="text-sm text-muted-foreground">
-                  {formatDistanceToNowCompact(selected.createdAt, {
-                    addSuffix: true,
-                  })}
-                </div>
+                <DialogTitle>{resultTitle(selected)}</DialogTitle>
+                <DialogDescription asChild>
+                  <div className="flex items-center gap-1.5">
+                    <AutomationAvatar result={selected} />
+                    <span>{selected.automationName}</span>
+                    <span aria-hidden="true">&middot;</span>
+                    <span>
+                      {formatDistanceToNowCompact(selected.createdAt, {
+                        addSuffix: true,
+                      })}
+                    </span>
+                  </div>
+                </DialogDescription>
               </DialogHeader>
-              {selected.title ? (
-                <h2 className="text-lg font-semibold">{selected.title}</h2>
-              ) : null}
-              <Streamdown className="break-words text-sm">
-                {selected.content}
-              </Streamdown>
+              <NewTaskForm
+                key={`${selected.kind}:${selected.id}`}
+                animate={false}
+                initialPrompt={resultPrompt(selected)}
+                placeholder="Add details"
+                textareaMaxHeight={320}
+                onTaskStarted={() => actOnResult(selected, 'accept')}
+              />
               <DialogFooter>
                 <Button
                   variant="outline"
                   disabled={actionMutation.isPending}
-                  onClick={() =>
-                    actionMutation.mutate({
-                      id: selected.id,
-                      kind: selected.kind,
-                      action: 'ignore',
-                    })
-                  }
+                  onClick={() => actOnResult(selected, 'ignore')}
                 >
-                  Ignore
+                  <X />
+                  Clear
                 </Button>
-                <Button
-                  disabled={actionMutation.isPending}
-                  onClick={() =>
-                    actionMutation.mutate({
-                      id: selected.id,
-                      kind: selected.kind,
-                      action: 'accept',
-                    })
-                  }
-                >
-                  Accept
+                <Button variant="outline" onClick={() => setSelected(null)}>
+                  Close
                 </Button>
               </DialogFooter>
             </>

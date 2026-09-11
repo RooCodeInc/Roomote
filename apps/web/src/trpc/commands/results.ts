@@ -13,6 +13,7 @@ import {
 } from '@roomote/db/server';
 import {
   AUTOMATION_RESULT_PRIORITY_RANK,
+  type BackgroundAutomationKey,
   type AutomationResultPriority,
 } from '@roomote/types';
 
@@ -27,6 +28,7 @@ export type ResultInboxItem = {
   content: string;
   priority: AutomationResultPriority;
   createdAt: Date;
+  automationKey: BackgroundAutomationKey | null;
 };
 
 async function assertResultsEnabled(auth: UserAuthSuccess) {
@@ -51,6 +53,7 @@ export async function listResultsCommand(
     db
       .select({
         id: automationResults.id,
+        automationKey: automationResults.automationKey,
         automationName: automationResults.automationName,
         content: automationResults.content,
         priority: automationResults.priority,
@@ -72,6 +75,7 @@ export async function listResultsCommand(
     db
       .select({
         id: workItems.id,
+        automationKey: workItems.automationKey,
         automationName: workItems.resultAutomationName,
         title: workItems.title,
         content: workItems.brief,
