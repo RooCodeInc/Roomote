@@ -439,15 +439,21 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
   }
 
-  /** Show Telegram's native Thinking placeholder for an in-flight private-chat reply. */
-  async sendThinkingDraft(input: {
+  /** Update a private-chat live draft. Empty text shows native Thinking. */
+  async sendMessageDraft(input: {
     channelId: string;
     draftId: number;
     threadId?: string;
+    text?: string;
   }): Promise<void> {
     if (!Number.isSafeInteger(input.draftId) || input.draftId === 0) {
       throw new Error(
-        'Telegram sendThinkingDraft requires a non-zero draft id.',
+        'Telegram sendMessageDraft requires a non-zero draft id.',
+      );
+    }
+    if ((input.text?.length ?? 0) > TELEGRAM_MAX_MESSAGE_LENGTH) {
+      throw new Error(
+        `Telegram sendMessageDraft text exceeds ${TELEGRAM_MAX_MESSAGE_LENGTH} characters.`,
       );
     }
 
@@ -455,9 +461,17 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('sendMessageDraft', {
       chat_id: input.channelId,
       draft_id: input.draftId,
-      text: '',
+      text: input.text ?? '',
       ...(threadId ? { message_thread_id: threadId } : {}),
     });
+  }
+
+  async sendThinkingDraft(input: {
+    channelId: string;
+    draftId: number;
+    threadId?: string;
+  }): Promise<void> {
+    await this.sendMessageDraft(input);
   }
 
   /**

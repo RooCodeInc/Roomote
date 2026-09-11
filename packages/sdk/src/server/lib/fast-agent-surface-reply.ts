@@ -144,7 +144,12 @@ export type FastAgentSurfaceReplyDelivery = {
   conversation: FastAgentConversation;
   adapter: Pick<
     FastAgentTurnAdapter,
-    'activity' | 'createArtifact' | 'launchTask' | 'postReply' | 'replaceReply'
+    | 'activity'
+    | 'createArtifact'
+    | 'createReplyStream'
+    | 'launchTask'
+    | 'postReply'
+    | 'replaceReply'
   >;
 };
 
@@ -610,41 +615,49 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       sessionId: session.id,
       footerContext,
     });
+    const postReply: FastAgentTurnAdapter['postReply'] = async ({
+      message,
+    }) => {
+      const posted = await postTextThreadReplyWithFooter({
+        provider,
+        input: {
+          channelId: conversation.replyTarget.channelId,
+          ...(conversation.replyTarget.threadId
+            ? { threadId: conversation.replyTarget.threadId }
+            : {}),
+          ...(replyToMessageId ? { replyToMessageId } : {}),
+          text: message,
+          textFormat: 'markdown',
+        },
+        footerText: buildFastSessionReplyFooterText({
+          provider: 'telegram',
+          sessionId: session.id,
+          ...footerContext,
+        }),
+      });
+      activity.reassert();
+      await recordFastAgentConversationMessageBestEffort({
+        sessionId: session.id,
+        conversation,
+        messageId: posted.lastTextMessageId ?? posted.messageId,
+      });
+      return { messageId: posted.messageId };
+    };
     return {
       conversation,
       adapter: {
         activity,
+        ...(activity.supportsReplyStream
+          ? {
+              createReplyStream: () => activity.createReplyStream(postReply),
+            }
+          : {}),
         createArtifact,
         launchTask: createFastAgentCommunicationTaskLauncher({
           userId: params.userId,
           conversation,
         }),
-        postReply: async ({ message }) => {
-          const posted = await postTextThreadReplyWithFooter({
-            provider,
-            input: {
-              channelId: conversation.replyTarget.channelId,
-              ...(conversation.replyTarget.threadId
-                ? { threadId: conversation.replyTarget.threadId }
-                : {}),
-              ...(replyToMessageId ? { replyToMessageId } : {}),
-              text: message,
-              textFormat: 'markdown',
-            },
-            footerText: buildFastSessionReplyFooterText({
-              provider: 'telegram',
-              sessionId: session.id,
-              ...footerContext,
-            }),
-          });
-          activity.reassert();
-          await recordFastAgentConversationMessageBestEffort({
-            sessionId: session.id,
-            conversation,
-            messageId: posted.lastTextMessageId ?? posted.messageId,
-          });
-          return { messageId: posted.messageId };
-        },
+        postReply,
         replaceReply: async (handle, reply) => {
           const result = await replaceReply(handle, reply);
           activity.reassert();

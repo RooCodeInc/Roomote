@@ -17,6 +17,7 @@ export * from './teams-credential-validation';
 export * from './teams-graph-client';
 export * from './teams-provider';
 export * from './telegram-provider';
+export { TELEGRAM_MAX_MESSAGE_LENGTH } from './telegram-format';
 export * from './telegram-update';
 export * from './fast-session-footer';
 export * from './thread-reply-footer-context';

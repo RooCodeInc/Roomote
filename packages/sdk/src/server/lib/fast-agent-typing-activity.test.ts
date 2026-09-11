@@ -118,6 +118,51 @@ describe('Fast typing activity', () => {
     expect(sendTyping).not.toHaveBeenCalled();
   });
 
+  it('pauses and drains an issued request, then resumes without losing ownership', async () => {
+    let resolveRequest!: () => void;
+    const request = new Promise<void>((resolve) => {
+      resolveRequest = resolve;
+    });
+    const sendTyping = vi
+      .fn()
+      .mockReturnValueOnce(request)
+      .mockResolvedValue(undefined);
+    const activity = createFastAgentTypingActivity({
+      sendTyping,
+      intervalMs: 4_000,
+    });
+
+    activity.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const paused = activity.pause();
+    activity.reassert();
+    await vi.advanceTimersByTimeAsync(8_000);
+    expect(sendTyping).toHaveBeenCalledTimes(1);
+    resolveRequest();
+    await paused;
+
+    activity.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendTyping).toHaveBeenCalledTimes(2);
+    await activity.settle();
+  });
+
+  it('cancels a queued write when paused before its microtask starts', async () => {
+    const sendTyping = vi.fn().mockResolvedValue(undefined);
+    const activity = createFastAgentTypingActivity({
+      sendTyping,
+      intervalMs: 4_000,
+    });
+
+    activity.start();
+    await activity.pause();
+    expect(sendTyping).not.toHaveBeenCalled();
+    activity.resume();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sendTyping).toHaveBeenCalledOnce();
+    await activity.dispose();
+  });
+
   it('reasserts immediately after a post and resets the heartbeat deadline', async () => {
     const sendTyping = vi.fn().mockResolvedValue(undefined);
     const activity = createFastAgentTypingActivity({
