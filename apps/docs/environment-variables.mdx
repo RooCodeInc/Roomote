@@ -153,6 +153,7 @@ catalog's enablement policy.
 | --- | --- | --- |
 | `R_HTTP_INTEGRATIONS_ENABLED` | Optional | Enables operator-manifest integrations. Defaults to `false`. The shared API broker remains available for owner-approved Session grants without a manifest. Set consistently on API, web, and background control-plane services. |
 | `R_HTTP_INTEGRATIONS_CONFIG_PATH` | When enabled, API only | Absolute path to the read-only JSON manifest of HTTPS origins, method/path rules, actor access, and credential environment-variable references. |
+| `R_SESSION_EGRESS_GATEWAY_TOKEN` | Optional, API only | Shared secret (at least 32 characters) a credential-substituting egress gateway presents to `/api/internal/session-egress`. Leave unset until you run such a gateway; the surface answers 404 without it. Never place it in task environments. |
 
 Referenced credential variables belong only on the API server, never in task
 environment configuration. Restart services after deployment environment or

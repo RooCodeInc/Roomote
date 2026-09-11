@@ -73,6 +73,10 @@ import type {
   TrackedMessageKind,
   McpConnectionRole,
   SourceControlProvider,
+  SessionEgressDenialReason,
+  SessionEgressMethod,
+  SessionEgressPhase,
+  SessionEgressRevocationKind,
   TaskModelSettings,
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
@@ -3864,6 +3868,14 @@ export const sessionSecrets = pgTable(
     headerPrefix: text('header_prefix')
       .notNull()
       .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    // Method policy enforced by the egress gateway authorize path. Additive
+    // with a read-only default so grants approved before it existed stay
+    // GET/HEAD-only; N-1 code ignores the column.
+    allowedMethods: text('allowed_methods')
+      .array()
+      .notNull()
+      .default(sql`'{GET,HEAD}'::text[]`)
+      .$type<SessionEgressMethod[]>(),
     value: encryptedText('value'),
     expiresAt: timestamp('expires_at').notNull(),
     revokedAt: timestamp('revoked_at'),
@@ -3895,6 +3907,11 @@ export const sessionSecretApprovals = pgTable(
     headerPrefix: text('header_prefix')
       .notNull()
       .$type<'' | 'Bearer ' | 'Basic ' | 'Token '>(),
+    allowedMethods: text('allowed_methods')
+      .array()
+      .notNull()
+      .default(sql`'{GET,HEAD}'::text[]`)
+      .$type<SessionEgressMethod[]>(),
     expiresAt: timestamp('expires_at').notNull(),
     consumedAt: timestamp('consumed_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
@@ -3917,6 +3934,118 @@ export const sessionSecretAudit = pgTable('session_secret_audit', {
   outcome: text('outcome')
     .notNull()
     .$type<'started' | 'succeeded' | 'denied' | 'failed'>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+/**
+ * Session egress control plane (additive, N-1 safe: previous releases never
+ * read these tables). One row per attached run that a trusted controller
+ * registered with the credential-substituting egress gateway. The
+ * `connectorIdentity` is what the gateway authenticates at connection time;
+ * it is never derived from anything the sandbox sends.
+ */
+export const sessionEgressWorkloads = pgTable(
+  'session_egress_workloads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    taskRunId: integer('task_run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(),
+    connectorIdentity: text('connector_identity').notNull(),
+    // Bumped on re-registration (resume, actor change, connector rotation).
+    // Substitutes are bound to the generation they were minted in.
+    generation: integer('generation').notNull().default(1),
+    status: text('status')
+      .notNull()
+      .default('active')
+      .$type<'active' | 'terminated'>(),
+    // Controller-renewed lease; never extended on a sandbox's say-so.
+    expiresAt: timestamp('expires_at').notNull(),
+    terminatedAt: timestamp('terminated_at'),
+    terminationReason: text('termination_reason'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_egress_workloads_active_run_unique')
+      .on(table.taskRunId)
+      .where(sql`${table.status} = 'active'`),
+    uniqueIndex('session_egress_workloads_active_connector_unique')
+      .on(table.connectorIdentity)
+      .where(sql`${table.status} = 'active'`),
+    index('session_egress_workloads_session_idx').on(table.sessionId),
+    check(
+      'session_egress_workloads_status_check',
+      sql`${table.status} in ('active', 'terminated')`,
+    ),
+  ],
+);
+
+/** Only a keyed hash of each substitute token is ever stored. */
+export const sessionEgressSubstitutes = pgTable(
+  'session_egress_substitutes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workloadId: uuid('workload_id')
+      .notNull()
+      .references(() => sessionEgressWorkloads.id, { onDelete: 'cascade' }),
+    secretId: uuid('secret_id')
+      .notNull()
+      .references(() => sessionSecrets.id, { onDelete: 'cascade' }),
+    generation: integer('generation').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('session_egress_substitutes_token_hash_unique').on(
+      table.tokenHash,
+    ),
+    uniqueIndex(
+      'session_egress_substitutes_workload_secret_generation_unique',
+    ).on(table.workloadId, table.secretId, table.generation),
+  ],
+);
+
+// Evaluation attempts, not proof of credential/byte release: an allowed
+// evaluation can still be denied by the final live read after this insert.
+// Each id identifies one attempt; authorizationId is caller-controlled
+// correlation only, never authority or a unique/final exchange outcome.
+// Bounded codes only: never paths, query strings, headers, tokens, upstream
+// errors, or credential material.
+export const sessionEgressAudit = pgTable('session_egress_audit', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  authorizationId: uuid('authorization_id'),
+  workloadId: uuid('workload_id'),
+  sessionId: uuid('session_id'),
+  actorUserId: text('actor_user_id'),
+  secretRef: uuid('secret_ref'),
+  phase: text('phase').notNull().$type<SessionEgressPhase>(),
+  method: text('method').$type<SessionEgressMethod>(),
+  destination: text('destination'),
+  decision: text('decision').notNull().$type<'allowed' | 'denied'>(),
+  reason: text('reason').$type<SessionEgressDenialReason>(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+/**
+ * Append-only acceleration feed the gateway polls to cancel in-flight
+ * streams early. Live per-request authorization stays the source of truth;
+ * missing an event here never grants access.
+ */
+export const sessionEgressRevocations = pgTable('session_egress_revocations', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  kind: text('kind').notNull().$type<SessionEgressRevocationKind>(),
+  workloadId: uuid('workload_id'),
+  secretRef: uuid('secret_ref'),
+  generation: integer('generation'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

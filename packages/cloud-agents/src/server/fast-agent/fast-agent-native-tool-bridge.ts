@@ -609,13 +609,14 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Prepare a Session credential approval using only nonsecret metadata from the service documentation. Choose the HTTPS origin and authentication header/prefix, then share the returned secure Session link so the human can enter the key privately. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
+  description: "Prepare a Session credential approval using only nonsecret metadata from the service documentation. Choose the HTTPS origin and authentication header/prefix, then share the returned secure Session link so the human can enter the key privately. Omit allowedMethods for read-only access; list the exact HTTP methods only when the requested work needs writes, and say so in the Session before the human approves. Never accept credentials in tool arguments or chat. Preparation is pending, not authorization to use a key.",
   args: {
     label: z.string().trim().min(1).max(80),
     origin: z.string().min(1).max(2048),
     headerName: z.enum(["authorization", "x-api-key", "api-key"]),
     headerPrefix: z.enum(["", "Bearer ", "Basic ", "Token "]),
     ttlHours: z.number().int().min(1).max(720).optional().default(24),
+    allowedMethods: z.array(z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])).min(1).max(6).optional().describe("HTTP methods the approved key may be used with. Defaults to GET and HEAD."),
   },
   execute: (args, context) => invoke("prepare_session_secret", args, context),
 }

@@ -63,7 +63,9 @@ it('persists immutable nonsecret approvals, defaults TTL and finalizes exactly o
   expect(
     Date.parse(pending.expiresAt) - Date.parse(pending.createdAt),
   ).toBeGreaterThanOrEqual(24 * 3600_000 - 1000);
+  expect(pending.allowedMethods).toEqual(['GET', 'HEAD']);
   expect(Object.keys(pending).sort()).toEqual([
+    'allowedMethods',
     'createdAt',
     'expiresAt',
     'headerName',
@@ -201,7 +203,9 @@ it('encrypts SQL storage, lists metadata only and wipes ciphertext on revoke', a
   expect(listed).toEqual([
     expect.objectContaining({ secretRef, ...policy, revokedAt: null }),
   ]);
+  expect(listed[0]!.allowedMethods).toEqual(['GET', 'HEAD']);
   expect(Object.keys(listed[0]!).sort()).toEqual([
+    'allowedMethods',
     'createdAt',
     'expiresAt',
     'headerName',

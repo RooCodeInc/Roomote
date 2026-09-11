@@ -7,6 +7,7 @@ import {
   type SessionSecretContext,
 } from '@roomote/db/server';
 import {
+  isReadOnlyMethodPolicy,
   sessionSecretCreateSchema,
   sessionSecretPrepareSchema,
   sessionSecretRevokeSchema,
@@ -155,6 +156,16 @@ export async function createSessionSecret(
     return await finalizeSessionSecret(context, input, (pending) => {
       const origin = approvedOrigin(pending.origin);
       if (pending.headerName !== 'authorization' && pending.headerPrefix !== '')
+        throw new Error(ERROR);
+      // Write-capable policy needs explicit consent: the approving client must
+      // echo the exact prepared method set. Older clients that never show it
+      // cannot approve such a grant, and a successful key entry alone never
+      // widens an approval beyond GET/HEAD.
+      if (
+        !isReadOnlyMethodPolicy(pending.allowedMethods) &&
+        JSON.stringify(input.allowedMethods ?? null) !==
+          JSON.stringify(pending.allowedMethods)
+      )
         throw new Error(ERROR);
       if (
         redactEcho(

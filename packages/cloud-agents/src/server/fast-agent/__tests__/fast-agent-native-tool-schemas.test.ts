@@ -345,6 +345,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     )!;
     const schema = toOpenCodeJsonSchema(zod, prepare.args!);
     expect(Object.keys(prepare.args!).sort()).toEqual([
+      'allowedMethods',
       'headerName',
       'headerPrefix',
       'label',
@@ -359,8 +360,15 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
         headerName: { enum: ['authorization', 'x-api-key', 'api-key'] },
         headerPrefix: { enum: ['', 'Bearer ', 'Basic ', 'Token '] },
         ttlHours: { type: 'integer', minimum: 1, maximum: 720, default: 24 },
+        allowedMethods: {
+          type: 'array',
+          items: { enum: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'] },
+          minItems: 1,
+          maxItems: 6,
+        },
       },
     });
+    expect(schema.required).not.toContain('allowedMethods');
     expect(status.args).toEqual({});
     expect(toOpenCodeJsonSchema(zod, status.args!)).toMatchObject({
       type: 'object',
@@ -375,7 +383,14 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(sessionSecretPrepareSchema.parse(args)).toEqual({
       ...args,
       ttlHours: 24,
+      allowedMethods: ['GET', 'HEAD'],
     });
+    expect(
+      sessionSecretPrepareSchema.parse({
+        ...args,
+        allowedMethods: ['POST', 'GET'],
+      }).allowedMethods,
+    ).toEqual(['GET', 'POST']);
     for (const extra of [
       { secret: 'never-a-key' },
       { userId: 'caller' },
@@ -385,6 +400,9 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       { ttlHours: 1.5 },
       { headerName: 'cookie' },
       { headerPrefix: 'Custom ' },
+      { allowedMethods: [] },
+      { allowedMethods: ['GET', 'GET'] },
+      { allowedMethods: ['OPTIONS'] },
     ]) {
       expect(
         sessionSecretPrepareSchema.safeParse({ ...args, ...extra }).success,

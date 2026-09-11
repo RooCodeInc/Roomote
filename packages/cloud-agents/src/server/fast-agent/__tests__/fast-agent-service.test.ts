@@ -1203,7 +1203,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       });
       expect(mocks.prepareSessionSecret).toHaveBeenCalledExactlyOnceWith(
         { sessionId: 'canonical-session-1', userId: 'user-1' },
-        { ...args, ttlHours: 24 },
+        { ...args, ttlHours: 24, allowedMethods: ['GET', 'HEAD'] },
       );
       expect(mocks.listSessionSecretApprovals).toHaveBeenCalledExactlyOnceWith({
         sessionId: 'canonical-session-1',

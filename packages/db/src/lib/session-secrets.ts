@@ -5,10 +5,13 @@ import type {
   SessionSecretPrepare,
   SessionSecretPendingMetadata,
   SessionSecretMetadata,
+  SessionEgressMethod,
 } from '@roomote/types';
 
 import { db } from '../db';
 import {
+  sessionEgressRevocations,
+  sessionEgressSubstitutes,
   sessionSecretApprovals,
   sessionSecretAudit,
   sessionSecrets,
@@ -85,6 +88,7 @@ const metadataColumns = {
   origin: sessionSecrets.origin,
   headerName: sessionSecrets.headerName,
   headerPrefix: sessionSecrets.headerPrefix,
+  allowedMethods: sessionSecrets.allowedMethods,
   expiresAt: sessionSecrets.expiresAt,
   revokedAt: sessionSecrets.revokedAt,
   createdAt: sessionSecrets.createdAt,
@@ -99,6 +103,7 @@ function metadata(
         origin: string;
         headerName: SessionSecretPrepare['headerName'];
         headerPrefix: SessionSecretPrepare['headerPrefix'];
+        allowedMethods: SessionEgressMethod[];
         expiresAt: Date;
         revokedAt: Date | null;
         createdAt: Date;
@@ -110,6 +115,7 @@ function metadata(
     origin: row.origin,
     headerName: row.headerName,
     headerPrefix: row.headerPrefix,
+    allowedMethods: [...row.allowedMethods],
     expiresAt: row.expiresAt.toISOString(),
     revokedAt: row.revokedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -150,6 +156,7 @@ function pendingMetadata(
     origin: row.origin,
     headerName: row.headerName,
     headerPrefix: row.headerPrefix,
+    allowedMethods: [...row.allowedMethods],
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
@@ -176,6 +183,7 @@ export async function insertSessionSecretApproval(
         origin: input.origin,
         headerName: input.headerName,
         headerPrefix: input.headerPrefix,
+        allowedMethods: input.allowedMethods,
         expiresAt: sql`clock_timestamp() + ${input.ttlHours} * interval '1 hour'`,
       })
       .returning();
@@ -245,6 +253,8 @@ export async function finalizeSessionSecret(
         origin: pending.origin,
         headerName: pending.headerName,
         headerPrefix: pending.headerPrefix,
+        // The policy is copied from the immutable prepared approval, never from the finalizer.
+        allowedMethods: pending.allowedMethods,
         // Always treat human input as plaintext, even if it happens to be valid ciphertext.
         value: encrypt(input.secret),
         expiresAt: pending.expiresAt,
@@ -300,6 +310,17 @@ export async function revokeOwnedSessionSecret(
       )
       .returning({ id: sessionSecrets.id });
     if (!row) throw new Error('Secret unavailable');
+    // Live authorization already denies a revoked grant; retiring substitutes
+    // and publishing the event only accelerates gateway-side stream cancel.
+    await tx
+      .update(sessionEgressSubstitutes)
+      .set({
+        revokedAt: sql`coalesce(${sessionEgressSubstitutes.revokedAt}, now())`,
+      })
+      .where(eq(sessionEgressSubstitutes.secretId, row.id));
+    await tx
+      .insert(sessionEgressRevocations)
+      .values({ kind: 'grant', secretRef: row.id });
   });
 }
 

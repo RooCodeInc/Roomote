@@ -101,7 +101,7 @@ export function createHttpIntegrationsMcp() {
         'list_integrations',
         {
           description:
-            'List allowed operator integrations and live owner-approved Session grants with their methods/paths. Credentials are never returned. Session grants do not require an operator manifest.',
+            'List allowed operator integrations and live owner-approved Session grants with their methods/paths. Credentials are never returned. Session grants do not require an operator manifest. Session grant entries here are a deprecated read-only compatibility listing; the supported way to use a Session grant is an ordinary HTTP client at the real service URL inside an attached run, through the session egress gateway.',
           inputSchema: {},
           annotations: {
             readOnlyHint: true,
@@ -180,7 +180,7 @@ export function createHttpIntegrationsMcp() {
         'list_session_secrets',
         {
           description:
-            "List this Session owner's nonsecret pending approvals and key metadata. Active grants also appear in list_integrations; use their opaque id with integration_request.",
+            "List this Session owner's nonsecret pending approvals and key metadata, including each grant's allowed HTTP methods. Grants are consumed by ordinary HTTP clients in attached runs through the session egress gateway; the session-prefixed integration_request path is deprecated and not required.",
           inputSchema: {},
         },
         async () => {
@@ -203,7 +203,7 @@ export function createHttpIntegrationsMcp() {
         'integration_request',
         {
           description:
-            'Make a credential-broker request using an ID from list_integrations. Session grants allow GET/HEAD only; mutating methods require operator manifest authorization. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
+            'Make a credential-broker request using an ID from list_integrations. Operator manifest integrations are the supported use. Session-prefixed IDs are a deprecated GET/HEAD-only compatibility path that never widens, is not required for Session resources, and will be removed once ordinary clients through the session egress gateway reach parity. Supply only integrationId, method, relative path (optional query), optional body/contentType and Session accept preference; never supply credentials, arbitrary headers, or a Session/user ID.',
           inputSchema: integrationRequestSchema,
           annotations: {
             readOnlyHint: false,

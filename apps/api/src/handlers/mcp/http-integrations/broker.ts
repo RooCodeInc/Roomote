@@ -168,6 +168,16 @@ export type HttpIntegrationsConfig = ReturnType<
 let active = 0;
 const scopes = new Map<string, number>();
 
+/**
+ * Operator-manifest requests are the supported product of this broker.
+ *
+ * @deprecated for `session:` IDs only. Routing a Session grant through this
+ * mediated request tool is a GET/HEAD-only compatibility path kept until
+ * ordinary HTTP clients at the real service URL (attached runs through the
+ * session egress gateway, `apps/api/src/handlers/session-egress`) reach
+ * parity. It is not the required way to consume a Session grant and is never
+ * widened: `allowedMethods` on a grant applies to the gateway path only.
+ */
 export async function integrationRequest(
   config: HttpIntegrationsConfig,
   scope: string,

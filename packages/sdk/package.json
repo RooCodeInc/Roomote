@@ -64,6 +64,10 @@
       "import": "./src/server/lib/session-secrets.ts",
       "require": "./src/server/lib/session-secrets.ts"
     },
+    "./server/session-egress": {
+      "import": "./src/server/lib/session-egress.ts",
+      "require": "./src/server/lib/session-egress.ts"
+    },
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",
       "require": "./src/server/lib/notion-api.ts"

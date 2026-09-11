@@ -575,6 +575,13 @@
       "when": 1788983310656,
       "tag": "0081_familiar_steel_serpent",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1789144471729,
+      "tag": "0082_wooden_cardiac",
+      "breakpoints": true
     }
   ]
 }
