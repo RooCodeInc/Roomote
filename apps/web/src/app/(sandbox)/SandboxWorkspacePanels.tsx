@@ -104,11 +104,11 @@ export function ResponsiveWorkspacePanels({
       }
       mainSize={mainSize}
       panelSize={panelSize}
-      mainMinSize={mainMinSize}
-      panelMinSize={panelMinSize}
+      mainMinSize={isMdOrLarger ? mainMinSize : 0}
+      panelMinSize={isMdOrLarger ? panelMinSize : 0}
       dimUnfocusedPanelIds={dimUnfocusedPanelIds}
       layoutWidth={layoutWidth}
-      mobilePanelId={!isMdOrLarger && isPanelOpen ? panelId : null}
+      mobilePanelId={isMdOrLarger ? undefined : isPanelOpen ? panelId : null}
     />
   );
 }
@@ -123,7 +123,7 @@ interface DesktopPanelsProps {
   panelMinSize: number;
   dimUnfocusedPanelIds: readonly string[];
   layoutWidth?: number;
-  mobilePanelId: string | null;
+  mobilePanelId: string | null | undefined;
 }
 interface DesktopPanelsState {
   panels: WorkspacePanel[];
@@ -394,6 +394,8 @@ class DesktopWorkspacePanels extends Component<
             data-dim-when-unfocused={
               dimUnfocusedPanelIds.includes('main') || undefined
             }
+            inert={mobilePanelId ? true : undefined}
+            aria-hidden={mobilePanelId ? true : undefined}
             className={cn(
               'flex min-h-0 min-w-0 flex-col max-md:!grow max-md:!basis-full',
               mobilePanelId && 'max-md:hidden',
@@ -403,6 +405,9 @@ class DesktopWorkspacePanels extends Component<
           </ResizablePanel>
           {this.state.panels.map((additionalPanel, index) => {
             const exiting = !this.state.activeIds.includes(additionalPanel.id);
+            const hiddenOnMobile =
+              mobilePanelId !== undefined &&
+              additionalPanel.id !== mobilePanelId;
             return (
               <Fragment key={additionalPanel.id}>
                 <ResizableDivider
@@ -427,7 +432,8 @@ class DesktopWorkspacePanels extends Component<
                   }
                   minSize={exiting ? 0 : panelMinSize}
                   maxSize={exiting ? 0 : undefined}
-                  inert={exiting || undefined}
+                  inert={exiting || hiddenOnMobile || undefined}
+                  aria-hidden={hiddenOnMobile || undefined}
                   data-dim-when-unfocused={
                     dimUnfocusedPanelIds.includes(additionalPanel.id) ||
                     undefined
