@@ -11,6 +11,7 @@ import {
 } from '@roomote/db/server';
 import {
   activeRunStatuses,
+  bootingRunStatuses,
   exitedRunStatuses,
   RunStatus,
 } from '@roomote/types';
@@ -179,6 +180,28 @@ describe('cancelTaskRunCommand', () => {
         cancelRequestedAt: null,
         canceledAt: null,
       });
+      expect(captureTaskSettled).not.toHaveBeenCalled();
+      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(bootingRunStatuses)(
+    'keeps a pre-sandbox Session-card %s run non-terminal',
+    async (status) => {
+      const selected = await runFactory.create({ status });
+
+      await expect(
+        cancelTaskRunCommand(auth, {
+          taskId: selected.taskId,
+          runId: selected.id,
+          terminate: false,
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: 'Task has no active sandbox. The worker may still be booting.',
+      });
+      expect(await readRun(selected.id)).toEqual(selected);
+      expect(withSandboxServerRpcClient).not.toHaveBeenCalled();
       expect(captureTaskSettled).not.toHaveBeenCalled();
       expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
     },

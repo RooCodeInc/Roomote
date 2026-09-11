@@ -226,10 +226,6 @@ export async function stopTaskRun(params: {
     });
   }
 
-  if (!allowDirectCancelWithoutSandbox) {
-    return createNoSandboxResult();
-  }
-
   const refreshedResolution = await readCurrentStopTaskResolution(run.id);
 
   if (refreshedResolution.kind === 'sandbox') {
@@ -239,6 +235,10 @@ export async function stopTaskRun(params: {
       cancelledBy,
       terminate,
     });
+  }
+
+  if (!allowDirectCancelWithoutSandbox) {
+    return stopTaskResolutionToResult(refreshedResolution);
   }
 
   if (refreshedResolution.kind !== 'no_sandbox') {

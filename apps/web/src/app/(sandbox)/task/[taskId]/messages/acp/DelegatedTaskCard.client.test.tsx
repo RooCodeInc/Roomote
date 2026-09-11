@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { RunStatus } from '@roomote/types';
+import { bootingRunStatuses, RunStatus } from '@roomote/types';
 
 const useQueryMock = vi.fn();
 const queryOptionsMock = vi.fn((input, options) => ({ input, ...options }));
@@ -269,8 +269,8 @@ describe('DelegatedTaskCard', () => {
     },
   );
 
-  it.each([RunStatus.Pending, RunStatus.Running, RunStatus.Idle])(
-    'allows stopping active %s runs',
+  it.each([RunStatus.Running, RunStatus.Idle])(
+    'allows stopping resumable %s runs',
     (status) => {
       useQueryMock.mockReturnValue({ data: { taskRun: { id: 42, status } } });
       render(
@@ -281,6 +281,40 @@ describe('DelegatedTaskCard', () => {
       ).toBeEnabled();
     },
   );
+
+  it.each(bootingRunStatuses)(
+    'hides soft Stop while a %s run has no resumable sandbox',
+    (status) => {
+      useQueryMock.mockReturnValue({ data: { taskRun: { id: 42, status } } });
+      render(
+        <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+      );
+      expect(
+        screen.queryByRole('button', { name: 'Stop coding task' }),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  it('shows soft Stop after a booting run becomes resumable', () => {
+    let status: RunStatus = RunStatus.Connecting;
+    useQueryMock.mockImplementation(() => ({
+      data: { taskRun: { id: 42, status } },
+    }));
+    const { rerender } = render(
+      <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Stop coding task' }),
+    ).not.toBeInTheDocument();
+
+    status = RunStatus.Running;
+    rerender(
+      <DelegatedTaskCard taskId="child-1" prompt={null} onOpen={vi.fn()} />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Stop coding task' }),
+    ).toBeEnabled();
+  });
 
   it.each([RunStatus.Completed, RunStatus.Failed, RunStatus.Canceled, null])(
     'hides stop for terminal or inaccessible runs: %s',
