@@ -610,6 +610,9 @@ telegram.post('/', async (c) => {
       senderDisplayName,
       question,
       currentMessageId: metadata.communicationMessageId ?? fastMessage.ts,
+      ...(fastMessage.agentContext
+        ? { agentContext: fastMessage.agentContext }
+        : {}),
       ...(fastMessage.images ? { images: fastMessage.images } : {}),
     });
     if (!continued) {
@@ -943,6 +946,9 @@ telegram.post('/', async (c) => {
     senderDisplayName,
     question: queuedMessage.text.trim(),
     currentMessageId,
+    ...(queuedMessage.agentContext
+      ? { agentContext: queuedMessage.agentContext }
+      : {}),
     ...(queuedMessage.images ? { images: queuedMessage.images } : {}),
   })
     .then((continued) => {

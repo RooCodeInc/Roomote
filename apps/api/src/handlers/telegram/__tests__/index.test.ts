@@ -651,6 +651,8 @@ describe('Telegram webhook handler', () => {
         sessionId: '22222222-2222-4222-8222-222222222222',
         userId: 'mapped-user-1',
         question: 'continue the task',
+        agentContext:
+          'The person is replying to this Telegram message:\n{"message_id":"400","author":"Telegram user","content":"Fast answer"}',
       }),
     );
     expect(addReactionMock).not.toHaveBeenCalled();
@@ -1411,7 +1413,13 @@ describe('Telegram webhook handler', () => {
       createTelegramUpdate({
         message: {
           text: 'Follow up on the first report',
-          reply_to_message: { message_id: 900, date: 1, chat: { id: 222 } },
+          reply_to_message: {
+            message_id: 900,
+            date: 1,
+            text: 'Earlier release report',
+            from: { id: 999, is_bot: true, first_name: 'Roomote' },
+            chat: { id: 222 },
+          },
         },
       }),
     );
@@ -1424,7 +1432,11 @@ describe('Telegram webhook handler', () => {
     expect(queueCommunicationMessageOnceMock).toHaveBeenCalledWith(
       'telegram',
       55,
-      expect.objectContaining({ text: 'Follow up on the first report' }),
+      expect.objectContaining({
+        text: 'Follow up on the first report',
+        agentContext:
+          'The person is replying to this Telegram message:\n{"message_id":"900","author":"Roomote","content":"Earlier release report"}',
+      }),
     );
     expect(taskRunsFindFirstMock).toHaveBeenCalledTimes(1);
   });
