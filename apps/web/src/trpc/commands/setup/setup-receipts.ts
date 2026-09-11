@@ -9,7 +9,8 @@ export type SetupReceiptKind =
   | 'source_connection'
   | 'compute_readiness'
   | 'starter_selection'
-  | 'recommendation_application';
+  | 'recommendation_application'
+  | 'integration_discovery';
 
 function formatList(items: string[]): string {
   if (items.length === 0) return '';
@@ -56,6 +57,10 @@ export function buildSetupReceiptMessage(input: {
   fingerprint: string;
   text: string;
   requestId?: string;
+  presentation: {
+    label: string;
+    iconKey: string;
+  };
   payload?: Record<string, unknown>;
   ts?: number;
 }) {
@@ -86,6 +91,7 @@ export function buildSetupReceiptMessage(input: {
       setupReceipt: {
         kind: input.kind,
         ...(input.requestId ? { requestId: input.requestId } : {}),
+        presentation: input.presentation,
         ...(input.payload ?? {}),
       },
     },

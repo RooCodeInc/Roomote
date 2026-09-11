@@ -157,6 +157,10 @@ async function persistSetupSessionReceipt(
     kind: SetupReceiptKind;
     fingerprint: string;
     text: string;
+    presentation: {
+      label: string;
+      iconKey: string;
+    };
     payload?: Record<string, unknown>;
     ts?: number;
   },
@@ -591,6 +595,10 @@ export async function reconcileSetupPlatformEvents(
       {
         kind: 'source_connection',
         fingerprint,
+        presentation: {
+          label: 'Asked to connect source control',
+          iconKey: 'git-branch',
+        },
         text: formatSourceConnectionReceipt({
           providerLabels: synchronized.map((provider) => provider.label),
           repositoryCount,
@@ -615,6 +623,10 @@ export async function reconcileSetupPlatformEvents(
       {
         kind: 'compute_readiness',
         fingerprint: state.computeProvider,
+        presentation: {
+          label: 'Asked to set up a sandbox',
+          iconKey: 'container',
+        },
         text: formatComputeReadinessReceipt(providerLabel),
         payload: { provider: state.computeProvider },
       },
@@ -811,6 +823,10 @@ export async function persistSetupRecommendationApplicationReceipt(
   await persistSetupSessionReceipt(auth, {
     kind: 'recommendation_application',
     fingerprint: `${batch.inputFingerprint}:${action}`,
+    presentation: {
+      label: 'Suggested things to automate',
+      iconKey: 'zap',
+    },
     text: formatRecommendationApplicationReceipt({ action, enabledTitles }),
     payload: {
       action,
@@ -1099,6 +1115,10 @@ async function persistSetupPresetResponse(input: {
             kind: 'starter_selection',
             fingerprint: input.request.payload.requestId,
             requestId: input.request.payload.requestId,
+            presentation: {
+              label: 'Suggested initial tasks',
+              iconKey: 'list-checks',
+            },
             text: formatStarterSelectionReceipt(
               taskIds.map(
                 (taskId) =>
@@ -1106,6 +1126,30 @@ async function persistSetupPresetResponse(input: {
               ),
             ),
             payload: { taskIds },
+            ts: now.getTime(),
+          }),
+        })
+        .onConflictDoNothing({
+          target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+        });
+    else
+      await tx
+        .insert(fastAgentMessages)
+        .values({
+          conversationId: input.fastConversationId,
+          ...buildSetupReceiptMessage({
+            sessionId: setupSession.sessionId,
+            workflowVersion: setupSession.workflowVersion,
+            userId: input.auth.userId,
+            kind: 'integration_discovery',
+            fingerprint: input.request.payload.requestId,
+            requestId: input.request.payload.requestId,
+            presentation: {
+              label: 'Suggested integrations',
+              iconKey: 'plug',
+            },
+            text: 'Suggested integrations.',
+            payload: {},
             ts: now.getTime(),
           }),
         })

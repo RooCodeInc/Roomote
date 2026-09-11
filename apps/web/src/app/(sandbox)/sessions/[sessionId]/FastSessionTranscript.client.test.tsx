@@ -676,7 +676,9 @@ describe('FastSessionTranscript', () => {
           screen.getByTestId('request-user-input-response'),
         ).toBeInTheDocument();
       }
-      expect(screen.getByLabelText('Test User')).toBeInTheDocument();
+      if (preset === 'setup_integrations') {
+        expect(screen.getByLabelText('Test User')).toBeInTheDocument();
+      }
       expect(screen.queryByText(cardLabel)).toBeNull();
     },
   );
@@ -1161,7 +1163,7 @@ describe('FastSessionTranscript', () => {
     );
   });
 
-  it('resolves a setup receipt avatar from the session owner', () => {
+  it('renders a setup receipt as a completed action with its card icon', () => {
     const receipt = textMessage({
       id: 'setup-receipt',
       role: 'user',
@@ -1170,6 +1172,15 @@ describe('FastSessionTranscript', () => {
       inputKind: SETUP_RECEIPT_INPUT_KIND,
       userId: 'user-1',
     });
+    receipt.payload = {
+      setupReceipt: {
+        kind: 'source_connection',
+        presentation: {
+          label: 'Asked to connect source control',
+          iconKey: 'git-branch',
+        },
+      },
+    };
 
     render(
       <FastSessionTranscript
@@ -1184,11 +1195,10 @@ describe('FastSessionTranscript', () => {
       />,
     );
 
-    const avatar = screen.getByLabelText('Test User');
-    expect(avatar.querySelector('img')).toHaveAttribute(
-      'src',
-      'https://example.com/avatar.png',
-    );
+    expect(
+      screen.getByText('Asked to connect source control'),
+    ).toBeInTheDocument();
+    expect(document.querySelector('.lucide-git-branch')).toBeInTheDocument();
   });
 
   it('removes the running task indicator when the count returns to zero', () => {

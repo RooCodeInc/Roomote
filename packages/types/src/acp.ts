@@ -88,6 +88,10 @@ export interface SetupReceiptPayload {
   kind: string;
   /** Request-user-input event represented by this receipt, when applicable. */
   requestId?: string;
+  presentation?: {
+    label: string;
+    iconKey: string;
+  };
   [key: string]: unknown;
 }
 
@@ -835,6 +839,7 @@ export function parseAcpRequestUserInputAnswerReply(
 
 export type AcpMessageKind =
   | 'text'
+  | 'setup_receipt'
   | 'reasoning'
   | 'tool_call'
   | 'tool_result'
