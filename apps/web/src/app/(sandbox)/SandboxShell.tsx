@@ -78,8 +78,7 @@ export function SandboxShell({
     : null;
   const needsAdminSetup =
     user?.isAdmin === true &&
-    setupStatus != null &&
-    setupStatus.setupCompletedAt == null &&
+    setupStatus?.setupCompletedAt == null &&
     setupSessionStatus?.completed !== true;
   const isAllowedSetupSession =
     setupSessionPath !== null && pathname === setupSessionPath;
