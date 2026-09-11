@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocalStorage } from 'usehooks-ts';
 
 import { useAuthorizedUser } from './useUser';
@@ -23,6 +23,31 @@ function normalizeEntries(stored: unknown): RecentEntry[] {
           : null,
     )
     .filter((entry): entry is RecentEntry => entry !== null);
+}
+
+/** Keep list order stable when the same ids are only reshuffled. */
+export function nextStickyIdOrder(current: string[], ids: string[]): string[] {
+  const known = new Set(current);
+  if (ids.some((id) => !known.has(id))) {
+    return ids;
+  }
+
+  const live = new Set(ids);
+  if (current.some((id) => !live.has(id))) {
+    return current.filter((id) => live.has(id));
+  }
+
+  return current;
+}
+
+function useStickyIdOrder(ids: string[]): string[] {
+  const [order, setOrder] = useState(ids);
+
+  useEffect(() => {
+    setOrder((current) => nextStickyIdOrder(current, ids));
+  }, [ids]);
+
+  return order;
 }
 
 /**
@@ -56,10 +81,11 @@ export function useRecentSessions() {
     [setEntries],
   );
 
-  const recentSessionIds = useMemo(
+  const liveRecentSessionIds = useMemo(
     () => entries.map((entry) => entry.id),
     [entries],
   );
+  const recentSessionIds = useStickyIdOrder(liveRecentSessionIds);
 
   return { recentSessionIds, recordVisit };
 }
