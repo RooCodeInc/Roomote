@@ -1310,6 +1310,11 @@ describe('Telegram webhook handler', () => {
         text: expect.stringContaining('Reconnected this Telegram chat'),
       }),
     );
+    expect(addReactionMock).toHaveBeenCalledExactlyOnceWith({
+      channelId: '222',
+      messageId: '456',
+      name: 'eyes',
+    });
   });
 
   it('does not silently resume a completed task from a user-owned forum topic', async () => {

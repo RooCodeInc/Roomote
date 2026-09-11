@@ -777,6 +777,10 @@ telegram.post('/', async (c) => {
   }
 
   if (completedRun) {
+    await ackTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      messageId: metadata.communicationMessageId,
+    });
     try {
       const resumeLaunch = await resumeTelegramTaskFromSnapshot({
         completedRun,
