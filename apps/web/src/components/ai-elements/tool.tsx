@@ -82,7 +82,6 @@ export const ToolHeader = ({
     (deletions !== undefined && deletions > 0);
   const hasSecondaryLabel = Boolean(object || suffix);
   const statusLabel = TOOL_STATE_LABELS[state];
-  const showStatus = state === 'output-error';
   const isRunning = state === 'input-streaming' || state === 'input-available';
 
   const customIcon = iconElement ? (
@@ -137,13 +136,7 @@ export const ToolHeader = ({
           )}
         </span>
       )}
-      <span
-        aria-live="polite"
-        className={cn(
-          showStatus ? 'shrink-0 text-xs' : 'sr-only',
-          state === 'output-error' && 'text-destructive',
-        )}
-      >
+      <span aria-live="polite" className="sr-only">
         {statusLabel}
       </span>
     </>
