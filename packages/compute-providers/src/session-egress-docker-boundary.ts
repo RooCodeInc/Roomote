@@ -193,6 +193,11 @@ export async function installDockerSessionEgressBoundary(
     'SYS_PTRACE',
     '--security-opt',
     'apparmor=unconfined',
+    // The worker image installs Node through mise for the roomote user. Root
+    // helpers must select that image-owned config explicitly, without relying
+    // on root's HOME or any configuration inside the workload filesystem.
+    '--env',
+    'MISE_CONFIG_FILE=/home/roomote/.config/mise/config.toml',
     '--platform',
     input.platform,
     '--entrypoint',

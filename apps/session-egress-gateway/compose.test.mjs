@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -12,6 +18,20 @@ const repository = resolve(gateway, '../..');
 test('production plus session-egress overlay resolves every local Dockerfile COPY source', () => {
   const configDir = mkdtempSync(join(tmpdir(), 'roomote-compose-contract-'));
   try {
+    // Preserve user-installed CLI plugin discovery without copying Docker's
+    // credential configuration into this isolated, read-only Compose check.
+    writeFileSync(
+      join(configDir, 'config.json'),
+      JSON.stringify({
+        cliPluginsExtraDirs: [
+          join(
+            process.env.DOCKER_CONFIG || join(homedir(), '.docker'),
+            'cli-plugins',
+          ),
+        ],
+      }),
+      { mode: 0o600 },
+    );
     const result = spawnSync(
       'docker',
       [
