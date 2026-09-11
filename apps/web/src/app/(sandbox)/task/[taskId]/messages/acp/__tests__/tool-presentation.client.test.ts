@@ -194,6 +194,7 @@ describe('tool presentation resolver', () => {
       ).toMatchObject({
         verb,
         object,
+        displayName: 'Timer',
         iconKey: 'stopwatch',
         providerLabel: undefined,
       });
@@ -672,6 +673,10 @@ describe('tool presentation resolver', () => {
           .displayName,
       ),
     ).toEqual({ action: 'Used', objectSummary: '2 tool calls' });
+    expect(summarizeToolGroup('generic', 2, 'Timer')).toEqual({
+      action: 'Used',
+      objectSummary: '2 timer calls',
+    });
   });
 });
 

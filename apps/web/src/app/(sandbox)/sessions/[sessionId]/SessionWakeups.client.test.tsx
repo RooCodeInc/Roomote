@@ -161,7 +161,7 @@ describe('SessionWakeups', () => {
     render(ui());
     await tick();
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Could not refresh scheduled wakeups.',
+      'Could not refresh scheduled timers.',
     );
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     await tick();
