@@ -483,10 +483,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         });
 
         if (!result.success) {
-          throw new Error(result.error);
+          toast.error(result.error);
         }
       } catch (err) {
         console.error('[sandbox] cancelTask fallback error:', err);
+        toast.error('Failed to stop task. Please try again.');
       } finally {
         cancellingRef.current = false;
       }
