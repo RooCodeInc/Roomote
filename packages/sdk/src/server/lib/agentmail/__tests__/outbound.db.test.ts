@@ -4,7 +4,6 @@ import {
   agentmailConversationParticipants,
   agentmailConversations,
   agentmailSuppressions,
-  agentmailUserMappings,
   authUsers,
   db,
   eq,
@@ -70,15 +69,9 @@ describe('agentmail suppression store (real database)', () => {
 });
 
 describe('resolveAgentMailOutboundAddress (real database)', () => {
-  it('prefers the verified account email over a linked mapping', async () => {
+  it('resolves the verified account email', async () => {
     const accountEmail = uniqueEmail('account');
-    const linkedEmail = uniqueEmail('linked');
     const user = await createVerifiedUser(accountEmail);
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: linkedEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
 
     expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
       ok: true,
@@ -86,27 +79,7 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
     });
   });
 
-  it('falls back to a linked mapping when the account email is suppressed', async () => {
-    const accountEmail = uniqueEmail('account');
-    const linkedEmail = uniqueEmail('linked');
-    const user = await createVerifiedUser(accountEmail);
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: linkedEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
-    await suppressAgentMailAddress({
-      emailAddress: accountEmail,
-      reason: 'unsubscribe',
-    });
-
-    expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
-      ok: true,
-      emailAddress: linkedEmail.toLowerCase(),
-    });
-  });
-
-  it('refuses when every permitted address is suppressed', async () => {
+  it('refuses when the account email is suppressed', async () => {
     const accountEmail = uniqueEmail('account');
     const user = await createVerifiedUser(accountEmail);
     await suppressAgentMailAddress({
@@ -120,7 +93,7 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
     });
   });
 
-  it('refuses users with no verified email and no mapping', async () => {
+  it('refuses users with no verified email', async () => {
     const user = await userFactory.create();
 
     expect(await resolveAgentMailOutboundAddress(user.id)).toEqual({
@@ -129,15 +102,9 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
     });
   });
 
-  it('lists only explicitly verified account identities for automation selection', async () => {
+  it('lists the verified account identity for automation selection', async () => {
     const accountEmail = uniqueEmail('verified');
-    const linkedEmail = uniqueEmail('linked');
     const user = await createVerifiedUser(accountEmail);
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: linkedEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
 
     const identities = await listAgentMailOutboundIdentities(user.id);
 
@@ -155,13 +122,7 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
 
   it('revokes an exact identity instead of substituting another address', async () => {
     const accountEmail = uniqueEmail('selected');
-    const linkedEmail = uniqueEmail('linked');
     const user = await createVerifiedUser(accountEmail);
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: linkedEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
     const [identity] = await listAgentMailOutboundIdentities(user.id);
     await db
       .update(authUsers)

@@ -276,13 +276,10 @@ export {
 } from './lib/agentmail/rui-answer-links';
 
 export {
-  buildAgentMailEmailLinkToken,
-  buildAgentMailEmailLinkUrl,
   buildAgentMailUnsubscribeToken,
   buildAgentMailUnsubscribeUrl,
-  verifyAgentMailEmailLinkToken,
   verifyAgentMailUnsubscribeToken,
-} from './lib/agentmail/email-link-tokens';
+} from './lib/agentmail/unsubscribe-tokens';
 
 export {
   AgentMailRecipientUnavailableError,
@@ -310,7 +307,6 @@ export {
   processAgentMailWebhookEvent,
   recordAgentMailWebhookEvent,
   recoverPendingAgentMailWork,
-  redispatchAgentMailEventsForSender,
   type AgentMailWebhookEventJob,
 } from './lib/agentmail/inbound';
 

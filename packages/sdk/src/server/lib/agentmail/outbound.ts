@@ -9,18 +9,16 @@ import {
   agentmailConversationParticipants,
   agentmailConversations,
   agentmailSuppressions,
-  agentmailUserMappings,
   and,
   authUsers,
   db,
-  desc,
   eq,
   isNull,
   resolveAgentMailRuntimeCredentials,
   users,
 } from '@roomote/db/server';
 
-import { buildAgentMailUnsubscribeUrl } from './email-link-tokens';
+import { buildAgentMailUnsubscribeUrl } from './unsubscribe-tokens';
 import {
   isUniqueViolation,
   normalizeEmailAddress,
@@ -32,9 +30,8 @@ const LOG_PREFIX = '[agentmail-outbound]';
 /**
  * Outbound-initiated (transactional) email. The consent invariant lives
  * here, enforced in code rather than call-site discipline: Roomote initiates
- * email only to (a) the recipient's own verified account address or (b) an
- * address they explicitly linked by proving mailbox possession — and never to
- * a suppressed address. Replies within an existing conversation do not pass
+ * email only to the recipient's own verified account address, and never to a
+ * suppressed address. Replies within an existing conversation do not pass
  * through this module and are never suppressed.
  */
 
@@ -215,8 +212,7 @@ export async function resolveAgentMailOutboundRecipient(
 
 /**
  * The address Roomote may initiate email to for this user: their verified
- * account email first, then their most recently linked mailbox-possession
- * address. Unverified account emails never qualify.
+ * account email. Unverified account emails never qualify.
  */
 export async function resolveAgentMailOutboundAddress(
   userId: string,
@@ -225,39 +221,19 @@ export async function resolveAgentMailOutboundAddress(
     return { ok: false, reason: 'no_active_member' };
   }
 
-  const candidates: string[] = [];
-
   const authUser = await db.query.authUsers.findFirst({
     where: and(eq(authUsers.id, userId), eq(authUsers.emailVerified, true)),
     columns: { email: true },
   });
-  if (authUser?.email) {
-    candidates.push(normalizeEmailAddress(authUser.email));
-  }
-
-  const mapping = await db.query.agentmailUserMappings.findFirst({
-    where: and(
-      eq(agentmailUserMappings.userId, userId),
-      eq(agentmailUserMappings.source, 'link_code'),
-    ),
-    orderBy: [desc(agentmailUserMappings.createdAt)],
-    columns: { emailAddress: true },
-  });
-  if (mapping) {
-    candidates.push(normalizeEmailAddress(mapping.emailAddress));
-  }
-
-  if (candidates.length === 0) {
+  if (!authUser?.email) {
     return { ok: false, reason: 'no_permitted_address' };
   }
 
-  for (const emailAddress of [...new Set(candidates)]) {
-    if (!(await isAgentMailAddressSuppressed(emailAddress))) {
-      return { ok: true, emailAddress };
-    }
+  const emailAddress = normalizeEmailAddress(authUser.email);
+  if (await isAgentMailAddressSuppressed(emailAddress)) {
+    return { ok: false, reason: 'suppressed' };
   }
-
-  return { ok: false, reason: 'suppressed' };
+  return { ok: true, emailAddress };
 }
 
 /** Whether an outbound-initiated email to this user could be sent right now. */

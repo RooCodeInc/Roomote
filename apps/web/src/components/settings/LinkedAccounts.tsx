@@ -424,7 +424,7 @@ function EmailAccountDetails({
   );
 }
 
-function EmailLinkingGuidance({
+function EmailChannelGuidance({
   canViewInboxAddress,
   emailEnabled,
   inboxEmail,
@@ -436,8 +436,8 @@ function EmailLinkingGuidance({
   if (!emailEnabled) {
     return (
       <p className="text-sm text-muted-foreground">
-        Email is disabled for this deployment. Verification messages and
-        sender-address linking are unavailable until an admin enables it.
+        Email is disabled for this deployment. Verification messages are
+        unavailable until an admin enables it.
       </p>
     );
   }
@@ -445,9 +445,8 @@ function EmailLinkingGuidance({
   if (inboxEmail) {
     return (
       <p className="text-sm text-muted-foreground">
-        To link another sender address, email{' '}
-        <span className="font-mono ph-no-capture">{inboxEmail}</span> from that
-        address, then use the link in Roomote&apos;s reply.
+        Email <span className="font-mono ph-no-capture">{inboxEmail}</span> from
+        your verified address to start work by email.
       </p>
     );
   }
@@ -455,8 +454,8 @@ function EmailLinkingGuidance({
   return (
     <p className="text-sm text-muted-foreground">
       {canViewInboxAddress
-        ? 'Email is enabled, but no AgentMail inbox is configured. Configure it in Communications before linking sender addresses.'
-        : "To link another sender address, email your deployment's Roomote inbox, then use the link in Roomote's reply. Ask an admin for the inbox address."}
+        ? 'Email is enabled, but no AgentMail inbox is configured. Configure it in Communications before starting work by email.'
+        : "Email your deployment's Roomote inbox from your verified address to start work by email. Ask an admin for the inbox address."}
     </p>
   );
 }
@@ -872,9 +871,7 @@ export function LinkedAccounts() {
   ].filter(isLinkedAccountDescriptor);
 
   const primaryEmail = emailAccounts.data?.primaryEmail;
-  const hasVisibleEmailRows = Boolean(
-    primaryEmail || emailAccounts.data?.senderAddresses.length,
-  );
+  const hasVisibleEmailRows = Boolean(primaryEmail);
   const hasVisibleRows =
     hasVisibleEmailRows || linkedAccountDescriptors.length > 0;
   const isLoadingVisibleRows =
@@ -963,23 +960,8 @@ export function LinkedAccounts() {
         />
       ) : null}
 
-      {emailAccounts.data?.senderAddresses.map((emailAddress) => (
-        <LinkedAccountRow
-          key={`email-sender:${emailAddress}`}
-          icon={<Mail className="size-4" />}
-          name="Email sender"
-          details={
-            <EmailAccountDetails
-              emailAddress={emailAddress}
-              status="Linked"
-              variant="success"
-            />
-          }
-        />
-      ))}
-
       {emailAccounts.data ? (
-        <EmailLinkingGuidance
+        <EmailChannelGuidance
           canViewInboxAddress={emailAccounts.data.canViewInboxAddress}
           emailEnabled={emailAccounts.data.emailEnabled}
           inboxEmail={emailAccounts.data.inboxEmail}
