@@ -115,6 +115,15 @@ describe('createVoiceLiveSession', () => {
     expect(body.session.instructions).toContain(
       'Never claim that you checked a source',
     );
+    expect(body.session.instructions).toContain(
+      'any product, repository, or connected tool discussed in the Session',
+    );
+    expect(body.session.instructions).toContain(
+      'Roomote when the platform itself is the topic',
+    );
+    expect(body.session.instructions).not.toContain(
+      'describe how Roomote works',
+    );
     expect(body.session.instructions).not.toContain(
       'Do not delegate to the backend when',
     );
