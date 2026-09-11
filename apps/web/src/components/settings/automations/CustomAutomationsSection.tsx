@@ -19,6 +19,9 @@ import {
   getAutomationTargetEmailIdentityId,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
+  AUTOMATION_RESULT_PRIORITY_LABELS,
+  AUTOMATION_RESULT_PRIORITIES,
+  type AutomationResultPriority,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
   type ReasoningEffort,
@@ -81,6 +84,7 @@ type CustomAutomationFormState = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string;
   cronExpression: string;
@@ -96,6 +100,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
   enabled: true,
+  resultPriority: 'normal',
   scheduleMode: 'daily',
   environmentId: '',
   cronExpression: '',
@@ -313,6 +318,7 @@ function formFromRow(
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
@@ -331,6 +337,7 @@ function writeInputFromRow(row: CustomAutomationListItem) {
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
@@ -839,6 +846,7 @@ export function CustomAutomationsSection({
       name: form.name,
       prompt: form.prompt,
       enabled: form.enabled,
+      resultPriority: form.resultPriority,
       scheduleMode: form.scheduleMode,
       cronExpression:
         form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
@@ -980,6 +988,31 @@ export function CustomAutomationsSection({
               {effectiveScheduleSummary}
             </p>
           ) : null}
+        </div>
+
+        <div className="space-y-2 sm:w-52">
+          <Label htmlFor="custom-automation-priority">Priority</Label>
+          <Select
+            value={form.resultPriority}
+            disabled={busy}
+            onValueChange={(value) =>
+              setForm((current) => ({
+                ...current,
+                resultPriority: value as AutomationResultPriority,
+              }))
+            }
+          >
+            <SelectTrigger id="custom-automation-priority" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTOMATION_RESULT_PRIORITIES.map((priority) => (
+                <SelectItem key={priority} value={priority}>
+                  {AUTOMATION_RESULT_PRIORITY_LABELS[priority]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-4 sm:flex-row">

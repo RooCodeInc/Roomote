@@ -51,6 +51,10 @@ function normalizePersonalPreferences(
       typeof metadata.therapist_mode === 'boolean'
         ? metadata.therapist_mode
         : DEFAULT_PERSONAL_PREFERENCES.therapistMode,
+    resultsPageEnabled:
+      typeof metadata.results_page_enabled === 'boolean'
+        ? metadata.results_page_enabled
+        : DEFAULT_PERSONAL_PREFERENCES.resultsPageEnabled,
   };
 }
 
@@ -142,6 +146,9 @@ export async function updatePersonalPreferencesCommand(
 
   if (input.therapistMode !== undefined) {
     nextMetadataRecord.therapist_mode = input.therapistMode;
+  }
+  if (input.resultsPageEnabled !== undefined) {
+    nextMetadataRecord.results_page_enabled = input.resultsPageEnabled;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

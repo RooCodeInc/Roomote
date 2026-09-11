@@ -59,6 +59,7 @@ export * from './lib/source-control-provider';
 export * from './lib/sync-task-state';
 export * from './lib/cancel-task-run';
 export * from './lib/automations';
+export * from './lib/automation-results';
 export * from './lib/custom-automations';
 export * from './lib/custom-automation-access';
 export * from './lib/custom-skills';
@@ -235,6 +236,7 @@ export {
   automationsRelations,
   customAutomations,
   customAutomationsRelations,
+  automationResults,
   trackedMessages,
   trackedMessagesRelations,
   environmentVariables,

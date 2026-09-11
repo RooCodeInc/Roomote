@@ -16,6 +16,7 @@ import {
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
+  AUTOMATION_RESULT_PRIORITIES,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -411,6 +412,12 @@ import {
   updateCustomAutomationCommand,
 } from '../commands/automations';
 import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
+import {
+  actOnResultCommand,
+  clearResultsCommand,
+  getUnreadResultCountCommand,
+  listResultsCommand,
+} from '../commands/results';
 import {
   getAgentBehaviorSettingsCommand,
   updateAgentBehaviorSettingsCommand,
@@ -875,6 +882,7 @@ const automationsRouter = createRouter({
         name: z.string().trim().min(1).max(100),
         prompt: z.string().trim().min(1).max(8_000),
         enabled: z.boolean(),
+        resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
           'every_hour',
@@ -917,6 +925,7 @@ const automationsRouter = createRouter({
         name: z.string().trim().min(1).max(100),
         prompt: z.string().trim().min(1).max(8_000),
         enabled: z.boolean(),
+        resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
           'every_hour',
@@ -1612,13 +1621,15 @@ export const appRouter = createRouter({
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
             therapistMode: z.boolean().optional(),
+            resultsPageEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
               input.narrationMode !== undefined ||
-              input.therapistMode !== undefined,
+              input.therapistMode !== undefined ||
+              input.resultsPageEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -2985,6 +2996,27 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         dismissTaskSuggestionCommand(auth, input),
       ),
+  }),
+
+  results: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      listResultsCommand(auth),
+    ),
+    unreadCount: protectedProcedure.query(({ ctx: { auth } }) =>
+      getUnreadResultCountCommand(auth),
+    ),
+    act: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          kind: z.enum(['report', 'suggestion']),
+          action: z.enum(['accept', 'ignore']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => actOnResultCommand(auth, input)),
+    clear: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      clearResultsCommand(auth),
+    ),
   }),
 
   backgroundAgents: automationsRouter,

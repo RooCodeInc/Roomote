@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   bindConversation: vi.fn(),
   findInstallation: vi.fn(),
   findCustomAutomation: vi.fn(),
+  recordCustomAutomationResult: vi.fn().mockResolvedValue(null),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   findWakeup: vi.fn(),
@@ -192,6 +193,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: mocks.findCustomAutomation,
+  recordCustomAutomationResult: mocks.recordCustomAutomationResult,
   getSessionWakeupById: mocks.findWakeup,
   getSessionForFastConversation: mocks.findWakeupSession,
   slackInstallations: {

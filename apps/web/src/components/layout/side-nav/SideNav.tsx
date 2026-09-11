@@ -33,6 +33,7 @@ import { useLiveTaskStatus, useTaskPins } from '@/hooks/tasks';
 import { useTRPC } from '@/trpc/client';
 import { cn } from '@/lib/utils';
 import { NewTaskDialog } from '@/components/tasks/NewTaskDialog';
+import { useResultsPage } from '@/hooks/useResultsPage';
 
 import {
   getVisiblePrimaryNavItems,
@@ -74,6 +75,12 @@ export const SideNav = ({
   );
   const isSideNavExpanded = hasHydrated && persistedIsSideNavExpanded;
   const trpc = useTRPC();
+  const { enabled: resultsEnabled } = useResultsPage();
+  const { data: unreadResultCount = 0 } = useQuery(
+    trpc.results.unreadCount.queryOptions(undefined, {
+      enabled: resultsEnabled,
+    }),
+  );
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   const { pinnedTaskIds, setTaskPinned, isTaskPinMutationPending } =
     useTaskPins();
@@ -125,8 +132,8 @@ export const SideNav = ({
   );
   const recentSessions = recentSessionsResult?.sessions ?? [];
   const visibleNavItems = useMemo(
-    () => getVisiblePrimaryNavItems({ isAdmin }),
-    [isAdmin],
+    () => getVisiblePrimaryNavItems({ isAdmin, resultsEnabled }),
+    [isAdmin, resultsEnabled],
   );
 
   useEffect(() => {
@@ -278,6 +285,7 @@ export const SideNav = ({
                   ? matchPaths.includes(pathname)
                   : matchPaths.some((path) => pathname.startsWith(path))
               }
+              badgeCount={href === '/results' ? unreadResultCount : 0}
             />
           ),
         )}

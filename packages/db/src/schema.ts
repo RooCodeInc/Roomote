@@ -87,6 +87,7 @@ import type {
   SessionWakeupReportPolicy,
   SessionWakeupSchedule,
   SessionWakeupStatus,
+  AutomationResultPriority,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -633,6 +634,13 @@ export const workItems = pgTable(
     failedAt: timestamp('failed_at'),
     launchError: text('launch_error'),
     dismissedAt: timestamp('dismissed_at'),
+    resultAcceptedAt: timestamp('result_accepted_at'),
+    resultIgnoredAt: timestamp('result_ignored_at'),
+    resultAutomationName: text('result_automation_name'),
+    resultPriority: text('result_priority').$type<AutomationResultPriority>(),
+    resultUserId: text('result_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -4390,6 +4398,10 @@ export const customAutomations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     prompt: text('prompt').notNull(),
+    resultPriority: text('result_priority')
+      .notNull()
+      .default('normal')
+      .$type<AutomationResultPriority>(),
     enabled: boolean('enabled').notNull().default(false),
     scheduleMode: text('schedule_mode').notNull().default('off'),
     cronExpression: text('cron_expression'),
@@ -4437,6 +4449,43 @@ export const customAutomations = pgTable(
     uniqueIndex('custom_automations_name_unique_idx').on(table.name),
     index('custom_automations_enabled_idx').on(table.enabled),
     index('custom_automations_environment_id_idx').on(table.environmentId),
+  ],
+);
+
+export const automationResults = pgTable(
+  'automation_results',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    automationKey: text('automation_key')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'set null' }),
+    customAutomationId: uuid('custom_automation_id').references(
+      () => customAutomations.id,
+      { onDelete: 'set null' },
+    ),
+    sourceTaskId: text('source_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    automationName: text('automation_name').notNull(),
+    content: text('content').notNull(),
+    priority: text('priority')
+      .notNull()
+      .default('normal')
+      .$type<AutomationResultPriority>(),
+    dedupeKey: text('dedupe_key').notNull(),
+    acceptedAt: timestamp('accepted_at'),
+    ignoredAt: timestamp('ignored_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('automation_results_dedupe_key_unique_idx').on(table.dedupeKey),
+    index('automation_results_inbox_idx').on(table.priority, table.createdAt),
+    index('automation_results_user_id_idx').on(table.userId),
+    index('automation_results_source_task_id_idx').on(table.sourceTaskId),
   ],
 );
 
