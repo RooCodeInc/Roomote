@@ -28,8 +28,10 @@ import {
 
 import {
   generateLlmTaskTitle,
+  generateLlmTaskTitleWithEmoji,
   isFallbackTaskTitle,
   LLM_TITLE_LOCKED_CHECKPOINT,
+  type GeneratedTaskTitle,
   type TaskTitleMessage,
 } from '../llm-task-title';
 
@@ -177,7 +179,7 @@ export async function refreshFastAgentSessionTitle({
 }: {
   sessionId: string;
   userId: string;
-}): Promise<string | null> {
+}): Promise<GeneratedTaskTitle | null> {
   try {
     const conversation = await db.query.fastAgentConversations.findFirst({
       where: eq(fastAgentConversations.id, sessionId),
@@ -192,7 +194,9 @@ export async function refreshFastAgentSessionTitle({
       return null;
     }
     if (conversation.titleEditedByUserAt) {
-      return conversation.title;
+      return conversation.title
+        ? { title: conversation.title, emoji: null }
+        : null;
     }
 
     const rows = await db
@@ -245,19 +249,24 @@ export async function refreshFastAgentSessionTitle({
       checkpoint <= conversation.llmTitleCheckpoint ||
       messages.length === 0
     ) {
-      return conversation.title;
+      return conversation.title
+        ? { title: conversation.title, emoji: null }
+        : null;
     }
 
-    const title = await generateLlmTaskTitle({
+    const generated = await generateLlmTaskTitleWithEmoji({
       userId,
       taskId: null,
       messages,
     });
+    const { title } = generated;
     if (isFallbackTaskTitle(title)) {
-      return conversation.title;
+      return conversation.title
+        ? { title: conversation.title, emoji: null }
+        : null;
     }
 
-    return await db.transaction(async (tx) => {
+    const persistedTitle = await db.transaction(async (tx) => {
       // Re-read the conversation title under a row lock: the pre-generation
       // snapshot may be stale by now, and the session guard below must match
       // the title the session was actually seeded/synced from.
@@ -310,6 +319,12 @@ export async function refreshFastAgentSessionTitle({
         );
       return title;
     });
+    return persistedTitle
+      ? {
+          title: persistedTitle,
+          emoji: persistedTitle === title ? generated.emoji : null,
+        }
+      : null;
   } catch (error) {
     console.error(
       `[Fast Agent] Failed to refresh session title session=${sessionId}: ${formatErrorForLog(error)}`,

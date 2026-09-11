@@ -304,6 +304,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
   });
 
   it('syncs generated titles to a managed Telegram Fast topic', async () => {
+    mocks.telegramResolveForumTopicIcon.mockResolvedValue('bug-icon');
     const user = await userFactory.create();
     const conversation = await createConversation({
       userId: user.id,
@@ -327,14 +328,18 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       question: 'Start here',
       currentMessageId: '78',
     });
-    delivery!.adapter.activity?.updateTitle?.('Generated Fast title');
+    delivery!.adapter.activity?.updateTitle?.('Generated Fast title', {
+      emoji: '🐞',
+    });
     await delivery!.adapter.activity?.dispose();
 
     expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({
       channelId: 'telegram-chat',
       threadId: '77',
       name: 'Generated Fast title',
+      iconCustomEmojiId: 'bug-icon',
     });
+    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith(['🐞']);
   });
 
   it('does not rename a user-owned Telegram topic', async () => {

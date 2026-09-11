@@ -25,10 +25,12 @@ import {
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../../llm-task-title';
 
 const generateLlmTaskTitle = vi.hoisted(() => vi.fn());
+const generateLlmTaskTitleWithEmoji = vi.hoisted(() => vi.fn());
 
 vi.mock('../../llm-task-title', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../llm-task-title')>()),
   generateLlmTaskTitle,
+  generateLlmTaskTitleWithEmoji,
 }));
 
 async function createConversation(
@@ -114,6 +116,7 @@ async function insertMessage({
 describe('refreshFastAgentSessionTitle', () => {
   beforeEach(() => {
     generateLlmTaskTitle.mockReset();
+    generateLlmTaskTitleWithEmoji.mockReset();
   });
 
   it('titles a session at the first user-message checkpoint', async () => {
@@ -127,7 +130,10 @@ describe('refreshFastAgentSessionTitle', () => {
       ts: 1,
       eventType: 'roomote_runtime.user_prompt',
     });
-    generateLlmTaskTitle.mockResolvedValue('Rotate the API keys');
+    generateLlmTaskTitleWithEmoji.mockResolvedValue({
+      title: 'Rotate the API keys',
+      emoji: '🔑',
+    });
 
     const refreshedTitle = await refreshFastAgentSessionTitle({
       sessionId: conversation.id,
@@ -143,9 +149,12 @@ describe('refreshFastAgentSessionTitle', () => {
     expect(updated?.title).toBe('Rotate the API keys');
     expect(updated?.llmTitleCheckpoint).toBe(1);
     expect(session?.title).toBe('Rotate the API keys');
-    expect(refreshedTitle).toBe('Rotate the API keys');
+    expect(refreshedTitle).toEqual({
+      title: 'Rotate the API keys',
+      emoji: '🔑',
+    });
     expect(session?.llmTitleCheckpoint).toBe(1);
-    expect(generateLlmTaskTitle).toHaveBeenCalledWith({
+    expect(generateLlmTaskTitleWithEmoji).toHaveBeenCalledWith({
       userId: user.id,
       taskId: null,
       messages: [{ role: 'user', text: 'How do I rotate the API keys?' }],
@@ -173,7 +182,10 @@ describe('refreshFastAgentSessionTitle', () => {
       },
       source: 'automation',
     });
-    generateLlmTaskTitle.mockResolvedValue('Find actionable regressions');
+    generateLlmTaskTitleWithEmoji.mockResolvedValue({
+      title: 'Find actionable regressions',
+      emoji: '🔎',
+    });
 
     await refreshFastAgentSessionTitle({
       sessionId: conversation.id,
@@ -184,7 +196,7 @@ describe('refreshFastAgentSessionTitle', () => {
       where: eq(sessions.fastConversationId, conversation.id),
     });
     expect(session?.title).toBe('Find actionable regressions');
-    expect(generateLlmTaskTitle).toHaveBeenCalledWith({
+    expect(generateLlmTaskTitleWithEmoji).toHaveBeenCalledWith({
       userId: user.id,
       taskId: null,
       messages: [{ role: 'user', text: 'Find actionable regressions.' }],
@@ -214,7 +226,7 @@ describe('refreshFastAgentSessionTitle', () => {
     });
 
     expect(refreshedTitle).toBeNull();
-    expect(generateLlmTaskTitle).not.toHaveBeenCalled();
+    expect(generateLlmTaskTitleWithEmoji).not.toHaveBeenCalled();
   });
 
   it('does not regenerate before the next checkpoint and skips hidden prompts', async () => {
@@ -253,7 +265,7 @@ describe('refreshFastAgentSessionTitle', () => {
       userId: user.id,
     });
 
-    expect(generateLlmTaskTitle).not.toHaveBeenCalled();
+    expect(generateLlmTaskTitleWithEmoji).not.toHaveBeenCalled();
   });
 
   it('never overwrites a user-edited title', async () => {
@@ -277,7 +289,7 @@ describe('refreshFastAgentSessionTitle', () => {
       userId: user.id,
     });
 
-    expect(generateLlmTaskTitle).not.toHaveBeenCalled();
+    expect(generateLlmTaskTitleWithEmoji).not.toHaveBeenCalled();
     const updated = await db.query.fastAgentConversations.findFirst({
       where: eq(fastAgentConversations.id, conversation.id),
     });
@@ -305,7 +317,10 @@ describe('refreshFastAgentSessionTitle', () => {
         titleEditedByUserAt: new Date(),
       })
       .where(eq(sessions.fastConversationId, conversation.id));
-    generateLlmTaskTitle.mockResolvedValue('Generated Fast title');
+    generateLlmTaskTitleWithEmoji.mockResolvedValue({
+      title: 'Generated Fast title',
+      emoji: '✨',
+    });
 
     await refreshFastAgentSessionTitle({
       sessionId: conversation.id,

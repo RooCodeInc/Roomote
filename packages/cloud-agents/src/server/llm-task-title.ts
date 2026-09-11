@@ -22,10 +22,11 @@ const MAX_MESSAGE_CHARS = 800;
 
 const generatedTaskTitleSchema = z.object({
   title: z.string(),
+  emoji: z.string().nullable(),
 });
 
 const TITLE_SYSTEM_PROMPT = `You write concise task titles for coding conversations.
-Return a title only, without punctuation wrappers or commentary.
+Return a title and one emoji that semantically represents the requested work.
 Rules:
 - maximum 12 words
 - name the requested work; never assert an outcome or failure state such as failed, blocked, stuck, or missing unless the final message explicitly states that outcome
@@ -37,7 +38,13 @@ Rules:
 - descriptive and specific to the user's request
 - use sentence case, not title case; preserve proper nouns, acronyms, and file names, capitalize the first word
 - avoid filler words
+- choose exactly one relevant emoji; do not include it in the title
 - no markdown`;
+
+export type GeneratedTaskTitle = {
+  title: string;
+  emoji: string | null;
+};
 
 export type TaskTitleMessage = {
   role: 'user' | 'assistant';
@@ -81,6 +88,17 @@ export function finalizeGeneratedTaskTitle(rawTitle: unknown): string {
   return enforceWordCap(sanitized, MAX_LLM_TASK_TITLE_WORDS);
 }
 
+export function sanitizeGeneratedTaskEmoji(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const emoji = value.trim();
+  return emoji &&
+    /^\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})?)*$/u.test(
+      emoji,
+    )
+    ? emoji
+    : null;
+}
+
 export function isFallbackTaskTitle(value: unknown): boolean {
   return sanitizeGeneratedTaskTitle(value) === FALLBACK_TASK_TITLE;
 }
@@ -117,15 +135,18 @@ function buildTaskTitlePrompt(messages: TaskTitleMessage[]): string {
   return hasMessages ? transcript : '';
 }
 
-export async function generateLlmTaskTitle(input: {
+async function generateLlmTaskTitleResult(input: {
   userId?: string | null;
   taskId?: string | null;
   messages: TaskTitleMessage[];
-}): Promise<string> {
+}): Promise<GeneratedTaskTitle> {
   const prompt = buildTaskTitlePrompt(input.messages);
 
   if (!prompt) {
-    return finalizeGeneratedTaskTitle(FALLBACK_TASK_TITLE);
+    return {
+      title: finalizeGeneratedTaskTitle(FALLBACK_TASK_TITLE),
+      emoji: null,
+    };
   }
 
   const { object } = await generateTrackedNonTaskObject({
@@ -138,5 +159,24 @@ export async function generateLlmTaskTitle(input: {
     prompt,
   });
 
-  return finalizeGeneratedTaskTitle(object?.title);
+  return {
+    title: finalizeGeneratedTaskTitle(object?.title),
+    emoji: sanitizeGeneratedTaskEmoji(object?.emoji),
+  };
+}
+
+export async function generateLlmTaskTitle(input: {
+  userId?: string | null;
+  taskId?: string | null;
+  messages: TaskTitleMessage[];
+}): Promise<string> {
+  return (await generateLlmTaskTitleResult(input)).title;
+}
+
+export async function generateLlmTaskTitleWithEmoji(input: {
+  userId?: string | null;
+  taskId?: string | null;
+  messages: TaskTitleMessage[];
+}): Promise<GeneratedTaskTitle> {
+  return generateLlmTaskTitleResult(input);
 }
