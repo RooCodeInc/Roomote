@@ -1,26 +1,23 @@
 import { renderHook } from '@testing-library/react';
 
-const { sendVerificationEmail, mutationOptionsRef } = vi.hoisted(() => ({
-  sendVerificationEmail: vi.fn(),
-  mutationOptionsRef: {
-    current: null as {
-      mutationFn: (email: string) => Promise<void>;
-    } | null,
-  },
+const { mutationOptions, mutationResult, useMutationMock } = vi.hoisted(() => ({
+  mutationOptions: { mutationKey: ['resend-email-verification'] },
+  mutationResult: { isPending: false, mutate: vi.fn() },
+  useMutationMock: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useMutation: (options: typeof mutationOptionsRef.current) => {
-    mutationOptionsRef.current = options;
-    return {
-      mutateAsync: async (email: string) => options?.mutationFn(email),
-      isPending: false,
-    };
-  },
+  useMutation: useMutationMock,
 }));
 
-vi.mock('@/lib/auth-client', () => ({
-  authClient: { sendVerificationEmail },
+vi.mock('@/trpc/client', () => ({
+  useTRPC: () => ({
+    linkedAccounts: {
+      resendEmailVerification: {
+        mutationOptions: () => mutationOptions,
+      },
+    },
+  }),
 }));
 
 import { useResendEmailVerification } from './useResendEmailVerification';
@@ -28,32 +25,13 @@ import { useResendEmailVerification } from './useResendEmailVerification';
 describe('useResendEmailVerification', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useMutationMock.mockReturnValue(mutationResult);
   });
 
-  it('uses Better Auth verification with the personal settings callback', async () => {
-    sendVerificationEmail.mockResolvedValue({
-      data: { status: true },
-      error: null,
-    });
+  it('uses the protected linked-account resend mutation', () => {
     const { result } = renderHook(() => useResendEmailVerification());
 
-    await result.current.mutateAsync('login@example.com');
-
-    expect(sendVerificationEmail).toHaveBeenCalledWith({
-      email: 'login@example.com',
-      callbackURL: '/settings/personal',
-    });
-  });
-
-  it('turns Better Auth response errors into mutation errors', async () => {
-    sendVerificationEmail.mockResolvedValue({
-      data: null,
-      error: { message: 'Too many requests' },
-    });
-    const { result } = renderHook(() => useResendEmailVerification());
-
-    await expect(
-      result.current.mutateAsync('login@example.com'),
-    ).rejects.toThrow('Too many requests');
+    expect(useMutationMock).toHaveBeenCalledWith(mutationOptions);
+    expect(result.current).toBe(mutationResult);
   });
 });

@@ -8,6 +8,9 @@ const {
   mockAuthUserFindFirst,
   mockIsEmailChannelEnabled,
   mockAgentMailGetInbox,
+  mockRedisEval,
+  mockHeaders,
+  mockSendAuthenticatedVerificationEmail,
   mockInsert,
   mockValues,
   mockOnConflictDoNothing,
@@ -28,6 +31,9 @@ const {
     mockAuthUserFindFirst: vi.fn(),
     mockIsEmailChannelEnabled: vi.fn(),
     mockAgentMailGetInbox: vi.fn(),
+    mockRedisEval: vi.fn(),
+    mockHeaders: vi.fn(),
+    mockSendAuthenticatedVerificationEmail: vi.fn(),
     mockInsert,
     mockValues,
     mockOnConflictDoNothing,
@@ -70,6 +76,18 @@ vi.mock('@roomote/communication', () => ({
   },
 }));
 
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ eval: mockRedisEval }),
+}));
+
+vi.mock('next/headers', () => ({
+  headers: mockHeaders,
+}));
+
+vi.mock('@/lib/server/auth', () => ({
+  sendAuthenticatedVerificationEmail: mockSendAuthenticatedVerificationEmail,
+}));
+
 vi.mock('@/lib/server/env', () => ({
   isEmailChannelEnabled: mockIsEmailChannelEnabled,
 }));
@@ -83,6 +101,7 @@ import {
   getLinkedEmailAccountsCommand,
   linkEmailAddressCommand,
   previewEmailLinkCommand,
+  resendPrimaryEmailVerificationCommand,
 } from './email-link';
 
 const mockAuth = { userId: 'user-1' } as UserAuthSuccess;
@@ -188,6 +207,42 @@ describe('previewEmailLinkCommand', () => {
     ).rejects.toThrow(
       'This link is invalid or has expired. Send another email to get a fresh link.',
     );
+  });
+});
+
+describe('resendPrimaryEmailVerificationCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRedisEval.mockResolvedValue(1);
+    mockHeaders.mockResolvedValue(new Headers({ cookie: 'session=valid' }));
+    mockSendAuthenticatedVerificationEmail.mockResolvedValue(undefined);
+  });
+
+  it('resends only the authenticated user login email', async () => {
+    await expect(
+      resendPrimaryEmailVerificationCommand({
+        ...mockAuth,
+        primaryEmail: 'login@example.com',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockSendAuthenticatedVerificationEmail).toHaveBeenCalledWith({
+      email: 'login@example.com',
+      callbackURL: '/settings/personal',
+      headers: expect.any(Headers),
+    });
+  });
+
+  it('limits authenticated resend attempts to three per minute', async () => {
+    mockRedisEval.mockResolvedValue(4);
+
+    await expect(
+      resendPrimaryEmailVerificationCommand({
+        ...mockAuth,
+        primaryEmail: 'login@example.com',
+      }),
+    ).rejects.toThrow('Too many verification requests');
+    expect(mockSendAuthenticatedVerificationEmail).not.toHaveBeenCalled();
   });
 });
 

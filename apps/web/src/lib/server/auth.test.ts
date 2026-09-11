@@ -7,6 +7,7 @@ const {
   mockSourceControlMappingUpsert,
   mockIsEmailChannelEnabled,
   mockSendAgentMailSystemEmail,
+  mockAuthSendVerificationEmail,
 } = vi.hoisted(() => {
   const calls: Array<{
     config: Array<{
@@ -20,6 +21,7 @@ const {
     mockBetterAuth: vi.fn((options) => ({
       api: {
         getSession: vi.fn(),
+        sendVerificationEmail: mockAuthSendVerificationEmail,
       },
       handler: vi.fn(),
       options,
@@ -33,6 +35,7 @@ const {
     mockSourceControlMappingUpsert: vi.fn(),
     mockIsEmailChannelEnabled: vi.fn(),
     mockSendAgentMailSystemEmail: vi.fn(),
+    mockAuthSendVerificationEmail: vi.fn(),
   };
 });
 
@@ -121,7 +124,7 @@ vi.mock('./canonical-forwarded-proto', () => ({
   withCanonicalForwardedProto: vi.fn((request) => request),
 }));
 
-import { getAuth } from './auth';
+import { getAuth, sendAuthenticatedVerificationEmail } from './auth';
 
 function getAdoOAuthProvider() {
   const config = genericOAuthCalls.at(-1)?.config;
@@ -196,7 +199,7 @@ describe('getAuth', () => {
     expect(options.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
   });
 
-  it('reports explicit verification resend delivery failures without blocking signup', async () => {
+  it('reports authenticated resend delivery failures without weakening public endpoint privacy', async () => {
     mockIsEmailChannelEnabled.mockReturnValue(true);
     mockSendAgentMailSystemEmail.mockResolvedValue({
       sent: false,
@@ -220,17 +223,22 @@ describe('getAuth', () => {
     };
 
     await expect(
-      sendVerificationEmail?.(
+      sendVerificationEmail?.(input, new Request('http://localhost:3000')),
+    ).resolves.toBeUndefined();
+
+    mockAuthSendVerificationEmail.mockImplementation(async () => {
+      await sendVerificationEmail?.(
         input,
         new Request('http://localhost:3000/api/auth/send-verification-email'),
-      ),
-    ).rejects.toThrow('Verification email could not be delivered');
+      );
+    });
     await expect(
-      sendVerificationEmail?.(
-        input,
-        new Request('http://localhost:3000/api/auth/sign-up/email'),
-      ),
-    ).resolves.toBeUndefined();
+      sendAuthenticatedVerificationEmail({
+        email: 'person@example.com',
+        callbackURL: '/settings/personal',
+        headers: new Headers({ cookie: 'session=valid' }),
+      }),
+    ).rejects.toThrow('Verification email could not be delivered');
   });
 
   it('keys the Entra linked-account identity on the normalized uniqueName', async () => {

@@ -933,7 +933,7 @@ export function LinkedAccounts() {
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  resendEmailVerification.mutate(primaryEmail.emailAddress, {
+                  resendEmailVerification.mutate(undefined, {
                     onSuccess: () => {
                       toast.success(
                         'Verification requested. Check your inbox for the link.',

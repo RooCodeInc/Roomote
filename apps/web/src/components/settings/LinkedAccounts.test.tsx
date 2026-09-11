@@ -751,7 +751,7 @@ describe('LinkedAccounts settings', () => {
     );
 
     expect(mutations.resendEmailVerification).toHaveBeenCalledWith(
-      'login@example.com',
+      undefined,
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),
