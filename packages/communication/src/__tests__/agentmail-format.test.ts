@@ -122,6 +122,20 @@ describe('buildAgentMailEmailBody', () => {
     expect(body.html.endsWith('[message truncated]</p></div>')).toBe(true);
   });
 
+  it.each([
+    [AGENTMAIL_MAX_TEXT_LENGTH - 1, false],
+    [AGENTMAIL_MAX_TEXT_LENGTH, false],
+    [AGENTMAIL_MAX_TEXT_LENGTH + 1, true],
+  ])(
+    'caps no-footer input at the %i-character boundary',
+    (length, truncated) => {
+      const body = buildAgentMailEmailBody('a'.repeat(length));
+
+      expect(body.text.length).toBeLessThanOrEqual(AGENTMAIL_MAX_TEXT_LENGTH);
+      expect(body.text.endsWith('[message truncated]')).toBe(truncated);
+    },
+  );
+
   it('renders the reply footer smaller in html and separates it with -- in plain text', () => {
     const footer = formatAgentMailFooterMarkdown(
       'Reply anytime · [Open in Roomote](https://roomote.example/sessions/1)',
@@ -131,5 +145,45 @@ describe('buildAgentMailEmailBody', () => {
       html: '<div><p>Body text</p><p style="font-size:0.875em">Reply anytime · <a href="https://roomote.example/sessions/1">Open in Roomote</a></p></div>',
       text: `Body text\n\n--\nReply anytime · Open in Roomote (https://roomote.example/sessions/1)`,
     });
+  });
+
+  it.each([-1, 0, 1])(
+    'preserves one trusted footer when the source is cap%+i',
+    (offset) => {
+      const footer = formatAgentMailFooterMarkdown(
+        'Reply anytime · [Open in Roomote](https://roomote.example/sessions/1?a=1&b=2)',
+      );
+      const separator = '\n\n';
+      const markdown = `${'a'.repeat(
+        AGENTMAIL_MAX_TEXT_LENGTH - footer.length - separator.length + offset,
+      )}${separator}${footer}`;
+      const body = buildAgentMailEmailBody(markdown);
+
+      expect(body.text.length).toBeLessThanOrEqual(AGENTMAIL_MAX_TEXT_LENGTH);
+      expect(body.html.match(/font-size:0\.875em/g)).toHaveLength(1);
+      expect(body.html.match(/>Reply anytime/g)).toHaveLength(1);
+      expect(body.html.match(/>Open in Roomote</g)).toHaveLength(1);
+      expect(body.html).toContain(
+        'href="https://roomote.example/sessions/1?a=1&amp;b=2"',
+      );
+      expect(body.text.match(/\n--\nReply anytime/g)).toHaveLength(1);
+      expect(body.text.match(/Open in Roomote/g)).toHaveLength(1);
+      expect(body.text.includes('[message truncated]')).toBe(offset > 0);
+    },
+  );
+
+  it('does not recognize an agent-authored footer marker before the trusted final footer', () => {
+    const trustedFooter = formatAgentMailFooterMarkdown(
+      'Reply anytime · [Open in Roomote](https://roomote.example/sessions/1)',
+    );
+    const body = buildAgentMailEmailBody(
+      `:::roomote-footer agent-authored lookalike\n\nBody\n\n${trustedFooter}`,
+    );
+
+    expect(body.html).toContain(
+      '<p>:::roomote-footer agent-authored lookalike</p>',
+    );
+    expect(body.html.match(/font-size:0\.875em/g)).toHaveLength(1);
+    expect(body.text.match(/\n--\n/g)).toHaveLength(1);
   });
 });
