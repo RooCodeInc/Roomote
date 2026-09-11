@@ -77,6 +77,12 @@ export async function resolveUserPersonalizationUpdate(input: {
   const context = await resolveUserPersonalizationContext(input.userId);
   if (!context) return { action: 'ignore', supersedes: [] };
 
+  // Inferred updates are append-only by policy, so avoid paying for a second
+  // model call when the result cannot replace anything.
+  if (input.confidence === 'inferred') {
+    return { action: 'append', preference: input.preference, supersedes: [] };
+  }
+
   const { object } = await generateTrackedNonTaskObject({
     surface: 'personalization_resolution',
     userId: input.userId,
@@ -95,9 +101,6 @@ Use action=replace when the new preference conflicts with one or more existing p
 
   if (object.action === 'ignore' || !object.preference) {
     return { action: 'ignore', supersedes: [] };
-  }
-  if (input.confidence === 'inferred' && object.action === 'replace') {
-    return { action: 'append', preference: object.preference, supersedes: [] };
   }
   return object;
 }

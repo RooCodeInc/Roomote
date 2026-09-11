@@ -112,11 +112,16 @@ describe('user personalization', () => {
     );
   });
 
-  it('removes superseded learned preferences before adding a correction', async () => {
+  it('removes superseded preferences before adding an explicit correction', async () => {
     const user = await userFactory.create();
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 0,
+      instructions: 'Use pirate language.',
+    });
     await appendLearnedUserPreference({
       userId: user.id,
-      preference: 'Use pirate language.',
+      preference: 'Keep answers short.',
       confidence: 'explicit',
     });
 
@@ -125,7 +130,7 @@ describe('user personalization', () => {
         userId: user.id,
         preference: 'Use normal professional language.',
         confidence: 'explicit',
-        supersedes: ['Use pirate language.'],
+        supersedes: ['Use pirate language.', 'Keep answers short.'],
       }),
     ).resolves.toEqual({ saved: true });
 

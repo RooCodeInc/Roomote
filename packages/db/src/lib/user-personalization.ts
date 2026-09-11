@@ -179,26 +179,33 @@ export async function appendLearnedUserPreference(input: {
         .join('\n');
     const nextExplicit = removeSuperseded(explicit);
     const nextInferred = removeSuperseded(inferred);
+    const nextManual =
+      input.confidence === 'explicit' ? removeSuperseded(manual) : manual;
     const current =
       input.confidence === 'explicit' ? nextExplicit : nextInferred;
     const addition = `- ${preference}`;
+    const nextLearned = joinInstructions(current, addition);
     if (
-      [manual, nextExplicit, nextInferred, addition].filter(Boolean).join('\n')
-        .length > USER_PERSONALIZATION_MAX_CHARS
+      joinInstructions(
+        nextManual,
+        nextLearned,
+        input.confidence === 'explicit' ? nextInferred : '',
+      ).length > USER_PERSONALIZATION_MAX_CHARS
     ) {
       return { saved: false, reason: 'full' };
     }
-    const next = joinInstructions(current, addition);
 
     await tx
       .update(userPersonalizations)
       .set({
         ...(input.confidence === 'explicit'
-          ? { explicitConversationInstructions: next, resetAt: null }
-          : { inferredInstructions: next }),
-        ...(input.confidence === 'explicit'
-          ? { inferredInstructions: nextInferred || null }
-          : {}),
+          ? {
+              manualInstructions: nextManual || null,
+              explicitConversationInstructions: nextLearned || null,
+              inferredInstructions: nextInferred || null,
+              resetAt: null,
+            }
+          : { inferredInstructions: nextLearned || null }),
         version: sql`${userPersonalizations.version} + 1`,
         updatedAt: new Date(),
       })
