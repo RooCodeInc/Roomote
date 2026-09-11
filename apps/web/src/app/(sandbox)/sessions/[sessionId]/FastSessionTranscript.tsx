@@ -805,7 +805,8 @@ export function FastSessionTranscript({
   // message id), with the GPT-Live delegation it answers (null for a turn
   // the voice did not delegate, such as a typed kickoff). Both streamed
   // chunks and persisted rows carry the turn id, so each piece of a reply is
-  // attributed to exactly the delegation that asked for it.
+  // attributed to exactly the delegation that asked for it. Entries survive
+  // call restarts until the turn's terminal persisted reply is processed.
   const voiceDelegationByTurnIdRef = useRef(new Map<string, string | null>());
   // Fast turn id of each streamed reply, from the chunk envelope.
   const streamTurnIdsRef = useRef(new Map<string, string>());
@@ -1031,13 +1032,20 @@ export function FastSessionTranscript({
       partial: boolean;
       delegationId: string | null;
     }> = [];
+    const settledVoiceTurnIds: string[] = [];
     for (const message of messages) {
+      const metadata = message.metadata as {
+        voiceCommentary?: unknown;
+        purpose?: unknown;
+      } | null;
       if (
         message.role === 'assistant' &&
         message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-        (message.metadata as { voiceCommentary?: unknown } | null)
-          ?.voiceCommentary === true
+        metadata?.voiceCommentary === true
       ) {
+        if (metadata.purpose !== 'progress') {
+          settledVoiceTurnIds.push(message.turnId);
+        }
         const text = getTranscriptMessageText(message);
         if (text) {
           commentary.push({
@@ -1092,6 +1100,9 @@ export function FastSessionTranscript({
         sentences.slice(spokenCount, readyCount).join(' '),
         message.delegationId,
       );
+    }
+    for (const turnId of settledVoiceTurnIds) {
+      voiceDelegationByTurnIdRef.current.delete(turnId);
     }
   }, [messages, streamMessages, liveVoiceActive]);
 
@@ -1182,7 +1193,6 @@ export function FastSessionTranscript({
       voiceCutoffTsRef.current = Math.max(voiceCutoffTsRef.current, message.ts);
     }
     spokenSentenceCountsRef.current.clear();
-    voiceDelegationByTurnIdRef.current.clear();
     pendingUtterancesRef.current = [];
     void liveVoice.start();
   }, [liveVoice, serverMessages]);
@@ -1206,7 +1216,6 @@ export function FastSessionTranscript({
 
     voiceCutoffTsRef.current = 0;
     spokenSentenceCountsRef.current.clear();
-    voiceDelegationByTurnIdRef.current.clear();
     // The Session was opened for this call, so a kickoff already in it (text
     // typed before the call) is the voice's turn too, with no delegation.
     for (const message of serverMessagesRef.current.values()) {
