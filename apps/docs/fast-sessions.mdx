@@ -85,11 +85,15 @@ account linkage is required. See
 for access requirements. Private reads and writes still require the target to
 be connected; access denials are not retried anonymously.
 
-The existing [GitHub integration](/providers/source-control/github#daily-github-management)
-also supports updates and explicit merge requests for existing pull requests,
-issue or PR comments, review-comment replies, and reactions using the
-deployment's GitHub App.
-See that guide for supported actions and access requirements.
+Native source-control tools can merge existing pull or merge requests on
+[GitHub](/providers/source-control/github#daily-github-management),
+[GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast),
+[Gitea](/providers/source-control/gitea#native-pull-request-merging-in-fast),
+[Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-fast),
+and [Azure DevOps](/providers/source-control/azure-devops#native-pull-request-merging-in-fast).
+Merging requires an explicit request in the current human message, an immediate
+pre-merge read and head binding where supported, and a post-merge read before
+Fast reports success or retries an ambiguous result.
 
 [GitLab API tools](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
 reuse the existing deployment OAuth connection for bounded repository reads,

@@ -189,11 +189,11 @@ describe('buildFastAgentSystemPrompt', () => {
       .split('- Bitbucket writes require')[1]!
       .split('\n')[0]!;
     expect(writes).toContain(
-      'update PR titles/descriptions, decline PRs, or add comments and replies to a comment in the same PR',
+      'update PR titles/descriptions, merge or decline PRs, or add comments and replies to a comment in the same PR',
     );
     expect(writes).toContain('Reading does not authorize writes');
     expect(writes).toContain(
-      'Reopening/merging PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
+      'Reopening PRs, file writes, commit/PR creation, review administration, and Bitbucket Server/Data Center are unsupported',
     );
     expect(prompt).toContain(
       'an actual code-review request still uses "review_pull_request"',
@@ -1187,7 +1187,7 @@ describe('buildFastAgentSystemPrompt', () => {
   );
 
   it.each(['human', 'automation', 'scheduled_wakeup'] as const)(
-    'keeps bounded GitHub updates in Fast without bypassing denied writes on %s turns',
+    'keeps native provider merges in Fast without bypassing denied writes on %s turns',
     (turn) => {
       const prompt = buildFastAgentSystemPrompt({
         availableEnvironments: [],
@@ -1209,12 +1209,13 @@ describe('buildFastAgentSystemPrompt', () => {
         'Follow their discovered descriptions, schemas, and arguments',
         'Read the target first, send only the requested fields',
         'report success only after the tool confirms it',
-        'current human message explicitly requests merging that pull request',
-        'approval, passing checks, or discussion about merging is not authorization',
-        'Immediately before merging, read the pull request again',
-        'bind the merge to that fresh head with `expectedHeadSha`',
-        'Let GitHub enforce branch protections, merge methods, and installation permissions',
-        'read the pull request again and confirm its merged state before reporting success or retrying an error, timeout, or other ambiguous result',
+        'current human message explicitly requests merging that exact pull or merge request',
+        'approval, passing checks, automation events, or discussion about merging is not authorization',
+        'Immediately before the mutation, read the target again',
+        'pass its fresh head SHA when the merge schema supports head binding',
+        'Let the provider enforce branch protections, required reviews, checks, merge methods, and credential permissions',
+        'After every merge attempt, read the target again and confirm the provider reports it merged',
+        'Bitbucket does not provide atomic expected-head binding on its merge endpoint',
         'inspect the resulting state before retrying an error',
       ]) {
         expect(prompt).toContain(guidance);

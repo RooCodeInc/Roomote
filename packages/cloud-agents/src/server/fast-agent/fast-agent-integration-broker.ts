@@ -4,6 +4,8 @@ import {
   getBitbucketOAuthConnection,
   resolveBitbucketInstanceHost,
 } from '@roomote/bitbucket';
+import { resolveAdoInstanceHost } from '@roomote/ado';
+import { resolveGiteaInstanceHost } from '@roomote/gitea';
 import {
   and,
   beginSlackFastIntegrationCall,
@@ -387,6 +389,36 @@ async function isBitbucketAvailable(userId: string): Promise<boolean> {
   );
 }
 
+async function isNativeProviderMergeAvailable(
+  userId: string,
+  provider: 'ado' | 'gitea',
+): Promise<boolean> {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED))
+    return false;
+  const host =
+    provider === 'ado'
+      ? await resolveAdoInstanceHost()
+      : await resolveGiteaInstanceHost();
+  const repository = await db.query.repositories.findFirst({
+    where: and(
+      eq(repositories.sourceControlProvider, provider),
+      eq(repositories.host, host),
+      eq(repositories.isActive, true),
+    ),
+    columns: { externalRepoId: true },
+  });
+  if (!repository?.externalRepoId) return false;
+  const member = await db.query.users.findFirst({
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+    columns: { role: true },
+  });
+  return !!(
+    member &&
+    ['admin', 'member'].includes(member.role) &&
+    repository.externalRepoId
+  );
+}
+
 /**
  * Actor-resolved remote MCP servers only. Local transports and filesystem
  * tools remain sandbox-only. Tools disabled by the deployment remain
@@ -411,6 +443,8 @@ export async function listFastAgentIntegrations(
     githubInstallation,
     gitlabConnection,
     bitbucketAvailable,
+    giteaAvailable,
+    adoAvailable,
   ] = await Promise.all([
     configuredServersPromise,
     isRouterMcpServerEnabled('github')
@@ -421,13 +455,17 @@ export async function listFastAgentIntegrations(
       : Promise.resolve(undefined),
     hasGitLabDiscoveryConnection().catch(() => false),
     isBitbucketAvailable(context.userId),
+    isNativeProviderMergeAvailable(context.userId, 'gitea').catch(() => false),
+    isNativeProviderMergeAvailable(context.userId, 'ado').catch(() => false),
   ]);
 
   if (
     Object.keys(configuredServers).length === 0 &&
     !githubInstallation &&
     !gitlabConnection &&
-    !bitbucketAvailable
+    !bitbucketAvailable &&
+    !giteaAvailable &&
+    !adoAvailable
   ) {
     return [];
   }
@@ -467,7 +505,7 @@ export async function listFastAgentIntegrations(
       id: 'gitlab',
       name: 'GitLab',
       description:
-        'Read connected GitLab repositories and commit history, inspect merge requests, and make bounded merge request updates and comments. Access is authorized on each request.',
+        'Read connected GitLab repositories and commit history, inspect merge requests, and make bounded merge request updates, merges, and comments. Access is authorized on each request.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'gitlab'),
         headers: { Authorization: `Bearer ${authToken}` },
@@ -482,7 +520,7 @@ export async function listFastAgentIntegrations(
       id: 'bitbucket',
       name: 'Bitbucket',
       description:
-        'Read bounded files, directories, code search, commits, and pull requests from active connected Bitbucket Cloud repositories; update PR titles/descriptions, decline PRs, and add comments or replies.',
+        'Read bounded files, directories, code search, commits, and pull requests from active connected Bitbucket Cloud repositories; update, merge, or decline PRs and add comments or replies.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'bitbucket'),
         headers: { Authorization: `Bearer ${authToken}` },
@@ -490,6 +528,25 @@ export async function listFastAgentIntegrations(
       },
       disabledTools: new Set<string>(),
     });
+  }
+
+  for (const [id, name, available] of [
+    ['gitea', 'Gitea', giteaAvailable],
+    ['ado', 'Azure DevOps', adoAvailable],
+  ] as const) {
+    if (available && !configuredServers[id]) {
+      candidates.push({
+        id,
+        name,
+        description: `Read and explicitly merge pull requests in active connected ${name} repositories. Access and target identity are revalidated on every request.`,
+        endpoint: {
+          url: integrationProxyUrl(apiBaseUrl, id),
+          headers: { Authorization: `Bearer ${authToken}` },
+          deploymentProxy: true,
+        },
+        disabledTools: new Set<string>(),
+      });
+    }
   }
 
   if (candidates.length === 0) {

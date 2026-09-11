@@ -113,6 +113,21 @@ and Roomote runs the Review Code automation's structured review on the current
 head, posts the findings on the pull request, and reports back in the same
 discussion.
 
+## Native pull request merging in Fast
+
+Active members and admins can ask Fast to read and merge a pull request in an
+active connected Gitea repository without starting a coding task. The bounded
+`get_pull_request` and `merge_pull_request` tools require
+`repositoryFullName` as `owner/repo` and a positive `pullRequestNumber`.
+Merging also requires the freshly read 40-character `expectedHeadSha` and can
+select `merge`, `rebase`, `rebase-merge`, or `squash`.
+
+Fast merges only after an explicit request in the current human message. It
+reads the PR immediately before the mutation, passes the expected head commit
+to Gitea, leaves branch protections and permissions to Gitea, and reads the PR
+again before reporting success or retrying an ambiguous result. These tools do
+not expose branch/file writes, PR creation, or repository administration.
+
 ## Current limits
 
 Gitea OAuth applications accept one redirect URL. The setup flow configures the

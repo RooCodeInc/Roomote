@@ -75,6 +75,7 @@ without a repository clone or coding task:
 | Read a PR, its diff, or its comments | `get_pull_request`, `get_pull_request_diff`, `list_pull_request_comments` |
 | Change a PR title and/or description | `update_pull_request` |
 | Decline a PR | `decline_pull_request` |
+| Merge a PR | `merge_pull_request` |
 | Add a PR comment or reply | `add_pull_request_comment` |
 
 Every tool requires `repositoryFullName` as `workspace/repo`. PR operations also
@@ -87,6 +88,12 @@ hashes and may reject ambiguous prefixes. Reading commits does not create commit
 Title/description updates accept only those fields, not state changes. Comments
 use `body`; a reply additionally uses `parentCommentId` belonging to the same PR.
 Writes must match the requested action, and reading a PR does not authorize changing it.
+Merging requires `expectedHeadSha` from an immediate PR read and optionally
+accepts `mergeStrategy` (`merge_commit`, `squash`, or `fast_forward`). Bitbucket
+Cloud does not offer atomic expected-head binding on its merge endpoint, so
+Roomote rejects a changed head immediately before the provider call and verifies
+the PR is `MERGED` afterward. Bitbucket still enforces branch restrictions,
+approvals, permissions, and merge eligibility.
 
 Reads are bounded: responses are limited to 1 MiB and list/search pages contain
 up to 50 entries. Request another page by its positive page number when needed.
@@ -103,7 +110,7 @@ prefer APIs; broad investigations do not require an API attempt first. An
 authorization or repository-scope denial must never be bypassed through a task.
 </Warning>
 
-The Fast API does not support reopening or merging PRs, writing files, creating
+The Fast API does not support reopening PRs, writing files, creating
 commits or PRs, or review administration such as approvals, reviewer changes, and
 thread resolution. A request for an actual code review still uses Roomote's
 structured review workflow; reading or summarizing a diff does not require it.
