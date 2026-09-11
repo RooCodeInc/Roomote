@@ -14,6 +14,7 @@ const fastMocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   canStartAgentMailConversation: vi.fn(),
+  listAvailableAgentMailOutboundIdentities: vi.fn(),
   prepareAgentMailConversation: vi.fn(),
   createAgentMailProvider: vi.fn(),
   agentMailPostMessage: vi.fn(),
@@ -62,6 +63,8 @@ vi.mock('../../lib/telegram-communication', () => ({
 vi.mock('../../lib/agentmail/outbound', () => ({
   canStartAgentMailConversationWithUser:
     fastMocks.canStartAgentMailConversation,
+  listAvailableAgentMailOutboundIdentities:
+    fastMocks.listAvailableAgentMailOutboundIdentities,
   prepareAgentMailConversation: fastMocks.prepareAgentMailConversation,
 }));
 
@@ -250,6 +253,7 @@ describe('customAutomationsJob', () => {
       postMessage: fastMocks.telegramPostMessage,
     });
     fastMocks.canStartAgentMailConversation.mockResolvedValue(true);
+    fastMocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
     fastMocks.prepareAgentMailConversation.mockResolvedValue({
       conversationId: 'agentmail-conversation-1',
       inboxId: 'roomote@agentmail.test',
@@ -265,7 +269,7 @@ describe('customAutomationsJob', () => {
     });
   });
 
-  it('runs a channel-less Fast automation as a stored Session', async () => {
+  it('delivers a destinationless Fast automation to the owner chat DM', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       {
         ...automation,
@@ -281,11 +285,20 @@ describe('customAutomationsJob', () => {
     expect(result).toMatchObject({ queued: true, completed: false });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
-      conversation: expect.objectContaining({
-        surface: 'automation',
-        workspaceId: automation.id,
-      }),
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: expect.stringContaining(`${automation.id}:`),
+        replyTarget: { channelId: 'D123' },
+      },
     });
+    expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
+      'slack',
+      'user-1',
+    );
+    expect(
+      fastMocks.listAvailableAgentMailOutboundIdentities,
+    ).not.toHaveBeenCalled();
     expect(fastMocks.enqueueParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
@@ -758,6 +771,9 @@ describe('customAutomationsJob', () => {
     expect(result.errors).toEqual([
       'Flaky tests: The automation owner no longer has an active verified Email destination.',
     ]);
+    expect(
+      fastMocks.listAvailableAgentMailOutboundIdentities,
+    ).not.toHaveBeenCalled();
     expect(fastMocks.prepareAgentMailConversation).not.toHaveBeenCalled();
     expect(fastMocks.getSession).not.toHaveBeenCalled();
   });
@@ -1217,6 +1233,8 @@ describe('customAutomationsJob', () => {
 
   it('keeps a run with no report destination as a stored Session', async () => {
     vi.mocked(findUserDirectMessageDestination).mockResolvedValue(null);
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([]);
+    fastMocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, target: {} } as never,
     ]);
@@ -1243,6 +1261,83 @@ describe('customAutomationsJob', () => {
         }),
       }),
     );
+  });
+
+  it('delivers a destinationless automation to verified Email after chat DMs are unavailable', async () => {
+    const claimAt = new Date('2026-09-11T12:00:00.000Z');
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue(null);
+    fastMocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([
+      {
+        id: 'verified:user-1:fallback',
+        emailAddress: 'owner@example.com',
+        kind: 'verified',
+      },
+    ]);
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, target: {} } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result).toMatchObject({ queued: true, errors: [] });
+    expect(findUserDirectMessageDestination).toHaveBeenCalledTimes(2);
+    expect(findUserDirectMessageDestination).toHaveBeenNthCalledWith(
+      1,
+      'slack',
+      'user-1',
+    );
+    expect(findUserDirectMessageDestination).toHaveBeenNthCalledWith(
+      2,
+      'teams',
+      'user-1',
+    );
+    expect(fastMocks.prepareAgentMailConversation).toHaveBeenCalledWith({
+      userId: 'user-1',
+      identityId: 'verified:user-1:fallback',
+      subject: `Flaky tests - ${claimAt.toISOString()}`,
+      conversationKey: `custom-automation:${automation.id}:${claimAt.toISOString()}`,
+    });
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'agentmail',
+        workspaceId: 'roomote@agentmail.test',
+        conversationId: 'agentmail-conversation-1',
+        replyTarget: { channelId: 'roomote@agentmail.test' },
+      },
+    });
+  });
+
+  it('treats a destinationless Discord fallback as a direct message', async () => {
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'discord',
+    ]);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
+      channelId: 'discord-dm-1',
+    });
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, target: {} } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result).toMatchObject({ queued: true, errors: [] });
+    expect(
+      db.query.discordInstallationChannels.findFirst,
+    ).not.toHaveBeenCalled();
+    expect(fastMocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: 'discord-dm-1' }),
+    );
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: expect.stringContaining(`${automation.id}:`),
+        replyTarget: { channelId: 'discord-dm-1' },
+      },
+    });
   });
 
   it('fails an ownerless environment automation until a run-as user exists', async () => {
