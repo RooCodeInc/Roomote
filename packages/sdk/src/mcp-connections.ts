@@ -6,5 +6,11 @@ export const isOrgEnabled = (mcpId: string) =>
 export const getMcpServerConfigs = () =>
   client.mcpConnections.getMcpServerConfigs.query();
 
+export const getSessionEgressDelivery = (nonce: string) =>
+  client.mcpConnections.getSessionEgressDelivery.query({ nonce });
+
+export const markSessionEgressBootstrapReady = (nonce: string) =>
+  client.mcpConnections.markSessionEgressBootstrapReady.mutate({ nonce });
+
 export const getCustomStdioMcpServers = () =>
   client.mcpConnections.getCustomStdioMcpServers.query();

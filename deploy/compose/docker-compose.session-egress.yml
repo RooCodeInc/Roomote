@@ -1,0 +1,44 @@
+# Optional overlay on docker-compose.prod.yml. Infrastructure files are supplied
+# by the operator; no service API key belongs in this configuration.
+services:
+  api:
+    environment:
+      R_SESSION_EGRESS_GATEWAY_TOKEN: ${R_SESSION_EGRESS_GATEWAY_TOKEN:?required for session egress}
+
+  controller:
+    environment:
+      SESSION_EGRESS_GATEWAY_ADDR: session-egress-gateway:8443
+      SESSION_EGRESS_GATEWAY_CA_CERT_FILE: /session-egress/mitm-ca.crt
+      SESSION_EGRESS_GATEWAY_SERVER_CA_FILE: /session-egress/server-ca.crt
+      SESSION_EGRESS_CONNECTOR_CA_CERT_FILE: /session-egress/connector-ca.crt
+      SESSION_EGRESS_CONNECTOR_CA_KEY_FILE: /session-egress/connector-ca.key
+      SESSION_EGRESS_CONNECTOR_IMAGE: ${SESSION_EGRESS_CONNECTOR_IMAGE:?build the pinned gateway image}
+      SESSION_EGRESS_GATEWAY_NETWORK: roomote_worker
+    volumes:
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/mitm-ca.crt:/session-egress/mitm-ca.crt:ro
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/server-ca.crt:/session-egress/server-ca.crt:ro
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/connector-ca.crt:/session-egress/connector-ca.crt:ro
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/connector-ca.key:/session-egress/connector-ca.key:ro
+
+  session-egress-gateway:
+    image: ${SESSION_EGRESS_CONNECTOR_IMAGE:?build the pinned gateway image}
+    build:
+      context: ../../apps/session-egress-gateway
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    read_only: true
+    networks: [default, worker]
+    environment:
+      SESSION_EGRESS_API_URL: ${SESSION_EGRESS_API_URL:?HTTPS API origin routing /api/internal/session-egress}
+      SESSION_EGRESS_GATEWAY_TOKEN: ${R_SESSION_EGRESS_GATEWAY_TOKEN:?required for session egress}
+      SESSION_EGRESS_SERVER_CERT_FILE: /session-egress/server.crt
+      SESSION_EGRESS_SERVER_KEY_FILE: /session-egress/server.key
+      SESSION_EGRESS_CLIENT_CA_FILE: /session-egress/connector-ca.crt
+      SESSION_EGRESS_MITM_CA_CERT_FILE: /session-egress/mitm-ca.crt
+      SESSION_EGRESS_MITM_CA_KEY_FILE: /session-egress/mitm-ca.key
+    volumes:
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/server.crt:/session-egress/server.crt:ro
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/server.key:/session-egress/server.key:ro
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/connector-ca.crt:/session-egress/connector-ca.crt:ro
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/mitm-ca.crt:/session-egress/mitm-ca.crt:ro
+      - ${SESSION_EGRESS_INFRA_DIR:?operator-owned infrastructure directory}/mitm-ca.key:/session-egress/mitm-ca.key:ro

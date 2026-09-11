@@ -4,6 +4,11 @@ import { promisify } from 'node:util';
 import { TaskRunErrorCode } from '@roomote/types';
 
 import { resolveFromWorkspaceRoot } from '../repo-paths';
+import {
+  removeDockerSessionEgressBoundary,
+  SESSION_EGRESS_POLICY_IMAGE_LABEL,
+  SESSION_EGRESS_POLICY_PLATFORM_LABEL,
+} from '@roomote/compute-providers';
 
 const execFileAsync = promisify(execFile);
 
@@ -23,6 +28,7 @@ type DockerNetworkInspect = {
   Id?: string;
   Name?: string;
   Labels?: Record<string, string> | null;
+  Options?: Record<string, string>;
   Containers?: Record<
     string,
     {
@@ -51,7 +57,7 @@ type DockerContainerInspect = {
 
 export type DockerCommand = (
   args: string[],
-  options?: { allowFailure?: boolean; signal?: AbortSignal },
+  options?: { allowFailure?: boolean; signal?: AbortSignal; input?: Buffer },
 ) => Promise<string>;
 
 export type DockerWorkerEgressPolicy = 'internet' | 'none';
@@ -286,16 +292,40 @@ export function formatSpawnWorkerError(error: unknown): string {
 
 export async function docker(
   args: string[],
-  options: { allowFailure?: boolean; signal?: AbortSignal } = {},
+  options: {
+    allowFailure?: boolean;
+    signal?: AbortSignal;
+    input?: Buffer;
+  } = {},
 ): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('docker', args, {
+    const execOptions = {
       cwd: resolveFromWorkspaceRoot('.'),
       maxBuffer: 10 * 1024 * 1024,
       signal: options.signal,
-    });
+    };
 
-    return stdout;
+    if (options.input === undefined) {
+      const { stdout } = await execFileAsync('docker', args, execOptions);
+      return stdout;
+    }
+
+    // `docker cp -` reads a tar stream from stdin: this is how connector key
+    // material reaches its container without ever touching controller disk.
+    const input = options.input;
+    return await new Promise<string>((resolve, reject) => {
+      const child = execFile('docker', args, execOptions, (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve(stdout);
+      });
+      child.stdin?.on('error', () => {
+        // The exit callback reports the real failure.
+      });
+      child.stdin?.end(input);
+    });
   } catch (error) {
     // Cancellation must not be treated as a soft failure; allowFailure only
     // covers Docker CLI / object-state errors, not AbortSignal abort.
@@ -345,6 +375,16 @@ export function getDockerTaskWorkspaceVolumeName(
 ): string {
   return `${workerContainerName}-workspace`;
 }
+
+/** Session-egress connector sidecar; holds the connector key, shares nothing with the worker. */
+export function getDockerSessionEgressConnectorContainerName(
+  workerContainerName: string,
+): string {
+  return `${workerContainerName}-connector`;
+}
+
+/** Network alias task processes address as their HTTPS proxy. */
+export const DOCKER_SESSION_EGRESS_CONNECTOR_ALIAS = 'session-egress-connector';
 
 export function buildDockerWorkerLabels(params: {
   taskRunId: number;
@@ -474,6 +514,9 @@ export async function prepareDockerTaskNetwork(
     taskRunId: number;
     controlNetwork?: string;
     egressPolicy: DockerWorkerEgressPolicy;
+    sessionEgress?: boolean;
+    sessionEgressPolicyImage?: string;
+    sessionEgressPolicyPlatform?: string;
     autoRemove: boolean;
     createdAtMs?: number;
   },
@@ -500,6 +543,16 @@ export async function prepareDockerTaskNetwork(
     '--label',
     `${CREATED_AT_MS_LABEL}=${params.createdAtMs ?? Date.now()}`,
     ...(params.egressPolicy === 'none' ? ['--internal'] : []),
+    ...(params.sessionEgress &&
+    params.sessionEgressPolicyImage &&
+    params.sessionEgressPolicyPlatform
+      ? [
+          '--label',
+          `${SESSION_EGRESS_POLICY_IMAGE_LABEL}=${params.sessionEgressPolicyImage}`,
+          '--label',
+          `${SESSION_EGRESS_POLICY_PLATFORM_LABEL}=${params.sessionEgressPolicyPlatform}`,
+        ]
+      : []),
     taskNetwork,
   ]);
 
@@ -520,6 +573,105 @@ export async function prepareDockerTaskNetwork(
   return taskNetwork;
 }
 
+/**
+ * Shell fragment that resolves a working iptables backend into
+ * `$iptables_cmd` (installing it on Alpine-based worker images when absent)
+ * and fails the helper when none exists.
+ */
+const IPTABLES_PRELUDE = [
+  'find_iptables() {',
+  '  for candidate in iptables-nft iptables-legacy iptables; do',
+  '    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -S OUTPUT >/dev/null 2>&1; then',
+  '      printf "%s" "$candidate"',
+  '      return 0',
+  '    fi',
+  '  done',
+  '  return 1',
+  '}',
+  'iptables_cmd="$(find_iptables || true)"',
+  'if [ -z "$iptables_cmd" ] && command -v apk >/dev/null 2>&1; then',
+  '  apk add --no-cache iptables >/dev/null',
+  '  iptables_cmd="$(find_iptables || true)"',
+  'fi',
+  'if [ -z "$iptables_cmd" ]; then',
+  '  echo "no supported iptables backend (nft, legacy, or default); cannot apply sandbox egress policy" >&2',
+  '  exit 1',
+  'fi',
+].join('\n');
+
+/**
+ * Drop packets destined TO the Docker bridge gateway so a sandbox cannot
+ * hairpin into host-published services, while keeping the gateway usable as
+ * the default next hop.
+ */
+const DOCKER_GATEWAY_BLOCK = [
+  'gateway="$(ip route show default | awk \'NR == 1 { print $3 }\')"',
+  'if [ -n "$gateway" ]; then',
+  // Heal namespaces set up by controllers that still blackholed the gateway
+  // as a route; retained standby workers keep their netns across upgrades.
+  '  ip route del blackhole "$gateway/32" 2>/dev/null || true',
+  '  "$iptables_cmd" -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A OUTPUT -d "$gateway" -j DROP',
+  // The route blackhole also covered forwarded traffic; keep that property in
+  // case the worker netns ever routes packets.
+  '  "$iptables_cmd" -C FORWARD -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A FORWARD -d "$gateway" -j DROP',
+  'fi',
+].join('\n');
+
+const DOCKER_SESSION_EGRESS_CHAIN = 'ROOMOTE_SESSION_EGRESS';
+const DOCKER_SESSION_EGRESS_FORWARD_CHAIN = 'ROOMOTE_SESSION_EGRESS_FWD';
+
+/**
+ * Session-egress lockdown, applied in the worker's own network namespace
+ * as defense in depth, not the authority boundary: privileged nested Docker
+ * may alter this namespace. The host bridge filter remains authoritative.
+ * The workload may reach only loopback and its on-link task-network
+ * subnets over TCP: the connector sidecar, the trusted control-plane
+ * services, and (without a control network) the bridge gateway that fronts
+ * host-based local development. Every other destination, protocol, and
+ * address family is dropped: no direct internet, no UDP/QUIC, no DoH, no
+ * IPv6. Forwarded traffic (nested Docker project containers) gets the same
+ * TCP destination policy. Exact endpoints and ports are enforced on the host.
+ */
+const SESSION_EGRESS_LOCKDOWN = [
+  'find_ip6tables() {',
+  '  for candidate in ip6tables-nft ip6tables-legacy ip6tables; do',
+  '    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -S OUTPUT >/dev/null 2>&1; then',
+  '      printf "%s" "$candidate"',
+  '      return 0',
+  '    fi',
+  '  done',
+  '  return 1',
+  '}',
+  `chain=${DOCKER_SESSION_EGRESS_CHAIN}`,
+  `fwd_chain=${DOCKER_SESSION_EGRESS_FORWARD_CHAIN}`,
+  // Rebuild our chains from scratch so re-runs (standby resume) are exact.
+  '"$iptables_cmd" -N "$chain" 2>/dev/null || "$iptables_cmd" -F "$chain"',
+  '"$iptables_cmd" -N "$fwd_chain" 2>/dev/null || "$iptables_cmd" -F "$fwd_chain"',
+  '"$iptables_cmd" -A "$chain" -o lo -j ACCEPT',
+  "for subnet in $(ip -4 route show scope link | awk '{ print $1 }'); do",
+  '  "$iptables_cmd" -A "$chain" -d "$subnet" -p tcp -j ACCEPT',
+  '  "$iptables_cmd" -A "$fwd_chain" -d "$subnet" -p tcp -j ACCEPT',
+  'done',
+  '"$iptables_cmd" -A "$chain" -j DROP',
+  '"$iptables_cmd" -A "$fwd_chain" -j DROP',
+  // Append (not insert) so the gateway DROP above keeps precedence.
+  '"$iptables_cmd" -C OUTPUT -j "$chain" 2>/dev/null || "$iptables_cmd" -A OUTPUT -j "$chain"',
+  '"$iptables_cmd" -C FORWARD -j "$fwd_chain" 2>/dev/null || "$iptables_cmd" -A FORWARD -j "$fwd_chain"',
+  'ip6tables_cmd="$(find_ip6tables || true)"',
+  'if [ -n "$ip6tables_cmd" ]; then',
+  '  "$ip6tables_cmd" -N "$chain" 2>/dev/null || "$ip6tables_cmd" -F "$chain"',
+  '  "$ip6tables_cmd" -A "$chain" -o lo -j ACCEPT',
+  '  "$ip6tables_cmd" -A "$chain" -j DROP',
+  '  "$ip6tables_cmd" -C OUTPUT -j "$chain" 2>/dev/null || "$ip6tables_cmd" -A OUTPUT -j "$chain"',
+  '  "$ip6tables_cmd" -C FORWARD -j "$chain" 2>/dev/null || "$ip6tables_cmd" -A FORWARD -j "$chain"',
+  'elif ip -6 route show default 2>/dev/null | grep -q .; then',
+  '  echo "no supported ip6tables backend but the sandbox has an IPv6 default route; refusing to start a session egress workload" >&2',
+  '  exit 1',
+  'else',
+  '  echo "no ip6tables backend; the sandbox has no IPv6 default route" >&2',
+  'fi',
+].join('\n');
+
 export async function attachDockerEgressPolicy(
   params: {
     containerName: string;
@@ -527,6 +679,11 @@ export async function attachDockerEgressPolicy(
     image: string;
     platform: string;
     blockDockerGateway: boolean;
+    /**
+     * Restrict the workload to its task network (connector + control plane)
+     * because a Session-egress workload was registered for this run.
+     */
+    sessionEgress?: boolean;
   },
   runDocker: DockerCommand = docker,
 ): Promise<void> {
@@ -561,58 +718,34 @@ export async function attachDockerEgressPolicy(
     '/bin/sh',
     params.image,
     '-c',
-    // `replace` keeps the script idempotent when a helper is re-run against a
-    // network namespace that already holds some of the routes.
-    [
-      ...BLOCKED_METADATA_ROUTES.map(
-        (route) => `ip route replace blackhole ${route}`,
-      ),
-      ...(params.blockDockerGateway
-        ? [
-            ...BLOCKED_PRIVATE_ROUTES.map(
-              (route) => `ip route replace blackhole ${route}`,
-            ),
-            // Do not blackhole the default gateway as a host route: on Linux
-            // that /32 is more specific than the on-link bridge subnet and
-            // breaks next-hop resolution for public egress (git clone, HTTPS).
-            // Drop only packets destined TO the gateway IP so host hairpin is
-            // blocked while using the gateway as default next-hop still works.
-            [
-              'gateway="$(ip route show default | awk \'NR == 1 { print $3 }\')"',
-              'if [ -n "$gateway" ]; then',
-              // Heal namespaces set up by controllers that still blackholed
-              // the gateway as a route; retained standby workers keep their
-              // netns across controller upgrades.
-              '  ip route del blackhole "$gateway/32" 2>/dev/null || true',
-              '  find_iptables() {',
-              '    for candidate in iptables-nft iptables-legacy iptables; do',
-              '      if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -S OUTPUT >/dev/null 2>&1; then',
-              '        printf "%s" "$candidate"',
-              '        return 0',
-              '      fi',
-              '    done',
-              '    return 1',
-              '  }',
-              '  iptables_cmd="$(find_iptables || true)"',
-              '  if [ -z "$iptables_cmd" ] && command -v apk >/dev/null 2>&1; then',
-              '    apk add --no-cache iptables >/dev/null',
-              '    iptables_cmd="$(find_iptables || true)"',
-              '  fi',
-              '  if [ -n "$iptables_cmd" ]; then',
-              '    "$iptables_cmd" -C OUTPUT -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A OUTPUT -d "$gateway" -j DROP',
-              // The route blackhole also covered forwarded traffic; keep that
-              // property in case the worker netns ever routes packets.
-              '    "$iptables_cmd" -C FORWARD -d "$gateway" -j DROP 2>/dev/null || "$iptables_cmd" -A FORWARD -d "$gateway" -j DROP',
-              '  else',
-              '    echo "no supported iptables backend (nft, legacy, or default); cannot block docker gateway $gateway" >&2',
-              '    exit 1',
-              '  fi',
-              'fi',
-            ].join('\n'),
-          ]
-        : []),
-    ].join(' && '),
+    buildDockerEgressPolicyScript(params),
   ]);
+}
+
+function buildDockerEgressPolicyScript(params: {
+  blockDockerGateway: boolean;
+  sessionEgress?: boolean;
+}): string {
+  const needsIptables = params.blockDockerGateway || params.sessionEgress;
+
+  // `replace` keeps the script idempotent when a helper is re-run against a
+  // network namespace that already holds some of the routes.
+  return [
+    ...BLOCKED_METADATA_ROUTES.map(
+      (route) => `ip route replace blackhole ${route}`,
+    ),
+    ...(params.blockDockerGateway
+      ? BLOCKED_PRIVATE_ROUTES.map(
+          (route) => `ip route replace blackhole ${route}`,
+        )
+      : []),
+    ...(needsIptables ? [IPTABLES_PRELUDE] : []),
+    // Do not blackhole the default gateway as a host route: on Linux that
+    // /32 is more specific than the on-link bridge subnet and breaks
+    // next-hop resolution for public egress (git clone, HTTPS).
+    ...(params.blockDockerGateway ? [DOCKER_GATEWAY_BLOCK] : []),
+    ...(params.sessionEgress ? [SESSION_EGRESS_LOCKDOWN] : []),
+  ].join(' && ');
 }
 
 /**
@@ -629,6 +762,7 @@ export async function restoreDockerStandbyNetworking(
     egressPolicy: DockerWorkerEgressPolicy;
     image: string;
     platform: string;
+    sessionEgress?: boolean;
   },
   runDocker: DockerCommand = docker,
 ): Promise<void> {
@@ -639,6 +773,7 @@ export async function restoreDockerStandbyNetworking(
       image: params.image,
       platform: params.platform,
       blockDockerGateway: Boolean(params.controlNetwork),
+      sessionEgress: params.sessionEgress,
     },
     runDocker,
   );
@@ -662,6 +797,14 @@ export async function removeDockerSandboxResources(
   );
   await runDocker(
     ['rm', '-f', getDockerTaskDaemonContainerName(params.containerName)],
+    { allowFailure: true },
+  );
+  await runDocker(
+    [
+      'rm',
+      '-f',
+      getDockerSessionEgressConnectorContainerName(params.containerName),
+    ],
     { allowFailure: true },
   );
   await runDocker(['rm', '-f', params.containerName], { allowFailure: true });
@@ -871,6 +1014,8 @@ async function removeDockerTaskNetwork(
       allowFailure: true,
     });
   }
+
+  if (network) await removeDockerSessionEgressBoundary(network, runDocker);
 
   await runDocker(['network', 'rm', taskNetwork], { allowFailure: true });
 }

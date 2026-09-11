@@ -201,6 +201,7 @@ export function createSessionEgressControllerClient(options: {
   ): Promise<T> {
     const response = await doFetch(`${base}${path}`, {
       method,
+      signal: AbortSignal.timeout(10_000),
       headers: {
         authorization: `Bearer ${await createSessionEgressControllerToken()}`,
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),

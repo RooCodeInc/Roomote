@@ -98,6 +98,32 @@ async function eligibleRunSession(tx: DatabaseOrTransaction, runId: number) {
   return rows.length === 1 ? rows[0]! : null;
 }
 
+/**
+ * Controller preflight: is this run attached to a Session that could receive
+ * substitutes, and how many live grants would it get? Runs with no such
+ * Session are ordinary runs and never contact the control plane; runs with a
+ * Session but zero grants are reported, not registered (grants approved
+ * mid-run take effect at the next start or resume).
+ */
+export async function findSessionEgressCandidateForRun(
+  runId: number,
+): Promise<{ sessionId: string; grantCount: number } | null> {
+  const eligible = await eligibleRunSession(db, runId);
+  if (!eligible) return null;
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(sessionSecrets)
+    .where(
+      and(
+        eq(sessionSecrets.sessionId, eligible.sessionId),
+        eq(sessionSecrets.ownerUserId, eligible.ownerUserId),
+        isNull(sessionSecrets.revokedAt),
+        gt(sessionSecrets.expiresAt, sql`clock_timestamp()`),
+      ),
+    );
+  return { sessionId: eligible.sessionId, grantCount: row?.count ?? 0 };
+}
+
 /** An active workload whose run, Session, owner, and attachment are all still live. */
 async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
   const [row] = await tx
@@ -128,6 +154,25 @@ async function liveWorkload(tx: DatabaseOrTransaction, workloadId: string) {
     )
     .for('update', { of: sessionEgressWorkloads });
   return row?.workload ?? null;
+}
+
+/** Authorization for controller-to-worker delivery of substitute-only client config. */
+export async function isSessionEgressDeliveryCurrent(input: {
+  workloadId: string;
+  generation: number;
+  runId: number;
+  signedUserId?: string;
+}): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const row = await liveWorkload(tx, input.workloadId);
+    return Boolean(
+      row &&
+      row.taskRunId === input.runId &&
+      row.generation === input.generation &&
+      (input.signedUserId === undefined ||
+        row.ownerUserId === input.signedUserId),
+    );
+  });
 }
 
 async function retireSubstitutes(
@@ -393,6 +438,33 @@ export async function terminateSessionEgressWorkload(
   reason: SessionEgressWorkloadTerminate['reason'],
 ): Promise<boolean> {
   return db.transaction((tx) => terminate(tx, workloadId, reason));
+}
+
+/**
+ * Terminate every active workload bound to a run. Used by the centralized
+ * run-finalization path (stop, completion, failure, cancel, standby) so a
+ * workload never outlives its run regardless of which process observed the
+ * transition. Returns the terminated workload ids.
+ */
+export async function terminateSessionEgressWorkloadsForRun(
+  runId: number,
+  reason: SessionEgressWorkloadTerminate['reason'],
+  database: DatabaseOrTransaction = db,
+): Promise<string[]> {
+  const rows = await database
+    .select({ id: sessionEgressWorkloads.id })
+    .from(sessionEgressWorkloads)
+    .where(
+      and(
+        eq(sessionEgressWorkloads.taskRunId, runId),
+        eq(sessionEgressWorkloads.status, 'active'),
+      ),
+    );
+  const terminated: string[] = [];
+  for (const row of rows) {
+    if (await terminate(database, row.id, reason)) terminated.push(row.id);
+  }
+  return terminated;
 }
 
 export async function listSessionEgressRevocations(

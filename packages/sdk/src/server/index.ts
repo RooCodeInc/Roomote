@@ -560,3 +560,7 @@ export * from './lib/brain-github';
 export * from './lib/brain-linear';
 export * from './lib/brain-inference';
 export * from './lib/brain-source-availability';
+export {
+  publishSessionEgressDelivery,
+  isSessionEgressBootstrapReady,
+} from './lib/session-egress-delivery';

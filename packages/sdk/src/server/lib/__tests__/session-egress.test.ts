@@ -98,6 +98,7 @@ it.each([
 ])(
   'normalizes only trailing slashes and preserves POST registration',
   async (suffix) => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(new Response('{}'));
@@ -112,11 +113,13 @@ it.each([
       leaseSeconds: 3600,
     };
     await client.register(input);
+    expect(timeout).toHaveBeenCalledWith(10_000);
     const kept = suffix.includes('suffix') ? suffix.slice(0, -3) : '';
     expect(fetch).toHaveBeenCalledExactlyOnceWith(
       `https://api.example.com${kept}${SESSION_EGRESS_CONTROL_PLANE_PATH}/workloads`,
       {
         method: 'POST',
+        signal: expect.any(AbortSignal),
         headers: {
           authorization: 'Bearer controller-token',
           'content-type': 'application/json',

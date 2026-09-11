@@ -42,6 +42,7 @@ import {
   slackInstallations,
   slackUserMappings,
   syncTaskStateFromRuns,
+  terminateSessionEgressWorkloadsForRun,
   updatePendingEnvironmentSnapshot,
   asc,
   eq,
@@ -360,6 +361,21 @@ export const finishRun = async ({
     // rules and DLP live in the bullmq drainer, not here.
     if (status === RunStatus.Completed) {
       await maybeEnqueueBrainMemoryForCompletedRun(tx, id);
+    }
+
+    // A Session-egress workload never outlives its run: retire every
+    // substitute and publish the revocation in the same transaction as the
+    // terminal status. Idle keeps the sandbox (and its workload) alive.
+    if (status !== RunStatus.Idle) {
+      await terminateSessionEgressWorkloadsForRun(
+        id,
+        status === RunStatus.Completed
+          ? 'completed'
+          : status === RunStatus.Failed
+            ? 'failed'
+            : 'stopped',
+        tx,
+      );
     }
   });
 

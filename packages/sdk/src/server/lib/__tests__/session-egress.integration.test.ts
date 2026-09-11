@@ -6,6 +6,9 @@ import {
   hashSessionEgressSubstitute,
   runFactory,
   sessionEgressSubstitutes,
+  sessionEgressWorkloads,
+  terminateSessionEgressWorkloadsForRun,
+  taskRuns,
   sessionFactory,
   sessionTasks,
   sessions,
@@ -14,7 +17,12 @@ import {
   users,
   type SessionSecretContext,
 } from '@roomote/db/server';
-import { RunStatus } from '@roomote/types';
+import { RunStatus, type RunTokenContext } from '@roomote/types';
+import * as redisModule from '@roomote/redis';
+import {
+  publishSessionEgressDelivery,
+  readSessionEgressDelivery,
+} from '../session-egress-delivery';
 
 import {
   authorize,
@@ -99,6 +107,121 @@ it('registers exact prepared GET+POST consent and authorizes both methods withou
     );
   }
 });
+
+it('retires the run workload and substitutes together on terminal cleanup', async () => {
+  const pending = await prepareSessionSecret(context, policy);
+  await createSessionSecret(context, {
+    pendingRef: pending.pendingRef,
+    secret,
+    allowedMethods: pending.allowedMethods,
+  });
+  const registered = await registerWorkload({
+    runId,
+    provider: 'docker',
+    connectorIdentity,
+  });
+  await db.transaction(async (tx) => {
+    expect(
+      await terminateSessionEgressWorkloadsForRun(runId, 'completed', tx),
+    ).toEqual([registered.workloadId]);
+  });
+  const [workload] = await db
+    .select({ status: sessionEgressWorkloads.status })
+    .from(sessionEgressWorkloads)
+    .where(eq(sessionEgressWorkloads.id, registered.workloadId));
+  expect(workload?.status).toBe('terminated');
+  const issued = await db
+    .select({ revokedAt: sessionEgressSubstitutes.revokedAt })
+    .from(sessionEgressSubstitutes)
+    .where(eq(sessionEgressSubstitutes.workloadId, registered.workloadId));
+  expect(issued).toHaveLength(1);
+  expect(issued[0]?.revokedAt).not.toBeNull();
+});
+
+it.each([
+  'owner',
+  'user token',
+  'other signed user',
+  'actor change during cache read',
+  'rotation during cache read',
+])(
+  'delivers verified bootstrap configuration only to the live bound run: %s',
+  async (mode) => {
+    const pending = await prepareSessionSecret(context, policy);
+    await createSessionSecret(context, {
+      pendingRef: pending.pendingRef,
+      secret,
+      allowedMethods: pending.allowedMethods,
+    });
+    const registered = await registerWorkload({
+      runId,
+      provider: 'docker',
+      connectorIdentity,
+    });
+    const environment = {
+      ROOMOTE_SERVICE_TOKEN_TEST: registered.substitutes[0]!.substitute,
+    };
+    const nonce = randomUUID();
+    const data = new Map<string, string>();
+    const fakeRedis = {
+      set: vi.fn(async (key: string, value: string) => {
+        data.set(key, value);
+        return 'OK';
+      }),
+      get: vi.fn(async (key: string) => {
+        if (data.has(key) && mode === 'actor change during cache read') {
+          await db
+            .update(taskRuns)
+            .set({ actingUserId: null })
+            .where(eq(taskRuns.id, runId));
+        }
+        if (data.has(key) && mode === 'rotation during cache read') {
+          await registerWorkload({
+            runId,
+            provider: 'docker',
+            connectorIdentity: randomUUID(),
+          });
+        }
+        return data.get(key) ?? null;
+      }),
+    };
+    vi.spyOn(redisModule, 'getRedis').mockReturnValue(
+      fakeRedis as unknown as ReturnType<typeof redisModule.getRedis>,
+    );
+    const auth: RunTokenContext = {
+      runId,
+      userId: context.userId!,
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    };
+    expect(await readSessionEgressDelivery(auth, nonce)).toBeNull();
+    await publishSessionEgressDelivery(runId, registered, environment, nonce);
+    const stored = [...data.values()][0]!;
+    expect(stored).not.toContain(environment.ROOMOTE_SERVICE_TOKEN_TEST);
+    expect(stored).not.toContain(secret);
+    expect(fakeRedis.set.mock.calls[0]).toContain('EX');
+    const input =
+      mode === 'user token'
+        ? { tokenType: 'auth' as const, userId: context.userId!, version: 1 }
+        : {
+            ...auth,
+            ...(mode === 'other signed user' ? { userId: 'wrong-user' } : {}),
+          };
+    if (mode === 'owner') {
+      await expect(
+        readSessionEgressDelivery(input, randomUUID()),
+      ).resolves.toBeNull();
+      await expect(readSessionEgressDelivery(input, nonce)).resolves.toEqual(
+        environment,
+      );
+    } else {
+      await expect(readSessionEgressDelivery(input, nonce)).rejects.toThrow(
+        'configuration unavailable',
+      );
+    }
+  },
+);
 
 it.each([undefined, ['GET'], ['GET', 'HEAD'], ['GET', 'POST', 'DELETE']])(
   'denies omitted or mismatched write consent without consuming the approval: %j',

@@ -18,6 +18,10 @@ import {
 import { OPENCODE_IDENTITY_PLUGIN_SCRIPT } from '@roomote/cloud-agents';
 import { HTTP_INTEGRATIONS_INSTRUCTIONS } from '@roomote/sdk/client';
 import {
+  buildInferenceGatewayUrl,
+  buildSessionEgressClientEnv,
+} from '@roomote/types';
+import {
   callOnDemandIntegrationTool,
   findOnDemandIntegrationTools,
   loadOnDemandMcpCatalog,
@@ -637,6 +641,46 @@ describe('generateOpenCodeConfig provider support', () => {
         apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
       },
     });
+  });
+
+  it('keeps protected inference on the fixed API endpoint outside the grant proxy', () => {
+    const clientEnv = buildSessionEgressClientEnv({
+      proxyUrl: 'http://connector:3128',
+      caFile: '/etc/roomote/public-ca.pem',
+      noProxy: 'api,preview-proxy',
+    });
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        ...clientEnv,
+        ROOMOTE_SESSION_EGRESS_ENFORCED: '1',
+        R_MODEL: 'openrouter/openai/gpt-4.1-mini',
+        R_INFERENCE_GATEWAY_URL: buildInferenceGatewayUrl('http://api:3001'),
+        R_INFERENCE_GATEWAY_KEYS: 'OPENROUTER_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent);
+    const options = config.provider.openrouter.options;
+    expect(options.baseURL).toBe('http://api:3001/api/inference/openrouter/v1');
+    expect(options.apiKey).toBe('{env:ROOMOTE_CLOUD_TOKEN}');
+    const endpoint = new URL(options.baseURL);
+    expect(clientEnv.NO_PROXY.split(',')).toContain(endpoint.hostname);
+    expect(clientEnv.no_proxy).toBe(clientEnv.NO_PROXY);
+    expect(endpoint.port).toBe('3001');
+    expect(clientEnv.NODE_USE_ENV_PROXY).toBe('1');
+  });
+
+  it('rejects protected direct/custom inference without a served gateway provider', () => {
+    expect(() =>
+      generateOpenCodeConfig({
+        homeDir: createHomeDir(),
+        runtimeEnv: {
+          ROOMOTE_SESSION_EGRESS_ENFORCED: '1',
+          R_MODEL: 'openrouter/openai/gpt-4.1-mini',
+          R_INFERENCE_GATEWAY_URL: 'http://api:3001/api/inference',
+        },
+      }),
+    ).toThrow('requires gateway-backed inference for openrouter');
   });
 
   it('keeps OpenRouter attribution headers when rebasing onto the gateway', () => {

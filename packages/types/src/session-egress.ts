@@ -254,3 +254,125 @@ export interface SessionEgressRevocationFeed {
   /** Pass back as `after` on the next poll. */
   cursor: number;
 }
+
+/**
+ * Workload delivery contract (controller -> worker launcher env). The worker
+ * captures these at startup, scrubs them from its own process env, and turns
+ * them into ordinary client configuration (proxy + CA + substitute env vars)
+ * for task processes. Nothing here is a real credential: the values are the
+ * connector address, the PUBLIC gateway CA bundle path, the no-proxy list for
+ * control-plane hosts, a nonsecret service manifest, and substitute tokens.
+ */
+export const SESSION_EGRESS_WORKLOAD_ENV = {
+  /** Wait for the controller's post-bootstrap verified network admission. */
+  BOOTSTRAP_REQUIRED: 'ROOMOTE_SESSION_EGRESS_BOOTSTRAP_REQUIRED',
+  BOOTSTRAP_NONCE: 'ROOMOTE_SESSION_EGRESS_BOOTSTRAP_NONCE',
+  /** `http://<connector-alias>:<port>` reachable only from the workload network. */
+  PROXY_URL: 'ROOMOTE_SESSION_EGRESS_PROXY_URL',
+  /** Path inside the workload to the PEM bundle (system roots + gateway public CA). */
+  CA_FILE: 'ROOMOTE_SESSION_EGRESS_CA_FILE',
+  /** Comma-separated hosts task processes must reach directly (control plane). */
+  NO_PROXY: 'ROOMOTE_SESSION_EGRESS_NO_PROXY',
+  /** JSON `SessionEgressWorkloadServiceManifestEntry[]`; never contains token values. */
+  SERVICES: 'ROOMOTE_SESSION_EGRESS_SERVICES',
+} as const;
+
+/** Substitute tokens are delivered as `ROOMOTE_SERVICE_TOKEN_<LABEL_SLUG>`. */
+export const SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX = 'ROOMOTE_SERVICE_TOKEN_';
+
+/** Default listener port of the connector sidecar (plain HTTP CONNECT). */
+export const SESSION_EGRESS_CONNECTOR_PORT = 3128;
+
+export interface SessionEgressWorkloadServiceManifestEntry extends SessionEgressGrantPolicy {
+  /** The env var that carries this service's substitute token. */
+  envName: string;
+}
+
+export function sessionEgressServiceTokenEnvName(label: string): string {
+  const normalized = label
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9]+/g, '_')
+    .toUpperCase();
+  let start = 0;
+  let end = normalized.length;
+  while (start < end && normalized[start] === '_') start += 1;
+  while (end > start && normalized[end - 1] === '_') end -= 1;
+  const slug = normalized.slice(start, end);
+  const safe =
+    slug === '' ? 'SERVICE' : /^[0-9]/.test(slug) ? `_${slug}` : slug;
+  return `${SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX}${safe.slice(0, 96)}`;
+}
+
+/**
+ * Split issued substitutes into the secret env map and the nonsecret
+ * manifest. Label collisions get a numeric suffix so no token silently
+ * overwrites another.
+ */
+export function buildSessionEgressServiceTokenEnv(
+  substitutes: readonly SessionEgressSubstituteIssue[],
+): {
+  tokens: Record<string, string>;
+  manifest: SessionEgressWorkloadServiceManifestEntry[];
+} {
+  const tokens: Record<string, string> = {};
+  const manifest: SessionEgressWorkloadServiceManifestEntry[] = [];
+  for (const issue of substitutes) {
+    const base = sessionEgressServiceTokenEnvName(issue.label);
+    let envName = base;
+    for (let n = 2; envName in tokens; n += 1) envName = `${base}_${n}`;
+    tokens[envName] = issue.substitute;
+    const { substitute: _omitted, ...policy } = issue;
+    manifest.push({ ...policy, envName });
+  }
+  return { tokens, manifest };
+}
+
+/** Names task processes read to route through the connector and trust the gateway CA. */
+export const SESSION_EGRESS_CLIENT_ENV_NAMES = [
+  'HTTPS_PROXY',
+  'https_proxy',
+  'HTTP_PROXY',
+  'http_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'SSL_CERT_FILE',
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_USE_ENV_PROXY',
+  'REQUESTS_CA_BUNDLE',
+  'CURL_CA_BUNDLE',
+  'GIT_SSL_CAINFO',
+] as const;
+
+/**
+ * Ordinary-client configuration for a workload: proxy and trust settings for
+ * curl/libcurl, Python requests/httpx, Node, and git. Configuration is a
+ * convenience, not the boundary: egress enforcement outside the sandbox is
+ * what makes a client that ignores these settings fail closed.
+ */
+export function buildSessionEgressClientEnv(input: {
+  proxyUrl: string;
+  caFile: string;
+  noProxy: string;
+}): Record<(typeof SESSION_EGRESS_CLIENT_ENV_NAMES)[number], string> {
+  return {
+    HTTPS_PROXY: input.proxyUrl,
+    https_proxy: input.proxyUrl,
+    HTTP_PROXY: input.proxyUrl,
+    http_proxy: input.proxyUrl,
+    NO_PROXY: input.noProxy,
+    no_proxy: input.noProxy,
+    SSL_CERT_FILE: input.caFile,
+    NODE_EXTRA_CA_CERTS: input.caFile,
+    NODE_USE_ENV_PROXY: '1',
+    REQUESTS_CA_BUNDLE: input.caFile,
+    CURL_CA_BUNDLE: input.caFile,
+    GIT_SSL_CAINFO: input.caFile,
+  };
+}
+
+export function isSessionEgressWorkloadEnvKey(key: string): boolean {
+  return (
+    key.startsWith(SESSION_EGRESS_SERVICE_TOKEN_ENV_PREFIX) ||
+    (Object.values(SESSION_EGRESS_WORKLOAD_ENV) as string[]).includes(key)
+  );
+}

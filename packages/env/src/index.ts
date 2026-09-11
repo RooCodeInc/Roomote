@@ -427,6 +427,30 @@ const serverSchema = {
   // its own; the surface stays disabled (404) until this is set. Controllers
   // authenticate to the same surface with a signed job-auth token instead.
   R_SESSION_EGRESS_GATEWAY_TOKEN: z.string().min(32).optional(),
+  // Controller-side Session-egress provisioning. All five *_ADDR/*_FILE values
+  // below must be set for the controller to register workloads; otherwise
+  // every run is reported as `disabled` and receives no substitute tokens.
+  // The connector CA key signs short-lived connector client certificates and
+  // stays on the controller; the gateway public CA is the only certificate
+  // material ever delivered into a sandbox.
+  SESSION_EGRESS_GATEWAY_ADDR: z.string().min(1).optional(),
+  SESSION_EGRESS_GATEWAY_CA_CERT_FILE: z.string().min(1).optional(),
+  SESSION_EGRESS_GATEWAY_SERVER_CA_FILE: z.string().min(1).optional(),
+  SESSION_EGRESS_CONNECTOR_CA_CERT_FILE: z.string().min(1).optional(),
+  SESSION_EGRESS_CONNECTOR_CA_KEY_FILE: z.string().min(1).optional(),
+  SESSION_EGRESS_CONNECTOR_IMAGE: z
+    .string()
+    .min(1)
+    .default('roomote/session-egress-gateway'),
+  // Optional Docker network the connector sidecar also joins so it can reach
+  // a gateway published only on the deployment's control network.
+  SESSION_EGRESS_GATEWAY_NETWORK: z.string().min(1).optional(),
+  SESSION_EGRESS_WORKLOAD_LEASE_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(86_400)
+    .default(3_600),
   // Which models the Brain runs, in the configured provider's own naming
   // (`openai/gpt-5.6-luna` on OpenRouter, `gpt-5.6-luna` on OpenAI). Both are
   // substituted by the gateway, so changing the synthesis model is a restart
@@ -580,6 +604,12 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_GATEWAY_TOKEN',
   'R_BRAIN_GATEWAY_TOKEN_FILE',
   'R_SESSION_EGRESS_GATEWAY_TOKEN',
+  'SESSION_EGRESS_GATEWAY_ADDR',
+  'SESSION_EGRESS_GATEWAY_CA_CERT_FILE',
+  'SESSION_EGRESS_GATEWAY_SERVER_CA_FILE',
+  'SESSION_EGRESS_CONNECTOR_CA_CERT_FILE',
+  'SESSION_EGRESS_CONNECTOR_CA_KEY_FILE',
+  'SESSION_EGRESS_GATEWAY_NETWORK',
   'R_BRAIN_MODEL',
   'R_BRAIN_EMBEDDING_MODEL',
   'R_BRAIN_EMBEDDING_DIMENSIONS',
