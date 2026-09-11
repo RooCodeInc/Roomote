@@ -225,7 +225,7 @@ describe('cleanVoiceTranscriptCommand', () => {
 });
 
 describe('recordVoiceTurnCommand', () => {
-  it('writes direct voice output as spoken but unverified in Fast history', async () => {
+  it('writes what the voice said as a spoken assistant turn and adds it to Fast history', async () => {
     mockFindAccessibleFastSession.mockResolvedValue({ id: 'fast-1' });
     mockUpsertFastAgentMessage.mockResolvedValue({});
     mockAppendFastAgentVisibleMessages.mockResolvedValue(undefined);

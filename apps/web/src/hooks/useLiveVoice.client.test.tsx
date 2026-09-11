@@ -378,53 +378,63 @@ describe('useLiveVoice', () => {
     expect(playVoiceCue).not.toHaveBeenCalled();
   });
 
-  it('stays in fallback-only mode after a missed delegation', async () => {
+  it('records small talk GPT-Live handled itself as a heard turn, and what GPT-Live said as a spoken turn', async () => {
     const onUtterance = vi.fn();
-    const { result } = renderHook(() => useLiveVoice({ onUtterance }));
+    const onHeardTurn = vi.fn();
+    const onSpokenTurn = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance, onHeardTurn, onSpokenTurn }),
+    );
 
     await act(async () => result.current.start());
     act(() => {
       FakePeer.instance.channel.emit({
         type: 'session.input_transcript.delta',
-        delta: 'I want to talk about the browser, ',
+        delta: 'Thanks, that ',
         start_ms: 0,
         end_ms: 300,
       });
       vi.advanceTimersByTime(1_000);
       FakePeer.instance.channel.emit({
         type: 'session.input_transcript.delta',
-        delta: 'and how people might do more with it',
+        delta: 'looks right',
         start_ms: 300,
         end_ms: 600,
       });
       vi.advanceTimersByTime(1_499);
     });
-    expect(onUtterance).not.toHaveBeenCalled();
+    expect(onHeardTurn).not.toHaveBeenCalled();
 
-    await act(async () => {
+    act(() => {
       vi.advanceTimersByTime(1);
     });
-    expect(cleanTranscriptMutate).toHaveBeenCalledWith({
-      text: 'I want to talk about the browser, and how people might do more with it',
-    });
-    expect(onUtterance).toHaveBeenCalledWith(
-      'I want to talk about the browser, and how people might do more with it.',
-      null,
-    );
+    expect(onHeardTurn).toHaveBeenCalledWith('Thanks, that looks right');
+    expect(onUtterance).not.toHaveBeenCalled();
 
-    // Neither A's late delegation nor B's own delegation can be correlated
-    // after fallback, even well beyond the old three-second window. Both are
-    // ignored and B uses the same safe path.
+    // GPT-Live answers on its own; its words are recorded once it goes quiet.
     act(() => {
-      vi.advanceTimersByTime(10_000);
+      FakePeer.instance.channel.emit({
+        type: 'session.output_transcript.delta',
+        delta: 'Glad to ',
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.output_transcript.delta',
+        delta: 'hear it.',
+      });
+      vi.advanceTimersByTime(1_200);
+    });
+    expect(onSpokenTurn).toHaveBeenCalledWith('Glad to hear it.');
+
+    // A delegation made while the next request was being spoken, arriving
+    // before that request's transcript, is its delegation: the request must
+    // reach Fast.
+    act(() => {
       FakePeer.instance.channel.emit({
         type: 'session.delegation.created',
-        delegation: { id: 'item_late', target: 'client' },
+        offset_ms: 5_900,
+        delegation: { id: 'item_next', target: 'client' },
       });
-      vi.advanceTimersByTime(250);
     });
-    expect(onUtterance).toHaveBeenCalledTimes(1);
-
     act(() => {
       FakePeer.instance.channel.emit({
         type: 'session.input_transcript.delta',
@@ -432,75 +442,126 @@ describe('useLiveVoice', () => {
         start_ms: 5_000,
         end_ms: 5_400,
       });
-      FakePeer.instance.channel.emit({
-        type: 'session.delegation.created',
-        delegation: { id: 'item_next', target: 'client' },
-      });
-      vi.advanceTimersByTime(1_500);
-    });
-    await act(async () => {});
-    expect(onUtterance).toHaveBeenLastCalledWith('Now check the build.', null);
-    expect(onUtterance).toHaveBeenCalledTimes(2);
-
-    act(() => result.current.stop());
-    await act(async () => result.current.start());
-    act(() => {
-      FakePeer.instance.channel.emit({
-        type: 'session.delegation.created',
-        delegation: { id: 'item_new_call', target: 'client' },
-      });
-      FakePeer.instance.channel.emit({
-        type: 'session.input_transcript.delta',
-        delta: 'Fresh call',
-      });
       vi.advanceTimersByTime(250);
     });
     await act(async () => {});
-    expect(onUtterance).toHaveBeenLastCalledWith(
-      'Fresh call.',
-      'item_new_call',
+    expect(onUtterance).toHaveBeenCalledWith(
+      'Now check the build.',
+      'item_next',
     );
-    expect(onUtterance).toHaveBeenCalledTimes(3);
+    expect(onHeardTurn).toHaveBeenCalledTimes(1);
   });
 
-  it('does not attach A late delegation after utterance B has started', async () => {
+  it('drops a delegation that is never followed by speech, so it cannot attach to a later request', async () => {
     const onUtterance = vi.fn();
-    const { result } = renderHook(() => useLiveVoice({ onUtterance }));
+    const onHeardTurn = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance, onHeardTurn }),
+    );
+
+    await act(async () => result.current.start());
+    // A late delegation for speech that was already flushed as small talk.
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        offset_ms: 2_000,
+        delegation: { id: 'item_stale', target: 'client' },
+      });
+      vi.advanceTimersByTime(3_000);
+    });
+
+    // The next thing said is small talk again: it is recorded as heard, not
+    // sent to Fast under the stale delegation.
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Cool, thanks',
+        start_ms: 8_000,
+        end_ms: 8_400,
+      });
+      vi.advanceTimersByTime(1_500);
+    });
+    await act(async () => {});
+    expect(onHeardTurn).toHaveBeenCalledWith('Cool, thanks');
+    expect(onUtterance).not.toHaveBeenCalled();
+  });
+
+  it('drops a late delegation for flushed small talk even when the next small talk starts right away', async () => {
+    const onUtterance = vi.fn();
+    const onHeardTurn = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance, onHeardTurn }),
+    );
 
     await act(async () => result.current.start());
     act(() => {
       FakePeer.instance.channel.emit({
         type: 'session.input_transcript.delta',
-        delta: 'First request',
+        delta: 'Thanks',
+        start_ms: 0,
+        end_ms: 400,
+      });
+      vi.advanceTimersByTime(1_500);
+    });
+    expect(onHeardTurn).toHaveBeenCalledWith('Thanks');
+
+    // GPT-Live's delegation for "Thanks" lands after the silence flush, and
+    // the person starts talking again well inside the expiry window.
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        offset_ms: 2_200,
+        delegation: { id: 'item_stale', target: 'client' },
+      });
+      vi.advanceTimersByTime(500);
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Cool, thanks',
+        start_ms: 2_900,
+        end_ms: 3_300,
       });
       vi.advanceTimersByTime(1_500);
     });
     await act(async () => {});
-    expect(onUtterance).toHaveBeenCalledWith('First request.', null);
+    expect(onHeardTurn).toHaveBeenLastCalledWith('Cool, thanks');
+    expect(onUtterance).not.toHaveBeenCalled();
+  });
 
+  it('sends a request under its own delegation, not a stale one that preceded it', async () => {
+    const onUtterance = vi.fn();
+    const onHeardTurn = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance, onHeardTurn }),
+    );
+
+    await act(async () => result.current.start());
     act(() => {
       FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        offset_ms: 2_200,
+        delegation: { id: 'item_stale', target: 'client' },
+      });
+      vi.advanceTimersByTime(500);
+      FakePeer.instance.channel.emit({
         type: 'session.input_transcript.delta',
-        delta: 'Second ',
+        delta: 'Now check the build',
+        start_ms: 2_900,
+        end_ms: 3_500,
       });
       FakePeer.instance.channel.emit({
         type: 'session.delegation.created',
-        delegation: { id: 'item_first_late', target: 'client' },
-      });
-      FakePeer.instance.channel.emit({
-        type: 'session.input_transcript.delta',
-        delta: 'request',
+        offset_ms: 4_100,
+        delegation: { id: 'item_fresh', target: 'client' },
       });
       vi.advanceTimersByTime(250);
     });
-    expect(onUtterance).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      vi.advanceTimersByTime(1_250);
-    });
     await act(async () => {});
-    expect(onUtterance).toHaveBeenLastCalledWith('Second request.', null);
-    expect(onUtterance).toHaveBeenCalledTimes(2);
+    expect(onUtterance).toHaveBeenCalledTimes(1);
+    expect(onUtterance).toHaveBeenCalledWith(
+      'Now check the build.',
+      'item_fresh',
+    );
+    expect(onHeardTurn).not.toHaveBeenCalled();
   });
 
   it('streams both sides of the call as they are spoken', async () => {
@@ -549,9 +610,10 @@ describe('useLiveVoice', () => {
 
   it('drops sound annotations from what the person said', async () => {
     const onUtterance = vi.fn();
+    const onHeardTurn = vi.fn();
     const onHeardTurnDelta = vi.fn();
     const { result } = renderHook(() =>
-      useLiveVoice({ onUtterance, onHeardTurnDelta }),
+      useLiveVoice({ onUtterance, onHeardTurn, onHeardTurnDelta }),
     );
 
     await act(async () => result.current.start());
@@ -583,7 +645,6 @@ describe('useLiveVoice', () => {
     });
 
     // Annotation-only speech is not a turn at all.
-    onUtterance.mockClear();
     act(() => {
       FakePeer.instance.channel.emit({
         type: 'session.input_transcript.delta',
@@ -593,7 +654,7 @@ describe('useLiveVoice', () => {
       });
       vi.advanceTimersByTime(1_500);
     });
-    expect(onUtterance).not.toHaveBeenCalled();
+    expect(onHeardTurn).not.toHaveBeenCalled();
   });
 
   it('flushes the spoken turn when the person starts talking again', async () => {
