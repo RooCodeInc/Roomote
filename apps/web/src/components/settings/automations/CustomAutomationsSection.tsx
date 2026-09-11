@@ -1232,7 +1232,9 @@ export function CustomAutomationsSection({
                     target.provider === 'none'
                       ? ''
                       : target.mode === 'direct_message'
-                        ? 'DM me'
+                        ? target.provider === 'email'
+                          ? 'me'
+                          : 'DM me'
                         : target.provider === 'slack'
                           ? (slackOptions.find(
                               (option) =>
