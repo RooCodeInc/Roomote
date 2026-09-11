@@ -62,6 +62,7 @@ const state = vi.hoisted(() => ({
     createdAt: Date;
     updatedAt: Date;
     latestFastResult?: string | null;
+    nextRunAt?: Date | null;
   }>,
   environments: [] as Array<{ id: string; name: string }>,
   nextUpdateSettingsResult: null as {
@@ -604,7 +605,10 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 import { AutomationsSettings } from './AutomationsSettings';
-import { CustomAutomationsSection } from './CustomAutomationsSection';
+import {
+  CustomAutomationsSection,
+  nextRunLabel,
+} from './CustomAutomationsSection';
 
 it.each([false, true])(
   'enables custom-editor channel catalogs only for admins (isAdmin=%s)',
@@ -1607,6 +1611,7 @@ describe('AutomationsSettings', () => {
         environmentId: 'env-1',
         target: { provider: 'slack', externalRef: 'C123MANAGER' },
         lastRunAt: new Date(),
+        nextRunAt: new Date('2026-09-11T13:00:00Z'),
         lastSucceededAt: null,
         lastFailedAt: null,
         lastError: null,
@@ -1624,10 +1629,31 @@ describe('AutomationsSettings', () => {
         'At 09:00 AM, Monday through Friday (UTC), in Production →',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Created by Ada/)).toHaveTextContent(
+    const creatorMetadata = screen.getByText(/Created by Ada/, {
+      selector: 'span',
+    });
+    expect(creatorMetadata).toHaveTextContent(
       /Created by Ada · Last run \d+s ago/,
     );
+    expect(creatorMetadata).not.toHaveTextContent('Next run');
+    expect(screen.getByText('Next run Sep 11 at 1:00 PM')).toHaveClass(
+      'basis-full',
+    );
+    expect(screen.getByText('Next run Sep 11 at 1:00 PM')).toHaveAttribute(
+      'title',
+      '2026-09-11T13:00:00.000Z',
+    );
     expect(screen.queryByText('0 9 * * 1-5')).not.toBeInTheDocument();
+  });
+
+  it('includes the year only when the next run is outside the current year', () => {
+    const now = new Date('2026-09-11T12:00:00Z');
+    expect(nextRunLabel('2026-12-31T15:00:00Z', 'UTC', now)).toBe(
+      'Next run Dec 31 at 3:00 PM',
+    );
+    expect(nextRunLabel('2027-01-01T15:00:00Z', 'UTC', now)).toBe(
+      'Next run Jan 1, 2027 at 3:00 PM',
+    );
   });
 
   it('shows saved cron cadence in the deployment timezone', async () => {

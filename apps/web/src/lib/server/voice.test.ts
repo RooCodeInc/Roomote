@@ -42,6 +42,7 @@ import {
   cleanVoiceTranscript,
   createVoiceLiveSession,
   createVoicePreview,
+  VoicePreviewPermissionError,
   resolveVoiceOpenAiKey,
   resolveVoiceId,
 } from './voice';
@@ -108,30 +109,14 @@ describe('createVoiceLiveSession', () => {
     expect(body.session.instructions).toContain(
       'Integrations the backend can use: GitHub.',
     );
-    // The voice acknowledges, delegates every utterance, and reports results
-    // faithfully without originating answers or claims of inspection.
+    // The voice acknowledges, delegates real work, and reports results
+    // faithfully in its own words.
     expect(body.session.instructions).toContain('Backchannel policy');
+    expect(body.session.instructions).toContain('Delegate to the backend when');
     expect(body.session.instructions).toContain(
-      'Delegate every complete utterance to the backend',
-    );
-    expect(body.session.instructions).toContain(
-      'Never answer, explain, clarify, offer an opinion, or state a fact yourself',
-    );
-    expect(body.session.instructions).toContain(
-      'Never claim that you checked a source',
-    );
-    expect(body.session.instructions).toContain(
-      'any product, repository, or connected tool discussed in the Session',
-    );
-    expect(body.session.instructions).toContain(
-      'Roomote when the platform itself is the topic',
-    );
-    expect(body.session.instructions).not.toContain(
-      'describe how Roomote works',
-    );
-    expect(body.session.instructions).not.toContain(
       'Do not delegate to the backend when',
     );
+    expect(body.session.instructions).toContain('Grounding policy');
     expect(body.session.instructions).toContain(
       'keep every number, name, path, and link label exactly as given',
     );
@@ -286,5 +271,58 @@ describe('resolveVoiceId', () => {
 
     findConnection.mockResolvedValue(null);
     await expect(resolveVoiceId()).resolves.toBe('marin');
+  });
+});
+
+describe('createVoicePreview permission errors', () => {
+  it('names the missing Audio permission when a restricted key is rejected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'You have insufficient permissions for this operation. Missing scopes: api.model.audio.request.',
+              type: 'invalid_request_error',
+              code: 'missing_scope',
+            },
+          }),
+          { status: 401 },
+        ),
+      ),
+    );
+
+    await expect(
+      createVoicePreview({ apiKey: 'sk-restricted', voiceId: 'marin' }),
+    ).rejects.toBeInstanceOf(VoicePreviewPermissionError);
+  });
+
+  it('keeps the upstream error for a missing scope other than Audio', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'You have insufficient permissions for this operation. Missing scopes: model.request.',
+              type: 'invalid_request_error',
+              code: 'missing_scope',
+            },
+          }),
+          { status: 401 },
+        ),
+      ),
+    );
+
+    const failure = await createVoicePreview({
+      apiKey: 'sk-restricted',
+      voiceId: 'marin',
+    }).catch((error: unknown) => error);
+    expect(failure).not.toBeInstanceOf(VoicePreviewPermissionError);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain('status 401');
+    expect((failure as Error).message).toContain('model.request');
   });
 });

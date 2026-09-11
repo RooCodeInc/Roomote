@@ -15,7 +15,10 @@ separate from any key used for task inference, so voice can be billed and
 revoked on its own.
 
 The setup dialog also lets the admin choose any voice supported by GPT-Live and
-play a short AI-generated preview before saving. New and previously unset
+play a short AI-generated preview before saving. Previews use OpenAI's speech
+endpoint, so a restricted key needs the **Audio** model permission
+(`api.model.audio.request`) in addition to GPT-Live access; without it, calls
+still work and the dialog says what the key is missing. New and previously unset
 connections use Marin, one of OpenAI's recommended voices. Existing voice
 selections stay unchanged.
 
