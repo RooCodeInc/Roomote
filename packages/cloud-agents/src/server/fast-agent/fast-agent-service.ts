@@ -571,41 +571,70 @@ const setupIntegrationAnswersSchema = z.record(
 // Some models fill every optional tool parameter, so a trusted preset may
 // arrive alongside placeholder questions. The preset wins: its questions are
 // server-supplied and model-provided ones are discarded rather than rejected.
-const requestUserInputArgsSchema = z
-  .object({
-    questions: z.array(requestUserInputQuestionSchema).min(1).max(4).optional(),
-    preset: fastAgentInputPresetSchema.optional(),
-    setupIntegrationAnswers: setupIntegrationAnswersSchema.optional(),
-  })
-  .refine(
-    (args) =>
-      args.setupIntegrationAnswers === undefined ||
-      args.preset === 'setup_integrations',
-    'setupIntegrationAnswers is only available with setup_integrations.',
-  )
-  .transform(
-    (
-      args,
-    ):
-      | {
-          preset: FastAgentInputPreset;
-          setupIntegrationAnswers?: z.output<
-            typeof setupIntegrationAnswersSchema
-          >;
-        }
-      | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
-      | null =>
-      args.preset
-        ? {
-            preset: args.preset,
-            ...(args.setupIntegrationAnswers !== undefined
-              ? { setupIntegrationAnswers: args.setupIntegrationAnswers }
-              : {}),
+const requestUserInputArgsSchema = z.preprocess(
+  (raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+
+    const input = raw as Record<string, unknown>;
+    if (input.preset === 'setup_starter_tasks') {
+      // A trusted preset owns its questions. Models sometimes serialize
+      // optional fields as placeholders or null; discard them before schema
+      // validation so those fields cannot make the preset call fail.
+      return { preset: input.preset };
+    }
+    if (input.preset === 'setup_integrations') {
+      // Integration answers are meaningful for this preset, but questions
+      // are still server-owned. Treat a model-emitted null as omitted.
+      return {
+        preset: input.preset,
+        ...(input.setupIntegrationAnswers !== undefined &&
+        input.setupIntegrationAnswers !== null
+          ? { setupIntegrationAnswers: input.setupIntegrationAnswers }
+          : {}),
+      };
+    }
+    return raw;
+  },
+  z
+    .object({
+      questions: z
+        .array(requestUserInputQuestionSchema)
+        .min(1)
+        .max(4)
+        .optional(),
+      preset: fastAgentInputPresetSchema.optional(),
+      setupIntegrationAnswers: setupIntegrationAnswersSchema.optional(),
+    })
+    .refine(
+      (args) =>
+        args.setupIntegrationAnswers === undefined ||
+        args.preset === 'setup_integrations',
+      'setupIntegrationAnswers is only available with setup_integrations.',
+    )
+    .transform(
+      (
+        args,
+      ):
+        | {
+            preset: FastAgentInputPreset;
+            setupIntegrationAnswers?: z.output<
+              typeof setupIntegrationAnswersSchema
+            >;
           }
-        : args.questions
-          ? { questions: args.questions }
-          : null,
-  );
+        | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
+        | null =>
+        args.preset
+          ? {
+              preset: args.preset,
+              ...(args.setupIntegrationAnswers !== undefined
+                ? { setupIntegrationAnswers: args.setupIntegrationAnswers }
+                : {}),
+            }
+          : args.questions
+            ? { questions: args.questions }
+            : null,
+    ),
+);
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();

@@ -1356,18 +1356,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
-        // Some models fill every optional parameter; the placeholder
-        // questions must be discarded, never rendered or used to reject.
+        // Some models fill every optional parameter, including malformed
+        // placeholders and nulls. Trusted preset calls must discard them
+        // before validation, never render them or fail.
         toolResult = await invokeTool(nativeToolNames.requestUserInput, {
           preset: 'setup_starter_tasks',
-          questions: [
-            {
-              id: 'placeholder',
-              header: 'placeholder',
-              question: 'placeholder',
-              options: [{ label: 'placeholder', description: 'placeholder' }],
-            },
-          ],
+          questions: [],
+          setupIntegrationAnswers: null,
         });
         return '';
       },
