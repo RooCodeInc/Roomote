@@ -137,6 +137,7 @@ export async function appendLearnedUserPreference(input: {
   preference: string;
   confidence: 'explicit' | 'inferred';
   supersedes?: string[];
+  fastConversationId?: string;
 }): Promise<{
   saved: boolean;
   reason?: 'disabled' | 'duplicate' | 'full' | 'reset_boundary' | 'no_change';
@@ -157,8 +158,22 @@ export async function appendLearnedUserPreference(input: {
       .from(userPersonalizations)
       .where(eq(userPersonalizations.userId, input.userId))
       .for('update');
-    if (!row?.learnFromConversations)
-      return { saved: false, reason: 'disabled' };
+    if (!row) return { saved: false, reason: 'disabled' };
+    const learningEnabled = input.fastConversationId
+      ? (
+          await tx.query.fastAgentPersonalizationSnapshots.findFirst({
+            where: and(
+              eq(
+                fastAgentPersonalizationSnapshots.conversationId,
+                input.fastConversationId,
+              ),
+              eq(fastAgentPersonalizationSnapshots.userId, input.userId),
+            ),
+            columns: { learnFromConversations: true },
+          })
+        )?.learnFromConversations === true
+      : row.learnFromConversations;
+    if (!learningEnabled) return { saved: false, reason: 'disabled' };
     if (row.resetAt && input.confidence === 'inferred') {
       return { saved: false, reason: 'reset_boundary' };
     }

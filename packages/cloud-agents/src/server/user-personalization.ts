@@ -23,6 +23,7 @@ type QueuedPersonalizationUpdate = {
   preference: string;
   confidence: 'explicit' | 'inferred';
   taskId?: string | null;
+  fastConversationId?: string;
 };
 
 type PersonalizationUpdateResult = Awaited<
@@ -164,6 +165,9 @@ export function enqueueUserPersonalizationUpdate(
         preference: decision.preference,
         confidence: input.confidence,
         supersedes: decision.supersedes,
+        ...(input.fastConversationId
+          ? { fastConversationId: input.fastConversationId }
+          : {}),
       });
     })
     .finally(() => {

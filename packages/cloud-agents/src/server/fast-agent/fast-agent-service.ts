@@ -4453,6 +4453,7 @@ export async function answerFastAgentQuestion({
             const args = updatePersonalizationArgsSchema.parse(call.args);
             const result = await enqueueUserPersonalizationUpdate({
               userId,
+              fastConversationId: session.id,
               ...args,
             });
             return result.saved

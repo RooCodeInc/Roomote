@@ -83,8 +83,16 @@ describe('queued user personalization updates', () => {
         userId: 'user-1',
         preference: 'Be concise.',
         confidence: 'explicit',
+        fastConversationId: 'conversation-1',
       }),
     ).resolves.toEqual({ saved: true });
+    expect(mocks.appendLearnedPreference).toHaveBeenCalledWith({
+      userId: 'user-1',
+      preference: 'Be concise.',
+      confidence: 'explicit',
+      supersedes: [],
+      fastConversationId: 'conversation-1',
+    });
   });
 
   it('returns opt-out instead of confirming a queued update', async () => {

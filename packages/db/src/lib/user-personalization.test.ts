@@ -93,6 +93,72 @@ describe('user personalization', () => {
     });
   });
 
+  it('uses the frozen Fast conversation learning setting for later updates', async () => {
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: 'personalization-learning-snapshot-test',
+        conversationId: crypto.randomUUID(),
+      })
+      .returning({ id: fastAgentConversations.id });
+    await getOrCreateFastAgentPersonalizationSnapshot({
+      conversationId: conversation!.id,
+      userId: user.id,
+    });
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 0,
+      learnFromConversations: false,
+    });
+
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Save this for my next conversation.',
+        confidence: 'explicit',
+        fastConversationId: conversation!.id,
+      }),
+    ).resolves.toEqual({ saved: true });
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Do not save without a frozen enabled snapshot.',
+        confidence: 'explicit',
+      }),
+    ).resolves.toEqual({ saved: false, reason: 'disabled' });
+
+    const [disabledConversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: 'personalization-disabled-snapshot-test',
+        conversationId: crypto.randomUUID(),
+      })
+      .returning({ id: fastAgentConversations.id });
+    await getOrCreateFastAgentPersonalizationSnapshot({
+      conversationId: disabledConversation!.id,
+      userId: user.id,
+    });
+    const current = await getUserPersonalization(user.id);
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: current.version,
+      learnFromConversations: true,
+    });
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Do not save from a frozen disabled conversation.',
+        confidence: 'explicit',
+        fastConversationId: disabledConversation!.id,
+      }),
+    ).resolves.toEqual({ saved: false, reason: 'disabled' });
+  });
+
   it('keeps manual text ahead of append-only conversational learning', async () => {
     const user = await userFactory.create();
     await updateUserPersonalization({

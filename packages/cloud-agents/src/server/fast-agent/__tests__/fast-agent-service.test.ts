@@ -755,6 +755,14 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
+    expect(mocks.appendLearnedPreference).toHaveBeenCalledWith({
+      userId: 'user-1',
+      fastConversationId: 'conversation-1',
+      preference: 'PRIVATE_SENTINEL',
+      confidence: 'explicit',
+      supersedes: [],
+    });
+
     await vi.waitFor(() =>
       expect(
         mocks.upsertMessage.mock.calls
