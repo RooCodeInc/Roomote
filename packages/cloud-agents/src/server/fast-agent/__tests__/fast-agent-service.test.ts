@@ -327,6 +327,7 @@ import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
 } from '@roomote/types';
+import { McpToolCallError } from '../../mcp-tool-client';
 
 import {
   answerFastAgentQuestion,
@@ -7452,6 +7453,45 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         success: true,
         result: { matches: ['fast-agent.ts'] },
       });
+    });
+
+    it('returns upstream MCP error content as a failure', async () => {
+      const errorText =
+        'missing_required_fields: severity_id is required because manual triage is disabled';
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'incident-io',
+          name: 'Incident.io',
+          description: 'Manage incidents',
+          tools: [{ name: 'incident_create', inputSchema: { type: 'object' } }],
+        },
+      ]);
+      mocks.callIntegration.mockRejectedValue(new McpToolCallError(errorText));
+      let result: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          result = await invokeMcpTool('incident-io', 'incident_create', {
+            name: 'Database unavailable',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The incident could not be created.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        question:
+          '<platform_event>{"type":"automation_triggered"}</platform_event>',
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        adapter: callbacks(),
+      });
+
+      expect(result).toEqual({ success: false, error: errorText });
     });
   });
 

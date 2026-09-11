@@ -6,10 +6,14 @@
  * closes the transport.
  */
 
-type McpToolResult = {
-  structuredContent?: unknown;
-  content?: Array<{ type?: string; text?: string }>;
-};
+import { parseMcpToolResult } from '@roomote/types';
+
+export class McpToolCallError extends Error {
+  constructor(readonly upstreamText: string | null) {
+    super('MCP tool reported an error (isError: true).');
+    this.name = 'McpToolCallError';
+  }
+}
 
 async function createCancellableMcpClient(options: {
   url: string;
@@ -74,40 +78,11 @@ export async function listMcpTools(options: {
 }
 
 export function extractMcpToolResultPayload(result: unknown): unknown | null {
-  if (!result || typeof result !== 'object') {
-    return result ?? null;
+  const parsed = parseMcpToolResult(result);
+  if (parsed.isError) {
+    throw new McpToolCallError(parsed.errorText);
   }
-
-  const toolResult = result as McpToolResult;
-
-  if (
-    'structuredContent' in toolResult &&
-    toolResult.structuredContent != null
-  ) {
-    return toolResult.structuredContent;
-  }
-
-  if ('content' in toolResult && Array.isArray(toolResult.content)) {
-    const textPart = toolResult.content.find(
-      (part: {
-        type?: string;
-        text?: string;
-      }): part is { type: 'text'; text: string } =>
-        part.type === 'text' && typeof part.text === 'string',
-    );
-
-    if (!textPart) {
-      return toolResult.content;
-    }
-
-    try {
-      return JSON.parse(textPart.text);
-    } catch {
-      return textPart.text;
-    }
-  }
-
-  return result;
+  return parsed.payload;
 }
 
 /**
@@ -115,7 +90,8 @@ export function extractMcpToolResultPayload(result: unknown): unknown | null {
  *
  * Returns the extracted tool payload, or `null` when the server does not
  * expose the requested tool. Transport and protocol errors are thrown so the
- * caller can decide whether to fail open.
+ * caller can decide whether to fail open. Tool results with `isError: true`
+ * throw before success payload extraction.
  */
 export async function callMcpTool(options: {
   url: string;
