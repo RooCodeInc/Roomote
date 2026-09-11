@@ -425,7 +425,7 @@ describe('Environments', () => {
     render(<Environments />);
 
     expect(
-      screen.getByText(/Environments let Roomote run and verify its work\./i),
+      screen.getByText(/Environments help Roomote verify its work\./i),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /add/i })).toHaveAttribute(
       'href',
@@ -439,7 +439,7 @@ describe('Environments', () => {
     render(<Environments />);
 
     expect(
-      screen.getByText(/Environments let Roomote run and verify its work\./i),
+      screen.getByText(/Environments help Roomote verify its work\./i),
     ).toBeInTheDocument();
   });
 
