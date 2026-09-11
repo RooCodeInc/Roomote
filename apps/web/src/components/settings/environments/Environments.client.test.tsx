@@ -425,9 +425,7 @@ describe('Environments', () => {
     render(<Environments />);
 
     expect(
-      screen.getByText(
-        /Roomote can only verify its work when running with an environment\./i,
-      ),
+      screen.getByText(/Environments help Roomote verify its work\./i),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /add/i })).toHaveAttribute(
       'href',
@@ -441,9 +439,7 @@ describe('Environments', () => {
     render(<Environments />);
 
     expect(
-      screen.getByText(
-        /Roomote can only verify its work when running with an environment\./i,
-      ),
+      screen.getByText(/Environments help Roomote verify its work\./i),
     ).toBeInTheDocument();
   });
 
