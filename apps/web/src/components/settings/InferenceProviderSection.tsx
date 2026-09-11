@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -292,6 +292,8 @@ function ProviderCredentialsDialog({
   const [apiKey, setApiKey] = useState(() =>
     getInitialPrimaryCredential(providers[0] ?? null),
   );
+  const connectionNameRef = useRef<HTMLInputElement>(null);
+  const primaryCredentialRef = useRef<HTMLInputElement>(null);
   const [connectionName, setConnectionName] = useState('');
   const [providerSelectOpen, setProviderSelectOpen] = useState(false);
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
@@ -428,6 +430,11 @@ function ProviderCredentialsDialog({
                   open={providerSelectOpen}
                   onOpenChange={setProviderSelectOpen}
                   value={selectedProvider.id}
+                  handoffTargetOnSelect={
+                    requiresConnectionName
+                      ? connectionNameRef
+                      : primaryCredentialRef
+                  }
                   onValueChange={(value) => {
                     const providerId = value as SetupModelProviderId;
                     const provider =
@@ -475,6 +482,7 @@ function ProviderCredentialsDialog({
                       </span>
                       <div className="space-y-1.5">
                         <Input
+                          ref={connectionNameRef}
                           value={connectionName}
                           onChange={(event) =>
                             setConnectionName(event.target.value)
@@ -495,6 +503,7 @@ function ProviderCredentialsDialog({
                     </span>
                     <div className="space-y-1.5">
                       <Input
+                        ref={primaryCredentialRef}
                         type={
                           selectedProvider.authKind === 'endpoint'
                             ? 'url'

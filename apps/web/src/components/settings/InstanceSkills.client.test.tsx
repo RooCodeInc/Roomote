@@ -8,32 +8,43 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
-const { state, createMock, updateMock, deleteMock } = vi.hoisted(() => ({
-  state: {
-    skills: [
-      {
-        id: '00000000-0000-4000-8000-000000000001',
-        name: 'my-skill',
-        description: 'My instructions',
-        content: '# My skill body',
-        canManage: true,
-        createdByName: 'Me',
-      },
-      {
-        id: '00000000-0000-4000-8000-000000000002',
-        name: 'shared-skill',
-        description: 'Another member created this',
-        content: '# Shared skill body',
-        canManage: false,
-        createdByName: 'Teammate',
-      },
-    ],
-    isAdmin: false,
-  },
-  createMock: vi.fn(async (_input: unknown) => ({ success: true })),
-  updateMock: vi.fn(async (_input: unknown) => ({ success: true })),
-  deleteMock: vi.fn(async (_input: unknown) => ({ success: true })),
-}));
+const { state, createMock, updateMock, deleteMock, saveManualMock } =
+  vi.hoisted(() => ({
+    state: {
+      skills: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          name: 'my-skill',
+          description: 'My instructions',
+          content: '# My skill body',
+          canManage: true,
+          createdByName: 'Me',
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          name: 'shared-skill',
+          description: 'Another member created this',
+          content: '# Shared skill body',
+          canManage: false,
+          createdByName: 'Teammate',
+        },
+      ],
+      environments: [
+        { id: '00000000-0000-4000-8000-000000000011', name: 'Alpha' },
+        { id: '00000000-0000-4000-8000-000000000012', name: 'Beta' },
+      ],
+      createResult: null as Promise<{ success: true }> | null,
+      environmentError: false,
+      isAdmin: false,
+    },
+    createMock: vi.fn(
+      async (_input: unknown) =>
+        state.createResult ?? Promise.resolve({ success: true as const }),
+    ),
+    updateMock: vi.fn(async (_input: unknown) => ({ success: true })),
+    deleteMock: vi.fn(async (_input: unknown) => ({ success: true })),
+    saveManualMock: vi.fn(async (_input: unknown) => ({ success: true })),
+  }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@/trpc/client', () => ({
@@ -65,6 +76,30 @@ vi.mock('@/trpc/client', () => ({
         }),
       },
     },
+    customSkills: {
+      list: {
+        queryKey: () => ['customSkills', 'list'],
+        queryOptions: () => ({
+          queryKey: ['customSkills', 'list'],
+          queryFn: async () => {
+            if (state.environmentError) {
+              throw new Error('Environment query failed');
+            }
+            return {
+              deploymentName: 'this deployment',
+              environments: state.environments,
+              installed: [],
+            };
+          },
+        }),
+      },
+      saveManual: {
+        mutationOptions: (options = {}) => ({
+          mutationFn: saveManualMock,
+          ...options,
+        }),
+      },
+    },
   }),
 }));
 vi.mock('@/hooks/useUser', () => ({
@@ -81,6 +116,35 @@ vi.mock('@/components/settings/SettingsShell', () => ({
     <>
       <header>{headerAction}</header>
       {children}
+    </>
+  ),
+}));
+vi.mock('@/components/settings/CustomSkills', () => ({
+  CustomSkills: ({
+    filter,
+    search,
+    marketplaceOpen,
+    onMarketplaceOpenChange,
+  }: {
+    filter: string;
+    search: string;
+    marketplaceOpen: boolean;
+    onMarketplaceOpenChange: (open: boolean) => void;
+  }) => (
+    <>
+      {filter !== 'shared' && 'env-skill'.includes(search.toLowerCase()) ? (
+        <div role="row" data-testid="environment-skill-row">
+          <span role="cell">env-skill</span>
+          <span role="cell">Environment instructions</span>
+          <span role="cell">Only in Alpha</span>
+        </div>
+      ) : null}
+      {marketplaceOpen ? (
+        <div role="dialog" aria-label="Add from Marketplace">
+          Marketplace results
+          <button onClick={() => onMarketplaceOpenChange(false)}>Close</button>
+        </div>
+      ) : null}
     </>
   ),
 }));
@@ -103,6 +167,8 @@ function renderSkills() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  state.createResult = null;
+  state.environmentError = false;
   state.isAdmin = false;
 });
 
@@ -119,16 +185,19 @@ it('makes Skills navigation and creation available to members without environmen
   expect(
     screen.queryByText(/marketplace|environment/i),
   ).not.toBeInTheDocument();
-  expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(1);
   expect(
-    within(screen.getByRole('banner')).getByRole('button', {
-      name: 'Add Skill',
-    }),
+    screen.getByRole('button', { name: 'Add Custom Skill' }),
   ).toBeVisible();
-  fireEvent.click(screen.getByRole('button', { name: 'Add Skill' }));
+  expect(screen.getAllByRole('radio')).toHaveLength(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Add Custom Skill' }));
   const dialog = screen.getByRole('dialog');
   expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
-  expect(within(dialog).queryByText(/environment/i)).not.toBeInTheDocument();
+  expect(
+    within(dialog).getByRole('radio', { name: 'Everywhere' }),
+  ).toBeChecked();
+  expect(
+    within(dialog).queryByText('Only in selected environments'),
+  ).not.toBeInTheDocument();
   fireEvent.change(within(dialog).getByLabelText('Slug'), {
     target: { value: 'new-skill' },
   });
@@ -156,20 +225,22 @@ it('makes Skills navigation and creation available to members without environmen
 it('lets members view every body but only manage skills authorized by the server', async () => {
   renderSkills();
   await screen.findByText('my-skill');
-  const list = screen.getByRole('list', { name: 'Shared skills' });
-  expect(within(list).getByText('Created by Me')).toBeInTheDocument();
-  expect(within(list).getByText('Created by Teammate')).toBeInTheDocument();
+  const table = screen.getByRole('table', { name: 'Skills' });
+  expect(table.closest('[data-slot="card"]')).toHaveClass('gap-0', 'p-0');
+  expect(within(table).getByText('Created by Me')).toBeInTheDocument();
+  expect(within(table).getByText('Created by Teammate')).toBeInTheDocument();
+  expect(within(table).getAllByText('Everywhere')).toHaveLength(2);
   expect(
-    within(list).getByRole('button', { name: 'Edit my-skill' }),
+    within(table).getByRole('button', { name: 'Edit my-skill' }),
   ).toBeInTheDocument();
   expect(
-    within(list).getByRole('button', { name: 'Delete my-skill' }),
+    within(table).getByRole('button', { name: 'Delete my-skill' }),
   ).toBeInTheDocument();
   expect(
-    within(list).queryByRole('button', { name: 'Edit shared-skill' }),
+    within(table).queryByRole('button', { name: 'Edit shared-skill' }),
   ).not.toBeInTheDocument();
   expect(
-    within(list).queryByRole('button', { name: 'Delete shared-skill' }),
+    within(table).queryByRole('button', { name: 'Delete shared-skill' }),
   ).not.toBeInTheDocument();
   fireEvent.click(screen.getByText('my-skill'));
   const ownedDialog = screen.getByRole('dialog');
@@ -196,6 +267,61 @@ it('shows document-size validation instead of silently refusing to save', async 
   );
   expect(updateMock).not.toHaveBeenCalled();
   expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+
+it('keeps the submitted catalog invalidation stable while creation is pending', async () => {
+  let resolveCreate!: (value: { success: true }) => void;
+  state.createResult = new Promise((resolve) => {
+    resolveCreate = resolve;
+  });
+  const { invalidate } = renderSkills();
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Add Custom Skill' }),
+  );
+  const dialog = screen.getByRole('dialog');
+  fireEvent.change(within(dialog).getByLabelText('Slug'), {
+    target: { value: 'pending-skill' },
+  });
+  fireEvent.change(within(dialog).getByLabelText('Description'), {
+    target: { value: 'Pending instructions' },
+  });
+  fireEvent.change(within(dialog).getByLabelText('Content'), {
+    target: { value: '# Pending instructions' },
+  });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save Skill' }));
+
+  await waitFor(() => expect(createMock).toHaveBeenCalled());
+  expect(
+    within(dialog).getByRole('radio', { name: 'Everywhere' }),
+  ).toBeDisabled();
+  resolveCreate({ success: true });
+
+  await waitFor(() =>
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['instanceSkills'] }),
+  );
+  expect(invalidate).not.toHaveBeenCalledWith({
+    queryKey: ['customSkills', 'list'],
+  });
+});
+
+it('disables environment creation when environments fail to load', async () => {
+  state.isAdmin = true;
+  state.environmentError = true;
+  renderSkills();
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Add Custom Skill' }),
+  );
+  const dialog = screen.getByRole('dialog');
+
+  const loadError = await within(dialog).findByText(
+    'Failed to load environments. Try again.',
+  );
+  expect(loadError).toHaveAttribute('role', 'alert');
+  expect(
+    within(dialog).getByRole('radio', {
+      name: 'Only in selected environments',
+    }),
+  ).toBeDisabled();
 });
 
 it('updates a creator skill and invalidates the catalog', async () => {
@@ -244,18 +370,66 @@ it('requires confirmation before deleting and refreshes the catalog', async () =
   );
 });
 
-it('shows only shared skills for admins with one add action in the header', async () => {
+it('unifies admin skills with filters, search, marketplace, and scoped creation', async () => {
   state.isAdmin = true;
   renderSkills();
   await screen.findByText('my-skill');
-  expect(screen.getAllByRole('button', { name: 'Add Skill' })).toHaveLength(1);
+  const table = screen.getByRole('table', { name: 'Skills' });
   expect(
-    within(screen.getByRole('banner')).getByRole('button', {
-      name: 'Add Skill',
-    }),
+    within(table).getByRole('columnheader', { name: 'Availability' }),
   ).toBeVisible();
+  expect(within(table).getByText('Only in Alpha')).toBeVisible();
+  expect(within(table).getAllByText('Everywhere')).toHaveLength(2);
+  expect(screen.getAllByRole('radio')).toHaveLength(3);
+
+  fireEvent.click(screen.getByRole('radio', { name: 'Everywhere' }));
+  expect(screen.queryByText('env-skill')).not.toBeInTheDocument();
+  expect(screen.getByText('my-skill')).toBeVisible();
+  fireEvent.click(screen.getByRole('radio', { name: 'Env-Specific' }));
+  expect(screen.getByText('env-skill')).toBeVisible();
+  expect(screen.queryByText('my-skill')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('radio', { name: 'All' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Search skills' }), {
+    target: { value: 'env-skill' },
+  });
+  expect(screen.getByText('env-skill')).toBeVisible();
+  expect(screen.queryByText('my-skill')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add from Marketplace' }));
   expect(
-    screen.queryByText(/marketplace|environment/i),
-  ).not.toBeInTheDocument();
-  expect(screen.getByRole('list', { name: 'Shared skills' })).toBeVisible();
+    screen.getByRole('dialog', { name: 'Add from Marketplace' }),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add Custom Skill' }));
+  const createDialog = screen.getByRole('dialog');
+  const environmentScope = await within(createDialog).findByRole('radio', {
+    name: 'Only in selected environments',
+  });
+  await waitFor(() => expect(environmentScope).toBeEnabled());
+  fireEvent.click(environmentScope);
+  fireEvent.click(await within(createDialog).findByLabelText('Alpha'));
+  fireEvent.change(within(createDialog).getByLabelText('Slug'), {
+    target: { value: 'environment-skill' },
+  });
+  fireEvent.change(within(createDialog).getByLabelText('Description'), {
+    target: { value: 'Environment instructions' },
+  });
+  fireEvent.change(within(createDialog).getByLabelText('Content'), {
+    target: { value: '# Environment instructions' },
+  });
+  fireEvent.click(
+    within(createDialog).getByRole('button', { name: 'Save Skill' }),
+  );
+  await waitFor(() =>
+    expect(saveManualMock).toHaveBeenCalledWith(
+      {
+        name: 'environment-skill',
+        description: 'Environment instructions',
+        content: '# Environment instructions\n',
+        environmentIds: ['00000000-0000-4000-8000-000000000011'],
+      },
+      expect.anything(),
+    ),
+  );
 });

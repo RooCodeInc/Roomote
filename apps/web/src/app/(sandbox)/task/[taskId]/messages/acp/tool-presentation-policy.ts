@@ -68,6 +68,8 @@ export function resolveToolPresentationPolicy(
   const consequentialReceipt =
     presentation.identity.toolName !== null &&
     CONSEQUENTIAL_RECEIPTS.has(presentation.identity.toolName);
+  const isPersonalizationReceipt =
+    presentation.identity.toolName === 'update_personalization';
   const keepConsequentialReceiptVisible =
     consequentialReceipt &&
     (presentation.identity.toolName !== 'send_chat_reply' ||
@@ -94,8 +96,9 @@ export function resolveToolPresentationPolicy(
     rowVisibility = 'hidden';
   }
 
-  const detailMode: ResolvedToolPolicy['detailMode'] =
-    isSubagentToolMessage(msg) && hasSubagentSummary(msg)
+  const detailMode: ResolvedToolPolicy['detailMode'] = isPersonalizationReceipt
+    ? 'none'
+    : isSubagentToolMessage(msg) && hasSubagentSummary(msg)
       ? 'expandable'
       : hasPreview
         ? 'preview'
@@ -113,6 +116,7 @@ export function resolveToolPresentationPolicy(
     detailMode,
     activityMode:
       isRunning ||
+      isPersonalizationReceipt ||
       hasPreview ||
       isArtifact ||
       renderAs === 'delegated-task-card' ||
@@ -121,6 +125,7 @@ export function resolveToolPresentationPolicy(
         : 'collapsible',
     renderAs,
     groupingMode:
+      isPersonalizationReceipt ||
       hasPreview ||
       isArtifact ||
       renderAs === 'delegated-task-card' ||

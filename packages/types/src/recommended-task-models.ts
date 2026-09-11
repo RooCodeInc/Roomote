@@ -47,8 +47,8 @@ export const RECOMMENDED_TASK_MODELS = [
     family: 'Gemini',
   },
   {
-    id: 'deepseek-v4-flash-0731',
-    displayName: 'DeepSeek V4 Flash 0731',
+    id: 'deepseek-v4-1-flash',
+    displayName: 'DeepSeek V4.1 Flash',
     family: 'DeepSeek',
   },
   {
@@ -111,7 +111,7 @@ export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'gpt-5-6-terra': 'openrouter/openai/gpt-5.6-terra',
   'gpt-5-6-luna': 'openrouter/openai/gpt-5.6-luna',
   'gemini-3-8-flash': 'openrouter/google/gemini-3.8-flash',
-  'deepseek-v4-flash-0731': 'openrouter/deepseek/deepseek-v4-flash-0731',
+  'deepseek-v4-1-flash': 'openrouter/deepseek/deepseek-v4.1-flash',
   'deepseek-v4-pro-0813': 'openrouter/deepseek/deepseek-v4-pro-0813',
   'glm-5-3-flash': 'openrouter/z-ai/glm-5.3-flash',
   'glm-5-3': 'openrouter/z-ai/glm-5.3',

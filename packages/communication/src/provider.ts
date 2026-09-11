@@ -92,7 +92,8 @@ export type CommunicationOperation =
   | 'postMessage'
   | 'fetchThreadMessages'
   | 'fetchChannelMessages'
-  | 'addReaction';
+  | 'addReaction'
+  | 'removeReaction';
 
 export class UnsupportedCommunicationOperationError extends Error {
   readonly code = 'communication_operation_unsupported' as const;

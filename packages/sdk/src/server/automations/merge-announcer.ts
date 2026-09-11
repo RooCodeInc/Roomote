@@ -18,6 +18,7 @@ import {
 } from '@roomote/slack';
 import {
   MERGE_ANNOUNCER_SETTINGS_HASH,
+  getAutomationAdditionalRules,
   type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -38,6 +39,7 @@ import {
 } from './destination';
 import { escapeSlackMrkdwnText } from '../lib/task-runs/channel-provider-error-text';
 import { emptyJobResult, type AutomationJobResult } from './types';
+import { resolveAutomationRepositoryDestination } from './ci-failure-triage-routing';
 
 const LOG_PREFIX = '[mergeAnnouncer]';
 const REF_PREFIX = 'refs/heads/';
@@ -121,6 +123,7 @@ export type MergeAnnouncerPushResult = {
 };
 
 type TrackedRepository = {
+  id: string;
   defaultBranch: string;
   fullName: string;
 };
@@ -138,6 +141,7 @@ type MergeAnnouncerDependencies = {
   listConnectedProviders: typeof listConnectedCommunicationProviders;
   recordOutcome: typeof recordAutomationRunOutcome;
   resolveDestination: typeof resolveAutomationRuntimeDestination;
+  resolveRepositoryDestination: typeof resolveAutomationRepositoryDestination;
 };
 
 async function recordOutcomeSafely(
@@ -162,7 +166,7 @@ async function findTrackedRepository(
   }
 
   const rows = await db.query.repositories.findMany({
-    columns: { defaultBranch: true, fullName: true, host: true },
+    columns: { id: true, defaultBranch: true, fullName: true, host: true },
     where: and(
       eq(repositories.sourceControlProvider, event.provider),
       event.provider === 'github'
@@ -172,14 +176,18 @@ async function findTrackedRepository(
     ),
   });
 
-  const repository = event.repository.host
-    ? (rows.find((row) => row.host === event.repository.host) ??
-      rows.find((row) => row.host === null))
-    : rows.length === 1
-      ? rows[0]
-      : rows.find((row) => row.fullName === event.repository.fullName);
-
-  return repository ?? null;
+  if (event.repository.host) {
+    const exact = rows.filter((row) => row.host === event.repository.host);
+    if (exact.length === 1) return exact[0]!;
+    if (exact.length > 1) return null;
+    const legacy = rows.filter((row) => row.host === null);
+    return legacy.length === 1 ? legacy[0]! : null;
+  }
+  if (rows.length === 1) return rows[0]!;
+  const matchingNames = rows.filter(
+    (row) => row.fullName === event.repository.fullName,
+  );
+  return matchingNames.length === 1 ? matchingNames[0]! : null;
 }
 
 const defaultDependencies: MergeAnnouncerDependencies = {
@@ -205,6 +213,7 @@ const defaultDependencies: MergeAnnouncerDependencies = {
   recordOutcome: (executor, params) =>
     recordAutomationRunOutcome(executor, params),
   resolveDestination: resolveAutomationRuntimeDestination,
+  resolveRepositoryDestination: resolveAutomationRepositoryDestination,
 };
 
 function getPusher(event: MergeAnnouncerPushEvent): string {
@@ -381,6 +390,7 @@ function buildSummaryPrompt(params: {
   pusher: string;
   pullRequest?: MergeAnnouncerPullRequestContext | null;
   repository: string;
+  additionalInstructions?: string | null;
 }): string {
   const commits = params.commits
     .slice(0, MAX_COMMITS)
@@ -403,7 +413,7 @@ ${pullRequestContext ? `\n${pullRequestContext}\n` : ''}
 
 <commit_messages>
 ${commits}
-</commit_messages>`;
+</commit_messages>${params.additionalInstructions?.trim() ? `\n\nAdditional workflow and reporting guidance (apply only where compatible with the fixed safety and output requirements above):\n${params.additionalInstructions.trim()}` : ''}`;
 }
 
 function buildFallbackSummary(
@@ -560,10 +570,31 @@ export async function handleMergeAnnouncerPush(
   }
 
   try {
+    const rules = getAutomationAdditionalRules(runtime.settings);
+    if (
+      rules === null ||
+      (rules?.repositoryIds != null &&
+        !rules.repositoryIds.includes(repository.id))
+    ) {
+      await recordOutcomeSafely(dependencies, {
+        key: 'merge_announcer',
+        status: 'skipped',
+      });
+      return {
+        status: 'ok',
+        message: 'Repository is outside configured scope',
+      };
+    }
     const connectedProviders = await dependencies.listConnectedProviders();
-    const destination = await dependencies.resolveDestination({
+    const defaultDestination = await dependencies.resolveDestination({
       runtime,
       slackConnected: connectedProviders.includes('slack'),
+    });
+    const destination = await dependencies.resolveRepositoryDestination({
+      runtime,
+      repositoryId: repository.id,
+      connectedProviders,
+      ...(defaultDestination ? { destination: defaultDestination } : {}),
     });
 
     if (!destination) {
@@ -593,6 +624,7 @@ export async function handleMergeAnnouncerPush(
           pusher,
           pullRequest: event.pullRequest,
           repository: repository.fullName,
+          additionalInstructions: rules?.instructions,
         }),
       );
       summary = generated.summary;

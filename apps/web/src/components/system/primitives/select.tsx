@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import * as SelectPrimitive from '@radix-ui/react-select';
+import { useControllableState } from '@radix-ui/react-use-controllable-state';
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -11,10 +12,140 @@ import {
 
 import { cn } from '@/lib/utils';
 
+type SelectFocusTarget = HTMLInputElement | HTMLTextAreaElement;
+
+export type SelectHandoffTarget = {
+  focusAndOpen: () => boolean;
+};
+
+type SelectHandoffDestination = SelectFocusTarget | SelectHandoffTarget;
+
+type SelectFocusContextValue = {
+  clearSelection: () => void;
+  handoffTargetOnSelect?: React.RefObject<SelectHandoffDestination | null>;
+  markSelection: () => void;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+  takeSelection: () => boolean;
+};
+
+const SelectFocusContext = React.createContext<SelectFocusContextValue | null>(
+  null,
+);
+
+const TEXT_INPUT_TYPES = new Set([
+  'email',
+  'number',
+  'password',
+  'search',
+  'tel',
+  'text',
+  'url',
+]);
+
+function isVisibleEditableTextField(
+  target: SelectFocusTarget,
+): target is SelectFocusTarget {
+  if (
+    !target.isConnected ||
+    target.disabled ||
+    target.readOnly ||
+    target.closest('[hidden], [inert], [aria-hidden="true"]') ||
+    target.getClientRects().length === 0
+  ) {
+    return false;
+  }
+
+  if (
+    target instanceof HTMLInputElement &&
+    !TEXT_INPUT_TYPES.has(target.type)
+  ) {
+    return false;
+  }
+
+  const style = getComputedStyle(target);
+  return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+function isAvailableSelectTrigger(
+  trigger: HTMLButtonElement | null,
+): trigger is HTMLButtonElement {
+  if (
+    !trigger?.isConnected ||
+    trigger.disabled ||
+    trigger.getAttribute('aria-disabled') === 'true' ||
+    trigger.closest('[hidden], [inert], [aria-hidden="true"]') ||
+    trigger.getClientRects().length === 0
+  ) {
+    return false;
+  }
+
+  const style = getComputedStyle(trigger);
+  return style.display !== 'none' && style.visibility !== 'hidden';
+}
+
+function setRef<T>(ref: React.Ref<T> | undefined, value: T | null) {
+  if (typeof ref === 'function') ref(value);
+  else if (ref) ref.current = value;
+}
+
 function Select({
-  ...props
-}: React.ComponentProps<typeof SelectPrimitive.Root>) {
-  return <SelectPrimitive.Root data-slot="select" {...props} />;
+  defaultOpen,
+  disabled,
+  handoffRef,
+  handoffTargetOnSelect,
+  onOpenChange,
+  open: openProp,
+  ...rootProps
+}: React.ComponentProps<typeof SelectPrimitive.Root> & {
+  handoffRef?: React.Ref<SelectHandoffTarget>;
+  handoffTargetOnSelect?: React.RefObject<SelectHandoffDestination | null>;
+}) {
+  const [open, setOpen] = useControllableState({
+    prop: openProp,
+    defaultProp: defaultOpen ?? false,
+    onChange: onOpenChange,
+    caller: 'Select',
+  });
+  const selectionCommittedRef = React.useRef(false);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+  const focusContext: SelectFocusContextValue = {
+    handoffTargetOnSelect,
+    triggerRef,
+    markSelection: () => {
+      selectionCommittedRef.current = true;
+    },
+    clearSelection: () => {
+      selectionCommittedRef.current = false;
+    },
+    takeSelection: () => {
+      const selectionCommitted = selectionCommittedRef.current;
+      selectionCommittedRef.current = false;
+      return selectionCommitted;
+    },
+  };
+
+  React.useImperativeHandle(handoffRef, () => ({
+    focusAndOpen: () => {
+      const trigger = triggerRef.current;
+      if (!isAvailableSelectTrigger(trigger)) return false;
+
+      trigger.focus({ preventScroll: true });
+      setOpen(true);
+      return true;
+    },
+  }));
+
+  return (
+    <SelectFocusContext value={focusContext}>
+      <SelectPrimitive.Root
+        data-slot="select"
+        open={open}
+        onOpenChange={setOpen}
+        disabled={disabled}
+        {...rootProps}
+      />
+    </SelectFocusContext>
+  );
 }
 
 function SelectGroup({
@@ -33,10 +164,13 @@ function SelectTrigger({
   className,
   size = 'default',
   children,
+  ref,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: 'sm' | 'default';
 }) {
+  const focusContext = React.useContext(SelectFocusContext);
+
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
@@ -50,6 +184,10 @@ function SelectTrigger({
         'rounded-lg cursor-pointer',
         className,
       )}
+      ref={(trigger) => {
+        if (focusContext) focusContext.triggerRef.current = trigger;
+        setRef(ref, trigger);
+      }}
       {...props}
     >
       {children}
@@ -63,9 +201,12 @@ function SelectTrigger({
 function SelectContent({
   className,
   children,
+  onCloseAutoFocus,
   position = 'popper',
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  const focusContext = React.useContext(SelectFocusContext);
+
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -77,6 +218,24 @@ function SelectContent({
           className,
         )}
         position={position}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event);
+
+          const selectionCommitted = focusContext?.takeSelection() ?? false;
+          if (event.defaultPrevented || !selectionCommitted) return;
+
+          const target = focusContext?.handoffTargetOnSelect?.current;
+          if (!target) return;
+
+          if ('focusAndOpen' in target) {
+            if (!target.focusAndOpen()) return;
+          } else {
+            if (!isVisibleEditableTextField(target)) return;
+            target.focus({ preventScroll: true });
+          }
+
+          event.preventDefault();
+        }}
         {...props}
       >
         <SelectScrollUpButton />
@@ -114,8 +273,34 @@ function SelectLabel({
 function SelectItem({
   className,
   children,
+  disabled,
+  onClick,
+  onKeyDown,
+  onPointerUp,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Item>) {
+  const focusContext = React.useContext(SelectFocusContext);
+  const markSelection = (
+    event:
+      | React.MouseEvent<HTMLDivElement>
+      | React.PointerEvent<HTMLDivElement>
+      | React.KeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (
+      !focusContext?.handoffTargetOnSelect ||
+      disabled ||
+      event.defaultPrevented
+    ) {
+      return;
+    }
+
+    const item = event.currentTarget;
+    focusContext.markSelection();
+    requestAnimationFrame(() => {
+      if (item.isConnected) focusContext.clearSelection();
+    });
+  };
+
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
@@ -128,6 +313,19 @@ function SelectItem({
         'transition-colors duration-50',
         className,
       )}
+      disabled={disabled}
+      onClick={(event) => {
+        onClick?.(event);
+        markSelection(event);
+      }}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (event.key === 'Enter' || event.key === ' ') markSelection(event);
+      }}
+      onPointerUp={(event) => {
+        onPointerUp?.(event);
+        markSelection(event);
+      }}
       {...props}
     >
       <span className="absolute right-2 flex size-3.5 items-center justify-center">

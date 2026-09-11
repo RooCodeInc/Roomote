@@ -452,7 +452,7 @@ export async function listFastAgentIntegrations(
       id: 'github',
       name: 'GitHub',
       description:
-        'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App. In active connected repositories, use native update_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, and comment reactions. Follow the discovered native tool descriptions and schemas for supported arguments.',
+        'Read public github.com repositories and connected private repositories using the deployment GitHub App. Public repositories do not need to be connected. In active connected repositories, use native update_pull_request, add_issue_comment, and add_reply_to_pull_request_comment capabilities, including reviewer requests, draft status, and comment reactions. Follow the discovered native tool descriptions and schemas for supported arguments.',
       endpoint: {
         url: integrationProxyUrl(apiBaseUrl, 'github'),
         headers: { Authorization: `Bearer ${authToken}` },
@@ -501,7 +501,7 @@ export async function listFastAgentIntegrations(
       ...integration,
       tools: (
         await listCachedIntegrationTools({
-          cacheKey: `${context.userId}:${integration.endpoint!.url}`,
+          cacheKey: `${context.userId}:${integration.endpoint!.url}:${configuredServers[integration.id]?.cacheRevision ?? ''}`,
           url: integration.endpoint!.url,
           headers: integration.endpoint!.headers,
         })

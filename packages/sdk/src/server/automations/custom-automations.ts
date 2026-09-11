@@ -18,11 +18,13 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
+  getAutomationTargetEmailIdentityId,
+  isAutomationDestinationTarget,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
-  isCommunicationAutomationTarget,
   type AutomationTarget,
-  type CommunicationProvider,
+  type BackgroundAutomationProvider,
   type FastAgentConversation,
 } from '@roomote/types';
 
@@ -47,12 +49,17 @@ import {
 import { SlackNotifier } from '@roomote/slack';
 
 import { findUserDirectMessageDestination } from '../lib/user-direct-message';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../lib/agentmail-communication';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../lib/discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
 import type { FastAgentParentEvent } from '../lib/fast-agent-parent-event';
 import { enqueueFastAgentParentEvent } from '../lib/fast-agent-parent-event-queue';
 import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
+import {
+  canStartAgentMailConversationWithUser,
+  prepareAgentMailConversation,
+} from '../lib/agentmail/outbound';
 
 const LOG_PREFIX = '[custom-automations]';
 
@@ -63,12 +70,25 @@ class CustomAutomationClaimSettlementError extends Error {
   }
 }
 
-const PROVIDER_LABELS: Record<CommunicationProvider, string> = {
+const PROVIDER_LABELS: Record<
+  Exclude<BackgroundAutomationProvider, 'sentry'>,
+  string
+> = {
   discord: 'Discord',
+  email: 'Email',
   slack: 'Slack',
   teams: 'Teams',
   telegram: 'Telegram',
 };
+
+type CustomAutomationDestination =
+  | ResolvedAutomationDestination
+  | {
+      provider: 'email';
+      userId: string;
+      identityId: string;
+      source: 'automation_target';
+    };
 
 const WINDOW_DAYS: Record<string, number> = {
   every_hour: 1 / 24,
@@ -89,12 +109,27 @@ function scheduleHourLocalForFrequency(frequency: string): number {
 
 async function resolveDestination(
   target: AutomationTarget,
-): Promise<ResolvedAutomationDestination | null> {
+  ownerUserId: string,
+): Promise<CustomAutomationDestination | null> {
   if (!target.provider || !target.externalRef) {
     return null;
   }
 
-  const provider = target.provider as CommunicationProvider;
+  if (target.provider === 'email') {
+    const identityId = getAutomationTargetEmailIdentityId(target);
+    return target.targetKind === 'email_user' &&
+      identityId &&
+      (await canStartAgentMailConversationWithUser(ownerUserId, identityId))
+      ? {
+          provider: 'email',
+          userId: ownerUserId,
+          identityId,
+          source: 'automation_target',
+        }
+      : null;
+  }
+
+  const provider = target.provider;
   if (
     provider !== 'slack' &&
     provider !== 'discord' &&
@@ -160,7 +195,7 @@ async function resolveDestination(
 }
 
 function isFastDeliveryTarget(target: AutomationTarget): boolean {
-  return isCommunicationAutomationTarget(target);
+  return isAutomationDestinationTarget(target);
 }
 
 function buildAutomationConversation(
@@ -177,7 +212,7 @@ function buildAutomationConversation(
 async function buildFastAutomationConversation(params: {
   automation: CustomAutomation;
   eventId: string;
-  destination: ResolvedAutomationDestination | null;
+  destination: CustomAutomationDestination | null;
   target: AutomationTarget | null;
 }): Promise<{
   conversation: FastAgentConversation;
@@ -186,6 +221,30 @@ async function buildFastAutomationConversation(params: {
   const { automation, destination, eventId, target } = params;
   if (!destination) {
     return { conversation: buildAutomationConversation(automation, eventId) };
+  }
+
+  if (destination.provider === 'email') {
+    // Some inboxes group unrelated messages by subject even without reply
+    // headers, so give every run a distinct root subject.
+    const prepared = await prepareAgentMailConversation({
+      userId: destination.userId,
+      subject: `${automation.name} - ${eventId.slice(automation.id.length + 1)}`,
+      conversationKey: `custom-automation:${eventId}`,
+      identityId: destination.identityId,
+    });
+    if (!prepared) {
+      throw new Error(
+        'Email is no longer available for this automation owner.',
+      );
+    }
+    return {
+      conversation: {
+        surface: 'agentmail',
+        workspaceId: prepared.inboxId,
+        conversationId: prepared.conversationId,
+        replyTarget: { channelId: prepared.inboxId },
+      },
+    };
   }
 
   if (destination.provider === 'slack') {
@@ -319,7 +378,7 @@ async function buildFastAutomationConversation(params: {
 
 async function runFastCustomAutomation(params: {
   automation: CustomAutomation;
-  destination: ResolvedAutomationDestination | null;
+  destination: CustomAutomationDestination | null;
   eventClaimedAt: Date;
   launchClaimedAt: Date;
   trigger: 'schedule' | 'manual';
@@ -453,6 +512,16 @@ async function reportFastAutomationStartupFailure(params: {
         text: message,
         textFormat: 'markdown',
       });
+    } else if (conversation.surface === 'agentmail') {
+      const provider =
+        await createAgentMailCommunicationProviderFromRuntimeCredentials();
+      await provider?.postMessage({
+        channelId: conversation.replyTarget.channelId,
+        threadId: conversation.conversationId,
+        text: message,
+        textFormat: 'markdown',
+        idempotencyKey: `agentmail:${conversation.conversationId}:fast-automation-startup-failure`,
+      });
     }
   } catch (updateError) {
     console.warn(
@@ -544,19 +613,21 @@ async function launchCustomAutomationRow(
   // deleted environment simply drops the hint.
   const preferredEnvironmentId = automation.allRepositories
     ? ALL_REPOSITORIES
-    : automation.environmentId
-      ? ((
-          await db.query.environments.findFirst({
-            columns: { id: true },
-            where: eq(environments.id, automation.environmentId),
-          })
-        )?.id ?? null)
-      : null;
+    : automation.noRepositories
+      ? NO_REPOSITORIES
+      : automation.environmentId
+        ? ((
+            await db.query.environments.findFirst({
+              columns: { id: true },
+              where: eq(environments.id, automation.environmentId),
+            })
+          )?.id ?? null)
+        : null;
 
-  let destination: ResolvedAutomationDestination | null = null;
+  let destination: CustomAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
     if (!isFastDeliveryTarget(automation.target)) {
-      const message = `${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} report destinations of this type are not supported.`;
+      const message = `${PROVIDER_LABELS[automation.target.provider as Exclude<BackgroundAutomationProvider, 'sentry'>]} report destinations of this type are not supported.`;
       result.skippedReason = message;
       result.errors.push(message);
       await recordCustomAutomationRunOutcome(db, {
@@ -567,12 +638,29 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    destination = await resolveDestination(automation.target);
+    if (!automation.createdByUserId) {
+      const message = 'Automation owner is not configured.';
+      result.skippedReason = message;
+      result.errors.push(message);
+      await recordCustomAutomationRunOutcome(db, {
+        id: automation.id,
+        status: 'failed',
+        error: message,
+      });
+      return result;
+    }
+
+    destination = await resolveDestination(
+      automation.target,
+      automation.createdByUserId,
+    );
     if (!destination) {
       const message = isBackgroundAutomationUserTargetKind(
         automation.target.targetKind,
       )
-        ? `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} account that can receive direct messages.`
+        ? automation.target.provider === 'email'
+          ? 'The automation owner no longer has an active verified Email destination.'
+          : `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as Exclude<BackgroundAutomationProvider, 'sentry'>]} account that can receive direct messages.`
         : automation.target.provider === 'teams'
           ? 'Teams report destination is missing a resolvable service URL.'
           : 'Report destination could not be resolved.';
@@ -586,8 +674,14 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    const connected = await listConnectedCommunicationProviders();
-    if (!connected.includes(destination.provider)) {
+    // Email eligibility was just checked against the pinned identity; the
+    // chat-provider catalog is only consulted for chat destinations.
+    if (
+      destination.provider !== 'email' &&
+      !(await listConnectedCommunicationProviders()).includes(
+        destination.provider,
+      )
+    ) {
       const message = `${destination.provider} is not connected.`;
       result.skippedReason = message;
       result.errors.push(message);

@@ -81,6 +81,7 @@ type SlackAuthTestResponse = {
   error?: string;
   user_id?: string;
   bot_id?: string;
+  team_id?: string;
 };
 
 type SlackUsersListResponse = {
@@ -233,6 +234,7 @@ export class SlackNotifier {
   private ownBotIdentityPromise?: Promise<{
     userId?: string;
     botId?: string;
+    teamId?: string;
   } | null>;
 
   constructor(
@@ -350,6 +352,7 @@ export class SlackNotifier {
   private async getOwnBotIdentity(): Promise<{
     userId?: string;
     botId?: string;
+    teamId?: string;
   } | null> {
     if (!this.ownBotIdentityPromise) {
       this.ownBotIdentityPromise = (async () => {
@@ -385,6 +388,7 @@ export class SlackNotifier {
           return {
             userId: result.user_id,
             botId: result.bot_id,
+            teamId: result.team_id,
           };
         } catch (error) {
           console.error(
@@ -402,6 +406,11 @@ export class SlackNotifier {
     }
 
     return ownBotIdentity;
+  }
+
+  /** Non-secret routing identity for durable, control-plane message refresh. */
+  async getWorkspaceId(): Promise<string | null> {
+    return (await this.getOwnBotIdentity())?.teamId ?? null;
   }
 
   private async normalizeFetchedMessages(
@@ -1379,10 +1388,13 @@ export class SlackNotifier {
     channel,
     messageTs,
     threadTs,
+    throwOnUnavailable = false,
   }: {
     channel: string;
     messageTs: string;
     threadTs: string;
+    /** Distinguish an unavailable API from a confirmed missing carrier. */
+    throwOnUnavailable?: boolean;
   }): Promise<unknown[] | null> {
     try {
       const response = await slackFetch(
@@ -1397,6 +1409,10 @@ export class SlackNotifier {
       );
 
       if (!response.ok) {
+        if (throwOnUnavailable)
+          throw new Error(
+            `Slack message lookup unavailable (${response.status})`,
+          );
         console.error(
           `[fetchMessageBlocks] Slack API failed: ${response.status} ${response.statusText}`,
         );
@@ -1421,6 +1437,18 @@ export class SlackNotifier {
       };
 
       if (!result.ok || !result.messages) {
+        if (
+          throwOnUnavailable &&
+          ![
+            'message_not_found',
+            'thread_not_found',
+            'channel_not_found',
+          ].includes(result.error ?? '')
+        ) {
+          throw new Error(
+            `Slack message lookup unavailable: ${result.error ?? 'missing response data'}`,
+          );
+        }
         console.error(
           `[fetchMessageBlocks] Slack error: ${result.error || 'No messages returned'}`,
         );
@@ -1443,6 +1471,7 @@ export class SlackNotifier {
       console.error(
         `[fetchMessageBlocks] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      if (throwOnUnavailable) throw error;
       return null;
     }
   }
@@ -1997,6 +2026,9 @@ export class SlackNotifier {
       const result: SlackResponse = await response.json();
 
       if (!result.ok) {
+        if (result.error === 'already_reacted') {
+          return true;
+        }
         console.error(
           `[addReaction] Slack reactions.add error: ${result.error} - ${JSON.stringify(result)}`,
         );

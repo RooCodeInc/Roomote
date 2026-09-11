@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import {
   CALL_INTEGRATION_TOOL_TOOL,
   FAST_AGENT_NATIVE_TOOL_NAMES,
+  MANAGE_WAKEUPS_TOOL,
 } from '@roomote/types';
 import { z } from 'zod';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -427,6 +428,112 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     expect(
       z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse(forwarded.args),
     ).toEqual(request);
+  });
+
+  it('forwards explicit internal wakeup visibility', async () => {
+    const wakeupsTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
+    )!;
+    const request = {
+      action: 'create',
+      name: 'Follow through on session tasks',
+      prompt: 'Check the tasks in this conversation.',
+      schedule: 'in 10m',
+      reportPolicy: 'only_when_notable',
+      internal: true,
+    };
+    const parsed = zod.z
+      .object(wakeupsTool.args as Record<string, never>)
+      .parse(request);
+    const execute = wakeupsTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    const forwarded = await execute(parsed, {});
+
+    expect(parsed).toHaveProperty('internal', true);
+    expect(wakeupsTool.args).toHaveProperty('internal');
+    expect(forwarded.name).toBe(FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups);
+    expect(
+      z.object(MANAGE_WAKEUPS_TOOL.inputSchema).parse(forwarded.args),
+    ).toEqual({
+      action: 'create',
+      name: request.name,
+      prompt: request.prompt,
+      schedule: request.schedule,
+      reportPolicy: request.reportPolicy,
+      internal: true,
+    });
+  });
+
+  // Synthetic arguments verify the generic bridge, not live upstream schemas.
+  it.each([
+    { toolName: 'sources', args: {} },
+    { toolName: 'sources', args: { name: 'example', page: 2, per_page: 10 } },
+    { toolName: 'source', args: { id: 42 } },
+    {
+      toolName: 'query',
+      args: {
+        source_id: 42,
+        table: 'observed_logs_7',
+        host: 'cluster.example.test',
+        query: 'SELECT count() FROM observed_logs_7',
+      },
+    },
+    {
+      toolName: 'query',
+      args: { source_id: 42, table: 'observed_logs_7', query: 'SELECT 1' },
+    },
+  ])(
+    'preserves Better Stack $toolName arguments without defaults through generated execution',
+    async ({ toolName, args }) => {
+      const callTool = tools.find(
+        (tool) =>
+          tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+      )!;
+      const request = JSON.parse(
+        JSON.stringify({ integrationId: 'betterstack', toolName, args }),
+      );
+      const validate = validator.compile(
+        toOpenCodeJsonSchema(zod, callTool.args),
+      );
+      expect(validate(request), JSON.stringify(validate.errors)).toBe(true);
+      const parsed = zod.z
+        .object(callTool.args as Record<string, never>)
+        .parse(request);
+      expect(parsed).toEqual(request);
+      const execute = callTool.execute as (
+        args: unknown,
+        context: unknown,
+      ) => Promise<{ name: string; args: unknown }>;
+      const forwarded = await execute(parsed, {});
+      expect(forwarded.name).toBe(
+        FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool,
+      );
+      expect(
+        z.object(CALL_INTEGRATION_TOOL_TOOL.inputSchema).parse(forwarded.args),
+      ).toEqual(request);
+    },
+  );
+  it('preserves discovery prose preferences through the native bridge', async () => {
+    const inputTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    )!;
+    const request = {
+      preset: 'setup_integrations',
+      setupIntegrationAnswers: { communication: { answers: ['Slack'] } },
+    };
+    const parsed = zod.z
+      .object(inputTool.args as Record<string, never>)
+      .parse(request);
+    const execute = inputTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    expect(await execute(parsed, {})).toEqual({
+      name: 'request_user_input',
+      args: request,
+    });
   });
 
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {

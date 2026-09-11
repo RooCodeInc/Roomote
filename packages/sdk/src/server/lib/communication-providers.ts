@@ -1,4 +1,5 @@
 import type {
+  AgentMailCommunicationProvider,
   CommunicationProviderAdapter,
   DiscordCommunicationProvider,
   TeamsCommunicationProvider,
@@ -8,6 +9,7 @@ import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import { SlackCommunicationProvider, SlackNotifier } from '@roomote/slack';
 import type { CommunicationProvider } from '@roomote/types';
 
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
@@ -18,6 +20,7 @@ export type RuntimeCommunicationProviderAdapter = CommunicationProviderAdapter &
     | TeamsCommunicationProvider
     | TelegramCommunicationProvider
     | DiscordCommunicationProvider
+    | AgentMailCommunicationProvider
   );
 
 /**
@@ -67,5 +70,7 @@ export async function getCommunicationProviderAdapter(
       return createTelegramCommunicationProviderFromRuntimeCredentials();
     case 'discord':
       return createDiscordCommunicationProviderFromRuntimeCredentials();
+    case 'agentmail':
+      return createAgentMailCommunicationProviderFromRuntimeCredentials();
   }
 }

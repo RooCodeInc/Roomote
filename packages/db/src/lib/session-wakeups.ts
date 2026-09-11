@@ -99,6 +99,7 @@ export type InsertSessionWakeupInput = {
   prompt: string;
   schedule: SessionWakeupSchedule;
   reportPolicy: SessionWakeupReportPolicy;
+  internal?: boolean;
   maxRuns: number | null;
   until: Date | null;
   nextRunAt: Date;
@@ -128,6 +129,7 @@ export async function admitSessionWakeup(
     const existing = active.find(
       (row) =>
         row.promptSignature === promptSignature &&
+        row.internal === (input.internal ?? false) &&
         (row.schedule.mode === 'once' &&
         input.schedule.mode === 'once' &&
         row.schedule.inMinutes !== undefined &&
@@ -158,6 +160,7 @@ export async function insertSessionWakeup(
       promptSignature: buildSessionWakeupPromptSignature(input.prompt),
       schedule: input.schedule,
       reportPolicy: input.reportPolicy,
+      internal: input.internal ?? false,
       status: 'active',
       maxRuns: input.maxRuns,
       until: input.until,

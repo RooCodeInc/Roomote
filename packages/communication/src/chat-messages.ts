@@ -289,59 +289,50 @@ export type ThreadReplyLinkedPr = {
   prUrl: string;
 };
 
+export type ThreadReplyRunningTasks = {
+  count: number;
+  url: string;
+};
+
 export function buildThreadReplyFooterText({
   taskUrl,
   linkedPrs,
-  livePreviewUrl,
-  explicitMentionRequired = false,
+  runningTasks,
+  webAppUrl,
   formatLink = formatMarkdownLink,
-  formatFooterText = (text) => `_${text}_`,
+  formatFooterText = (text) => text,
 }: {
   taskUrl: string;
   linkedPrs?: ThreadReplyLinkedPr[];
   livePreviewUrl?: string | null;
-  explicitMentionRequired?: boolean;
+  runningTasks?: ThreadReplyRunningTasks | null;
+  webAppUrl?: string | null;
   formatLink?: LinkFormatter;
   formatFooterText?: (text: string) => string;
 }): string {
-  const replyInstruction = explicitMentionRequired
-    ? 'reply with @-mention or use'
-    : 'reply or use';
-  const livePreviewLink = livePreviewUrl
-    ? formatLink('live preview', livePreviewUrl)
-    : null;
-  const webAppLink = formatLink('web app', taskUrl);
-
-  const activePullRequests = linkedPrs ?? [];
-
-  if (activePullRequests.length > 0) {
-    const prLinks = activePullRequests.map((pr) =>
-      formatLink(`PR #${pr.prNumber}`, pr.prUrl),
-    );
-    const prLink =
-      prLinks.length === 1
-        ? prLinks[0]
-        : `${prLinks.slice(0, -1).join(', ')} and ${prLinks.at(-1)}`;
-    const workingOn = livePreviewLink
-      ? `${prLink}, ${livePreviewLink}`
-      : prLink;
-
-    return formatFooterText(
-      `Working on ${workingOn}, ${replyInstruction} the ${webAppLink}.`,
+  const items = ['Reply anytime'];
+  if (runningTasks && runningTasks.count > 0) {
+    items.push(
+      runningTasks.count === 1
+        ? '1 task running'
+        : `${runningTasks.count} tasks running`,
     );
   }
-
-  if (livePreviewLink) {
-    return formatFooterText(
-      `Working on a ${livePreviewLink}, ${replyInstruction} the ${webAppLink}.`,
-    );
-  }
-
-  return formatFooterText(
-    explicitMentionRequired
-      ? `Reply with @-mention or use the ${webAppLink}.`
-      : `Reply or use the ${webAppLink}.`,
+  const prLinks = (linkedPrs ?? []).map((pr) =>
+    formatLink(`PR #${pr.prNumber}`, pr.prUrl),
   );
+  if (prLinks.length > 0) items.push(prLinks.join(', '));
+
+  const taskNavigationUrl = new URL(taskUrl);
+  let webUrl = taskNavigationUrl;
+  if (webAppUrl && /^\/task\/[^/]+$/.test(taskNavigationUrl.pathname)) {
+    webUrl = new URL(webAppUrl);
+    for (const [key, value] of taskNavigationUrl.searchParams) {
+      if (key.startsWith('utm_')) webUrl.searchParams.set(key, value);
+    }
+  }
+  items.push(formatLink('Open in Roomote', webUrl.toString()));
+  return formatFooterText(items.join(' · '));
 }
 
 /**

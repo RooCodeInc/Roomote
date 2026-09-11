@@ -1,4 +1,5 @@
 import type {
+  DataVisualizationInput,
   FastAgentConversation,
   FastAgentReactionExternalInput as SharedFastAgentReactionExternalInput,
   ReasoningEffort,
@@ -65,6 +66,7 @@ export type FastAgentReply = {
   message: string;
   imageArtifactIds?: string[];
   videoArtifactIds?: string[];
+  charts?: DataVisualizationInput[];
   /** Launchable follow-ups attached to a Fast automation report. */
   suggestions?: FastAgentSuggestedTask[];
   /** True for the parent-owned task kickoff. Deliverers must treat anything
@@ -160,6 +162,8 @@ export type FastAgentMcpServerConfig = {
   url: string;
   headers: Record<string, string>;
   disabledTools?: string[];
+  /** Opaque, non-secret revision used to invalidate process-local tool catalogs. */
+  cacheRevision?: string;
 };
 
 /** Structured input request issued with the Fast-native request_user_input tool. */
@@ -172,12 +176,12 @@ export type FastAgentInputRequest = {
     question: string;
     isOther: boolean;
     isSecret: boolean;
-    options?: Array<{ label: string; description: string }>;
+    options?: Array<{ id?: string; label: string; description: string }>;
     multiple?: boolean;
   }>;
 };
 
-export type FastAgentInputPreset = 'setup_starter_tasks';
+export type FastAgentInputPreset = 'setup_starter_tasks' | 'setup_integrations';
 
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
@@ -208,6 +212,7 @@ export type FastAgentTurnAdapter = {
   /** Resolve a trusted preset without accepting model-supplied options. */
   resolveUserInputPreset?: (
     preset: FastAgentInputPreset,
+    setupIntegrationAnswers?: Record<string, { answers: string[] }>,
   ) => Promise<FastAgentInputRequest['questions']>;
   /**
    * Called when an interrupted turn is still safe to replay and has handed

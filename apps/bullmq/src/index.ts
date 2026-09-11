@@ -53,6 +53,7 @@ import { startPullRequestMergeabilityCheckQueue } from './pull-request-mergeabil
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 import { startFastAgentParentEventQueue } from './fast-agent-parent-event-queue';
+import { startAgentMailWebhookEventsQueue } from './agentmail-webhook-events-queue';
 import { readBullMqQueueHealth } from './health';
 import { startSessionWakeupQueue } from './session-wakeup-queue';
 import { installBullMqGracefulShutdown } from './graceful-shutdown';
@@ -223,6 +224,12 @@ const {
   queueEvents: sessionWakeupQueueEvents,
 } = await startSessionWakeupQueue();
 
+const {
+  queue: agentMailWebhookEventsQueue,
+  worker: agentMailWebhookEventsWorker,
+  queueEvents: agentMailWebhookEventsQueueEvents,
+} = await startAgentMailWebhookEventsQueue();
+
 const serverAdapter = new HonoAdapter(serveStatic);
 
 createBullBoard({
@@ -263,6 +270,7 @@ createBullBoard({
     }),
     new BullMQAdapter(fastAgentParentEventQueue, { readOnlyMode: false }),
     new BullMQAdapter(sessionWakeupQueue, { readOnlyMode: false }),
+    new BullMQAdapter(agentMailWebhookEventsQueue, { readOnlyMode: false }),
   ],
   serverAdapter,
 });
@@ -458,6 +466,9 @@ installBullMqGracefulShutdown({
     await sessionWakeupWorker.close();
     await sessionWakeupQueueEvents.close();
     await sessionWakeupQueue.close();
+    await agentMailWebhookEventsWorker.close();
+    await agentMailWebhookEventsQueueEvents.close();
+    await agentMailWebhookEventsQueue.close();
     await discordGatewaySupervisor.stop();
     await closeRedis();
   },

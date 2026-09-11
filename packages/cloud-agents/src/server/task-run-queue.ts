@@ -2184,6 +2184,13 @@ async function stampWorkspaceSourceControlProviders(
   payload: FreshTask['payload'],
   workspace: ReturnType<typeof resolveTaskWorkspace>,
 ): Promise<void> {
+  if (workspace.type === 'no_repositories') {
+    payload.repositoryProviders = undefined;
+    payload.sourceControlProvider = undefined;
+    payload.sourceControlHost = undefined;
+    return;
+  }
+
   const [repositoryProviders, workspaceHost] = await Promise.all([
     resolveWorkspaceRepositoryProviders(db, workspace),
     resolveWorkspaceSourceControlHost(db, workspace),

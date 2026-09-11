@@ -1,4 +1,5 @@
 const mocks = vi.hoisted(() => ({
+  redisStore: new Map<string, string>(),
   acquireTurnLock: vi.fn(),
   releaseTurnLock: Object.assign(vi.fn(), {
     signal: new AbortController().signal,
@@ -9,12 +10,14 @@ const mocks = vi.hoisted(() => ({
   acquireRootBindingLock: vi.fn(),
   releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
+  buildSetupAdapter: vi.fn(() => ({ assertTaskLaunch: vi.fn() })),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
   findSession: vi.fn(),
   bindConversation: vi.fn(),
   findInstallation: vi.fn(),
   findCustomAutomation: vi.fn(),
+  recordCustomAutomationResult: vi.fn().mockResolvedValue(null),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   findWakeup: vi.fn(),
@@ -39,6 +42,8 @@ const mocks = vi.hoisted(() => ({
   teamsUpdateMessage: vi.fn(),
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
+  createAgentMailProvider: vi.fn(),
+  agentMailPostMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
   recordProviderMessage: vi.fn(),
   enqueueTask: vi.fn(),
@@ -69,11 +74,37 @@ vi.mock('@roomote/redis', async (importOriginal) => {
   return {
     ...actual,
     // The sticky-footer lock and state live in Redis; these tests run without
-    // a server, so satisfy lock acquisition and empty prior state.
+    // a server, so model lock ownership and atomic carrier writes in memory.
     getRedis: () => ({
-      set: async () => 'OK',
-      get: async () => null,
-      eval: async () => 1,
+      set: async (key: string, value: string, ...args: unknown[]) => {
+        if (args.includes('NX') && mocks.redisStore.has(key)) return null;
+        mocks.redisStore.set(key, value);
+        return 'OK';
+      },
+      get: async (key: string) => mocks.redisStore.get(key) ?? null,
+      eval: async (
+        script: string,
+        count: number,
+        key: string,
+        ...args: (string | number)[]
+      ) => {
+        const owner = args[count - 1];
+        if (mocks.redisStore.get(key) !== owner) return 0;
+        if (count === 2) {
+          const [pointerKey, , record, ttl] = args as [
+            string,
+            string,
+            string,
+            string | number,
+          ];
+          if (ttl !== 'keepTtl' || mocks.redisStore.has(pointerKey)) {
+            mocks.redisStore.set(pointerKey, record);
+          }
+        }
+        if (script.includes("'del'")) mocks.redisStore.delete(key);
+        return 1;
+      },
+      zadd: async () => 1,
     }),
   };
 });
@@ -90,9 +121,23 @@ vi.mock('@roomote/communication', async (importOriginal) => ({
   ),
 }));
 
+vi.mock(
+  '@roomote/communication/thread-footer-refresh',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('@roomote/communication/thread-footer-refresh')
+    >()),
+    resolveCurrentThreadFooterText: async (
+      _provider: string,
+      footerText: string,
+    ) => footerText,
+  }),
+);
+
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  buildFastAgentSetupAdapter: mocks.buildSetupAdapter,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   fastAgentConversationRepository: {
     findById: mocks.findSession,
@@ -148,6 +193,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: mocks.findCustomAutomation,
+  recordCustomAutomationResult: mocks.recordCustomAutomationResult,
   getSessionWakeupById: mocks.findWakeup,
   getSessionForFastConversation: mocks.findWakeupSession,
   slackInstallations: {
@@ -215,6 +261,11 @@ vi.mock('./telegram-communication', () => ({
     mocks.createTelegramProvider,
 }));
 
+vi.mock('./agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials:
+    mocks.createAgentMailProvider,
+}));
+
 vi.mock('../automations/destination', () => ({
   findTeamsConversationRoute: mocks.findTeamsConversationRoute,
 }));
@@ -248,6 +299,8 @@ vi.mock('./source-control-fast-delivery', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./source-control-fast-delivery')>()),
   buildSourceControlFastDelivery: mocks.buildSourceControlFastDelivery,
 }));
+
+import { ALL_REPOSITORIES, NO_REPOSITORIES } from '@roomote/types';
 
 import {
   deliverFastAgentParentEvent,
@@ -283,6 +336,7 @@ const event = {
 
 describe('deliverFastAgentParentEvent', () => {
   beforeEach(() => {
+    mocks.redisStore.clear();
     vi.clearAllMocks();
     mocks.findWakeupSession.mockResolvedValue({ id: originSessionId });
     mocks.releaseTurnLock.signal = new AbortController().signal;
@@ -381,6 +435,7 @@ describe('deliverFastAgentParentEvent', () => {
       messageId: 'teams-message-1',
     });
     mocks.createTeamsProvider.mockResolvedValue({
+      provider: 'teams',
       postMessage: mocks.teamsPostMessage,
       updateMessage: mocks.teamsUpdateMessage,
     });
@@ -391,9 +446,19 @@ describe('deliverFastAgentParentEvent', () => {
       lastTextMessageId: 'telegram-message-2',
     });
     mocks.createTelegramProvider.mockResolvedValue({
+      provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       sendChatAction: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
+    });
+    mocks.agentMailPostMessage.mockResolvedValue({
+      provider: 'agentmail',
+      channelId: 'roomote@agentmail.test',
+      messageId: 'agentmail-message-1',
+    });
+    mocks.createAgentMailProvider.mockResolvedValue({
+      provider: 'agentmail',
+      postMessage: mocks.agentMailPostMessage,
     });
     mocks.findTeamsConversationRoute.mockResolvedValue({
       serviceUrl: 'https://smba.example.com/amer/',
@@ -638,6 +703,12 @@ describe('deliverFastAgentParentEvent', () => {
           platformEventKind: 'setup',
           platformEventVisibility: 'required',
           setupSession: true,
+          setupContext: {
+            sessionId: 'session-1',
+            fastConversationId: parent.sessionId,
+            setupSnapshot: '{"rail":{"source":"ready"}}',
+            starterTaskOptions: [],
+          },
         },
         resumedAfterInterruption: true,
         durableAdmission: { eventId: 'row-2' },
@@ -663,6 +734,10 @@ describe('deliverFastAgentParentEvent', () => {
         platformEventKind: 'setup',
         platformEventVisibility: 'required',
         setupSession: true,
+        setupSnapshot: '{"rail":{"source":"ready"}}',
+        adapter: expect.objectContaining({
+          assertTaskLaunch: expect.any(Function),
+        }),
         resumedAfterInterruption: true,
         durableAdmission: { eventId: 'row-2' },
       }),
@@ -801,7 +876,7 @@ describe('deliverFastAgentParentEvent', () => {
             elements: [
               {
                 type: 'mrkdwn',
-                text: expect.stringContaining('Reply or use the'),
+                text: expect.stringContaining('|Open in Roomote>'),
               },
             ],
           },
@@ -809,6 +884,59 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('delivers charts from queued Slack human follow-ups as native blocks', async () => {
+    const chart = {
+      title: 'Weekly signups',
+      chart: {
+        type: 'line' as const,
+        series: [
+          {
+            name: 'Signups',
+            data: [
+              { label: 'Week 1', value: 12 },
+              { label: 'Week 2', value: 18 },
+            ],
+          },
+        ],
+        axis_config: { categories: ['Week 1', 'Week 2'] },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'Signups increased.',
+        charts: [chart],
+      }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'human_follow_up',
+        eventId: '100.004',
+        currentMessageId: '100.004',
+        userId: 'u1',
+        question: 'Show the chart in Slack.',
+      },
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '100.001',
+        text: 'Signups increased.',
+        blocks: [
+          { type: 'markdown', text: 'Signups increased.' },
+          { type: 'data_visualization', ...chart },
+          expect.objectContaining({
+            type: 'context',
+            block_id: 'roomote_thread_reply_footer',
+          }),
+        ],
+      }),
+    );
   });
 
   it('keeps child lifecycle text private until the Fast parent composes a reply', async () => {
@@ -847,7 +975,7 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
-  it('carries child-selected image IDs into the Fast parent turn by default', async () => {
+  it('carries child-selected images and charts into the Fast parent turn by default', async () => {
     mocks.answerQuestion.mockResolvedValueOnce('Shared the proof.');
 
     await deliverFastAgentParentEvent({
@@ -860,12 +988,30 @@ describe('deliverFastAgentParentEvent', () => {
         purpose: 'closeout',
         message: 'The visual comparison is ready.',
         imageArtifactIds: ['artifact-1'],
+        charts: [
+          {
+            title: 'Traffic sources',
+            chart: {
+              type: 'pie',
+              segments: [{ label: 'Search', value: 65 }],
+            },
+          },
+        ],
       },
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultImageArtifactIds: ['artifact-1'],
+        defaultCharts: [
+          {
+            title: 'Traffic sources',
+            chart: {
+              type: 'pie',
+              segments: [{ label: 'Search', value: 65 }],
+            },
+          },
+        ],
       }),
     );
   });
@@ -906,7 +1052,88 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.createDiscordProvider).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: 'Blank slate',
+      environmentId: NO_REPOSITORIES,
+      expectedWorkspace: { repo: NO_REPOSITORIES },
+    },
+    {
+      name: 'a normal environment',
+      environmentId: 'environment-1',
+      expectedWorkspace: {
+        repo: ALL_REPOSITORIES,
+        environmentId: 'environment-1',
+      },
+    },
+  ])(
+    'maps $name when an automation delegates a task',
+    async ({ environmentId, expectedWorkspace }) => {
+      const automationParent = {
+        sessionId: parent.sessionId,
+        conversation: {
+          surface: 'automation' as const,
+          workspaceId: 'automation-1',
+          conversationId: 'occurrence-1',
+        },
+      };
+      mocks.answerQuestion.mockImplementationOnce(
+        async ({
+          adapter,
+        }: {
+          adapter: { launchTask: (input: unknown) => unknown };
+        }) =>
+          adapter.launchTask({
+            prompt: 'Inspect the workspace.',
+            environmentId,
+            model: null,
+            parentSessionId: parent.sessionId,
+            postKickoff: vi.fn().mockResolvedValue(undefined),
+          }),
+      );
+
+      await deliverFastAgentParentEvent({
+        parent: automationParent,
+        event: {
+          type: 'automation_triggered',
+          eventId: 'occurrence-1',
+          automationId: 'automation-1',
+          automationName: 'Weekly scan',
+          prompt: 'Find actionable regressions.',
+          trigger: 'schedule',
+        },
+      });
+
+      const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
+      expect(task.payload).toMatchObject(expectedWorkspace);
+      if (environmentId === NO_REPOSITORIES) {
+        expect(task.payload).not.toHaveProperty('environmentId');
+      }
+    },
+  );
+
   it('updates the Slack root for a channel-backed automation turn', async () => {
+    const chart = {
+      title: 'Weekly findings',
+      chart: {
+        type: 'bar' as const,
+        series: [
+          {
+            name: 'Findings',
+            data: [{ label: 'This week', value: 4 }],
+          },
+        ],
+        axis_config: { categories: ['This week'] },
+      },
+    };
+    mocks.answerQuestion.mockImplementationOnce(async ({ adapter }) =>
+      adapter.postReply({
+        purpose: 'closeout',
+        message: 'The report is ready.',
+        charts: [chart],
+      }),
+    );
+
     await deliverFastAgentParentEvent({
       parent,
       event: {
@@ -924,7 +1151,7 @@ describe('deliverFastAgentParentEvent', () => {
       channel: 'C123',
       ts: '100.001',
       message: {
-        text: 'The proof is ready.',
+        text: 'The report is ready.',
         blocks: [
           expect.objectContaining({
             type: 'context',
@@ -932,7 +1159,8 @@ describe('deliverFastAgentParentEvent', () => {
               expect.objectContaining({ text: 'Weekly scan' }),
             ]),
           }),
-          { type: 'markdown', text: 'The proof is ready.' },
+          { type: 'markdown', text: 'The report is ready.' },
+          { type: 'data_visualization', ...chart },
           expect.objectContaining({
             type: 'actions',
             elements: [
@@ -2014,7 +2242,7 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'channel-1',
       idempotencyKey: 'fast-parent-artifact:artifact-1:v1',
       text: expect.stringMatching(
-        /^The proof is ready\.\n\n-# Reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^The proof is ready\.\n\n-# Reply anytime · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
       ),
       textFormat: 'markdown',
       images: [
@@ -2062,6 +2290,8 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'teams-channel-1',
       threadId: 'teams-root-1',
       post: mocks.teamsPostMessage,
+      edit: mocks.teamsUpdateMessage,
+      messageId: 'teams-message-1',
     },
     {
       surface: 'telegram' as const,
@@ -2069,10 +2299,20 @@ describe('deliverFastAgentParentEvent', () => {
       channelId: 'telegram-chat-1',
       threadId: undefined,
       post: mocks.telegramPostMessage,
+      edit: mocks.telegramEditMessage,
+      messageId: 'telegram-message-2',
     },
   ])(
     'delivers a $surface parent event through its provider adapter',
-    async ({ surface, workspaceId, channelId, threadId, post }) => {
+    async ({
+      surface,
+      workspaceId,
+      channelId,
+      threadId,
+      post,
+      edit,
+      messageId,
+    }) => {
       await deliverFastAgentParentEvent({
         parent: {
           ...parent,
@@ -2095,7 +2335,7 @@ describe('deliverFastAgentParentEvent', () => {
           ...(threadId ? { threadId } : {}),
           text: expect.stringMatching(
             new RegExp(
-              `^The proof is ready\\.\\n\\n.*Reply or use the \\[web app\\]\\(.*utm_source=${surface}.*\\)\\..*$`,
+              `^The proof is ready\\.\\n\\nReply anytime · \\[Open in Roomote\\]\\(.*utm_source=${surface}.*\\)$`,
             ),
           ),
           textFormat: 'markdown',
@@ -2108,8 +2348,66 @@ describe('deliverFastAgentParentEvent', () => {
           ],
         }),
       );
+      const footerText = post.mock.calls[0]![0].text.split('\n\n').at(-1);
+      expect(
+        JSON.parse(
+          mocks.redisStore.get(
+            `${surface}:thread_reply_footer:${channelId}:${threadId ?? 'root'}`,
+          )!,
+        ),
+      ).toEqual(
+        expect.objectContaining({
+          messageId,
+          textWithoutFooter: 'The proof is ready.',
+          refresh: expect.objectContaining({ channelId, footerText }),
+        }),
+      );
+      expect(edit).not.toHaveBeenCalled();
     },
   );
+
+  it('clears its own Teams footer without recording a carrier after losing the lease', async () => {
+    const lockKey =
+      'teams:thread_reply_footer_lock:teams-channel-1:teams-root-1';
+    mocks.teamsPostMessage.mockImplementationOnce(async () => {
+      mocks.redisStore.set(lockKey, 'new-owner');
+      return {
+        provider: 'teams',
+        channelId: 'teams-channel-1',
+        messageId: 'teams-message-1',
+      };
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'teams',
+          workspaceId: 'tenant-1',
+          conversationId: 'teams-conversation-1',
+          replyTarget: {
+            channelId: 'teams-channel-1',
+            threadId: 'teams-root-1',
+          },
+        },
+      },
+      event,
+    });
+
+    expect(mocks.teamsUpdateMessage).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        channelId: 'teams-channel-1',
+        messageId: 'teams-message-1',
+        text: 'The proof is ready.',
+      }),
+    );
+    expect(
+      mocks.redisStore.has(
+        'teams:thread_reply_footer:teams-channel-1:teams-root-1',
+      ),
+    ).toBe(false);
+    expect(mocks.redisStore.get(lockKey)).toBe('new-owner');
+  });
 
   it('updates the Teams automation root instead of posting a duplicate report', async () => {
     await deliverFastAgentParentEvent({
@@ -2473,6 +2771,13 @@ describe('deliverFastAgentParentEvent', () => {
       serviceUrl: undefined,
     },
     {
+      surface: 'agentmail' as const,
+      workspaceId: 'roomote@agentmail.test',
+      channelId: 'roomote@agentmail.test',
+      threadId: undefined,
+      serviceUrl: undefined,
+    },
+    {
       surface: 'teams' as const,
       workspaceId: 'tenant-1',
       channelId: 'teams-channel-1',
@@ -2541,6 +2846,70 @@ describe('deliverFastAgentParentEvent', () => {
       );
     },
   );
+
+  it.each([
+    {
+      path: 'Fast-only result',
+      event: {
+        type: 'automation_triggered' as const,
+        eventId: 'automation-1:occurrence-1',
+        automationId: 'automation-1',
+        automationName: 'Weekly scan',
+        prompt: 'Find actionable regressions.',
+        trigger: 'schedule' as const,
+      },
+      expectedText: 'The proof is ready.',
+    },
+    {
+      path: 'delegated sandbox result',
+      event: {
+        type: 'task_settled' as const,
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'completed' as const,
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+      expectedText: 'The proof is ready.',
+    },
+    {
+      path: 'delegated sandbox failure',
+      event: {
+        type: 'task_settled' as const,
+        taskId: 'child-task-1',
+        runId: 42,
+        customAutomationId: 'automation-1',
+        status: 'failed' as const,
+        error: 'sandbox unavailable',
+        taskUrl: 'https://roomote.example/task/child-task-1',
+        pullRequests: [],
+      },
+      expectedText: 'The delegated task failed: sandbox unavailable',
+    },
+  ])('delivers the $path by Email', async ({ event, expectedText }) => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'agentmail',
+          workspaceId: 'roomote@agentmail.test',
+          conversationId: 'agentmail-conversation-1',
+          replyTarget: { channelId: 'roomote@agentmail.test' },
+        },
+      },
+      event,
+    });
+
+    expect(mocks.agentMailPostMessage).toHaveBeenCalledOnce();
+    expect(mocks.agentMailPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'roomote@agentmail.test',
+        threadId: 'agentmail-conversation-1',
+        text: expect.stringContaining(expectedText),
+      }),
+    );
+  });
 
   it('keeps delegating as the automation after its task settles on Teams', async () => {
     mocks.findTeamsConversationRoute.mockResolvedValueOnce({
@@ -2665,6 +3034,13 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: undefined,
       serviceUrl: undefined,
     },
+    {
+      surface: 'agentmail' as const,
+      workspaceId: 'roomote@agentmail.test',
+      channelId: 'roomote@agentmail.test',
+      threadId: undefined,
+      serviceUrl: undefined,
+    },
   ])(
     'keeps launch_task provider-neutral during a $surface parent event',
     async ({ surface, workspaceId, channelId, threadId, serviceUrl }) => {
@@ -2706,12 +3082,14 @@ describe('deliverFastAgentParentEvent', () => {
             payload: expect.objectContaining({
               communicationProvider: surface,
               communicationChannelId: channelId,
-              ...(threadId
-                ? {
-                    communicationThreadId: threadId,
-                    communicationMessageId: threadId,
-                  }
-                : {}),
+              ...(surface === 'agentmail'
+                ? { communicationThreadId: 'agentmail-conversation-1' }
+                : threadId
+                  ? {
+                      communicationThreadId: threadId,
+                      communicationMessageId: threadId,
+                    }
+                  : {}),
               ...(serviceUrl ? { communicationServiceUrl: serviceUrl } : {}),
               communicationContextInherited: true,
               fastAgentSessionId: parent.sessionId,
@@ -2945,7 +3323,7 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: 'thread-1',
       idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
       text: expect.stringMatching(
-        /^There is new PR feedback\.\n\n-# Working on \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\), reply or use the \[web app\]\(.*\/sessions\/.*\)\.$/,
+        /^There is new PR feedback\.\n\n-# Reply anytime · \[PR #42\]\(https:\/\/github\.com\/acme\/web\/pull\/42\) · \[Open in Roomote\]\(.*\/sessions\/.*\)$/,
       ),
       textFormat: 'markdown',
       images: [],

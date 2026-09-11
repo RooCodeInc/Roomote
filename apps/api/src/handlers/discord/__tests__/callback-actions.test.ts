@@ -3,6 +3,7 @@ import * as suggestionLaunch from '../../tasks/suggestion-launch.js';
 
 const mocks = vi.hoisted(() => ({
   findRun: vi.fn(),
+  findActiveCommunicationRun: vi.fn(),
   stopTaskRun: vi.fn(),
   reply: vi.fn(),
   findMappedUser: vi.fn(),
@@ -48,6 +49,9 @@ vi.mock('../../tasks/task-stop.js', () => ({ stopTaskRun: mocks.stopTaskRun }));
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
 vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUser,
+}));
+vi.mock('@roomote/sdk/server/communication', () => ({
+  findActiveCommunicationTaskRun: mocks.findActiveCommunicationRun,
 }));
 vi.mock('../../fast-agent-entry.js', () => ({
   resolveFastAgentEntryMode: ({

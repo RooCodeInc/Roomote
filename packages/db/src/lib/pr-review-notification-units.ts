@@ -262,12 +262,15 @@ function fastDestination(
   if (
     conversation.surface === 'automation' ||
     conversation.surface === 'web' ||
+    conversation.surface === 'agentmail' ||
     conversation.surface === 'linear' ||
     isFastAgentSourceControlConversation(conversation)
   ) {
-    // Surfaces without a chat route (identity-only, or a Linear agent
+    // Surfaces without a chat route (identity-only, email, or a Linear agent
     // session) have no reply channel; delivery resolves the Fast
-    // conversation itself.
+    // conversation itself. PR-review notifications never post to email
+    // directly either (only the consent-checked outbound entry point may
+    // initiate email).
     return {
       destinationKey,
       routeProvider: null,

@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   listCustomSkills: vi.fn(),
   getCustomSkill: vi.fn(),
   getTaskModelOptions: vi.fn(),
+  getDeploymentSettings: vi.fn(),
   appendMemory: vi.fn(),
+  appendLearnedPreference: vi.fn(),
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
   generateHelperText: vi.fn(),
@@ -22,9 +24,11 @@ const mocks = vi.hoisted(() => ({
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
+  stopTask: vi.fn(),
   launchPrReview: vi.fn(),
   getUserIdentity: vi.fn(),
   getTherapistMode: vi.fn(),
+  getPersonalization: vi.fn(),
   refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
@@ -49,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   touchSessionActivity: vi.fn(),
   getSessionForTask: vi.fn(),
   getPendingHumanFollowUp: vi.fn(),
+  ensureOwnTaskFollowThroughWakeup: vi.fn(),
   inArray: vi.fn((...values: unknown[]) => values),
   updateParentEventWhere: vi.fn(),
   nativeSteer: vi.fn(),
@@ -83,6 +88,7 @@ const nativeToolNames = vi.hoisted(
       reviewPullRequest: 'review_pull_request',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
+      updatePersonalization: 'update_personalization',
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
@@ -92,6 +98,7 @@ const nativeToolNames = vi.hoisted(
       showWidget: 'show_widget',
       spillGrep: 'spill_grep',
       spillRead: 'spill_read',
+      stopTask: 'stop_task',
     }) as const,
 );
 
@@ -129,6 +136,11 @@ vi.mock('../../available-environments', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
 }));
 
+vi.mock('../../session-wakeups', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../session-wakeups')>()),
+  ensureOwnTaskFollowThroughWakeup: mocks.ensureOwnTaskFollowThroughWakeup,
+}));
+
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...values) => values),
   asc: vi.fn((value) => value),
@@ -149,9 +161,12 @@ vi.mock('@roomote/db/server', () => ({
   listCustomSkills: mocks.listCustomSkills,
   getCustomSkill: mocks.getCustomSkill,
   appendFastAgentMemory: mocks.appendMemory,
+  appendLearnedUserPreference: mocks.appendLearnedPreference,
+  getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
   db: {
     query: {
+      deploymentSettings: { findFirst: mocks.getDeploymentSettings },
       fastAgentParentEvents: { findMany: mocks.getPendingHumanFollowUp },
     },
     update: vi.fn(() => ({
@@ -238,6 +253,7 @@ vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
   launchFastAgentPrReview: mocks.launchPrReview,
+  stopFastAgentTask: mocks.stopTask,
 }));
 
 vi.mock('../fast-agent-user-identity', () => ({
@@ -249,6 +265,15 @@ vi.mock('../../therapist-mode', async (importOriginal) => {
   return {
     ...actual,
     getTherapistModeEnabledForUser: mocks.getTherapistMode,
+  };
+});
+
+vi.mock('../../user-personalization', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../user-personalization')>();
+  return {
+    ...actual,
+    resolveFastAgentPersonalizationContext: mocks.getPersonalization,
   };
 });
 
@@ -300,7 +325,9 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
 } from '@roomote/types';
+import { McpToolCallError } from '../../mcp-tool-client';
 
 import {
   answerFastAgentQuestion,
@@ -407,6 +434,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.touchSessionActivity.mockResolvedValue(undefined);
     mocks.getSessionForTask.mockResolvedValue(null);
     mocks.getPendingHumanFollowUp.mockResolvedValue([]);
+    mocks.ensureOwnTaskFollowThroughWakeup.mockResolvedValue(undefined);
     mocks.updateParentEventWhere.mockResolvedValue(undefined);
     mocks.nativeSteer.mockResolvedValue(undefined);
     mocks.getNativeRuntime.mockImplementation(async () => {
@@ -502,10 +530,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       ],
       defaultModelId: 'openai/gpt-5.6',
     });
+    mocks.getDeploymentSettings.mockResolvedValue(undefined);
     mocks.listIntegrations.mockResolvedValue([]);
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
+    mocks.stopTask.mockResolvedValue({ success: true });
     mocks.launchPrReview.mockResolvedValue({
       success: true,
       taskId: 'review-task',
@@ -518,6 +548,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       isAdmin: true,
     });
     mocks.getTherapistMode.mockResolvedValue(false);
+    mocks.getPersonalization.mockResolvedValue(null);
+    mocks.appendLearnedPreference.mockResolvedValue({ saved: true });
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
 
@@ -586,6 +618,314 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.getTherapistMode).toHaveBeenCalledWith('user-1');
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       '<therapist_mode>',
+    );
+  });
+
+  it('loads personalization for the trusted current speaker', async () => {
+    mocks.getPersonalization.mockResolvedValueOnce({
+      displayName: 'Ada',
+      instructions: 'Reply in pirate style.',
+      learnFromConversations: true,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.getPersonalization).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      userId: 'user-1',
+    });
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      'Reply in pirate style.',
+    );
+  });
+
+  it('reuses each participant personalization snapshot while current instructions stay in history', async () => {
+    const current = new Map([
+      [
+        'user-1',
+        {
+          displayName: 'Ada',
+          instructions: 'Use detailed answers.',
+          learnFromConversations: true,
+        },
+      ],
+      [
+        'user-2',
+        {
+          displayName: 'Grace',
+          instructions: 'Use bullet points.',
+          learnFromConversations: true,
+        },
+      ],
+    ]);
+    const snapshots = new Map<
+      string,
+      typeof current extends Map<unknown, infer V> ? V : never
+    >();
+    mocks.getPersonalization.mockImplementation(
+      async ({ conversationId, userId }) => {
+        const key = `${conversationId}:${userId}`;
+        const existing = snapshots.get(key);
+        if (existing) return existing;
+        const snapshot = structuredClone(current.get(userId) ?? null);
+        if (snapshot) snapshots.set(key, snapshot);
+        return snapshot;
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    current.set('user-1', {
+      displayName: 'Ada',
+      instructions: 'Use concise answers.',
+      learnFromConversations: true,
+    });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'For this answer, be extremely concise.',
+      currentMessageId: '100.3',
+      adapter: callbacks(),
+    });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      userId: 'user-2',
+      currentMessageId: '100.4',
+      adapter: callbacks(),
+    });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      currentMessageId: '100.5',
+      adapter: callbacks(),
+    });
+
+    const prompts = mocks.generateText.mock.calls.map(([params]) => params);
+    expect(prompts[0]?.system).toContain('Use detailed answers.');
+    expect(prompts[1]?.system).toBe(prompts[0]?.system);
+    expect(prompts[1]?.system).toContain('Use detailed answers.');
+    expect(prompts[1]?.system).not.toContain('Use concise answers.');
+    expect(prompts[1]?.prompt).toContain(
+      'For this answer, be extremely concise.',
+    );
+    expect(prompts[2]?.system).toContain('Use bullet points.');
+    expect(prompts[2]?.system).not.toContain('Use detailed answers.');
+    expect(prompts[3]?.system).toBe(prompts[0]?.system);
+    expect(prompts[3]?.system).toContain('Use detailed answers.');
+    expect(prompts[3]?.system).not.toContain('Use bullet points.');
+  });
+
+  it('keeps private snapshot content out of canonical message writes', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      displayName: 'PRIVATE_NAME_SENTINEL',
+      instructions: 'PRIVATE_INSTRUCTIONS_SENTINEL',
+      learnFromConversations: true,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const writes = JSON.stringify({
+      canonical: mocks.upsertMessage.mock.calls.map(([input]) => input.message),
+      compatibility: mocks.appendVisibleMessages.mock.calls,
+    });
+    expect(writes).not.toContain('PRIVATE_NAME_SENTINEL');
+    expect(writes).not.toContain('PRIVATE_INSTRUCTIONS_SENTINEL');
+  });
+
+  it('never persists private personalization tool arguments', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      displayName: null,
+      instructions: '',
+      learnFromConversations: true,
+    });
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Saving that preference.',
+        });
+        await invokeTool(nativeToolNames.updatePersonalization, {
+          preference: 'PRIVATE_SENTINEL',
+          confidence: 'explicit',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Preference saved.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.appendLearnedPreference).toHaveBeenCalledWith({
+      userId: 'user-1',
+      fastConversationId: 'conversation-1',
+      preference: 'PRIVATE_SENTINEL',
+      confidence: 'explicit',
+      supersedes: [],
+    });
+
+    await vi.waitFor(() =>
+      expect(
+        mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter(
+            (message) =>
+              message.payload?.toolName === 'update_personalization' ||
+              message.payload?.title === 'update_personalization',
+          ),
+      ).toHaveLength(2),
+    );
+
+    const personalizationWrites = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter(
+        (message) =>
+          message.payload?.toolName === 'update_personalization' ||
+          message.payload?.title === 'update_personalization',
+      );
+    expect(personalizationWrites).toHaveLength(2);
+    expect(JSON.stringify(personalizationWrites)).not.toContain(
+      'PRIVATE_SENTINEL',
+    );
+    expect(
+      personalizationWrites.map(
+        (message) => message.metadata?.visibleInTranscript,
+      ),
+    ).toEqual([true, true]);
+    expect(
+      personalizationWrites.map((message) => message.payload?.output),
+    ).toEqual([undefined, 'Personalization updated']);
+  });
+
+  it('does not confirm a personalization update when learning is disabled', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      displayName: null,
+      instructions: '',
+      learnFromConversations: true,
+    });
+    mocks.appendLearnedPreference.mockResolvedValue({
+      saved: false,
+      reason: 'disabled',
+    });
+    let toolResult: unknown;
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Saving that preference.',
+        });
+        toolResult = await invokeTool(nativeToolNames.updatePersonalization, {
+          preference: 'Be concise.',
+          confidence: 'explicit',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(toolResult).toEqual({
+      success: false,
+      saved: false,
+      reason: 'disabled',
+    });
+    const toolEvent = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) =>
+          message.payload?.toolName === 'update_personalization' &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+    expect(toolEvent?.payload?.output).toBe('Personalization was not updated');
+    expect(toolEvent?.payload?.status).toBe('failed');
+  });
+
+  it('does not confirm a personalization update when persistence fails', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      displayName: null,
+      instructions: '',
+      learnFromConversations: true,
+    });
+    mocks.appendLearnedPreference.mockRejectedValue(
+      new Error('db unavailable'),
+    );
+    let toolResult: unknown;
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Saving that preference.',
+        });
+        toolResult = await invokeTool(nativeToolNames.updatePersonalization, {
+          preference: 'Be concise.',
+          confidence: 'explicit',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(toolResult).toMatchObject({ success: false });
+    const toolEvent = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) =>
+          message.payload?.toolName === 'update_personalization' &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+    expect(toolEvent?.payload?.output).toBe('Personalization was not updated');
+    expect(toolEvent?.payload?.status).toBe('failed');
+  });
+
+  it('refreshes shared agent guidance for each subsequent turn', async () => {
+    mocks.getDeploymentSettings
+      .mockResolvedValueOnce({ globalAgentInstructions: 'First guidance.' })
+      .mockResolvedValueOnce({ globalAgentInstructions: 'Updated guidance.' });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      currentMessageId: '100.3',
+      adapter: callbacks(),
+    });
+
+    const firstSystemPrompt = mocks.generateText.mock.calls[0]?.[0].system;
+    const secondSystemPrompt = mocks.generateText.mock.calls[1]?.[0].system;
+    expect(firstSystemPrompt).toContain('First guidance.');
+    expect(firstSystemPrompt).not.toContain('Updated guidance.');
+    expect(secondSystemPrompt).toContain('Updated guidance.');
+    expect(secondSystemPrompt).not.toContain('First guidance.');
+    expect(mocks.getDeploymentSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('includes saved routing rules in the Fast system prompt', async () => {
+    mocks.getDeploymentSettings.mockResolvedValueOnce({
+      globalAgentInstructions: null,
+      workspaceRoutingSettings: {
+        rules: [
+          {
+            description: 'Use App for frontend work and prefer GPT-5.6.',
+            target: 'env-1',
+          },
+        ],
+      },
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const systemPrompt = mocks.generateText.mock.calls[0]?.[0].system;
+    expect(mocks.getDeploymentSettings).toHaveBeenCalledWith({
+      columns: {
+        globalAgentInstructions: true,
+        workspaceRoutingSettings: true,
+      },
+    });
+    expect(systemPrompt).toContain('## Routing Rules');
+    expect(systemPrompt).toContain(
+      'Use App for frontend work and prefer GPT-5.6. -> App [id: env-1]',
     );
   });
 
@@ -882,6 +1222,50 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('persists child-selected charts when the parent omits the optional chart argument', async () => {
+    const chart = {
+      title: 'Traffic sources',
+      chart: {
+        type: 'pie' as const,
+        segments: [{ label: 'Search', value: 65 }],
+      },
+    };
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Search accounts for most visits.',
+        });
+        return '';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      adapter,
+      defaultCharts: [chart],
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'Search accounts for most visits.',
+      charts: [chart],
+    });
+    const assistantMessage = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) => message.eventType === 'roomote_runtime.assistant_message',
+      );
+    expect(assistantMessage?.contentBlocks).toEqual([
+      { type: 'text', text: 'Search accounts for most visits.' },
+      { type: 'data_visualization', ...chart },
+    ]);
+  });
+
   it('persists child-selected image IDs on a text-only terminal closeout', async () => {
     mocks.generateText.mockImplementationOnce(
       async (_params, _session, options) => {
@@ -972,18 +1356,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
         options.onPromptStarted?.();
-        // Some models fill every optional parameter; the placeholder
-        // questions must be discarded, never rendered or used to reject.
+        // Some models fill every optional parameter, including malformed
+        // placeholders and nulls. Trusted preset calls must discard them
+        // before validation, never render them or fail.
         toolResult = await invokeTool(nativeToolNames.requestUserInput, {
           preset: 'setup_starter_tasks',
-          questions: [
-            {
-              id: 'placeholder',
-              header: 'placeholder',
-              question: 'placeholder',
-              options: [{ label: 'placeholder', description: 'placeholder' }],
-            },
-          ],
+          questions: [],
+          setupIntegrationAnswers: null,
         });
         return '';
       },
@@ -1015,6 +1394,152 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       questions: presetQuestions,
     });
   });
+
+  it.each([undefined, { documents: { answers: ['Notion'] } }])(
+    'resolves integration discovery with optional prose preferences: %j',
+    async (setupIntegrationAnswers) => {
+      const questions = [
+        {
+          id: 'setup-integrations',
+          header: 'Connections',
+          question: 'Which tools would you like to connect?',
+          isOther: false,
+          isSecret: false,
+          options: [
+            { id: 'notion', label: 'Notion', description: 'Documents' },
+          ],
+        },
+      ];
+      const requestUserInput = vi.fn();
+      const resolveUserInputPreset = vi.fn(async () => questions);
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.requestUserInput, {
+            preset: 'setup_integrations',
+            ...(setupIntegrationAnswers !== undefined
+              ? { setupIntegrationAnswers }
+              : {}),
+            questions: [
+              { id: 'ignored', header: 'Ignored', question: 'Ignored' },
+            ],
+          });
+          return '';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'deployment-1',
+          conversationId: 'setup-session-1',
+        },
+        turnSource: 'platform_event',
+        platformEventKind: 'setup',
+        platformEventVisibility: 'required',
+        setupSession: true,
+        adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+      });
+      expect(resolveUserInputPreset.mock.calls).toEqual([
+        setupIntegrationAnswers === undefined
+          ? ['setup_integrations']
+          : ['setup_integrations', setupIntegrationAnswers],
+      ]);
+      expect(requestUserInput).toHaveBeenCalledWith({
+        requestId: expect.any(String),
+        preset: 'setup_integrations',
+        questions,
+      });
+      expect(mocks.upsertMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: expect.objectContaining({
+            payload: expect.objectContaining({ questions }),
+          }),
+        }),
+      );
+    },
+  );
+
+  it('closes a server-completed setup preset without persisting a pending request', async () => {
+    let toolResult: unknown;
+    const requestUserInput = vi.fn();
+    const resolveUserInputPreset = vi.fn(async () => []);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+          preset: 'setup_integrations',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      conversation: {
+        surface: 'web',
+        workspaceId: 'deployment-1',
+        conversationId: 'setup-session-1',
+      },
+      turnSource: 'platform_event',
+      platformEventKind: 'setup',
+      platformEventVisibility: 'required',
+      setupSession: true,
+      adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+    });
+
+    expect(toolResult).toEqual({
+      success: true,
+      completed: true,
+      closed: true,
+    });
+    expect(requestUserInput).not.toHaveBeenCalled();
+    expect(mocks.upsertMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          eventType: 'roomote_runtime.request_user_input',
+        }),
+      }),
+    );
+  });
+
+  it.each(['setup_starter_tasks', undefined])(
+    'rejects integration preferences outside their preset: %s',
+    async (preset) => {
+      const resolveUserInputPreset = vi.fn();
+      const requestUserInput = vi.fn();
+      let toolResult: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          toolResult = await invokeTool(nativeToolNames.requestUserInput, {
+            ...(preset
+              ? { preset }
+              : {
+                  questions: [
+                    { id: 'q', header: 'Tools', question: 'Which tools?' },
+                  ],
+                }),
+            setupIntegrationAnswers: { documents: { answers: ['Notion'] } },
+          });
+          return 'Please choose your tools.';
+        },
+      );
+      await answerFastAgentQuestion({
+        ...baseParams,
+        conversation: {
+          surface: 'web',
+          workspaceId: 'deployment-1',
+          conversationId: 'setup-session-1',
+        },
+        setupSession: true,
+        adapter: callbacks({ requestUserInput, resolveUserInputPreset }),
+      });
+      expect(toolResult).toEqual(expect.objectContaining({ success: false }));
+      expect(resolveUserInputPreset).not.toHaveBeenCalled();
+      expect(requestUserInput).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects request_user_input calls with neither questions nor a preset', async () => {
     let toolResult: unknown;
@@ -7075,6 +7600,45 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         result: { matches: ['fast-agent.ts'] },
       });
     });
+
+    it('returns upstream MCP error content as a failure', async () => {
+      const errorText =
+        'missing_required_fields: severity_id is required because manual triage is disabled';
+      mocks.listIntegrations.mockResolvedValue([
+        {
+          id: 'incident-io',
+          name: 'Incident.io',
+          description: 'Manage incidents',
+          tools: [{ name: 'incident_create', inputSchema: { type: 'object' } }],
+        },
+      ]);
+      mocks.callIntegration.mockRejectedValue(new McpToolCallError(errorText));
+      let result: unknown;
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          result = await invokeMcpTool('incident-io', 'incident_create', {
+            name: 'Database unavailable',
+          });
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The incident could not be created.',
+          });
+          return '';
+        },
+      );
+
+      await answerFastAgentQuestion({
+        ...baseParams,
+        question:
+          '<platform_event>{"type":"automation_triggered"}</platform_event>',
+        turnSource: 'platform_event',
+        platformEventKind: 'automation',
+        adapter: callbacks(),
+      });
+
+      expect(result).toEqual({ success: false, error: errorText });
+    });
   });
 
   it('stays silent after an acknowledgement when an integration has no result to report', async () => {
@@ -7782,6 +8346,11 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           'Fix checkout.\n\nAttachment: checkout-plan.md\nAdd a retry test.',
       }),
     );
+    expect(mocks.ensureOwnTaskFollowThroughWakeup).toHaveBeenCalledOnce();
+    expect(mocks.ensureOwnTaskFollowThroughWakeup).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      userId: 'user-1',
+    });
     const canonicalWrites = mocks.upsertMessage.mock.calls.map(
       ([input]) => input.message,
     );
@@ -7862,6 +8431,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
     );
     expect(launchTask.mock.calls[0]?.[0]).not.toHaveProperty('images');
+  });
+
+  it('accepts an explicit Blank slate Session launch target', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async ({ postKickoff }) => {
+      await postKickoff({ taskId: 'task-blank' });
+      return { success: true, taskId: 'task-blank' };
+    });
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m starting a Blank slate sandbox.',
+        });
+        await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Create a standalone artifact.',
+          environmentId: NO_REPOSITORIES,
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ environmentId: NO_REPOSITORIES }),
+    );
   });
 
   it.each(['slack', 'discord', 'teams', 'telegram'] as const)(
@@ -8219,6 +8816,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         'I could not start the checkout work because no task capacity is available.',
     });
     expect(adapter.postReply).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureOwnTaskFollowThroughWakeup).not.toHaveBeenCalled();
   });
 
   it('allows a corrected launch after rejecting an unavailable model', async () => {
@@ -8758,7 +9356,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           });
           await invokeTool(nativeToolNames.sendChatReply, {
             purpose: 'ack',
-            message: 'I’ll stop it.',
+            message: 'I’ll cancel it.',
           });
           await expect(
             invokeTool(nativeToolNames.cancelTask, { taskId: 'task-1' }),
@@ -8776,6 +9374,44 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.cancelTask).toHaveBeenCalledOnce();
     },
   );
+
+  it('soft-stops an associated task without removing the association', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’ll stop it.',
+        });
+        await expect(
+          invokeTool(nativeToolNames.stopTask, {
+            taskId: 'task-1',
+            userInitiated: true,
+          }),
+        ).resolves.toEqual({ success: true });
+        await expect(
+          invokeTool(nativeToolNames.stopTask, {
+            taskId: 'task-1',
+            userInitiated: true,
+          }),
+        ).resolves.toEqual({
+          success: false,
+          error: 'That task was already stopped.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.stopTask).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      { taskId: 'task-1', userInitiated: true },
+    );
+  });
 
   it('silently ignores optional human reaction input through the existing native tool', async () => {
     mocks.generateText.mockImplementation(

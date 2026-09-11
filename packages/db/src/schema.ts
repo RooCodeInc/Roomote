@@ -13,6 +13,7 @@ import {
   primaryKey,
   check,
   uniqueIndex,
+  foreignKey,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
@@ -86,6 +87,7 @@ import type {
   SessionWakeupReportPolicy,
   SessionWakeupSchedule,
   SessionWakeupStatus,
+  AutomationResultPriority,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -152,6 +154,26 @@ export const users = pgTable(
   ],
 );
 
+/** Private, actor-owned instructions used only while serving that user. */
+export const userPersonalizations = pgTable('user_personalizations', {
+  userId: text('user_id')
+    .notNull()
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  manualInstructions: encryptedText('manual_instructions'),
+  explicitConversationInstructions: encryptedText(
+    'explicit_conversation_instructions',
+  ),
+  inferredInstructions: encryptedText('inferred_instructions'),
+  learnFromConversations: boolean('learn_from_conversations')
+    .notNull()
+    .default(true),
+  version: integer('version').notNull().default(0),
+  resetAt: timestamp('reset_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 export const instanceSkills = pgTable(
   'instance_skills',
   {
@@ -177,6 +199,16 @@ export const userRelations = relations(users, ({ many }) => ({
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
+
+export const userPersonalizationRelations = relations(
+  userPersonalizations,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userPersonalizations.userId],
+      references: [users.id],
+    }),
+  }),
+);
 
 /**
  * deployment_settings
@@ -602,6 +634,13 @@ export const workItems = pgTable(
     failedAt: timestamp('failed_at'),
     launchError: text('launch_error'),
     dismissedAt: timestamp('dismissed_at'),
+    resultAcceptedAt: timestamp('result_accepted_at'),
+    resultIgnoredAt: timestamp('result_ignored_at'),
+    resultAutomationName: text('result_automation_name'),
+    resultPriority: text('result_priority').$type<AutomationResultPriority>(),
+    resultUserId: text('result_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -818,7 +857,7 @@ export const tasks = pgTable(
     ),
     check(
       'tasks_surface_check',
-      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system')`,
+      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'agentmail', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system')`,
     ),
     check(
       'tasks_trigger_check',
@@ -2849,6 +2888,308 @@ export const telegramUserMappingsRelations = relations(
 );
 
 /**
+ * agentmail_user_mappings
+ *
+ * N-1 rollback: the email-link flow (claiming an extra sender address by
+ * proving mailbox possession) was removed; senders are now recognized only
+ * by their verified auth_users email. Nothing reads or writes this table any
+ * more, but the previous release still selects and inserts into it, so keep
+ * it until that release is no longer the supported rollback target, then
+ * drop it.
+ */
+export const agentmailUserMappings = pgTable(
+  'agentmail_user_mappings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    emailAddress: text('email_address').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    source: text('source').notNull().$type<'verified_match' | 'link_code'>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('agentmail_user_mappings_user_id_idx').on(table.userId),
+    unique('agentmail_user_mappings_unique').on(table.emailAddress),
+    check(
+      'agentmail_user_mappings_source_check',
+      sql`${table.source} in ('verified_match', 'link_code')`,
+    ),
+  ],
+);
+
+export const agentmailUserMappingsRelations = relations(
+  agentmailUserMappings,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [agentmailUserMappings.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+/**
+ * agentmail_conversations
+ *
+ * The unit of email routing. Usually 1:1 with an AgentMail provider thread,
+ * but forwarded threads fork into a second conversation on the same provider
+ * thread, so (inbox_id, provider_thread_id) is deliberately NOT unique. The
+ * row is the durable reply route: inbound and outbound anchors are separate
+ * columns so an in-flight send can never overwrite the record of a newer
+ * inbound message, and inbound anchors only advance by the total order
+ * (latest_inbound_at, latest_inbound_message_id) under the version guard.
+ */
+export const agentmailConversations = pgTable(
+  'agentmail_conversations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    inboxId: text('inbox_id').notNull(),
+    providerThreadId: text('provider_thread_id').notNull(),
+    ownerUserId: text('owner_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Server-issued identity used by outbound-initiated conversations. */
+    outboundIdentityId: text('outbound_identity_id'),
+    subject: text('subject'),
+    latestInboundMessageId: text('latest_inbound_message_id'),
+    latestInboundAt: timestamp('latest_inbound_at'),
+    latestInboundSenderEmail: text('latest_inbound_sender_email'),
+    latestInboundUserId: text('latest_inbound_user_id').references(
+      () => users.id,
+      { onDelete: 'set null' },
+    ),
+    latestOutboundMessageId: text('latest_outbound_message_id'),
+    version: integer('version').notNull().default(0),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('agentmail_conversations_thread_idx').on(
+      table.inboxId,
+      table.providerThreadId,
+    ),
+    index('agentmail_conversations_owner_idx').on(table.ownerUserId),
+    // Composite FK target so the participants table's denormalized
+    // inbox/thread columns cannot drift from the conversation they reference.
+    unique('agentmail_conversations_id_thread_unique').on(
+      table.id,
+      table.inboxId,
+      table.providerThreadId,
+    ),
+  ],
+);
+
+/**
+ * agentmail_conversation_participants
+ *
+ * Membership and authorization for a conversation. The (inbox_id,
+ * provider_thread_id, user_id) unique index enforces the resolution
+ * invariant: a user belongs to at most one conversation per provider thread,
+ * which makes sender → conversation lookup unambiguous and turns the
+ * simultaneous first-contact race into an insert conflict the loser retries.
+ */
+export const agentmailConversationParticipants = pgTable(
+  'agentmail_conversation_participants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id').notNull(),
+    inboxId: text('inbox_id').notNull(),
+    providerThreadId: text('provider_thread_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: text('role').notNull().$type<'owner' | 'participant'>(),
+    // 'link_code' is retained for N-1 rollback only (the email-link flow was
+    // removed); new rows never use it.
+    source: text('source')
+      .notNull()
+      .$type<'initiator' | 'cc' | 'link_code' | 'outbound'>(),
+    addedAt: timestamp('added_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('agentmail_conversation_participants_conversation_user_unique').on(
+      table.conversationId,
+      table.userId,
+    ),
+    unique('agentmail_conversation_participants_thread_user_unique').on(
+      table.inboxId,
+      table.providerThreadId,
+      table.userId,
+    ),
+    index('agentmail_conversation_participants_user_idx').on(table.userId),
+    foreignKey({
+      columns: [table.conversationId, table.inboxId, table.providerThreadId],
+      foreignColumns: [
+        agentmailConversations.id,
+        agentmailConversations.inboxId,
+        agentmailConversations.providerThreadId,
+      ],
+      name: 'agentmail_conversation_participants_conversation_fk',
+    }).onDelete('cascade'),
+    check(
+      'agentmail_conversation_participants_role_check',
+      sql`${table.role} in ('owner', 'participant')`,
+    ),
+    check(
+      'agentmail_conversation_participants_source_check',
+      sql`${table.source} in ('initiator', 'cc', 'link_code', 'outbound')`,
+    ),
+  ],
+);
+
+export const agentmailConversationParticipantsRelations = relations(
+  agentmailConversationParticipants,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [agentmailConversationParticipants.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+/**
+ * agentmail_webhook_events
+ *
+ * Ingestion outbox, dedupe memory, audit trail, and dead-letter surface for
+ * inbound AgentMail webhooks. The row, not the BullMQ job, is the durable
+ * commitment: a delivery is recorded as `received` before it is dispatched,
+ * marked `queued` only after the queue accepts the job, and a duplicate
+ * delivery re-dispatches a still-`received` row instead of blindly acking.
+ * BullMQ job retention is irrelevant to dedupe; Svix retries can arrive after
+ * completed jobs are pruned.
+ */
+export const agentmailWebhookEvents = pgTable(
+  'agentmail_webhook_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    deliveryId: text('delivery_id').notNull(),
+    eventId: text('event_id'),
+    eventType: text('event_type').notNull(),
+    payload: jsonb('payload').notNull(),
+    state: text('state')
+      .notNull()
+      .default('received')
+      .$type<'received' | 'queued' | 'processing' | 'processed' | 'failed'>(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    receivedAt: timestamp('received_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('agentmail_webhook_events_delivery_unique').on(table.deliveryId),
+    index('agentmail_webhook_events_state_idx').on(
+      table.state,
+      table.receivedAt,
+    ),
+    check(
+      'agentmail_webhook_events_state_check',
+      sql`${table.state} in ('received', 'queued', 'processing', 'processed', 'failed')`,
+    ),
+  ],
+);
+
+/**
+ * agentmail_inbound_turns
+ *
+ * Durable Fast-admission record. Inserting this row IS admission: the webhook
+ * event becomes `processed` only after this insert commits, and a crash later
+ * leaves the row `pending` instead of losing the email. A per-conversation
+ * runner drains pending rows ordered by (provider_timestamp, message_id); the
+ * Fast turn lock only serializes turns, this table is what orders them.
+ */
+export const agentmailInboundTurns = pgTable(
+  'agentmail_inbound_turns',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => agentmailConversations.id, { onDelete: 'cascade' }),
+    webhookEventId: uuid('webhook_event_id')
+      .notNull()
+      .references(() => agentmailWebhookEvents.id, { onDelete: 'cascade' }),
+    providerMessageId: text('provider_message_id').notNull(),
+    providerTimestamp: timestamp('provider_timestamp').notNull(),
+    // Everything the drain needs is captured at admission (including the
+    // re-fetched body of oversize deliveries), so consuming a turn never
+    // depends on re-parsing the raw webhook payload or re-resolving the
+    // sender against state that may have changed since admission.
+    senderEmail: text('sender_email').notNull(),
+    senderUserId: text('sender_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    bodyText: text('body_text').notNull().default(''),
+    // `failed` is a dead letter: delivery threw `attempts` times in a row,
+    // so the drain skips the turn instead of blocking the conversation
+    // behind it forever.
+    state: text('state')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'consumed' | 'failed'>(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    // Set when the turn parked itself for a durable inference retry: the
+    // drain holds the conversation (in order) until this passes instead of
+    // running the next email over the parked one.
+    retryAt: timestamp('retry_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    consumedAt: timestamp('consumed_at'),
+  },
+  (table) => [
+    unique('agentmail_inbound_turns_webhook_event_unique').on(
+      table.webhookEventId,
+    ),
+    index('agentmail_inbound_turns_drain_idx').on(
+      table.conversationId,
+      table.state,
+      table.providerTimestamp,
+      table.providerMessageId,
+    ),
+    // The recovery sweep scans for stale pending turns; keep that scan off
+    // the ever-growing consumed history.
+    index('agentmail_inbound_turns_pending_idx')
+      .on(table.createdAt)
+      .where(sql`${table.state} = 'pending'`),
+    check(
+      'agentmail_inbound_turns_state_check',
+      sql`${table.state} in ('pending', 'consumed', 'failed')`,
+    ),
+  ],
+);
+
+/**
+ * agentmail_suppressions
+ *
+ * Addresses Roomote must never initiate email to: permanent bounces, spam
+ * complaints, and one-click unsubscribes. Consulted only on the
+ * outbound-initiation path — replying within a conversation the recipient
+ * started (or is actively participating in) is never suppressed. A row is
+ * intentionally sticky: it survives account changes and re-links, and only an
+ * explicit operator action should remove one.
+ */
+export const agentmailSuppressions = pgTable(
+  'agentmail_suppressions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    emailAddress: text('email_address').notNull(),
+    reason: text('reason')
+      .notNull()
+      .$type<'bounce' | 'complaint' | 'unsubscribe'>(),
+    /** Human-readable provenance, e.g. the bounce type/sub-type. */
+    details: text('details'),
+    providerMessageId: text('provider_message_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('agentmail_suppressions_email_unique').on(table.emailAddress),
+    check(
+      'agentmail_suppressions_reason_check',
+      sql`${table.reason} in ('bounce', 'complaint', 'unsubscribe')`,
+    ),
+  ],
+);
+
+/**
  * discord_installations
  *
  * One row per Discord guild where the deployment's bot is installed. The
@@ -3174,6 +3515,28 @@ export const fastAgentConversations = pgTable(
 );
 
 /**
+ * Private personalization captured independently for each participant when
+ * they first speak in a Fast conversation. These encrypted values deliberately
+ * live outside shared conversation and transcript records.
+ */
+export const fastAgentPersonalizationSnapshots = pgTable(
+  'fast_agent_personalization_snapshots',
+  {
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    displayName: encryptedText('display_name'),
+    instructions: encryptedText('instructions').notNull(),
+    learnFromConversations: boolean('learn_from_conversations').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.conversationId, table.userId] })],
+);
+
+/**
  * fast_agent_parent_events
  *
  * Durable admission queue for events entering a Fast conversation while its
@@ -3302,7 +3665,7 @@ export const fastAgentProviderMessages = pgTable(
       .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
     provider: text('provider')
       .notNull()
-      .$type<'discord' | 'slack' | 'teams' | 'telegram'>(),
+      .$type<'discord' | 'slack' | 'teams' | 'telegram' | 'agentmail'>(),
     workspaceId: text('workspace_id').notNull(),
     channelId: text('channel_id').notNull(),
     threadId: text('thread_id'),
@@ -3328,7 +3691,7 @@ export const fastAgentProviderMessages = pgTable(
     ),
     check(
       'fast_agent_provider_messages_provider_v3_check',
-      sql`${table.provider} in ('discord', 'slack', 'teams', 'telegram')`,
+      sql`${table.provider} in ('discord', 'slack', 'teams', 'telegram', 'agentmail')`,
     ),
   ],
 );
@@ -3409,6 +3772,7 @@ export const sessionWakeups = pgTable(
     reportPolicy: text('report_policy')
       .notNull()
       .$type<SessionWakeupReportPolicy>(),
+    internal: boolean('internal').notNull().default(false),
     status: text('status')
       .notNull()
       .default('active')
@@ -3828,7 +4192,7 @@ export const sessions = pgTable(
     ),
     check(
       'sessions_source_surface_check',
-      sql`${table.sourceSurface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system', 'automation')`,
+      sql`${table.sourceSurface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'agentmail', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system', 'automation')`,
     ),
     check(
       'sessions_source_trigger_check',
@@ -4034,6 +4398,10 @@ export const customAutomations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     prompt: text('prompt').notNull(),
+    resultPriority: text('result_priority')
+      .notNull()
+      .default('normal')
+      .$type<AutomationResultPriority>(),
     enabled: boolean('enabled').notNull().default(false),
     scheduleMode: text('schedule_mode').notNull().default('off'),
     cronExpression: text('cron_expression'),
@@ -4048,6 +4416,7 @@ export const customAutomations = pgTable(
       onDelete: 'set null',
     }),
     allRepositories: boolean('all_repositories').notNull().default(false),
+    noRepositories: boolean('no_repositories').notNull().default(false),
     executionMode: text('execution_mode')
       .notNull()
       .default('sandbox_task')
@@ -4080,6 +4449,43 @@ export const customAutomations = pgTable(
     uniqueIndex('custom_automations_name_unique_idx').on(table.name),
     index('custom_automations_enabled_idx').on(table.enabled),
     index('custom_automations_environment_id_idx').on(table.environmentId),
+  ],
+);
+
+export const automationResults = pgTable(
+  'automation_results',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    automationKey: text('automation_key')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'set null' }),
+    customAutomationId: uuid('custom_automation_id').references(
+      () => customAutomations.id,
+      { onDelete: 'set null' },
+    ),
+    sourceTaskId: text('source_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    automationName: text('automation_name').notNull(),
+    content: text('content').notNull(),
+    priority: text('priority')
+      .notNull()
+      .default('normal')
+      .$type<AutomationResultPriority>(),
+    dedupeKey: text('dedupe_key').notNull(),
+    acceptedAt: timestamp('accepted_at'),
+    ignoredAt: timestamp('ignored_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('automation_results_dedupe_key_unique_idx').on(table.dedupeKey),
+    index('automation_results_inbox_idx').on(table.priority, table.createdAt),
+    index('automation_results_user_id_idx').on(table.userId),
+    index('automation_results_source_task_id_idx').on(table.sourceTaskId),
   ],
 );
 

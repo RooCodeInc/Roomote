@@ -10,6 +10,7 @@ import {
 
 import { enqueueSessionWakeupFireBestEffort } from './queue';
 import {
+  ensureOwnTaskFollowThroughWakeup,
   handleManageWakeupsToolCall,
   type SessionWakeupActor,
 } from './service';
@@ -24,6 +25,14 @@ const createInput = {
   name: 'Reminder',
   prompt: 'Check the deploy.',
   schedule: 'in 30s',
+};
+const ownTaskFollowThroughInput = {
+  action: 'create' as const,
+  name: 'Follow through on session tasks',
+  prompt:
+    'Run the Own Coding Task Follow-Through session check for all tasks in this conversation. Follow that system policy exactly, including inspection, reporting, correction, stopping, and rearming.',
+  schedule: 'in 10m',
+  reportPolicy: 'only_when_notable' as const,
 };
 
 describe('handleManageWakeupsToolCall relative reminders', () => {
@@ -77,8 +86,10 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
           },
           nextRunAt: nextRunAt.toISOString(),
           reportPolicy: 'always',
+          internal: false,
           status: 'active',
         },
+        note: 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation.',
       });
       const rows = await listSessionWakeups(actor.conversationId);
       expect(rows).toHaveLength(1);
@@ -87,6 +98,7 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
         schedule: { mode: 'once', at: nextRunAt.toISOString(), inMinutes: 0.5 },
         nextRunAt,
         reportPolicy: 'always',
+        internal: false,
         status: 'active',
       });
       expect(
@@ -154,5 +166,75 @@ describe('handleManageWakeupsToolCall relative reminders', () => {
     });
     expect(await listSessionWakeups(actor.conversationId)).toEqual([]);
     expect(enqueueSessionWakeupFireBestEffort).not.toHaveBeenCalled();
+  });
+
+  it('accepts explicit internal wakeups and keeps user reminders visible by default', async () => {
+    const internal = await handleManageWakeupsToolCall(actor, {
+      ...createInput,
+      internal: true,
+    });
+    expect(internal).toMatchObject({
+      success: true,
+      duplicate: false,
+      wakeup: { internal: true, status: 'active' },
+    });
+
+    const visible = await handleManageWakeupsToolCall(actor, createInput);
+    expect(visible).toMatchObject({
+      success: true,
+      duplicate: false,
+      wakeup: { internal: false, status: 'active' },
+    });
+    await expect(
+      handleManageWakeupsToolCall(actor, createInput),
+    ).resolves.toMatchObject({
+      success: true,
+      duplicate: true,
+      wakeup: { id: (visible.wakeup as { id: string }).id, internal: false },
+    });
+  });
+
+  it('creates and rearms task follow-through as explicitly internal', async () => {
+    const created = await ensureOwnTaskFollowThroughWakeup(actor);
+    const sourceWakeupId = created.wakeup.id;
+    await db
+      .update(sessionWakeups)
+      .set({ status: 'completed', nextRunAt: null })
+      .where(eq(sessionWakeups.id, sourceWakeupId));
+
+    vi.setSystemTime(new Date(now.getTime() + 10 * 60_000));
+    const rearmed = await handleManageWakeupsToolCall(actor, {
+      ...ownTaskFollowThroughInput,
+      internal: true,
+    });
+    expect(rearmed).toMatchObject({
+      success: true,
+      duplicate: false,
+      wakeup: {
+        name: 'Follow through on session tasks',
+        internal: true,
+        status: 'active',
+      },
+    });
+    expect((rearmed.wakeup as { id: string }).id).not.toBe(sourceWakeupId);
+
+    expect(enqueueSessionWakeupFireBestEffort).toHaveBeenNthCalledWith(2, {
+      wakeupId: expect.any(String),
+      runAt: now.getTime() + 20 * 60_000,
+    });
+
+    const rows = await listSessionWakeups(actor.conversationId, {
+      includeTerminal: true,
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: sourceWakeupId, internal: true }),
+        expect.objectContaining({
+          id: (rearmed.wakeup as { id: string }).id,
+          internal: true,
+        }),
+      ]),
+    );
   });
 });

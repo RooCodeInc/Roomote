@@ -1,4 +1,4 @@
-import { ALL_REPOSITORIES, RunStatus } from '@roomote/types';
+import { ALL_REPOSITORIES, NO_REPOSITORIES, RunStatus } from '@roomote/types';
 
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { createMemoryMcpInstructions } from '@roomote/types';
@@ -70,6 +70,92 @@ describe.each([
 });
 
 describe('buildFastAgentSystemPrompt', () => {
+  it('includes matching workspace and model guidance as supplemental routing rules', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [
+        { id: 'env-app', name: 'App', repositoryNames: ['acme/app'] },
+      ],
+      availableTaskModels: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6', family: 'GPT' },
+      ],
+      workspaceRoutingRules: [
+        {
+          description: 'For frontend work, use App and prefer GPT-5.6.',
+          target: 'env-app',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('## Routing Rules');
+    expect(prompt).toContain(
+      'For frontend work, use App and prefer GPT-5.6. -> App [id: env-app]',
+    );
+    expect(prompt).toContain(
+      'An explicit user request for an environment or model always takes precedence',
+    );
+    expect(prompt).toContain('supplemental routing rules');
+    expect(prompt).toContain(
+      'natural-language guidance for selecting an exact model from Available Delegated Task Models',
+    );
+    expect(prompt.indexOf('## Routing Rules')).toBeLessThan(
+      prompt.indexOf('## Available Delegated Task Models'),
+    );
+  });
+
+  it.each([undefined, []])(
+    'omits routing guidance when rules are %s',
+    (workspaceRoutingRules) => {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        workspaceRoutingRules,
+      });
+
+      expect(prompt).not.toContain('## Routing Rules');
+      expect(prompt).not.toContain('<routing_rules>');
+    },
+  );
+
+  it('omits routing rules whose saved environment no longer exists', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      workspaceRoutingRules: [
+        { description: 'Use the deleted environment.', target: 'env-deleted' },
+      ],
+    });
+
+    expect(prompt).not.toContain('## Routing Rules');
+    expect(prompt).not.toContain('Use the deleted environment.');
+  });
+
+  it('includes shared agent guidance as supplemental system instructions', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      globalAgentInstructions: 'Prefer concise implementation summaries.',
+    });
+
+    expect(prompt).toContain('## Shared Agent Guidance');
+    expect(prompt).toContain('Prefer concise implementation summaries.');
+    expect(prompt).toContain(
+      "when it does not conflict with Roomote's system policies",
+    );
+    expect(prompt.indexOf('## Orchestration Policy')).toBeLessThan(
+      prompt.indexOf('## Shared Agent Guidance'),
+    );
+  });
+
+  it.each([undefined, null, '   '])(
+    'omits shared agent guidance when the setting is %s',
+    (globalAgentInstructions) => {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        globalAgentInstructions,
+      });
+
+      expect(prompt).not.toContain('## Shared Agent Guidance');
+      expect(prompt).not.toContain('<shared_agent_guidance>');
+    },
+  );
+
   it('keeps supported Bitbucket reads API-first without a checkout or task', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
     expect(prompt).toContain(
@@ -300,6 +386,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(eventPrompt).toContain("as you would a teammate's request");
     expect(eventPrompt).toContain('`preferredEnvironmentId`');
     expect(eventPrompt).toContain('unless the prompt names a different one');
+    expect(eventPrompt).toContain(
+      `A \`${NO_REPOSITORIES}\` preference is an explicit request for sandbox execution`,
+    );
   });
 
   it('offers suggestions on an automation task-settled report only', () => {
@@ -325,6 +414,17 @@ describe('buildFastAgentSystemPrompt', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
     expect(prompt).not.toContain('Roomote release');
+  });
+
+  it('omits repository details for environments without them', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [
+        { id: 'env-tools', name: 'Tools', repositoryNames: [] },
+      ],
+    });
+
+    expect(prompt).toContain('- Tools [id: env-tools]');
+    expect(prompt).not.toContain('No repositories configured');
   });
 
   it('describes native OpenCode tools and Roomote orchestration policy', () => {
@@ -360,6 +460,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Roomote/example-app [id: repo-1]');
     expect(prompt).toContain(
       `All repositories [id: ${ALL_REPOSITORIES}]: Run against all active repositories.`,
+    );
+    expect(prompt).toContain(
+      `Blank slate [id: ${NO_REPOSITORIES}]: Start a sandbox without repositories.`,
     );
     expect(prompt).toContain('conversational orchestrator');
     const turnStartupIndex = prompt.indexOf(
@@ -427,7 +530,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'never claim a video is attached unless native delivery succeeds',
     );
     expect(prompt).toContain(
-      'Use `send_chat_reaction` only for an optional reaction or an emoji-only terminal answer',
+      'Use `send_chat_reaction` only for an optional meaningful reaction or an emoji-only terminal answer',
+    );
+    expect(prompt).toContain(
+      'do not use "eyes" as an automatic processing or working-status acknowledgement',
     );
     expect(prompt).toContain(
       'It does not satisfy the turn-start acknowledgement required before continuing work',
@@ -517,7 +623,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'Communicate first on a human-authored turn; platform events remain exempt',
     );
     expect(prompt).toContain(
-      'Keep using "launch_task", "send_task_message", or "cancel_task" for task changes',
+      'Keep using "launch_task", "send_task_message", "stop_task", or "cancel_task" for task changes',
     );
     expect(prompt).toContain(
       'Slack channel history defaults to the previous 24 hours',
@@ -532,6 +638,24 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'On a human-authored turn, acknowledge first, then send the instruction immediately',
+    );
+    expect(prompt).toContain(
+      'A successful call means the task accepted the instruction, not that it has responded or completed it',
+    );
+    expect(prompt).toContain(
+      'same resumable soft stop as the running-task UI Stop control',
+    );
+    expect(prompt).toContain(
+      'Cancellation ends the current run and is distinct from the resumable Stop action',
+    );
+    expect(prompt).toContain(
+      'An accepted or response-pending delivery, silence alone, and a normal long-running command are not evidence of a stall',
+    );
+    expect(prompt).toContain(
+      'do not duplicate messages or enter repeated stop/resume loops',
+    );
+    expect(prompt).toContain(
+      'set "userInitiated" to false so the task transcript does not attribute the recovery interruption to the user',
     );
     expect(prompt).toContain('Its "kickoffMessage" should describe the review');
     expect(prompt).toContain(
@@ -552,7 +676,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'The task card or a separate task link keeps the started work associated with this conversation',
     );
     expect(prompt).not.toContain('explaining what is being delegated');
-    expect(prompt).toContain('launch multiple independent tasks in one turn');
+    expect(prompt).toContain('proactively launch multiple tasks in one turn');
     expect(prompt).toContain('the turn remains open for more tools');
     expect(prompt).toContain(
       'use a closeout or clarification only for additional user-useful outcome',
@@ -570,7 +694,17 @@ describe('buildFastAgentSystemPrompt', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
     expect(prompt).toContain(
-      'ongoing process has a concrete unresolved outcome',
+      'eligible under the exclusions below reports an outcome and is about to close, make one silent decision before the closeout',
+    );
+    expect(prompt).toContain(
+      'leave an ongoing process with a concrete unresolved outcome',
+    );
+    expect(prompt).toContain(
+      'include one specific bounded-check offer after the outcome in that same closeout',
+    );
+    expect(prompt).toContain('close normally without mentioning monitoring');
+    expect(prompt).toContain(
+      'not a blanket offer after every tool call, fix, or update',
     );
     expect(prompt).toContain('Verify capability before offering');
     expect(prompt).toContain(
@@ -625,6 +759,134 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('do not inspect or schedule from them');
     expect(prompt).toContain(
       'not an offer to save work as a deployment automation',
+    );
+    expect(prompt).toContain(
+      "the automation rule against pitching one-off fixes does not suppress an otherwise eligible check of a deployed fix's unresolved observable outcome",
+    );
+  });
+
+  it('silently ensures one session-scoped one-shot after a successful coding launch', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain('## Own Coding Task Follow-Through');
+    expect(prompt).toContain(
+      'After "launch_task" successfully creates a coding task for a human-authored request',
+    );
+    expect(prompt).toContain(
+      'the runtime silently ensures this conversation has exactly one internal session-wide one-shot check',
+    );
+    expect(prompt).toContain('Do not create another wakeup for this purpose');
+    expect(prompt).toContain('passing "internal": true');
+    expect(prompt).toContain(
+      'not external-process monitoring, so do not ask for monitoring consent',
+    );
+    expect(prompt).toContain('Failed launches do not schedule follow-through');
+    expect(prompt).toContain(
+      'Do not mention this automatic monitor, its setup, cadence, or next run in the acknowledgement or closeout',
+    );
+    expect(prompt).toContain(
+      'This exception overrides generic wakeup-creation confirmation instructions only for automatic own-task follow-through',
+    );
+    expect(prompt).toContain(
+      'continue to confirm reminders and monitoring that the user requested',
+    );
+    expect(prompt).toContain(
+      'After creating a user-requested wakeup, confirm the plan and the next run time in one sentence',
+    );
+  });
+
+  it('inspects and rearms the session check only while work is running', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventKind: 'scheduled_wakeup',
+    });
+
+    expect(prompt).toContain(
+      'inspect every task currently listed in this prompt as active or resumable for this conversation',
+    );
+    expect(prompt).toContain('get each current summary and recent messages');
+    expect(prompt).toContain(
+      "compare the evidence with the user's goals and accepted instructions in this conversation",
+    );
+    expect(prompt).toContain(
+      'Count a task as still running only when current evidence shows it is booting or actively executing',
+    );
+    expect(prompt).toContain(
+      'stopped, waiting for input, completed, failed, canceled, or merely resumable does not keep the monitor alive',
+    );
+    expect(prompt).toContain(
+      'Never treat an inspection failure or missing evidence as success',
+    );
+    expect(prompt).toContain(
+      'do not rearm, and stop the monitor on capability loss',
+    );
+    expect(prompt).toContain(
+      'concrete evidence shows drift, a missed requirement, or an actionable blocker a running task can resolve within the accepted scope',
+    );
+    expect(prompt).toContain(
+      'use "send_task_message" to send one specific corrective instruction to that task',
+    );
+    expect(prompt).toContain('naming the evidence and expected correction');
+    expect(prompt).toContain(
+      'the same correction is not already queued, accepted, recorded, addressed, or superseded',
+    );
+    expect(prompt).toContain(
+      'Do not steer on silence alone, invent progress or problems, expand scope, or reactivate stopped, waiting, finished, failed, or canceled work',
+    );
+    expect(prompt).toContain(
+      'post one brief consolidated factual status for the Session when either inspection finds a genuinely notable new development',
+    );
+    expect(prompt).toContain(
+      'or the user has received no useful user-visible work update in this conversation for roughly 10 minutes',
+    );
+    expect(prompt).toContain(
+      'Important news is immediate and has no minimum wait',
+    );
+    expect(prompt).toContain(
+      'a recent useful update suppresses only a routine cadence status, not inspection, corrective action, or the next timer',
+    );
+    expect(prompt).toContain(
+      'do not narrate routine logs, invent progress, repeat an already reported development, or emit separate per-task or duplicate lifecycle notifications',
+    );
+    expect(prompt).toContain(
+      'When neither reporting condition is met, call "ignore_event" after ensuring the next check',
+    );
+    expect(prompt).toContain(
+      'ensure exactly one equivalent next one-shot check exists for "in 10m"',
+    );
+    expect(prompt).toContain('passing "internal": true');
+    expect(prompt).toContain('If no task remains running, do not rearm');
+    expect(prompt).toContain('otherwise call "ignore_event"');
+    expect(prompt).toContain(
+      'cancel those active per-task monitors before ensuring the session check',
+    );
+    expect(prompt).toContain(
+      'Leave every unrelated reminder or external-process monitor unchanged',
+    );
+    expect(prompt).toContain(
+      'does not loosen the consent, finite-bound, or no-renewal rules for unrelated external-process monitoring',
+    );
+    expect(prompt).toContain(
+      'when the automatic own-task session check above authorizes a corrective instruction to a running task',
+    );
+    expect(prompt).toContain('automatic monitoring must never reactivate it');
+    expect(prompt).toContain(
+      'report notable new developments immediately or one factual consolidated status after roughly 10 minutes without a useful visible work update',
+    );
+    expect(prompt).toContain(
+      'otherwise stay silent while still rearming if work runs',
+    );
+    expect(prompt).toContain(
+      'explicitly authorizes creating its next one-shot only while running work remains',
+    );
+    expect(prompt).toContain(
+      'unless the prompt explicitly asks you to schedule the next check',
+    );
+    expect(prompt).not.toContain('schedule "every 10m x12"');
+    expect(prompt).not.toContain('after 12 runs');
+    expect(prompt).not.toContain(
+      'post exactly one brief consolidated factual status for the Session on every check',
     );
   });
 
@@ -824,8 +1086,18 @@ describe('buildFastAgentSystemPrompt', () => {
       );
       const explorationGuidance = prompt
         .split('- Repository code exploration')[1]!
-        .split('- For requested GitHub updates')[0]!;
+        .split('- For GitHub,')[0]!;
       expect(explorationGuidance).not.toMatch(/GitHub|GitLab|Bitbucket/);
+      for (const guidance of [
+        'an eligible deployment GitHub App installation with an active connected repository is required',
+        'without connecting the public target or linking a personal GitHub account',
+        'including source, code search, issues, and pull requests',
+        'exactly one positive `repo:owner/name` qualifier',
+        'Respect upstream pagination and search-index limits and disclose incomplete results',
+        'Private reads and all writes still require an eligible connection to the target repository',
+        'never retry an authorization denial anonymously or through a task',
+      ])
+        expect(prompt).toContain(guidance);
       expect(prompt).toContain(
         'Use only the methods and arguments exposed by the discovered schemas',
       );
@@ -989,6 +1261,27 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),
+    );
+  });
+
+  it('proactively parallelizes only cleanly independent coding scopes', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'When a request cleanly separates into clearly independent, low-conflict scopes and parallel execution would improve throughput',
+    );
+    expect(prompt).toContain('proactively launch multiple tasks in one turn');
+    expect(prompt).toContain(
+      'Give each task a distinct outcome and non-overlapping file or subsystem ownership so they do not duplicate work',
+    );
+    expect(prompt).toContain(
+      'Keep the work in one task when scopes may touch the same files, depend on shared intermediate decisions, are tightly coupled, or require ordered sequencing',
+    );
+    expect(prompt).toContain(
+      'Use "send_task_message" when an active or resumable task is listed above and the user clearly gives that task a new instruction',
+    );
+    expect(prompt).toContain(
+      'When multiple tasks are listed, route a follow-up only when the intended task is unambiguous',
     );
   });
 
@@ -1229,6 +1522,12 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       'The reacted-to message is context, not the current message surface',
+    );
+    expect(prompt).toContain(
+      'render as Slack native Block Kit data visualization blocks',
+    );
+    expect(prompt).toContain(
+      'Do not describe them as web-only, claim that Slack lacks native chart blocks',
     );
     expect(prompt).toContain(
       'Do not call `send_chat_reaction` or `retry_task_start`',

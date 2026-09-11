@@ -15,6 +15,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   manageWakeups: 'manage_wakeups',
   retryTaskStart: 'retry_task_start',
   saveMemory: 'save_memory',
+  updatePersonalization: 'update_personalization',
   sendChatReaction: 'send_chat_reaction',
   sendChatReply: 'send_chat_reply',
   sendTaskMessage: 'send_task_message',
@@ -23,6 +24,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   showWidget: 'show_widget',
   spillGrep: 'spill_grep',
   spillRead: 'spill_read',
+  stopTask: 'stop_task',
   requestUserInput: 'request_user_input',
   reviewPullRequest: 'review_pull_request',
 } as const;
@@ -70,6 +72,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
     kind: ACP_TOOL_KINDS.memory,
   },
   {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization,
+    kind: ACP_TOOL_KINDS.memory,
+  },
+  {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction,
     kind: ACP_TOOL_KINDS.communication,
   },
@@ -89,6 +95,7 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillGrep, kind: ACP_TOOL_KINDS.search },
   { name: FAST_AGENT_NATIVE_TOOL_NAMES.spillRead, kind: ACP_TOOL_KINDS.read },
+  { name: FAST_AGENT_NATIVE_TOOL_NAMES.stopTask, kind: ACP_TOOL_KINDS.task },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
     kind: ACP_TOOL_KINDS.communication,

@@ -10,11 +10,13 @@ import {
   SLACK_RESOLVE_USERS_MAX_IDS,
   ALL_REPOSITORIES,
   FAST_EXECUTION,
+  NO_REPOSITORIES,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   computeProviders,
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
+  AUTOMATION_RESULT_PRIORITIES,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -23,6 +25,7 @@ import {
   isSetupModelProviderId,
   isOpenAiCompatibleProviderId,
   customMcpServerInputSchema,
+  isOpenAiRealtimeVoiceId,
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
@@ -47,6 +50,14 @@ import {
   startFastSessionInputSchema,
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
+import {
+  cleanVoiceTranscriptCommand,
+  createVoiceLiveSessionCommand,
+  getVoiceStatusCommand,
+  previewVoiceCommand,
+  recordVoiceCallEventCommand,
+  recordVoiceTurnCommand,
+} from '../commands/voice';
 import {
   getSessionByIdCommand,
   getSessionForTask,
@@ -78,6 +89,7 @@ import {
   saveRipplingConnectionSchema,
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
+  saveVoiceConnectionSchema,
   saveGrafanaConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
@@ -110,7 +122,6 @@ import {
 import {
   getGitHubInstallationsCommand,
   getGitHubPendingInstallationsCommand,
-  getBranchesCommand,
   getCollaboratorsCommand,
   getIssuesCommand,
   getPullRequestsCommand,
@@ -184,6 +195,8 @@ import {
   createDiscordLinkCodeCommand,
   unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
+  getLinkedEmailAccountsCommand,
+  resendPrimaryEmailVerificationCommand,
 } from '../commands/linked-accounts';
 import {
   getPersonalAccountCapabilitiesCommand,
@@ -191,6 +204,8 @@ import {
   acceptCookieConsentCommand,
   setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
+  getUserPersonalizationCommand,
+  updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
   type EnvironmentConfigVersionDetail,
@@ -198,7 +213,6 @@ import {
   getEnvironmentsCommand,
   getWorkspaceRoutingSettingsCommand,
   updateWorkspaceRoutingSettingsCommand,
-  getAvailableEnvironmentsCommand,
   getEnvironmentNamesByIdsCommand,
   getEnvironmentByIdCommand,
   getEnvironmentConfigVersionCommand,
@@ -243,6 +257,7 @@ import {
 } from '../commands/sandbox-session';
 import {
   getDeploymentMcpEnablementsCommand,
+  getEffectiveMcpIntegrationsCommand,
   getCuratedIntegrationsAvailabilityCommand,
   getMcpOauthReadinessCommand,
   setDeploymentMcpEnabledCommand,
@@ -252,6 +267,7 @@ import {
   getRipplingConnectionCommand,
   getGranolaConnectionCommand,
   getElevenLabsConnectionCommand,
+  getVoiceConnectionCommand,
   getGrafanaConnectionCommand,
   getSnowflakeConnectionCommand,
   getVercelConnectionCommand,
@@ -262,6 +278,7 @@ import {
   saveRipplingConnectionCommand,
   saveGranolaConnectionCommand,
   saveElevenLabsConnectionCommand,
+  saveVoiceConnectionCommand,
   saveGrafanaConnectionCommand,
   saveSnowflakeConnectionCommand,
   saveVercelConnectionCommand,
@@ -395,6 +412,12 @@ import {
   updateCustomAutomationCommand,
 } from '../commands/automations';
 import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
+import {
+  actOnResultCommand,
+  clearResultsCommand,
+  getUnreadResultCountCommand,
+  listResultsCommand,
+} from '../commands/results';
 import {
   getAgentBehaviorSettingsCommand,
   updateAgentBehaviorSettingsCommand,
@@ -748,6 +771,7 @@ const automationsRouter = createRouter({
          */
         suggesterUseTeams: z.boolean().optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
+        suggesterAdditionalRules: z.string().max(8000).nullable().optional(),
         announcerFrequency: z.enum(['off', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         announcerDiscordChannel: z
@@ -758,6 +782,7 @@ const automationsRouter = createRouter({
           .nullable()
           .optional(),
         announcerInstructions: z.string().max(8_000).nullable(),
+        announcerAdditionalRules: z.string().max(8000).nullable().optional(),
         platformIssueAlertsEnabled: z.boolean().optional(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
         platformIssueDiscordChannel: z
@@ -779,6 +804,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        securityAuditorAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         codeQualityAuditorSlackChannel: z
           .string()
           .trim()
@@ -791,6 +821,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        codeQualityAuditorAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
         ciFailureTriageSlackChannel: z
           .string()
           .trim()
@@ -808,6 +843,11 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        mergeAnnouncerAdditionalRules: z
+          .string()
+          .max(8000)
+          .nullable()
+          .optional(),
       }),
     )
     .mutation(({ ctx: { auth }, input }) =>
@@ -830,9 +870,11 @@ const automationsRouter = createRouter({
     listCustomAutomationsCommand(auth),
   ),
 
-  getCustomAutomationOptions: protectedProcedure.query(({ ctx: { auth } }) =>
-    getCustomAutomationOptionsCommand(auth),
-  ),
+  getCustomAutomationOptions: protectedProcedure
+    .input(z.object({ automationId: z.string().uuid().optional() }).optional())
+    .query(({ ctx: { auth }, input }) =>
+      getCustomAutomationOptionsCommand(auth, input ?? {}),
+    ),
 
   createCustomAutomation: protectedProcedure
     .input(
@@ -840,6 +882,7 @@ const automationsRouter = createRouter({
         name: z.string().trim().min(1).max(100),
         prompt: z.string().trim().min(1).max(8_000),
         enabled: z.boolean(),
+        resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
           'every_hour',
@@ -861,10 +904,11 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -881,6 +925,7 @@ const automationsRouter = createRouter({
         name: z.string().trim().min(1).max(100),
         prompt: z.string().trim().min(1).max(8_000),
         enabled: z.boolean(),
+        resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
           'every_hour',
@@ -902,10 +947,11 @@ const automationsRouter = createRouter({
         environmentId: z.union([
           z.string().uuid(),
           z.literal(ALL_REPOSITORIES),
+          z.literal(NO_REPOSITORIES),
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -1089,6 +1135,7 @@ export const appRouter = createRouter({
             sessionId: z.string().uuid().optional(),
             path: z.string(),
             version: z.number().optional(),
+            preview: z.boolean().optional(),
           })
           .refine(
             (value) => Boolean(value.taskId) !== Boolean(value.sessionId),
@@ -1140,6 +1187,7 @@ export const appRouter = createRouter({
         z.object({
           taskId: z.string(),
           runId: z.number().int().optional(),
+          terminate: z.boolean().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -1170,10 +1218,6 @@ export const appRouter = createRouter({
     resolvePendingInstallations: protectedProcedure.mutation(
       ({ ctx: { auth } }) => resolvePendingGitHubInstallationsCommand(auth),
     ),
-
-    branches: protectedProcedure
-      .input(z.object({ fullName: z.string() }))
-      .query(({ ctx: { auth }, input }) => getBranchesCommand(auth, input)),
 
     collaborators: protectedProcedure.query(({ ctx: { auth } }) =>
       getCollaboratorsCommand(auth),
@@ -1477,6 +1521,14 @@ export const appRouter = createRouter({
   }),
 
   linkedAccounts: createRouter({
+    email: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedEmailAccountsCommand(auth),
+    ),
+
+    resendEmailVerification: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      resendPrimaryEmailVerificationCommand(auth),
+    ),
+
     github: protectedProcedure.query(({ ctx: { auth } }) =>
       getLinkedGitHubAccountCommand(auth),
     ),
@@ -1569,13 +1621,15 @@ export const appRouter = createRouter({
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
             therapistMode: z.boolean().optional(),
+            resultsPageEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
               input.narrationMode !== undefined ||
-              input.therapistMode !== undefined,
+              input.therapistMode !== undefined ||
+              input.resultsPageEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -1583,6 +1637,29 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         updatePersonalPreferencesCommand(auth, input),
+      ),
+    getPersonalization: protectedProcedure.query(({ ctx: { auth } }) =>
+      getUserPersonalizationCommand(auth),
+    ),
+    updatePersonalization: protectedProcedure
+      .input(
+        z
+          .object({
+            expectedVersion: z.number().int().nonnegative(),
+            instructions: z.string().max(8_000).optional(),
+            learnFromConversations: z.boolean().optional(),
+            reset: z.literal(true).optional(),
+          })
+          .refine(
+            (input) =>
+              input.instructions !== undefined ||
+              input.learnFromConversations !== undefined ||
+              input.reset === true,
+            { message: 'Expected a personalization change.' },
+          ),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateUserPersonalizationCommand(auth, input),
       ),
   }),
 
@@ -1599,12 +1676,6 @@ export const appRouter = createRouter({
       .input(workspaceRoutingSettingsSchema)
       .mutation(({ ctx: { auth }, input }) =>
         updateWorkspaceRoutingSettingsCommand(auth, input),
-      ),
-
-    available: protectedProcedure
-      .input(z.object({ repository: z.string().optional() }).optional())
-      .query(({ ctx: { auth }, input }) =>
-        getAvailableEnvironmentsCommand(auth, input),
       ),
 
     namesByIds: protectedProcedure
@@ -1685,7 +1756,7 @@ export const appRouter = createRouter({
     startDefinitionTask: protectedProcedure
       .input(
         z.object({
-          repositoryIds: z.array(z.string().uuid()).min(1),
+          repositoryIds: z.array(z.string().uuid()),
           environmentId: z.string().optional(),
           changeRequest: z.string().trim().min(1).max(8_000).optional(),
           selectedModelId: z.string().trim().min(1).optional(),
@@ -1879,6 +1950,10 @@ export const appRouter = createRouter({
       getDeploymentMcpEnablementsCommand(auth),
     ),
 
+    effectiveIntegrations: protectedProcedure.query(({ ctx: { auth } }) =>
+      getEffectiveMcpIntegrationsCommand(auth),
+    ),
+
     oauthReadiness: protectedProcedure.query(({ ctx: { auth } }) =>
       getMcpOauthReadinessCommand(auth),
     ),
@@ -1915,6 +1990,10 @@ export const appRouter = createRouter({
 
     elevenLabsConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getElevenLabsConnectionCommand(auth),
+    ),
+
+    voiceConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getVoiceConnectionCommand(auth),
     ),
 
     grafanaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
@@ -2005,6 +2084,12 @@ export const appRouter = createRouter({
       .input(saveElevenLabsConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
         saveElevenLabsConnectionCommand(auth, input),
+      ),
+
+    saveVoiceConnection: protectedProcedure
+      .input(saveVoiceConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveVoiceConnectionCommand(auth, input),
       ),
 
     saveGrafanaConnection: protectedProcedure
@@ -2581,7 +2666,7 @@ export const appRouter = createRouter({
             .array(
               z.object({
                 name: z.string().min(1).max(100),
-                repositoryIds: z.array(z.string().uuid()).min(1),
+                repositoryIds: z.array(z.string().uuid()),
                 installCommand: z.string().max(500).optional(),
                 testCommand: z.string().max(500).optional(),
               }),
@@ -2913,6 +2998,27 @@ export const appRouter = createRouter({
       ),
   }),
 
+  results: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      listResultsCommand(auth),
+    ),
+    unreadCount: protectedProcedure.query(({ ctx: { auth } }) =>
+      getUnreadResultCountCommand(auth),
+    ),
+    act: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          kind: z.enum(['report', 'suggestion']),
+          action: z.enum(['accept', 'ignore']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => actOnResultCommand(auth, input)),
+    clear: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      clearResultsCommand(auth),
+    ),
+  }),
+
   backgroundAgents: automationsRouter,
   automations: automationsRouter,
 
@@ -2976,6 +3082,52 @@ export const appRouter = createRouter({
         getFastSessionComposerSuggestionCommand(auth, {
           sessionId: input.sessionId,
         }),
+      ),
+  }),
+
+  voice: createRouter({
+    status: protectedProcedure.query(() => getVoiceStatusCommand()),
+    createLiveSession: protectedProcedure
+      // Never trim the SDP: it must keep its trailing CRLF or GPT-Live
+      // rejects the offer with "failed to unmarshal SDP: EOF".
+      .input(z.object({ sdp: z.string().min(1).max(65_536) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createVoiceLiveSessionCommand(auth, input),
+      ),
+    preview: protectedProcedure
+      .input(
+        z.object({
+          apiKey: z.string().transform((value) => value.trim()),
+          voiceId: z.string().refine(isOpenAiRealtimeVoiceId),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => previewVoiceCommand(auth, input)),
+    cleanTranscript: protectedProcedure
+      .input(z.object({ text: z.string().trim().min(1).max(8_000) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        cleanVoiceTranscriptCommand(auth, input),
+      ),
+    recordTurn: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          role: z.enum(['user', 'assistant']),
+          text: z.string().trim().min(1).max(20_000),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        recordVoiceTurnCommand(auth, input),
+      ),
+    recordCallEvent: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          phase: z.enum(['started', 'ended']),
+          durationMs: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        recordVoiceCallEventCommand(auth, input),
       ),
   }),
 

@@ -37,6 +37,13 @@ Fast is the default for unpinned requests across the web dashboard and
 supported chat providers. Choose an environment or repository explicitly when
 you already know where the work should run.
 
+When work needs a sandbox but no source code, ask Fast to delegate it to
+**Blank slate**. The delegated task starts with an empty workspace and does not
+clone repositories or require source-control credentials. This is useful for
+artifact generation, integration work, and other tasks that need command
+execution without a repository. Custom automations can also select Blank slate
+as their preferred environment.
+
 Select **New Session** in the navigation to open the same launcher from any
 dashboard page.
 
@@ -50,7 +57,7 @@ integrations for focused repository exploration. Reading files and directories,
 searching code, or inspecting commits, pull/merge request diffs, and reported CI
 results does not require a
 coding task, local clone, or workspace provisioning. Available reads depend on
-the connected integration's tools and permissions. Reading CI results is not the
+the integration's tools and permissions. Reading CI results is not the
 same as running tests: local checkout, code edits, command execution, and testing
 are delegated to a task, as are investigations that need a workspace.
 
@@ -68,6 +75,15 @@ limitations when results are partial, truncated, or limited to a search index.
 An empty search is not proof that code is absent. Source inspection is not a
 test run or reproduction, and an access denial is not bypassed through a task.
 Requests for a code review still use the structured Review Code pipeline.
+
+With an eligible deployment GitHub App installation and an active connected
+repository, active Roomote members can use the existing GitHub tools to read
+public `github.com` repositories, including source and code search. Public
+repositories do not themselves need to be connected, and no personal GitHub
+account linkage is required. See
+[public GitHub reads](/providers/source-control/github#public-github-reads)
+for access requirements. Private reads and writes still require the target to
+be connected; access denials are not retried anonymously.
 
 The existing [GitHub integration](/providers/source-control/github#daily-github-management)
 also supports updates to existing pull requests, issue or PR comments,
@@ -99,10 +115,13 @@ task, you can reply, attach files, use commands, answer pending requests, cancel
 work, or wake a sleeping task without leaving the Session. Choose **Open full
 workspace** for terminal, logs, diff, and preview tools.
 
-To stop just one active coding task, select **Stop** on its Session card. This
-requires execution access and stops the displayed task run without stopping the
-parent Session or sibling tasks. Cancellation errors appear on the card; check
-the resulting task status rather than assuming the request succeeded.
+To pause just one active coding task, select **Stop** on its Session card. This
+requires execution access and interrupts the task's current work while
+preserving the task, sandbox, and artifacts, so a later message can resume it.
+The parent Session and sibling tasks continue. Explicitly canceling the task is
+different: cancellation terminally ends the current run and shuts down its
+sandbox. Stop or cancellation errors appear on the card; check the resulting
+task status rather than assuming the request succeeded.
 
 On desktop, you can keep several task workspaces open beside the Session,
 resize them, and switch between the conversation and task panels without losing
@@ -121,6 +140,12 @@ screenshots or other images captured by a task, they appear inline with that
 reply in the transcript. Delegated tasks also report their completion, blockers,
 and relevant results back into the parent Session; open the task workspace when
 you need its full logs or diff.
+
+Fast quietly follows the coding tasks it launches after the conversation becomes
+idle. It reports meaningful progress, blockers, and questions that need input,
+and can send an evidence-backed correction when a task is drifting from the
+request. Routine status stays quiet. Follow-through stops when the Session's
+coding work settles instead of leaving a recurring monitor behind.
 
 **Session info** shows the total inference cost for the conversation and its
 attached tasks. Open the cost breakdown to separate direct Session orchestration
@@ -159,6 +184,11 @@ Fast sessions can also render presentational widgets such as status cards,
 tables, and plans directly in the transcript. Widget HTML is sanitized and
 sandboxed in the web view. Chat surfaces receive a concise text preview and a
 link to open the rendered widget when both are available.
+
+Agent replies and delegated reports can also include up to two pie, bar, area,
+or line charts. Roomote renders each chart responsively in the web transcript
+with a keyboard-accessible data table. Slack receives a native chart with its
+Markdown fallback; other chat providers receive the fallback text.
 
 ## Reply to a session
 
@@ -236,6 +266,15 @@ check it. The offer names the outcome, evidence source, timing, and stop bound.
 Fast waits for your acceptance before scheduling; an explicit request to monitor
 already gives that permission. Before scheduling, it rechecks access and reuses
 an equivalent active check rather than duplicating monitoring or notifications.
+
+Coding work that Fast starts for your request is a separate exception. The
+Session follows its own running tasks without asking for additional monitoring
+consent, reports important milestones, blockers, or needed input, and can send a
+factual status after roughly ten minutes without a useful update. It may also
+correct a running task when inspected evidence shows that it has drifted from
+the accepted request. This follow-through is hidden from the scheduled wakeup
+list and ends when no linked task is running; it does not change the consent and
+finite-bound rules for monitoring an external process.
 
 For ongoing-process monitoring, Fast uses a one-shot check or sets a finite run
 count or end time on a recurring schedule at any cadence, without automatic

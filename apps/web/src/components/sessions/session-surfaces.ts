@@ -40,6 +40,7 @@ const SESSION_SURFACES: Record<string, SurfaceDescriptor> = {
   teams: surface('teams', 'teams'),
   telegram: surface('telegram', 'telegram'),
   discord: surface('discord', 'discord'),
+  agentmail: surface('agentmail'),
   linear: surface('linear', 'linear'),
   github: surface('github', 'github'),
   gitlab: surface('gitlab', 'gitlab'),

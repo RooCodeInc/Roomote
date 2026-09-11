@@ -425,9 +425,7 @@ describe('Environments', () => {
     render(<Environments />);
 
     expect(
-      screen.getByText(
-        /Roomote can only verify its work when running with an environment\./i,
-      ),
+      screen.getByText(/Environments help Roomote verify its work\./i),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /add/i })).toHaveAttribute(
       'href',
@@ -441,9 +439,7 @@ describe('Environments', () => {
     render(<Environments />);
 
     expect(
-      screen.getByText(
-        /Roomote can only verify its work when running with an environment\./i,
-      ),
+      screen.getByText(/Environments help Roomote verify its work\./i),
     ).toBeInTheDocument();
   });
 
@@ -472,6 +468,23 @@ describe('Environments', () => {
     fireEvent.click(screen.getByTitle('Toggle environment details'));
 
     expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
+  });
+
+  it('omits repository labels when an environment has none', () => {
+    state.environments = [
+      {
+        ...state.environments[0]!,
+        config: {
+          ...state.environments[0]!.config,
+          repositories: [],
+        },
+      },
+    ];
+
+    render(<Environments />);
+
+    expect(screen.queryByText(/no repositories/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('acme/api')).not.toBeInTheDocument();
   });
 
   it('does not link verified badges when there is no verification task', () => {

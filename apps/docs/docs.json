@@ -58,7 +58,8 @@
           "goal-mode",
           "fast-sessions",
           "memory",
-          "file-attachments"
+          "file-attachments",
+          "voice"
         ]
       },
       {
@@ -108,6 +109,7 @@
             "expanded": false,
             "pages": [
               "communications",
+              "providers/communications/agentmail",
               "providers/communications/discord",
               "providers/communications/microsoft-teams",
               "providers/communications/slack",
@@ -171,6 +173,7 @@
           "integrations/supabase",
           "integrations/supermemory",
           "integrations/vercel",
+          "integrations/voice",
           "integrations/x",
           "integrations/zero"
         ]

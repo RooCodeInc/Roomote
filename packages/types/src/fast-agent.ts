@@ -7,6 +7,7 @@ export const fastAgentSurfaces = [
   'discord',
   'teams',
   'telegram',
+  'agentmail',
   'linear',
   'github',
   'gitlab',
@@ -66,6 +67,18 @@ export const fastAgentConversationSchema = z.discriminatedUnion('surface', [
   }),
   z.object({
     surface: z.literal('telegram'),
+    ...fastAgentConversationIdentitySchema,
+    replyTarget: fastAgentReplyTargetSchema,
+  }),
+  z.object({
+    surface: z.literal('agentmail'),
+    /**
+     * conversationId is the internal agentmail_conversations id, not the
+     * provider thread id: forwarded threads fork into a second conversation
+     * on the same provider thread, and the fork must be a distinct identity.
+     * The durable reply route (anchor, recipient) lives on the conversation
+     * row; replyTarget carries the inbox as channelId for display/context.
+     */
     ...fastAgentConversationIdentitySchema,
     replyTarget: fastAgentReplyTargetSchema,
   }),
@@ -148,7 +161,7 @@ export function isFastAgentSourceControlConversation(
 
 export type FastAgentCommunicationConversation = Extract<
   FastAgentConversation,
-  { surface: 'slack' | 'discord' | 'teams' | 'telegram' }
+  { surface: 'slack' | 'discord' | 'teams' | 'telegram' | 'agentmail' }
 >;
 
 export function isFastAgentCommunicationConversation(
@@ -158,7 +171,8 @@ export function isFastAgentCommunicationConversation(
     conversation.surface === 'slack' ||
     conversation.surface === 'discord' ||
     conversation.surface === 'teams' ||
-    conversation.surface === 'telegram'
+    conversation.surface === 'telegram' ||
+    conversation.surface === 'agentmail'
   );
 }
 
@@ -231,6 +245,23 @@ export const fastAgentPlatformEventVisibilitySchema = z.enum([
   'required',
 ]);
 
+export const fastAgentSetupTurnContextSchema = z.object({
+  sessionId: z.string().min(1),
+  fastConversationId: z.string().min(1),
+  setupSnapshot: z.string().min(1),
+  starterTaskOptions: z.array(
+    z.object({
+      id: z.string().min(1),
+      label: z.string().min(1),
+      description: z.string(),
+    }),
+  ),
+});
+
+export type FastAgentSetupTurnContext = z.infer<
+  typeof fastAgentSetupTurnContextSchema
+>;
+
 export const fastAgentHumanFollowUpEventSchema = z.object({
   type: z.literal(FAST_AGENT_HUMAN_FOLLOW_UP_EVENT_TYPE),
   eventId: z.string().min(1),
@@ -288,6 +319,15 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   platformEventKind: fastAgentPlatformEventKindSchema.optional(),
   platformEventVisibility: fastAgentPlatformEventVisibilitySchema.optional(),
   setupSession: z.boolean().optional(),
+  /**
+   * Set when the message was spoken on a voice call. The reply is returned
+   * to the call for the voice to report rather than shown as a chat reply,
+   * so a resumed run must keep that framing.
+   */
+  voiceMode: z.boolean().optional(),
+  /** Serializable setup context used to rebuild trusted setup capabilities
+   * when an admitted web turn resumes in another process. */
+  setupContext: fastAgentSetupTurnContextSchema.optional(),
 });
 
 export type FastAgentHumanFollowUpEvent = z.infer<

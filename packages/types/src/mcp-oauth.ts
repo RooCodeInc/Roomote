@@ -171,6 +171,67 @@ export interface McpConnectionElevenLabsConfig {
   voiceId: string;
 }
 
+export interface OpenAiRealtimeVoiceOption {
+  id: string;
+  label: string;
+  locale?: string;
+  recommended?: boolean;
+}
+
+/**
+ * Voice metadata documented for OpenAI Realtime sessions, alphabetical for
+ * the picker. `recommended` marks OpenAI's recommended voices; the default is
+ * chosen by id below, not by position.
+ */
+export const OPENAI_REALTIME_VOICE_OPTIONS = [
+  { id: 'alloy', label: 'Alloy', locale: undefined, recommended: false },
+  { id: 'ash', label: 'Ash', locale: undefined, recommended: false },
+  { id: 'ballad', label: 'Ballad', locale: undefined, recommended: false },
+  { id: 'cedar', label: 'Cedar', locale: undefined, recommended: true },
+  { id: 'coral', label: 'Coral', locale: undefined, recommended: false },
+  { id: 'echo', label: 'Echo', locale: undefined, recommended: false },
+  { id: 'marin', label: 'Marin', locale: undefined, recommended: true },
+  { id: 'sage', label: 'Sage', locale: undefined, recommended: false },
+  { id: 'shimmer', label: 'Shimmer', locale: undefined, recommended: false },
+  { id: 'verse', label: 'Verse', locale: undefined, recommended: false },
+] as const satisfies readonly OpenAiRealtimeVoiceOption[];
+
+export type OpenAiRealtimeVoiceId =
+  (typeof OPENAI_REALTIME_VOICE_OPTIONS)[number]['id'];
+
+export function isOpenAiRealtimeVoiceId(
+  value: unknown,
+): value is OpenAiRealtimeVoiceId {
+  return (
+    typeof value === 'string' &&
+    OPENAI_REALTIME_VOICE_OPTIONS.some((option) => option.id === value)
+  );
+}
+
+/** Prefer a documented Australian voice, then Marin, one of OpenAI's recommended voices. */
+export const DEFAULT_OPENAI_REALTIME_VOICE_ID: OpenAiRealtimeVoiceId =
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.locale === 'en-AU')
+    ?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.id === 'marin')?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.recommended)?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS[0]!.id;
+
+/**
+ * Deployment-scoped Voice connection config stored in
+ * mcpConnections.authConfig.
+ *
+ * Credential-only: an OpenAI API key with GPT-Live access, consumed by the
+ * control plane to open voice calls on Fast Sessions and to clean spoken
+ * transcripts. Excluded from agent MCP config delivery so the key never
+ * reaches a task sandbox. The `R_VOICE_OPENAI_API_KEY` environment variable,
+ * when set, takes precedence over this connection.
+ */
+export interface McpConnectionVoiceConfig {
+  type: 'voice';
+  encryptedApiKey: string;
+  voiceId?: OpenAiRealtimeVoiceId;
+}
+
 /**
  * Deployment-scoped X connection config stored in mcpConnections.authConfig.
  *
@@ -252,6 +313,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionRipplingConfig
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
+  | McpConnectionVoiceConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
   | McpConnectionGbrainConfig
@@ -342,6 +404,38 @@ export type McpIntegrationServerMode =
   | 'upstream_proxy'
   | 'native'
   | 'credential_only';
+
+export type EffectiveMcpIntegrationStatus =
+  | 'unavailable'
+  | 'not_enabled'
+  | 'needs_connection'
+  | 'connected';
+
+export type McpIntegrationOauthReadiness =
+  | 'not_required'
+  | 'ready'
+  | 'missing'
+  | 'partial';
+
+/** Public-safe, actor-scoped integration state for product UI. */
+export type EffectiveMcpIntegration = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  connectionScope: 'user' | 'deployment';
+  connectionMode: McpIntegrationConnectionMode;
+  serverMode: McpIntegrationServerMode;
+  available: boolean;
+  enabled: boolean;
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  oauthReadiness: McpIntegrationOauthReadiness;
+  status: EffectiveMcpIntegrationStatus;
+  capabilities: {
+    agentTools: boolean;
+    toolManagement: boolean;
+  };
+};
 
 export type McpIntegrationCategory = 'memory';
 
@@ -507,6 +601,8 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     description: `Enable Sentry so this deployment can access alerts and performance indicators from ${PRODUCT_NAME} tasks.`,
     icon: 'sentry',
     connectionScope: 'deployment',
+    instructions:
+      'Sentry advertises only a few tools directly (find_organizations, find_projects, search_issues, search_events, get_sentry_resource). Reach everything else (issue details, event stack traces, breadcrumbs, tag values, issue events, releases, traces, replays, attachments, monitors, alert rules, docs) by calling search_sentry_tools with a short query, then execute_sentry_tool with the returned tool name and arguments. Which tools exist depends on the access the admin granted when connecting. Treat Sentry as read-only unless the request explicitly asks to change Sentry state: do not resolve, assign, ignore, or otherwise update issues, and do not create or modify projects, teams, DSNs, or monitors on your own initiative.',
   },
   {
     id: 'pylon',
@@ -637,6 +733,15 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     name: 'ElevenLabs',
     description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice`,
     icon: 'elevenlabs',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
+  },
+  {
+    id: 'voice',
+    name: 'Voice',
+    description: `Add an OpenAI key with GPT-Live access so your team can talk to ${PRODUCT_NAME} on a call`,
+    icon: 'voice',
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
     serverMode: 'credential_only',
@@ -1030,6 +1135,23 @@ export function isMcpConnectionElevenLabsConfig(
     typeof authConfig.encryptedApiKey === 'string' &&
     'voiceId' in authConfig &&
     typeof authConfig.voiceId === 'string',
+  );
+}
+
+export function isMcpConnectionVoiceConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionVoiceConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'voice' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string' &&
+    authConfig.encryptedApiKey.length > 0 &&
+    (!('voiceId' in authConfig) ||
+      authConfig.voiceId === undefined ||
+      isOpenAiRealtimeVoiceId(authConfig.voiceId)),
   );
 }
 

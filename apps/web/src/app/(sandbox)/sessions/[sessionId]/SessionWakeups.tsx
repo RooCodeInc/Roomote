@@ -62,7 +62,7 @@ export function SessionWakeups({ sessionId }: { sessionId: string }) {
           role="alert"
           className="flex items-center gap-2 px-4 py-1 text-xs text-muted-foreground"
         >
-          Could not refresh scheduled wakeups.
+          Could not refresh scheduled timers.
           <Button
             type="button"
             variant="ghost"

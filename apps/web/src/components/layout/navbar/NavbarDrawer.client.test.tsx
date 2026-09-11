@@ -36,11 +36,16 @@ vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => state.user,
 }));
 
+vi.mock('@/hooks/useResultsPage', () => ({
+  useResultsPage: () => ({ enabled: false, isLoading: false }),
+}));
+
 vi.mock('@/components/system', () => ({
   Menu: Icon,
   X: Icon,
   House: Icon,
   Rows4: Icon,
+  NotepadText: Icon,
   GalleryVerticalEnd: Icon,
   ChartColumnIncreasing: Icon,
   Lightbulb: Icon,

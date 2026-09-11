@@ -6,6 +6,7 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getFastAgentParentFromPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
   parseConflictResolutionSummary,
@@ -19,6 +20,7 @@ import {
   TASK_STARTUP_FAILURE_TEXT,
 } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../agentmail-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
 import { Env, isBrainConfigured } from '@roomote/env';
@@ -407,10 +409,8 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
-  // Detached: this can hold the parent's turn lock through a full
-  // orchestrator turn, and settle callers (tRPC finish, controller, queue
-  // jobs) must not block on it. The delivery claim keeps it idempotent.
-  void notifyFastAgentParentOnSettle(
+  const fastAgentParent = getFastAgentParentFromPayload(run.payload);
+  const parentSettleNotification = notifyFastAgentParentOnSettle(
     {
       ...run,
       error: sanitizedError ?? run.error,
@@ -419,6 +419,19 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
+  const awaitAgentMailFailureAdmission =
+    status === RunStatus.Failed &&
+    getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail' &&
+    Boolean(fastAgentParent);
+  // Most settles remain detached because parent processing must not block the
+  // child. Email failures await only durable event admission so the child can
+  // provide the existing idempotent fallback if that database write fails.
+  const agentMailParentAdmissionFailed = awaitAgentMailFailureAdmission
+    ? (await parentSettleNotification) === 'failed'
+    : false;
+  if (!awaitAgentMailFailureAdmission) {
+    void parentSettleNotification;
+  }
   // The worker settles its own card on exit; this covers runs finalized
   // here without one (reaper, failed bootstrap). Never throws.
   void settleSlackLiveTaskCardOnExit(run, status, run.task.title);
@@ -550,6 +563,23 @@ export const finishRun = async ({
     } catch (err) {
       console.error(
         `[finishRun] Failed to send Telegram failure notification for run ${id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (
+    status === RunStatus.Failed &&
+    !task.slackThreadTs &&
+    getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail' &&
+    (!fastAgentParent || agentMailParentAdmissionFailed)
+  ) {
+    try {
+      await sendAgentMailFailureNotification(run, channelProviderError);
+    } catch (err) {
+      console.error(
+        `[finishRun] Failed to send email failure notification for run ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -1054,6 +1084,64 @@ async function sendTelegramFailureNotification(
   console.log(
     `[finishRun] Sent Telegram failure notification for run ${run.id}`,
   );
+}
+
+/**
+ * Post the terminal failure result back into the originating email
+ * conversation when an email-launched run fails. Mirrors the Telegram path:
+ * same result-text composition (failure text, error details, task link), no
+ * reactions, no typing indicators, no topic-name updates. The adapter
+ * resolves the actual reply anchor and recipient from the durable
+ * agentmail_conversations row; the payload thread id is the INTERNAL
+ * conversation id. The Idempotency-Key is stable per run so a finish-run
+ * retry can never double-send the email.
+ */
+async function sendAgentMailFailureNotification(
+  run: FinishedRun,
+  error?: string,
+): Promise<void> {
+  const provider =
+    await createAgentMailCommunicationProviderFromRuntimeCredentials();
+  if (!provider) {
+    console.warn(
+      `[finishRun] AgentMail credentials are not configured, skipping email failure notification for run ${run.id}`,
+    );
+    return;
+  }
+
+  const channelId = getCommunicationChannelFromTaskPayload(run.payload);
+  const conversationId = getCommunicationThreadIdFromTaskPayload(run.payload);
+  if (!channelId || !conversationId) {
+    console.warn(
+      `[finishRun] Missing email conversation metadata for run ${run.id}, skipping email failure notification`,
+    );
+    return;
+  }
+
+  const failureText = hasReachedTaskRuntime(run)
+    ? TASK_RUNTIME_FAILURE_TEXT
+    : TASK_STARTUP_FAILURE_TEXT;
+  const taskUrl = getTaskUrl({
+    taskId: run.taskId,
+    utm: { campaign: run.payloadKind, source: 'agentmail' },
+  });
+  const text = [
+    failureText,
+    error ? `**Error details:** ${error}` : null,
+    taskUrl ? formatMarkdownLink('Open the task', taskUrl) : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n');
+
+  await provider.postMessage({
+    channelId,
+    threadId: conversationId,
+    text,
+    textFormat: 'markdown',
+    idempotencyKey: `agentmail:${conversationId}:finish-run:${run.id}`,
+  });
+
+  console.log(`[finishRun] Sent email failure notification for run ${run.id}`);
 }
 
 async function sendDiscordFailureNotification(

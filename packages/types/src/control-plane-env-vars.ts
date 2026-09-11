@@ -43,6 +43,8 @@ export const INTEGRATION_BOT_SECRET_ENV_VAR_NAMES: ReadonlySet<string> =
   new Set([
     'R_TELEGRAM_BOT_TOKEN',
     'R_TELEGRAM_WEBHOOK_SECRET',
+    'R_AGENTMAIL_API_KEY',
+    'R_AGENTMAIL_WEBHOOK_SECRET',
     'R_DISCORD_BOT_TOKEN',
     'R_DISCORD_GATEWAY_SECRET',
     'R_TEAMS_BOT_APP_ID',
@@ -68,6 +70,7 @@ export const PROVIDER_IDENTIFIER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'GITLAB_CLIENT_ID',
   'GITEA_CLIENT_ID',
   'SLACK_APP_ID',
+  'R_AGENTMAIL_INBOX_ID',
   'ADO_CLIENT_ID',
   'ADO_TENANT_ID',
   'ADO_AUTH_MODE',
@@ -111,6 +114,7 @@ export const INSTANCE_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 export const MEDIA_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
+  'R_VOICE_OPENAI_API_KEY',
 ]);
 
 /**

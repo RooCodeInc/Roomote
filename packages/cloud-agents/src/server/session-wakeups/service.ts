@@ -25,6 +25,13 @@ import {
 } from './schedule';
 
 const DEFAULT_DEPLOYMENT_SETTINGS_ID = 'default';
+const OWN_TASK_FOLLOW_THROUGH_WAKEUP = {
+  name: 'Follow through on session tasks',
+  prompt:
+    'Run the Own Coding Task Follow-Through session check for all tasks in this conversation. Follow that system policy exactly, including inspection, reporting, correction, stopping, and rearming.',
+  schedule: 'in 10m',
+  reportPolicy: 'only_when_notable' as const,
+};
 
 /** The conversation a wakeup tool call acts on, and who is acting. */
 export type SessionWakeupActor = {
@@ -38,6 +45,7 @@ export type CreateSessionWakeupInput = {
   /** One schedule string, e.g. "in 20m", "every 10m x3", "cron 0 9 * * 1-5". */
   schedule: string;
   reportPolicy?: SessionWakeupReportPolicy | null;
+  internal?: boolean;
 };
 
 export type CreateSessionWakeupResult = {
@@ -46,6 +54,15 @@ export type CreateSessionWakeupResult = {
   duplicate: boolean;
   timeZone: string;
 };
+
+export function ensureOwnTaskFollowThroughWakeup(
+  actor: SessionWakeupActor,
+): Promise<CreateSessionWakeupResult> {
+  return createSessionWakeup(actor, {
+    ...OWN_TASK_FOLLOW_THROUGH_WAKEUP,
+    internal: true,
+  });
+}
 
 /**
  * Cron defaults and next-run confirmations use the deployment timezone when
@@ -76,6 +93,7 @@ export function toSessionWakeupSummary(
     schedule: row.schedule,
     scheduleDescription: describeSessionWakeupSchedule(row.schedule),
     reportPolicy: row.reportPolicy,
+    internal: row.internal,
     status: row.status,
     runCount: row.runCount,
     maxRuns: row.maxRuns,
@@ -114,6 +132,7 @@ export async function createSessionWakeup(
     prompt,
     schedule,
     reportPolicy,
+    internal: input.internal ?? false,
     maxRuns,
     until,
     nextRunAt: firstRunAt,
@@ -209,6 +228,7 @@ export async function handleManageWakeupsToolCall(
           prompt: input.prompt,
           schedule: input.schedule,
           reportPolicy: input.reportPolicy ?? null,
+          internal: input.internal ?? false,
         });
         return {
           success: true,
@@ -218,7 +238,7 @@ export async function handleManageWakeupsToolCall(
           nextRunLocal: formatNextRun(result.wakeup.nextRunAt, result.timeZone),
           note: result.duplicate
             ? 'An equivalent wakeup was already active in this conversation; it was reused instead of creating a duplicate.'
-            : 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation. Confirm the plan to the user in one sentence.',
+            : 'Scheduled. When it fires you will receive a scheduled_wakeup platform event in this conversation.',
         };
       }
       case 'list': {

@@ -5,9 +5,9 @@ description: 'Understand the environment definition YAML: the schema, how it rel
 ---
 
 An environment definition is the YAML document that describes a Roomote
-[environment](/environments): which repositories to clone, which services to
-start, which tools and environment variables to provide, which ports to
-preview, and what guidance every task in that environment should receive.
+[environment](/environments): repositories to clone, services to start, tools
+and environment variables to provide, ports to preview, and guidance every task
+in that environment should receive.
 
 The visual editor and the onboarding setup agent both produce this same YAML.
 This page documents the format directly so you can read, review, and write a
@@ -144,7 +144,7 @@ agentInstructions: |
 | ------------------------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `name`                    | string            | yes      | Environment name, 1–100 characters.                                                                                       |
 | `description`             | string            | no       | Short summary, up to 500 characters.                                                                                      |
-| `repositories`            | list              | yes      | At least one repository. See [Repositories](#repositories).                                                               |
+| `repositories`            | list              | no       | Repositories to clone. See [Repositories](#repositories).                                                                  |
 | `initialUrl`              | string            | no       | Absolute URL or `about:blank` that the preview surface opens first.                                                       |
 | `agentInstructions`       | string            | no       | Guidance attached to every task, up to 10,000 characters.                                                                 |
 | `tool_versions`           | map               | no       | Tools installed at the shared workspace root via mise.                                                                    |
@@ -168,8 +168,8 @@ opens first, so point it at the app entry a reviewer would expect, for example
 
 ## Repositories
 
-`repositories` is a required list with at least one entry. Each repository is
-cloned onto the shared workspace.
+`repositories` is optional. Each listed repository is cloned onto the shared
+workspace.
 
 | Field           | Type   | Required | Notes                                                             |
 | --------------- | ------ | -------- | ----------------------------------------------------------------- |
@@ -381,11 +381,14 @@ repository has a known trap, state it plainly.
 Admins can configure natural-language routing rules from **Settings →
 Environments**. Each rule maps a description, such as “Messages sent in the
 hospital-bugs Slack channel,” to an environment or the broad **All repositories**
-workspace.
+workspace. A rule can also recommend a coding model for work that Fast delegates.
 
 Rules are guidance rather than exact string matchers. An environment explicitly
 named in a request takes precedence, and a specific rule takes precedence over a
-catch-all default.
+catch-all default. Fast evaluates the saved rules when it chooses an environment
+or model for a delegated task; they do not override a model or environment the
+user explicitly requested. Rules that point to a deleted environment are ignored
+until an admin updates or removes them.
 
 ## MCP servers
 
