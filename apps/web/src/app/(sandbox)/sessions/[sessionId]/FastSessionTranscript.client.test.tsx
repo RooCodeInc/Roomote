@@ -2527,14 +2527,20 @@ describe('FastSessionTranscript', () => {
       await screen.findAllByRole('button', { name: /end voice conversation/i });
 
       act(() => {
+        liveVoiceState.onHeardTurnDelta?.('check the build');
+        liveVoiceState.onSpokenTurnDelta?.('Sure, checking.');
         liveVoiceState.onSpokenTurn?.('Sure, checking.');
       });
+      expect(screen.getByText('check the build')).toBeInTheDocument();
+      expect(screen.getByText('Sure, checking.')).toBeInTheDocument();
       expect(recordVoiceTurnMutate).not.toHaveBeenCalled();
 
       liveVoiceState.active = false;
       liveVoiceState.status = 'idle';
       liveVoiceState.startedAt = null;
       rerender(transcript());
+      expect(screen.queryByText('check the build')).not.toBeInTheDocument();
+      expect(screen.queryByText('Sure, checking.')).not.toBeInTheDocument();
       await waitFor(() =>
         expect(recordVoiceCallEventMutate).toHaveBeenCalledWith(
           expect.objectContaining({ sessionId: 'session-1', phase: 'ended' }),

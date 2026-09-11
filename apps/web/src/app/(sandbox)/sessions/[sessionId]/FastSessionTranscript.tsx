@@ -1129,6 +1129,11 @@ export function FastSessionTranscript({
   useEffect(() => {
     if (!liveVoiceActive) {
       heldSpokenTurnsRef.current = [];
+      setLiveVoiceTurns((current) =>
+        current.user === null && current.assistant === null
+          ? current
+          : { user: null, assistant: null },
+      );
       return;
     }
     if (requestInFlight || heldSpokenTurnsRef.current.length === 0) return;
