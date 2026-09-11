@@ -533,6 +533,7 @@ describe('PromptInput', () => {
         terminate: false,
       });
     });
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   it('falls back to the web API when sandbox cancellation fails', async () => {
@@ -572,6 +573,7 @@ describe('PromptInput', () => {
         terminate: false,
       });
     });
+    expect(toastErrorMock).not.toHaveBeenCalled();
   });
 
   it('falls back to the web API when sandbox cancellation hangs', async () => {
@@ -616,6 +618,7 @@ describe('PromptInput', () => {
         runId: 45,
         terminate: false,
       });
+      expect(toastErrorMock).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -652,6 +655,114 @@ describe('PromptInput', () => {
       expect(sandboxCancelMutateMock).toHaveBeenCalledTimes(1);
     });
     expect(taskRunCancelMutateMock).not.toHaveBeenCalled();
+    expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+
+  it('shows the web API error and allows retrying after cancellation fails', async () => {
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+    taskRunCancelMutateMock.mockResolvedValueOnce({
+      success: false,
+      error: 'This task cannot be stopped.',
+    });
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(46, { taskId: 'task-result-error' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const stopButton = screen.getByRole('button', { name: 'Stop' });
+    fireEvent.click(stopButton);
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'This task cannot be stopped.',
+      );
+    });
+
+    fireEvent.click(stopButton);
+
+    await waitFor(() => {
+      expect(taskRunCancelMutateMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('shows safe fallback copy when the final cancellation path throws', async () => {
+    const sandboxCancelMutateMock = vi
+      .fn()
+      .mockRejectedValue(new Error('WebSocket disconnected'));
+
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        cancelTask: { mutate: sandboxCancelMutateMock },
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+    taskRunCancelMutateMock.mockRejectedValueOnce(
+      new Error('Sensitive upstream failure'),
+    );
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(47, { taskId: 'task-thrown-error' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Failed to stop task. Please try again.',
+      );
+    });
+    expect(toastErrorMock).not.toHaveBeenCalledWith(
+      'Sensitive upstream failure',
+    );
+  });
+
+  it('fences repeated stop clicks only while cancellation is pending', async () => {
+    let resolveCancellation!: (result: { success: true }) => void;
+    taskRunCancelMutateMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCancellation = resolve;
+        }),
+    );
+    useSandboxTaskPhaseMock.mockReturnValue('running');
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(48, { taskId: 'task-click-fence' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const stopButton = screen.getByRole('button', { name: 'Stop' });
+    fireEvent.click(stopButton);
+    fireEvent.click(stopButton);
+
+    expect(taskRunCancelMutateMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveCancellation({ success: true });
+    });
+    fireEvent.click(stopButton);
+
+    await waitFor(() => {
+      expect(taskRunCancelMutateMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('hides the connecting status when the transport already failed', () => {
