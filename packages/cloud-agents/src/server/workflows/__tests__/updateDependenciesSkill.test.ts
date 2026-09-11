@@ -66,4 +66,16 @@ describe('update-dependencies guidance', () => {
       'preserve the existing delivery behavior and finish without an ownership mutation',
     );
   });
+
+  it('leaves user-visible automation reporting to an owning Session', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'For orchestrator-owned tasks, return the final shipped, no-op, deferred, blocker, or input-needed state privately to the owning Session.',
+    );
+    expect(skillContent).toContain(
+      'Only standalone tasks may publish that state directly to Slack.',
+    );
+    expect(skillContent).not.toContain('send a Slack-visible report only');
+  });
 });
