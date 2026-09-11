@@ -53,6 +53,7 @@ const state = vi.hoisted(() => ({
     createdAt: Date;
     updatedAt: Date;
     latestFastResult?: string | null;
+    nextRunAt?: Date | null;
   }>,
   environments: [] as Array<{ id: string; name: string }>,
   nextUpdateSettingsResult: null as {
@@ -1577,6 +1578,7 @@ describe('AutomationsSettings', () => {
         environmentId: 'env-1',
         target: { provider: 'slack', externalRef: 'C123MANAGER' },
         lastRunAt: new Date(),
+        nextRunAt: new Date('2026-09-11T13:00:00Z'),
         lastSucceededAt: null,
         lastFailedAt: null,
         lastError: null,
@@ -1595,7 +1597,11 @@ describe('AutomationsSettings', () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByText(/Created by Ada/)).toHaveTextContent(
-      /Created by Ada · Last run \d+s ago/,
+      /Created by Ada · Last run \d+s ago · Next run Sep 11, 2026, 1:00 PM/,
+    );
+    expect(screen.getByText('Sep 11, 2026, 1:00 PM')).toHaveAttribute(
+      'title',
+      '2026-09-11T13:00:00.000Z',
     );
     expect(screen.queryByText('0 9 * * 1-5')).not.toBeInTheDocument();
   });

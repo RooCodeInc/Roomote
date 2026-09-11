@@ -11,7 +11,10 @@ import {
   eq,
   slackInstallations,
 } from '@roomote/db/server';
-import { CUSTOM_AUTOMATION_CRON_MAX_LENGTH } from '@roomote/types';
+import {
+  CUSTOM_AUTOMATION_CRON_MAX_LENGTH,
+  type CustomAutomationScheduleMode,
+} from '@roomote/types';
 
 import {
   DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL,
@@ -130,6 +133,92 @@ export function isCronRunDue(params: {
       params.now,
     ).getTime() > params.baseline.getTime()
   );
+}
+
+const PRESET_INTERVAL_MS: Partial<
+  Record<CustomAutomationScheduleMode, number>
+> = {
+  every_hour: 60 * 60 * 1000,
+  every_6_hours: 6 * 60 * 60 * 1000,
+  weekly: 7 * 24 * 60 * 60 * 1000,
+};
+
+function localDateKey(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+export function getCustomAutomationNextRunAt(params: {
+  enabled: boolean;
+  scheduleMode: CustomAutomationScheduleMode;
+  cronExpression: string | null;
+  timeZone: string;
+  timeZoneUpdatedAt: Date | null;
+  lastRunAt: Date | null;
+  createdAt: Date;
+  now?: Date;
+}): Date | null {
+  if (!params.enabled || params.scheduleMode === 'off') return null;
+
+  const now = params.now ?? new Date();
+  if (params.scheduleMode === 'cron') {
+    if (!params.cronExpression) return null;
+    try {
+      return getCronOccurrence(
+        params.cronExpression,
+        params.timeZone,
+        'next',
+        now,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  if (params.scheduleMode === 'daily') {
+    const baseline = new Date(
+      Math.max(
+        params.lastRunAt?.getTime() ?? params.createdAt.getTime(),
+        params.timeZoneUpdatedAt?.getTime() ?? 0,
+      ),
+    );
+    let nextRunAt = getCronOccurrence(
+      `0 ${DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL} * * *`,
+      params.timeZone,
+      'next',
+      now,
+    );
+    if (
+      localDateKey(nextRunAt, params.timeZone) ===
+      localDateKey(baseline, params.timeZone)
+    ) {
+      nextRunAt = getCronOccurrence(
+        `0 ${DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL} * * *`,
+        params.timeZone,
+        'next',
+        nextRunAt,
+      );
+    }
+    return nextRunAt;
+  }
+
+  const intervalMs = PRESET_INTERVAL_MS[params.scheduleMode];
+  if (!intervalMs) return null;
+
+  const baseline = new Date(
+    Math.max(
+      params.lastRunAt?.getTime() ?? params.createdAt.getTime(),
+      params.timeZoneUpdatedAt?.getTime() ?? 0,
+    ),
+  );
+  const elapsedIntervals = Math.floor(
+    Math.max(0, now.getTime() - baseline.getTime()) / intervalMs,
+  );
+  return new Date(baseline.getTime() + (elapsedIntervals + 1) * intervalMs);
 }
 
 const scheduleResolutionSchema = z

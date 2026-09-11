@@ -158,6 +158,14 @@ function cadenceLabel(
     : 'Custom schedule';
 }
 
+function nextRunLabel(nextRunAt: Date | string, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(nextRunAt));
+}
+
 // Fast runs settle asynchronously, so refresh sparsely through the existing
 // ten-minute launch-claim recovery window instead of polling indefinitely.
 const RUN_RESULT_REFRESH_DELAYS_MS = [
@@ -169,6 +177,7 @@ const RUN_RESULT_REFRESH_DELAYS_MS = [
   5 * 60_000,
   10 * 60_000,
 ];
+const NEXT_RUN_REFRESH_MAX_DELAY_MS = 24 * 60 * 60 * 1000;
 
 function CustomAutomationRunButton({
   automation,
@@ -416,7 +425,21 @@ export function CustomAutomationsSection({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listQuery = useQuery(
-    trpc.automations.listCustomAutomations.queryOptions(),
+    trpc.automations.listCustomAutomations.queryOptions(undefined, {
+      refetchInterval: (query) => {
+        const nextRuns = (query.state.data ?? [])
+          .map((row) => row.nextRunAt && new Date(row.nextRunAt).getTime())
+          .filter((value): value is number => Boolean(value));
+        if (nextRuns.length === 0) return false;
+        return Math.max(
+          1_000,
+          Math.min(
+            NEXT_RUN_REFRESH_MAX_DELAY_MS,
+            Math.min(...nextRuns) - Date.now() + 1_000,
+          ),
+        );
+      },
+    }),
   );
   const environmentsQuery = useQuery(trpc.environments.list.queryOptions());
   const slackChannelsQuery = useQuery(
@@ -1288,6 +1311,19 @@ export function CustomAutomationsSection({
                                   {formatDistanceToNowCompact(
                                     new Date(row.lastRunAt),
                                     { addSuffix: true },
+                                  )}
+                                </span>
+                              </>
+                            ) : null}
+                            {row.nextRunAt && schedulingTimeZone ? (
+                              <>
+                                {' · Next run '}
+                                <span
+                                  title={new Date(row.nextRunAt).toISOString()}
+                                >
+                                  {nextRunLabel(
+                                    row.nextRunAt,
+                                    schedulingTimeZone,
                                   )}
                                 </span>
                               </>
