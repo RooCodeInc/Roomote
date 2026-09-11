@@ -12,6 +12,7 @@ import {
   findTrackedSuggestionWorkItemIds,
   inArray,
   isNull,
+  recordSuggestionResults,
   registerTrackedSuggestionCards,
   sql,
   trackedMessages,
@@ -179,9 +180,6 @@ async function persistFastAutomationSuggestions(params: {
             fingerprint,
             status: 'open' as const,
             sortOrder: index,
-            resultAutomationName: customAutomation?.name ?? 'Custom automation',
-            resultPriority: customAutomation?.resultPriority ?? 'normal',
-            resultUserId: params.createdByUserId,
           })),
         )
         .returning({
@@ -193,6 +191,19 @@ async function persistFastAutomationSuggestions(params: {
       for (const suggestion of inserted) {
         byFingerprint.set(suggestion.fingerprint, suggestion);
       }
+      await recordSuggestionResults(
+        inserted.map((suggestion) => ({
+          workItemId: suggestion.id,
+          automationKey: null,
+          customAutomationId: customAutomation?.id,
+          userId: params.createdByUserId,
+          automationName: customAutomation?.name ?? 'Custom automation',
+          title: suggestion.title,
+          content: suggestion.brief ?? '',
+          priority: customAutomation?.resultPriority ?? 'normal',
+        })),
+        tx,
+      );
     }
 
     return inputs.map(({ suggestion, fingerprint }) => {
