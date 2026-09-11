@@ -6,6 +6,7 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
+  getFastAgentParentFromPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
   parseConflictResolutionSummary,
@@ -560,7 +561,8 @@ export const finishRun = async ({
   if (
     status === RunStatus.Failed &&
     !task.slackThreadTs &&
-    getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail'
+    getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail' &&
+    !getFastAgentParentFromPayload(run.payload)
   ) {
     try {
       await sendAgentMailFailureNotification(run, channelProviderError);

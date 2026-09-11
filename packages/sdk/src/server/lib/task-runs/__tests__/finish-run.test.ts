@@ -295,6 +295,14 @@ vi.mock('../../telegram-communication', () => ({
   ) => mockCreateTelegramCommunicationProvider(...args),
 }));
 
+const mockCreateAgentMailCommunicationProvider = vi.fn();
+const mockAgentMailPostMessage = vi.fn();
+vi.mock('../../agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials: (
+    ...args: unknown[]
+  ) => mockCreateAgentMailCommunicationProvider(...args),
+}));
+
 vi.mock('@roomote/communication/discord-provider', () => ({
   DiscordCommunicationProvider: class MockDiscordCommunicationProvider {
     postMessage = mockDiscordPostMessage;
@@ -456,6 +464,14 @@ describe('finishRun', () => {
       channelId: 'channel-1',
       threadId: 'thread-1',
       messageId: 'message-1',
+    });
+    mockAgentMailPostMessage.mockResolvedValue({
+      provider: 'agentmail',
+      channelId: 'roomote@agentmail.test',
+      messageId: 'email-message-1',
+    });
+    mockCreateAgentMailCommunicationProvider.mockResolvedValue({
+      postMessage: mockAgentMailPostMessage,
     });
     vi.mocked(createTaskRunGitHubToken).mockResolvedValue('github-token');
   });
@@ -1909,6 +1925,72 @@ describe('finishRun', () => {
         status: RunStatus.Failed,
         error: 'test error',
       });
+    });
+  });
+
+  describe('AgentMail failure notification', () => {
+    const emailConversation = {
+      surface: 'agentmail' as const,
+      workspaceId: 'roomote@agentmail.test',
+      conversationId: '11111111-1111-4111-8111-111111111111',
+      replyTarget: { channelId: 'roomote@agentmail.test' },
+    };
+
+    it('lets the Fast parent exclusively deliver a delegated Email failure', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Run the automation',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+          fastAgentParent: {
+            sessionId: '22222222-2222-4222-8222-222222222222',
+            conversation: emailConversation,
+          },
+          customAutomationId: 'automation-1',
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).not.toHaveBeenCalled();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: job.taskId }),
+        RunStatus.Failed,
+        job.task.title,
+      );
+    });
+
+    it('keeps direct Email task failures on the child finalizer path', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Handle an email request',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).toHaveBeenCalledOnce();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledOnce();
     });
   });
 
