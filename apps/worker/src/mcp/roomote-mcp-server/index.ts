@@ -1669,6 +1669,9 @@ if (
                 charts: params.charts as DataVisualizationInput[] | undefined,
                 suggestions: params.suggestions,
                 chatReplySurface: chatReplySurfaceLabel,
+                purpose: params.purpose,
+                recordAutomationOutput:
+                  process.env.ROOMOTE_AUTOMATION_TASK === 'true',
               },
               artifactConfig,
               roomoteConfig,

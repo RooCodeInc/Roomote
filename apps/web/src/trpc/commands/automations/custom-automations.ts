@@ -37,6 +37,7 @@ import {
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
   type ReasoningEffort,
+  type AutomationResultPriority,
 } from '@roomote/types';
 import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
@@ -59,6 +60,7 @@ export type CustomAutomationListItem = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority?: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression: string | null;
   model: string | null;
@@ -106,6 +108,7 @@ export type CustomAutomationWriteInput = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority?: AutomationResultPriority;
   scheduleMode: string;
   cronExpression?: string | null;
   /** Provider/model launch override, or null for the deployment default. */
@@ -137,6 +140,7 @@ function toListItem(
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority,
     scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
@@ -380,6 +384,7 @@ export async function createCustomAutomationCommand(
     name: input.name,
     prompt: input.prompt,
     enabled: input.enabled,
+    resultPriority: input.resultPriority ?? 'normal',
     scheduleMode: input.scheduleMode,
     cronExpression,
     model: input.model ?? null,
@@ -431,6 +436,7 @@ export async function updateCustomAutomationCommand(
     name: input.name,
     prompt: input.prompt,
     enabled: input.enabled,
+    resultPriority: input.resultPriority ?? existing.resultPriority,
     scheduleMode: input.scheduleMode,
     cronExpression,
     model: input.model ?? null,

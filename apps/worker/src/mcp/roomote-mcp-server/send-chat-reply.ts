@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { replyToChatThread } from './chat-api-client.js';
 import {
   buildDataVisualizationBlocks,
@@ -13,6 +15,7 @@ import {
 } from './slack-post-helpers.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
 import {
+  recordAutomationResult,
   submitTaskSuggestions,
   type TaskSuggestionInput,
 } from './tasks-api-client.js';
@@ -66,6 +69,8 @@ export async function handleSendChatReply(
     charts?: DataVisualizationInput[];
     suggestions?: TaskSuggestionInput[];
     chatReplySurface?: ChatReplySurface;
+    purpose?: 'ack' | 'progress' | 'closeout' | 'clarification';
+    recordAutomationOutput?: boolean;
   },
   artifactConfig: ArtifactConfig,
   roomoteConfig: RoomoteConfig,
@@ -77,6 +82,17 @@ export async function handleSendChatReply(
   );
   const imagePaths = uniqueNonEmpty(input.imagePaths);
   const imageArtifactIds = uniqueNonEmpty(input.imageArtifactIds);
+
+  if (
+    input.recordAutomationOutput &&
+    summary &&
+    (input.purpose === 'closeout' || input.purpose === 'clarification')
+  ) {
+    await recordAutomationResult(roomoteConfig, input.taskId, {
+      content: summary,
+      dedupeKey: `task:${input.taskId}:${createHash('sha256').update(summary).digest('hex')}`,
+    }).catch(() => undefined);
+  }
 
   if (imagePaths.length > 0 && !artifactConfig.workspacePath) {
     return errorResult('ROOMOTE_WORKSPACE_PATH not set');

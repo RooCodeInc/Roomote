@@ -23,6 +23,7 @@ import {
   customAutomations,
   eq,
   getCustomAutomationById,
+  recordCustomAutomationResult,
   getSessionForFastConversation,
   getSessionWakeupById,
   inArray,
@@ -2496,7 +2497,7 @@ export async function deliverFastAgentParentEventWithLock(
 
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
-    const parentTurn = await createFastAgentParentTurn({
+    let parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
       event: params.event,
       ...(humanFollowUp
@@ -2508,6 +2509,35 @@ export async function deliverFastAgentParentEventWithLock(
         replyPosted = true;
       },
     });
+    if (isFastAutomationReportEvent(params.event)) {
+      const reportEvent = params.event;
+      const automationId =
+        reportEvent.type === 'automation_triggered'
+          ? reportEvent.automationId
+          : reportEvent.customAutomationId!;
+      const baseAdapter = parentTurn.adapter;
+      parentTurn = {
+        ...parentTurn,
+        adapter: {
+          ...baseAdapter,
+          postReply: async (reply) => {
+            if (
+              !reply.kickoff &&
+              (reply.purpose === 'closeout' ||
+                reply.purpose === 'clarification')
+            ) {
+              await recordCustomAutomationResult({
+                automationId,
+                userId: parentTurn.userId,
+                content: reply.message,
+                dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
+              }).catch(() => undefined);
+            }
+            return baseAdapter.postReply(reply);
+          },
+        },
+      };
+    }
     // A failed automation run always reaches its destination. The model
     // judges what a result is worth, but a broken automation must not stay
     // silent, so this closeout is fixed text rather than a model turn.
