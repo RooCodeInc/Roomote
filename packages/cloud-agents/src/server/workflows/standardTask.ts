@@ -386,7 +386,6 @@ ${buildGitHubMessageInstructions()}`
   <reporting_context>
     <consumer>orchestrator</consumer>
     <role>You are the coding executor for an orchestrator-owned task.</role>
-    <destination>All task communication is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, and final user communication.</destination>
     <delivery>Before settlement, send one report to the parent Session using \`report_to_parent_session\` with purpose \`closeout\`.</delivery>
     <final_report_contract>
       <section name="Outcome">State what was accomplished or the precise blocker.</section>
@@ -532,7 +531,7 @@ ${initialTodoSeed}
       <rule>Do not overlay additional procedural phases from this envelope onto the selected skill.</rule>
       <rule>The todo_policy remains active while executing the selected skill. Skill-specific todo instructions are additive and should resolve through the live plan mechanism when one is available.</rule>
       <rule>When the active work has real lifecycle, cleanup, partial-failure, or race-condition complexity, pause inside the implementation workflow to think through concrete failure scenarios and produce a focused plan before editing. Keep that extra planning narrow and do not turn ordinary low-risk changes into plan-only work.</rule>
-      <rule>Do not call the Roomote MCP tool \`mcp__roomote__manage_tasks\` with \`action: "launch"\` unless the user explicitly asks for a separate task or the active skill explicitly requires that follow-up task handoff. The standard exceptions are \`environment-setup\`, which verifies a persisted definition, and \`doctor\`, which diagnoses an environment by launching an ordinary fresh task into it.</rule>
+      <rule>Sandbox tasks cannot launch other Roomote tasks. The task-management tool intentionally does not expose a launch action, and run-scoped tokens are rejected by the task-launch API. Use in-process subagents for bounded assistance; leave any separate top-level Roomote task launch to Fast or an authenticated user.</rule>
     </execution>
 
     <skill_transitions>

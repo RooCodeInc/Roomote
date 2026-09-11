@@ -10,6 +10,7 @@ import {
   TooltipTrigger,
 } from '@/components/system';
 import { useAuthorizedUser } from '@/hooks/useUser';
+import { useResultsPage } from '@/hooks/useResultsPage';
 
 import {
   Button,
@@ -32,7 +33,11 @@ export const NavbarDrawer = ({
 }) => {
   const pathname = usePathname();
   const { isAdmin } = useAuthorizedUser();
-  const visibleNavItems = getVisiblePrimaryNavItems({ isAdmin });
+  const { enabled: resultsEnabled } = useResultsPage();
+  const visibleNavItems = getVisiblePrimaryNavItems({
+    isAdmin,
+    resultsEnabled,
+  });
 
   const [open, setOpen] = useState(false);
 

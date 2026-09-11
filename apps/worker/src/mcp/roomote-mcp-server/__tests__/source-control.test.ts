@@ -379,6 +379,190 @@ describe('handleManageSourceControl issue actions', () => {
     );
   });
 
+  it('forwards close pull request actions', async () => {
+    vi.mocked(tasksApiClient.writeSourceControl).mockResolvedValueOnce({
+      success: true,
+      action: 'close_pull_request',
+      provider: 'github',
+      repositoryFullName: 'acme/web',
+      number: 12,
+      applied: true,
+      warnings: [],
+    } as never);
+
+    const result = await handleManageSourceControl(
+      {
+        action: 'close_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: true,
+      action: 'close_pull_request',
+      applied: true,
+    });
+    expect(tasksApiClient.writeSourceControl).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      expect.objectContaining({
+        action: 'close_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+      }),
+    );
+  });
+
+  it('normalizes and forwards explicit pull request updates', async () => {
+    vi.mocked(tasksApiClient.writeSourceControl).mockResolvedValueOnce({
+      success: true,
+      action: 'update_pull_request',
+      provider: 'github',
+      repositoryFullName: 'acme/web',
+      number: 12,
+      applied: true,
+      warnings: [],
+    } as never);
+
+    const result = await handleManageSourceControl(
+      {
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        targetBranch: ' main ',
+        title: ' Updated title ',
+        body: '',
+        draft: false,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: true,
+      action: 'update_pull_request',
+      applied: true,
+    });
+    expect(tasksApiClient.writeSourceControl).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      expect.objectContaining({
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        targetBranch: 'main',
+        title: 'Updated title',
+        body: '',
+        draft: false,
+      }),
+    );
+  });
+
+  it('forwards reopen pull request actions', async () => {
+    vi.mocked(tasksApiClient.writeSourceControl).mockResolvedValueOnce({
+      success: true,
+      action: 'reopen_pull_request',
+      provider: 'github',
+      repositoryFullName: 'acme/web',
+      number: 12,
+      applied: true,
+      warnings: [],
+    } as never);
+
+    await handleManageSourceControl(
+      {
+        action: 'reopen_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(tasksApiClient.writeSourceControl).toHaveBeenCalledWith(
+      config,
+      'task-1',
+      expect.objectContaining({
+        action: 'reopen_pull_request',
+        prNumber: 12,
+      }),
+    );
+  });
+
+  it('requires update fields and a positive pull request identity', async () => {
+    const missingFields = await handleManageSourceControl(
+      {
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+      },
+      config,
+      'task-1',
+    );
+    const invalidIdentity = await handleManageSourceControl(
+      {
+        action: 'reopen_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 0,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(missingFields.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error:
+        'update_pull_request requires at least one of targetBranch, title, body, or draft',
+    });
+    expect(JSON.parse(invalidIdentity.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: 'prNumber is required for reopen_pull_request',
+    });
+    expect(tasksApiClient.writeSourceControl).not.toHaveBeenCalled();
+  });
+
+  it('rejects delivery metadata on explicit pull request updates', async () => {
+    const result = await handleManageSourceControl(
+      {
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 12,
+        title: 'Updated title',
+        labels: ['bug'],
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error:
+        'update_pull_request supports only targetBranch, title, body, and draft updates',
+    });
+    expect(tasksApiClient.writeSourceControl).not.toHaveBeenCalled();
+  });
+
+  it('requires a positive pull request number for close actions', async () => {
+    const result = await handleManageSourceControl(
+      {
+        action: 'close_pull_request',
+        repositoryFullName: 'acme/web',
+        prNumber: 0,
+      },
+      config,
+      'task-1',
+    );
+
+    expect(JSON.parse(result.content[0]?.text ?? '')).toMatchObject({
+      success: false,
+      error: 'prNumber is required for close_pull_request',
+    });
+    expect(tasksApiClient.writeSourceControl).not.toHaveBeenCalled();
+  });
+
   it('requires at least one pull request reviewer target', async () => {
     const result = await handleManageSourceControl(
       {

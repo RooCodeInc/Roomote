@@ -29,7 +29,11 @@ import { getProviderSetupCopy } from './providerSetupCopy';
 type ProviderSetupExperienceProvider =
   | SetupAuthStatus['providers'][number]
   | {
-      id: SetupAuthStatus['providers'][number]['id'] | 'telegram' | 'discord';
+      id:
+        | SetupAuthStatus['providers'][number]['id']
+        | 'telegram'
+        | 'discord'
+        | 'agentmail';
       label: string;
       fields: SetupAuthStatus['providers'][number]['fields'];
       runtimeSatisfied: boolean;
@@ -829,16 +833,18 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
             </a>
           </Button>
         </p>
-        <p className="text-sm text-muted-foreground">
-          If you need our logo,{' '}
-          <Link
-            className="underline underline-offset-4 hover:text-foreground"
-            href="/api/setup/roomote-logo"
-          >
-            download here
-          </Link>
-          .
-        </p>
+        {props.provider.id !== 'agentmail' && (
+          <p className="text-sm text-muted-foreground">
+            If you need our logo,{' '}
+            <Link
+              className="underline underline-offset-4 hover:text-foreground"
+              href="/api/setup/roomote-logo"
+            >
+              download here
+            </Link>
+            .
+          </p>
+        )}
       </NumberedStep>
 
       <NumberedStep number={2}>

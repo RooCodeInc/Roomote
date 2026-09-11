@@ -11,6 +11,7 @@ import {
 } from '@roomote/db/server';
 import {
   activeRunStatuses,
+  bootingRunStatuses,
   exitedRunStatuses,
   RunStatus,
 } from '@roomote/types';
@@ -145,6 +146,62 @@ describe('cancelTaskRunCommand', () => {
         cancelledBy: { name: auth.name, source: 'web' },
       });
       expect(await readRun(sibling.id)).toEqual(sibling);
+      expect(captureTaskSettled).not.toHaveBeenCalled();
+      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([RunStatus.Running, RunStatus.Idle])(
+    'soft-stops an attached Session-card %s run without terminal markers',
+    async (status) => {
+      const selected = await runFactory.create({
+        status,
+        sandboxServerUrl: 'https://sandbox.example',
+      });
+      const cancelTask = vi.fn().mockResolvedValue({ success: true });
+      vi.mocked(withSandboxServerRpcClient).mockImplementationOnce((options) =>
+        options.call({
+          commands: { cancelTask: { mutate: cancelTask } },
+        } as unknown as Parameters<typeof options.call>[0]),
+      );
+
+      await expect(
+        cancelTaskRunCommand(auth, {
+          taskId: selected.taskId,
+          runId: selected.id,
+          terminate: false,
+        }),
+      ).resolves.toEqual({ success: true });
+      expect(cancelTask).toHaveBeenCalledExactlyOnceWith({
+        cancelledBy: { name: auth.name, source: 'web' },
+      });
+      expect(await readRun(selected.id)).toMatchObject({
+        status,
+        cancelRequestedAt: null,
+        canceledAt: null,
+      });
+      expect(captureTaskSettled).not.toHaveBeenCalled();
+      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(bootingRunStatuses)(
+    'keeps a pre-sandbox Session-card %s run non-terminal',
+    async (status) => {
+      const selected = await runFactory.create({ status });
+
+      await expect(
+        cancelTaskRunCommand(auth, {
+          taskId: selected.taskId,
+          runId: selected.id,
+          terminate: false,
+        }),
+      ).resolves.toEqual({
+        success: false,
+        error: 'Task has no active sandbox. The worker may still be booting.',
+      });
+      expect(await readRun(selected.id)).toEqual(selected);
+      expect(withSandboxServerRpcClient).not.toHaveBeenCalled();
       expect(captureTaskSettled).not.toHaveBeenCalled();
       expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
     },

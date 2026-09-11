@@ -95,6 +95,54 @@ const ENV_VAR_REQUEST_SLACK_KEY_PREFIX = 'slack:env_var_request:';
 const SETUP_ENV_VAR_REQUEST_SLACK_CAMPAIGN = 'setup.secure_env_vars.request';
 const ENV_VAR_REQUEST_SLACK_CAMPAIGN = 'env_vars.request';
 const ENV_VAR_REQUEST_SLACK_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+export function sanitizePrivatePersonalizationEnvelope(
+  envelope: AcpPersistedEnvelope,
+): Pick<AcpPersistedEnvelope, 'contentBlocks' | 'metadata' | 'payload'> {
+  const payloadRecord = envelope.payload as Record<string, unknown> | null;
+  const updateRecord =
+    payloadRecord?.update && typeof payloadRecord.update === 'object'
+      ? (payloadRecord.update as Record<string, unknown>)
+      : null;
+  const toolNames = [
+    payloadRecord?.title,
+    payloadRecord?.toolName,
+    payloadRecord?.mcpToolName,
+    updateRecord?.title,
+    updateRecord?.toolName,
+    updateRecord?.mcpToolName,
+  ];
+  const privatePersonalization = toolNames.some(
+    (name) =>
+      name === 'update_personalization' ||
+      name === 'roomote_update_personalization',
+  );
+  if (!privatePersonalization) {
+    return {
+      contentBlocks: envelope.contentBlocks,
+      metadata: withTranscriptVisibility(
+        envelope.metadata,
+        envelope.visibleInTranscript ??
+          isVisibleInTranscript(envelope.metadata ?? null),
+      ),
+      payload: envelope.payload,
+    };
+  }
+
+  return {
+    contentBlocks: [{ type: 'text', text: 'Personalization updated' }],
+    metadata: withTranscriptVisibility(envelope.metadata, true),
+    payload: {
+      toolCallId: payloadRecord?.toolCallId ?? updateRecord?.toolCallId,
+      title: 'update_personalization',
+      toolName: 'update_personalization',
+      status: payloadRecord?.status ?? updateRecord?.status,
+      output: 'Personalization updated',
+      private: true,
+    },
+  };
+}
+
 function getPersistedUserId(
   envelope: AcpPersistedEnvelope,
   fallbackUserId?: string,
@@ -965,11 +1013,7 @@ export async function recordTaskMessageEnvelope(
   const { runId, taskId, userId, envelope } = input;
   const persistedUserId = getPersistedUserId(envelope, userId);
   const normalizedActivityAt = normalizeTaskActivityTimestamp(envelope.ts);
-  const metadata = withTranscriptVisibility(
-    envelope.metadata,
-    envelope.visibleInTranscript ??
-      isVisibleInTranscript(envelope.metadata ?? null),
-  );
+  const privateSafeEnvelope = sanitizePrivatePersonalizationEnvelope(envelope);
 
   const [persistedTaskMessage] = await db
     .insert(taskMessages)
@@ -981,9 +1025,9 @@ export async function recordTaskMessageEnvelope(
       eventType: envelope.eventType,
       role: envelope.role,
       protocol: envelope.protocol,
-      contentBlocks: envelope.contentBlocks,
-      metadata,
-      payload: envelope.payload,
+      contentBlocks: privateSafeEnvelope.contentBlocks,
+      metadata: privateSafeEnvelope.metadata,
+      payload: privateSafeEnvelope.payload,
     })
     .onConflictDoUpdate({
       target: [
@@ -995,9 +1039,9 @@ export async function recordTaskMessageEnvelope(
       set: {
         userId: persistedUserId,
         role: envelope.role,
-        contentBlocks: envelope.contentBlocks,
-        metadata,
-        payload: envelope.payload,
+        contentBlocks: privateSafeEnvelope.contentBlocks,
+        metadata: privateSafeEnvelope.metadata,
+        payload: privateSafeEnvelope.payload,
       },
     })
     .returning({ id: taskMessages.id });

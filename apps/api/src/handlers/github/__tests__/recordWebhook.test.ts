@@ -1,11 +1,12 @@
 // pnpm --filter @roomote/api test github/__tests__/recordWebhook.test.ts
 
-import { db, webhooks, eq, inArray } from '@roomote/db/server';
+import { db, webhooks, eq, inArray, sql } from '@roomote/db/server';
 
 import { recordWebhook } from '../recordWebhook';
 
 describe('recordWebhook', () => {
   const testDeliveryIds: string[] = [];
+  let terminalFailureTriggerInstalled = false;
 
   const deleteTestData = async () => {
     if (testDeliveryIds.length > 0) {
@@ -21,6 +22,16 @@ describe('recordWebhook', () => {
   });
 
   afterEach(async () => {
+    if (terminalFailureTriggerInstalled) {
+      await db.execute(
+        sql`DROP TRIGGER test_fail_github_webhook_terminal_update ON webhooks`,
+      );
+      await db.execute(
+        sql`DROP FUNCTION test_fail_github_webhook_terminal_update()`,
+      );
+      terminalFailureTriggerInstalled = false;
+    }
+    vi.restoreAllMocks();
     await deleteTestData();
   });
 
@@ -256,6 +267,141 @@ describe('recordWebhook', () => {
 
     expect(records).toHaveLength(1);
     expect(records[0]!.payload).toEqual({ test: 'first' });
+  });
+
+  it.each([
+    {
+      outcome: 'successful GitHub',
+      provider: 'github' as const,
+      response: { status: 'ok' as const },
+    },
+    {
+      outcome: 'failed GitLab',
+      provider: 'gitlab' as const,
+      response: { status: 'error' as const, message: 'handler failed' },
+    },
+  ])(
+    'finalizes an unclassified placeholder after a $outcome handler without replay',
+    async ({ provider, response }) => {
+      const deliveryId = `test-delivery-${Date.now()}-${response.status}-unclassified-placeholder`;
+      testDeliveryIds.push(deliveryId);
+      const handler = vi.fn(async () => response);
+      const consoleErrorSpy = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => {});
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await db.execute(
+        sql.raw(`
+      CREATE FUNCTION test_fail_github_webhook_terminal_update()
+      RETURNS trigger AS $$
+      BEGIN
+        IF NEW.delivery_id = '${deliveryId}'
+          AND (NEW.succeeded_at IS NOT NULL OR NEW.failed_at IS NOT NULL)
+        THEN
+          RAISE EXCEPTION 'terminal update failed';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `),
+      );
+      await db.execute(sql`
+      CREATE TRIGGER test_fail_github_webhook_terminal_update
+      BEFORE UPDATE ON webhooks
+      FOR EACH ROW EXECUTE FUNCTION test_fail_github_webhook_terminal_update()
+    `);
+      terminalFailureTriggerInstalled = true;
+
+      await recordWebhook(
+        deliveryId,
+        'pull_request.opened',
+        { test: 'first' },
+        handler,
+        { provider },
+      );
+
+      await db.execute(
+        sql`DROP TRIGGER test_fail_github_webhook_terminal_update ON webhooks`,
+      );
+      await db.execute(
+        sql`DROP FUNCTION test_fail_github_webhook_terminal_update()`,
+      );
+      terminalFailureTriggerInstalled = false;
+
+      await recordWebhook(
+        deliveryId,
+        'pull_request.opened',
+        { test: 'redelivery' },
+        handler,
+        { provider },
+      );
+
+      const [webhook] = await db
+        .select()
+        .from(webhooks)
+        .where(eq(webhooks.deliveryId, deliveryId));
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(webhook!.succeededAt).toBeNull();
+      expect(webhook!.failedAt).not.toBeNull();
+      expect(webhook!.error).toContain('outcome is unknown');
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        `[recordWebhook] Failed to update webhook ${deliveryId} for event pull_request.opened:`,
+        expect.any(String),
+      );
+    },
+  );
+
+  it('lets the original result replace concurrent redelivery recovery without replay', async () => {
+    const deliveryId = `test-delivery-${Date.now()}-concurrent`;
+    testDeliveryIds.push(deliveryId);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let releaseHandler!: () => void;
+    let handlerStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      handlerStarted = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseHandler = resolve;
+    });
+    const handler = vi.fn(async () => {
+      handlerStarted();
+      await release;
+      return { status: 'ok' as const };
+    });
+
+    const firstDelivery = recordWebhook(
+      deliveryId,
+      'pull_request.opened',
+      { test: 'first' },
+      handler,
+    );
+    await started;
+    await recordWebhook(
+      deliveryId,
+      'pull_request.opened',
+      { test: 'concurrent' },
+      handler,
+    );
+
+    const [inProgress] = await db
+      .select()
+      .from(webhooks)
+      .where(eq(webhooks.deliveryId, deliveryId));
+    expect(inProgress!.succeededAt).toBeNull();
+    expect(inProgress!.failedAt).not.toBeNull();
+    expect(inProgress!.error).toContain('outcome is unknown');
+
+    releaseHandler();
+    await firstDelivery;
+
+    const [completed] = await db
+      .select()
+      .from(webhooks)
+      .where(eq(webhooks.deliveryId, deliveryId));
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(completed!.succeededAt).not.toBeNull();
+    expect(completed!.failedAt).toBeNull();
   });
 
   it('should record different event types correctly', async () => {

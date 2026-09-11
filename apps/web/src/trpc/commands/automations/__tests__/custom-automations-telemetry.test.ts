@@ -21,6 +21,9 @@ const mocks = vi.hoisted(() => ({
   updateCustomAutomation: vi.fn(),
   runCustomAutomationNow: vi.fn(),
   listConnectedCommunicationProviders: vi.fn(),
+  canStartAgentMailConversationWithUser: vi.fn(),
+  listAvailableAgentMailOutboundIdentities: vi.fn(),
+  resolveDefaultAutomationTarget: vi.fn(),
   captureActivationCustomAutomationChanged: vi.fn(),
 }));
 
@@ -39,6 +42,11 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   listConnectedCommunicationProviders:
     mocks.listConnectedCommunicationProviders,
+  canStartAgentMailConversationWithUser:
+    mocks.canStartAgentMailConversationWithUser,
+  listAvailableAgentMailOutboundIdentities:
+    mocks.listAvailableAgentMailOutboundIdentities,
+  resolveDefaultAutomationTarget: mocks.resolveDefaultAutomationTarget,
   runCustomAutomationNow: mocks.runCustomAutomationNow,
   resolveDeploymentTimeZone: mocks.resolveDeploymentTimeZone,
 }));
@@ -95,6 +103,9 @@ describe('custom automation activation telemetry', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listConnectedCommunicationProviders.mockResolvedValue(['slack']);
+    mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
+    mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
+    mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
   });
 
   it('tracks creation with only the destination provider classification', async () => {
@@ -154,6 +165,87 @@ describe('custom automation activation telemetry', () => {
     },
   );
 
+  it('stores the exact server-verified Email identity', async () => {
+    mocks.canStartAgentMailConversationWithUser.mockResolvedValue(true);
+    mocks.createCustomAutomation.mockResolvedValue(
+      customAutomation({ provider: 'email' }),
+    );
+
+    await createCustomAutomationCommand(adminAuth, {
+      name: 'Private automation name',
+      prompt: 'Private prompt',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: 'environment-id',
+      targetProvider: 'email',
+      targetMode: 'direct_message',
+      targetChannelId: 'verified:user-admin:digest',
+    });
+
+    expect(mocks.canStartAgentMailConversationWithUser).toHaveBeenCalledWith(
+      'user-admin',
+      'verified:user-admin:digest',
+    );
+    expect(mocks.createCustomAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: 'user-admin',
+          metadata: { emailIdentityId: 'verified:user-admin:digest' },
+        },
+      }),
+    );
+  });
+
+  it('re-validates the destination only when the update changes it', async () => {
+    const emailTarget = {
+      provider: 'email',
+      targetKind: 'email_user',
+      externalRef: 'user-admin',
+      metadata: { emailIdentityId: 'verified:user-admin:digest' },
+    };
+    mocks.getCustomAutomationById.mockResolvedValue({
+      ...customAutomation(emailTarget),
+      createdByUserId: 'user-admin',
+    });
+    mocks.updateCustomAutomation.mockResolvedValue(
+      customAutomation(emailTarget),
+    );
+    // The identity is stale, e.g. AgentMail was disabled since.
+    mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
+
+    const base = {
+      id: 'automation-id',
+      name: 'Private automation name',
+      prompt: 'Private prompt',
+      scheduleMode: 'daily',
+      environmentId: 'environment-id',
+      targetProvider: 'email' as const,
+      targetMode: 'direct_message' as const,
+    };
+    await expect(
+      updateCustomAutomationCommand(adminAuth, {
+        ...base,
+        enabled: false,
+        targetChannelId: 'verified:user-admin:digest',
+      }),
+    ).resolves.toMatchObject({ id: 'automation-id' });
+    expect(mocks.canStartAgentMailConversationWithUser).not.toHaveBeenCalled();
+    expect(mocks.updateCustomAutomation).toHaveBeenCalledWith(
+      'automation-id',
+      expect.objectContaining({ enabled: false, target: emailTarget }),
+    );
+
+    await expect(
+      updateCustomAutomationCommand(adminAuth, {
+        ...base,
+        enabled: true,
+        targetChannelId: 'verified:user-admin:other',
+      }),
+    ).rejects.toThrow('Verify your Email address');
+  });
+
   it('tracks deletion with only the persisted destination provider classification', async () => {
     mocks.getCustomAutomationById.mockResolvedValue(
       customAutomation({ provider: 'discord' }),
@@ -179,7 +271,12 @@ describe('custom automation ownership', () => {
     environmentId: '__fast__',
   };
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
+    mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
+    mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
+  });
 
   it('returns only member-safe connection flags and timezone without reading admin settings', async () => {
     mocks.listConnectedCommunicationProviders.mockResolvedValue([
@@ -197,14 +294,81 @@ describe('custom automation ownership', () => {
         discordConnected: false,
         telegramConnected: false,
         teamsConnected: true,
+        emailConnected: false,
       },
       managerSlackChannelId: null,
       managerDiscordChannelId: null,
+      defaultTarget: null,
+      emailIdentities: [],
       effectiveTimeZone: 'America/New_York',
     });
     expect(
       mocks.getBackgroundAgentSettingsForDeployment,
     ).not.toHaveBeenCalled();
+    expect(mocks.resolveDefaultAutomationTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 'member-1',
+        includeSharedChannels: false,
+      }),
+    );
+  });
+
+  it("lists the automation owner's Email identities when an admin edits on their behalf", async () => {
+    mocks.listConnectedCommunicationProviders.mockResolvedValue([]);
+    mocks.resolveDeploymentTimeZone.mockResolvedValue({ timeZone: 'UTC' });
+    mocks.getCustomAutomationById.mockResolvedValue({
+      ...customAutomation(),
+      createdByUserId: 'member-2',
+    });
+    mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
+
+    await getCustomAutomationOptionsCommand(adminAuth, {
+      automationId: 'automation-id',
+    });
+    expect(mocks.listAvailableAgentMailOutboundIdentities).toHaveBeenCalledWith(
+      'member-2',
+    );
+
+    await expect(
+      getCustomAutomationOptionsCommand(memberAuth, {
+        automationId: 'automation-id',
+      }),
+    ).rejects.toThrow('Custom automation was not found.');
+  });
+
+  it('offers only currently usable verified Email identities', async () => {
+    mocks.listConnectedCommunicationProviders.mockResolvedValue([]);
+    mocks.resolveDeploymentTimeZone.mockResolvedValue({ timeZone: 'UTC' });
+    mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([
+      {
+        id: 'verified:member-1:digest',
+        emailAddress: 'member@example.com',
+        kind: 'verified',
+      },
+    ]);
+
+    await expect(
+      getCustomAutomationOptionsCommand(memberAuth),
+    ).resolves.toEqual({
+      capabilities: {
+        slackConnected: false,
+        discordConnected: false,
+        telegramConnected: false,
+        teamsConnected: false,
+        emailConnected: true,
+      },
+      emailIdentities: [
+        {
+          id: 'verified:member-1:digest',
+          emailAddress: 'member@example.com',
+          kind: 'verified',
+        },
+      ],
+      managerSlackChannelId: null,
+      managerDiscordChannelId: null,
+      defaultTarget: null,
+      effectiveTimeZone: 'UTC',
+    });
   });
 
   it('allows admin channel defaults without returning other settings', async () => {
@@ -225,9 +389,12 @@ describe('custom automation ownership', () => {
           discordConnected: true,
           telegramConnected: true,
           teamsConnected: false,
+          emailConnected: false,
         },
         managerSlackChannelId: 'private-slack',
         managerDiscordChannelId: 'private-discord',
+        defaultTarget: null,
+        emailIdentities: [],
         effectiveTimeZone: 'UTC',
       },
     );

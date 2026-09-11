@@ -9,7 +9,6 @@ Roomote is a product centered on **Roomote agents**. Those agents are the core u
 This repository is open source. Treat GitHub and other public surfaces as fully public:
 
 - Do not put customer names, customer data, private deployment details, secrets, credentials, or internal maintainer discussion into commits, PR titles/bodies, PR/issue comments, review replies, or other public artifacts.
-- Prefer private channels (for example Slack or the task UI) for anything that is customer-specific, confidential, or only meaningful as internal discussion.
 - When writing public text, keep it general enough for an open-source audience and omit private context even when it was available in the private task thread.
 
 ## Setup
@@ -49,6 +48,7 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - Treat workflow prompts and instructions as a first-class control surface. When agent behavior is off, debug prompt clarity before defaulting to code enforcement.
 - `apps/docs/` is the public product documentation site (published at `https://docs.roomote.dev`) and should be kept in sync with user-facing product changes.
 - Keep equivalent functionality in sync across supported source-control, communication, and sandbox providers whenever applicable. Do not intentionally make provider-specific exceptions unless the user explicitly requests one.
+- When adding or changing a built-in automation, explicitly evaluate whether it needs text-based Additional rules for repository scope, per-repository communication-output routing, and residual workflow/report guidance. Opt in when its output goes to a communication provider and can contain material relevant to different people or teams; exclude inherently global, triage-oriented (except CI Failure Triage), and non-communication-output automations. Keep the eligibility metadata, settings UI, save-time compilation and validation, persisted automation settings, runtime scope/routing enforcement, and prompt propagation aligned.
 - **Schema N-1 rollback guarantee:** Roomote must always be able to roll application code back one release against the current database. Do not drop tables or columns that the previous release still reads or writes in the same release that removes the feature. Stop using the columns in app code first, keep them in `packages/db` with an explicit N-1 comment, and drop them only after the next release is the supported rollback target. See `packages/db/AGENTS.md` for the package-local rules.
 
 ## Slack message formatting

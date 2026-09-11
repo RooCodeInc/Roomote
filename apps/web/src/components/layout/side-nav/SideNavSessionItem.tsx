@@ -25,7 +25,10 @@ export function SideNavSessionItem({
           : 'text-muted-foreground hover:text-accent-foreground',
       )}
     >
-      <span className="min-w-0 flex-1 line-clamp-1 text-sm font-medium leading-5 wrap-break-word">
+      <span
+        title={session.title}
+        className="min-w-0 flex-1 line-clamp-1 text-sm font-medium leading-5 wrap-break-word"
+      >
         {session.title}
       </span>
     </Link>

@@ -13,6 +13,7 @@ export { slack } from './slack';
 export { linear } from './linear';
 export { teams } from './teams';
 export { telegram } from './telegram';
+export { agentmail } from './agentmail';
 export { discord } from './discord';
 export { cloudDeploymentAccess } from './cloud-deployment-access';
 

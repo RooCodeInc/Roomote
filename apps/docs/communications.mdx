@@ -1,7 +1,7 @@
 ---
-title: Communications Overview
+title: Communications overview
 icon: messages-square
-description: Connect Slack, Microsoft Teams, Telegram, or Discord so Roomote can start, continue, and summarize work from chat.
+description: Connect Slack, Microsoft Teams, Telegram, Discord, or email so Roomote can start, continue, and summarize work from chat.
 ---
 
 import { IntegrationName } from '/snippets/integration-name.jsx';
@@ -11,9 +11,10 @@ already coordinate work.
 
 Roomote can run from the web dashboard alone, but a communications provider
 turns it into something you can reach from wherever work is happening. You can
-start tasks from chat, continue an existing task thread, receive updates while
-the agent works, and get proactive summaries when background work needs
-attention.
+start Sessions from chat, continue an existing conversation, receive updates
+while the agent works, and get proactive summaries when background work needs
+attention. When a Session delegates execution, its task workspace keeps the
+logs, diffs, previews, and artifacts.
 
 ## Supported providers
 
@@ -23,6 +24,7 @@ attention.
 | <IntegrationName href="/providers/communications/microsoft-teams" icon="microsoftteams" name="Microsoft Teams" /> | Teams that use Microsoft 365, Teams channels, and Microsoft Entra accounts | Microsoft can also be used for sign-in and account linking. |
 | <IntegrationName href="/providers/communications/telegram" icon="telegram" name="Telegram" /> | Lightweight personal, group, or forum-topic chat access | Telegram is a messaging provider, not a sign-in provider. |
 | <IntegrationName href="/providers/communications/discord" icon="discord" name="Discord" /> | Communities and teams that organize work in channels, threads, and forums | Discord is a messaging provider, not a sign-in provider. |
+| <IntegrationName href="/providers/communications/agentmail" icon="agentmail" name="Email (AgentMail)" /> | Low-frequency task requests and results over email | Email conversations are replyable in both directions; not a sign-in provider. |
 
 Configure communications providers from **Settings > Communications**.
 
@@ -35,18 +37,18 @@ Before connecting a communications provider, make sure your deployment has:
 3. at least one Roomote user who can sign in
 4. an environment that tasks can run against
 
-After connecting the provider, run a small task from chat and confirm that:
+After connecting the provider, start a small Session from chat and confirm that:
 
 - Roomote acknowledges the request in the same conversation
-- the task appears in the dashboard
-- replies in the thread continue the same task
+- the Session appears in the dashboard
+- replies in the thread continue the same Session
 - final summaries and links are posted back to chat
 
 ## Start suggested tasks
 
-When a task or automation report identifies independent follow-up work, Roomote
-can post each action as a suggested task in the originating conversation. Start
-the exact suggestion you want by reacting to its message:
+When a Session or automation report identifies independent follow-up work,
+Roomote can post each action as a suggested task in the originating
+conversation. Start the exact suggestion you want by reacting to its message:
 
 - on Slack, add a thumbs-up reaction
 - on Discord, add a 👍 reaction
@@ -54,20 +56,19 @@ the exact suggestion you want by reacting to its message:
 - on Telegram, add a new 👍 reaction or use the suggestion's **Start** button
 
 The person starting the suggestion must have a linked Roomote account. Roomote
-also needs an environment that can run the suggestion's target repository. A
-suggestion with a pinned workspace starts its task inside the Session that
-produced the report, so the task, the report, and any follow-up conversation
-share one transcript.
+also needs an environment that can run the suggestion's target repository.
 Configured **Call Roomote via emoji** automations are separate from these
 suggestion reactions.
 
 When the suggestion is not pinned to an execution target, Fast-capable chat
 surfaces start it in Fast so Roomote can answer or delegate as needed. A pinned
 environment, repository-only surface, or provider without Fast support starts
-the coding task directly. Suggested work remains connected to the Session that
-produced the report. In Slack, suggestions with an available origin Session
-continue in its report thread. Thread or topic placement for other launches
-depends on the provider and execution target.
+the coding task directly. On Slack, each accepted suggestion starts in its own
+top-level execution thread and Session, while retaining its connection to the
+report that proposed it. Separate suggestions therefore do not share execution
+conversation state, and retrying the same accepted suggestion reuses its
+execution thread. Thread or topic placement on other providers depends on the
+provider and execution target.
 
 ## React to Roomote replies
 
@@ -83,6 +84,7 @@ silent; it does not react to the reaction event itself.
 | Discord | Supported | Discord Gateway sends standard and server custom reaction-add events, but the event does not include the reacted-to message text. |
 | Microsoft Teams | Supported | Bot Framework sends native `messageReaction` activities only for messages posted by Roomote. Reaction removals are ignored. |
 | Telegram | Supported | Roomote uses user-attributed `message_reaction` updates. Anonymous aggregate `message_reaction_count` updates are not supported because they do not identify the reacting user. |
+| Email (AgentMail) | Not supported | Email has no reaction mechanism; reply in the thread instead. |
 
 These reaction paths apply only to Roomote replies that were recorded for the
 current Fast conversation. Reactions on older or unrelated messages do not gain
@@ -114,6 +116,10 @@ request again.
 Telegram and Discord use one-time link codes instead of acting as sign-in
 providers. Generate a code under **Settings > Personal > Linked Accounts** and
 send the corresponding link command to the bot.
+
+Email needs no separate linking step: Roomote recognizes senders by the
+verified email addresses on their Roomote accounts. See
+[Email (AgentMail)](/providers/communications/agentmail).
 
 ## Related setup
 

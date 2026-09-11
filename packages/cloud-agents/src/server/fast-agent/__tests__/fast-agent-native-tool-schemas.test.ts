@@ -12,6 +12,7 @@ import {
   FAST_AGENT_NATIVE_TOOL_NAMES,
   sessionSecretRequestSchema,
   sessionSecretPrepareSchema,
+  MANAGE_WAKEUPS_TOOL,
 } from '@roomote/types';
 import { z } from 'zod';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -820,6 +821,42 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     ).toEqual(request);
   });
 
+  it('forwards explicit internal wakeup visibility', async () => {
+    const wakeupsTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
+    )!;
+    const request = {
+      action: 'create',
+      name: 'Follow through on session tasks',
+      prompt: 'Check the tasks in this conversation.',
+      schedule: 'in 10m',
+      reportPolicy: 'only_when_notable',
+      internal: true,
+    };
+    const parsed = zod.z
+      .object(wakeupsTool.args as Record<string, never>)
+      .parse(request);
+    const execute = wakeupsTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    const forwarded = await execute(parsed, {});
+
+    expect(parsed).toHaveProperty('internal', true);
+    expect(wakeupsTool.args).toHaveProperty('internal');
+    expect(forwarded.name).toBe(FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups);
+    expect(
+      z.object(MANAGE_WAKEUPS_TOOL.inputSchema).parse(forwarded.args),
+    ).toEqual({
+      action: 'create',
+      name: request.name,
+      prompt: request.prompt,
+      schedule: request.schedule,
+      reportPolicy: request.reportPolicy,
+      internal: true,
+    });
+  });
+
   // Synthetic arguments verify the generic bridge, not live upstream schemas.
   it.each([
     { toolName: 'sources', args: {} },
@@ -869,6 +906,26 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       ).toEqual(request);
     },
   );
+  it('preserves discovery prose preferences through the native bridge', async () => {
+    const inputTool = tools.find(
+      (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput,
+    )!;
+    const request = {
+      preset: 'setup_integrations',
+      setupIntegrationAnswers: { communication: { answers: ['Slack'] } },
+    };
+    const parsed = zod.z
+      .object(inputTool.args as Record<string, never>)
+      .parse(request);
+    const execute = inputTool.execute as (
+      args: unknown,
+      context: unknown,
+    ) => Promise<{ name: string; args: unknown }>;
+    expect(await execute(parsed, {})).toEqual({
+      name: 'request_user_input',
+      args: request,
+    });
+  });
 
   it('rejects a bare union or object as args, the shape that broke OpenAI models', () => {
     const { z } = zod;

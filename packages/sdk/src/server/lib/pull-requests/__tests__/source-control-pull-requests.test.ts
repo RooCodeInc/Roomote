@@ -835,8 +835,51 @@ describe('platform-managed draft state', () => {
     });
 
     expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'web',
+      pull_number: 11,
+      title: '[Feature] X',
+      body: `${attributionBody('Created by Roomote.')}
+
+Body`,
+    });
     expect(octokit.graphql).not.toHaveBeenCalled();
     expect(result).toMatchObject({ action: 'updated', draft: true });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('preserves the existing GitHub ready state under draft delivery policy', async () => {
+    const existing = {
+      number: 11,
+      node_id: 'node-11',
+      html_url: 'https://github.com/acme/web/pull/11',
+      title: 'Old title',
+      draft: false,
+    };
+    const octokit = makeOctokit({
+      existing,
+      updated: { ...existing, title: '[Feature] X' },
+    });
+
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...githubInput },
+    });
+
+    expect(mockGetDeploymentPrAction).toHaveBeenCalledOnce();
+    expect(octokit.rest.pulls.create).not.toHaveBeenCalled();
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'web',
+      pull_number: 11,
+      title: '[Feature] X',
+      body: `${attributionBody('Created by Roomote.')}
+
+Body`,
+    });
+    expect(octokit.graphql).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ action: 'updated', draft: false });
     expect(result.warnings).toEqual([]);
   });
 

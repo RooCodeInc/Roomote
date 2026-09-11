@@ -15,6 +15,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   manageWakeups: 'manage_wakeups',
   retryTaskStart: 'retry_task_start',
   saveMemory: 'save_memory',
+  updatePersonalization: 'update_personalization',
   sendChatReaction: 'send_chat_reaction',
   sendChatReply: 'send_chat_reply',
   sendTaskMessage: 'send_task_message',
@@ -71,6 +72,10 @@ export const FAST_AGENT_NATIVE_TOOL_CATALOG = [
   },
   {
     name: FAST_AGENT_NATIVE_TOOL_NAMES.saveMemory,
+    kind: ACP_TOOL_KINDS.memory,
+  },
+  {
+    name: FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization,
     kind: ACP_TOOL_KINDS.memory,
   },
   {

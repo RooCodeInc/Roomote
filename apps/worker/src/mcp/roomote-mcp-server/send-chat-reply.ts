@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { replyToChatThread } from './chat-api-client.js';
 import {
   buildDataVisualizationBlocks,
@@ -13,12 +15,19 @@ import {
 } from './slack-post-helpers.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
 import {
+  recordAutomationResult,
   submitTaskSuggestions,
   type TaskSuggestionInput,
 } from './tasks-api-client.js';
 import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
 
-type ChatReplySurface = 'Slack' | 'Teams' | 'Telegram' | 'Discord' | 'chat';
+type ChatReplySurface =
+  | 'Slack'
+  | 'Teams'
+  | 'Telegram'
+  | 'Discord'
+  | 'email thread'
+  | 'chat';
 
 const SUGGESTION_START_INSTRUCTIONS: Record<ChatReplySurface, string> = {
   Slack:
@@ -29,6 +38,8 @@ const SUGGESTION_START_INSTRUCTIONS: Record<ChatReplySurface, string> = {
     "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
   Teams:
     "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
+  'email thread':
+    "Want me to take one of these on? Reply to this email naming the suggested task and I'll start it.",
   chat: 'Want me to take one of these on? Use the Start action on a suggested task below.',
 };
 
@@ -58,6 +69,8 @@ export async function handleSendChatReply(
     charts?: DataVisualizationInput[];
     suggestions?: TaskSuggestionInput[];
     chatReplySurface?: ChatReplySurface;
+    purpose?: 'ack' | 'progress' | 'closeout' | 'clarification';
+    recordAutomationOutput?: boolean;
   },
   artifactConfig: ArtifactConfig,
   roomoteConfig: RoomoteConfig,
@@ -69,6 +82,17 @@ export async function handleSendChatReply(
   );
   const imagePaths = uniqueNonEmpty(input.imagePaths);
   const imageArtifactIds = uniqueNonEmpty(input.imageArtifactIds);
+
+  if (
+    input.recordAutomationOutput &&
+    summary &&
+    (input.purpose === 'closeout' || input.purpose === 'clarification')
+  ) {
+    await recordAutomationResult(roomoteConfig, input.taskId, {
+      content: summary,
+      dedupeKey: `task:${input.taskId}:${createHash('sha256').update(summary).digest('hex')}`,
+    }).catch(() => undefined);
+  }
 
   if (imagePaths.length > 0 && !artifactConfig.workspacePath) {
     return errorResult('ROOMOTE_WORKSPACE_PATH not set');

@@ -338,6 +338,27 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toBe(false);
   });
 
+  it('keeps build execution on the root while preserving specialist subagents', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
+        R_EXPLORE_MODEL: 'openrouter/anthropic/claude-haiku-4.5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<string, { disable?: boolean }>;
+    };
+
+    expect(config.agent.general?.disable).toBe(true);
+    for (const agentName of ['explore', 'advisor', 'judge', 'visual']) {
+      expect(config.agent[agentName]).toBeDefined();
+      expect(config.agent[agentName]?.disable).not.toBe(true);
+    }
+  });
+
   it('installs the Roomote identity plugin for standard task sessions', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

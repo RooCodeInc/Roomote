@@ -127,6 +127,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   slackQuestionChannelSuggestions: 'slack_question_channel_suggestions',
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
+  voiceTranscriptCleanup: 'voice_transcript_cleanup',
 } as const;
 
 const NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS = 15_000;
@@ -210,6 +211,7 @@ export interface GenerateTrackedNonTaskObjectParams<
   TSchema extends z.ZodTypeAny,
 > extends GenerateTrackedNonTaskBaseParams {
   schema: TSchema;
+  structuredOutputRetryCount?: number;
 }
 
 /**
@@ -1875,7 +1877,9 @@ async function generateTrackedNonTaskObjectWithSdk<
           $refStrategy: 'none',
           target: 'jsonSchema7',
         }) as Record<string, unknown>,
-        retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
+        retryCount:
+          params.structuredOutputRetryCount ??
+          DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
       },
       parts: [
         {

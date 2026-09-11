@@ -64,6 +64,7 @@ type SessionListInput = {
   period?: number | 'all';
   q?: string | null;
   ids?: string[];
+  ownedOnly?: boolean;
   before?: string | null;
   limit?: number;
 };
@@ -111,6 +112,16 @@ function sessionListScope(auth: SessionAuth) {
             ),
           ),
       ),
+    ),
+  );
+}
+
+function sessionOwnerScope(auth: SessionAuth) {
+  return or(
+    eq(sessions.ownerUserId, auth.userId),
+    and(
+      eq(sessions.ownerAutomation, 'custom_automation'),
+      customAutomationSessionAccess({ ...auth, isAdmin: false }),
     ),
   );
 }
@@ -398,6 +409,7 @@ function listConditions(
 
   return and(
     sessionListScope(auth),
+    input.ownedOnly ? sessionOwnerScope(auth) : undefined,
     eq(sessions.visibility, 'visible'),
     isNull(sessions.archivedAt),
     input.ids ? inArray(sessions.id, input.ids) : undefined,

@@ -212,6 +212,16 @@ export async function listCommunicationChannels(options: {
     limitation:
       'Telegram Bot API does not provide a way to enumerate chats available to a bot.',
   });
+  const agentmail = await getCommunicationProviderAdapter('agentmail');
+  platformsByProvider.set('agentmail', {
+    provider: 'agentmail',
+    platform: getCommunicationProviderDisplayName('agentmail'),
+    connected: agentmail !== null,
+    discoverySupported: false,
+    channels: [],
+    limitation:
+      'Email runs through a single Roomote inbox and conversations are inbound-initiated; there are no enumerable channels.',
+  });
   const platforms = communicationProviders.map(
     (provider) => platformsByProvider.get(provider)!,
   );

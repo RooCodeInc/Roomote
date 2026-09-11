@@ -96,27 +96,6 @@ const PYLON_READ_ONLY_TOOL_NAMES = [
   'get_account',
 ] as const;
 
-const SENTRY_READ_ONLY_TOOL_NAMES = [
-  'whoami',
-  'find_organizations',
-  'find_teams',
-  'find_projects',
-  'find_releases',
-  'get_issue_details',
-  'get_issue_tag_values',
-  'get_trace_details',
-  'get_replay_details',
-  'get_event_attachment',
-  'search_events',
-  'find_dsns',
-  'search_docs',
-  'get_doc',
-  'search_issues',
-  'search_issue_events',
-  'get_profile_details',
-  'get_sentry_resource',
-] as const;
-
 const JIRA_SHARED_TOOL_NAMES = [
   'atlassianUserInfo',
   'getAccessibleAtlassianResources',
@@ -218,7 +197,10 @@ const INTEGRATION_MCP_ALLOWED_TOOL_NAMES: Readonly<
   monday: MONDAY_READ_ONLY_TOOL_NAMES,
   pylon: PYLON_READ_ONLY_TOOL_NAMES,
   railway: RAILWAY_READ_ONLY_TOOL_NAMES,
-  sentry: SENTRY_READ_ONLY_TOOL_NAMES,
+  // Sentry is intentionally absent: mcp.sentry.dev is catalog-first, so
+  // tools/list advertises a small top-level surface and everything else runs
+  // through execute_sentry_tool. A static name list silently hid most of the
+  // server. Access is chosen by the admin in Sentry's consent dialog instead.
   x: X_READ_ONLY_TOOL_NAMES,
 };
 

@@ -1,7 +1,12 @@
 const mocks = vi.hoisted(() => ({
   configuredServers: {} as Record<
     string,
-    { url: string; headers: Record<string, string>; disabledTools?: string[] }
+    {
+      url: string;
+      headers: Record<string, string>;
+      disabledTools?: string[];
+      cacheRevision?: string;
+    }
   >,
   createAuthToken: vi.fn(),
   createSessionBrokerToken: vi.fn(),
@@ -1619,6 +1624,22 @@ describe('fast-agent integration broker', () => {
     });
 
     expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+  });
+
+  it('rediscovers tools when the persisted integration revision changes', async () => {
+    mocks.configuredServers = {
+      notion: {
+        url: 'https://api.example.com/api/mcp/notion',
+        headers: {},
+        cacheRevision: '1',
+      },
+    };
+
+    await listFastAgentIntegrations(auditContext);
+    mocks.configuredServers.notion!.cacheRevision = '2';
+    await listFastAgentIntegrations(auditContext);
+
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
   });
 
   it('does not share cached tool catalogs across acting users', async () => {

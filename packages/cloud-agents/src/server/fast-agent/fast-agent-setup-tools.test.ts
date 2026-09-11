@@ -21,21 +21,6 @@ describe('Fast structured input tool filtering', () => {
     expect(generic['linear_*']).toBe(true);
   });
 
-  it('defers only scheduling schemas when the pilot is enabled', () => {
-    const baseline = buildFastAgentToolFilter(['roomote']);
-    const pilot = buildFastAgentToolFilter(['roomote'], {
-      schedulingProgressiveDisclosureEnabled: true,
-    });
-
-    expect(baseline[FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]).toBe(true);
-    expect(baseline.roomote_manage_custom_automations).toBeUndefined();
-    expect(pilot[FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]).toBe(false);
-    expect(pilot.roomote_manage_custom_automations).toBe(false);
-    expect(pilot['roomote_*']).toBe(true);
-    expect(pilot[FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]).toBe(true);
-    expect(pilot[FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]).toBe(true);
-  });
-
   it('limits structured input to web Sessions', () => {
     expect(
       buildFastAgentToolFilter([], { surface: 'slack' })[
@@ -78,48 +63,24 @@ describe('setup prompt guidance and snapshot injection', () => {
       "use ordinary language centered on the user's action and outcome",
     );
     expect(prompt).toContain('Your repositories are ready');
-    expect(prompt).toContain(
-      "I'm looking for flaky tests and fixing the ones causing the most trouble.",
-    );
-    expect(prompt).toContain(
-      'the administrator is free to start something new or explore the app while I work',
-    );
-    expect(prompt).toContain(
-      'do not imply that they need to wait in or remain on the setup session',
-    );
+    expect(prompt).toContain("Describe launched work in the user's terms");
     expect(prompt).toContain('<setup_snapshot>');
     expect(prompt).toContain('request_user_input');
     expect(prompt).toContain('setup_starter_tasks');
     expect(prompt).toContain('launch_task');
+    expect(prompt).toContain('The renderer owns trusted controls');
     expect(prompt).toContain(
-      'The renderer owns presentation of trusted setup controls, but some controls require an explicit tool call from you',
-    );
-    expect(prompt).toContain(
-      'Keep those controls separate from my side of the conversation',
-    );
-    expect(prompt).toContain(
-      'Never name, locate, or instruct the user to interact with UI elements',
+      'Never name or locate cards, rails, dialogs, panels, buttons, presets, or setup steps',
     );
     expect(prompt).toContain(
       "state only the user's goal, the capability I need, the outcome that changed, or the decision the user needs to make",
     );
     expect(prompt).toContain(
-      'Launch is deferred until the setup snapshot says',
-    );
-    expect(prompt).toContain(
       'I need a workspace where I can run the work you selected',
     );
     expect(prompt).toContain('Starter work is optional');
-    expect(prompt).toContain(
-      'call `request_user_input` with exactly `{ preset: "setup_starter_tasks" }`',
-    );
-    expect(prompt).toContain('the server emits a starter-request setup event');
-    expect(prompt).toContain(
-      'Do not send a closeout first: that tool call creates the user-visible first-work control and is the terminal response for the turn',
-    );
-    expect(prompt).toContain(
-      'Do not replace the tool call with prose asking the user to choose',
-    );
+    expect(prompt).toContain('use the trusted `setup_starter_tasks` preset');
+    expect(prompt).not.toContain('exactly once');
     expect(prompt).not.toContain(
       'Direct the administrator to the relevant card',
     );
@@ -130,6 +91,25 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).not.toContain('helps the user recognize the visible card');
     expect(prompt).not.toContain('launch_setup_starter_tasks');
     expect(prompt).not.toContain('update_plan');
+  });
+
+  it('keeps discovery optional, resumable, reorderable, and server-resolved', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      ...baseInput,
+      setupSession: true,
+    });
+    for (const rule of [
+      'Optional integration discovery never gates setup completion',
+      'ordered categories as suggestions, not a questionnaire',
+      'reorder the agenda',
+      'setup-tools-<id>',
+      'carrying prose answers by category ID',
+      'completes an empty match set without browser input',
+      'Do not restart answered discovery categories',
+      'Setup state-change events are coalesced current facts',
+    ])
+      expect(prompt).toContain(rule);
+    expect(prompt).not.toContain('Naturally ask about communication');
   });
 
   it('omits setup sections for ordinary sessions', () => {
@@ -147,12 +127,7 @@ describe('setup prompt guidance and snapshot injection', () => {
     });
     expect(setupEvent).toContain('Setup Platform Event');
     expect(setupEvent).toContain('Reconcile them against the setup snapshot');
-    expect(setupEvent).toContain(
-      'For a starter-request event, call `request_user_input` exactly once',
-    );
-    expect(setupEvent).toContain(
-      'If any selected task started, say that the started work will continue while the user starts something new or explores the app',
-    );
+    expect(setupEvent).not.toContain('starter-request event');
 
     const inputResponseEvent = buildFastAgentSystemPrompt({
       ...baseInput,

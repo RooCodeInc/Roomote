@@ -17,16 +17,13 @@ import {
   inArray,
   repositories,
   resolveWorkspaceRepositoryProviders,
-  taskRuns,
 } from '@roomote/db/server';
 import {
   ADMIN_REQUIRED_LAUNCH_TYPES,
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
   buildTaskTypePromptAndWorkspacePayload,
-  type ComputeProvider,
   getEnvironmentRepositoryInstallationError,
-  getFastAgentParentFromPayload,
   type StandardTask,
   type SuggestedTasksTask,
   TaskPayloadKind,
@@ -143,44 +140,6 @@ async function resolveLaunchSourceControlProvider({
 }
 
 /**
- * A run launched from inside a Fast-delegated task keeps its children in the
- * same Session, so the whole tree stays visible in one place.
- */
-async function resolveLaunchParentFastConversationId(
-  auth: McpAuth,
-): Promise<string | null> {
-  if (!('runId' in auth.authContext)) {
-    return null;
-  }
-
-  const sourceRun = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, auth.authContext.runId),
-    columns: { payload: true },
-  });
-
-  return getFastAgentParentFromPayload(sourceRun?.payload)?.sessionId ?? null;
-}
-
-async function resolveLaunchComputeProvider({
-  requestedProvider,
-  auth,
-}: {
-  requestedProvider: ComputeProvider | undefined;
-  auth: McpAuth;
-}): Promise<ComputeProvider | undefined> {
-  if (requestedProvider || !('runId' in auth.authContext)) {
-    return requestedProvider;
-  }
-
-  const sourceRun = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, auth.authContext.runId),
-    columns: { vendor: true },
-  });
-
-  return sourceRun?.vendor ?? undefined;
-}
-
-/**
  * POST /api/tasks
  *
  * Launch a new Roomote task.
@@ -189,6 +148,14 @@ export async function launchTask(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
   const requestAuth = c.get('mcpAuth');
+
+  if (requestAuth.authContext.tokenType === 'run') {
+    return c.json(
+      { error: 'Task-originated task launches are not allowed' },
+      403,
+    );
+  }
+
   const auth = {
     ...requestAuth,
     userId: await resolveMcpTaskOrSessionUserId(requestAuth),
@@ -362,34 +329,10 @@ export async function launchTask(
         requestedType === 'standard' ? body.bootstrap?.skill : undefined,
       userId: auth.userId,
     });
-    const computeProvider = await resolveLaunchComputeProvider({
-      requestedProvider: body.computeProvider,
-      auth,
-    });
-
-    // A settle notification needs a durable pointer back to the launching
-    // run, so the opt-in only takes effect on run-token launches.
-    const notifySourceRunOnSettle =
-      requestedType === 'standard' &&
-      body.notifyOnSettle === true &&
-      'runId' in auth.authContext;
-
     const taskBase = {
       harness: harnessSelection.harness ?? body.harness,
-      computeProvider,
+      computeProvider: body.computeProvider,
       requestedWorkKindDecision,
-      ...((requestedType === 'environment-definition' ||
-        notifySourceRunOnSettle) &&
-      'runId' in auth.authContext
-        ? { sourceRunId: auth.authContext.runId }
-        : {}),
-      // Run-token launches carry the parent pointer for read-only
-      // source-context inheritance, without widening sourceRunId semantics.
-      ...('runId' in auth.authContext &&
-      (requestedType === 'standard' ||
-        requestedType === 'environment-definition')
-        ? { communicationContextSourceRunId: auth.authContext.runId }
-        : {}),
     };
 
     const task: StandardTask | SuggestedTasksTask =
@@ -410,9 +353,6 @@ export async function launchTask(
               ...basePayload,
               bootstrap:
                 requestedType === 'standard' ? body.bootstrap : undefined,
-              ...(notifySourceRunOnSettle
-                ? { notifySourceRunOnSettle: true }
-                : {}),
             },
           };
 
@@ -420,12 +360,9 @@ export async function launchTask(
     // the initiator even for the hidden scan branch (the old automation stamp
     // made the requesting human invisible).
     if (task.type === TaskPayloadKind.StandardTask) {
-      // A standard launch always belongs to a Session: the caller's own Fast
-      // Session when a delegated task is launching a sibling, otherwise a new
-      // Session owned by the requesting person.
       const launch = await launchPinnedFastSessionTask({
         userId: auth.userId,
-        fastConversationId: await resolveLaunchParentFastConversationId(auth),
+        fastConversationId: null,
         launchId: body.launchId ?? randomUUID(),
         prompt: taskTypePayload.taskPrompt,
         task,

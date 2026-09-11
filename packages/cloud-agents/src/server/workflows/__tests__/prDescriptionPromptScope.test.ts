@@ -73,6 +73,9 @@ describe('PR description prompt scope', () => {
         expect(skillContent).toContain(
           "The refresh never flips draft status: the platform preserves the pull request's existing draft state on update.",
         );
+        expect(skillContent).toContain(
+          "A later human transition or the deployment's opt-in promotion after a clean Roomote review is separate from the metadata refresh; report that transition by its actual cause.",
+        );
       }
       if (skillContent === fixPrSkill) {
         expect(skillContent).toContain(

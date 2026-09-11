@@ -59,6 +59,7 @@ function createDependencies() {
     postMessage,
     dependencies: {
       findRepository: vi.fn().mockResolvedValue({
+        id: '11111111-1111-4111-8111-111111111111',
         defaultBranch: 'main',
         fullName: 'acme/widgets',
       }),
@@ -76,14 +77,69 @@ function createDependencies() {
         channelId: 'C123',
         source: 'automation_target',
       }),
+      resolveRepositoryDestination: vi.fn(
+        async ({ destination }) => destination ?? null,
+      ),
     },
   };
 }
 
 describe('handleMergeAnnouncerPush', () => {
+  it('fails closed when Additional rules exclude the tracked repository', async () => {
+    const { dependencies } = createDependencies();
+    const text = 'Do not announce any repositories.';
+    dependencies.getRuntime.mockResolvedValue({
+      ...runtime,
+      settings: {
+        additionalRules: text,
+        compiledRules: {
+          text,
+          repositoryIds: [],
+          destinations: [],
+          instructions: '',
+        },
+      },
+    });
+
+    const result = await handleMergeAnnouncerPush(
+      createPayload(),
+      dependencies,
+    );
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'Repository is outside configured scope',
+    });
+    expect(dependencies.generateAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it('passes residual Additional rules guidance to summary generation', async () => {
+    const { dependencies } = createDependencies();
+    const text = 'Keep the announcement focused on operational impact.';
+    dependencies.getRuntime.mockResolvedValue({
+      ...runtime,
+      settings: {
+        additionalRules: text,
+        compiledRules: {
+          text,
+          repositoryIds: null,
+          destinations: [],
+          instructions: 'Focus on operational impact.',
+        },
+      },
+    });
+
+    await handleMergeAnnouncerPush(createPayload(), dependencies);
+
+    expect(dependencies.generateAnnouncement).toHaveBeenCalledWith(
+      expect.stringContaining('Focus on operational impact.'),
+    );
+  });
+
   it('summarizes default-branch commits with pusher and author attribution', async () => {
     const { dependencies, postMessage } = createDependencies();
     dependencies.findRepository.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
       defaultBranch: 'develop',
       fullName: 'acme/widgets',
     });
@@ -162,6 +218,7 @@ describe('handleMergeAnnouncerPush', () => {
   it('grounds the artifact announcement in verified PR context and links the PR', async () => {
     const { dependencies, postMessage } = createDependencies();
     dependencies.findRepository.mockResolvedValue({
+      id: '11111111-1111-4111-8111-111111111111',
       defaultBranch: 'develop',
       fullName: 'RooCodeInc/Roomote',
     });

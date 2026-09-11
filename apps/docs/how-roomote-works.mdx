@@ -16,8 +16,8 @@ for most teams.
 
 ## Shared engineering work
 
-Most natural-language work starts as a general Roomote task. The recommended
-first path is to mention Roomote in chat with a scoped ask. Use it for
+Most natural-language work starts as a Roomote Session. The recommended first
+path is to mention Roomote in chat with a scoped ask. Use it for
 implementation, debugging, investigation, small refactors, test fixes,
 documentation updates, planning, and codebase questions.
 
@@ -57,28 +57,30 @@ Session lives.
 
 | Surface       | How work starts                                            | Where updates appear                    |
 | ------------- | ---------------------------------------------------------- | --------------------------------------- |
-| Slack         | Mention Roomote or reply in an active Roomote thread       | Slack thread and task view              |
-| Teams         | Mention the bot in a channel or group chat, or message it directly in a personal chat | Teams thread and task view              |
-| Telegram      | Mention the bot in a group chat, or message it directly in a private chat            | Telegram chat and task view             |
+| Slack         | Mention Roomote or reply in an active Roomote thread       | Slack thread and Session view           |
+| Teams         | Mention the bot in a channel or group chat, or message it directly in a personal chat | Teams thread and Session view           |
+| Telegram      | Mention the bot in a group chat, or message it directly in a private chat            | Telegram chat and Session view          |
 | Discord       | Mention the bot in a server or send it a direct message    | Discord thread, forum post, or DM       |
-| Web dashboard | Submit a prompt from **Home**                              | Task view in Roomote                    |
+| Email         | Email the deployment's AgentMail inbox from a verified account address | Replies in the same email thread and Session view |
+| Web dashboard | Submit a prompt from **Home**                              | Session view in Roomote                 |
 | Linear        | Start an agent session or mention Roomote on an issue      | Agent session replies and Session view  |
-| GitHub        | Pull request events or `@`-mentions in PR and issue comments | GitHub comments, reviews, and task view |
-| GitLab        | Repository or merge request follow-up when configured      | GitLab activity and task view           |
-| Gitea         | Repository or pull request follow-up when configured       | Gitea activity and task view            |
-| Bitbucket     | Pull request events or `@`-mentions when configured        | Bitbucket activity and task view        |
-| Azure DevOps  | Repository or pull request follow-up when configured       | Azure DevOps activity and task view     |
+| GitHub        | Pull request events or `@`-mentions in PR and issue comments | GitHub comments, reviews, and Session view |
+| GitLab        | Repository or merge request follow-up when configured      | GitLab activity and Session view        |
+| Gitea         | Repository or pull request follow-up when configured       | Gitea activity and Session view         |
+| Bitbucket     | Pull request events or `@`-mentions when configured        | Bitbucket activity and Session view     |
+| Azure DevOps  | Repository or pull request follow-up when configured       | Azure DevOps activity and Session view  |
 
-Chat is the recommended surface for the first task after setup because it makes
-Roomote visible inside an existing team conversation. Use the dashboard when
-you want to choose the environment directly, inspect task details, review
-diffs, or continue with a richer task view.
+Chat is the recommended surface for the first Session after setup because it
+makes Roomote visible inside an existing team conversation. Use the dashboard
+when you want to continue a Session or open delegated task details such as
+logs, diffs, and previews.
 
 ## How Roomote stays reviewable
 
-Roomote runs in an isolated sandbox and keeps the work visible. The task view
-gives your team the transcript, logs, diffs, previews, artifacts, and task
-metadata before anything ships.
+Roomote runs delegated work in an isolated sandbox and keeps it visible. The
+Session holds the conversation and reports; each task view exposes its
+transcript, logs, diffs, previews, artifacts, and execution metadata before
+anything ships.
 
 For code changes, Roomote hands work back through normal delivery paths such
 as a branch, pull request, or reviewable diff. For questions and planning, it

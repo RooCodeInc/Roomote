@@ -3,8 +3,8 @@ import { z } from 'zod';
 
 import {
   ALL_REPOSITORIES,
-  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
-  ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION,
+  ROOMOTE_MEMBER_MANAGEMENT_TOOL_DESCRIPTION,
+  ROOMOTE_MEMBER_MANAGEMENT_ACTION_DESCRIPTION,
   ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
   getRoomoteSearchStatusError,
   resolveRoomoteCommunicationTarget,
@@ -44,7 +44,7 @@ function invokeMemberApi(
 const manageTasksInputSchema = {
   action: z
     .enum(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS)
-    .describe(ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION),
+    .describe(ROOMOTE_MEMBER_MANAGEMENT_ACTION_DESCRIPTION),
   ...roomoteManagementFieldSchemas,
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -56,7 +56,7 @@ export function registerRoomoteMemberTools(
     'manage_tasks',
     {
       title: 'Manage Sessions and Tasks',
-      description: ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
+      description: ROOMOTE_MEMBER_MANAGEMENT_TOOL_DESCRIPTION,
       inputSchema: manageTasksInputSchema,
       annotations: {
         readOnlyHint: false,

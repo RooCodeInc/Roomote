@@ -4,7 +4,6 @@ import {
   getTaskComputeLogs,
   getTaskMessages,
   getTaskSummary,
-  launchTask,
   cancelTask,
   listTaskModels,
   stopTask,
@@ -563,122 +562,6 @@ describe('getTaskMessages', () => {
 
     await expect(getTaskMessages(config, 'task-bad')).rejects.toThrow(
       'Failed to get task messages: 404 Task not found',
-    );
-  });
-});
-
-describe('launchTask', () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it('should call POST /api/mcp/tasks and return result', async () => {
-    const mockResponse = {
-      success: true,
-      runId: 99,
-      taskId: 'task-new',
-    };
-
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockResponse,
-    });
-
-    const result = await launchTask(config, {
-      prompt: 'Fix the tests',
-      repo: '__all_repositories__',
-      environmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
-      type: 'standard',
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.runId).toBe(99);
-    expect(result.taskId).toBe('task-new');
-
-    const fetchCall = vi.mocked(fetch).mock.calls[0];
-    expect(fetchCall?.[0]).toBe('https://test-api.example.com/api/mcp/tasks');
-    expect(fetchCall?.[1]?.method).toBe('POST');
-
-    const body = JSON.parse(fetchCall?.[1]?.body as string);
-    expect(body.prompt).toBe('Fix the tests');
-    expect(body.repo).toBe('__all_repositories__');
-    expect(body.environmentId).toBe('10b031ec-b728-4d8f-a9a0-1ed4aa500511');
-    expect(body.type).toBe('standard');
-  });
-
-  it('sends a minimal standard launch payload for implicit standard-workflow tasks', async () => {
-    const mockResponse = {
-      success: true,
-      runId: 100,
-      taskId: 'task-standard',
-    };
-
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockResponse,
-    });
-
-    const result = await launchTask(config, {
-      prompt: 'Investigate this',
-      type: 'standard',
-    });
-
-    expect(result.success).toBe(true);
-
-    const fetchCall = vi.mocked(fetch).mock.calls[0];
-    const body = JSON.parse(fetchCall?.[1]?.body as string);
-    expect(body.prompt).toBe('Investigate this');
-    expect(body.type).toBe('standard');
-  });
-
-  it('passes extended programmatic launch fields through unchanged', async () => {
-    const mockResponse = {
-      success: true,
-      runId: 101,
-      taskId: 'task-env-def',
-    };
-
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => mockResponse,
-    });
-
-    await launchTask(config, {
-      type: 'environment-definition',
-      repositoryFullNames: ['acme/web', 'acme/api'],
-      setupGuidance: 'Start the API and worker services.',
-      hidden: true,
-      computeProvider: 'modal',
-      harness: 'opencode-server',
-      bootstrap: {
-        skill: 'plan-repo-implementation',
-        interactiveMode: true,
-      },
-    });
-
-    const fetchCall = vi.mocked(fetch).mock.calls[0];
-    const body = JSON.parse(fetchCall?.[1]?.body as string);
-    expect(body).toMatchObject({
-      type: 'environment-definition',
-      repositoryFullNames: ['acme/web', 'acme/api'],
-      setupGuidance: 'Start the API and worker services.',
-      hidden: true,
-      computeProvider: 'modal',
-      harness: 'opencode-server',
-      bootstrap: {
-        skill: 'plan-repo-implementation',
-        interactiveMode: true,
-      },
-    });
-  });
-
-  it('should throw on non-ok response', async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      text: async () => JSON.stringify({ error: 'Forbidden' }),
-    });
-
-    await expect(launchTask(config, { prompt: 'b' })).rejects.toThrow(
-      'Failed to launch task: 403 Forbidden',
     );
   });
 });

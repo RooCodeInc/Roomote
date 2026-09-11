@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  buildFastAgentSetupAdapter,
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
@@ -22,6 +23,7 @@ import {
   customAutomations,
   eq,
   getCustomAutomationById,
+  recordCustomAutomationResult,
   getSessionForFastConversation,
   getSessionWakeupById,
   inArray,
@@ -43,12 +45,14 @@ import {
 import {
   buildFastSessionReplyFooterText,
   deliverManagedThreadReplyFooter,
+  postTextThreadReplyWithFooter,
   getDiscordFooterlessFinalChunk,
   resolveFastSessionReplyFooterContext,
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
   ALL_REPOSITORIES,
+  NO_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
   buildDataVisualizationBlocks,
   buildPrReviewActionCallbackData,
@@ -104,6 +108,8 @@ import { deliverFastAgentSessionVideos } from './fast-agent-session-videos';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
+import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
+import { AgentMailRecipientUnavailableError } from './agentmail/outbound';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 import { findTeamsConversationRoute } from '../automations/destination';
@@ -544,6 +550,21 @@ function buildFastAutomationLaunchOptions(params: {
   };
 }
 
+function resolveFastAgentChildWorkspace(environmentId: string | null): {
+  repo: string;
+  environmentId?: string;
+} {
+  if (environmentId === NO_REPOSITORIES) {
+    return { repo: NO_REPOSITORIES };
+  }
+
+  if (environmentId && environmentId !== ALL_REPOSITORIES) {
+    return { repo: ALL_REPOSITORIES, environmentId };
+  }
+
+  return { repo: ALL_REPOSITORIES };
+}
+
 function createFastAgentAutomationTaskLauncher(params: {
   userId: string;
   conversation: FastAgentConversation;
@@ -576,16 +597,13 @@ function createFastAgentAutomationTaskLauncher(params: {
     }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        ...resolveFastAgentChildWorkspace(environmentId),
         description: prompt,
         ...payload,
         ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: params.conversation,
         }),
-        ...(environmentId && environmentId !== ALL_REPOSITORIES
-          ? { environmentId }
-          : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
@@ -1144,7 +1162,7 @@ export function createFastAgentDiscordTaskLauncher(params: {
       return {
         type: TaskPayloadKind.StandardTask,
         payload: {
-          repo: ALL_REPOSITORIES,
+          ...resolveFastAgentChildWorkspace(environmentId),
           description: prompt,
           ...automationPayload,
           communicationProvider: 'discord',
@@ -1172,9 +1190,6 @@ export function createFastAgentDiscordTaskLauncher(params: {
             sessionId: parentSessionId,
             conversation: params.conversation,
           }),
-          ...(environmentId && environmentId !== ALL_REPOSITORIES
-            ? { environmentId }
-            : {}),
           ...(model
             ? { harnessModelOverrides: { 'opencode-server': model } }
             : {}),
@@ -1189,7 +1204,7 @@ export function createFastAgentCommunicationTaskLauncher(params: {
   userId: string;
   conversation: Extract<
     FastAgentConversation,
-    { surface: 'teams' | 'telegram' }
+    { surface: 'teams' | 'telegram' | 'agentmail' }
   >;
   serviceUrl?: string;
   /** Set when the conversation is a custom automation run. */
@@ -1216,17 +1231,20 @@ export function createFastAgentCommunicationTaskLauncher(params: {
     }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
-        repo: ALL_REPOSITORIES,
+        ...resolveFastAgentChildWorkspace(environmentId),
         description: prompt,
         ...automationPayload,
         communicationProvider: params.conversation.surface,
         communicationChannelId: params.conversation.replyTarget.channelId,
-        ...(params.conversation.replyTarget.threadId
-          ? {
-              communicationThreadId: params.conversation.replyTarget.threadId,
-              communicationMessageId: params.conversation.replyTarget.threadId,
-            }
-          : {}),
+        ...(params.conversation.surface === 'agentmail'
+          ? { communicationThreadId: params.conversation.conversationId }
+          : params.conversation.replyTarget.threadId
+            ? {
+                communicationThreadId: params.conversation.replyTarget.threadId,
+                communicationMessageId:
+                  params.conversation.replyTarget.threadId,
+              }
+            : {}),
         ...(params.serviceUrl
           ? { communicationServiceUrl: params.serviceUrl }
           : {}),
@@ -1234,9 +1252,6 @@ export function createFastAgentCommunicationTaskLauncher(params: {
           sessionId: parentSessionId,
           conversation: params.conversation,
         }),
-        ...(environmentId && environmentId !== ALL_REPOSITORIES
-          ? { environmentId }
-          : {}),
         ...(model
           ? { harnessModelOverrides: { 'opencode-server': model } }
           : {}),
@@ -1280,6 +1295,10 @@ async function postDiscordFastParentMessageWithFooter(params: {
           textWithFooter: params.textWithFooter,
           footerText: params.footerText,
         }),
+        refresh: {
+          footerText: params.footerText,
+          channelId: params.conversation.replyTarget.threadId ?? channelId,
+        },
       };
     },
     clearPreviousFooter: async (previousFooterRecord) => {
@@ -1624,19 +1643,28 @@ async function createTeamsFastAgentParentTurn(
                 suggestions.length > 0,
               )
             : message;
-        const text = `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.parent.sessionId, ...params.footerContext })}`;
+        const footerText = buildFastSessionReplyFooterText({
+          provider: 'teams',
+          sessionId: params.parent.sessionId,
+          ...params.footerContext,
+        });
         if (
           params.event.type === 'automation_triggered' &&
           params.event.rootMessageId &&
           !kickoff
         ) {
-          await provider.updateMessage({
-            channelId: conversation.replyTarget.channelId,
+          await postTextThreadReplyWithFooter({
+            provider,
             messageId: params.event.rootMessageId,
-            serviceUrl,
-            text,
-            textFormat: 'markdown',
-            images,
+            footerText,
+            input: {
+              channelId: conversation.replyTarget.channelId,
+              threadId: conversation.replyTarget.threadId,
+              serviceUrl,
+              text: reportMessage,
+              textFormat: 'markdown',
+              images,
+            },
           });
           await recordFastAgentConversationMessageBestEffort({
             sessionId: session.id,
@@ -1662,18 +1690,22 @@ async function createTeamsFastAgentParentTurn(
           params.onReplyPosted();
           return { messageId: params.event.rootMessageId };
         }
-        const posted = await provider.postMessage({
-          channelId: conversation.replyTarget.channelId,
-          serviceUrl,
-          ...(conversation.replyTarget.threadId
-            ? {
-                threadId: conversation.replyTarget.threadId,
-                replyToMessageId: conversation.replyTarget.threadId,
-              }
-            : {}),
-          text,
-          textFormat: 'markdown',
-          images,
+        const posted = await postTextThreadReplyWithFooter({
+          provider,
+          footerText,
+          input: {
+            channelId: conversation.replyTarget.channelId,
+            serviceUrl,
+            ...(conversation.replyTarget.threadId
+              ? {
+                  threadId: conversation.replyTarget.threadId,
+                  replyToMessageId: conversation.replyTarget.threadId,
+                }
+              : {}),
+            text: reportMessage,
+            textFormat: 'markdown',
+            images,
+          },
         });
         if (
           isFastAutomationReportEvent(params.event) &&
@@ -1699,6 +1731,78 @@ async function createTeamsFastAgentParentTurn(
           sessionId: session.id,
           conversation,
           messageId: posted.messageId,
+        });
+        params.onReplyPosted();
+        return { messageId: posted.messageId };
+      },
+    },
+  };
+}
+
+async function createAgentMailFastAgentParentTurn(
+  params: FastAgentParentTurnParams,
+): Promise<FastAgentParentTurn> {
+  const fallbackConversation = params.parent.conversation;
+  if (fallbackConversation.surface !== 'agentmail') {
+    throw new Error('Expected an AgentMail Fast parent conversation.');
+  }
+  const [session, provider] = await Promise.all([
+    fastAgentConversationRepository.findById({
+      id: params.parent.sessionId,
+      fallbackConversation,
+    }),
+    createAgentMailCommunicationProviderFromRuntimeCredentials(),
+  ]);
+  if (!session || session.conversation.surface !== 'agentmail' || !provider) {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast parent session or AgentMail credentials were not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+  const actorUserId = requireFastAgentActorUserId(session, params.actorUserId);
+  const conversation = session.conversation;
+  return {
+    userId: actorUserId,
+    conversation,
+    adapter: {
+      launchTask: createFastAgentCommunicationTaskLauncher({
+        userId: actorUserId,
+        conversation,
+        automation: await resolveFastAutomationLaunchContext({
+          event: params.event,
+          conversation,
+        }),
+      }),
+      // Email is a low-frequency surface: one coalesced reply per event, no
+      // suggestion buttons or reactions. The adapter resolves the reply
+      // anchor and recipient from the durable conversation row; threadId
+      // carries the internal conversation id.
+      postReply: async ({ message }) => {
+        const posted = await provider
+          .postMessage({
+            channelId: conversation.replyTarget.channelId,
+            threadId: conversation.conversationId,
+            text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'agentmail', sessionId: params.parent.sessionId, ...params.footerContext })}`,
+            textFormat: 'markdown',
+            // Durable parent events retry after crashes that may land AFTER the
+            // provider accepted the email; the event's stable identity makes
+            // the replay a no-op instead of a duplicate result email.
+            idempotencyKey: `agentmail:${conversation.conversationId}:parent-event:${createHash('sha256').update(buildEventClientMessageSeed(params.event)).update('\0').update(message).digest('hex').slice(0, 24)}`,
+          })
+          .catch((error: unknown) => {
+            // A revoked recipient identity does not recover on retry.
+            if (error instanceof AgentMailRecipientUnavailableError) {
+              throw new FastAgentParentEventDeliveryError(error.message, {
+                replyPosted: false,
+                permanent: true,
+              });
+            }
+            throw error;
+          });
+        await recordFastAgentConversationMessageBestEffort({
+          sessionId: session.id,
+          conversation,
+          messageId: posted.lastTextMessageId ?? posted.messageId,
         });
         params.onReplyPosted();
         return { messageId: posted.messageId };
@@ -1777,14 +1881,22 @@ async function createTelegramFastAgentParentTurn(
                 suggestions.length > 0,
               )
             : message;
-        const posted = await provider.postMessage({
-          channelId: conversation.replyTarget.channelId,
-          ...(conversation.replyTarget.threadId
-            ? { threadId: conversation.replyTarget.threadId }
-            : {}),
-          text: `${reportMessage}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.parent.sessionId, ...params.footerContext })}`,
-          textFormat: 'markdown',
-          images,
+        const posted = await postTextThreadReplyWithFooter({
+          provider,
+          input: {
+            channelId: conversation.replyTarget.channelId,
+            ...(conversation.replyTarget.threadId
+              ? { threadId: conversation.replyTarget.threadId }
+              : {}),
+            text: reportMessage,
+            textFormat: 'markdown',
+            images,
+          },
+          footerText: buildFastSessionReplyFooterText({
+            provider: 'telegram',
+            sessionId: params.parent.sessionId,
+            ...params.footerContext,
+          }),
         });
         activity.reassert();
         await recordFastAgentConversationMessageBestEffort({
@@ -2192,6 +2304,8 @@ async function createFastAgentHomeParentTurn(params: {
       return createTeamsFastAgentParentTurn(turnParams);
     case 'telegram':
       return createTelegramFastAgentParentTurn(turnParams);
+    case 'agentmail':
+      return createAgentMailFastAgentParentTurn(turnParams);
   }
 }
 
@@ -2217,6 +2331,8 @@ type FastAgentParentEventDeliveryParams = {
    * immediately after an interruption, or at a scheduled retry time. */
   requestDurableResume?: () => Promise<void>;
   requestDurableRetry?: (retryAt: Date) => Promise<void>;
+  /** Schedule the next setup state turn after a server-only preset completion. */
+  onSetupIntegrationDiscoveryCompleted?: () => Promise<void>;
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -2381,7 +2497,7 @@ export async function deliverFastAgentParentEventWithLock(
 
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
-    const parentTurn = await createFastAgentParentTurn({
+    let parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
       event: params.event,
       ...(humanFollowUp
@@ -2393,6 +2509,35 @@ export async function deliverFastAgentParentEventWithLock(
         replyPosted = true;
       },
     });
+    if (isFastAutomationReportEvent(params.event)) {
+      const reportEvent = params.event;
+      const automationId =
+        reportEvent.type === 'automation_triggered'
+          ? reportEvent.automationId
+          : reportEvent.customAutomationId!;
+      const baseAdapter = parentTurn.adapter;
+      parentTurn = {
+        ...parentTurn,
+        adapter: {
+          ...baseAdapter,
+          postReply: async (reply) => {
+            if (
+              !reply.kickoff &&
+              (reply.purpose === 'closeout' ||
+                reply.purpose === 'clarification')
+            ) {
+              await recordCustomAutomationResult({
+                automationId,
+                userId: parentTurn.userId,
+                content: reply.message,
+                dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
+              }).catch(() => undefined);
+            }
+            return baseAdapter.postReply(reply);
+          },
+        },
+      };
+    }
     // A failed automation run always reaches its destination. The model
     // judges what a result is worth, but a broken automation must not stay
     // silent, so this closeout is fixed text rather than a model turn.
@@ -2455,6 +2600,10 @@ export async function deliverFastAgentParentEventWithLock(
         (humanFollowUp ? 'human' : 'platform_event'),
       ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
       ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
+      ...(humanFollowUp?.voiceMode ? { voiceMode: true } : {}),
+      ...(humanFollowUp?.setupContext
+        ? { setupSnapshot: humanFollowUp.setupContext.setupSnapshot }
+        : {}),
       ...(humanFollowUp
         ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
         : {}),
@@ -2515,6 +2664,16 @@ export async function deliverFastAgentParentEventWithLock(
         createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
         ...parentTurn.adapter,
         launchTask: parentTurn.adapter.launchTask,
+        ...(humanFollowUp?.setupContext
+          ? buildFastAgentSetupAdapter(humanFollowUp.setupContext, {
+              ...(params.onSetupIntegrationDiscoveryCompleted
+                ? {
+                    onIntegrationDiscoveryCompleted:
+                      params.onSetupIntegrationDiscoveryCompleted,
+                  }
+                : {}),
+            })
+          : {}),
         ...(wakeupGuard
           ? {
               postReply: wakeupGuard.guardPostReply(

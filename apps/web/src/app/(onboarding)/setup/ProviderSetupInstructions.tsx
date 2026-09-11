@@ -13,7 +13,8 @@ import { cn } from '@/lib/utils';
 type ProviderSetupInstructionsProviderId =
   | SetupAuthProviderId
   | 'telegram'
-  | 'discord';
+  | 'discord'
+  | 'agentmail';
 
 function InstructionText({
   heading,
@@ -176,6 +177,27 @@ export function ProviderSetupInstructions({
         <InstructionText heading="Bot token">
           Paste the token below. Roomote derives the bot and application names
           from it, so there is no separate name or application ID to enter.
+        </InstructionText>
+      </div>
+    );
+  }
+
+  if (providerId === 'agentmail') {
+    return (
+      <div className={cn('space-y-3 max-w-xl', className)}>
+        <InstructionText heading="Inbox">
+          In the AgentMail console, create the inbox Roomote should receive mail
+          at (or pick an existing one).
+        </InstructionText>
+        <InstructionText heading="API key">
+          Open that inbox and create an API key from inside it, so the key is
+          scoped to the inbox. Paste it below; Roomote uses the inbox the key is
+          for.
+        </InstructionText>
+        <InstructionText heading="Webhook">
+          Roomote registers the AgentMail webhook for incoming mail
+          automatically when you save — there is nothing to configure at
+          AgentMail.
         </InstructionText>
       </div>
     );

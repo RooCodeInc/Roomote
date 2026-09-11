@@ -36,7 +36,7 @@ Four PaaS-shaped paths run the same published images with
 - [`fly/`](fly/README.md) — a maintained `fly.toml` that runs the stack as
   one Fly.io app (a process group per service) with Fly Managed Postgres,
   Upstash Redis, and Tigris object storage; like Railway, there is no
-  Docker socket, so hosted sandboxes is required.
+  Docker socket, so hosted sandboxes are required.
 
 V1 is intentionally single-tenant. Do not use this flow to put multiple
 customers on the same VM or database.

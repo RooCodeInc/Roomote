@@ -963,35 +963,6 @@ describe('Fast native OpenCode tool bridge', () => {
     );
   });
 
-  it('does not mount scheduling schemas directly during the pilot', async () => {
-    const runtime = await getFastAgentNativeToolRuntime(
-      'deferred-scheduling',
-      [
-        {
-          id: 'roomote',
-          name: 'Roomote',
-          description: 'Deployment access',
-          tools: [
-            { name: 'manage_tasks' },
-            { name: 'manage_custom_automations' },
-          ],
-        },
-      ],
-      { schedulingProgressiveDisclosureEnabled: true },
-    );
-    const config = JSON.parse(
-      await readFile(join(runtime.directory, 'opencode.json'), 'utf8'),
-    ) as { agent: { build: { tools: Record<string, boolean> } } };
-
-    expect(config.agent.build.tools).toMatchObject({
-      'roomote_*': true,
-      roomote_manage_custom_automations: false,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups]: false,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools]: true,
-      [FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool]: true,
-    });
-  });
-
   it('spills oversized MCP results for direct parent recovery', async () => {
     const conversationId = 'mcp-spill-conversation';
     const parentSessionId = 'mcp-spill-parent-session';

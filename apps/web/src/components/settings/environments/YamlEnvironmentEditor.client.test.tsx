@@ -147,6 +147,27 @@ describe('YamlEnvironmentEditor', () => {
 });
 
 describe('VisualEnvironmentEditor', () => {
+  it('omits the repositories section when the config has none', () => {
+    const onChange = vi.fn();
+
+    render(
+      <VisualEnvironmentEditor
+        config={{ name: 'Tools', repositories: [] }}
+        onChange={onChange}
+      />,
+    );
+
+    expect(screen.queryByText('Repositories')).not.toBeInTheDocument();
+    expect(screen.queryByText(/no repositories/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Repo' }));
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositories: [{ repository: '', commands: [] }],
+      }),
+    );
+  });
+
   it('preserves intentionally empty environment variable values', () => {
     const onChange = vi.fn();
 
@@ -359,6 +380,19 @@ describe('VisualEnvironmentEditor', () => {
 });
 
 describe('EnvironmentPreviewContent', () => {
+  it('omits the repositories section when the config has none', () => {
+    render(
+      <EnvironmentPreviewContent
+        config={{ name: 'Tools', repositories: [] }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('heading', { name: 'Repositories' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/no repositories/i)).not.toBeInTheDocument();
+  });
+
   it('masks literal environment values while showing interpolations', () => {
     render(
       <EnvironmentPreviewContent

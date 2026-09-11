@@ -280,11 +280,8 @@ export function VisualEnvironmentEditor({
         </div>
       </SectionShell>
 
-      <SectionShell
-        icon={GitBranch}
-        title="Repositories"
-        defaultOpen={config.repositories.some(hasRepositoryContent)}
-        action={
+      {config.repositories.length === 0 ? (
+        <div className="flex justify-end">
           <Button
             type="button"
             variant="outline"
@@ -292,10 +289,7 @@ export function VisualEnvironmentEditor({
             onClick={() =>
               onChange(
                 updateEnvironmentConfig(config, (draft) => {
-                  draft.repositories = [
-                    ...draft.repositories,
-                    { repository: '', commands: [] },
-                  ];
+                  draft.repositories = [{ repository: '', commands: [] }];
                 }),
               )
             }
@@ -303,40 +297,66 @@ export function VisualEnvironmentEditor({
             <Plus />
             Add Repo
           </Button>
-        }
-      >
-        <p className="mb-4 text-sm text-muted-foreground">
-          Choose the repositories to clone for this environment, then configure
-          repo-specific setup details.
-        </p>
-        <div className="space-y-3">
-          {config.repositories.map((repository, index) => (
-            <RepositoryEditor
-              key={`${repository.repository}-${index}`}
-              repository={repository}
-              removable={config.repositories.length > 1}
-              fieldId={`visual-repository-${index}`}
-              repositoryOptions={repositories}
-              onChange={(nextRepository) =>
-                onChange(
-                  updateEnvironmentConfig(config, (draft) => {
-                    draft.repositories[index] = nextRepository;
-                  }),
-                )
-              }
-              onRemove={() =>
-                onChange(
-                  updateEnvironmentConfig(config, (draft) => {
-                    draft.repositories = draft.repositories.filter(
-                      (_, repositoryIndex) => repositoryIndex !== index,
-                    );
-                  }),
-                )
-              }
-            />
-          ))}
         </div>
-      </SectionShell>
+      ) : (
+        <SectionShell
+          icon={GitBranch}
+          title="Repositories"
+          defaultOpen={config.repositories.some(hasRepositoryContent)}
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                onChange(
+                  updateEnvironmentConfig(config, (draft) => {
+                    draft.repositories = [
+                      ...draft.repositories,
+                      { repository: '', commands: [] },
+                    ];
+                  }),
+                )
+              }
+            >
+              <Plus />
+              Add Repo
+            </Button>
+          }
+        >
+          <p className="mb-4 text-sm text-muted-foreground">
+            Choose repositories to clone, then configure repo-specific setup
+            details.
+          </p>
+          <div className="space-y-3">
+            {config.repositories.map((repository, index) => (
+              <RepositoryEditor
+                key={`${repository.repository}-${index}`}
+                repository={repository}
+                removable
+                fieldId={`visual-repository-${index}`}
+                repositoryOptions={repositories}
+                onChange={(nextRepository) =>
+                  onChange(
+                    updateEnvironmentConfig(config, (draft) => {
+                      draft.repositories[index] = nextRepository;
+                    }),
+                  )
+                }
+                onRemove={() =>
+                  onChange(
+                    updateEnvironmentConfig(config, (draft) => {
+                      draft.repositories = draft.repositories.filter(
+                        (_, repositoryIndex) => repositoryIndex !== index,
+                      );
+                    }),
+                  )
+                }
+              />
+            ))}
+          </div>
+        </SectionShell>
+      )}
 
       <SectionShell
         icon={Container}

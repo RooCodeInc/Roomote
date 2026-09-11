@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from '@testing-library/react';
 import { toast } from 'sonner';
@@ -16,6 +17,16 @@ const state = vi.hoisted(() => ({
   queriedKeys: [] as unknown[],
   customAutomationsPending: false,
   customAutomationRunPendingId: null as string | null,
+  customAutomationTimeZone: 'UTC' as string | undefined,
+  customAutomationDefaultTarget: undefined as
+    | {
+        provider: 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
+        targetKind: string;
+        externalRef: string;
+        metadata?: Record<string, unknown>;
+      }
+    | null
+    | undefined,
   customAutomations: [] as Array<{
     id: string;
     name: string;
@@ -28,7 +39,7 @@ const state = vi.hoisted(() => ({
     executionMode?: 'sandbox_task' | 'fast';
     environmentId: string;
     target: {
-      provider?: 'slack' | 'discord' | 'teams' | 'telegram';
+      provider?: 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
       externalRef?: string;
       targetKind?:
         | 'slack_channel'
@@ -38,7 +49,8 @@ const state = vi.hoisted(() => ({
         | 'teams_channel'
         | 'teams_user'
         | 'telegram_chat'
-        | 'telegram_user';
+        | 'telegram_user'
+        | 'email_user';
       metadata?: Record<string, unknown>;
     };
     lastRunAt: Date | null;
@@ -50,6 +62,7 @@ const state = vi.hoisted(() => ({
     createdAt: Date;
     updatedAt: Date;
     latestFastResult?: string | null;
+    nextRunAt?: Date | null;
   }>,
   environments: [] as Array<{ id: string; name: string }>,
   nextUpdateSettingsResult: null as {
@@ -293,7 +306,14 @@ const mutations = vi.hoisted(() => ({
     ) => void;
   } | null,
   latestCustomTriggerOptions: null as {
-    onSuccess?: (result: { outcome: 'launched'; taskId: string }) => void;
+    onSuccess?: (
+      result:
+        | { outcome: 'launched'; taskId: string }
+        | { outcome: 'queued' }
+        | { outcome: 'completed' }
+        | { outcome: 'skipped'; reason: string }
+        | { outcome: 'failed'; error: string },
+    ) => void;
   } | null,
 }));
 
@@ -326,15 +346,35 @@ vi.mock('@tanstack/react-query', () => ({
     state.queriedKeys.push(queryOptions.queryKey);
     const key1 = queryOptions.queryKey?.[1];
     if (key1 === 'getCustomAutomationOptions') {
+      const managerSlackChannelId =
+        state.settingsQuery.data.settings.managerSlackChannelId;
+      const managerDiscordChannelId =
+        state.settingsQuery.data.settings.managerDiscordChannelId;
       return {
         isPending: state.settingsQuery.isPending,
         data: {
           capabilities: state.settingsQuery.data.capabilities,
-          managerSlackChannelId:
-            state.settingsQuery.data.settings.managerSlackChannelId,
-          managerDiscordChannelId:
-            state.settingsQuery.data.settings.managerDiscordChannelId,
-          effectiveTimeZone: 'UTC',
+          managerSlackChannelId,
+          managerDiscordChannelId,
+          defaultTarget:
+            state.customAutomationDefaultTarget !== undefined
+              ? state.customAutomationDefaultTarget
+              : managerSlackChannelId &&
+                  state.settingsQuery.data.capabilities.slackConnected
+                ? {
+                    provider: 'slack',
+                    targetKind: 'slack_channel',
+                    externalRef: managerSlackChannelId,
+                  }
+                : managerDiscordChannelId &&
+                    state.settingsQuery.data.capabilities.discordConnected
+                  ? {
+                      provider: 'discord',
+                      targetKind: 'discord_channel',
+                      externalRef: managerDiscordChannelId,
+                    }
+                  : null,
+          effectiveTimeZone: state.customAutomationTimeZone,
         },
       };
     }
@@ -564,11 +604,11 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
+import { AutomationsSettings } from './AutomationsSettings';
 import {
-  AutomationsSettings,
-  getAutomationHistoryHref,
-} from './AutomationsSettings';
-import { CustomAutomationsSection } from './CustomAutomationsSection';
+  CustomAutomationsSection,
+  nextRunLabel,
+} from './CustomAutomationsSection';
 
 it.each([false, true])(
   'enables custom-editor channel catalogs only for admins (isAdmin=%s)',
@@ -593,6 +633,12 @@ it('opens the standalone custom editor without querying admin settings', () => {
   state.queriedKeys = [];
   render(<CustomAutomationsSection />);
 
+  expect(
+    screen.queryByRole('radio', { name: 'Built-in' }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByText('No custom automations created yet.'),
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'New' }));
   expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
   expect(state.queriedKeys).toContainEqual([
@@ -606,16 +652,16 @@ it('opens the standalone custom editor without querying admin settings', () => {
 
 async function openSuggesterCard() {
   fireEvent.click(
-    await screen.findByRole('button', {
-      name: /(?:Set up|Configure) Suggest Ideas/,
+    await screen.findByRole('switch', {
+      name: /(?:Set up|Configure) Suggest Ideas enabled state/,
     }),
   );
 }
 
 async function openReviewerCard() {
   fireEvent.click(
-    await screen.findByRole('button', {
-      name: /(?:Set up|Configure) Review Code/,
+    await screen.findByRole('switch', {
+      name: /(?:Set up|Configure) Review Code enabled state/,
     }),
   );
 }
@@ -624,8 +670,34 @@ function closeAutomationDialog() {
   fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 }
 
+function setRunnableCustomAutomation() {
+  state.customAutomations = [
+    {
+      id: 'automation-1',
+      name: 'Daily scan',
+      prompt: 'Find flaky tests.',
+      enabled: true,
+      scheduleMode: 'daily',
+      cronExpression: null,
+      model: null,
+      executionMode: 'fast',
+      environmentId: '__fast__',
+      target: {},
+      lastRunAt: null,
+      lastSucceededAt: null,
+      lastFailedAt: null,
+      lastError: null,
+      lastLaunchedTaskId: null,
+      createdByName: 'Ada',
+      createdAt: new Date('2026-01-01T00:00:00Z'),
+      updatedAt: new Date('2026-01-01T00:00:00Z'),
+    },
+  ];
+}
+
 describe('AutomationsSettings', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     state.nextUpdateSettingsResult = null;
     state.customAutomationRunPendingId = null;
@@ -668,6 +740,8 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
     state.customAutomations = [];
+    state.customAutomationTimeZone = 'UTC';
+    state.customAutomationDefaultTarget = undefined;
     state.customAutomationsPending = false;
     state.settingsQuery.isPending = false;
     state.environments = [];
@@ -689,8 +763,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     expect(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Weekly Manager Stats/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Weekly Manager Stats enabled state/,
       }),
     ).toBeInTheDocument();
     expect(screen.queryByText('Beta')).not.toBeInTheDocument();
@@ -700,8 +774,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'Configure Inference Provider Usage Alerts',
+      await screen.findByRole('switch', {
+        name: 'Configure Inference Provider Usage Alerts enabled state',
       }),
     );
 
@@ -721,8 +795,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'Set up Call Roomote via emoji',
+      await screen.findByRole('switch', {
+        name: 'Set up Call Roomote via emoji enabled state',
       }),
     );
     fireEvent.click(
@@ -786,8 +860,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Weekly Manager Stats/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Weekly Manager Stats enabled state/,
       }),
     );
     expect(
@@ -798,8 +872,8 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
-      screen.getByRole('button', {
-        name: /(?:Set up|Configure) Triage Sentry Issues/,
+      screen.getByRole('switch', {
+        name: /(?:Set up|Configure) Triage Sentry Issues enabled state/,
       }),
     );
     expect(
@@ -807,8 +881,8 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
-      screen.getByRole('button', {
-        name: /(?:Set up|Configure) Triage Dependabot Alerts/,
+      screen.getByRole('switch', {
+        name: /(?:Set up|Configure) Triage Dependabot Alerts enabled state/,
       }),
     );
 
@@ -841,8 +915,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Weekly Manager Stats/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Weekly Manager Stats enabled state/,
       }),
     );
     expect(
@@ -850,8 +924,8 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
     closeAutomationDialog();
     fireEvent.click(
-      screen.getByRole('button', {
-        name: /(?:Set up|Configure) Triage Sentry Issues/,
+      screen.getByRole('switch', {
+        name: /(?:Set up|Configure) Triage Sentry Issues enabled state/,
       }),
     );
 
@@ -881,8 +955,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Automation output/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Automation output enabled state/,
       }),
     );
     const destination = await screen.findByRole('button', {
@@ -915,8 +989,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Alert on Config Errors/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Alert on Config Errors enabled state/,
       }),
     );
 
@@ -936,8 +1010,8 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     fireEvent.click(
-      await screen.findByRole('button', {
-        name: /(?:Set up|Configure) Alert on Config Errors/,
+      await screen.findByRole('switch', {
+        name: /(?:Set up|Configure) Alert on Config Errors enabled state/,
       }),
     );
 
@@ -951,8 +1025,8 @@ describe('AutomationsSettings', () => {
   it('hides the launch mode picker when decision mode is disabled', async () => {
     render(<AutomationsSettings />);
 
-    const expandButton = await screen.findByRole('button', {
-      name: /(?:Set up|Configure) Auto-respond to channels/,
+    const expandButton = await screen.findByRole('switch', {
+      name: /(?:Set up|Configure) Auto-respond to channels enabled state/,
     });
     fireEvent.click(expandButton);
 
@@ -991,69 +1065,138 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     await screen.findByText('Triage Dependabot Alerts');
-    const providerSupport = screen.getAllByText('GitHub only')[0]!;
-    expect(providerSupport.tagName).toBe('P');
-    expect(providerSupport).toHaveClass('text-sm', 'text-foreground');
+    const dependabotRow = screen
+      .getByText('Triage Dependabot Alerts')
+      .closest('[role="row"]');
+    expect(dependabotRow).not.toBeNull();
+    const providerSupport = within(dependabotRow as HTMLElement).getByText(
+      /GitHub only/,
+    );
+    expect(providerSupport.tagName).toBe('SPAN');
   });
 
-  it('groups built-in automations into Enabled and Available sections', async () => {
-    render(<AutomationsSettings />);
-
-    expect(await screen.findByText('Enabled')).toBeInTheDocument();
-    expect(screen.getByText('Available')).toBeInTheDocument();
-    expect(screen.queryByText('Source Code automations')).toBeNull();
-    expect(screen.queryByText('Meta automations')).toBeNull();
-  });
-
-  it('links enabled built-in automations to their filtered task history', async () => {
+  it('renders custom and built-in automations in one list by default', async () => {
     render(<AutomationsSettings />);
 
     expect(
-      await screen.findByRole('link', {
-        name: 'View previous runs for Auto-respond to channels',
-      }),
-    ).toHaveAttribute(
-      'href',
-      '/tasks?userId=automation%3Aslack_channel_auto_start',
+      await screen.findByRole('table', { name: 'Automations' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'All' })).toBeChecked();
+    expect(screen.getByText('Auto-respond to channels')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Enabled' })).toHaveClass(
+      'sr-only',
     );
+    expect(screen.getByRole('columnheader', { name: 'Actions' })).toHaveClass(
+      'sr-only',
+    );
+    expect(screen.queryByText('Available')).not.toBeInTheDocument();
+  });
+
+  it('orders the unified list alphabetically without changing query data', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-z',
+        name: 'Zulu custom automation',
+        prompt: 'Run last alphabetically.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+      {
+        id: 'automation-a',
+        name: 'Aardvark custom automation',
+        prompt: 'Run first alphabetically.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    await screen.findByText('Aardvark custom automation');
+    const orderedRows = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.textContent ?? '');
+
+    expect(orderedRows[0]).toContain('Aardvark custom automation');
+    expect(orderedRows[1]).toContain('Alert on Config Errors');
+    expect(orderedRows.at(-1)).toContain('Zulu custom automation');
+    expect(
+      state.customAutomations.map((automation) => automation.name),
+    ).toEqual(['Zulu custom automation', 'Aardvark custom automation']);
+
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'Run first alphabetically' } },
+    );
+    const customRow = screen
+      .getByText('Aardvark custom automation')
+      .closest('[role="row"]');
+    expect(customRow?.nextElementSibling).toBe(
+      screen.getByText('No built-in automations match your search.'),
+    );
+  });
+
+  it('uses the left switch as the built-in configuration entry point', async () => {
+    render(<AutomationsSettings />);
+
+    const enabledSwitch = await screen.findByRole('switch', {
+      name: 'Configure Auto-respond to channels enabled state',
+    });
+    expect(enabledSwitch).toBeChecked();
+    expect(enabledSwitch).toHaveAttribute('data-state', 'checked');
+    const disabledSwitch = screen.getByRole('switch', {
+      name: 'Set up CI Failure Triage enabled state',
+    });
+    expect(disabledSwitch).not.toBeChecked();
+    expect(disabledSwitch).toHaveAttribute('data-state', 'unchecked');
+
+    fireEvent.pointerMove(enabledSwitch.parentElement!, {
+      pointerType: 'mouse',
+    });
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('Configure Auto-respond to channels').length,
+      ).toBeGreaterThan(1);
+    });
     expect(
       screen.queryByRole('link', {
-        name: 'View previous runs for Review Code',
+        name: 'View previous runs for Auto-respond to channels',
       }),
     ).not.toBeInTheDocument();
-  });
-
-  it.each([
-    ['callRoomoteViaEmoji', 'call_roomote_via_emoji'],
-    ['channelAutoStart', 'slack_channel_auto_start'],
-    ['managerStats', 'manager_stats'],
-    ['sentryTriage', 'sentry_triage'],
-    ['dependabotTriage', 'dependabot_triage'],
-    ['codeqlTriage', 'codeql_triage'],
-    ['issueFixer', 'issue_fixer'],
-    ['securityAuditor', 'security_auditor'],
-    ['codeQualityAuditor', 'code_quality_auditor'],
-    ['ciFailureTriage', 'ci_failure_triage'],
-    ['reviewer', 'review_code'],
-    ['conflictResolver', 'conflict_resolver'],
-    ['suggester', 'suggester'],
-    ['announcer', 'announcer'],
-    ['platformIssueAlerts', 'platform_issue_alerts'],
-  ] as const)(
-    'builds the filtered task history link for %s',
-    (automationId, automationKey) => {
-      expect(getAutomationHistoryHref(automationId)).toBe(
-        `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`,
-      );
-    },
-  );
-
-  it('does not add task history to non-running built-in configuration', () => {
-    expect(getAutomationHistoryHref('managerChannel')).toBeNull();
-  });
-
-  it('does not add task history to provider usage alerts', () => {
-    expect(getAutomationHistoryHref('providerUsageLimit')).toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: 'Configure Auto-respond to channels',
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(enabledSwitch);
+    expect(
+      await screen.findByRole('dialog', { name: 'Auto-respond to channels' }),
+    ).toBeInTheDocument();
   });
 
   it('shows Merge announcer as a webhook-driven automation without task history', async () => {
@@ -1071,10 +1214,10 @@ describe('AutomationsSettings', () => {
         'Summarize commits pushed to each active repository’s default branch and announce who pushed them.',
       ),
     ).toBeInTheDocument();
-    expect(getAutomationHistoryHref('mergeAnnouncer')).toBeNull();
-
     fireEvent.click(
-      screen.getByRole('button', { name: 'Configure Merge announcer' }),
+      screen.getByRole('switch', {
+        name: 'Configure Merge announcer enabled state',
+      }),
     );
     expect(
       screen.getByRole('combobox', { name: 'Destination provider' }),
@@ -1084,33 +1227,22 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('DM me');
   });
 
-  it('filters available automations by category and provider-aware search', async () => {
+  it('filters the unified list by type and searches built-in summaries', async () => {
     render(<AutomationsSettings />);
 
-    const categoryFilter = await screen.findByRole('combobox', {
-      name: 'Filter available automations by category',
-    });
-    expect(categoryFilter).toHaveTextContent('All');
-
     fireEvent.change(
-      screen.getByRole('textbox', { name: 'Search available automations' }),
-      { target: { value: 'Discord' } },
-    );
-
-    expect(screen.getByText('Auto-respond to channels')).toBeInTheDocument();
-    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Clear automation filters' }),
+      await screen.findByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'Pull request events' } },
     );
     expect(screen.getByText('Review Code')).toBeInTheDocument();
-
-    fireEvent.click(categoryFilter);
-    fireEvent.click(await screen.findByRole('option', { name: 'Operations' }));
-    expect(screen.getByText('Triage Sentry Issues')).toBeInTheDocument();
-    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
     expect(
-      screen.queryByText('Call Roomote via emoji'),
+      screen.queryByText('Auto-respond to channels'),
     ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+    expect(screen.queryByText('Review Code')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Built-in' }));
+    expect(screen.getByText('Review Code')).toBeInTheDocument();
   });
 
   it('shows independent structural skeletons for custom and built-in automations', () => {
@@ -1143,11 +1275,12 @@ describe('AutomationsSettings', () => {
       screen.queryByText('No built-in automations enabled yet.'),
     ).not.toBeInTheDocument();
     expect(
-      await screen.findByRole('button', {
-        name: 'Configure Alert on Config Errors',
+      await screen.findByRole('switch', {
+        name: 'Configure Alert on Config Errors enabled state',
       }),
     ).toBeInTheDocument();
-    const customEmptyState = screen.getByText(
+    fireEvent.click(screen.getByRole('radio', { name: 'Custom' }));
+    const customEmptyState = await screen.findByText(
       'No custom automations created yet.',
     );
     expect(customEmptyState.tagName).toBe('P');
@@ -1218,14 +1351,6 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     ).toBeEnabled();
-    expect(
-      screen.getByRole('link', {
-        name: 'View previous runs for Weekly flaky-test scan',
-      }),
-    ).toHaveAttribute(
-      'href',
-      '/tasks?userId=automation%3Acustom_automation%3Aautomation-1',
-    );
     fireEvent.click(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     );
@@ -1244,6 +1369,9 @@ describe('AutomationsSettings', () => {
         action: expect.objectContaining({ label: 'View task' }),
       }),
     );
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['automations', 'listCustomAutomations'],
+    });
 
     state.customAutomations.push({
       ...state.customAutomations[0]!,
@@ -1272,11 +1400,6 @@ describe('AutomationsSettings', () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', {
-        name: 'View previous runs for Weekly flaky-test scan',
-      }),
-    ).toBeInTheDocument();
-    expect(
       screen.getByRole('button', { name: 'Delete Weekly flaky-test scan' }),
     ).toBeInTheDocument();
 
@@ -1298,6 +1421,73 @@ describe('AutomationsSettings', () => {
         'Configure what runs, when it runs, and where the result is sent.',
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { outcome: 'completed' as const },
+    { outcome: 'failed' as const, error: 'launch failed' },
+  ])('refreshes persisted custom automation state after $outcome', (result) => {
+    setRunnableCustomAutomation();
+    render(<AutomationsSettings />);
+
+    act(() => {
+      mutations.latestCustomTriggerOptions?.onSuccess?.(result);
+    });
+
+    expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['automations', 'listCustomAutomations'],
+    });
+  });
+
+  it.each([
+    { outcome: 'launched' as const, taskId: 'task-custom-1' },
+    { outcome: 'queued' as const },
+  ])('uses bounded follow-up refreshes after $outcome', (result) => {
+    vi.useFakeTimers();
+    setRunnableCustomAutomation();
+    const { unmount } = render(<AutomationsSettings />);
+
+    try {
+      act(() => {
+        mutations.latestCustomTriggerOptions?.onSuccess?.(result);
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledTimes(8);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not schedule follow-up refreshes after unmount', () => {
+    vi.useFakeTimers();
+    setRunnableCustomAutomation();
+    const { unmount } = render(<AutomationsSettings />);
+    const onSuccess = mutations.latestCustomTriggerOptions?.onSuccess;
+
+    try {
+      unmount();
+      act(() => {
+        onSuccess?.({ outcome: 'queued' });
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      expect(queryClient.invalidateQueries).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('offers and displays the all-repositories workspace target', async () => {
@@ -1369,14 +1559,14 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     expect(await screen.findByText('Daily →')).toBeInTheDocument();
-    expect(
-      screen.getByText('No actionable regressions found.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', {
-        name: 'View previous runs for Fast daily digest',
-      }),
-    ).toBeInTheDocument();
+    const search = screen.getByRole('textbox', { name: 'Search automations' });
+    fireEvent.change(search, {
+      target: { value: 'Summarize priorities' },
+    });
+    expect(screen.getByText('Fast daily digest')).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: 'No matching automation' } });
+    expect(screen.queryByText('Fast daily digest')).not.toBeInTheDocument();
+    fireEvent.change(search, { target: { value: '' } });
     fireEvent.click(
       screen.getByRole('button', { name: 'Configure Fast daily digest' }),
     );
@@ -1387,7 +1577,7 @@ describe('AutomationsSettings', () => {
     ).toHaveTextContent('High');
     expect(
       screen.getByText(
-        'Each run is a Session in the web app and does not post to chat.',
+        'Each run is a Session in the web app and does not send a report.',
       ),
     ).toBeInTheDocument();
     fireEvent.click(
@@ -1421,6 +1611,7 @@ describe('AutomationsSettings', () => {
         environmentId: 'env-1',
         target: { provider: 'slack', externalRef: 'C123MANAGER' },
         lastRunAt: new Date(),
+        nextRunAt: new Date('2026-09-11T13:00:00Z'),
         lastSucceededAt: null,
         lastFailedAt: null,
         lastError: null,
@@ -1435,13 +1626,120 @@ describe('AutomationsSettings', () => {
 
     expect(
       await screen.findByText(
-        'At 09:00 AM, Monday through Friday, in Production →',
+        'At 09:00 AM, Monday through Friday (UTC), in Production →',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Created by Ada/)).toHaveTextContent(
+    const creatorMetadata = screen.getByText(/Created by Ada/, {
+      selector: 'span',
+    });
+    expect(creatorMetadata).toHaveTextContent(
       /Created by Ada · Last run \d+s ago/,
     );
+    expect(creatorMetadata).not.toHaveTextContent('Next run');
+    expect(screen.getByText('Next run Sep 11 at 1:00 PM')).toHaveClass(
+      'basis-full',
+    );
+    expect(screen.getByText('Next run Sep 11 at 1:00 PM')).toHaveAttribute(
+      'title',
+      '2026-09-11T13:00:00.000Z',
+    );
     expect(screen.queryByText('0 9 * * 1-5')).not.toBeInTheDocument();
+  });
+
+  it('includes the year only when the next run is outside the current year', () => {
+    const now = new Date('2026-09-11T12:00:00Z');
+    expect(nextRunLabel('2026-12-31T15:00:00Z', 'UTC', now)).toBe(
+      'Next run Dec 31 at 3:00 PM',
+    );
+    expect(nextRunLabel('2027-01-01T15:00:00Z', 'UTC', now)).toBe(
+      'Next run Jan 1, 2027 at 3:00 PM',
+    );
+  });
+
+  it('shows saved cron cadence in the deployment timezone', async () => {
+    state.customAutomationTimeZone = 'America/New_York';
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Daily scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'cron',
+        cronExpression: '0 9 * * *',
+        model: null,
+        environmentId: 'env-1',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText(
+        'Daily at 09:00 AM (America/New York), in Production →',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Search automations' }),
+      { target: { value: 'America/New York' } },
+    );
+    expect(screen.getByText('Daily scan')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Daily scan' }),
+    );
+    expect(
+      screen.getByText('Daily at 09:00 AM (America/New York)'),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      reason: 'the deployment timezone is unavailable',
+      timeZone: undefined,
+      cronExpression: '0 9 * * *',
+    },
+    {
+      reason: 'the saved cron is invalid',
+      timeZone: 'UTC',
+      cronExpression: '99 99 * * *',
+    },
+  ])('falls back when $reason', async ({ timeZone, cronExpression }) => {
+    state.customAutomationTimeZone = timeZone;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Daily scan',
+        prompt: 'Find flaky tests.',
+        enabled: true,
+        scheduleMode: 'cron',
+        cronExpression,
+        model: null,
+        executionMode: 'fast',
+        environmentId: '__fast__',
+        target: {},
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Custom schedule →')).toBeInTheDocument();
   });
 
   it('shows Slack DM me as a custom automation destination', async () => {
@@ -1636,6 +1934,11 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.capabilities.discordConnected = true;
     state.settingsQuery.data.capabilities.teamsConnected = true;
     state.settingsQuery.data.settings.managerSlackChannelId = null as never;
+    state.customAutomationDefaultTarget = {
+      provider: 'discord',
+      targetKind: 'discord_user',
+      externalRef: 'user-1',
+    };
 
     render(<AutomationsSettings />);
 
@@ -1749,6 +2052,60 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('combobox', { name: 'Destination provider' }),
     ).toHaveTextContent('Slack');
+  });
+
+  it('preserves a saved unavailable Email destination when capabilities finish loading', async () => {
+    state.settingsQuery.isPending = true;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Weekly Email report',
+        prompt: 'Summarize the week.',
+        enabled: true,
+        scheduleMode: 'weekly',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: 'user-1',
+          metadata: { emailIdentityId: 'verified:user-1:address-digest' },
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    const { rerender } = render(<AutomationsSettings />);
+    expect(await screen.findByText('Email me')).toBeInTheDocument();
+    expect(screen.queryByText('Email DM me')).not.toBeInTheDocument();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Configure Weekly Email report',
+      }),
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Destination provider' }),
+    ).toHaveTextContent('Email');
+
+    state.settingsQuery.isPending = false;
+    rerender(<AutomationsSettings />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('combobox', { name: 'Destination provider' }),
+      ).toHaveTextContent('Email');
+      expect(
+        screen.getByRole('combobox', { name: 'Email address' }),
+      ).toHaveTextContent('Email · No longer available');
+    });
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {

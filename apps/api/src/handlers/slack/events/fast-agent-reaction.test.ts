@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  FastAgentDurableRetryScheduledError: class extends Error {},
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   buildFastAgentReactionExternalInputQuestion: vi.fn(
@@ -75,7 +76,11 @@ vi.mock('@roomote/slack', () => ({
   createFastAgentSlackSessionActivity: mocks.createActivity,
   getSlackThreadReplyFooterMessageTs: vi.fn(async () => null),
   withSlackThreadReplyFooterLock: vi.fn(
-    async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    async ({
+      fn,
+    }: {
+      fn: (assertLock: () => Promise<void>) => Promise<unknown>;
+    }) => fn(async () => {}),
   ),
 }));
 

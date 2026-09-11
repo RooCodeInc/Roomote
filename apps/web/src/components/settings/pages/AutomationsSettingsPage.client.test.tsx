@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({ isAdmin: false }));
@@ -7,7 +8,12 @@ vi.mock('@/hooks/useUser', () => ({
 }));
 
 vi.mock('@/components/settings/automations', () => ({
-  AutomationsSettings: () => <div>Full automation settings</div>,
+  AutomationsSettings: ({ toolbarLeading }: { toolbarLeading?: ReactNode }) => (
+    <>
+      {toolbarLeading}
+      <div>Full automation settings</div>
+    </>
+  ),
 }));
 
 vi.mock('@/components/settings/automations/CustomAutomationsSection', () => ({

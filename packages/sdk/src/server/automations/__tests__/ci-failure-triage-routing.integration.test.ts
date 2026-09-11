@@ -62,7 +62,7 @@ import {
   users,
 } from '@roomote/db/server';
 import { launchCiFailureTriageForFailedRun } from '../ci-failure-triage-launch';
-import { resolveCiFailureTriageRepositoryDestination } from '../ci-failure-triage-routing';
+import { resolveAutomationRepositoryDestination } from '../ci-failure-triage-routing';
 
 describe('CI triage Slack ownership through the webhook launch path', () => {
   let userId: string;
@@ -385,14 +385,14 @@ describe('CI triage Slack ownership through the webhook launch path', () => {
     });
     const runtime = await getAutomationRuntime('ci_failure_triage');
     expect(
-      await resolveCiFailureTriageRepositoryDestination({
+      await resolveAutomationRepositoryDestination({
         runtime,
         repositoryId,
         connectedProviders: ['slack'],
       }),
     ).toMatchObject({ channelId: 'C_OWNER_B', teamId: b.teamId });
     expect(
-      await resolveCiFailureTriageRepositoryDestination({
+      await resolveAutomationRepositoryDestination({
         runtime,
         repositoryId: '10000000-0000-4000-8000-000000000099',
         connectedProviders: ['slack'],
@@ -409,7 +409,7 @@ describe('CI triage Slack ownership through the webhook launch path', () => {
       source: 'automation_target' as const,
     };
     expect(
-      await resolveCiFailureTriageRepositoryDestination({
+      await resolveAutomationRepositoryDestination({
         runtime,
         repositoryId,
         connectedProviders: ['slack'],
@@ -417,7 +417,7 @@ describe('CI triage Slack ownership through the webhook launch path', () => {
       }),
     ).toBeNull();
     expect(
-      await resolveCiFailureTriageRepositoryDestination({
+      await resolveAutomationRepositoryDestination({
         runtime,
         repositoryId: '10000000-0000-4000-8000-000000000001',
         connectedProviders: ['slack'],

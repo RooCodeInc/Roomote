@@ -56,11 +56,13 @@ function requireFastSessionContent(
     images?: string[];
     attachmentTexts?: string[];
     pinnedLaunch?: unknown;
+    voiceCall?: boolean;
   },
   ctx: z.RefinementCtx,
 ): void {
-  // A pinned launch may open a blank workspace with nothing to say yet.
-  if (input.pinnedLaunch) {
+  // A pinned launch may open a blank workspace with nothing to say yet, and a
+  // voice call opens the Session first and talks inside it.
+  if (input.pinnedLaunch || input.voiceCall) {
     return;
   }
   if (!input.text && !input.images?.length && !input.attachmentTexts?.length) {
@@ -89,12 +91,17 @@ export const startFastSessionInputSchema = z
     ...fastSessionMessageInputShape,
     conversationId: z.string().uuid().optional(),
     pinnedLaunch: pinnedFastSessionLaunchSchema.optional(),
+    /** Open the Session for a voice call; any text is the pre-typed message. */
+    voiceCall: z.boolean().optional(),
   })
   .superRefine(requireFastSessionContent);
 
 export const replyToFastSessionInputSchema = z
   .object({
     sessionId: z.string().uuid(),
+    clientMessageId: z.string().uuid().optional(),
+    /** The message was spoken on a voice call; the reply goes to the voice. */
+    voiceMode: z.boolean().optional(),
     ...fastSessionMessageInputShape,
   })
   .superRefine(requireFastSessionContent);

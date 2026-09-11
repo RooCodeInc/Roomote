@@ -1,22 +1,34 @@
 'use client';
 
-import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactElement, ReactNode } from 'react';
+import {
+  Children,
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   NO_REPOSITORIES,
+  getAutomationTargetEmailIdentityId,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
+  AUTOMATION_RESULT_PRIORITY_LABELS,
+  AUTOMATION_RESULT_PRIORITIES,
+  type AutomationResultPriority,
   type CustomAutomationScheduleMode,
+  type OptionalAutomationTarget,
   type ReasoningEffort,
 } from '@roomote/types';
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
 import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
-import { buildCreatorFilterValue } from '@/lib/task-creator-filter';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
@@ -34,7 +46,6 @@ import {
   Label,
   Play,
   Plus,
-  RotateCcwClock,
   Select,
   SelectContent,
   SelectItem,
@@ -45,6 +56,7 @@ import {
   Switch,
   Textarea,
   Trash2,
+  Zap,
 } from '@/components/system';
 
 import { ModelSelect } from '@/components/tasks/ModelSelect';
@@ -56,6 +68,12 @@ import {
   AutomationDestinationPicker,
   type AutomationDestinationProvider,
 } from './AutomationDestinationPicker';
+import {
+  AutomationListHeader,
+  AutomationListRow,
+  AutomationListToolbar,
+  type AutomationListFilter,
+} from './AutomationList';
 
 type ConnectedDestinationProvider = Exclude<
   AutomationDestinationProvider,
@@ -66,13 +84,14 @@ type CustomAutomationFormState = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string;
   cronExpression: string;
   /** Provider/model launch override; empty string means deployment default. */
   model: string;
   reasoningEffort: ReasoningEffort | null;
-  targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
+  targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
 };
@@ -81,6 +100,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
   enabled: true,
+  resultPriority: 'normal',
   scheduleMode: 'daily',
   environmentId: '',
   cronExpression: '',
@@ -110,12 +130,14 @@ const DESTINATION_OPTIONS: Array<{
     | 'slackConnected'
     | 'discordConnected'
     | 'teamsConnected'
-    | 'telegramConnected';
+    | 'telegramConnected'
+    | 'emailConnected';
 }> = [
   { value: 'slack', label: 'Slack', capability: 'slackConnected' },
   { value: 'discord', label: 'Discord', capability: 'discordConnected' },
   { value: 'teams', label: 'Teams', capability: 'teamsConnected' },
   { value: 'telegram', label: 'Telegram', capability: 'telegramConnected' },
+  { value: 'email', label: 'Email', capability: 'emailConnected' },
 ];
 
 function scheduleLabel(mode: CustomAutomationScheduleMode): string {
@@ -124,16 +146,62 @@ function scheduleLabel(mode: CustomAutomationScheduleMode): string {
   );
 }
 
-function cadenceLabel(row: CustomAutomationListItem): string {
+function cadenceLabel(
+  row: CustomAutomationListItem,
+  timeZone: string | undefined,
+): string {
   if (row.scheduleMode !== 'cron') {
     return scheduleLabel(row.scheduleMode);
   }
 
-  return row.cronExpression
-    ? (tryParseCronSchedule(row.cronExpression, 'UTC')?.summary ??
-        'Custom schedule')
+  if (!row.cronExpression || !timeZone) {
+    return 'Custom schedule';
+  }
+
+  const parsed = tryParseCronSchedule(row.cronExpression, timeZone);
+  return parsed
+    ? scheduleSummaryLine(parsed.summary, timeZone)
     : 'Custom schedule';
 }
+
+export function nextRunLabel(
+  nextRunAt: Date | string,
+  timeZone: string,
+  now = new Date(),
+): string {
+  const nextRunDate = new Date(nextRunAt);
+  const yearFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+  });
+  const date = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    ...(yearFormatter.format(nextRunDate) === yearFormatter.format(now)
+      ? {}
+      : { year: 'numeric' }),
+  }).format(nextRunDate);
+  const time = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(nextRunDate);
+  return `Next run ${date} at ${time}`;
+}
+
+// Fast runs settle asynchronously, so refresh sparsely through the existing
+// ten-minute launch-claim recovery window instead of polling indefinitely.
+const RUN_RESULT_REFRESH_DELAYS_MS = [
+  5_000,
+  15_000,
+  30_000,
+  60_000,
+  2 * 60_000,
+  5 * 60_000,
+  10 * 60_000,
+];
+const NEXT_RUN_REFRESH_MAX_DELAY_MS = 24 * 60 * 60 * 1000;
 
 function CustomAutomationRunButton({
   automation,
@@ -143,9 +211,40 @@ function CustomAutomationRunButton({
   disabled: boolean;
 }) {
   const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const isMountedRef = useRef(true);
+  const refreshTimeoutsRef = useRef<number[]>([]);
+  const invalidate = () =>
+    queryClient.invalidateQueries({
+      queryKey: trpc.automations.listCustomAutomations.queryKey(),
+    });
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      for (const timeout of refreshTimeoutsRef.current) {
+        window.clearTimeout(timeout);
+      }
+    };
+  }, []);
+
   const triggerMutation = useMutation({
     ...trpc.automations.triggerCustomAutomation.mutationOptions({
       onSuccess: (result) => {
+        void invalidate();
+        if (
+          isMountedRef.current &&
+          (result.outcome === 'launched' || result.outcome === 'queued')
+        ) {
+          for (const timeout of refreshTimeoutsRef.current) {
+            window.clearTimeout(timeout);
+          }
+          refreshTimeoutsRef.current = RUN_RESULT_REFRESH_DELAYS_MS.map(
+            (delay) => window.setTimeout(() => void invalidate(), delay),
+          );
+        }
+
         switch (result.outcome) {
           case 'launched':
             toast.success(`Running ${automation.name} now`, {
@@ -194,12 +293,12 @@ function CustomAutomationRunButton({
   );
 }
 
-function targetFromRow(row: CustomAutomationListItem): {
+function targetFromAutomationTarget(target: OptionalAutomationTarget): {
   provider: CustomAutomationFormState['targetProvider'];
   mode: CustomAutomationFormState['targetMode'];
   channelId: string;
 } {
-  if (!row.target.provider || !row.target.externalRef) {
+  if (!target.provider || !target.externalRef) {
     return {
       provider: 'none',
       mode: 'channel',
@@ -208,20 +307,28 @@ function targetFromRow(row: CustomAutomationListItem): {
   }
 
   const provider =
-    row.target.provider === 'discord' ||
-    row.target.provider === 'teams' ||
-    row.target.provider === 'telegram'
-      ? row.target.provider
+    target.provider === 'discord' ||
+    target.provider === 'teams' ||
+    target.provider === 'telegram' ||
+    target.provider === 'email'
+      ? target.provider
       : 'slack';
   return {
     provider,
-    mode: isBackgroundAutomationUserTargetKind(row.target.targetKind)
+    mode: isBackgroundAutomationUserTargetKind(target.targetKind)
       ? 'direct_message'
       : 'channel',
-    channelId: isBackgroundAutomationUserTargetKind(row.target.targetKind)
-      ? ''
-      : (row.target.externalRef ?? ''),
+    channelId:
+      target.provider === 'email'
+        ? (getAutomationTargetEmailIdentityId(target) ?? '')
+        : isBackgroundAutomationUserTargetKind(target.targetKind)
+          ? ''
+          : (target.externalRef ?? ''),
   };
+}
+
+function targetFromRow(row: CustomAutomationListItem) {
+  return targetFromAutomationTarget(row.target);
 }
 
 function formFromRow(
@@ -232,11 +339,13 @@ function formFromRow(
   const targetIsConnected =
     connectedProviders === null ||
     target.provider === 'none' ||
+    target.provider === 'email' ||
     connectedProviders.includes(target.provider);
   return {
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
@@ -255,6 +364,7 @@ function writeInputFromRow(row: CustomAutomationListItem) {
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
@@ -264,7 +374,7 @@ function writeInputFromRow(row: CustomAutomationListItem) {
       ? {
           targetProvider: target.provider,
           targetMode: target.mode,
-          ...(target.mode === 'channel'
+          ...(target.mode === 'channel' || target.provider === 'email'
             ? { targetChannelId: target.channelId }
             : {}),
         }
@@ -281,12 +391,85 @@ function scheduleSummaryLine(summary: string, timeZone: string): string {
     : `${summary} (${timeZoneLabel})`;
 }
 
-export function CustomAutomationsSection() {
+type NamedAutomationRowProps = {
+  name?: string;
+  automation?: { label: string };
+  children?: ReactNode;
+};
+
+function getAutomationRowName(node: ReactNode): string | null {
+  if (!isValidElement<NamedAutomationRowProps>(node)) {
+    return null;
+  }
+
+  return node.props.name ?? node.props.automation?.label ?? null;
+}
+
+function sortAutomationRows(
+  customRows: ReactNode[],
+  builtInContent: ReactNode,
+): ReactNode {
+  const directChildren = Children.toArray(builtInContent);
+  const wrapper =
+    directChildren.length === 1 &&
+    isValidElement<NamedAutomationRowProps>(directChildren[0])
+      ? (directChildren[0] as ReactElement<NamedAutomationRowProps>)
+      : null;
+  const wrappedChildren = wrapper
+    ? Children.toArray(wrapper.props.children)
+    : [];
+  const builtInRows = wrappedChildren.some(getAutomationRowName)
+    ? wrappedChildren
+    : directChildren;
+  const rows = [...customRows, ...builtInRows];
+  const sortedRows = [
+    ...rows
+      .filter((row) => getAutomationRowName(row) !== null)
+      .toSorted((left, right) =>
+        getAutomationRowName(left)!.localeCompare(getAutomationRowName(right)!),
+      ),
+    ...rows.filter((row) => getAutomationRowName(row) === null),
+  ];
+
+  return builtInRows === wrappedChildren && wrapper
+    ? cloneElement(wrapper, undefined, sortedRows)
+    : sortedRows;
+}
+
+export function CustomAutomationsSection({
+  filter: controlledFilter,
+  search: controlledSearch,
+  onFilterChange,
+  onSearchChange,
+  toolbarLeading,
+  children,
+}: {
+  filter?: AutomationListFilter;
+  search?: string;
+  onFilterChange?: (filter: AutomationListFilter) => void;
+  onSearchChange?: (search: string) => void;
+  toolbarLeading?: ReactNode;
+  children?: ReactNode;
+} = {}) {
   const { isAdmin } = useAuthorizedUser();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listQuery = useQuery(
-    trpc.automations.listCustomAutomations.queryOptions(),
+    trpc.automations.listCustomAutomations.queryOptions(undefined, {
+      refetchInterval: (query) => {
+        const nextRuns = (query.state.data ?? [])
+          .map((row) => row.nextRunAt && new Date(row.nextRunAt).getTime())
+          .filter((value): value is number => Boolean(value));
+        if (nextRuns.length === 0) return false;
+        return Math.max(
+          60_000,
+          Math.min(
+            NEXT_RUN_REFRESH_MAX_DELAY_MS,
+            Math.min(...nextRuns) - Date.now() + 1_000,
+          ),
+        );
+      },
+    }),
   );
   const environmentsQuery = useQuery(trpc.environments.list.queryOptions());
   const slackChannelsQuery = useQuery(
@@ -305,10 +488,26 @@ export function CustomAutomationsSection() {
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const cronExpressionRef = useRef<HTMLInputElement>(null);
+  // Email identities belong to the automation owner (runs execute as the
+  // creator), so editing an existing automation lists the owner's identities
+  // rather than the viewer's. Same shape as the base options query.
+  const ownerOptionsQuery = useQuery(
+    trpc.automations.getCustomAutomationOptions.queryOptions(
+      { automationId: editingId ?? undefined },
+      { enabled: Boolean(editingId) },
+    ),
+  );
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
   const [scheduleSummary, setScheduleSummary] = useState<string | null>(null);
+  const [localFilter, setLocalFilter] = useState<AutomationListFilter>('all');
+  const [localSearch, setLocalSearch] = useState('');
+  const filter = controlledFilter ?? localFilter;
+  const search = controlledSearch ?? localSearch;
+  const setFilter = onFilterChange ?? setLocalFilter;
+  const setSearch = onSearchChange ?? setLocalSearch;
 
   // New destinations default to the shared manager channel, matching where
   // the other automations report by default.
@@ -368,6 +567,41 @@ export function CustomAutomationsSection() {
         label: channel.label ?? channel.name,
       })),
     [discordChannelsQuery.data?.channels],
+  );
+  const emailIdentities = editingId
+    ? ownerOptionsQuery.data?.emailIdentities
+    : optionsQuery.data?.emailIdentities;
+  const emailOptions = useMemo(
+    () =>
+      (emailIdentities ?? []).map((identity) => ({
+        id: identity.id,
+        name: identity.emailAddress,
+        label: `${identity.emailAddress} · Verified`,
+      })),
+    [emailIdentities],
+  );
+  const visibleEmailOptions = useMemo(
+    () =>
+      form.targetProvider === 'email' &&
+      form.targetChannelId &&
+      !(editingId && ownerOptionsQuery.isPending) &&
+      !emailOptions.some((identity) => identity.id === form.targetChannelId)
+        ? [
+            ...emailOptions,
+            {
+              id: form.targetChannelId,
+              name: 'Email',
+              label: 'Email · No longer available',
+            },
+          ]
+        : emailOptions,
+    [
+      editingId,
+      emailOptions,
+      form.targetChannelId,
+      form.targetProvider,
+      ownerOptionsQuery.isPending,
+    ],
   );
 
   const invalidate = async () => {
@@ -483,6 +717,51 @@ export function CustomAutomationsSection() {
       : scheduleSummary;
 
   const rows = useMemo(() => listQuery.data ?? [], [listQuery.data]);
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleRows =
+    filter === 'built-in'
+      ? []
+      : rows.filter((row) => {
+          const target = targetFromRow(row);
+          const environmentName =
+            row.executionMode === 'fast'
+              ? ''
+              : (environmentOptions.find(
+                  (environment) => environment.id === row.environmentId,
+                )?.name ?? 'Environment missing');
+          const destinationName =
+            DESTINATION_OPTIONS.find(
+              (option) => option.value === target.provider,
+            )?.label ?? 'No report channel';
+          const destinationLabel =
+            target.provider === 'slack'
+              ? (slackOptions.find(
+                  (option) =>
+                    option.id === target.channelId ||
+                    option.name === target.channelId,
+                )?.label ?? target.channelId)
+              : target.provider === 'discord'
+                ? (discordOptions.find(
+                    (option) => option.id === target.channelId,
+                  )?.label ?? target.channelId)
+                : target.channelId;
+
+          return (
+            !normalizedSearch ||
+            [
+              row.name,
+              row.prompt,
+              cadenceLabel(row, schedulingTimeZone),
+              environmentName,
+              destinationName,
+              destinationLabel,
+              row.createdByName ?? '',
+            ]
+              .join(' ')
+              .toLowerCase()
+              .includes(normalizedSearch)
+          );
+        });
   const atCap = rows.length >= MAX_CUSTOM_AUTOMATIONS;
   const busy =
     createMutation.isPending ||
@@ -566,6 +845,7 @@ export function CustomAutomationsSection() {
 
     setForm((current) =>
       current.targetProvider === 'none' ||
+      current.targetProvider === 'email' ||
       connectedDestinationProviders.includes(current.targetProvider)
         ? current
         : {
@@ -592,11 +872,13 @@ export function CustomAutomationsSection() {
     }
     if (
       form.targetProvider !== 'none' &&
-      form.targetMode === 'channel' &&
+      (form.targetMode === 'channel' || form.targetProvider === 'email') &&
       !form.targetChannelId.trim()
     ) {
       toast.error(
-        'Choose a destination channel, or set the destination to None.',
+        form.targetProvider === 'email'
+          ? 'Choose an Email identity, or set the destination to None.'
+          : 'Choose a destination channel, or set the destination to None.',
       );
       return;
     }
@@ -605,6 +887,7 @@ export function CustomAutomationsSection() {
       name: form.name,
       prompt: form.prompt,
       enabled: form.enabled,
+      resultPriority: form.resultPriority,
       scheduleMode: form.scheduleMode,
       cronExpression:
         form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
@@ -615,7 +898,7 @@ export function CustomAutomationsSection() {
         ? {
             targetProvider: form.targetProvider,
             targetMode: form.targetMode,
-            ...(form.targetMode === 'channel'
+            ...(form.targetMode === 'channel' || form.targetProvider === 'email'
               ? { targetChannelId: form.targetChannelId }
               : {}),
           }
@@ -676,6 +959,7 @@ export function CustomAutomationsSection() {
             <Select
               value={form.scheduleMode}
               disabled={busy}
+              handoffTargetOnSelect={cronExpressionRef}
               onValueChange={(value) => {
                 setResolvedCron(null);
                 setScheduleSummary(null);
@@ -702,6 +986,7 @@ export function CustomAutomationsSection() {
 
             {form.scheduleMode === 'cron' ? (
               <Input
+                ref={cronExpressionRef}
                 id="custom-automation-cron"
                 aria-label="Custom schedule"
                 className="flex-1"
@@ -744,6 +1029,31 @@ export function CustomAutomationsSection() {
               {effectiveScheduleSummary}
             </p>
           ) : null}
+        </div>
+
+        <div className="space-y-2 sm:w-52">
+          <Label htmlFor="custom-automation-priority">Priority</Label>
+          <Select
+            value={form.resultPriority}
+            disabled={busy}
+            onValueChange={(value) =>
+              setForm((current) => ({
+                ...current,
+                resultPriority: value as AutomationResultPriority,
+              }))
+            }
+          >
+            <SelectTrigger id="custom-automation-priority" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTOMATION_RESULT_PRIORITIES.map((priority) => (
+                <SelectItem key={priority} value={priority}>
+                  {AUTOMATION_RESULT_PRIORITY_LABELS[priority]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-4 sm:flex-row">
@@ -833,8 +1143,10 @@ export function CustomAutomationsSection() {
             availableProviders={connectedDestinationProviders}
             slackOptions={slackOptions}
             discordOptions={discordOptions}
+            emailOptions={visibleEmailOptions}
             defaultSlackChannelId={managerSlackChannelId}
             defaultDiscordChannelId={managerDiscordChannelId}
+            defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
             disabled={busy}
             onChange={(destination) =>
               setForm((current) => ({
@@ -847,7 +1159,7 @@ export function CustomAutomationsSection() {
           />
           <p className="text-sm text-muted-foreground">
             {form.targetProvider === 'none'
-              ? 'Each run is a Session in the web app and does not post to chat.'
+              ? 'Each run is a Session in the web app and does not send a report.'
               : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
           </p>
         </div>
@@ -885,54 +1197,47 @@ export function CustomAutomationsSection() {
     </DialogContent>
   );
 
+  const newButton =
+    !isCreating && !editingId ? (
+      <Button
+        type="button"
+        size="sm"
+        disabled={busy || atCap || !capabilitiesLoaded}
+        onClick={() => {
+          const target = targetFromAutomationTarget(
+            optionsQuery.data?.defaultTarget ?? {},
+          );
+          setIsCreating(true);
+          setEditingId(null);
+          setForm({
+            ...EMPTY_FORM,
+            targetProvider: target.provider,
+            targetMode: target.mode,
+            targetChannelId: target.channelId,
+          });
+          setResolvedCron(null);
+          setScheduleSummary(null);
+        }}
+      >
+        <Plus />
+        New
+      </Button>
+    ) : null;
+
   return (
-    <section className="space-y-3" aria-labelledby="custom-automations-heading">
-      <div className="flex items-start justify-between gap-3 pt-2">
-        <div className="space-y-1">
-          <h2
-            id="custom-automations-heading"
-            className="text-sm font-semibold text-foreground"
-          >
-            Custom
-          </h2>
-        </div>
-        {!isCreating && !editingId ? (
-          <Button
-            type="button"
-            size="sm"
-            disabled={busy || atCap || !capabilitiesLoaded}
-            onClick={() => {
-              const managerProvider =
-                managerSlackChannelId && capabilities?.slackConnected
-                  ? 'slack'
-                  : managerDiscordChannelId && capabilities?.discordConnected
-                    ? 'discord'
-                    : null;
-              const targetProvider =
-                managerProvider ??
-                connectedDestinationOptions[0]?.value ??
-                'none';
-              setIsCreating(true);
-              setEditingId(null);
-              setForm({
-                ...EMPTY_FORM,
-                targetProvider,
-                targetChannelId:
-                  targetProvider === 'slack'
-                    ? managerSlackChannelId
-                    : targetProvider === 'discord'
-                      ? managerDiscordChannelId
-                      : '',
-              });
-              setResolvedCron(null);
-              setScheduleSummary(null);
-            }}
-          >
-            <Plus className="size-4" />
-            New
-          </Button>
-        ) : null}
-      </div>
+    <section
+      className="space-y-3 md:flex md:min-h-0 md:flex-1 md:flex-col md:gap-3 md:space-y-0"
+      aria-label="Automations"
+    >
+      <AutomationListToolbar
+        filter={filter}
+        search={search}
+        leading={toolbarLeading}
+        action={newButton}
+        showBuiltInFilter={Boolean(children)}
+        onFilterChange={setFilter}
+        onSearchChange={setSearch}
+      />
 
       <Dialog
         open={isCreating || Boolean(editingId)}
@@ -943,186 +1248,196 @@ export function CustomAutomationsSection() {
         {isCreating || editingId ? renderEditor() : null}
       </Dialog>
 
-      {listQuery.isPending ? (
-        <Card variant="snug" data-testid="custom-automations-skeleton">
-          <CardContent>
-            <div className="divide-y divide-background">
-              {Array.from({ length: 2 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="flex items-start gap-3 py-3 first:pt-0 last:pb-0"
-                >
-                  <Skeleton className="mt-0.5 h-5 w-9 rounded-full" />
-                  <div className="flex-1 space-y-2">
-                    <Skeleton className="h-4 w-48" />
-                    <Skeleton className="h-3 w-full max-w-lg" />
-                  </div>
+      <Card
+        variant="snug"
+        className="gap-0 p-0 md:min-h-0 md:flex-1 md:overflow-y-auto"
+      >
+        <CardContent className="p-0!">
+          <div role="table" aria-label="Automations">
+            <AutomationListHeader />
+            <div role="rowgroup" className="divide-y divide-background">
+              {listQuery.isPending && filter !== 'built-in' ? (
+                <div data-testid="custom-automations-skeleton">
+                  {Array.from({ length: 2 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="flex items-start gap-3 px-4 py-3"
+                    >
+                      <Skeleton className="mt-0.5 h-5 w-9 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-48" />
+                        <Skeleton className="h-3 w-full max-w-lg" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : rows.length === 0 && !isCreating ? (
-        <p className="text-sm text-muted-foreground -mt-4">
-          No custom automations created yet.
-        </p>
-      ) : (
-        <Card variant="snug">
-          <CardContent>
-            <div className="divide-y divide-background">
-              {rows.map((row) => {
-                const environmentName =
-                  row.executionMode === 'fast'
-                    ? null
-                    : (environmentOptions.find(
-                        (environment) => environment.id === row.environmentId,
-                      )?.name ?? 'Environment missing');
-                const target = targetFromRow(row);
-                const destinationName =
-                  DESTINATION_OPTIONS.find(
-                    (option) => option.value === target.provider,
-                  )?.label ?? 'No report channel';
-                const destinationLabel =
-                  target.provider === 'none'
-                    ? ''
-                    : target.mode === 'direct_message'
-                      ? 'DM me'
-                      : target.provider === 'slack'
-                        ? (slackOptions.find(
-                            (option) =>
-                              option.id === target.channelId ||
-                              option.name === target.channelId,
-                          )?.label ?? target.channelId)
-                        : target.provider === 'discord'
-                          ? (discordOptions.find(
-                              (option) => option.id === target.channelId,
+              ) : null}
+              {!listQuery.isPending &&
+              visibleRows.length === 0 &&
+              (filter === 'custom' || (!children && filter === 'all')) ? (
+                <p className="px-4 py-6 text-sm text-muted-foreground">
+                  {normalizedSearch
+                    ? 'No custom automations match your search.'
+                    : 'No custom automations created yet.'}
+                </p>
+              ) : null}
+              {sortAutomationRows(
+                visibleRows.map((row) => {
+                  const environmentName =
+                    row.executionMode === 'fast'
+                      ? null
+                      : (environmentOptions.find(
+                          (environment) => environment.id === row.environmentId,
+                        )?.name ?? 'Environment missing');
+                  const target = targetFromRow(row);
+                  const destinationName =
+                    DESTINATION_OPTIONS.find(
+                      (option) => option.value === target.provider,
+                    )?.label ?? 'No report channel';
+                  const destinationLabel =
+                    target.provider === 'none'
+                      ? ''
+                      : target.mode === 'direct_message'
+                        ? target.provider === 'email'
+                          ? 'me'
+                          : 'DM me'
+                        : target.provider === 'slack'
+                          ? (slackOptions.find(
+                              (option) =>
+                                option.id === target.channelId ||
+                                option.name === target.channelId,
                             )?.label ?? target.channelId)
-                          : target.channelId;
-                const historyFilter = buildCreatorFilterValue({
-                  initiatorKind: 'automation',
-                  initiatorUserId: null,
-                  initiatorAutomation: 'custom_automation',
-                  actorExternalId: row.id,
-                });
-
-                return (
-                  <div
-                    key={row.id}
-                    className="grid grid-cols-[1fr_auto] gap-3 py-3 first:pt-0 last:pb-0 sm:grid-cols-[auto_1fr_auto] sm:items-start"
-                  >
-                    <Switch
-                      aria-label={`Toggle ${row.name}`}
-                      checked={row.enabled}
-                      disabled={busy}
-                      className="col-start-1 row-start-2 mt-0.5 sm:row-start-1"
-                      onCheckedChange={(enabled) =>
-                        toggleMutation.mutate({
-                          id: row.id,
-                          ...writeInputFromRow(row),
-                          enabled,
-                        })
+                          : target.provider === 'discord'
+                            ? (discordOptions.find(
+                                (option) => option.id === target.channelId,
+                              )?.label ?? target.channelId)
+                            : target.channelId;
+                  return (
+                    <AutomationListRow
+                      key={row.id}
+                      icon={Zap}
+                      name={row.name}
+                      description={<p className="line-clamp-2">{row.prompt}</p>}
+                      enabledControl={
+                        <Switch
+                          aria-label={`Toggle ${row.name}`}
+                          checked={row.enabled}
+                          disabled={busy}
+                          className="border-border data-[state=unchecked]:bg-muted"
+                          onCheckedChange={(enabled) =>
+                            toggleMutation.mutate({
+                              id: row.id,
+                              ...writeInputFromRow(row),
+                              enabled,
+                            })
+                          }
+                        />
+                      }
+                      summary={
+                        <>
+                          <span>
+                            {cadenceLabel(row, schedulingTimeZone)}
+                            {environmentName
+                              ? `, in ${environmentName}`
+                              : ''} →
+                          </span>
+                          {target.provider !== 'none' ? (
+                            <BrandIcon
+                              icon={target.provider}
+                              name=""
+                              className="size-4 shrink-0"
+                            />
+                          ) : null}
+                          <span>
+                            {destinationName}
+                            {destinationLabel ? ` ${destinationLabel}` : ''}
+                          </span>
+                          <span>
+                            Created by {row.createdByName ?? 'Unknown'}
+                            {row.lastRunAt ? (
+                              <>
+                                {' · Last run '}
+                                <span
+                                  title={new Date(
+                                    row.lastRunAt,
+                                  ).toLocaleString()}
+                                >
+                                  {formatDistanceToNowCompact(
+                                    new Date(row.lastRunAt),
+                                    { addSuffix: true },
+                                  )}
+                                </span>
+                              </>
+                            ) : null}
+                          </span>
+                          {row.nextRunAt && schedulingTimeZone ? (
+                            <span
+                              className="basis-full"
+                              title={new Date(row.nextRunAt).toISOString()}
+                            >
+                              {nextRunLabel(row.nextRunAt, schedulingTimeZone)}
+                            </span>
+                          ) : null}
+                        </>
+                      }
+                      actions={
+                        <>
+                          <CustomAutomationRunButton
+                            automation={row}
+                            disabled={busy}
+                          />
+                          <BasicTooltip content="Configure">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              disabled={busy}
+                              aria-label={`Configure ${row.name}`}
+                              onClick={() => editAutomation(row)}
+                            >
+                              <Settings2 />
+                            </Button>
+                          </BasicTooltip>
+                          <BasicTooltip content="Delete">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={busy}
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `Delete custom automation “${row.name}”?`,
+                                  )
+                                ) {
+                                  deleteMutation.mutate({ id: row.id });
+                                }
+                              }}
+                              aria-label={`Delete ${row.name}`}
+                            >
+                              <Trash2 />
+                            </Button>
+                          </BasicTooltip>
+                        </>
                       }
                     />
-                    <div className="col-span-2 row-start-1 min-w-0 space-y-1 sm:col-span-1 sm:col-start-2">
-                      <p className="text-sm font-semibold">{row.name}</p>
-                      <p className="flex flex-wrap items-center gap-x-1 text-sm text-muted-foreground">
-                        <span>
-                          {cadenceLabel(row)}
-                          {environmentName
-                            ? `, in ${environmentName}`
-                            : ''} →
-                        </span>
-                        {target.provider !== 'none' ? (
-                          <BrandIcon
-                            icon={target.provider}
-                            name=""
-                            className="size-4 shrink-0"
-                          />
-                        ) : null}
-                        <span>
-                          {destinationName}
-                          {destinationLabel ? ` ${destinationLabel}` : ''}
-                        </span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        Created by {row.createdByName ?? 'Unknown'}
-                        {row.lastRunAt ? (
-                          <>
-                            {' · Last run '}
-                            <span
-                              title={new Date(row.lastRunAt).toLocaleString()}
-                            >
-                              {formatDistanceToNowCompact(
-                                new Date(row.lastRunAt),
-                                { addSuffix: true },
-                              )}
-                            </span>
-                          </>
-                        ) : null}
-                      </p>
-                      {row.latestFastResult ? (
-                        <p className="line-clamp-2 text-xs text-muted-foreground">
-                          {row.latestFastResult}
-                        </p>
-                      ) : null}
-                    </div>
-                    <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
-                      {historyFilter ? (
-                        <BasicTooltip content="View previous runs">
-                          <Button asChild size="icon" variant="ghost">
-                            <Link
-                              href={`/tasks?userId=${encodeURIComponent(historyFilter)}`}
-                              aria-label={`View previous runs for ${row.name}`}
-                            >
-                              <RotateCcwClock />
-                            </Link>
-                          </Button>
-                        </BasicTooltip>
-                      ) : null}
-                      <CustomAutomationRunButton
-                        automation={row}
-                        disabled={busy}
-                      />
-                      <BasicTooltip content="Configure">
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          disabled={busy}
-                          aria-label={`Configure ${row.name}`}
-                          onClick={() => editAutomation(row)}
-                        >
-                          <Settings2 />
-                        </Button>
-                      </BasicTooltip>
-                      <BasicTooltip content="Delete">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Delete custom automation “${row.name}”?`,
-                              )
-                            ) {
-                              deleteMutation.mutate({ id: row.id });
-                            }
-                          }}
-                          aria-label={`Delete ${row.name}`}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </BasicTooltip>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                }),
+                filter !== 'custom' ? children : null,
+              )}
+              {!listQuery.isPending &&
+              visibleRows.length === 0 &&
+              !children &&
+              filter !== 'custom' &&
+              filter !== 'all' ? (
+                <p className="px-4 py-6 text-sm text-muted-foreground">
+                  No automations match your filters.
+                </p>
+              ) : null}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </CardContent>
+      </Card>
     </section>
   );
 }

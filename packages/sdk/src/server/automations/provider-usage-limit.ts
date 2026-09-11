@@ -8,6 +8,7 @@ import {
   getAutomationRuntime,
   getProviderUsageLimitSnapshots,
   recordAutomationRunOutcome,
+  recordBackgroundAutomationResult,
   slackInstallations,
   type ProviderUsageLimitSnapshot,
 } from '@roomote/db/server';
@@ -66,6 +67,7 @@ type ProviderUsageLimitDependencies = {
   resolveDestination: typeof resolveAutomationRuntimeDestination;
   getCommunicationAdapter: typeof getCommunicationProviderAdapter;
   recordOutcome: typeof recordAutomationRunOutcome;
+  recordResult: typeof recordBackgroundAutomationResult;
   now: () => Date;
 };
 
@@ -79,6 +81,7 @@ const defaultDependencies: ProviderUsageLimitDependencies = {
   getCommunicationAdapter: getCommunicationProviderAdapter,
   recordOutcome: (executor, params) =>
     recordAutomationRunOutcome(executor, params),
+  recordResult: (params) => recordBackgroundAutomationResult(params),
   now: () => new Date(),
 };
 
@@ -394,9 +397,9 @@ export async function providerUsageLimitJob(
 
   try {
     if (alerts.length > 0) {
+      const message = buildProviderUsageLimitWarningMessage({ alerts });
       if (destination.provider === 'slack') {
         const notifier = dependencies.createNotifier(slackBotToken!);
-        const message = buildProviderUsageLimitWarningMessage({ alerts });
         const messageTs = await notifier.postMessage({
           channel: destination.channelId,
           ...message,
@@ -421,6 +424,17 @@ export async function providerUsageLimitJob(
           alerts,
         });
       }
+      await dependencies
+        .recordResult({
+          automationKey: 'provider_usage_limit',
+          content: message.text,
+          dedupeKey: `provider-usage-limit:${now.toISOString()}`,
+        })
+        .catch((error) => {
+          console.warn(
+            `${LOG_PREFIX} Failed to record result: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
     }
 
     await dependencies.recordOutcome(db, {

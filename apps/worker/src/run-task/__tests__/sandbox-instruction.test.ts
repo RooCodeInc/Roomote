@@ -6,6 +6,15 @@ import {
 } from '../sandbox-instruction';
 
 describe('sanitizeEnvironmentConfigForPrompt', () => {
+  it('omits repository details when the environment has none', () => {
+    expect(
+      sanitizeEnvironmentConfigForPrompt({
+        name: 'Tools',
+        repositories: [],
+      }),
+    ).toEqual({ name: 'Tools' });
+  });
+
   it('keeps only whitelisted prompt-safe fields', () => {
     const environmentConfig: EnvironmentConfig = {
       name: 'Sandbox',
@@ -133,25 +142,37 @@ describe('sanitizeEnvironmentConfigForPrompt', () => {
 });
 
 describe('buildSandboxInstruction', () => {
-  it('tells the agent that Docker project startup may still be running', () => {
-    const instruction = buildSandboxInstruction(false, {
+  it('tells the agent that Docker projects start automatically and may still be running', () => {
+    const environmentConfig = {
       name: 'Sandbox',
       repositories: [{ repository: 'owner/repo' }],
       docker_projects: [
         {
-          type: 'compose',
+          type: 'compose' as const,
           name: 'app',
           repository: 'owner/repo',
           files: ['compose.yaml'],
         },
       ],
+    };
+    const instruction = buildSandboxInstruction(false, environmentConfig, {
+      backgroundEnvironmentSetupPending: true,
     });
 
     expect(instruction).toContain(
-      'They may still be building or waiting for health checks when your task begins.',
+      'Roomote automatically starts configured Docker projects with Docker Compose during environment setup.',
     );
     expect(instruction).toContain(
-      'Run `docker compose ls` to find each Roomote-managed project name and its config files',
+      'Do not run `docker compose up`, build the projects, or start Docker yourself.',
+    );
+    expect(instruction).toContain(
+      'an empty listing while `.roomote/setup-status.json` is still `running` means startup is still in progress, not that Roomote skipped it',
+    );
+    expect(instruction).toContain(
+      '- app: `/tmp/roomote-docker-projects/roomote-app.log`',
+    );
+    expect(instruction).toContain(
+      're-read `.roomote/setup-status.json` every 10-15 seconds',
     );
     expect(instruction).toContain(
       '`docker compose --project-name <name> --file <file> ... ps`',
@@ -164,6 +185,19 @@ describe('buildSandboxInstruction', () => {
     );
     expect(instruction).not.toContain(
       'were built and started with Docker Compose before your task began',
+    );
+
+    const settledInstruction = buildSandboxInstruction(
+      false,
+      environmentConfig,
+      { backgroundEnvironmentSetupPending: false },
+    );
+
+    expect(settledInstruction).not.toContain(
+      'Automatic Docker project startup may still be building images',
+    );
+    expect(settledInstruction).not.toContain(
+      're-read `.roomote/setup-status.json` every 10-15 seconds',
     );
   });
 
@@ -288,6 +322,22 @@ describe('buildSandboxInstruction', () => {
     expect(renderedInstruction).not.toContain('agent-browser');
   });
 
+  it('encourages necessary system package installs within sandbox boundaries', () => {
+    const instruction = buildSandboxInstruction(false) ?? '';
+
+    expect(instruction).toContain('passwordless `sudo`');
+    expect(instruction).toContain(
+      'When a missing system dependency blocks authorized work and `apt-get` is available',
+    );
+    expect(instruction).toContain(
+      'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y <package>',
+    );
+    expect(instruction).toContain(
+      'These changes affect only this sandbox, not the host, and do not persist to other tasks or production',
+    );
+    expect(instruction).toContain('avoid unnecessary installs');
+  });
+
   it('only mentions detached background processes when detached commands exist', () => {
     const instruction = buildSandboxInstruction(false, {
       name: 'Sandbox',
@@ -341,7 +391,7 @@ describe('buildSandboxInstruction', () => {
       }) ?? '';
 
     expect(pendingInstruction).toContain(
-      'run in the background and may still be executing while you work',
+      'runs automatically in the background and may still be executing while you work',
     );
     expect(pendingInstruction).toContain('.roomote/setup-status.json');
     expect(pendingInstruction).toContain('.roomote/setup-logs/');

@@ -1484,7 +1484,10 @@ describe('opencode-server bootstrap', () => {
       judge: expect.objectContaining({ model: 'test-provider/main-model' }),
       advisor: expect.objectContaining({ model: 'test-provider/main-model' }),
       architect: expect.objectContaining({ mode: 'primary' }),
-      general: { tools: slackPostingToolExclusions },
+      general: {
+        disable: true,
+        tools: slackPostingToolExclusions,
+      },
     });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.instructions).toEqual([
@@ -1535,7 +1538,10 @@ describe('opencode-server bootstrap', () => {
         model: 'test-provider/override-model',
       }),
       architect: expect.objectContaining({ mode: 'primary' }),
-      general: { tools: slackPostingToolExclusions },
+      general: {
+        disable: true,
+        tools: slackPostingToolExclusions,
+      },
     });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.model).toBe('test-provider/override-model');
@@ -1604,7 +1610,7 @@ describe('opencode-server bootstrap', () => {
     expect(runtimeEnv).not.toHaveProperty('R_VISION_MODEL');
   });
 
-  it('excludes the Slack-posting tools from every generated subagent and the built-in general agent', async () => {
+  it('disables general and excludes Slack-posting tools from generated subagents', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1621,7 +1627,10 @@ describe('opencode-server bootstrap', () => {
     });
 
     const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
-      agent?: Record<string, { tools?: Record<string, boolean> }>;
+      agent?: Record<
+        string,
+        { disable?: boolean; tools?: Record<string, boolean> }
+      >;
     };
 
     for (const agentName of [
@@ -1636,9 +1645,8 @@ describe('opencode-server bootstrap', () => {
       );
     }
 
-    // The built-in general agent override only strips the Slack-posting
-    // tools; anything more would change the default background subagent.
     expect(config.agent?.general).toEqual({
+      disable: true,
       tools: slackPostingToolExclusions,
     });
 

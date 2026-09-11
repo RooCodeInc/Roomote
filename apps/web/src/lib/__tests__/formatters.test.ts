@@ -4,8 +4,21 @@ import {
   formatNumber,
   formatCurrency,
   formatInferenceCost,
+  formatTokens,
   formatTimeZone,
 } from '../formatters';
+
+describe('formatTokens', () => {
+  it.each([
+    [0, '0'],
+    [42, '42'],
+    [1_230, '1.23K'],
+    [1_230_000, '1.23M'],
+    [4_210_000_000, '4.21B'],
+  ])('formats %s tokens as %s', (value, expected) => {
+    expect(formatTokens(value)).toBe(expected);
+  });
+});
 
 describe('formatInferenceCost', () => {
   it.each([

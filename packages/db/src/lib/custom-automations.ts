@@ -16,6 +16,7 @@ import {
   NO_REPOSITORIES,
   MAX_CUSTOM_AUTOMATIONS,
   type ReasoningEffort,
+  type AutomationResultPriority,
 } from '@roomote/types';
 
 import { type DatabaseOrTransaction, db } from '../db';
@@ -36,6 +37,7 @@ export type CustomAutomationWriteInput = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority?: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression?: string | null;
   /** Optional provider/model launch override; null uses the deployment default. */
@@ -241,6 +243,7 @@ export async function createCustomAutomation(
       name,
       prompt,
       enabled: input.enabled,
+      resultPriority: input.resultPriority ?? 'normal',
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
@@ -303,6 +306,7 @@ export async function updateCustomAutomation(
       name,
       prompt,
       enabled: input.enabled,
+      resultPriority: input.resultPriority ?? existing.resultPriority,
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,

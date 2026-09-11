@@ -41,7 +41,7 @@
   "navigation": {
     "groups": [
       {
-        "group": "Getting Started",
+        "group": "Getting started",
         "pages": [
           "index",
           "self-hosting",
@@ -59,7 +59,8 @@
           "fast-sessions",
           "session-secrets",
           "memory",
-          "file-attachments"
+          "file-attachments",
+          "voice"
         ]
       },
       {
@@ -67,10 +68,10 @@
         "pages": ["cookbook/index", "cookbook/template"]
       },
       {
-        "group": "Provider Configuration",
+        "group": "Provider configuration",
         "pages": [
           {
-            "group": "Models and Inference",
+            "group": "Models and inference",
             "root": "models",
             "expanded": false,
             "pages": [
@@ -109,6 +110,7 @@
             "expanded": false,
             "pages": [
               "communications",
+              "providers/communications/agentmail",
               "providers/communications/discord",
               "providers/communications/microsoft-teams",
               "providers/communications/slack",
@@ -116,7 +118,7 @@
             ]
           },
           {
-            "group": "Source Control",
+            "group": "Source control",
             "root": "source-control",
             "expanded": false,
             "pages": [
@@ -173,12 +175,13 @@
           "integrations/supabase",
           "integrations/supermemory",
           "integrations/vercel",
+          "integrations/voice",
           "integrations/x",
           "integrations/zero"
         ]
       },
       {
-        "group": "Roomote Configuration",
+        "group": "Roomote configuration",
         "pages": [
           "agent-guidance",
           "anonymous-analytics",

@@ -19,6 +19,7 @@ const wakeup = (
   schedule: { mode: 'interval', everyMinutes: 5 },
   scheduleDescription: 'Every 5 minutes',
   reportPolicy: 'only_when_notable',
+  internal: false,
   status: 'active',
   runCount: 0,
   maxRuns: null,
@@ -79,6 +80,21 @@ describe('SessionWakeupList', () => {
     expect(wakeups[0]?.id).toBe('later');
   });
 
+  it('hides only explicitly internal wakeups, not timers with check-in wording', () => {
+    render(
+      <SessionWakeupList
+        wakeups={[
+          wakeup({ id: 'visible', name: 'Task check-in' }),
+          wakeup({ id: 'internal', name: 'Ordinary reminder', internal: true }),
+        ]}
+        canCancel
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('Task check-in')).toBeInTheDocument();
+    expect(screen.queryByText('Ordinary reminder')).not.toBeInTheDocument();
+  });
+
   it('counts down with the server correction and notifies once per due occurrence without inventing the next run', async () => {
     const onDue = vi.fn();
     const item = wakeup({ nextRunAt: new Date(now + 302_000).toISOString() });
@@ -131,6 +147,9 @@ describe('SessionWakeupList', () => {
     render(
       <SessionWakeupList wakeups={[wakeup()]} canCancel onCancel={onCancel} />,
     );
+    expect(
+      screen.getByRole('list', { name: 'Scheduled timers' }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel Check build' }));
     const button = screen.getByRole('button', {
       name: 'Cancelling Check build',

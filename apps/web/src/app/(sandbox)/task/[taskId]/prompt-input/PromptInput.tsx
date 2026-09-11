@@ -479,13 +479,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         const result = await trpcClient.taskRuns.cancel.mutate({
           taskId,
           runId,
+          terminate: false,
         });
 
         if (!result.success) {
-          throw new Error(result.error);
+          toast.error(result.error);
         }
       } catch (err) {
         console.error('[sandbox] cancelTask fallback error:', err);
+        toast.error('Failed to stop task. Please try again.');
       } finally {
         cancellingRef.current = false;
       }

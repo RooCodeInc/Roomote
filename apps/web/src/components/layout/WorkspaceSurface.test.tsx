@@ -17,7 +17,7 @@ describe('Workspace detail layout', () => {
 
   it('renders arbitrary task or session header content in the shared header', () => {
     render(
-      <WorkspaceHeader>
+      <WorkspaceHeader actions={<span>Actions</span>}>
         <h1>Conversation title</h1>
         <span>Context</span>
       </WorkspaceHeader>,
@@ -27,5 +27,6 @@ describe('Workspace detail layout', () => {
       screen.getByRole('heading', { name: 'Conversation title' }),
     ).toBeInTheDocument();
     expect(screen.getByText('Context')).toBeInTheDocument();
+    expect(screen.getByText('Actions')).toBeInTheDocument();
   });
 });

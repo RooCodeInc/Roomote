@@ -565,22 +565,64 @@
     {
       "idx": 80,
       "version": "7",
-      "when": 1788983310655,
-      "tag": "0080_workable_forgotten_one",
+      "when": 1789052095386,
+      "tag": "0080_natural_ma_gnuci",
       "breakpoints": true
     },
     {
       "idx": 81,
       "version": "7",
-      "when": 1788983310656,
-      "tag": "0081_familiar_steel_serpent",
+      "when": 1789059502690,
+      "tag": "0081_agentmail_channel",
       "breakpoints": true
     },
     {
       "idx": 82,
       "version": "7",
-      "when": 1789144471729,
-      "tag": "0082_wooden_cardiac",
+      "when": 1789097339420,
+      "tag": "0082_public_purifiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1789114124326,
+      "tag": "0083_nifty_sir_ram",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1789133820571,
+      "tag": "0084_confused_frightful_four",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1789149625129,
+      "tag": "0085_chubby_shinko_yamashiro",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1789158001521,
+      "tag": "0086_workable_forgotten_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1789158001553,
+      "tag": "0087_familiar_steel_serpent",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1789158001585,
+      "tag": "0088_wooden_cardiac",
       "breakpoints": true
     }
   ]

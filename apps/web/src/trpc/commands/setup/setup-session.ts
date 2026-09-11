@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import { type FastAgentTurnAdapter } from '@roomote/cloud-agents/server';
 import { buildFastAgentArtifactCreator } from '@roomote/sdk/server';
+import { buildFastAgentSetupAdapter } from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -22,9 +22,19 @@ import {
   normalizeSetupNewState,
   normalizeSetupNewSetupSession,
   RunStatus,
+  SETUP_INTEGRATION_CATEGORIES,
+  SETUP_INTEGRATIONS,
+  SETUP_INTEGRATIONS_QUESTION_ID,
+  SETUP_INTEGRATIONS_CONTINUE_OPTION,
+  getSetupIntegrationQuestionId,
+  isSetupIntegrationDiscoveryQuestionId,
+  matchSetupIntegrationAnswers,
+  parseAcpRequestUserInputPayload,
+  parseAcpRequestUserInputResponsePayload,
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type AutomationRecommendationBatch,
+  type FastAgentSetupTurnContext,
 } from '@roomote/types';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -51,6 +61,7 @@ const SETUP_SESSION_ADVISORY_LOCK = 'setup-session';
 const SETUP_SESSION_TITLE = 'Set up Roomote';
 
 type SetupPlatformEventKind =
+  | 'setup_state_changed'
   | 'session_creation'
   | 'provider_selection'
   | 'source_connection'
@@ -106,9 +117,9 @@ async function readSetupNewState() {
   return normalizeSetupNewState(settings?.setupNewState ?? {});
 }
 
-async function findSetupSessionConversation(
-  auth: UserAuthSuccess,
-): Promise<SetupSessionConversation | null> {
+async function findSetupSessionConversationRecord(): Promise<
+  (SetupSessionConversation & { ownerUserId: string | null }) | null
+> {
   const state = await readSetupNewState();
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
   if (!setupSession) return null;
@@ -119,20 +130,25 @@ async function findSetupSessionConversation(
       sessionId: sessions.id,
       conversationId: fastAgentConversations.conversationId,
       workspaceId: fastAgentConversations.workspaceId,
+      ownerUserId: fastAgentConversations.userId,
     })
     .from(sessions)
     .innerJoin(
       fastAgentConversations,
       eq(sessions.fastConversationId, fastAgentConversations.id),
     )
-    .where(
-      and(
-        eq(sessions.id, setupSession.sessionId),
-        eq(fastAgentConversations.userId, auth.userId),
-      ),
-    )
+    .where(eq(sessions.id, setupSession.sessionId))
     .limit(1);
   return row ? { ...row, workflowVersion: setupSession.workflowVersion } : null;
+}
+
+async function findSetupSessionConversation(
+  auth: UserAuthSuccess,
+): Promise<SetupSessionConversation | null> {
+  const row = await findSetupSessionConversationRecord();
+  if (!row || row.ownerUserId !== auth.userId) return null;
+  const { ownerUserId: _, ...conversation } = row;
+  return conversation;
 }
 
 async function persistSetupSessionReceipt(
@@ -141,6 +157,10 @@ async function persistSetupSessionReceipt(
     kind: SetupReceiptKind;
     fingerprint: string;
     text: string;
+    presentation: {
+      label: string;
+      iconKey: string;
+    };
     payload?: Record<string, unknown>;
     ts?: number;
   },
@@ -191,6 +211,9 @@ function buildSetupEventTurnId(input: {
 function buildSetupSnapshot(input: {
   status: Awaited<ReturnType<typeof getSetupNewStatusCommand>>;
   hasSuccessfulStarterLaunch: boolean;
+  integrationDiscovery: Awaited<
+    ReturnType<typeof readSetupIntegrationDiscovery>
+  >;
 }): string {
   const state = normalizeSetupNewState(input.status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
@@ -200,6 +223,7 @@ function buildSetupSnapshot(input: {
   );
 
   return JSON.stringify({
+    integrationDiscovery: input.integrationDiscovery,
     rail: deriveSetupRailMilestones(input.status),
     sourceControl: {
       selectedProvider: state.sourceControlProvider,
@@ -225,27 +249,159 @@ function buildSetupSnapshot(input: {
   });
 }
 
-async function resolveSetupSnapshot(auth: UserAuthSuccess): Promise<string> {
+async function resolveSetupSnapshot(
+  auth: UserAuthSuccess,
+  conversation?: SetupSessionConversation,
+): Promise<string> {
   const status = await getSetupNewStatusCommand(auth);
   const setupSession = normalizeSetupNewSetupSession(
     status.setupNewState.setupSession,
   );
   return buildSetupSnapshot({
     status,
+    integrationDiscovery: await readSetupIntegrationDiscovery(
+      auth,
+      {},
+      conversation,
+    ),
     hasSuccessfulStarterLaunch: setupSession?.starterTaskSelection
       ? await hasSuccessfulSetupSessionTaskLaunch(
           auth,
           setupSession.starterTaskSelection.selectedAt,
+          conversation,
         )
       : false,
   });
 }
 
+function buildSetupTurnContext(
+  conversation: SetupSessionConversation,
+  setupSnapshot: string,
+): FastAgentSetupTurnContext {
+  return {
+    sessionId: conversation.sessionId,
+    fastConversationId: conversation.fastConversationId,
+    setupSnapshot,
+    starterTaskOptions: SETUP_STARTER_TASKS.map((task) => ({
+      id: task.id,
+      label: task.title,
+      description: task.description,
+    })),
+  };
+}
+
+async function readSetupIntegrationDiscovery(
+  auth: UserAuthSuccess,
+  suppliedAnswers: AcpRequestUserInputAnswers = {},
+  conversationOverride?: SetupSessionConversation,
+) {
+  const state = await readSetupNewState();
+  const setupSession = normalizeSetupNewSetupSession(state.setupSession);
+  const conversation =
+    conversationOverride ?? (await findSetupSessionConversation(auth));
+  const messages = conversation
+    ? await db
+        .select({
+          eventType: fastAgentMessages.eventType,
+          payload: fastAgentMessages.payload,
+        })
+        .from(fastAgentMessages)
+        .where(
+          and(
+            eq(
+              fastAgentMessages.conversationId,
+              conversation.fastConversationId,
+            ),
+            sql`${fastAgentMessages.eventType} IN (${ACP_ENVELOPE_EVENT_TYPES.RequestUserInput}, ${ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse})`,
+          ),
+        )
+        .orderBy(fastAgentMessages.ts, fastAgentMessages.id)
+    : [];
+  const requests = new Map<string, AcpRequestUserInputPayload>();
+  const answers: AcpRequestUserInputAnswers = { ...suppliedAnswers };
+  let finalMatches: string[] = [];
+  let skipped = false;
+  for (const message of messages) {
+    if (message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput) {
+      const request = parseAcpRequestUserInputPayload(message.payload);
+      if (request) {
+        requests.set(request.requestId, request);
+        if (request.preset === 'setup_integrations') {
+          finalMatches = request.questions.flatMap(
+            (question) =>
+              question.options?.flatMap((option) =>
+                option.id ? [option.id] : [],
+              ) ?? [],
+          );
+        }
+      }
+    }
+  }
+  // Resolve by request ID rather than assuming distinct or monotonic timestamps.
+  for (const message of messages) {
+    if (
+      message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
+    ) {
+      const response = parseAcpRequestUserInputResponsePayload(message.payload);
+      const request = response ? requests.get(response.requestId) : undefined;
+      if (!response || !request || request.preset) continue;
+      if (response.resolution === 'cancelled') {
+        if (
+          request.questions.some((question) =>
+            isSetupIntegrationDiscoveryQuestionId(question.id),
+          )
+        )
+          skipped = true;
+        continue;
+      }
+      for (const category of SETUP_INTEGRATION_CATEGORIES) {
+        const questionId = getSetupIntegrationQuestionId(category.id);
+        if (request.questions.some((question) => question.id === questionId)) {
+          const answer = response.answers[questionId];
+          if (!answer) continue;
+          if (
+            answer.answers.some((value) =>
+              ['skip', 'skip for now'].includes(value.trim().toLowerCase()),
+            )
+          )
+            skipped = true;
+          // Persisted user answers take precedence over model-extracted prose preferences.
+          answers[questionId] = answer;
+        }
+      }
+    }
+  }
+  const matches = matchSetupIntegrationAnswers(answers);
+  const completed =
+    setupSession?.integrationDiscoveryCompletedAt !== null ||
+    Boolean(setupSession?.starterTaskSelection);
+  return {
+    completed,
+    skipped,
+    ...matches,
+    matchedIntegrationIds: SETUP_INTEGRATIONS.filter(
+      (integration) =>
+        finalMatches.includes(integration.id) ||
+        matches.matchedIntegrationIds.includes(integration.id),
+    ).map((integration) => integration.id),
+    hasInputRequest: requests.size > 0,
+    categories: SETUP_INTEGRATION_CATEGORIES.map((category) => ({
+      ...category,
+      questionId: getSetupIntegrationQuestionId(category.id),
+      integrations: SETUP_INTEGRATIONS.filter((integration) =>
+        (category.integrationIds as readonly string[]).includes(integration.id),
+      ),
+    })),
+  };
+}
+
 async function hasSuccessfulSetupSessionTaskLaunch(
   auth: UserAuthSuccess,
   selectedAt: string,
+  conversationOverride?: SetupSessionConversation,
 ): Promise<boolean> {
-  const conversation = await findSetupSessionConversation(auth);
+  const conversation =
+    conversationOverride ?? (await findSetupSessionConversation(auth));
   if (!conversation) return false;
   const [run] = await db
     .select({ id: taskRuns.id })
@@ -299,38 +455,6 @@ function deriveSetupRailMilestones(
   };
 }
 
-async function buildSetupSessionAdapterExtensions(
-  auth: UserAuthSuccess,
-): Promise<Partial<FastAgentTurnAdapter>> {
-  return {
-    resolveUserInputPreset: async (preset) => {
-      if (preset !== 'setup_starter_tasks') {
-        throw new Error('Unsupported setup input preset.');
-      }
-      await assertSetupStarterWorkReady(auth);
-      return [
-        {
-          id: 'setup-starter-tasks',
-          header: 'First work',
-          question: 'What should Roomote work on first?',
-          isOther: false,
-          isSecret: false,
-          multiple: true,
-          options: SETUP_STARTER_TASKS.map((task) => ({
-            label: task.title,
-            description: task.description,
-          })),
-        },
-      ];
-    },
-    assertTaskLaunch: () =>
-      assertSetupStarterWorkReady(auth, {
-        requireStarterSelection: true,
-        requireCompute: true,
-      }),
-  };
-}
-
 export async function scheduleSetupPlatformEvent(
   auth: UserAuthSuccess,
   input: {
@@ -362,6 +486,9 @@ async function buildSetupPlatformEventTurn(
     prepared?.conversation ?? (await findSetupSessionConversation(auth));
   if (!conversation) return null;
 
+  const setupSnapshot =
+    prepared?.setupSnapshot ?? (await resolveSetupSnapshot(auth));
+  const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
   const currentMessageId = buildSetupEventTurnId({
     sessionId: conversation.sessionId,
     workflowVersion: conversation.workflowVersion,
@@ -400,10 +527,14 @@ async function buildSetupPlatformEventTurn(
       conversationId: conversation.fastConversationId,
       turnId: currentMessageId,
     },
-    adapterExtensions: await buildSetupSessionAdapterExtensions(auth),
     setupSession: true,
-    setupSnapshot:
-      prepared?.setupSnapshot ?? (await resolveSetupSnapshot(auth)),
+    setupContext,
+    adapterExtensions: buildFastAgentSetupAdapter(setupContext, {
+      onIntegrationDiscoveryCompleted: async () => {
+        await reconcileSetupPlatformEvents(auth);
+      },
+    }),
+    durableSessionId: conversation.fastConversationId,
   };
 }
 
@@ -413,13 +544,15 @@ async function buildSetupPlatformEventTurn(
  */
 export async function reconcileSetupPlatformEvents(
   auth: UserAuthSuccess,
+  options: { conversation?: SetupSessionConversation } = {},
 ): Promise<boolean> {
   assertAdmin(auth);
   const status = await getSetupNewStatusCommand(auth);
   const state = normalizeSetupNewState(status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
   if (!setupSession) return status.setupCompletedAt != null;
-  const conversation = await findSetupSessionConversation(auth);
+  const conversation =
+    options.conversation ?? (await findSetupSessionConversation(auth));
   if (!conversation) return status.setupCompletedAt != null;
   const setupCompleted =
     status.setupCompletedAt != null ||
@@ -428,11 +561,18 @@ export async function reconcileSetupPlatformEvents(
     ? await hasSuccessfulSetupSessionTaskLaunch(
         auth,
         setupSession.starterTaskSelection.selectedAt,
+        conversation,
       )
     : false;
+  const integrationDiscovery = await readSetupIntegrationDiscovery(
+    auth,
+    {},
+    conversation,
+  );
   const setupSnapshot = buildSetupSnapshot({
     status,
     hasSuccessfulStarterLaunch,
+    integrationDiscovery,
   });
 
   const connected = status.sourceControlSetup.providers.filter(
@@ -455,6 +595,10 @@ export async function reconcileSetupPlatformEvents(
       {
         kind: 'source_connection',
         fingerprint,
+        presentation: {
+          label: 'Asked to connect source control',
+          iconKey: 'git-branch',
+        },
         text: formatSourceConnectionReceipt({
           providerLabels: synchronized.map((provider) => provider.label),
           repositoryCount,
@@ -479,6 +623,10 @@ export async function reconcileSetupPlatformEvents(
       {
         kind: 'compute_readiness',
         fingerprint: state.computeProvider,
+        presentation: {
+          label: 'Asked to set up a sandbox',
+          iconKey: 'container',
+        },
         text: formatComputeReadinessReceipt(providerLabel),
         payload: { provider: state.computeProvider },
       },
@@ -616,13 +764,27 @@ export async function reconcileSetupPlatformEvents(
     { allowAfterSetupCompletion: true },
   );
 
-  for (const event of events) {
-    const turn = await buildSetupPlatformEventTurn(auth, event, {
-      conversation,
-      setupSnapshot,
-    });
-    if (turn) scheduleWebFastAgentTurn(turn);
-  }
+  const changes = events.map((event) => ({
+    type: event.kind,
+    ...event.payload,
+  }));
+  const fingerprint = createHash('sha256')
+    .update(JSON.stringify({ setupSnapshot, changes }))
+    .digest('hex')
+    .slice(0, 24);
+  const turn = await buildSetupPlatformEventTurn(
+    auth,
+    {
+      kind: 'setup_state_changed',
+      fingerprint,
+      payload: {
+        snapshot: JSON.parse(setupSnapshot),
+        changes,
+      },
+    },
+    { conversation, setupSnapshot },
+  );
+  if (turn) scheduleWebFastAgentTurn(turn);
   return setupCompleted;
 }
 
@@ -661,6 +823,10 @@ export async function persistSetupRecommendationApplicationReceipt(
   await persistSetupSessionReceipt(auth, {
     kind: 'recommendation_application',
     fingerprint: `${batch.inputFingerprint}:${action}`,
+    presentation: {
+      label: 'Suggested things to automate',
+      iconKey: 'zap',
+    },
     text: formatRecommendationApplicationReceipt({ action, enabledTitles }),
     payload: {
       action,
@@ -802,10 +968,22 @@ async function persistSetupPresetResponse(input: {
 }): Promise<void> {
   assertAdmin(input.auth);
   const preset = input.request.payload.preset;
-  if (preset !== 'setup_starter_tasks') {
+  if (preset !== 'setup_starter_tasks' && preset !== 'setup_integrations') {
     throw new Error('The setup starter-task preset is missing.');
   }
-  await assertSetupStarterWorkReady(input.auth);
+  if (preset === 'setup_starter_tasks')
+    await assertSetupStarterWorkReady(input.auth);
+  else if (
+    input.answers[SETUP_INTEGRATIONS_QUESTION_ID]?.answers.length !== 1 ||
+    !(
+      [
+        SETUP_INTEGRATIONS_CONTINUE_OPTION.id,
+        SETUP_INTEGRATIONS_CONTINUE_OPTION.label,
+      ] as readonly string[]
+    ).includes(input.answers[SETUP_INTEGRATIONS_QUESTION_ID]!.answers[0]!)
+  ) {
+    throw new Error('Continue with or without connecting tools.');
+  }
 
   await db.transaction(async (tx) => {
     await tx.execute(
@@ -860,7 +1038,7 @@ async function persistSetupPresetResponse(input: {
         }) ?? [],
       ),
     ];
-    if (taskIds.length === 0) {
+    if (preset === 'setup_starter_tasks' && taskIds.length === 0) {
       throw new Error('Select at least one starter task.');
     }
     const selectedAt = new Date();
@@ -868,11 +1046,15 @@ async function persistSetupPresetResponse(input: {
       ...state,
       setupSession: {
         ...setupSession,
-        starterTaskSelection: {
-          requestId: input.request.payload.requestId,
-          taskIds,
-          selectedAt: selectedAt.toISOString(),
-        },
+        ...(preset === 'setup_integrations'
+          ? { integrationDiscoveryCompletedAt: selectedAt.toISOString() }
+          : {
+              starterTaskSelection: {
+                requestId: input.request.payload.requestId,
+                taskIds,
+                selectedAt: selectedAt.toISOString(),
+              },
+            }),
       },
     };
     const now = new Date();
@@ -900,10 +1082,17 @@ async function persistSetupPresetResponse(input: {
           }),
         },
       ],
-      // The transcript client needs this control event to resolve and remove
-      // the input card. FastSessionTranscript filters response event types
-      // from rendered chat, so it remains visually hidden.
-      metadata: { visibleInTranscript: true },
+      metadata: {
+        visibleInTranscript: true,
+        userId: input.auth.userId,
+        ...(input.auth.name ? { userName: input.auth.name } : {}),
+        ...(input.auth.primaryEmail
+          ? { userEmail: input.auth.primaryEmail }
+          : {}),
+        ...(input.auth.resource?.imageUrl
+          ? { userImageUrl: input.auth.resource.imageUrl }
+          : {}),
+      },
       payload: {
         requestId: input.request.payload.requestId,
         sessionId: input.fastConversationId,
@@ -914,29 +1103,59 @@ async function persistSetupPresetResponse(input: {
       },
       source: 'web',
     });
-    await tx
-      .insert(fastAgentMessages)
-      .values({
-        conversationId: input.fastConversationId,
-        ...buildSetupReceiptMessage({
-          sessionId: setupSession.sessionId,
-          workflowVersion: setupSession.workflowVersion,
-          userId: input.auth.userId,
-          kind: 'starter_selection',
-          fingerprint: input.request.payload.requestId,
-          text: formatStarterSelectionReceipt(
-            taskIds.map(
-              (taskId) =>
-                SETUP_STARTER_TASKS.find((task) => task.id === taskId)!.title,
+    if (preset === 'setup_starter_tasks')
+      await tx
+        .insert(fastAgentMessages)
+        .values({
+          conversationId: input.fastConversationId,
+          ...buildSetupReceiptMessage({
+            sessionId: setupSession.sessionId,
+            workflowVersion: setupSession.workflowVersion,
+            userId: input.auth.userId,
+            kind: 'starter_selection',
+            fingerprint: input.request.payload.requestId,
+            requestId: input.request.payload.requestId,
+            presentation: {
+              label: 'Suggested initial tasks',
+              iconKey: 'list-checks',
+            },
+            text: formatStarterSelectionReceipt(
+              taskIds.map(
+                (taskId) =>
+                  SETUP_STARTER_TASKS.find((task) => task.id === taskId)!.title,
+              ),
             ),
-          ),
-          payload: { taskIds },
-          ts: now.getTime(),
-        }),
-      })
-      .onConflictDoNothing({
-        target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
-      });
+            payload: { taskIds },
+            ts: now.getTime(),
+          }),
+        })
+        .onConflictDoNothing({
+          target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+        });
+    else
+      await tx
+        .insert(fastAgentMessages)
+        .values({
+          conversationId: input.fastConversationId,
+          ...buildSetupReceiptMessage({
+            sessionId: setupSession.sessionId,
+            workflowVersion: setupSession.workflowVersion,
+            userId: input.auth.userId,
+            kind: 'integration_discovery',
+            fingerprint: input.request.payload.requestId,
+            requestId: input.request.payload.requestId,
+            presentation: {
+              label: 'Suggested integrations',
+              iconKey: 'plug',
+            },
+            text: 'Suggested integrations.',
+            payload: {},
+            ts: now.getTime(),
+          }),
+        })
+        .onConflictDoNothing({
+          target: [fastAgentMessages.conversationId, fastAgentMessages.eventId],
+        });
   });
 }
 
@@ -949,7 +1168,21 @@ export async function submitSetupSessionUserInputCommand(
   },
 ): Promise<{ success: true }> {
   assertAdmin(auth);
-  const setupConversation = await findSetupSessionConversation(auth);
+  let setupConversation = await findSetupSessionConversation(auth);
+  if (!setupConversation) {
+    const [settings] = await db
+      .select({ setupCompletedAt: deploymentSettings.setupCompletedAt })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .limit(1);
+    if (settings?.setupCompletedAt) {
+      const row = await findSetupSessionConversationRecord();
+      if (row) {
+        const { ownerUserId: _, ...conversation } = row;
+        setupConversation = conversation;
+      }
+    }
+  }
   if (
     !setupConversation ||
     (input.sessionId !== setupConversation.sessionId &&
@@ -957,14 +1190,61 @@ export async function submitSetupSessionUserInputCommand(
   ) {
     throw new Error('This input request does not belong to the setup Session.');
   }
+  const setupSnapshot = await resolveSetupSnapshot(auth, setupConversation);
   return submitFastSessionUserInputCommand(auth, input, {
-    adapterExtensions: await buildSetupSessionAdapterExtensions(auth),
-    setupSnapshot: await resolveSetupSnapshot(auth),
+    setupContext: buildSetupTurnContext(setupConversation, setupSnapshot),
     setupSession: true,
     persistSetupPresetResponse: async (details) => {
       const result = await persistSetupPresetResponse({ auth, ...details });
-      await reconcileSetupPlatformEvents(auth);
+      await reconcileSetupPlatformEvents(auth, {
+        conversation: setupConversation,
+      });
       return result;
     },
   });
+}
+
+/** Attach setup capabilities to ordinary replies as well as structured input turns. */
+export async function resolveSetupSessionTurnContext(
+  auth: UserAuthSuccess,
+  sessionId: string,
+) {
+  const [settings] = await db
+    .select({
+      setupCompletedAt: deploymentSettings.setupCompletedAt,
+      setupNewState: deploymentSettings.setupNewState,
+    })
+    .from(deploymentSettings)
+    .where(eq(deploymentSettings.id, 'default'))
+    .limit(1);
+  if (settings?.setupCompletedAt) return null;
+  const state = normalizeSetupNewState(settings?.setupNewState ?? {});
+  const setupSession = normalizeSetupNewSetupSession(state.setupSession);
+  if (!setupSession) return null;
+  const [linkedSession] = await db
+    .select({ fastConversationId: sessions.fastConversationId })
+    .from(sessions)
+    .where(eq(sessions.id, setupSession.sessionId))
+    .limit(1);
+  if (
+    setupSession.sessionId !== sessionId &&
+    linkedSession?.fastConversationId !== sessionId
+  )
+    return null;
+  const conversation = await findSetupSessionConversation(auth);
+  if (!conversation)
+    throw new Error('Only the setup Session owner can reply during setup.');
+  assertAdmin(auth);
+  const setupSnapshot = await resolveSetupSnapshot(auth);
+  const setupContext = buildSetupTurnContext(conversation, setupSnapshot);
+  return {
+    adapterExtensions: buildFastAgentSetupAdapter(setupContext, {
+      onIntegrationDiscoveryCompleted: async () => {
+        await reconcileSetupPlatformEvents(auth);
+      },
+    }),
+    setupSnapshot,
+    setupContext,
+    setupSession: true as const,
+  };
 }

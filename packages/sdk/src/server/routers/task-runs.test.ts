@@ -18,6 +18,7 @@ const {
   mockRecordTaskInferenceUsage,
   mockClaimShowWidgetFallbackDelivery,
   mockClearPendingSlackRequestUserInput,
+  mockClearPendingCommunicationRequestUserInput,
   mockReleaseShowWidgetFallbackDelivery,
   mockClaimMissingChatCloseoutFallbackDelivery,
   mockReleaseMissingChatCloseoutFallbackDelivery,
@@ -37,6 +38,7 @@ const {
   mockRecordTaskInferenceUsage: vi.fn(),
   mockClaimShowWidgetFallbackDelivery: vi.fn(),
   mockClearPendingSlackRequestUserInput: vi.fn(),
+  mockClearPendingCommunicationRequestUserInput: vi.fn(),
   mockReleaseShowWidgetFallbackDelivery: vi.fn(),
   mockClaimMissingChatCloseoutFallbackDelivery: vi.fn(),
   mockReleaseMissingChatCloseoutFallbackDelivery: vi.fn(),
@@ -55,6 +57,17 @@ vi.mock('@roomote/communication/messages', () => ({
   getCommunicationMessages: mockGetCommunicationMessages,
   queueCommunicationMessage: mockQueueCommunicationMessage,
 }));
+
+vi.mock(
+  '@roomote/communication/request-user-input',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('@roomote/communication/request-user-input')
+    >()),
+    clearPendingCommunicationRequestUserInput:
+      mockClearPendingCommunicationRequestUserInput,
+  }),
+);
 
 vi.mock('@roomote/slack', () => ({
   clearPendingSlackRequestUserInput: mockClearPendingSlackRequestUserInput,
@@ -345,6 +358,24 @@ describe('taskRunsRouter queue message guards', () => {
     );
   });
 
+  it('clears a communication prompt only for the matching source run', async () => {
+    mockClearPendingCommunicationRequestUserInput.mockResolvedValueOnce(true);
+
+    await expect(
+      createRunCaller().clearPendingCommunicationRequestUserInput({
+        runId: 42,
+        provider: 'discord',
+        conversationId: 'channel-1',
+        requestId: 'rui:session:turn:call',
+      }),
+    ).resolves.toBe(true);
+    expect(mockClearPendingCommunicationRequestUserInput).toHaveBeenCalledWith(
+      'discord',
+      'channel-1',
+      { requestId: 'rui:session:turn:call', runId: 42 },
+    );
+  });
+
   it('allows queueCommunicationMessage for the matching run token', async () => {
     await expect(
       createRunCaller().queueCommunicationMessage({
@@ -443,35 +474,37 @@ describe('taskRunsRouter queue message guards', () => {
     expect(mockFindTaskRun).not.toHaveBeenCalled();
   });
 
-  it('resolves the footer text for the run thread', async () => {
-    mockFindTaskRun.mockResolvedValue({
-      id: 42,
-      taskId: 'task-1',
-      prRepo: null,
-      prNumber: null,
-    });
+  it.each([0, 1, 2])(
+    'uses the complete shared footer for the run thread with %i running tasks',
+    async (count) => {
+      mockFindTaskRun.mockResolvedValue({
+        id: 42,
+        taskId: 'task-1',
+        prRepo: null,
+        prNumber: null,
+      });
+      const footer = `Reply anytime${count === 1 ? ' · 1 task running' : count >= 2 ? ` · ${count} tasks running` : ''} · <https://app.example.com/sessions/owner|Open in Roomote>`;
+      mockGetSlackThreadFooterText.mockResolvedValue(footer);
 
-    await expect(
-      createRunCaller().getSlackThreadFooterText({
-        runId: 42,
-        slackChannelId: 'C123',
-        threadTs: '1710000000.123',
+      await expect(
+        createRunCaller().getSlackThreadFooterText({
+          runId: 42,
+          slackChannelId: 'C123',
+          threadTs: '1710000000.123',
+          taskUrl: 'http://localhost:3000/task/task-1',
+        }),
+      ).resolves.toBe(footer);
+
+      expect(mockGetSlackThreadFooterText).toHaveBeenCalledWith({
         taskUrl: 'http://localhost:3000/task/task-1',
-      }),
-    ).resolves.toBe(
-      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
-    );
-
-    expect(mockGetSlackThreadFooterText).toHaveBeenCalledWith({
-      taskUrl: 'http://localhost:3000/task/task-1',
-      taskId: 'task-1',
-      prRepo: null,
-      prNumber: null,
-      linkedPrs: [],
-      channelId: 'C123',
-      threadTs: '1710000000.123',
-    });
-  });
+        taskId: 'task-1',
+        prRepo: null,
+        prNumber: null,
+        channelId: 'C123',
+        threadTs: '1710000000.123',
+      });
+    },
+  );
 
   it('rejects recordMessageEnvelope for auth-token callers', async () => {
     await expect(

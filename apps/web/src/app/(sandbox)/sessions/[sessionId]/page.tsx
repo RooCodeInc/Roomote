@@ -23,6 +23,7 @@ import { SessionViewers } from '@/components/sessions/SessionViewers';
 import { SessionSecrets } from '@/components/sessions/SessionSecrets';
 
 import { findDeploymentSetupSessionId } from '@/trpc/commands/setup/setup-session';
+import { hasVoiceAutostartFlag } from '@/lib/voice-autostart';
 import { FastSessionTranscript } from './FastSessionTranscript';
 import { SessionTaskTimeline } from './SessionTaskTimeline';
 import {
@@ -72,6 +73,7 @@ const getSessionPageData = cache(async (sessionId: string) => {
 
 type SessionDetailPageProps = {
   params: Promise<{ sessionId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export async function generateMetadata({
@@ -94,14 +96,24 @@ export async function generateMetadata({
 
 export default async function SessionDetailPage({
   params,
+  searchParams,
 }: SessionDetailPageProps) {
   const { sessionId } = await params;
-  const { authorizedUser, unifiedSession, session } =
-    await getSessionPageData(sessionId);
+  const sessionPageDataPromise = getSessionPageData(sessionId);
+  const modelEnvPromise: Promise<Record<string, string>> =
+    resolveEffectiveModelRuntimeEnv().catch(() => ({}));
+  const [
+    { authorizedUser, unifiedSession, session },
+    modelEnv,
+    resolvedParams,
+  ] = await Promise.all([
+    sessionPageDataPromise,
+    modelEnvPromise,
+    searchParams,
+  ]);
+  const autoStartVoice = hasVoiceAutostartFlag(resolvedParams);
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
-  const modelEnv: Record<string, string> =
-    await resolveEffectiveModelRuntimeEnv().catch(() => ({}));
   const defaultModelId =
     modelEnv.R_ORCHESTRATION_MODEL || modelEnv.R_MODEL || null;
   const rawDefaultEffort = modelEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
@@ -141,7 +153,7 @@ export default async function SessionDetailPage({
       authorizedUser.isAdmin &&
       unifiedSession.id === (await findDeploymentSetupSessionId());
     const setupTimelineExtras = isSetupSession ? (
-      <div className="space-y-3">
+      <div className="space-y-3" key="setup-timeline-extras">
         <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
         <SetupSandboxCard />
         <SetupAutomationRecommendationsCard sessionId={unifiedSession.id} />
@@ -170,6 +182,7 @@ export default async function SessionDetailPage({
                   sessionReasoningEffort={session.reasoningEffort}
                   defaultModelId={defaultModelId}
                   defaultReasoningEffort={defaultReasoningEffort}
+                  autoStartVoice={autoStartVoice}
                   {...(unifiedSession.ownerUserId
                     ? {
                         owner: {
@@ -275,6 +288,7 @@ export default async function SessionDetailPage({
           sessionReasoningEffort={session.reasoningEffort}
           defaultModelId={defaultModelId}
           defaultReasoningEffort={defaultReasoningEffort}
+          autoStartVoice={autoStartVoice}
           {...(session.userId
             ? {
                 owner: {

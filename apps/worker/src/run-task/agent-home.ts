@@ -1753,13 +1753,11 @@ function resolveModelBackedOpenCodeConfig(
         : null,
     }),
   };
-  // OpenCode's built-in `general` agent is the default subagent type for
-  // background Task launches. A named config entry for a built-in agent
-  // merges onto it in place (OpenCode applies provided fields and merges the
-  // tools/permission rules over the built-in ruleset) rather than redefining
-  // it as a custom agent, so this only strips the Slack-posting tools.
+  // Keep implementation on the steerable root build agent instead of letting
+  // Task launches hand it to OpenCode's built-in general-purpose subagent.
   const generalAgent = {
     [OPENCODE_GENERAL_AGENT_NAME]: {
+      disable: true,
       tools: { ...SLACK_POSTING_TOOL_EXCLUSIONS },
     },
   };

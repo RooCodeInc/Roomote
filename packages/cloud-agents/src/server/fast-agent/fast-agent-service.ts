@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import type { ModelMessage } from 'ai';
-import zodToJsonSchema from 'zod-to-json-schema';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   listSessionSecretApprovals,
@@ -29,8 +28,6 @@ import {
   dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL,
-  MANAGE_WAKEUPS_TOOL,
   manageWakeupsInputSchema,
   sessionSecretRequestSchema,
   sessionSecretPrepareSchema,
@@ -73,6 +70,7 @@ import packageJson from '../../../../../package.json';
 
 import { appendAttachmentTextsToPromptText } from '../../file-attachments';
 import {
+  ensureOwnTaskFollowThroughWakeup,
   handleManageWakeupsToolCall,
   normalizeManageWakeupsArgs,
 } from '../session-wakeups';
@@ -95,6 +93,10 @@ import {
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
+import {
+  enqueueUserPersonalizationUpdate,
+  resolveFastAgentPersonalizationContext,
+} from '../user-personalization';
 import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
@@ -171,6 +173,7 @@ import {
   listFastAgentIntegrations,
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
+import { McpToolCallError } from '../mcp-tool-client';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -218,60 +221,6 @@ import {
 } from './fast-agent-storage-diagnostics';
 
 const LEGACY_SLACK_REACTION_TOOL = 'add_reaction_to_slack_message';
-export const FAST_AGENT_SCHEDULING_CAPABILITY_ID = 'scheduling';
-const FAST_AGENT_SCHEDULING_SKILL = {
-  id: 'packaged:scheduling',
-  name: 'scheduling',
-  description:
-    'Required workflow guidance for reminders, bounded checks, reports, and custom automation lifecycle changes.',
-  loadWith: FAST_AGENT_NATIVE_TOOL_NAMES.loadSkill,
-} as const;
-const FAST_AGENT_CUSTOM_AUTOMATIONS_TOOL_NAME = `${ROOMOTE_MCP_ID}_${MANAGE_CUSTOM_AUTOMATIONS_TOOL.name}`;
-
-function schedulingInputSchema(shape: z.ZodRawShape): Record<string, unknown> {
-  return zodToJsonSchema(z.object(shape), {
-    $refStrategy: 'none',
-    target: 'jsonSchema7',
-  }) as Record<string, unknown>;
-}
-
-const FAST_AGENT_MANAGE_WAKEUPS_INPUT_SCHEMA = schedulingInputSchema(
-  MANAGE_WAKEUPS_TOOL.inputSchema,
-);
-const FAST_AGENT_MANAGE_CUSTOM_AUTOMATIONS_INPUT_SCHEMA = schedulingInputSchema(
-  MANAGE_CUSTOM_AUTOMATIONS_TOOL.inputSchema,
-);
-
-function getFastAgentSchedulingTools(
-  integrations: FastAgentIntegration[],
-): IntegrationToolCandidate[] {
-  const tools: IntegrationToolCandidate[] = [
-    {
-      integrationId: FAST_AGENT_SCHEDULING_CAPABILITY_ID,
-      name: MANAGE_WAKEUPS_TOOL.name,
-      description: `Scheduling capability for conversation reminders and bounded checks. ${MANAGE_WAKEUPS_TOOL.description}`,
-      inputSchema: FAST_AGENT_MANAGE_WAKEUPS_INPUT_SCHEMA,
-      source: 'native',
-    },
-  ];
-  const customAutomationsAvailable = integrations.some(
-    (integration) =>
-      integration.id === ROOMOTE_MCP_ID &&
-      integration.tools.some(
-        (tool) => tool.name === MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
-      ),
-  );
-  if (customAutomationsAvailable) {
-    tools.push({
-      integrationId: FAST_AGENT_SCHEDULING_CAPABILITY_ID,
-      name: FAST_AGENT_CUSTOM_AUTOMATIONS_TOOL_NAME,
-      description: `Scheduling capability for deployment automations and reports. ${MANAGE_CUSTOM_AUTOMATIONS_TOOL.description}`,
-      inputSchema: FAST_AGENT_MANAGE_CUSTOM_AUTOMATIONS_INPUT_SCHEMA,
-      source: 'native',
-    });
-  }
-  return tools;
-}
 
 function selectFastRoomoteChannelTools(options: {
   integrations: FastAgentIntegration[];
@@ -325,6 +274,10 @@ const chatReplyArgsSchema = z.object({
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
+});
+const updatePersonalizationArgsSchema = z.object({
+  preference: z.string().trim().min(1).max(500),
+  confidence: z.enum(['explicit', 'inferred']),
 });
 const showWidgetArgsSchema = z.object({
   html: z.string(),
@@ -567,7 +520,6 @@ const callIntegrationToolArgsSchema = z.object(
 function findFastAgentIntegrationTools(
   integrations: FastAgentIntegration[],
   args: z.infer<typeof findIntegrationToolsArgsSchema>,
-  additionalCandidates: IntegrationToolCandidate[] = [],
 ): {
   tools: IntegrationToolCandidate[];
   truncated: boolean;
@@ -575,28 +527,20 @@ function findFastAgentIntegrationTools(
 } {
   if (
     args.integrationId &&
-    !integrations.some(
-      (integration) => integration.id === args.integrationId,
-    ) &&
-    !additionalCandidates.some(
-      (candidate) => candidate.integrationId === args.integrationId,
-    )
+    !integrations.some((integration) => integration.id === args.integrationId)
   ) {
     return { tools: [], truncated: false, unknownIntegration: true };
   }
-  const candidates = [
-    ...integrations.flatMap((integration) =>
-      integration.tools.map((tool) => ({
-        integrationId: integration.id,
-        name: tool.name,
-        ...(tool.description ? { description: tool.description } : {}),
-        ...(tool.inputSchema !== undefined
-          ? { inputSchema: tool.inputSchema }
-          : {}),
-      })),
-    ),
-    ...additionalCandidates,
-  ];
+  const candidates = integrations.flatMap((integration) =>
+    integration.tools.map((tool) => ({
+      integrationId: integration.id,
+      name: tool.name,
+      ...(tool.description ? { description: tool.description } : {}),
+      ...(tool.inputSchema !== undefined
+        ? { inputSchema: tool.inputSchema }
+        : {}),
+    })),
+  );
   return {
     ...matchIntegrationTools(candidates, args),
     unknownIntegration: false,
@@ -623,28 +567,81 @@ const requestUserInputQuestionSchema = z.object({
     .optional(),
   multiple: z.boolean().optional(),
 });
-const fastAgentInputPresetSchema = z.enum(['setup_starter_tasks']);
+const fastAgentInputPresetSchema = z.enum([
+  'setup_starter_tasks',
+  'setup_integrations',
+]);
+const setupIntegrationAnswersSchema = z.record(
+  z.string(),
+  z.object({ answers: z.array(z.string()) }),
+);
 // Some models fill every optional tool parameter, so a trusted preset may
 // arrive alongside placeholder questions. The preset wins: its questions are
 // server-supplied and model-provided ones are discarded rather than rejected.
-const requestUserInputArgsSchema = z
-  .object({
-    questions: z.array(requestUserInputQuestionSchema).min(1).max(4).optional(),
-    preset: fastAgentInputPresetSchema.optional(),
-  })
-  .transform(
-    (
-      args,
-    ):
-      | { preset: FastAgentInputPreset }
-      | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
-      | null =>
-      args.preset
-        ? { preset: args.preset }
-        : args.questions
-          ? { questions: args.questions }
-          : null,
-  );
+const requestUserInputArgsSchema = z.preprocess(
+  (raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+
+    const input = raw as Record<string, unknown>;
+    if (input.preset === 'setup_starter_tasks') {
+      // A trusted preset owns its questions. Models sometimes serialize
+      // optional fields as placeholders or null; discard them before schema
+      // validation so those fields cannot make the preset call fail.
+      return { preset: input.preset };
+    }
+    if (input.preset === 'setup_integrations') {
+      // Integration answers are meaningful for this preset, but questions
+      // are still server-owned. Treat a model-emitted null as omitted.
+      return {
+        preset: input.preset,
+        ...(input.setupIntegrationAnswers !== undefined &&
+        input.setupIntegrationAnswers !== null
+          ? { setupIntegrationAnswers: input.setupIntegrationAnswers }
+          : {}),
+      };
+    }
+    return raw;
+  },
+  z
+    .object({
+      questions: z
+        .array(requestUserInputQuestionSchema)
+        .min(1)
+        .max(4)
+        .optional(),
+      preset: fastAgentInputPresetSchema.optional(),
+      setupIntegrationAnswers: setupIntegrationAnswersSchema.optional(),
+    })
+    .refine(
+      (args) =>
+        args.setupIntegrationAnswers === undefined ||
+        args.preset === 'setup_integrations',
+      'setupIntegrationAnswers is only available with setup_integrations.',
+    )
+    .transform(
+      (
+        args,
+      ):
+        | {
+            preset: FastAgentInputPreset;
+            setupIntegrationAnswers?: z.output<
+              typeof setupIntegrationAnswersSchema
+            >;
+          }
+        | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
+        | null =>
+        args.preset
+          ? {
+              preset: args.preset,
+              ...(args.setupIntegrationAnswers !== undefined
+                ? { setupIntegrationAnswers: args.setupIntegrationAnswers }
+                : {}),
+            }
+          : args.questions
+            ? { questions: args.questions }
+            : null,
+    ),
+);
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -1619,6 +1616,9 @@ function selectActiveTaskId(
 }
 
 function toolFailure(error: unknown): { success: false; error: string } {
+  if (error instanceof McpToolCallError && error.upstreamText) {
+    return { success: false, error: error.upstreamText };
+  }
   return { success: false, error: formatErrorForLog(error) };
 }
 
@@ -1666,11 +1666,10 @@ export async function answerFastAgentQuestion({
   currentDurableHumanFollowUpEventId,
   setupSnapshot,
   setupSession = false,
+  voiceMode = false,
   durableAdmission,
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
-  schedulingProgressiveDisclosureEnabled = Env.R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED ===
-    true,
 }: {
   question: string;
   images?: string[];
@@ -1718,6 +1717,12 @@ export async function answerFastAgentQuestion({
    * setup-only native tools. */
   setupSession?: boolean;
   /**
+   * The human message was spoken on a voice call. The reply is returned to
+   * the call as commentary for the voice to report, so it is written for
+   * the ear and marked as voice commentary in the transcript.
+   */
+  voiceMode?: boolean;
+  /**
    * The inline-admitted parent-event row this turn is executing. While the
    * turn stays replay-safe the row remains pending under this owner's claim,
    * so an interruption hands it to the durable queue instead of the user.
@@ -1732,9 +1737,6 @@ export async function answerFastAgentQuestion({
   /** The durable queue is re-running this turn at its scheduled retry time
    * after a previous execution parked it on a temporary provider failure. */
   resumedAfterInferenceRetry?: boolean;
-  /** Operator-controlled pilot override. Primarily injectable for focused
-   * transport tests; production uses the deployment environment setting. */
-  schedulingProgressiveDisclosureEnabled?: boolean;
 }): Promise<string> {
   const turnId = buildFastAgentTurnId({
     currentMessageId,
@@ -2190,6 +2192,7 @@ export async function answerFastAgentQuestion({
       eventId: streamedReply.eventId,
       sessionId: activeOpenCodeSessionId,
       turnId: update.messageId,
+      fastTurnId: turnId,
       ts: Date.now(),
       text: delta,
     });
@@ -2567,6 +2570,9 @@ export async function answerFastAgentQuestion({
         metadata: {
           visibleInTranscript,
           purpose: reply.purpose,
+          // The voice reports this result aloud; the transcript shows the
+          // spoken words and keeps this as the collapsed source.
+          ...(voiceMode ? { voiceCommentary: true } : {}),
           ...(inferenceRetryNotice
             ? {
                 inferenceRetryNotice: true,
@@ -2615,6 +2621,8 @@ export async function answerFastAgentQuestion({
     const visibleInTranscript =
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
+    const privatePersonalization =
+      title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -2639,7 +2647,7 @@ export async function answerFastAgentQuestion({
           serverName: mcpServerName,
           toolName: mcpToolName ?? title,
           command: null,
-          rawInput: { arguments: args },
+          rawInput: { arguments: privatePersonalization ? {} : args },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -2664,12 +2672,21 @@ export async function answerFastAgentQuestion({
     result: unknown,
     nativeSessionId?: string | null,
   ) => {
-    const { output, truncated } = serializeFastAgentToolOutput(result);
     const failed =
       result !== null &&
       typeof result === 'object' &&
       'success' in result &&
       result.success === false;
+    const privatePersonalization =
+      event.title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
+    const { output, truncated } = privatePersonalization
+      ? {
+          output: failed
+            ? 'Personalization was not updated'
+            : 'Personalization updated',
+          truncated: false,
+        }
+      : serializeFastAgentToolOutput(result);
     await persistCanonicalMessage(
       {
         ...event.canonicalEvent,
@@ -2695,7 +2712,7 @@ export async function answerFastAgentQuestion({
           command: null,
           exitCode: null,
           output,
-          rawInput: { arguments: event.args },
+          rawInput: { arguments: privatePersonalization ? {} : event.args },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -2992,7 +3009,10 @@ export async function answerFastAgentQuestion({
       }),
       db.query.deploymentSettings
         .findFirst({
-          columns: { globalAgentInstructions: true },
+          columns: {
+            globalAgentInstructions: true,
+            workspaceRoutingSettings: true,
+          },
         })
         .catch((error) => {
           degradedContextComponents.add('agent_guidance');
@@ -3002,6 +3022,17 @@ export async function answerFastAgentQuestion({
           return undefined;
         }),
     ]);
+    const personalizationContext = platformEvent
+      ? null
+      : await resolveFastAgentPersonalizationContext({
+          conversationId: session.id,
+          userId,
+        }).catch((error) => {
+          console.warn(
+            `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
+          );
+          return null;
+        });
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
@@ -3144,6 +3175,7 @@ export async function answerFastAgentQuestion({
           // transcript or title seeds.
           visibleInTranscript: substantiveHumanInput,
           turnSource,
+          ...(voiceMode ? { voiceTurn: 'spoken_request' } : {}),
           ...(reactionInput
             ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
             : {}),
@@ -3239,14 +3271,17 @@ export async function answerFastAgentQuestion({
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
       allowSilentAmbientReply,
       implicitAutomationOffersEnabled: !Env.R_FAST_AUTOMATION_OFFERS_DISABLED,
-      schedulingProgressiveDisclosureEnabled,
       releaseVersion,
       commitSha: process.env.GITHUB_SHA || process.env.VERCEL_GIT_COMMIT_SHA,
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
+      voiceMode,
       therapistModeEnabled,
+      personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
+      workspaceRoutingRules:
+        agentBehaviorSettings?.workspaceRoutingSettings?.rules,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,
@@ -3754,16 +3789,12 @@ export async function answerFastAgentQuestion({
     const onDemandIntegrations = availableIntegrations.filter(
       (integration) => !isFastAgentNativeIntegration(integration.id),
     );
-    const schedulingTools = schedulingProgressiveDisclosureEnabled
-      ? getFastAgentSchedulingTools(availableIntegrations)
-      : [];
     const nativeIntegrationError = (integrationId: string) => ({
       success: false as const,
       error: `The "${integrationId}" server is mounted natively; call its tools directly by their ${integrationId}_ prefixed names.`,
     });
     const describeIntegrationTools = (
       args: z.infer<typeof findIntegrationToolsArgsSchema>,
-      options: { includeScheduling?: boolean } = {},
     ) => {
       if (
         args.integrationId &&
@@ -3771,11 +3802,7 @@ export async function answerFastAgentQuestion({
       ) {
         return nativeIntegrationError(args.integrationId);
       }
-      const found = findFastAgentIntegrationTools(
-        onDemandIntegrations,
-        args,
-        options.includeScheduling ? schedulingTools : [],
-      );
+      const found = findFastAgentIntegrationTools(onDemandIntegrations, args);
       if (found.unknownIntegration) {
         return {
           success: false as const,
@@ -3785,9 +3812,6 @@ export async function answerFastAgentQuestion({
       return {
         success: true as const,
         tools: found.tools,
-        ...(found.tools.some((tool) => tool.source === 'native')
-          ? { skill: FAST_AGENT_SCHEDULING_SKILL }
-          : {}),
         ...(found.truncated
           ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }
           : {}),
@@ -3803,18 +3827,10 @@ export async function answerFastAgentQuestion({
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools) {
           return describeIntegrationTools(
             findIntegrationToolsArgsSchema.parse(call.args),
-            { includeScheduling: false },
           );
         }
         if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
           const args = callIntegrationToolArgsSchema.parse(call.args);
-          if (args.integrationId === FAST_AGENT_SCHEDULING_CAPABILITY_ID) {
-            return {
-              success: false,
-              error:
-                'Scheduling capabilities are reserved for the Fast parent agent.',
-            };
-          }
           if (isFastAgentNativeIntegration(args.integrationId)) {
             return nativeIntegrationError(args.integrationId);
           }
@@ -3845,13 +3861,7 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
         turnProgressMarker += 1;
-        const localWakeupCall =
-          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool &&
-          call.args.integrationId === FAST_AGENT_SCHEDULING_CAPABILITY_ID &&
-          call.args.toolName === MANAGE_WAKEUPS_TOOL.name;
-        const startDenial = authorizeToolStart(
-          localWakeupCall ? MANAGE_WAKEUPS_TOOL.name : call.name,
-        );
+        const startDenial = authorizeToolStart(call.name);
         if (startDenial) return startDenial;
         // No replay withdrawal here: every call is recorded before it runs and
         // its result after, and a resumed run is handed that record, so an
@@ -4232,6 +4242,18 @@ export async function answerFastAgentQuestion({
             }
             if (result.success) {
               currentTasks.set(result.taskId, { taskId: result.taskId });
+              if (substantiveHumanInput) {
+                try {
+                  await ensureOwnTaskFollowThroughWakeup({
+                    conversationId: session.id,
+                    userId,
+                  });
+                } catch (error) {
+                  console.warn(
+                    `[Fast Agent] Failed to schedule own-task follow-through after launch: ${formatErrorForLog(error)}`,
+                  );
+                }
+              }
               if (result.kickoffDelivered) {
                 visibleUpdatePosted = true;
               }
@@ -4566,6 +4588,29 @@ export async function answerFastAgentQuestion({
             };
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization: {
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'Personalization learning is unavailable for platform events.',
+              };
+            }
+            const args = updatePersonalizationArgsSchema.parse(call.args);
+            const result = await enqueueUserPersonalizationUpdate({
+              userId,
+              fastConversationId: session.id,
+              ...args,
+            });
+            return result.saved
+              ? { success: true, saved: true }
+              : {
+                  success: false,
+                  saved: false,
+                  reason: result.reason ?? 'unknown',
+                };
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
             if (conversation.surface !== 'web') {
               return {
@@ -4591,9 +4636,19 @@ export async function answerFastAgentQuestion({
             const questions =
               'questions' in args
                 ? args.questions
-                : await adapter.resolveUserInputPreset!(
-                    args.preset as FastAgentInputPreset,
-                  );
+                : args.setupIntegrationAnswers !== undefined
+                  ? await adapter.resolveUserInputPreset!(
+                      args.preset,
+                      args.setupIntegrationAnswers,
+                    )
+                  : await adapter.resolveUserInputPreset!(args.preset);
+            // Trusted setup presets may complete entirely server-side. In
+            // that case no pending request or browser response is needed.
+            if (preset && questions.length === 0) {
+              visibleUpdatePosted = true;
+              closedInstructionVersions.add(instructionVersion);
+              return { success: true, completed: true, closed: true };
+            }
             for (const question of questions) {
               if (question.options && question.isSecret) {
                 return {
@@ -4658,7 +4713,6 @@ export async function answerFastAgentQuestion({
           case FAST_AGENT_NATIVE_TOOL_NAMES.findIntegrationTools: {
             return describeIntegrationTools(
               findIntegrationToolsArgsSchema.parse(call.args),
-              { includeScheduling: true },
             );
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.inspectImages: {
@@ -4666,35 +4720,6 @@ export async function answerFastAgentQuestion({
           }
           case FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool: {
             const args = callIntegrationToolArgsSchema.parse(call.args);
-            if (args.integrationId === FAST_AGENT_SCHEDULING_CAPABILITY_ID) {
-              const availableTool = schedulingTools.find(
-                (tool) => tool.name === args.toolName,
-              );
-              if (!availableTool) {
-                return {
-                  success: false,
-                  error:
-                    'That scheduling tool is not available in this Fast Session.',
-                };
-              }
-              if (args.toolName === MANAGE_WAKEUPS_TOOL.name) {
-                const wakeupArgs = manageWakeupsInputSchema.parse(
-                  normalizeManageWakeupsArgs(args.args),
-                );
-                throwIfTurnCancelled();
-                return await handleManageWakeupsToolCall(
-                  { conversationId: session.id, userId },
-                  wakeupArgs,
-                );
-              }
-              if (args.toolName === FAST_AGENT_CUSTOM_AUTOMATIONS_TOOL_NAME) {
-                return executeMcpTool({
-                  integrationId: ROOMOTE_MCP_ID,
-                  toolName: MANAGE_CUSTOM_AUTOMATIONS_TOOL.name,
-                  args: args.args,
-                });
-              }
-            }
             if (isFastAgentNativeIntegration(args.integrationId)) {
               return nativeIntegrationError(args.integrationId);
             }
@@ -4738,18 +4763,11 @@ export async function answerFastAgentQuestion({
         // The on-demand call is transport: the MCP executor it delegates to
         // records the integration tool event, which is what the transcript
         // should show, so no wrapper event is written for it.
-        const localWakeupCall =
-          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool &&
-          call.args.integrationId === FAST_AGENT_SCHEDULING_CAPABILITY_ID &&
-          call.args.toolName === MANAGE_WAKEUPS_TOOL.name;
-        if (
-          call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool &&
-          !localWakeupCall
-        ) {
+        if (call.name === FAST_AGENT_NATIVE_TOOL_NAMES.callIntegrationTool) {
           return await executeNativeToolInner(call);
         }
         const canonicalToolEvent = await beginCanonicalToolEvent({
-          title: localWakeupCall ? MANAGE_WAKEUPS_TOOL.name : call.name,
+          title: call.name,
           args: call.args,
           nativeSessionId: call.sessionId,
           kind: getFastAgentNativeAcpKind(call.name),
@@ -4863,12 +4881,7 @@ export async function answerFastAgentQuestion({
         const nativeRuntime = await getFastAgentNativeToolRuntime(
           session.id,
           availableIntegrations,
-          {
-            surface: conversation.surface,
-            ...(schedulingProgressiveDisclosureEnabled
-              ? { schedulingProgressiveDisclosureEnabled: true }
-              : {}),
-          },
+          { surface: conversation.surface },
         );
         const unbindExecutors = new Set<() => void>();
         const boundSubagentSessionIDs = new Set<string>();

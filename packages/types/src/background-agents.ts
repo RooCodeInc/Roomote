@@ -168,6 +168,7 @@ export type BackgroundAutomationProvider =
   | 'teams'
   | 'telegram'
   | 'discord'
+  | 'email'
   | 'sentry';
 
 export type BackgroundAutomationTargetKind =
@@ -179,18 +180,36 @@ export type BackgroundAutomationTargetKind =
   | 'telegram_user'
   | 'discord_channel'
   | 'discord_user'
+  | 'email_user'
   | 'sentry_project';
 
 export function isBackgroundAutomationUserTargetKind(
   value: unknown,
-): value is 'slack_user' | 'teams_user' | 'telegram_user' | 'discord_user' {
+): value is
+  | 'slack_user'
+  | 'teams_user'
+  | 'telegram_user'
+  | 'discord_user'
+  | 'email_user' {
   return (
     value === 'slack_user' ||
     value === 'teams_user' ||
     value === 'telegram_user' ||
-    value === 'discord_user'
+    value === 'discord_user' ||
+    value === 'email_user'
   );
 }
+
+/** Chat providers that can act as automation destinations. */
+export type AutomationCapableCommunicationProvider = Exclude<
+  CommunicationProvider,
+  'agentmail'
+>;
+
+/** User-facing providers supported by shared automation destination controls. */
+export type AutomationDestinationProvider =
+  | AutomationCapableCommunicationProvider
+  | 'email';
 
 export const communicationAutomationTargetKinds = {
   slack: { channel: 'slack_channel', direct_message: 'slack_user' },
@@ -198,12 +217,27 @@ export const communicationAutomationTargetKinds = {
   teams: { channel: 'teams_channel', direct_message: 'teams_user' },
   telegram: { channel: 'telegram_chat', direct_message: 'telegram_user' },
 } as const satisfies Record<
-  CommunicationProvider,
+  AutomationCapableCommunicationProvider,
   Record<'channel' | 'direct_message', BackgroundAutomationTargetKind>
 >;
 
+export function getAutomationTargetKind(
+  provider: AutomationDestinationProvider,
+  mode: 'channel' | 'direct_message',
+): BackgroundAutomationTargetKind {
+  if (provider === 'email') {
+    if (mode !== 'direct_message') {
+      throw new Error(
+        'Email automation destinations must use direct message mode.',
+      );
+    }
+    return 'email_user';
+  }
+  return getCommunicationAutomationTargetKind(provider, mode);
+}
+
 export function getCommunicationAutomationTargetKind(
-  provider: CommunicationProvider,
+  provider: AutomationCapableCommunicationProvider,
   mode: 'channel' | 'direct_message',
 ): BackgroundAutomationTargetKind {
   return communicationAutomationTargetKinds[provider][mode];
@@ -212,19 +246,46 @@ export function getCommunicationAutomationTargetKind(
 export function isCommunicationAutomationTarget(
   target: Pick<AutomationTarget, 'provider' | 'targetKind'>,
 ): target is Pick<AutomationTarget, 'provider' | 'targetKind'> & {
-  provider: CommunicationProvider;
+  provider: AutomationCapableCommunicationProvider;
 } {
   if (!(target.provider in communicationAutomationTargetKinds)) {
     return false;
   }
   const kinds =
     communicationAutomationTargetKinds[
-      target.provider as CommunicationProvider
+      target.provider as AutomationCapableCommunicationProvider
     ];
   return (
     target.targetKind === kinds.channel ||
     target.targetKind === kinds.direct_message
   );
+}
+
+export function isAutomationDestinationTarget(
+  target: Pick<AutomationTarget, 'provider' | 'targetKind'>,
+): boolean {
+  return (
+    isCommunicationAutomationTarget(target) ||
+    (target.provider === 'email' && target.targetKind === 'email_user')
+  );
+}
+
+/**
+ * Email destinations keep the direct-message invariant (`externalRef` is the
+ * owner user id) and pin the server-issued identity in target metadata, so
+ * every consumer that treats user-kind targets as owner refs stays correct.
+ */
+export const AUTOMATION_TARGET_EMAIL_IDENTITY_KEY = 'emailIdentityId';
+
+export function getAutomationTargetEmailIdentityId(
+  target:
+    | Partial<Pick<AutomationTarget, 'provider' | 'metadata'>>
+    | null
+    | undefined,
+): string | null {
+  if (target?.provider !== 'email') return null;
+  const identityId = target.metadata?.[AUTOMATION_TARGET_EMAIL_IDENTITY_KEY];
+  return typeof identityId === 'string' && identityId ? identityId : null;
 }
 
 /**

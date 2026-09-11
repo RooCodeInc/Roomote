@@ -1,12 +1,13 @@
 ---
-title: 'Custom MCP Servers'
+title: 'Custom MCP servers'
 description: 'Connect MCP servers that are not in the built-in catalog'
 ---
 
 Custom MCP servers let agents use services that Roomote does not ship a
 built-in integration for. Deployment admins configure them under
-**Settings → Integrations → Custom MCP Servers**, and they become available to
-agents in every task.
+**Settings → Integrations → Custom MCP Servers**. Remote servers become
+available to both Fast Sessions and sandbox tasks. Local stdio servers need a
+task sandbox because Roomote launches their process inside that workspace.
 
 Most MCP servers publish a JSON snippet in their docs. The add dialog's
 **Import from JSON** button accepts a pasted `mcpServers` snippet (or a bare
@@ -27,7 +28,7 @@ Three kinds of servers are supported:
 ## How remote servers are reached
 
 Remote custom servers are never handed to the task sandbox directly. The
-sandbox sees an authenticated Roomote proxy URL, and the proxy injects the
+sandbox and Fast use an authenticated Roomote proxy, and the proxy injects the
 real credentials per request. This means:
 
 - Header values and OAuth tokens never appear in sandbox-readable

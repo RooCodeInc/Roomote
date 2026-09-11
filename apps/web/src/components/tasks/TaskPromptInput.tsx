@@ -19,6 +19,7 @@ import {
   Attachment,
   AttachmentPreview,
   AttachmentRemove,
+  LiveVoiceButton,
   VoiceDictationButton,
   usePromptInputAttachments,
 } from '@/components/ai-elements';
@@ -123,6 +124,18 @@ type TaskPromptInputProps = {
   submitWithMetaKey?: boolean;
   submitIcon?: ReactNode;
   surface?: 'default' | 'embedded';
+  /**
+   * Live voice conversation toggle, shown only when the deployment has
+   * voice configured. Distinct from dictation: it opens a spoken
+   * conversation rather than filling the textarea.
+   */
+  voice?: TaskPromptVoiceControls;
+};
+
+type TaskPromptVoiceControls = {
+  /** Whether a voice conversation is currently running or connecting. */
+  active: boolean;
+  onToggle: () => void;
 };
 
 export function TaskPromptInput({
@@ -141,6 +154,7 @@ export function TaskPromptInput({
   submitWithMetaKey = true,
   submitIcon,
   surface = 'default',
+  voice,
 }: TaskPromptInputProps) {
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => onPromptTextChange(text),
@@ -196,11 +210,18 @@ export function TaskPromptInput({
             {tools}
           </PromptInputTools>
           <div className="flex items-center gap-1">
+            {voice ? (
+              <LiveVoiceButton
+                active={voice.active}
+                onClick={voice.onToggle}
+                disabled={isBusy && !voice.active}
+              />
+            ) : null}
             <VoiceDictationButton
               isRecording={voiceDictation.isRecording}
               isSupported={voiceDictation.isSupported}
               onClick={voiceDictation.toggle}
-              disabled={isBusy}
+              disabled={isBusy || Boolean(voice?.active)}
             />
             <div
               className={`transition-opacity ${promptText.trim().length > 0 ? 'opacity-100' : 'opacity-50'}`}
