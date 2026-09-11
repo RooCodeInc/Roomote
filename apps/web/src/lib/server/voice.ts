@@ -271,11 +271,9 @@ export async function createVoicePreview(options: {
 
   if (!response.ok) {
     const body = (await response.text().catch(() => '')).slice(0, 2_000);
-    if (
-      response.status === 401 &&
-      (body.includes('"missing_scope"') ||
-        body.includes('api.model.audio.request'))
-    ) {
+    // Only the Audio model permission has a known remedy. Any other missing
+    // scope surfaces as the upstream error so the admin sees what OpenAI said.
+    if (response.status === 401 && body.includes('api.model.audio.request')) {
       throw new VoicePreviewPermissionError();
     }
     throw new Error(

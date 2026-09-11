@@ -313,4 +313,32 @@ describe('createVoicePreview permission errors', () => {
       createVoicePreview({ apiKey: 'sk-restricted', voiceId: 'marin' }),
     ).rejects.toBeInstanceOf(VoicePreviewPermissionError);
   });
+
+  it('keeps the upstream error for a missing scope other than Audio', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'You have insufficient permissions for this operation. Missing scopes: model.request.',
+              type: 'invalid_request_error',
+              code: 'missing_scope',
+            },
+          }),
+          { status: 401 },
+        ),
+      ),
+    );
+
+    const failure = await createVoicePreview({
+      apiKey: 'sk-restricted',
+      voiceId: 'marin',
+    }).catch((error: unknown) => error);
+    expect(failure).not.toBeInstanceOf(VoicePreviewPermissionError);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain('status 401');
+    expect((failure as Error).message).toContain('model.request');
+  });
 });
