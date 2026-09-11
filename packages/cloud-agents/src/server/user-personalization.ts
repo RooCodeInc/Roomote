@@ -77,6 +77,23 @@ export async function resolveUserPersonalizationUpdate(input: {
   const context = await resolveUserPersonalizationContext(input.userId);
   if (!context) return { action: 'ignore', supersedes: [] };
 
+  if (!context.instructions.trim()) {
+    return { action: 'append', preference: input.preference, supersedes: [] };
+  }
+
+  const normalizedPreference = input.preference.trim().toLocaleLowerCase();
+  if (
+    context.instructions.split('\n').some(
+      (line) =>
+        line
+          .replace(/^[-*]\s*/, '')
+          .trim()
+          .toLocaleLowerCase() === normalizedPreference,
+    )
+  ) {
+    return { action: 'ignore', supersedes: [] };
+  }
+
   // Inferred updates are append-only by policy, so avoid paying for a second
   // model call when the result cannot replace anything.
   if (input.confidence === 'inferred') {
@@ -89,7 +106,8 @@ export async function resolveUserPersonalizationUpdate(input: {
     taskId: input.taskId,
     modelRole: 'small',
     reasoningEffort: 'low',
-    maxOutputTokens: 500,
+    maxOutputTokens: 250,
+    structuredOutputRetryCount: 0,
     system: `You resolve one personal-preference update. Return only the requested structured result.
 
 Treat the current user's direct correction as authoritative over older conflicting preferences. Preserve unrelated preferences. Ignore statements that are explicitly temporary, ambiguous, or not actually a preference. Never invent preferences or rewrite unrelated text.
