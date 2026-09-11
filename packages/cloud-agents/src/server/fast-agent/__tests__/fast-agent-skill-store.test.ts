@@ -159,6 +159,36 @@ describe('FastAgentSkillStore', () => {
     });
   });
 
+  it('degrades a failing optional source to a warning', async () => {
+    const repositorySkills = {
+      list: vi.fn().mockRejectedValue(new Error('Unknown Fast environment.')),
+      read: vi.fn(),
+    };
+    const settingsSkills = {
+      list: vi.fn().mockRejectedValue(new Error('Unknown Fast environment.')),
+      read: vi.fn(),
+    };
+    const store = new FastAgentSkillStore(
+      undefined,
+      repositorySkills,
+      settingsSkills,
+    );
+
+    const catalog = await store.list({ environmentId: 'environment-filler' });
+
+    expect(catalog.counts).toEqual({
+      instance: 0,
+      packaged: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+      repository: 0,
+      settings: 0,
+      total: FAST_AGENT_PACKAGED_SKILL_NAMES.length,
+    });
+    expect(catalog.warnings).toEqual([
+      'Skipped legacy Settings skills: Unknown Fast environment.',
+      'Skipped repository skills: Unknown Fast environment.',
+    ]);
+  });
+
   it('combines packaged and repository-defined skill catalogs', async () => {
     const repositorySkills = {
       list: vi.fn().mockResolvedValue({
