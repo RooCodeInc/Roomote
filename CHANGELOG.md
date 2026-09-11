@@ -37,6 +37,7 @@ Roomote 1.8 adds a durable automation results inbox, private personalization, mo
 - Voice conversations start with the selected GPT-Live voice, survive phone rotation, release call resources after terminal connection failures, show the Call ended marker, and keep internal delivery rows out of web transcripts.
 - Voice previews now say when the OpenAI key lacks the Audio model permission instead of a generic failure.
 - Voice answers greetings and small talk itself again instead of starting a Fast turn for every utterance, which doubled replies and read out of order; it still never states facts about code, tools, or the product without Fast.
+- Sandbox tasks keep implementation on the root build agent so users can steer active work while purpose-built exploration, advice, review, and visual delegation remain available.
 
 ## 1.7.0 (2026-09-11)
 
