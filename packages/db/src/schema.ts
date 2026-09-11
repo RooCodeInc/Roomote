@@ -3507,6 +3507,28 @@ export const fastAgentConversations = pgTable(
 );
 
 /**
+ * Private personalization captured independently for each participant when
+ * they first speak in a Fast conversation. These encrypted values deliberately
+ * live outside shared conversation and transcript records.
+ */
+export const fastAgentPersonalizationSnapshots = pgTable(
+  'fast_agent_personalization_snapshots',
+  {
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    displayName: encryptedText('display_name'),
+    instructions: encryptedText('instructions').notNull(),
+    learnFromConversations: boolean('learn_from_conversations').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.conversationId, table.userId] })],
+);
+
+/**
  * fast_agent_parent_events
  *
  * Durable admission queue for events entering a Fast conversation while its

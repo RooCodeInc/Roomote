@@ -1,5 +1,6 @@
 import {
   appendLearnedUserPreference,
+  getOrCreateFastAgentPersonalizationSnapshot,
   getUserPersonalizationRuntimeContext,
   type UserPersonalization,
 } from '@roomote/db/server';
@@ -22,6 +23,7 @@ type QueuedPersonalizationUpdate = {
   preference: string;
   confidence: 'explicit' | 'inferred';
   taskId?: string | null;
+  fastConversationId?: string;
 };
 
 type PersonalizationUpdateResult = Awaited<
@@ -41,6 +43,13 @@ export async function resolveUserPersonalizationContext(
   userId: string | null | undefined,
 ) {
   return getUserPersonalizationRuntimeContext(userId);
+}
+
+export async function resolveFastAgentPersonalizationContext(input: {
+  conversationId: string;
+  userId: string;
+}) {
+  return getOrCreateFastAgentPersonalizationSnapshot(input);
 }
 
 export function buildUserPersonalizationInstructions(
@@ -156,6 +165,9 @@ export function enqueueUserPersonalizationUpdate(
         preference: decision.preference,
         confidence: input.confidence,
         supersedes: decision.supersedes,
+        ...(input.fastConversationId
+          ? { fastConversationId: input.fastConversationId }
+          : {}),
       });
     })
     .finally(() => {

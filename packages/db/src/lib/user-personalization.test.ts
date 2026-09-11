@@ -2,9 +2,14 @@ import { eq } from 'drizzle-orm';
 
 import { userFactory } from '../fixtures/factories/user.factory';
 import { db } from '../db';
-import { userPersonalizations } from '../schema';
+import {
+  fastAgentConversations,
+  fastAgentPersonalizationSnapshots,
+  userPersonalizations,
+} from '../schema';
 import {
   appendLearnedUserPreference,
+  getOrCreateFastAgentPersonalizationSnapshot,
   getUserPersonalization,
   getUserPersonalizationRuntimeContext,
   updateUserPersonalization,
@@ -86,6 +91,72 @@ describe('user personalization', () => {
       instructions: 'Lead with the recommendation.',
       learnFromConversations: false,
     });
+  });
+
+  it('uses the frozen Fast conversation learning setting for later updates', async () => {
+    const user = await userFactory.create();
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: 'personalization-learning-snapshot-test',
+        conversationId: crypto.randomUUID(),
+      })
+      .returning({ id: fastAgentConversations.id });
+    await getOrCreateFastAgentPersonalizationSnapshot({
+      conversationId: conversation!.id,
+      userId: user.id,
+    });
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 0,
+      learnFromConversations: false,
+    });
+
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Save this for my next conversation.',
+        confidence: 'explicit',
+        fastConversationId: conversation!.id,
+      }),
+    ).resolves.toEqual({ saved: true });
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Do not save without a frozen enabled snapshot.',
+        confidence: 'explicit',
+      }),
+    ).resolves.toEqual({ saved: false, reason: 'disabled' });
+
+    const [disabledConversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: user.id,
+        surface: 'web',
+        workspaceId: 'personalization-disabled-snapshot-test',
+        conversationId: crypto.randomUUID(),
+      })
+      .returning({ id: fastAgentConversations.id });
+    await getOrCreateFastAgentPersonalizationSnapshot({
+      conversationId: disabledConversation!.id,
+      userId: user.id,
+    });
+    const current = await getUserPersonalization(user.id);
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: current.version,
+      learnFromConversations: true,
+    });
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Do not save from a frozen disabled conversation.',
+        confidence: 'explicit',
+        fastConversationId: disabledConversation!.id,
+      }),
+    ).resolves.toEqual({ saved: false, reason: 'disabled' });
   });
 
   it('keeps manual text ahead of append-only conversational learning', async () => {
@@ -259,5 +330,154 @@ describe('user personalization', () => {
         confidence: 'inferred',
       }),
     ).resolves.toEqual({ saved: true });
+  });
+
+  it('freezes personalization per Fast conversation while later conversations use updated or reset settings', async () => {
+    const user = await userFactory.create({ name: 'Ada' });
+    const [firstConversation, secondConversation, thirdConversation] = await db
+      .insert(fastAgentConversations)
+      .values([
+        {
+          userId: user.id,
+          surface: 'web',
+          workspaceId: 'personalization-snapshot-test',
+          conversationId: crypto.randomUUID(),
+        },
+        {
+          userId: user.id,
+          surface: 'web',
+          workspaceId: 'personalization-snapshot-test',
+          conversationId: crypto.randomUUID(),
+        },
+        {
+          userId: user.id,
+          surface: 'web',
+          workspaceId: 'personalization-snapshot-test',
+          conversationId: crypto.randomUUID(),
+        },
+      ])
+      .returning({ id: fastAgentConversations.id });
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 0,
+      instructions: 'Prefer detailed answers.',
+    });
+
+    const first = await getOrCreateFastAgentPersonalizationSnapshot({
+      conversationId: firstConversation!.id,
+      userId: user.id,
+    });
+    await appendLearnedUserPreference({
+      userId: user.id,
+      preference: 'Prefer concise answers.',
+      confidence: 'explicit',
+      supersedes: ['Prefer detailed answers.'],
+    });
+
+    await expect(
+      getOrCreateFastAgentPersonalizationSnapshot({
+        conversationId: firstConversation!.id,
+        userId: user.id,
+      }),
+    ).resolves.toEqual(first);
+    await expect(
+      getOrCreateFastAgentPersonalizationSnapshot({
+        conversationId: secondConversation!.id,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({
+      displayName: 'Ada',
+      instructions: expect.stringContaining('Prefer concise answers.'),
+    });
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 2,
+      reset: true,
+    });
+    await expect(
+      getOrCreateFastAgentPersonalizationSnapshot({
+        conversationId: firstConversation!.id,
+        userId: user.id,
+      }),
+    ).resolves.toEqual(first);
+    await expect(
+      getOrCreateFastAgentPersonalizationSnapshot({
+        conversationId: secondConversation!.id,
+        userId: user.id,
+      }),
+    ).resolves.toMatchObject({
+      displayName: 'Ada',
+      instructions: expect.stringContaining('Prefer concise answers.'),
+    });
+    await expect(
+      getOrCreateFastAgentPersonalizationSnapshot({
+        conversationId: thirdConversation!.id,
+        userId: user.id,
+      }),
+    ).resolves.toEqual({
+      displayName: null,
+      instructions: '',
+      learnFromConversations: true,
+    });
+  });
+
+  it('keeps encrypted participant snapshots isolated within a Fast conversation', async () => {
+    const [owner, participant] = await Promise.all([
+      userFactory.create({ name: 'Ada' }),
+      userFactory.create({ name: 'Grace' }),
+    ]);
+    const [conversation] = await db
+      .insert(fastAgentConversations)
+      .values({
+        userId: owner.id,
+        surface: 'slack',
+        workspaceId: 'personalization-participant-test',
+        conversationId: crypto.randomUUID(),
+      })
+      .returning({ id: fastAgentConversations.id });
+    await Promise.all([
+      updateUserPersonalization({
+        userId: owner.id,
+        expectedVersion: 0,
+        instructions: 'OWNER_PRIVATE_SENTINEL',
+      }),
+      updateUserPersonalization({
+        userId: participant.id,
+        expectedVersion: 0,
+        instructions: 'PARTICIPANT_PRIVATE_SENTINEL',
+      }),
+    ]);
+
+    const [ownerSnapshot, participantSnapshot] = await Promise.all([
+      getOrCreateFastAgentPersonalizationSnapshot({
+        conversationId: conversation!.id,
+        userId: owner.id,
+      }),
+      getOrCreateFastAgentPersonalizationSnapshot({
+        conversationId: conversation!.id,
+        userId: participant.id,
+      }),
+    ]);
+
+    expect(ownerSnapshot?.instructions).toContain('OWNER_PRIVATE_SENTINEL');
+    expect(ownerSnapshot?.instructions).not.toContain(
+      'PARTICIPANT_PRIVATE_SENTINEL',
+    );
+    expect(participantSnapshot?.instructions).toContain(
+      'PARTICIPANT_PRIVATE_SENTINEL',
+    );
+    expect(participantSnapshot?.instructions).not.toContain(
+      'OWNER_PRIVATE_SENTINEL',
+    );
+    const stored = await db
+      .select({
+        displayName: fastAgentPersonalizationSnapshots.displayName,
+        instructions: fastAgentPersonalizationSnapshots.instructions,
+      })
+      .from(fastAgentPersonalizationSnapshots)
+      .where(
+        eq(fastAgentPersonalizationSnapshots.conversationId, conversation!.id),
+      );
+    expect(JSON.stringify(stored)).not.toContain('PRIVATE_SENTINEL');
   });
 });
