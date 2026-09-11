@@ -127,6 +127,11 @@ export const SideNav = ({
       {
         enabled: isSideNavExpanded,
         placeholderData: keepPreviousData,
+        // Opening a session can change activity order. Keep this paint stable
+        // until the next full load instead of reshuffling under the pointer.
+        staleTime: Infinity,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
       },
     ),
   );

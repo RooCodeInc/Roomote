@@ -78,10 +78,12 @@ export function SandboxShell({
     : null;
   const needsAdminSetup =
     user?.isAdmin === true &&
-    setupStatus?.setupCompletedAt == null &&
+    setupStatus != null &&
+    setupStatus.setupCompletedAt == null &&
     setupSessionStatus?.completed !== true;
   const isAllowedSetupSession =
     setupSessionPath !== null && pathname === setupSessionPath;
+  const isOnASession = pathname.startsWith('/sessions/');
   const sandboxLayoutValue = useMemo(
     () => ({ isSidebarVisible, setSidebarVisible, toggleSidebar }),
     [isSidebarVisible, setSidebarVisible, toggleSidebar],
@@ -91,13 +93,21 @@ export function SandboxShell({
     // Wait for the setup-session lookup before routing. Otherwise a direct
     // visit to the in-progress setup session can briefly see no session ID
     // and be redirected to /setup before the lookup resolves.
-    if (needsAdminSetup && !isSetupSessionLoading && !isAllowedSetupSession) {
+    // Do not steal an explicit /sessions/:id click — that sent people back
+    // to the setup session (usually the first Recent sessions row).
+    if (
+      needsAdminSetup &&
+      !isSetupSessionLoading &&
+      !isAllowedSetupSession &&
+      !isOnASession
+    ) {
       router.replace(setupSessionPath ?? '/setup');
     } else if (needsOnboarding || isOnboardingError) {
       router.replace('/onboarding');
     }
   }, [
     isAllowedSetupSession,
+    isOnASession,
     isOnboardingError,
     isSetupSessionLoading,
     needsAdminSetup,
