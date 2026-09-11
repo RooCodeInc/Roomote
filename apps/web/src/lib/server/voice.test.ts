@@ -42,6 +42,7 @@ import {
   cleanVoiceTranscript,
   createVoiceLiveSession,
   createVoicePreview,
+  VoicePreviewPermissionError,
   resolveVoiceOpenAiKey,
   resolveVoiceId,
 } from './voice';
@@ -286,5 +287,30 @@ describe('resolveVoiceId', () => {
 
     findConnection.mockResolvedValue(null);
     await expect(resolveVoiceId()).resolves.toBe('marin');
+  });
+});
+
+describe('createVoicePreview permission errors', () => {
+  it('names the missing Audio permission when a restricted key is rejected', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                'You have insufficient permissions for this operation. Missing scopes: api.model.audio.request.',
+              type: 'invalid_request_error',
+              code: 'missing_scope',
+            },
+          }),
+          { status: 401 },
+        ),
+      ),
+    );
+
+    await expect(
+      createVoicePreview({ apiKey: 'sk-restricted', voiceId: 'marin' }),
+    ).rejects.toBeInstanceOf(VoicePreviewPermissionError);
   });
 });

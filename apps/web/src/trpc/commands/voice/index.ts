@@ -15,6 +15,7 @@ import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
 import {
   cleanVoiceTranscript,
   createVoicePreview,
+  VoicePreviewPermissionError,
   createVoiceLiveSession,
   resolveVoiceOpenAiKey,
   resolveVoiceId,
@@ -90,6 +91,14 @@ export async function previewVoiceCommand(
   try {
     return await createVoicePreview({ apiKey, voiceId: input.voiceId });
   } catch (error) {
+    if (error instanceof VoicePreviewPermissionError) {
+      // The admin can fix this one themselves; say exactly what is missing.
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        cause: error,
+      });
+    }
     console.error('[voice] Failed to create voice preview', error);
     throw new TRPCError({
       code: 'BAD_GATEWAY',
