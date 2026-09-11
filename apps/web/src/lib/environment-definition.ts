@@ -105,7 +105,9 @@ export function buildUpdateEnvironmentDefinitionPrompt(input: {
   const repositoryContext =
     orderedRepositories.length > 0
       ? `Repositories to inspect:\n${repositoryLines}`
-      : 'This is a repository-free environment. Do not look for or add a repository unless the user explicitly requests one.';
+      : input.config.repositories.length === 0
+        ? 'This is a repository-free environment. Do not look for or add a repository unless the user explicitly requests one.'
+        : "No repositories were selected for inspection in this task. The environment's repositories remain listed in the YAML below.";
 
   return `$environment-setup
 

@@ -206,6 +206,24 @@ describe('environment definition helpers', () => {
     expect(prompt).not.toContain('repositories:');
   });
 
+  it('distinguishes an empty inspection selection from a repository-free environment', () => {
+    const prompt = buildUpdateEnvironmentDefinitionPrompt({
+      environmentId: 'env-existing',
+      environmentName: 'Existing app',
+      repositoryFullNames: [],
+      config: {
+        name: 'Existing app',
+        repositories: [{ repository: 'acme/api' }],
+      },
+    });
+
+    expect(prompt).toContain(
+      'No repositories were selected for inspection in this task.',
+    );
+    expect(prompt).not.toContain('This is a repository-free environment.');
+    expect(prompt).toContain('repository: acme/api');
+  });
+
   it('directs preview repair tasks through the public preview URL', () => {
     const prompt = buildEnvironmentPreviewRepairPrompt({
       environmentId: 'env-123',
