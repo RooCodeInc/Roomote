@@ -2,7 +2,11 @@ import { and, eq, sql } from 'drizzle-orm';
 
 import { db } from '../db';
 import { decrypt } from './encryption';
-import { userPersonalizations, users } from '../schema';
+import {
+  fastAgentPersonalizationSnapshots,
+  userPersonalizations,
+  users,
+} from '../schema';
 
 export const USER_PERSONALIZATION_MAX_CHARS = 8_000;
 const CONVERSATION_PREFERENCE_MAX_CHARS = 500;
@@ -12,6 +16,12 @@ export type UserPersonalization = {
   learnFromConversations: boolean;
   version: number;
   resetAt: Date | null;
+};
+
+export type UserPersonalizationRuntimeContext = {
+  displayName: string | null;
+  instructions: string;
+  learnFromConversations: boolean;
 };
 
 export class UserPersonalizationConflictError extends Error {
@@ -217,11 +227,7 @@ export async function appendLearnedUserPreference(input: {
 
 export async function getUserPersonalizationRuntimeContext(
   userId: string | null | undefined,
-): Promise<{
-  displayName: string | null;
-  instructions: string;
-  learnFromConversations: boolean;
-} | null> {
+): Promise<UserPersonalizationRuntimeContext | null> {
   if (!userId) return null;
 
   const [user, row] = await Promise.all([
@@ -255,4 +261,87 @@ export async function getUserPersonalizationRuntimeContext(
     instructions,
     learnFromConversations: row?.learnFromConversations ?? true,
   };
+}
+
+function decryptFastAgentPersonalizationSnapshot(row: {
+  displayName: string | null;
+  instructions: string | null;
+  learnFromConversations: boolean;
+}): UserPersonalizationRuntimeContext {
+  return {
+    displayName: row.displayName ? decrypt(row.displayName) : null,
+    instructions: decryptValue(row.instructions),
+    learnFromConversations: row.learnFromConversations,
+  };
+}
+
+export async function getOrCreateFastAgentPersonalizationSnapshot(input: {
+  conversationId: string;
+  userId: string;
+}): Promise<UserPersonalizationRuntimeContext | null> {
+  return db.transaction(async (tx) => {
+    const where = and(
+      eq(
+        fastAgentPersonalizationSnapshots.conversationId,
+        input.conversationId,
+      ),
+      eq(fastAgentPersonalizationSnapshots.userId, input.userId),
+    );
+    const existing = await tx.query.fastAgentPersonalizationSnapshots.findFirst(
+      { where },
+    );
+    if (existing) return decryptFastAgentPersonalizationSnapshot(existing);
+
+    const [user, personalization] = await Promise.all([
+      tx.query.users.findFirst({
+        where: eq(users.id, input.userId),
+        columns: { name: true, deletedAt: true },
+      }),
+      tx.query.userPersonalizations.findFirst({
+        where: eq(userPersonalizations.userId, input.userId),
+      }),
+    ]);
+    if (!user || user.deletedAt) return null;
+
+    const manual = decryptValue(personalization?.manualInstructions ?? null);
+    const explicit = decryptValue(
+      personalization?.explicitConversationInstructions ?? null,
+    );
+    const inferred = decryptValue(
+      personalization?.inferredInstructions ?? null,
+    );
+    const context: UserPersonalizationRuntimeContext = {
+      displayName: personalization?.resetAt ? null : user.name.trim() || null,
+      instructions: [
+        manual
+          ? `Manually edited preferences (highest priority):\n${manual}`
+          : '',
+        explicit
+          ? `Preferences explicitly stated in conversation:\n${explicit}`
+          : '',
+        inferred
+          ? `Tentative inferred preferences (lowest priority):\n${inferred}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      learnFromConversations: personalization?.learnFromConversations ?? true,
+    };
+
+    await tx
+      .insert(fastAgentPersonalizationSnapshots)
+      .values({
+        conversationId: input.conversationId,
+        userId: input.userId,
+        displayName: context.displayName,
+        instructions: context.instructions,
+        learnFromConversations: context.learnFromConversations,
+      })
+      .onConflictDoNothing();
+
+    const snapshot = await tx.query.fastAgentPersonalizationSnapshots.findFirst(
+      { where },
+    );
+    return snapshot ? decryptFastAgentPersonalizationSnapshot(snapshot) : null;
+  });
 }

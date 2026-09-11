@@ -1,5 +1,6 @@
 import {
   appendLearnedUserPreference,
+  getOrCreateFastAgentPersonalizationSnapshot,
   getUserPersonalizationRuntimeContext,
   type UserPersonalization,
 } from '@roomote/db/server';
@@ -41,6 +42,13 @@ export async function resolveUserPersonalizationContext(
   userId: string | null | undefined,
 ) {
   return getUserPersonalizationRuntimeContext(userId);
+}
+
+export async function resolveFastAgentPersonalizationContext(input: {
+  conversationId: string;
+  userId: string;
+}) {
+  return getOrCreateFastAgentPersonalizationSnapshot(input);
 }
 
 export function buildUserPersonalizationInstructions(

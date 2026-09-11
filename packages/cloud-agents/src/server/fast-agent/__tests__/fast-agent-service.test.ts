@@ -273,7 +273,7 @@ vi.mock('../../user-personalization', async (importOriginal) => {
     await importOriginal<typeof import('../../user-personalization')>();
   return {
     ...actual,
-    resolveUserPersonalizationContext: mocks.getPersonalization,
+    resolveFastAgentPersonalizationContext: mocks.getPersonalization,
   };
 });
 
@@ -629,10 +629,103 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
-    expect(mocks.getPersonalization).toHaveBeenCalledWith('user-1');
+    expect(mocks.getPersonalization).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      userId: 'user-1',
+    });
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       'Reply in pirate style.',
     );
+  });
+
+  it('reuses each participant personalization snapshot while current instructions stay in history', async () => {
+    const current = new Map([
+      [
+        'user-1',
+        {
+          displayName: 'Ada',
+          instructions: 'Use detailed answers.',
+          learnFromConversations: true,
+        },
+      ],
+      [
+        'user-2',
+        {
+          displayName: 'Grace',
+          instructions: 'Use bullet points.',
+          learnFromConversations: true,
+        },
+      ],
+    ]);
+    const snapshots = new Map<
+      string,
+      typeof current extends Map<unknown, infer V> ? V : never
+    >();
+    mocks.getPersonalization.mockImplementation(
+      async ({ conversationId, userId }) => {
+        const key = `${conversationId}:${userId}`;
+        const existing = snapshots.get(key);
+        if (existing) return existing;
+        const snapshot = structuredClone(current.get(userId) ?? null);
+        if (snapshot) snapshots.set(key, snapshot);
+        return snapshot;
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    current.set('user-1', {
+      displayName: 'Ada',
+      instructions: 'Use concise answers.',
+      learnFromConversations: true,
+    });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'For this answer, be extremely concise.',
+      currentMessageId: '100.3',
+      adapter: callbacks(),
+    });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      userId: 'user-2',
+      currentMessageId: '100.4',
+      adapter: callbacks(),
+    });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      currentMessageId: '100.5',
+      adapter: callbacks(),
+    });
+
+    const prompts = mocks.generateText.mock.calls.map(([params]) => params);
+    expect(prompts[0]?.system).toContain('Use detailed answers.');
+    expect(prompts[1]?.system).toBe(prompts[0]?.system);
+    expect(prompts[1]?.system).toContain('Use detailed answers.');
+    expect(prompts[1]?.system).not.toContain('Use concise answers.');
+    expect(prompts[1]?.prompt).toContain(
+      'For this answer, be extremely concise.',
+    );
+    expect(prompts[2]?.system).toContain('Use bullet points.');
+    expect(prompts[2]?.system).not.toContain('Use detailed answers.');
+    expect(prompts[3]?.system).toBe(prompts[0]?.system);
+    expect(prompts[3]?.system).toContain('Use detailed answers.');
+    expect(prompts[3]?.system).not.toContain('Use bullet points.');
+  });
+
+  it('keeps private snapshot content out of canonical message writes', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      displayName: 'PRIVATE_NAME_SENTINEL',
+      instructions: 'PRIVATE_INSTRUCTIONS_SENTINEL',
+      learnFromConversations: true,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    const writes = JSON.stringify({
+      canonical: mocks.upsertMessage.mock.calls.map(([input]) => input.message),
+      compatibility: mocks.appendVisibleMessages.mock.calls,
+    });
+    expect(writes).not.toContain('PRIVATE_NAME_SENTINEL');
+    expect(writes).not.toContain('PRIVATE_INSTRUCTIONS_SENTINEL');
   });
 
   it('never persists private personalization tool arguments', async () => {

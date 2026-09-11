@@ -88,7 +88,7 @@ import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
   enqueueUserPersonalizationUpdate,
-  resolveUserPersonalizationContext,
+  resolveFastAgentPersonalizationContext,
 } from '../user-personalization';
 import {
   appendFastAgentVisibleMessages,
@@ -2903,7 +2903,6 @@ export async function answerFastAgentQuestion({
       discoveredIntegrations,
       currentUser,
       therapistModeEnabled,
-      personalizationContext,
       agentBehaviorSettings,
     ] = await Promise.all([
       getAvailableEnvironments(),
@@ -2944,14 +2943,6 @@ export async function answerFastAgentQuestion({
         );
         return false;
       }),
-      platformEvent
-        ? Promise.resolve(null)
-        : resolveUserPersonalizationContext(userId).catch((error) => {
-            console.warn(
-              `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
-            );
-            return null;
-          }),
       db.query.deploymentSettings
         .findFirst({
           columns: {
@@ -2967,6 +2958,17 @@ export async function answerFastAgentQuestion({
           return undefined;
         }),
     ]);
+    const personalizationContext = platformEvent
+      ? null
+      : await resolveFastAgentPersonalizationContext({
+          conversationId: session.id,
+          userId,
+        }).catch((error) => {
+          console.warn(
+            `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
+          );
+          return null;
+        });
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
