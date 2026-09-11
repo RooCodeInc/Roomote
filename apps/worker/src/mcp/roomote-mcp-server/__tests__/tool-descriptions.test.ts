@@ -898,7 +898,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(description).toContain('complete engineering handoff');
     expect(description).toContain('do not send another generic ack');
     expect(description).toContain('meaningful work milestones');
-    expect(description).toContain('roughly 10 minutes of silence');
+    expect(description).not.toContain('10 minutes');
     expect(description).toContain(
       'without labeling the message as a progress update',
     );
@@ -906,6 +906,9 @@ describe('roomote MCP tool descriptions', () => {
     expect(getInputSchemaField(reportTool, 'message').description).toContain(
       'Non-empty Markdown report for the parent Session.',
     );
+    expect(
+      getInputSchemaField(reportTool, 'purpose').description,
+    ).not.toContain('10 minutes');
     expect(reportTool.config.inputSchema.suggestions).toBeUndefined();
     expect(
       getRegisteredTool(registeredTools, 'manage_artifacts').config.description,

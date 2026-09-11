@@ -102,6 +102,61 @@ describe('SLACK_SILENCE_HOOK_SCRIPT', () => {
     expect(result.stderr).toContain('reason="parent_session_report_disabled"');
   });
 
+  it('leaves recurring follow-through to the parent Session for coding tasks', () => {
+    const stateFilePath = writeState({
+      recordedAtMs: Date.now() - 8 * 60_000,
+      messageTs: 'bot-111.222',
+    });
+
+    const result = runHook({
+      input: { hook_event_name: 'PostToolUse', tool_name: 'shell' },
+      env: {
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+        ROOMOTE_SLACK_HOOK_DEBUG: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('decision="allow"');
+    expect(result.stderr).toContain(
+      'reason="parent_session_owns_follow_through"',
+    );
+    expect(
+      JSON.parse(fs.readFileSync(stateFilePath, 'utf8')),
+    ).not.toHaveProperty('lastSilenceReminderAtMs');
+  });
+
+  it('keeps terminal-closeout bookkeeping for coding tasks', () => {
+    const stateFilePath = writeState({
+      recordedAtMs: Date.now() - 60_000,
+      messageTs: 'bot-111.222',
+      tool: 'report_to_parent_session',
+      replyPurpose: 'closeout',
+      satisfiedTurnMessageTs: 'web:client-1',
+      currentTurnMessageTs: 'web:client-1',
+      terminalSatisfiedTurnMessageTs: 'web:client-1',
+      terminalSatisfiedAtMs: Date.now() - 60_000,
+      terminalSatisfactionTool: 'report_to_parent_session',
+    });
+
+    const result = runHook({
+      input: { hook_event_name: 'PostToolUse', tool_name: 'shell' },
+      env: {
+        ROOMOTE_FAST_AGENT_CHILD: 'true',
+        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(
+      JSON.parse(fs.readFileSync(stateFilePath, 'utf8'))
+        .lastNonSlackWorkAfterTerminalAtMs,
+    ).toEqual(expect.any(Number));
+  });
+
   it('skips Slack silence enforcement for non-parent subagent threads', () => {
     const stateFilePath = writeState({
       parentThreadId: 'thread-parent',

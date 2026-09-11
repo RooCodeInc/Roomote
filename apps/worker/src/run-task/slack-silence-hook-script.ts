@@ -39,40 +39,31 @@ const REPORTS_TO_PARENT_SESSION =
 const LIFECYCLE_TOOL_NAME = REPORTS_TO_PARENT_SESSION
   ? 'report_to_parent_session'
   : 'send_chat_reply';
-const REMINDER = REPORTS_TO_PARENT_SESSION
-  ? [
-      'The parent Session has not received a substantive update for this turn.',
-      'Your next action must be a private report using report_to_parent_session.',
-      'If the report mentions or relies on visual proof, include the relevant',
-      'screenshot artifact IDs via imageArtifactIds.',
-      'Normal assistant messages do not count. Do not run more tools first.',
-      'After reporting, continue the work you were doing.',
-    ].join(' ')
-  : [
-      'The originating ' +
-        SURFACE_LABEL +
-        ' thread has not received a visible update for this turn. Your next action',
-      'must be a ' +
-        SURFACE_LABEL +
-        '-visible update to the originating thread using',
-      'send_chat_reply',
-      'or use send_chat_reaction_emoji only when the latest user turn itself came',
-      'from ' + SURFACE_LABEL + ' and that message can receive a reaction.',
-      'If a successful visual-proof capture returned screenshot artifact IDs that',
-      'are not yet visible in the thread and the update mentions or relies on that',
-      'proof, include those IDs in the same reply via imageArtifactIds.',
-      'Use request_user_input only when you genuinely require structured input',
-      'from the user.',
-      'Normal assistant messages do not count.',
-      'Do not run more tools first.',
-      'The only exception is tool_search when the needed ' +
-        SURFACE_LABEL +
-        ' reply/post tool is',
-      'not visible.',
-      'After sending the ' +
-        SURFACE_LABEL +
-        ' update, continue the work you were doing.',
-    ].join(' ');
+const REMINDER = [
+  'The originating ' +
+    SURFACE_LABEL +
+    ' thread has not received a visible update for this turn. Your next action',
+  'must be a ' +
+    SURFACE_LABEL +
+    '-visible update to the originating thread using',
+  'send_chat_reply',
+  'or use send_chat_reaction_emoji only when the latest user turn itself came',
+  'from ' + SURFACE_LABEL + ' and that message can receive a reaction.',
+  'If a successful visual-proof capture returned screenshot artifact IDs that',
+  'are not yet visible in the thread and the update mentions or relies on that',
+  'proof, include those IDs in the same reply via imageArtifactIds.',
+  'Use request_user_input only when you genuinely require structured input',
+  'from the user.',
+  'Normal assistant messages do not count.',
+  'Do not run more tools first.',
+  'The only exception is tool_search when the needed ' +
+    SURFACE_LABEL +
+    ' reply/post tool is',
+  'not visible.',
+  'After sending the ' +
+    SURFACE_LABEL +
+    ' update, continue the work you were doing.',
+].join(' ');
 const INITIAL_ACK_REMINDER = REPORTS_TO_PARENT_SESSION
   ? [
       'The parent Session needs a substantive update before more work.',
@@ -694,6 +685,15 @@ function writeInitialAckReminderState(stateFilePath, state, nowMs) {
         reason: INITIAL_ACK_REMINDER,
       }),
     );
+    process.exit(0);
+  }
+
+  if (REPORTS_TO_PARENT_SESSION) {
+    logAllow({
+      trigger: hookEventName,
+      reason: 'parent_session_owns_follow_through',
+      tool: getToolName(hookInput),
+    });
     process.exit(0);
   }
 
