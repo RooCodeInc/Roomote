@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   teamsCredentials: vi.fn(),
   telegramCredentials: vi.fn(),
   discordCredentials: vi.fn(),
+  connectedProviders: vi.fn(),
   directMessage: vi.fn(),
   emailIdentities: vi.fn(),
 }));
@@ -62,6 +63,7 @@ vi.mock('./telegram-primary-chat', () => ({
 }));
 vi.mock('../automations/destination', () => ({
   findTeamsConversationRoute: mocks.teams,
+  listConnectedCommunicationProviders: mocks.connectedProviders,
 }));
 vi.mock('./agentmail/outbound', () => ({
   listAvailableAgentMailOutboundIdentities: mocks.emailIdentities,
@@ -84,6 +86,12 @@ describe('resolveDefaultAutomationTarget', () => {
     mocks.discord.mockResolvedValue(null);
     mocks.discordPrimary.mockResolvedValue(null);
     mocks.discordCredentials.mockResolvedValue({ botToken: 'token' });
+    mocks.connectedProviders.mockResolvedValue([
+      'slack',
+      'teams',
+      'telegram',
+      'discord',
+    ]);
     mocks.directMessage.mockResolvedValue(null);
     mocks.teams.mockResolvedValue(null);
     mocks.teamsPrimary.mockResolvedValue(null);
@@ -146,6 +154,21 @@ describe('resolveDefaultAutomationTarget', () => {
       targetKind: 'teams_user',
       externalRef: 'user-1',
     });
+  });
+
+  it('skips stale DM mappings for disconnected providers', async () => {
+    mocks.connectedProviders.mockResolvedValue(['slack']);
+    mocks.directMessage.mockResolvedValue(null);
+    mocks.emailIdentities.mockResolvedValue([{ id: 'verified:user:hash' }]);
+
+    await expect(
+      resolveDefaultAutomationTarget({
+        ownerUserId: 'user-1',
+        capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
+      }),
+    ).resolves.toMatchObject({ provider: 'email' });
+    expect(mocks.directMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.directMessage).toHaveBeenCalledWith('slack', 'user-1');
   });
 
   it('uses a primary conversation before an owner DM', async () => {

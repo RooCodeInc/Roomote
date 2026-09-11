@@ -22,7 +22,10 @@ import {
   type OptionalAutomationTarget,
 } from '@roomote/types';
 
-import { findTeamsConversationRoute } from '../automations/destination';
+import {
+  findTeamsConversationRoute,
+  listConnectedCommunicationProviders,
+} from '../automations/destination';
 import { listAvailableAgentMailOutboundIdentities } from './agentmail/outbound';
 import {
   findDiscordDefaultDestination,
@@ -189,7 +192,10 @@ export async function resolveDefaultAutomationTarget({
     if (resolved) return resolved;
   }
 
+  const connectedProviders: AutomationCapableCommunicationProvider[] =
+    await listConnectedCommunicationProviders().catch(() => []);
   for (const provider of capabilities.chatProviders) {
+    if (!connectedProviders.includes(provider)) continue;
     try {
       if (await findUserDirectMessageDestination(provider, ownerUserId)) {
         return {

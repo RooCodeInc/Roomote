@@ -2647,7 +2647,7 @@ async function applySetupRecommendationInTx(
   const reportTarget =
     enabled && !isConfiguredAutomationTarget(existing?.target)
       ? await resolveDefaultAutomationTarget({
-          ownerUserId: auth.userId,
+          ownerUserId: existing?.createdByUserId ?? auth.userId,
           capabilities: CUSTOM_AUTOMATION_DESTINATION_CAPABILITIES,
           includeSetupHandoff: true,
           client: tx,

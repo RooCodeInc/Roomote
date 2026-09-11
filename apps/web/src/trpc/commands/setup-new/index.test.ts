@@ -1,5 +1,8 @@
 import type { UserAuthSuccess } from '@/types';
-import type { AutomationTarget } from '@roomote/types';
+import type {
+  AutomationTarget,
+  OptionalAutomationTarget,
+} from '@roomote/types';
 
 const {
   mockTxSelect,
@@ -69,7 +72,8 @@ const {
   mockGetCustomAutomationById: vi.fn<
     (...args: unknown[]) => Promise<{
       id: string;
-      target: AutomationTarget;
+      target: OptionalAutomationTarget;
+      createdByUserId?: string | null;
     } | null>
   >(async () => null),
   mockResolveDefaultAutomationTarget: vi.fn<
@@ -1496,6 +1500,45 @@ describe('setup recommendation commands', () => {
       'custom-automation-1',
       expect.objectContaining({ target: existingTarget }),
       expect.anything(),
+    );
+  });
+
+  it('resolves a reapplied recommendation for its persisted owner', async () => {
+    mockGetCustomAutomationById.mockResolvedValue({
+      id: 'custom-automation-1',
+      target: {},
+      createdByUserId: 'original-owner',
+    });
+    mockRecommendationTransaction({
+      automationRecommendations: {
+        version: 1,
+        inputFingerprint: 'recommendation-fingerprint',
+        catalogVersion: 1,
+        status: 'ready',
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        partial: false,
+        errorCode: null,
+        dismissed: false,
+        recommendations: [
+          {
+            id: 'cookbook.scheduled-housekeeping:1',
+            candidateId: 'cookbook.scheduled-housekeeping',
+            rank: 1,
+            score: 1,
+            explanation: 'Review maintenance opportunities.',
+            enabled: true,
+            lastRunTaskId: null,
+            automationId: 'custom-automation-1',
+          },
+        ],
+      },
+    });
+
+    await applySetupRecommendationsCommand(buildMockAuth());
+
+    expect(mockResolveDefaultAutomationTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ ownerUserId: 'original-owner' }),
     );
   });
 
