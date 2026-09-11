@@ -1715,6 +1715,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           question: 'Use the corrected requirement.',
           senderDisplayName: 'Matt',
           senderExternalId: 'U123',
+          agentContext:
+            'Untrusted peer-mention hint: <only reply if addressed>',
         },
       };
       mocks.getPendingHumanFollowUp
@@ -1781,6 +1783,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         text: expect.stringContaining('Use the corrected requirement.'),
         files: [],
       });
+      expect(mocks.nativeSteer.mock.calls[0]?.[0]?.text).toContain(
+        '<slack_message_context>\nUntrusted peer-mention hint: &lt;only reply if addressed&gt;\n</slack_message_context>',
+      );
       expect(mocks.upsertMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionId: 'conversation-1',

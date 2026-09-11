@@ -359,6 +359,78 @@ describe('processFastAgentMessage', () => {
     },
   );
 
+  it.each([
+    ['peer mention', '<@U222> what do you think?', true],
+    ['bot and peer mention', '<@UBOT> ask <@U222>', false],
+    ['bot only', '<@UBOT> help', false],
+    ['self mention', '<@U123> note to self', false],
+    ['quoted peer mention', '> <@U222> quoted message', false],
+    ['ordinary message', 'Please continue', false],
+  ])('adds only supplemental context for %s', async (_name, text, expected) => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text,
+        ts: '100.003',
+        thread_ts: '100.001',
+        agentContext: 'Existing attachment context',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
+    });
+    const call = mocks.answerQuestion.mock.calls[0]?.[0];
+    expect(call.question).toBe(text);
+    expect(call.currentMessageAgentContext).toContain(
+      'Existing attachment context',
+    );
+    if (expected) {
+      expect(call.allowSilentAmbientReply).toBe(true);
+      expect(call.currentMessageAgentContext).toContain(
+        'Untrusted supplemental context',
+      );
+      expect(call.currentMessageAgentContext).toContain(
+        'unless you are addressed directly',
+      );
+    } else {
+      expect(call.currentMessageAgentContext).toBe(
+        'Existing attachment context',
+      );
+    }
+  });
+
+  it('does not reconstruct the reminder from a peer mention in history', async () => {
+    const slack = {
+      fetchThreadMessages: vi.fn(async () => [
+        { user: 'U123', text: '<@U222> what do you think?', ts: '100.003' },
+      ]),
+    };
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U123',
+        text: 'Next detail',
+        ts: '100.005',
+        thread_ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
+    });
+    const call = mocks.answerQuestion.mock.calls[0]?.[0];
+    expect(call.currentMessageAgentContext).toBeUndefined();
+  });
+
   it('durably steers an active Fast generation instead of waiting for its lock', async () => {
     const abort = vi.fn().mockResolvedValue(undefined);
     const onAccepted = vi.fn();
@@ -376,13 +448,14 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'C123',
         user: 'U123',
-        text: 'Use the corrected requirement',
+        text: '<@U222> Use the corrected requirement',
         ts: '100.003',
         thread_ts: '100.001',
       } as never,
       slack: slack as never,
       userId: 'user-1',
       teamId: 'T123',
+      roomoteSlackUserId: 'UBOT',
       onAccepted,
     });
 
@@ -391,7 +464,10 @@ describe('processFastAgentMessage', () => {
         event: expect.objectContaining({
           type: 'human_follow_up',
           eventId: '100.003',
-          question: 'Use the corrected requirement',
+          question: '<@U222> Use the corrected requirement',
+          agentContext: expect.stringContaining(
+            'Untrusted supplemental context',
+          ),
         }),
       }),
     );
@@ -478,9 +554,9 @@ describe('processFastAgentMessage', () => {
         type: 'message',
         channel: 'D123',
         user: 'U123',
-        authoredText: '<@U_BOT> investigate this',
+        authoredText: '<@UROOMOTE> investigate this',
         agentContext: 'Slack block text:\nState: New',
-        text: '<@U_BOT> investigate this\n\nSlack block text:\nState: New',
+        text: '<@UROOMOTE> investigate this\n\nSlack block text:\nState: New',
         ts: '100.001',
       } as never,
       slack: slack as never,
@@ -495,7 +571,7 @@ describe('processFastAgentMessage', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: '<@U_BOT> investigate this',
+        question: '<@UROOMOTE> investigate this',
         slackRoomoteUserId: 'UROOMOTE',
         currentMessageAgentContext: 'Slack block text:\nState: New',
         adapter: expect.objectContaining({ launchTask }),

@@ -2349,6 +2349,7 @@ export async function answerFastAgentQuestion({
           question: followUp.question,
           threadContext: [],
           compatibilityMessages: [],
+          currentMessageAgentContext: followUp.agentContext,
           currentMessageTs: followUp.currentMessageId,
           currentMessageSender: {
             slackUserId: followUp.senderExternalId,

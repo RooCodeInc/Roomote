@@ -97,6 +97,21 @@ describe('persistFastAgentInlineHumanTurn', () => {
     expect(mocks.updateWhere).toHaveBeenCalledOnce();
   });
 
+  it('does not supersede a parked request with a quiet-eligible Slack aside', async () => {
+    mocks.findFirst.mockResolvedValue({
+      id: 'row-1',
+      admission: 'inline',
+      deliveredAt: null,
+      discardedAt: null,
+    });
+    await persistFastAgentInlineHumanTurn({
+      parent,
+      event: { ...event, directedAtRoomote: false },
+    });
+    expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
+    expect(mocks.updateWhere).not.toHaveBeenCalled();
+  });
+
   it('reports a still-pending inline row as a resumption and refreshes its claim', async () => {
     // The insert hit the existing row: an earlier inline attempt admitted
     // this same turn and never settled it.

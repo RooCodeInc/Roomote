@@ -232,7 +232,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toMatchObject({ shouldRoute: true });
   });
 
-  it('keeps a reply silent when the previous participant addressed the sender', async () => {
+  it('admits a reply after a peer mention in an established Fast thread', async () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
@@ -249,11 +249,8 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: 'I agree',
         }),
       ),
-    ).resolves.toEqual({ shouldRoute: false });
-    expect(markSlackThreadExplicitMentionRequiredMock).toHaveBeenCalledWith(
-      'C123',
-      THREAD_TS,
-    );
+    ).resolves.toEqual({ shouldRoute: true });
+    expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
   });
 
   it('keeps routing after the sender mentions themself in a fast-agent thread', async () => {
@@ -277,7 +274,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     expect(markSlackThreadExplicitMentionRequiredMock).not.toHaveBeenCalled();
   });
 
-  it('keeps a peer-directed reply silent in an existing fast-agent thread', async () => {
+  it('admits a peer-directed reply in an existing fast-agent thread', async () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
 
@@ -289,8 +286,23 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
           text: '<@U333> what do you think?',
         }),
       ),
-    ).resolves.toEqual({ shouldRoute: false });
+    ).resolves.toEqual({ shouldRoute: true });
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it('continues admitting the side discussion and plain-name resumption without a bot reply', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    for (const [user, ts, text] of [
+      ['U111', '102.000', '<@U222> what do you think?'],
+      ['U222', '103.000', 'Not really'],
+      ['U111', '104.000', 'I prefer consistency'],
+      ['U222', '105.000', 'Roomote, please summarize'],
+    ] as const) {
+      await expect(
+        routeDecision(threadReplyEvent({ user, ts, text })),
+      ).resolves.toEqual({ shouldRoute: true });
+    }
+    expect(findRoomoteOwnedSlackThreadMock).not.toHaveBeenCalled();
   });
 
   it('keeps routing between participants in a fast-agent thread', async () => {
