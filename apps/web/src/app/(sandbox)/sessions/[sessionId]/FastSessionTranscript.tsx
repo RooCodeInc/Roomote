@@ -719,6 +719,40 @@ export function FastSessionTranscript({
         userImageUrl: message.userImageUrl,
       });
 
+      // Keep the persisted source in the UI pipeline so it reconciles the
+      // streamed reply in place, but hide this internal voice delivery.
+      if (
+        message.role === 'assistant' &&
+        message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+        (message.metadata as { voiceCommentary?: unknown } | null)
+          ?.voiceCommentary === true
+      ) {
+        const text = getTranscriptMessageText(message) ?? '';
+        uiMessage = toAcpUiMessage({
+          id: `assistant:${message.eventId}`,
+          ts: message.ts,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult as AcpEventType,
+          role: 'tool',
+          kind: 'tool_result',
+          contentBlocks: [{ type: 'text', text }],
+          metadata: {
+            visibleInTranscript: false,
+            toolCallId: message.eventId,
+          },
+          payload: {
+            toolName: 'report_to_voice',
+            toolCallId: message.eventId,
+            status: 'completed',
+            rawInput: {},
+            output: text,
+          },
+          text,
+          userName: null,
+          userEmail: null,
+          userImageUrl: null,
+        });
+      }
+
       if (
         message.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
       ) {
