@@ -580,8 +580,8 @@ function manageTasksReceipt(
       object: 'task',
     },
     get_messages: {
-      verb: byPhase('Getting', 'Received', 'Failed to Get'),
-      object: `message from ${target}`,
+      verb: byPhase('Checking', 'Checked', 'Failed to Check'),
+      object: `recent ${target} messages`,
     },
     send_message: {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),

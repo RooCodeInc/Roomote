@@ -270,7 +270,7 @@ describe('tool presentation resolver', () => {
     ['start', 'Started', 'session'],
     ['search', 'Searched', 'sessions'],
     ['get_summary', 'Heard back from', 'task'],
-    ['get_messages', 'Received', 'message from task'],
+    ['get_messages', 'Checked', 'recent task messages'],
     ['send_message', 'Sent', 'message to task'],
     ['search_tasks', 'Searched', 'tasks'],
     ['get_compute_logs', 'Received', 'logs from task'],
@@ -294,6 +294,30 @@ describe('tool presentation resolver', () => {
       ).toMatchObject({ verb, object, providerLabel: undefined });
     },
   );
+
+  it('distinguishes task history checks from incoming task reports', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_tasks',
+          rawInput: {
+            arguments: { action: 'get_messages', taskId: 'task-1' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Checked', object: 'recent task messages' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'receive_task_report',
+        }),
+      ),
+    ).toMatchObject({ verb: 'Received', object: 'task report' });
+  });
 
   it('suppresses only first-party Roomote attribution', () => {
     expect(
