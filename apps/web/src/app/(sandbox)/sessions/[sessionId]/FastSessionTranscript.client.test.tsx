@@ -14,6 +14,7 @@ import {
   FastSessionTranscript,
   pendingResponseReducer,
 } from './FastSessionTranscript';
+import { isRequestUserInputResponseRepresentedByCanonicalReceipt } from '@/lib/setup-receipt-transcript';
 import { SessionRunningTaskCountContext } from './session-task-panel-context';
 import {
   clearPendingFastSessionLaunch,
@@ -607,6 +608,9 @@ describe('FastSessionTranscript', () => {
         eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
         payload: {
           requestId,
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
           answers: { starters: { answers: ['Speed up CI'] } },
           resolution: 'submitted',
         },
@@ -625,6 +629,12 @@ describe('FastSessionTranscript', () => {
           inputKind: SETUP_RECEIPT_INPUT_KIND,
           setupReceiptKind: 'starter_selection',
           userId: 'user-1',
+        },
+        payload: {
+          setupReceipt: {
+            requestId,
+            kind: 'starter_selection',
+          },
         },
       };
 
@@ -660,14 +670,104 @@ describe('FastSessionTranscript', () => {
       expect(screen.queryByText('Structured input request')).toBeNull();
       if (preset === 'setup_starter_tasks') {
         expect(screen.queryByText('Structured response')).toBeNull();
-        expect(screen.getByText('Selected Speed up CI.')).toBeInTheDocument();
+        expect(screen.getAllByText('Selected Speed up CI.')).toHaveLength(1);
       } else {
-        expect(screen.getByText('Structured response')).toBeInTheDocument();
+        expect(
+          screen.getByTestId('request-user-input-response'),
+        ).toBeInTheDocument();
       }
       expect(screen.getByLabelText('Test User')).toBeInTheDocument();
       expect(screen.queryByText(cardLabel)).toBeNull();
     },
   );
+
+  it('keeps an unmatched setup response visible even when a setup receipt exists', () => {
+    const request = {
+      ...textMessage({
+        id: 'request',
+        role: 'assistant',
+        text: 'Choose',
+        ts: 1,
+      }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      payload: {
+        requestId: 'request-1',
+        status: 'pending',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        preset: 'setup_starter_tasks' as const,
+        questions: [
+          { id: 'choice', question: 'Choose', options: [{ label: 'One' }] },
+        ],
+      },
+    };
+    const response = {
+      ...textMessage({ id: 'response', role: 'user', text: 'Response', ts: 2 }),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
+      payload: {
+        requestId: 'request-1',
+        sessionId: 'session-1',
+        turnId: 'turn-1',
+        callId: 'call-1',
+        answers: { choice: { answers: ['One'] } },
+        resolution: 'submitted' as const,
+      },
+    };
+    const receipt = textMessage({
+      id: 'receipt',
+      role: 'user',
+      text: 'A different setup result.',
+      ts: 2,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+    });
+    receipt.metadata = {
+      visibleInTranscript: true,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      setupReceiptKind: 'compute_readiness',
+    } as {
+      visibleInTranscript: boolean;
+      inputKind?: string;
+      setupReceiptKind?: string;
+    };
+    receipt.payload = {
+      setupReceipt: { kind: 'compute_readiness', requestId: 'request-2' },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[request, response, receipt]}
+      />,
+    );
+
+    expect(screen.getByText('One')).toBeInTheDocument();
+    expect(screen.getByText('A different setup result.')).toBeInTheDocument();
+  });
+
+  it('does not suppress responses for historical receipts without request linkage', () => {
+    expect(
+      isRequestUserInputResponseRepresentedByCanonicalReceipt(
+        {
+          requestId: 'request-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          answers: {},
+          resolution: 'submitted',
+        },
+        [
+          {
+            metadata: {
+              inputKind: SETUP_RECEIPT_INPUT_KIND,
+              setupReceiptKind: 'starter_selection',
+            },
+            payload: { setupReceipt: { kind: 'starter_selection' } },
+          },
+        ],
+      ),
+    ).toBe(false);
+  });
 
   it('renders a structured response once in chronology as human-authored text', () => {
     const requestId = 'rui:chronology';

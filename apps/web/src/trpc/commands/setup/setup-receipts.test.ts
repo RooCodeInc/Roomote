@@ -16,6 +16,7 @@ describe('setup transcript receipts', () => {
       userId: 'user-1',
       kind: 'compute_readiness' as const,
       fingerprint: 'modal',
+      requestId: 'request-1',
       text: 'Sandbox configured with Modal.',
       payload: { provider: 'modal' },
       ts: 123,
@@ -36,7 +37,11 @@ describe('setup transcript receipts', () => {
         setupReceiptKind: 'compute_readiness',
       },
       payload: {
-        setupReceipt: { kind: 'compute_readiness', provider: 'modal' },
+        setupReceipt: {
+          kind: 'compute_readiness',
+          requestId: 'request-1',
+          provider: 'modal',
+        },
       },
     });
   });

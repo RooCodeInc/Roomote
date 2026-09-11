@@ -1098,6 +1098,7 @@ async function persistSetupPresetResponse(input: {
             userId: input.auth.userId,
             kind: 'starter_selection',
             fingerprint: input.request.payload.requestId,
+            requestId: input.request.payload.requestId,
             text: formatStarterSelectionReceipt(
               taskIds.map(
                 (taskId) =>

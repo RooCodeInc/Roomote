@@ -55,6 +55,7 @@ export function buildSetupReceiptMessage(input: {
   kind: SetupReceiptKind;
   fingerprint: string;
   text: string;
+  requestId?: string;
   payload?: Record<string, unknown>;
   ts?: number;
 }) {
@@ -84,6 +85,7 @@ export function buildSetupReceiptMessage(input: {
     payload: {
       setupReceipt: {
         kind: input.kind,
+        ...(input.requestId ? { requestId: input.requestId } : {}),
         ...(input.payload ?? {}),
       },
     },

@@ -83,6 +83,14 @@ export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
  */
 export const SETUP_RECEIPT_INPUT_KIND = 'setup_receipt' as const;
 
+/** Payload shared by canonical setup receipts persisted in transcript history. */
+export interface SetupReceiptPayload {
+  kind: string;
+  /** Request-user-input event represented by this receipt, when applicable. */
+  requestId?: string;
+  [key: string]: unknown;
+}
+
 export interface AcpLogicalEventIdParts {
   sessionId: string | null | undefined;
   turnId?: string | null | undefined;
