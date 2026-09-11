@@ -177,7 +177,7 @@ The person will mostly talk about their code repositories, pull requests, issues
 
 ${formatVoiceWorkspaceContext(context)}
 
-Backchannel policy: Acknowledge each utterance in a few words right away ("Sure.", "I'll check.") and then wait for the backend. Do not narrate while waiting; if the wait runs long, one brief "still working on it" is enough.
+Backchannel policy: Acknowledge each request in a few words right away ("Sure.", "I'll check.") and then wait for the backend. Do not narrate while waiting; if the wait runs long, one brief "still working on it" is enough.
 
 Interruption policy: Stop speaking the moment the person starts talking, and listen.
 
@@ -185,9 +185,16 @@ Delegation policy:
 Backend tools:
 - The backend is the Roomote Fast session: it reads and changes the repositories above, launches coding tasks in those environments, calls the listed integrations, reasons carefully, and returns results for you to report.
 
-- Delegate every complete utterance to the backend, including greetings, thanks, reactions, small talk, corrections, follow-ups, and requests that need clarification.
-- Your only self-generated speech is the brief acknowledgement above or one brief wait update. Never answer, explain, clarify, offer an opinion, or state a fact yourself.
-- You cannot inspect code, documentation, tools, or deployment state yourself. Never claim that you checked a source or state how any product, repository, or connected tool discussed in the Session works unless backend commentary supplied that result. This includes Roomote when the platform itself is the topic.
+Delegate to the backend when:
+- The person asks about or for anything involving code, repositories, pull requests, issues, tasks, tools, data, or facts about their work. Anything you would have to guess at, delegate.
+- The person corrects, refines, or follows up on earlier work.
+
+Do not delegate to the backend when:
+- The person is only greeting you, thanking you, reacting ("cool", "nice"), or making small talk. Answer briefly yourself, and never start a Fast turn for it.
+- You need a one-line clarification to understand what they mean before the backend could act.
+
+Grounding policy:
+- You cannot inspect code, documentation, tools, or deployment state yourself. Never claim that you checked a source, and never state how any product, repository, or connected tool discussed in the Session works unless backend commentary supplied that result. This includes Roomote when the platform itself is the topic. When in doubt, delegate.
 
 Reporting policy:
 - Commentary is the backend's result. Report it in your own words, faithfully and completely: keep every number, name, path, and link label exactly as given, and do not add conclusions the backend did not state. Never claim work finished or a result exists before commentary says so.
@@ -209,7 +216,7 @@ export async function createVoiceLiveSession(options: {
     body: JSON.stringify({
       session: {
         model: VOICE_LIVE_MODEL,
-        voice: options.voiceId,
+        audio: { output: { voice: options.voiceId } },
         instructions: buildVoiceLiveInstructions(options.context),
         delegation: { type: 'client' },
       },
@@ -237,6 +244,19 @@ export async function createVoiceLiveSession(options: {
   return { sessionId: payload.session.id, sdp: payload.transport.sdp };
 }
 
+/**
+ * The key can open GPT-Live calls but is a restricted OpenAI key without the
+ * Audio model permission that the speech endpoint needs for previews.
+ */
+export class VoicePreviewPermissionError extends Error {
+  constructor() {
+    super(
+      'This OpenAI key cannot generate voice previews. In OpenAI, give the key the Audio model permission (api.model.audio.request) or use an unrestricted key. Voice calls work without it.',
+    );
+    this.name = 'VoicePreviewPermissionError';
+  }
+}
+
 export async function createVoicePreview(options: {
   apiKey: string;
   voiceId: OpenAiRealtimeVoiceId;
@@ -258,6 +278,11 @@ export async function createVoicePreview(options: {
 
   if (!response.ok) {
     const body = (await response.text().catch(() => '')).slice(0, 2_000);
+    // Only the Audio model permission has a known remedy. Any other missing
+    // scope surfaces as the upstream error so the admin sees what OpenAI said.
+    if (response.status === 401 && body.includes('api.model.audio.request')) {
+      throw new VoicePreviewPermissionError();
+    }
     throw new Error(
       `OpenAI voice preview request failed with status ${response.status}: ${body}`,
     );

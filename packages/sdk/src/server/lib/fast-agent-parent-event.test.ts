@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => ({
   acquireRootBindingLock: vi.fn(),
   releaseRootBindingLock: vi.fn(),
   answerQuestion: vi.fn(),
+  buildSetupAdapter: vi.fn(() => ({ assertTaskLaunch: vi.fn() })),
   createLauncher: vi.fn(),
   launchTask: vi.fn(),
   findSession: vi.fn(),
   bindConversation: vi.fn(),
   findInstallation: vi.fn(),
   findCustomAutomation: vi.fn(),
+  recordCustomAutomationResult: vi.fn().mockResolvedValue(null),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   findWakeup: vi.fn(),
@@ -135,6 +137,7 @@ vi.mock(
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  buildFastAgentSetupAdapter: mocks.buildSetupAdapter,
   resolveApiBaseUrl: () => 'https://roomote.example.com',
   fastAgentConversationRepository: {
     findById: mocks.findSession,
@@ -190,6 +193,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: mocks.findCustomAutomation,
+  recordCustomAutomationResult: mocks.recordCustomAutomationResult,
   getSessionWakeupById: mocks.findWakeup,
   getSessionForFastConversation: mocks.findWakeupSession,
   slackInstallations: {
@@ -699,6 +703,12 @@ describe('deliverFastAgentParentEvent', () => {
           platformEventKind: 'setup',
           platformEventVisibility: 'required',
           setupSession: true,
+          setupContext: {
+            sessionId: 'session-1',
+            fastConversationId: parent.sessionId,
+            setupSnapshot: '{"rail":{"source":"ready"}}',
+            starterTaskOptions: [],
+          },
         },
         resumedAfterInterruption: true,
         durableAdmission: { eventId: 'row-2' },
@@ -724,6 +734,10 @@ describe('deliverFastAgentParentEvent', () => {
         platformEventKind: 'setup',
         platformEventVisibility: 'required',
         setupSession: true,
+        setupSnapshot: '{"rail":{"source":"ready"}}',
+        adapter: expect.objectContaining({
+          assertTaskLaunch: expect.any(Function),
+        }),
         resumedAfterInterruption: true,
         durableAdmission: { eventId: 'row-2' },
       }),
@@ -1866,7 +1880,7 @@ describe('deliverFastAgentParentEvent', () => {
             type: 'actions',
             elements: expect.arrayContaining([
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_task',
+                action_id: 'late_bound_automation_view_session',
               }),
               expect.objectContaining({
                 action_id: 'late_bound_automation_configure',
@@ -1920,7 +1934,7 @@ describe('deliverFastAgentParentEvent', () => {
             type: 'actions',
             elements: expect.arrayContaining([
               expect.objectContaining({
-                action_id: 'late_bound_automation_view_task',
+                action_id: 'late_bound_automation_view_session',
               }),
             ]),
           }),

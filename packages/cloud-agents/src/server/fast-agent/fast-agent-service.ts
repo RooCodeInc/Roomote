@@ -87,6 +87,10 @@ import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
+  enqueueUserPersonalizationUpdate,
+  resolveFastAgentPersonalizationContext,
+} from '../user-personalization';
+import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
   getOrCreateFastAgentSession,
@@ -162,6 +166,7 @@ import {
   listFastAgentIntegrations,
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
+import { McpToolCallError } from '../mcp-tool-client';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -262,6 +267,10 @@ const chatReplyArgsSchema = z.object({
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
+});
+const updatePersonalizationArgsSchema = z.object({
+  preference: z.string().trim().min(1).max(500),
+  confidence: z.enum(['explicit', 'inferred']),
 });
 const showWidgetArgsSchema = z.object({
   html: z.string(),
@@ -551,28 +560,81 @@ const requestUserInputQuestionSchema = z.object({
     .optional(),
   multiple: z.boolean().optional(),
 });
-const fastAgentInputPresetSchema = z.enum(['setup_starter_tasks']);
+const fastAgentInputPresetSchema = z.enum([
+  'setup_starter_tasks',
+  'setup_integrations',
+]);
+const setupIntegrationAnswersSchema = z.record(
+  z.string(),
+  z.object({ answers: z.array(z.string()) }),
+);
 // Some models fill every optional tool parameter, so a trusted preset may
 // arrive alongside placeholder questions. The preset wins: its questions are
 // server-supplied and model-provided ones are discarded rather than rejected.
-const requestUserInputArgsSchema = z
-  .object({
-    questions: z.array(requestUserInputQuestionSchema).min(1).max(4).optional(),
-    preset: fastAgentInputPresetSchema.optional(),
-  })
-  .transform(
-    (
-      args,
-    ):
-      | { preset: FastAgentInputPreset }
-      | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
-      | null =>
-      args.preset
-        ? { preset: args.preset }
-        : args.questions
-          ? { questions: args.questions }
-          : null,
-  );
+const requestUserInputArgsSchema = z.preprocess(
+  (raw) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+
+    const input = raw as Record<string, unknown>;
+    if (input.preset === 'setup_starter_tasks') {
+      // A trusted preset owns its questions. Models sometimes serialize
+      // optional fields as placeholders or null; discard them before schema
+      // validation so those fields cannot make the preset call fail.
+      return { preset: input.preset };
+    }
+    if (input.preset === 'setup_integrations') {
+      // Integration answers are meaningful for this preset, but questions
+      // are still server-owned. Treat a model-emitted null as omitted.
+      return {
+        preset: input.preset,
+        ...(input.setupIntegrationAnswers !== undefined &&
+        input.setupIntegrationAnswers !== null
+          ? { setupIntegrationAnswers: input.setupIntegrationAnswers }
+          : {}),
+      };
+    }
+    return raw;
+  },
+  z
+    .object({
+      questions: z
+        .array(requestUserInputQuestionSchema)
+        .min(1)
+        .max(4)
+        .optional(),
+      preset: fastAgentInputPresetSchema.optional(),
+      setupIntegrationAnswers: setupIntegrationAnswersSchema.optional(),
+    })
+    .refine(
+      (args) =>
+        args.setupIntegrationAnswers === undefined ||
+        args.preset === 'setup_integrations',
+      'setupIntegrationAnswers is only available with setup_integrations.',
+    )
+    .transform(
+      (
+        args,
+      ):
+        | {
+            preset: FastAgentInputPreset;
+            setupIntegrationAnswers?: z.output<
+              typeof setupIntegrationAnswersSchema
+            >;
+          }
+        | { questions: z.output<typeof requestUserInputQuestionSchema>[] }
+        | null =>
+        args.preset
+          ? {
+              preset: args.preset,
+              ...(args.setupIntegrationAnswers !== undefined
+                ? { setupIntegrationAnswers: args.setupIntegrationAnswers }
+                : {}),
+            }
+          : args.questions
+            ? { questions: args.questions }
+            : null,
+    ),
+);
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -1547,6 +1609,9 @@ function selectActiveTaskId(
 }
 
 function toolFailure(error: unknown): { success: false; error: string } {
+  if (error instanceof McpToolCallError && error.upstreamText) {
+    return { success: false, error: error.upstreamText };
+  }
   return { success: false, error: formatErrorForLog(error) };
 }
 
@@ -2549,6 +2614,8 @@ export async function answerFastAgentQuestion({
     const visibleInTranscript =
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
+    const privatePersonalization =
+      title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -2573,7 +2640,7 @@ export async function answerFastAgentQuestion({
           serverName: mcpServerName,
           toolName: mcpToolName ?? title,
           command: null,
-          rawInput: { arguments: args },
+          rawInput: { arguments: privatePersonalization ? {} : args },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -2598,12 +2665,21 @@ export async function answerFastAgentQuestion({
     result: unknown,
     nativeSessionId?: string | null,
   ) => {
-    const { output, truncated } = serializeFastAgentToolOutput(result);
     const failed =
       result !== null &&
       typeof result === 'object' &&
       'success' in result &&
       result.success === false;
+    const privatePersonalization =
+      event.title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
+    const { output, truncated } = privatePersonalization
+      ? {
+          output: failed
+            ? 'Personalization was not updated'
+            : 'Personalization updated',
+          truncated: false,
+        }
+      : serializeFastAgentToolOutput(result);
     await persistCanonicalMessage(
       {
         ...event.canonicalEvent,
@@ -2629,7 +2705,7 @@ export async function answerFastAgentQuestion({
           command: null,
           exitCode: null,
           output,
-          rawInput: { arguments: event.args },
+          rawInput: { arguments: privatePersonalization ? {} : event.args },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -2939,6 +3015,17 @@ export async function answerFastAgentQuestion({
           return undefined;
         }),
     ]);
+    const personalizationContext = platformEvent
+      ? null
+      : await resolveFastAgentPersonalizationContext({
+          conversationId: session.id,
+          userId,
+        }).catch((error) => {
+          console.warn(
+            `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
+          );
+          return null;
+        });
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
@@ -3184,6 +3271,7 @@ export async function answerFastAgentQuestion({
       setupSession,
       voiceMode,
       therapistModeEnabled,
+      personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
         agentBehaviorSettings?.workspaceRoutingSettings?.rules,
@@ -4411,6 +4499,29 @@ export async function answerFastAgentQuestion({
             };
           }
 
+          case FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization: {
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'Personalization learning is unavailable for platform events.',
+              };
+            }
+            const args = updatePersonalizationArgsSchema.parse(call.args);
+            const result = await enqueueUserPersonalizationUpdate({
+              userId,
+              fastConversationId: session.id,
+              ...args,
+            });
+            return result.saved
+              ? { success: true, saved: true }
+              : {
+                  success: false,
+                  saved: false,
+                  reason: result.reason ?? 'unknown',
+                };
+          }
+
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {
             if (conversation.surface !== 'web') {
               return {
@@ -4436,9 +4547,19 @@ export async function answerFastAgentQuestion({
             const questions =
               'questions' in args
                 ? args.questions
-                : await adapter.resolveUserInputPreset!(
-                    args.preset as FastAgentInputPreset,
-                  );
+                : args.setupIntegrationAnswers !== undefined
+                  ? await adapter.resolveUserInputPreset!(
+                      args.preset,
+                      args.setupIntegrationAnswers,
+                    )
+                  : await adapter.resolveUserInputPreset!(args.preset);
+            // Trusted setup presets may complete entirely server-side. In
+            // that case no pending request or browser response is needed.
+            if (preset && questions.length === 0) {
+              visibleUpdatePosted = true;
+              closedInstructionVersions.add(instructionVersion);
+              return { success: true, completed: true, closed: true };
+            }
             for (const question of questions) {
               if (question.options && question.isSecret) {
                 return {

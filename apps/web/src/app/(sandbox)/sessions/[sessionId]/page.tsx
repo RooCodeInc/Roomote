@@ -98,13 +98,21 @@ export default async function SessionDetailPage({
   searchParams,
 }: SessionDetailPageProps) {
   const { sessionId } = await params;
-  const { authorizedUser, unifiedSession, session } =
-    await getSessionPageData(sessionId);
-  const autoStartVoice = hasVoiceAutostartFlag(await searchParams);
+  const sessionPageDataPromise = getSessionPageData(sessionId);
+  const modelEnvPromise: Promise<Record<string, string>> =
+    resolveEffectiveModelRuntimeEnv().catch(() => ({}));
+  const [
+    { authorizedUser, unifiedSession, session },
+    modelEnv,
+    resolvedParams,
+  ] = await Promise.all([
+    sessionPageDataPromise,
+    modelEnvPromise,
+    searchParams,
+  ]);
+  const autoStartVoice = hasVoiceAutostartFlag(resolvedParams);
   // The chip's "default" must reflect what Fast actually runs with: the
   // deployment's orchestration model, not the task launch default.
-  const modelEnv: Record<string, string> =
-    await resolveEffectiveModelRuntimeEnv().catch(() => ({}));
   const defaultModelId =
     modelEnv.R_ORCHESTRATION_MODEL || modelEnv.R_MODEL || null;
   const rawDefaultEffort = modelEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
@@ -144,7 +152,7 @@ export default async function SessionDetailPage({
       authorizedUser.isAdmin &&
       unifiedSession.id === (await findDeploymentSetupSessionId());
     const setupTimelineExtras = isSetupSession ? (
-      <div className="space-y-3">
+      <div className="space-y-3" key="setup-timeline-extras">
         <SetupSessionSourceControlCard sessionId={unifiedSession.id} />
         <SetupSandboxCard />
         <SetupAutomationRecommendationsCard sessionId={unifiedSession.id} />

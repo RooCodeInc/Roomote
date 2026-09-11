@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  buildFastAgentSetupAdapter,
   createFastAgentTaskLauncher,
   createFastAgentWebTaskLauncher,
   fastAgentConversationRepository,
@@ -22,6 +23,7 @@ import {
   customAutomations,
   eq,
   getCustomAutomationById,
+  recordCustomAutomationResult,
   getSessionForFastConversation,
   getSessionWakeupById,
   inArray,
@@ -2329,6 +2331,8 @@ type FastAgentParentEventDeliveryParams = {
    * immediately after an interruption, or at a scheduled retry time. */
   requestDurableResume?: () => Promise<void>;
   requestDurableRetry?: (retryAt: Date) => Promise<void>;
+  /** Schedule the next setup state turn after a server-only preset completion. */
+  onSetupIntegrationDiscoveryCompleted?: () => Promise<void>;
 };
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -2493,7 +2497,7 @@ export async function deliverFastAgentParentEventWithLock(
 
     const humanFollowUp =
       params.event.type === 'human_follow_up' ? params.event : null;
-    const parentTurn = await createFastAgentParentTurn({
+    let parentTurn = await createFastAgentParentTurn({
       parent: params.parent,
       event: params.event,
       ...(humanFollowUp
@@ -2505,6 +2509,35 @@ export async function deliverFastAgentParentEventWithLock(
         replyPosted = true;
       },
     });
+    if (isFastAutomationReportEvent(params.event)) {
+      const reportEvent = params.event;
+      const automationId =
+        reportEvent.type === 'automation_triggered'
+          ? reportEvent.automationId
+          : reportEvent.customAutomationId!;
+      const baseAdapter = parentTurn.adapter;
+      parentTurn = {
+        ...parentTurn,
+        adapter: {
+          ...baseAdapter,
+          postReply: async (reply) => {
+            if (
+              !reply.kickoff &&
+              (reply.purpose === 'closeout' ||
+                reply.purpose === 'clarification')
+            ) {
+              await recordCustomAutomationResult({
+                automationId,
+                userId: parentTurn.userId,
+                content: reply.message,
+                dedupeKey: `fast:${buildFastAutomationSuggestionEventId(reportEvent)}`,
+              }).catch(() => undefined);
+            }
+            return baseAdapter.postReply(reply);
+          },
+        },
+      };
+    }
     // A failed automation run always reaches its destination. The model
     // judges what a result is worth, but a broken automation must not stay
     // silent, so this closeout is fixed text rather than a model turn.
@@ -2568,6 +2601,9 @@ export async function deliverFastAgentParentEventWithLock(
       ...(humanFollowUp?.input ? { input: humanFollowUp.input } : {}),
       ...(humanFollowUp?.setupSession ? { setupSession: true } : {}),
       ...(humanFollowUp?.voiceMode ? { voiceMode: true } : {}),
+      ...(humanFollowUp?.setupContext
+        ? { setupSnapshot: humanFollowUp.setupContext.setupSnapshot }
+        : {}),
       ...(humanFollowUp
         ? { currentDurableHumanFollowUpEventId: humanFollowUp.eventId }
         : {}),
@@ -2628,6 +2664,16 @@ export async function deliverFastAgentParentEventWithLock(
         createArtifact: buildFastAgentArtifactCreator(params.parent.sessionId),
         ...parentTurn.adapter,
         launchTask: parentTurn.adapter.launchTask,
+        ...(humanFollowUp?.setupContext
+          ? buildFastAgentSetupAdapter(humanFollowUp.setupContext, {
+              ...(params.onSetupIntegrationDiscoveryCompleted
+                ? {
+                    onIntegrationDiscoveryCompleted:
+                      params.onSetupIntegrationDiscoveryCompleted,
+                  }
+                : {}),
+            })
+          : {}),
         ...(wakeupGuard
           ? {
               postReply: wakeupGuard.guardPostReply(

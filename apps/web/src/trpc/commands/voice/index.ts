@@ -15,6 +15,7 @@ import { findAccessibleFastSession } from '@/lib/server/fast-sessions';
 import {
   cleanVoiceTranscript,
   createVoicePreview,
+  VoicePreviewPermissionError,
   createVoiceLiveSession,
   resolveVoiceOpenAiKey,
   resolveVoiceId,
@@ -90,6 +91,14 @@ export async function previewVoiceCommand(
   try {
     return await createVoicePreview({ apiKey, voiceId: input.voiceId });
   } catch (error) {
+    if (error instanceof VoicePreviewPermissionError) {
+      // The admin can fix this one themselves; say exactly what is missing.
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message: error.message,
+        cause: error,
+      });
+    }
     console.error('[voice] Failed to create voice preview', error);
     throw new TRPCError({
       code: 'BAD_GATEWAY',
@@ -137,10 +146,10 @@ export async function cleanVoiceTranscriptCommand(
 const VOICE_MESSAGE_SOURCE = 'voice';
 
 /**
- * Record one spoken turn of a voice call in the Session transcript: legacy
- * direct user speech (`user`), or what the voice said directly (`assistant`).
- * Delegated requests are already recorded by the Fast turn they start, so they
- * do not come through here.
+ * Record one spoken turn of a voice call in the Session transcript: what the
+ * person said when the voice answered them directly (`user`), or what the
+ * voice said (`assistant`). Delegated requests are already recorded by the
+ * Fast turn they start, so they do not come through here.
  *
  * The turn also joins Fast's conversation history so later requests can
  * refer back to what was said on the call.

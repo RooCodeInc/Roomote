@@ -17,6 +17,7 @@ import {
 import {
   listConnectedCommunicationProviders,
   listAvailableAgentMailOutboundIdentities,
+  getCustomAutomationNextRunAt,
   resolveCustomAutomationSchedule,
   resolveDeploymentTimeZone,
   runCustomAutomationNow,
@@ -37,6 +38,7 @@ import {
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
   type ReasoningEffort,
+  type AutomationResultPriority,
 } from '@roomote/types';
 import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
@@ -59,6 +61,7 @@ export type CustomAutomationListItem = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority?: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
   cronExpression: string | null;
   model: string | null;
@@ -75,6 +78,7 @@ export type CustomAutomationListItem = {
   createdAt: Date;
   updatedAt: Date;
   latestFastResult: string | null;
+  nextRunAt: Date | null;
 };
 
 function latestAssistantText(
@@ -106,6 +110,7 @@ export type CustomAutomationWriteInput = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority?: AutomationResultPriority;
   scheduleMode: string;
   cronExpression?: string | null;
   /** Provider/model launch override, or null for the deployment default. */
@@ -124,6 +129,7 @@ function toListItem(
     createdByUser?: { name: string; email: string } | null;
   },
   latestFastResult: string | null = null,
+  scheduleContext?: Awaited<ReturnType<typeof resolveDeploymentTimeZone>>,
 ): CustomAutomationListItem {
   const scheduleMode =
     row.scheduleMode === 'cron'
@@ -137,6 +143,7 @@ function toListItem(
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority,
     scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
@@ -160,6 +167,16 @@ function toListItem(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     latestFastResult,
+    nextRunAt: scheduleContext
+      ? getCustomAutomationNextRunAt({
+          enabled: row.enabled,
+          scheduleMode,
+          cronExpression: row.cronExpression,
+          timeZone: scheduleContext.timeZone,
+          timeZoneUpdatedAt: scheduleContext.updatedAt,
+          lastRunAt: row.lastRunAt,
+        })
+      : null,
   };
 }
 
@@ -285,7 +302,11 @@ async function assertAutomationModelSelection(
 export async function listCustomAutomationsCommand(
   auth: UserAuthSuccess,
 ): Promise<CustomAutomationListItem[]> {
-  const rows = (await listCustomAutomations()).filter(
+  const [allRows, scheduleContext] = await Promise.all([
+    listCustomAutomations(),
+    resolveDeploymentTimeZone(),
+  ]);
+  const rows = allRows.filter(
     (row) => auth.isAdmin || row.createdByUserId === auth.userId,
   );
   const automationIds = rows.map((row) => row.id);
@@ -316,7 +337,7 @@ export async function listCustomAutomationsCommand(
     );
   }
   return rows.map((row) =>
-    toListItem(row, latestByAutomation.get(row.id) ?? null),
+    toListItem(row, latestByAutomation.get(row.id) ?? null, scheduleContext),
   );
 }
 
@@ -360,11 +381,12 @@ export async function createCustomAutomationCommand(
   input: CustomAutomationWriteInput,
 ): Promise<CustomAutomationListItem> {
   assertScheduleMode(input.scheduleMode);
+  const scheduleContext = await resolveDeploymentTimeZone();
   const cronExpression =
     input.scheduleMode === 'cron'
       ? validateCronExpression(
           input.cronExpression ?? '',
-          (await resolveDeploymentTimeZone()).timeZone,
+          scheduleContext.timeZone,
         )
       : null;
   if (input.targetProvider) {
@@ -380,6 +402,7 @@ export async function createCustomAutomationCommand(
     name: input.name,
     prompt: input.prompt,
     enabled: input.enabled,
+    resultPriority: input.resultPriority ?? 'normal',
     scheduleMode: input.scheduleMode,
     cronExpression,
     model: input.model ?? null,
@@ -394,7 +417,7 @@ export async function createCustomAutomationCommand(
     input.targetProvider ?? null,
   );
 
-  return toListItem(created);
+  return toListItem(created, null, scheduleContext);
 }
 
 export async function updateCustomAutomationCommand(
@@ -403,11 +426,12 @@ export async function updateCustomAutomationCommand(
 ): Promise<CustomAutomationListItem> {
   const existing = await getOwnedAutomation(auth, input.id);
   assertScheduleMode(input.scheduleMode);
+  const scheduleContext = await resolveDeploymentTimeZone();
   const cronExpression =
     input.scheduleMode === 'cron'
       ? validateCronExpression(
           input.cronExpression ?? '',
-          (await resolveDeploymentTimeZone()).timeZone,
+          scheduleContext.timeZone,
         )
       : null;
   const ownerUserId = existing.createdByUserId ?? auth.userId;
@@ -431,6 +455,7 @@ export async function updateCustomAutomationCommand(
     name: input.name,
     prompt: input.prompt,
     enabled: input.enabled,
+    resultPriority: input.resultPriority ?? existing.resultPriority,
     scheduleMode: input.scheduleMode,
     cronExpression,
     model: input.model ?? null,
@@ -439,7 +464,7 @@ export async function updateCustomAutomationCommand(
     target,
   });
 
-  return toListItem(updated);
+  return toListItem(updated, null, scheduleContext);
 }
 
 export async function deleteCustomAutomationCommand(

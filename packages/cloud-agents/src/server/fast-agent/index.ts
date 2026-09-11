@@ -5,6 +5,7 @@ export * from './fast-agent-prompt';
 export * from './fast-agent-reply-stream';
 export * from './fast-agent-surface-reply-stream';
 export * from './fast-agent-service';
+export * from './fast-agent-setup-context';
 export * from './fast-agent-turn-lock';
 export * from './fast-agent-turn-shutdown';
 export * from './fast-agent-session';

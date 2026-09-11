@@ -64,6 +64,7 @@ import type {
   environmentRepositoryMappings,
   automations,
   customAutomations,
+  automationResults,
   sessionWakeups,
   trackedMessages,
 } from './schema';
@@ -631,6 +632,12 @@ export type CustomAutomation = typeof customAutomations.$inferSelect;
 
 export type CreateCustomAutomation = Omit<
   typeof customAutomations.$inferInsert,
+  Timestamp
+>;
+
+export type AutomationResult = typeof automationResults.$inferSelect;
+export type CreateAutomationResult = Omit<
+  typeof automationResults.$inferInsert,
   Timestamp
 >;
 

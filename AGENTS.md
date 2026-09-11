@@ -9,7 +9,6 @@ Roomote is a product centered on **Roomote agents**. Those agents are the core u
 This repository is open source. Treat GitHub and other public surfaces as fully public:
 
 - Do not put customer names, customer data, private deployment details, secrets, credentials, or internal maintainer discussion into commits, PR titles/bodies, PR/issue comments, review replies, or other public artifacts.
-- Prefer private channels (for example Slack or the task UI) for anything that is customer-specific, confidential, or only meaningful as internal discussion.
 - When writing public text, keep it general enough for an open-source audience and omit private context even when it was available in the private task thread.
 
 ## Setup

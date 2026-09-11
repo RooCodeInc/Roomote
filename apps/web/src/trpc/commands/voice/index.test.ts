@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TRPCError } from '@trpc/server';
 
+import { VoicePreviewPermissionError } from '@/lib/server/voice';
+
 const {
   mockResolveVoiceOpenAiKey,
   mockCreateVoiceLiveSession,
@@ -15,7 +17,11 @@ const {
   mockResolveVoiceId: vi.fn(),
 }));
 
-vi.mock('@/lib/server/voice', () => ({
+vi.mock('@/lib/server/voice', async (importOriginal) => ({
+  // The real error class so the command's instanceof check works.
+  VoicePreviewPermissionError: (
+    await importOriginal<typeof import('@/lib/server/voice')>()
+  ).VoicePreviewPermissionError,
   resolveVoiceOpenAiKey: mockResolveVoiceOpenAiKey,
   createVoiceLiveSession: mockCreateVoiceLiveSession,
   createVoicePreview: mockCreateVoicePreview,
@@ -152,6 +158,19 @@ describe('previewVoiceCommand', () => {
     expect(mockResolveVoiceOpenAiKey).not.toHaveBeenCalled();
   });
 
+  it('tells the admin what permission the key is missing for previews', async () => {
+    mockCreateVoicePreview.mockRejectedValue(new VoicePreviewPermissionError());
+
+    const error = await previewVoiceCommand(auth, {
+      apiKey: 'sk-restricted',
+      voiceId: 'marin',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TRPCError);
+    expect((error as TRPCError).code).toBe('PRECONDITION_FAILED');
+    expect((error as TRPCError).message).toContain('Audio model permission');
+  });
+
   it('uses the stored key when editing with a blank key', async () => {
     mockResolveVoiceOpenAiKey.mockResolvedValue('sk-stored');
     mockCreateVoicePreview.mockResolvedValue({
@@ -206,7 +225,7 @@ describe('cleanVoiceTranscriptCommand', () => {
 });
 
 describe('recordVoiceTurnCommand', () => {
-  it('writes direct voice output as spoken but unverified in Fast history', async () => {
+  it('writes what the voice said as a spoken assistant turn and adds it to Fast history', async () => {
     mockFindAccessibleFastSession.mockResolvedValue({ id: 'fast-1' });
     mockUpsertFastAgentMessage.mockResolvedValue({});
     mockAppendFastAgentVisibleMessages.mockResolvedValue(undefined);

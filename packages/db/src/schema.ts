@@ -87,6 +87,7 @@ import type {
   SessionWakeupReportPolicy,
   SessionWakeupSchedule,
   SessionWakeupStatus,
+  AutomationResultPriority,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -153,6 +154,26 @@ export const users = pgTable(
   ],
 );
 
+/** Private, actor-owned instructions used only while serving that user. */
+export const userPersonalizations = pgTable('user_personalizations', {
+  userId: text('user_id')
+    .notNull()
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  manualInstructions: encryptedText('manual_instructions'),
+  explicitConversationInstructions: encryptedText(
+    'explicit_conversation_instructions',
+  ),
+  inferredInstructions: encryptedText('inferred_instructions'),
+  learnFromConversations: boolean('learn_from_conversations')
+    .notNull()
+    .default(true),
+  version: integer('version').notNull().default(0),
+  resetAt: timestamp('reset_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 export const instanceSkills = pgTable(
   'instance_skills',
   {
@@ -178,6 +199,16 @@ export const userRelations = relations(users, ({ many }) => ({
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
+
+export const userPersonalizationRelations = relations(
+  userPersonalizations,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [userPersonalizations.userId],
+      references: [users.id],
+    }),
+  }),
+);
 
 /**
  * deployment_settings
@@ -603,6 +634,13 @@ export const workItems = pgTable(
     failedAt: timestamp('failed_at'),
     launchError: text('launch_error'),
     dismissedAt: timestamp('dismissed_at'),
+    resultAcceptedAt: timestamp('result_accepted_at'),
+    resultIgnoredAt: timestamp('result_ignored_at'),
+    resultAutomationName: text('result_automation_name'),
+    resultPriority: text('result_priority').$type<AutomationResultPriority>(),
+    resultUserId: text('result_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3477,6 +3515,28 @@ export const fastAgentConversations = pgTable(
 );
 
 /**
+ * Private personalization captured independently for each participant when
+ * they first speak in a Fast conversation. These encrypted values deliberately
+ * live outside shared conversation and transcript records.
+ */
+export const fastAgentPersonalizationSnapshots = pgTable(
+  'fast_agent_personalization_snapshots',
+  {
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    displayName: encryptedText('display_name'),
+    instructions: encryptedText('instructions').notNull(),
+    learnFromConversations: boolean('learn_from_conversations').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.conversationId, table.userId] })],
+);
+
+/**
  * fast_agent_parent_events
  *
  * Durable admission queue for events entering a Fast conversation while its
@@ -4338,6 +4398,10 @@ export const customAutomations = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     name: text('name').notNull(),
     prompt: text('prompt').notNull(),
+    resultPriority: text('result_priority')
+      .notNull()
+      .default('normal')
+      .$type<AutomationResultPriority>(),
     enabled: boolean('enabled').notNull().default(false),
     scheduleMode: text('schedule_mode').notNull().default('off'),
     cronExpression: text('cron_expression'),
@@ -4385,6 +4449,43 @@ export const customAutomations = pgTable(
     uniqueIndex('custom_automations_name_unique_idx').on(table.name),
     index('custom_automations_enabled_idx').on(table.enabled),
     index('custom_automations_environment_id_idx').on(table.environmentId),
+  ],
+);
+
+export const automationResults = pgTable(
+  'automation_results',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    automationKey: text('automation_key')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'set null' }),
+    customAutomationId: uuid('custom_automation_id').references(
+      () => customAutomations.id,
+      { onDelete: 'set null' },
+    ),
+    sourceTaskId: text('source_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    automationName: text('automation_name').notNull(),
+    content: text('content').notNull(),
+    priority: text('priority')
+      .notNull()
+      .default('normal')
+      .$type<AutomationResultPriority>(),
+    dedupeKey: text('dedupe_key').notNull(),
+    acceptedAt: timestamp('accepted_at'),
+    ignoredAt: timestamp('ignored_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('automation_results_dedupe_key_unique_idx').on(table.dedupeKey),
+    index('automation_results_inbox_idx').on(table.priority, table.createdAt),
+    index('automation_results_user_id_idx').on(table.userId),
+    index('automation_results_source_task_id_idx').on(table.sourceTaskId),
   ],
 );
 

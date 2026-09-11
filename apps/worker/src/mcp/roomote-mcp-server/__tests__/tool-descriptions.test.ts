@@ -381,12 +381,11 @@ describe('roomote MCP tool descriptions', () => {
       'send_message',
       'search_tasks',
       'get_compute_logs',
-      'launch',
       'cancel',
-      'list_environments',
       'list_models',
       'update_models',
     ]);
+    expect(manageTasksTool.config.description).not.toContain('launch');
     expect(taskIdField.description).toBe(
       'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
     );
@@ -397,6 +396,14 @@ describe('roomote MCP tool descriptions', () => {
       'targetTasks',
     );
     expect(manageTasksTool.config.inputSchema).not.toHaveProperty('targetType');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('prompt');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'environmentId',
+    );
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('branch');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'notifyOnSettle',
+    );
   });
 
   it('keeps task model discovery beside task model switching', async () => {
@@ -527,6 +534,24 @@ describe('roomote MCP tool descriptions', () => {
 
     expect(artifactsTool.config.description).toContain(
       'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not posted to chat automatically; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images).',
+    );
+  });
+
+  it('keeps platform issue reporting from replacing productive fallback work', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const tool = getRegisteredTool(registeredTools, 'report_platform_issue');
+
+    expect(tool.config.description).toContain(
+      'Report an admin-fixable Roomote platform, configuration, or access defect.',
+    );
+    expect(tool.config.description).toContain(
+      'When productive fallback work remains, describe the defect as degraded capability rather than a blocker',
+    );
+    expect(tool.config.description).toContain('continue that fallback work');
+    expect(tool.config.description).toContain(
+      'do not treat this report as task completion',
     );
   });
 

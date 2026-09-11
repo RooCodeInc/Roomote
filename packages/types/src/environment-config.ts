@@ -704,7 +704,7 @@ export const environmentConfigSchema = z
      * @example "This is a monorepo. The frontend is in packages/web and the API is in packages/api."
      */
     agentInstructions: z.string().max(10000).optional(),
-    repositories: z.array(environmentRepositoryConfigSchema).min(1),
+    repositories: z.array(environmentRepositoryConfigSchema).default([]),
     /**
      * Tool versions to install via mise at the shared workspace root.
      * Useful for workspace-root commands and as a broad fallback for repos

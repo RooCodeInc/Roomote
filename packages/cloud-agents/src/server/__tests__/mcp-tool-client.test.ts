@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 
-import { listMcpTools } from '../mcp-tool-client';
+import { extractMcpToolResultPayload, listMcpTools } from '../mcp-tool-client';
 
 describe('MCP tool client cancellation', () => {
   it('aborts the initialization transport when discovery is cancelled', async () => {
@@ -56,5 +56,35 @@ describe('MCP tool client cancellation', () => {
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe('extractMcpToolResultPayload', () => {
+  it('rejects an error result before considering structured content', () => {
+    const errorText =
+      'missing_required_fields: severity_id is required because manual triage is disabled';
+
+    expect(() =>
+      extractMcpToolResultPayload({
+        isError: true,
+        structuredContent: {
+          created_at: '',
+          external_id: 0,
+          id: '',
+          mode: '',
+          name: '',
+          permalink: '',
+          reference: '',
+          reported_at: '',
+          status: '',
+        },
+        content: [{ type: 'text', text: errorText }],
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: 'McpToolCallError',
+        upstreamText: errorText,
+      }),
+    );
   });
 });

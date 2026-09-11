@@ -3,6 +3,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { useTRPC } from '@/trpc/client';
+import { invalidateMcpIntegrationStatusQueries } from './invalidateMcpIntegrationStatusQueries';
 
 export function useSaveAsanaConnection() {
   const trpc = useTRPC();
@@ -11,12 +12,7 @@ export function useSaveAsanaConnection() {
   return useMutation(
     trpc.mcpConnections.saveAsanaConnection.mutationOptions({
       onSuccess: () => {
-        queryClient.invalidateQueries({
-          queryKey: trpc.mcpConnections.deploymentEnablements.queryKey(),
-        });
-        queryClient.invalidateQueries({
-          queryKey: trpc.mcpConnections.userConnections.queryKey(),
-        });
+        void invalidateMcpIntegrationStatusQueries(queryClient, trpc);
         queryClient.invalidateQueries({
           queryKey: trpc.mcpConnections.asanaConnection.queryKey(),
         });

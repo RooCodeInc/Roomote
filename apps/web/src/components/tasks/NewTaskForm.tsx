@@ -46,6 +46,7 @@ type FastSessionSubmission = {
 type NewTaskFormProps = {
   animate?: boolean;
   onTaskStarted?: () => void;
+  initialPrompt?: string;
   placeholder?: string;
   textareaMaxHeight?: number;
   promptContainerRef?: Ref<HTMLDivElement>;
@@ -54,6 +55,7 @@ type NewTaskFormProps = {
 export function NewTaskForm({
   animate = true,
   onTaskStarted,
+  initialPrompt = '',
   placeholder = DEFAULT_PROMPT_PLACEHOLDER,
   textareaMaxHeight,
   promptContainerRef,
@@ -68,7 +70,8 @@ export function NewTaskForm({
   const modelParam = searchParams.get('model')?.trim() || undefined;
   const environmentIdParam = searchParams.get('environmentId')?.trim() ?? '';
 
-  const [promptText, setPromptText] = useState(promptParam);
+  const initialPromptText = promptParam || initialPrompt;
+  const [promptText, setPromptText] = useState(initialPromptText);
   const [selectedModelOverrideId, setSelectedModelOverrideId] = useState<
     string | undefined
   >(modelParam);
@@ -76,7 +79,7 @@ export function NewTaskForm({
     ReasoningEffort | null | undefined
   >(undefined);
 
-  useEffect(() => setPromptText(promptParam), [promptParam]);
+  useEffect(() => setPromptText(initialPromptText), [initialPromptText]);
   useEffect(() => setSelectedModelOverrideId(modelParam), [modelParam]);
 
   const startFastSessionMutation = useStartFastSession();
@@ -299,7 +302,7 @@ export function NewTaskForm({
       }
     >
       <TaskPromptInput
-        promptKey={promptParam}
+        promptKey={initialPromptText}
         isBusy={isBusy}
         promptText={promptText}
         onPromptTextChange={setPromptText}

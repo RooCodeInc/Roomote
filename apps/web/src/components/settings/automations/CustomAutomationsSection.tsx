@@ -19,6 +19,9 @@ import {
   getAutomationTargetEmailIdentityId,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
+  AUTOMATION_RESULT_PRIORITY_LABELS,
+  AUTOMATION_RESULT_PRIORITIES,
+  type AutomationResultPriority,
   type CustomAutomationScheduleMode,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -80,6 +83,7 @@ type CustomAutomationFormState = {
   name: string;
   prompt: string;
   enabled: boolean;
+  resultPriority: AutomationResultPriority;
   scheduleMode: CustomAutomationScheduleMode;
   environmentId: string;
   cronExpression: string;
@@ -95,6 +99,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   name: '',
   prompt: '',
   enabled: true,
+  resultPriority: 'normal',
   scheduleMode: 'daily',
   environmentId: '',
   cronExpression: '',
@@ -158,6 +163,32 @@ function cadenceLabel(
     : 'Custom schedule';
 }
 
+export function nextRunLabel(
+  nextRunAt: Date | string,
+  timeZone: string,
+  now = new Date(),
+): string {
+  const nextRunDate = new Date(nextRunAt);
+  const yearFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+  });
+  const date = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    month: 'short',
+    day: 'numeric',
+    ...(yearFormatter.format(nextRunDate) === yearFormatter.format(now)
+      ? {}
+      : { year: 'numeric' }),
+  }).format(nextRunDate);
+  const time = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(nextRunDate);
+  return `Next run ${date} at ${time}`;
+}
+
 // Fast runs settle asynchronously, so refresh sparsely through the existing
 // ten-minute launch-claim recovery window instead of polling indefinitely.
 const RUN_RESULT_REFRESH_DELAYS_MS = [
@@ -169,6 +200,7 @@ const RUN_RESULT_REFRESH_DELAYS_MS = [
   5 * 60_000,
   10 * 60_000,
 ];
+const NEXT_RUN_REFRESH_MAX_DELAY_MS = 24 * 60 * 60 * 1000;
 
 function CustomAutomationRunButton({
   automation,
@@ -308,6 +340,7 @@ function formFromRow(
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
     environmentId: row.environmentId ?? '',
     cronExpression: row.cronExpression ?? '',
@@ -326,6 +359,7 @@ function writeInputFromRow(row: CustomAutomationListItem) {
     name: row.name,
     prompt: row.prompt,
     enabled: row.enabled,
+    resultPriority: row.resultPriority ?? 'normal',
     scheduleMode: row.scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
@@ -416,7 +450,21 @@ export function CustomAutomationsSection({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const listQuery = useQuery(
-    trpc.automations.listCustomAutomations.queryOptions(),
+    trpc.automations.listCustomAutomations.queryOptions(undefined, {
+      refetchInterval: (query) => {
+        const nextRuns = (query.state.data ?? [])
+          .map((row) => row.nextRunAt && new Date(row.nextRunAt).getTime())
+          .filter((value): value is number => Boolean(value));
+        if (nextRuns.length === 0) return false;
+        return Math.max(
+          60_000,
+          Math.min(
+            NEXT_RUN_REFRESH_MAX_DELAY_MS,
+            Math.min(...nextRuns) - Date.now() + 1_000,
+          ),
+        );
+      },
+    }),
   );
   const environmentsQuery = useQuery(trpc.environments.list.queryOptions());
   const slackChannelsQuery = useQuery(
@@ -834,6 +882,7 @@ export function CustomAutomationsSection({
       name: form.name,
       prompt: form.prompt,
       enabled: form.enabled,
+      resultPriority: form.resultPriority,
       scheduleMode: form.scheduleMode,
       cronExpression:
         form.scheduleMode === 'cron' ? effectiveResolvedCron : null,
@@ -975,6 +1024,31 @@ export function CustomAutomationsSection({
               {effectiveScheduleSummary}
             </p>
           ) : null}
+        </div>
+
+        <div className="space-y-2 sm:w-52">
+          <Label htmlFor="custom-automation-priority">Priority</Label>
+          <Select
+            value={form.resultPriority}
+            disabled={busy}
+            onValueChange={(value) =>
+              setForm((current) => ({
+                ...current,
+                resultPriority: value as AutomationResultPriority,
+              }))
+            }
+          >
+            <SelectTrigger id="custom-automation-priority" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {AUTOMATION_RESULT_PRIORITIES.map((priority) => (
+                <SelectItem key={priority} value={priority}>
+                  {AUTOMATION_RESULT_PRIORITY_LABELS[priority]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex flex-col gap-4 sm:flex-row">
@@ -1304,6 +1378,14 @@ export function CustomAutomationsSection({
                               </>
                             ) : null}
                           </span>
+                          {row.nextRunAt && schedulingTimeZone ? (
+                            <span
+                              className="basis-full"
+                              title={new Date(row.nextRunAt).toISOString()}
+                            >
+                              {nextRunLabel(row.nextRunAt, schedulingTimeZone)}
+                            </span>
+                          ) : null}
                         </>
                       }
                       actions={

@@ -23,6 +23,7 @@ import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
 import { buildTherapistModeInstructions } from '../therapist-mode';
+import { buildUserPersonalizationInstructions } from '../user-personalization';
 
 /**
  * The person is on a voice call. A voice layer acknowledged them already and
@@ -58,11 +59,11 @@ function formatRepositoriesForPrompt(
             .join(', ')
         : environment.repositoryNames.length > 0
           ? environment.repositoryNames.join(', ')
-          : 'No repositories configured';
+          : null;
       const description = environment.description
         ? ` (${environment.description})`
         : '';
-      return `- ${environment.name} [id: ${environment.id}]${description}: ${repos}`;
+      return `- ${environment.name} [id: ${environment.id}]${description}${repos ? `: ${repos}` : ''}`;
     }),
   ].join('\n');
 }
@@ -172,6 +173,7 @@ export function buildFastAgentSystemPrompt({
   setupSession = false,
   voiceMode = false,
   therapistModeEnabled = false,
+  personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
 }: {
@@ -203,6 +205,11 @@ export function buildFastAgentSystemPrompt({
   /** The message was spoken on a voice call and the reply will be spoken. */
   voiceMode?: boolean;
   therapistModeEnabled?: boolean;
+  personalizationContext?: {
+    displayName: string | null;
+    instructions: string;
+    learnFromConversations: boolean;
+  } | null;
   globalAgentInstructions?: string | null;
   workspaceRoutingRules?: WorkspaceRoutingSettings['rules'];
   /** @deprecated GitHub availability is derived from availableIntegrations. */
@@ -276,6 +283,11 @@ ${
 }`;
   const therapistModeInstructions =
     buildTherapistModeInstructions(therapistModeEnabled);
+  const personalizationInstructions = platformEvent
+    ? ''
+    : buildUserPersonalizationInstructions(personalizationContext, {
+        updateToolName: 'update_personalization',
+      });
   const sharedAgentGuidance = globalAgentInstructions?.trim();
   const workspaceRoutingGuidance = formatWorkspaceRoutingRulesForPrompt(
     workspaceRoutingRules,
@@ -318,6 +330,7 @@ ${formatActiveTasksForPrompt(activeTasks)}
 ## Deployment MCP Servers
 ${formatIntegrationsForPrompt(availableIntegrations)}
 ${therapistModeInstructions ? `\n${therapistModeInstructions}\n` : ''}
+${personalizationInstructions ? `\n${personalizationInstructions}\n` : ''}
 ${voiceMode ? `\n${buildVoiceModeInstructions()}\n` : ''}
 ${
   setupSession
@@ -328,14 +341,16 @@ This is often the user's first interaction with Roomote. Make the experience wel
 ## Conversational Setup
 You are guiding this deployment's first administrator from runtime readiness to optional starter work.
 - Treat the setup snapshot as authoritative deployment state. Fast cannot mutate that state.
-- Environment creation and communication-provider configuration are out of scope. Never ask for them and never block activation on them.
-- The renderer owns presentation of trusted setup controls, but some controls require an explicit tool call from you. Keep those controls separate from my side of the conversation. In user-visible prose, state only the user's goal, the capability I need, the outcome that changed, or the decision the user needs to make. Never name, locate, or instruct the user to interact with UI elements such as cards, rails, dialogs, panels, buttons, presets, or setup steps. Do not describe what the interface displays or will display. Never ask for credentials in chat; detailed source-control instructions and credential entry remain in the trusted interface.
-- Source control must be connected and repositories synchronized before setup completes or starter tasks are offered. Inference and sandbox readiness remain prerequisites for completion. When source control is not connected, explain that I need access to the user's source code, then stop after the user-visible response; source-control controls are state-driven. When all completion requirements are ready and the setup snapshot has no starter selection, the server emits a starter-request setup event. Starter work is optional and never gates setup completion. On that event, call \`request_user_input\` with exactly \`{ preset: "setup_starter_tasks" }\`. Do not send a closeout first: that tool call creates the user-visible first-work control and is the terminal response for the turn. Do not replace the tool call with prose asking the user to choose. The server supplies the choices; never invent or repeat their catalog in prose. Never ask where I should run the work before collecting the first-work selection.
-- Starter selection records the administrator's durable intent before this model turn resumes. Launch is deferred until the setup snapshot says the sandbox provider is ready. While it is not ready, do not call \`launch_task\`; explain that I need a workspace where I can run the selected work, then let the renderer supply the interaction. Once a trusted starter-selection event is emitted after sandbox readiness, call generic \`launch_task\` exactly once for each selected task, use its catalog prompt exactly, set \`environmentId\` to null, and omit \`model\` unless the administrator explicitly requested one. Do not launch other tasks in that turn. After attempting all selected launches, send one concise closeout. When at least one task started, explain that the work will continue and the administrator is free to start something new or explore the app while I work; do not imply that they need to wait in or remain on the setup session.
-- Partial launch failure never reverses setup completion. Name failed launches and continue with successful work. Mention automation recommendations only after the snapshot says at least one selected task launched successfully and the recommendation batch is ready.
+- A useful default agenda is: understand the user's goals and optional tools, connect and synchronize source code, make a sandbox ready, then offer optional starter work. Follow the conversation: the user may skip optional discovery, answer several topics at once, or reorder the agenda. Do not restart answered discovery categories or revive the legacy communication question.
+- Optional integration discovery never gates setup completion. Use the snapshot's ordered categories as suggestions, not a questionnaire. Ask naturally, offer an early skip, and use stable question IDs \`setup-tools-<id>\` for structured category questions. Finish or skip with the trusted \`setup_integrations\` preset, carrying prose answers by category ID. The server validates matches, canonicalizes options, and completes an empty match set without browser input.
+- Source control and a synchronized repository are required before setup completes or starter work is offered. A ready sandbox is required before selected work launches. State the missing capability plainly and let trusted setup controls handle configuration. Environment creation is out of scope.
+- When the snapshot has no starter selection and the current setup state makes starter work available, use the trusted \`setup_starter_tasks\` preset. The server owns its choices and validation; do not invent or repeat the catalog in prose. Starter work is optional and never gates setup completion.
+- A recorded starter selection is durable intent. When the current setup-state change includes selected starter tasks and the snapshot says the sandbox is ready, launch those catalog prompts with generic \`launch_task\`, no environment, and no model override unless the administrator requested one. Partial launch failure never reverses setup completion; name failures and continue with successful work.
+- Setup state-change events are coalesced current facts, not a fixed script. Reconcile the snapshot and listed changes, preserve any pending user decision, and continue with whichever useful setup action fits the conversation.
+- The renderer owns trusted controls. In prose, state only the user's goal, the capability I need, the outcome that changed, or the decision the user needs to make. Never name or locate cards, rails, dialogs, panels, buttons, presets, or setup steps. Never ask for credentials in chat.
 - In the setup session, always refer to Roomote in the first person: use "I", "me", and "my" in user-visible messages. Do not alternate with "Roomote", "the agent", or third-person phrasing such as "Roomote can inspect your repositories" or "the workspace lets Roomote run code." Product names such as GitHub and Roomote may still be used when naming a connected service or the product itself.
 - In every user-visible setup reply, use ordinary language centered on the user's action and outcome. Say "Your repositories are ready" rather than "repositories synced"; say "Choose what you'd like me to work on first" rather than "choose the first work from the setup options"; and say "I need a workspace where I can run the work you selected" rather than "configure the sandbox provider." Explain what a sandbox means once only if that context helps the user understand why I need it, without referring to the interface.
-- Before \`launch_task\`, describe the work beginning in the user's terms. Do not expose repository-selection heuristics such as "most impactful repository" or narrate setup machinery. For example, say "I'm looking for flaky tests and fixing the ones causing the most trouble."
+- Describe launched work in the user's terms. Do not expose repository-selection heuristics or narrate setup machinery.
 `
     : ''
 }
@@ -377,7 +392,7 @@ ${surface === 'slack' ? '- Charts supplied to "send_chat_reply" render as Slack 
 - Before "launch_task", acknowledge with \`send_chat_reply\` so the response can stream before task startup. Do not restate that acknowledgement after launch. The task card or a separate task link keeps the started work associated with this conversation; later useful progress and the final result still belong here.
 - Set "includeAttachments" on "launch_task" to true only when supported attachments from the active conversation turn are relevant to the coding task. This forwards supported images and bounded text extracted from supported documents, audio, or video without exposing provider URLs. Omit it otherwise; attachments are not forwarded by default.
 - If the answer is immediate, call the closeout tool directly.
-- Use \`request_user_input\` when the next step needs structured choices (for example a multi-select). Write self-contained questions with concrete options, or pass only the required trusted preset when setup instructions name one. The input request is user-visible, ends the turn in needs_input without a separate reply, and resumes automatically with the submitted answers. For a single free-text or choice question, prefer a clarification reply instead.
+- Use \`request_user_input\` when the next step needs structured choices (for example a multi-select). Write self-contained questions with concrete options, or pass the required trusted preset without questions when setup instructions name one; only \`setup_integrations\` may also carry \`setupIntegrationAnswers\`. The input request is user-visible, ends the turn in needs_input without a separate reply, and resumes automatically with the submitted answers. For a single free-text or choice question, prefer a clarification reply instead, except for setup integration discovery's one-category-at-a-time structured questions.
 ${reactionGuidance}
 ${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement followed immediately by the same answer.
 - After a closeout, clarification, closeout reaction, input request, or ignored event, do not call another tool and do not add user-facing prose.
@@ -440,7 +455,7 @@ ${emailCadenceGuidance}- Prefer one direct closeout over an acknowledgement foll
 - Use "launch_task" for new independent repository or workspace work when local checkout, local edits, execution, or testing is required, or a checkout is substantially more appropriate under the exploration rule above, regardless of whether the message is phrased as a question, request, or declarative feedback. Existing active tasks do not block a new independent task.
 - For GitHub, an eligible deployment GitHub App installation with an active connected repository is required. Active Roomote members can use the existing native tools to inspect public github.com repositories, including source, code search, issues, and pull requests, without connecting the public target or linking a personal GitHub account. Follow the discovered tool descriptions and schemas. Searches require exactly one positive \`repo:owner/name\` qualifier. Respect upstream pagination and search-index limits and disclose incomplete results. Private reads and all writes still require an eligible connection to the target repository; never retry an authorization denial anonymously or through a task. For requested GitHub updates, use the native \`update_pull_request\`, \`add_issue_comment\`, and \`add_reply_to_pull_request_comment\` tools directly when available; these bounded actions do not require a coding task. Follow their discovered descriptions, schemas, and arguments. Read the target first, send only the requested fields, and report success only after the tool confirms it. Native composite calls are not guaranteed atomic: inspect the resulting state before retrying an error. Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass.
 - Use "review_pull_request" when the user asks for a code review of a pull request. It runs the structured review pipeline, which posts a findings summary on the pull request; that summary then arrives here as a pull-request-feedback event, so do not promise a separate completion report. Do not use "launch_task" for pull request reviews. Its "kickoffMessage" should describe the review underway without narrating orchestration. In a pull request conversation, omit the repository and number to review the current pull request. Set "model" only to an exact ID from Available Delegated Task Models when a specific model is useful or requested, and set "reasoningEffort" only to low, medium, high, xhigh, or max; omit either override to use the deployment's code-review default.
-- You may launch multiple independent tasks in one turn after one acknowledgement that clearly covers them. Do not add a separate launch message for each task; the turn remains open for more tools.
+- When a request cleanly separates into clearly independent, low-conflict scopes and parallel execution would improve throughput, proactively launch multiple tasks in one turn after one acknowledgement that clearly covers them. Give each task a distinct outcome and non-overlapping file or subsystem ownership so they do not duplicate work. Keep the work in one task when scopes may touch the same files, depend on shared intermediate decisions, are tightly coupled, or require ordered sequencing. Do not add a separate launch message for each task; the turn remains open for more tools.
 - Set "model" on "launch_task" only to an exact ID from Available Delegated Task Models when a specific model is useful or requested. Omit it to use the deployment default. Never invent or abbreviate model IDs.
 - Use "send_task_message" when an active or resumable task is listed above and the user clearly gives that task a new instruction, or when the automatic own-task session check above authorizes a corrective instruction to a running task. On a human-authored turn, acknowledge first, then send the instruction immediately. Set "includeAttachments" to true only when supported attachments from the active conversation turn are relevant to that instruction; omit it otherwise. A resumable settled task continues under the same task identity only for a human instruction; automatic monitoring must never reactivate it. Set "taskId" when needed; with exactly one listed task, omit it or use null. A successful call means the task accepted the instruction, not that it has responded or completed it; describe that state accurately and wait for the task's later report to provide its outcome.
 - Use \`roomote_manage_tasks\` to inspect tasks in this deployment. Use "get_summary" for current status and failures, "get_messages" for transcript details, and "get_compute_logs" for runtime output when supported. Keep using "launch_task", "send_task_message", "stop_task", or "cancel_task" for task changes so Fast conversation association and follow-up behavior are preserved.
@@ -481,7 +496,7 @@ ${
 - When the event is useful, produce exactly one user-visible terminal response: a closeout, or \`request_user_input\` when the setup instructions require structured choices. Never use acknowledgement or progress replies for a platform event.
 ${
   platformEventKind === 'input_response'
-    ? "- The payload contains the user's submitted structured answers. Persist any needed state, continue the interrupted work with those answers, and acknowledge the choice in one closeout. Do not re-ask the same questions."
+    ? "- The payload contains the user's submitted structured answers. Persist any needed state and continue the interrupted work with those answers. For setup integration discovery, request the next unanswered category or the final trusted integration preset as directed above; otherwise acknowledge the choice in one closeout. Do not re-ask the same questions."
     : ''
 }
 ${
@@ -528,10 +543,7 @@ ${
       }
 ${
   platformEventKind === 'setup'
-    ? `- For a setup-session-started event, briefly introduce myself and explain the next unmet user need in ordinary language.
-- For a starter-request event, call \`request_user_input\` exactly once with only \`{ preset: "setup_starter_tasks" }\`, then stop. Do not replace the tool call with prose asking the user to choose.
-- For a starter-tasks-selected event, launch each canonical task definition exactly once with "launch_task": use its prompt verbatim, null for environmentId, and no model unless explicitly requested. The event is emitted only after the sandbox readiness fact is true; if the trusted snapshot disagrees, do not launch and report the configuration blocker. After all launch attempts, post one concise closeout. If any selected task started, say that the started work will continue while the user starts something new or explores the app. The persisted selection is authoritative and setup is already complete; launch failures do not reverse it.
-- For provider, source, compute, or recommendation events, use the supplied trusted facts and snapshot without claiming that I made configuration changes myself.
+    ? `- The setup-state-changed event contains the current snapshot and coalesced changes. Use those trusted facts without claiming that I made configuration changes myself. On the first useful turn, introduce myself and explain the next unmet user need in ordinary language.
 `
     : ''
 }

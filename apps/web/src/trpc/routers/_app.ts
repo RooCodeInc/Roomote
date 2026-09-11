@@ -16,6 +16,7 @@ import {
   environmentConfigSchema,
   workspaceRoutingSettingsSchema,
   REASONING_EFFORT_VALUES,
+  AUTOMATION_RESULT_PRIORITIES,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -203,6 +204,8 @@ import {
   acceptCookieConsentCommand,
   setPersonalPasswordCommand,
   updatePersonalPreferencesCommand,
+  getUserPersonalizationCommand,
+  updateUserPersonalizationCommand,
 } from '../commands/preferences';
 import {
   type EnvironmentConfigVersionDetail,
@@ -254,6 +257,7 @@ import {
 } from '../commands/sandbox-session';
 import {
   getDeploymentMcpEnablementsCommand,
+  getEffectiveMcpIntegrationsCommand,
   getCuratedIntegrationsAvailabilityCommand,
   getMcpOauthReadinessCommand,
   setDeploymentMcpEnabledCommand,
@@ -408,6 +412,12 @@ import {
   updateCustomAutomationCommand,
 } from '../commands/automations';
 import { mergeAnnouncerDestinationInputShape } from '../commands/automations/settings-schema';
+import {
+  actOnResultCommand,
+  clearResultsCommand,
+  getUnreadResultCountCommand,
+  listResultsCommand,
+} from '../commands/results';
 import {
   getAgentBehaviorSettingsCommand,
   updateAgentBehaviorSettingsCommand,
@@ -872,6 +882,7 @@ const automationsRouter = createRouter({
         name: z.string().trim().min(1).max(100),
         prompt: z.string().trim().min(1).max(8_000),
         enabled: z.boolean(),
+        resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
           'every_hour',
@@ -914,6 +925,7 @@ const automationsRouter = createRouter({
         name: z.string().trim().min(1).max(100),
         prompt: z.string().trim().min(1).max(8_000),
         enabled: z.boolean(),
+        resultPriority: z.enum(AUTOMATION_RESULT_PRIORITIES).default('normal'),
         scheduleMode: z.enum([
           'off',
           'every_hour',
@@ -1609,13 +1621,15 @@ export const appRouter = createRouter({
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
             therapistMode: z.boolean().optional(),
+            resultsPageEnabled: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
               input.narrationMode !== undefined ||
-              input.therapistMode !== undefined,
+              input.therapistMode !== undefined ||
+              input.resultsPageEnabled !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -1623,6 +1637,29 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         updatePersonalPreferencesCommand(auth, input),
+      ),
+    getPersonalization: protectedProcedure.query(({ ctx: { auth } }) =>
+      getUserPersonalizationCommand(auth),
+    ),
+    updatePersonalization: protectedProcedure
+      .input(
+        z
+          .object({
+            expectedVersion: z.number().int().nonnegative(),
+            instructions: z.string().max(8_000).optional(),
+            learnFromConversations: z.boolean().optional(),
+            reset: z.literal(true).optional(),
+          })
+          .refine(
+            (input) =>
+              input.instructions !== undefined ||
+              input.learnFromConversations !== undefined ||
+              input.reset === true,
+            { message: 'Expected a personalization change.' },
+          ),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateUserPersonalizationCommand(auth, input),
       ),
   }),
 
@@ -1719,7 +1756,7 @@ export const appRouter = createRouter({
     startDefinitionTask: protectedProcedure
       .input(
         z.object({
-          repositoryIds: z.array(z.string().uuid()).min(1),
+          repositoryIds: z.array(z.string().uuid()),
           environmentId: z.string().optional(),
           changeRequest: z.string().trim().min(1).max(8_000).optional(),
           selectedModelId: z.string().trim().min(1).optional(),
@@ -1911,6 +1948,10 @@ export const appRouter = createRouter({
 
     deploymentEnablements: protectedProcedure.query(({ ctx: { auth } }) =>
       getDeploymentMcpEnablementsCommand(auth),
+    ),
+
+    effectiveIntegrations: protectedProcedure.query(({ ctx: { auth } }) =>
+      getEffectiveMcpIntegrationsCommand(auth),
     ),
 
     oauthReadiness: protectedProcedure.query(({ ctx: { auth } }) =>
@@ -2625,7 +2666,7 @@ export const appRouter = createRouter({
             .array(
               z.object({
                 name: z.string().min(1).max(100),
-                repositoryIds: z.array(z.string().uuid()).min(1),
+                repositoryIds: z.array(z.string().uuid()),
                 installCommand: z.string().max(500).optional(),
                 testCommand: z.string().max(500).optional(),
               }),
@@ -2955,6 +2996,27 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         dismissTaskSuggestionCommand(auth, input),
       ),
+  }),
+
+  results: createRouter({
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      listResultsCommand(auth),
+    ),
+    unreadCount: protectedProcedure.query(({ ctx: { auth } }) =>
+      getUnreadResultCountCommand(auth),
+    ),
+    act: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          kind: z.enum(['report', 'suggestion']),
+          action: z.enum(['accept', 'ignore']),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => actOnResultCommand(auth, input)),
+    clear: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      clearResultsCommand(auth),
+    ),
   }),
 
   backgroundAgents: automationsRouter,
