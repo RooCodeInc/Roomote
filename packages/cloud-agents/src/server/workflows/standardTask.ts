@@ -386,7 +386,7 @@ ${buildGitHubMessageInstructions()}`
   <reporting_context>
     <consumer>orchestrator</consumer>
     <role>You are the coding executor for an orchestrator-owned task.</role>
-    <destination>All task communication, including generic skill references to user or chat updates, is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, follow-up and monitoring, final user communication, and task UI navigation.</destination>
+    <interaction>Do not perform user interaction.</interaction>
     <delivery>Before settlement, send one report to the parent Session using \`report_to_parent_session\` with purpose \`closeout\`.</delivery>
     <final_report_contract>
       <section name="Outcome">State what was accomplished or the precise blocker.</section>

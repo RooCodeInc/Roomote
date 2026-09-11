@@ -31,7 +31,7 @@ describe('standardTask reporting consumer', () => {
       '<role>You are the coding executor for an orchestrator-owned task.</role>',
     );
     expect(harnessInstructions).toContain(
-      '<destination>All task communication, including generic skill references to user or chat updates, is private input to the orchestrator. The orchestrator owns acknowledgements, progress updates, clarification, follow-up and monitoring, final user communication, and task UI navigation.</destination>',
+      '<interaction>Do not perform user interaction.</interaction>',
     );
     expect(harnessInstructions).toContain(
       '<delivery>Before settlement, send one report to the parent Session using `report_to_parent_session` with purpose `closeout`.</delivery>',
@@ -65,7 +65,7 @@ describe('standardTask reporting consumer', () => {
       reportingContextStart,
       reportingContextEnd + '</reporting_context>'.length,
     );
-    expect(reportingContext).not.toContain('Do not');
+    expect(reportingContext).not.toContain('<destination>');
     expect(reportingContext).not.toContain('not user-facing');
     expect(reportingContext).not.toContain('not transcript-like');
     expect(reportingContext).not.toContain('unless');
@@ -93,7 +93,7 @@ describe('standardTask reporting consumer', () => {
       '<consumer>orchestrator</consumer>',
     );
     expect(harnessInstructions).not.toContain(
-      'The orchestrator owns acknowledgements, progress updates, clarification, follow-up and monitoring, final user communication, and task UI navigation.',
+      'Do not perform user interaction.',
     );
     expect(harnessInstructions).toContain(
       'acknowledge it immediately to the user',
