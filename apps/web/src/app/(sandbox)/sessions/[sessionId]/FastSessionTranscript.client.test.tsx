@@ -1015,9 +1015,9 @@ describe('FastSessionTranscript', () => {
       expect(screen.getByText(actionLabel)).toBeInTheDocument();
       expect(screen.getByText('human guidance')).toBeInTheDocument();
       if (status === 'failed') {
-        expect(screen.getByText('Failed')).toBeInTheDocument();
+        expect(screen.getByText('Failed')).toHaveClass('sr-only');
       } else {
-        expect(screen.getByText('Completed')).toBeInTheDocument();
+        expect(screen.getByText('Completed')).toHaveClass('sr-only');
       }
       expect(screen.queryByText('Structured input request')).toBeNull();
     },
