@@ -26,13 +26,13 @@ describe('audio transcription', () => {
     vi.restoreAllMocks();
   });
 
-  it('transcribes supported audio through a native OpenCode file part', async () => {
+  it('transcribes Telegram OGG audio without spending the response on reasoning', async () => {
     generateTrackedNonTaskTextMock.mockResolvedValue('Deploy the fix.');
 
     const result = await transcribeAudioAttachment({
       audioBytes: Buffer.from('audio'),
-      mimeType: 'audio/mp4',
-      filename: 'clip.m4a',
+      mimeType: 'audio/ogg',
+      filename: 'voice-message.ogg',
       userTextContext: 'Please handle this request.',
     });
 
@@ -43,11 +43,12 @@ describe('audio transcription', () => {
     expect(generateTrackedNonTaskTextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         requiredInputModality: 'audio',
+        reasoningEffort: 'low',
         files: [
           {
-            mime: 'audio/mp4',
-            filename: 'clip.m4a',
-            url: 'data:audio/mp4;base64,YXVkaW8=',
+            mime: 'audio/ogg',
+            filename: 'voice-message.ogg',
+            url: 'data:audio/ogg;base64,YXVkaW8=',
           },
         ],
       }),

@@ -126,6 +126,7 @@ export async function transcribeAudioAttachment(input: {
       userId: input.userId,
       taskId: input.taskId,
       requiredInputModality: 'audio',
+      reasoningEffort: 'low',
       maxOutputTokens: 8_000,
       system:
         'Transcribe the attached audio faithfully in its original language. Preserve technical terms. Mark unintelligible portions instead of guessing. Return only the transcript.',
