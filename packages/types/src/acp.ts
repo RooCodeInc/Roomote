@@ -32,6 +32,8 @@ export const ACP_ENVELOPE_EVENT_TYPES = {
   RequestUserInput: 'roomote_runtime.request_user_input',
   RequestUserInputResponse: 'roomote_runtime.request_user_input_response',
   TaskCancelled: 'roomote_runtime.task_cancelled',
+  /** Voice call lifecycle marker persisted in a Fast Session transcript. */
+  VoiceCall: 'roomote_runtime.voice_call',
 } as const;
 
 export type AcpEnvelopeEventType =
@@ -274,6 +276,32 @@ export function parseAcpTaskCancelledPayload(
     sessionId,
     ...(cancelledByName ? { cancelledByName } : {}),
     ...(source ? { source } : {}),
+  };
+}
+
+/**
+ * Payload of the persisted `voice_call` marker written when a voice call on a
+ * Fast Session starts or ends. Transcript-only: never sent to the model.
+ */
+export interface AcpVoiceCallPayload {
+  phase: 'started' | 'ended';
+  /** Call length, present on `ended`. */
+  durationMs?: number;
+}
+
+export function parseAcpVoiceCallPayload(
+  payload: Record<string, unknown> | null,
+): AcpVoiceCallPayload | null {
+  const phase = payload?.phase;
+  if (phase !== 'started' && phase !== 'ended') {
+    return null;
+  }
+  const durationMs = payload?.durationMs;
+  return {
+    phase,
+    ...(typeof durationMs === 'number' && Number.isFinite(durationMs)
+      ? { durationMs }
+      : {}),
   };
 }
 
@@ -758,6 +786,7 @@ export type AcpMessageKind =
   | 'tool_result'
   | 'plan'
   | 'task_cancelled'
+  | 'voice_call'
   | 'unknown';
 
 export function inferAcpMessageKind(
@@ -780,6 +809,8 @@ export function inferAcpMessageKind(
       return 'tool_result';
     case ACP_ENVELOPE_EVENT_TYPES.TaskCancelled:
       return 'task_cancelled';
+    case ACP_ENVELOPE_EVENT_TYPES.VoiceCall:
+      return 'voice_call';
     default:
       return 'unknown';
   }

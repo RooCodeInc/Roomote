@@ -85,7 +85,7 @@ function WakeupComposer({
 }
 
 const meta: Meta<typeof WakeupComposer> = {
-  title: 'Surfaces/Session/Prompt Input/Wakeups',
+  title: 'Surfaces/Session/Prompt Input/Timers',
   component: WakeupComposer,
   parameters: { layout: 'fullscreen' },
   decorators: [
@@ -158,7 +158,7 @@ export const CancellationError: Story = {
     docs: {
       description: {
         story:
-          'Click the trash button to show the inline cancellation error. The wakeup remains visible and the action can be retried.',
+          'Click the trash button to show the inline cancellation error. The timer remains visible and the action can be retried.',
       },
     },
   },

@@ -362,10 +362,9 @@ as per-task auth tokens or workspace paths.
 | `R_DISCORD_GATEWAY_SECRET`     | Discord           | Shared internal secret for Discord event delivery between BullMQ and API. Auto-generated when Discord is saved in the UI if unset, and auto-healed when Discord is already configured without one. |
 | `DISCORD_API_BASE_URL`         | Optional          | Discord REST API base URL override, primarily for testing.                       |
 | `R_EMAIL_CHANNEL_ENABLED`      | Optional          | Set to `true` to enable the email (AgentMail) channel. Without it, email is absent from settings, inbound webhooks are ignored, and Roomote never sends email. Enabling it also turns on account email verification. |
-| `R_AGENTMAIL_API_KEY`          | Optional          | AgentMail API key for email. Overrides the value saved in the settings UI.       |
+| `R_AGENTMAIL_API_KEY`          | Optional          | AgentMail API key for email, created from inside the deployment's inbox (inbox-scoped). Overrides the value saved in the settings UI. |
 | `R_AGENTMAIL_WEBHOOK_SECRET`   | Optional          | AgentMail webhook secret. Overrides the value managed by the settings UI.        |
-| `R_AGENTMAIL_INBOX_ID`         | Optional          | AgentMail deployment inbox. Overrides the inbox connected in the settings UI.    |
-| `R_AGENTMAIL_POD_ID`           | Optional          | AgentMail pod the inbox and webhook live in; required with a pod-scoped API key. Overrides the pod entered in the settings UI. |
+| `R_AGENTMAIL_INBOX_ID`         | Optional          | AgentMail deployment inbox. Normally derived from the key on save; set it to pin the inbox for env-var-only setups. |
 | `AGENTMAIL_API_BASE_URL`       | Optional          | AgentMail API base URL override, primarily for testing. Defaults to `https://api.agentmail.to`. |
 | `R_MICROSOFT_CLIENT_ID`        | Microsoft sign-in | Microsoft OAuth client ID.                                                       |
 | `R_MICROSOFT_CLIENT_SECRET`    | Microsoft sign-in | Microsoft OAuth client secret.                                                   |
@@ -373,6 +372,7 @@ as per-task auth tokens or workspace paths.
 | `R_ALLOWED_EMAILS`             | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email.  |
 | `R_ELEVENLABS_API_KEY`         | Optional          | ElevenLabs API key for narrated feature-demo videos. The key stays on the control plane; sandboxes reach text-to-speech only through an authenticated Roomote endpoint. A key scoped to text-to-speech only is sufficient and recommended. |
 | `R_ELEVENLABS_VOICE_ID`        | Optional          | ElevenLabs voice ID used for feature-demo narration. Required alongside the API key for narration to be available.                                                       |
+| `R_VOICE_OPENAI_API_KEY`       | Optional          | OpenAI key dedicated to GPT-Live voice conversations. Requires project access to `gpt-live-1`; the general `OPENAI_API_KEY` is not used for Voice. The key stays on the control plane; browsers receive only a server-negotiated WebRTC session answer. |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory

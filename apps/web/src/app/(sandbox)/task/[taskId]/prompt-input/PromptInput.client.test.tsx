@@ -530,6 +530,7 @@ describe('PromptInput', () => {
       expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
         taskId: 'task-disconnected',
         runId: 42,
+        terminate: false,
       });
     });
   });
@@ -568,6 +569,7 @@ describe('PromptInput', () => {
       expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
         taskId: 'task-fallback',
         runId: 43,
+        terminate: false,
       });
     });
   });
@@ -612,6 +614,7 @@ describe('PromptInput', () => {
       expect(taskRunCancelMutateMock).toHaveBeenCalledWith({
         taskId: 'task-hung',
         runId: 45,
+        terminate: false,
       });
     } finally {
       vi.useRealTimers();

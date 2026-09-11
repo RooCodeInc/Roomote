@@ -48,6 +48,10 @@ const state = vi.hoisted(() => ({
     authStatus?: string | null;
     voiceId?: string;
   },
+  voiceConnection: null as null | {
+    authStatus?: string | null;
+    source?: 'environment' | 'connection';
+  },
   grafanaConnection: null as null | {
     authStatus?: string | null;
     baseUrl: string;
@@ -110,6 +114,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveRipplingConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
+    saveVoiceConnection: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
@@ -292,6 +297,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useElevenLabsConnection: () => ({
     data: state.elevenLabsConnection,
+    isPending: false,
+  }),
+  useSaveVoiceConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveVoiceConnection,
+  }),
+  useVoiceConnection: () => ({
+    data: state.voiceConnection,
     isPending: false,
   }),
   useSaveGrafanaConnection: () => ({
@@ -505,6 +518,7 @@ describe('Integrations settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
+    state.voiceConnection = null;
     state.deploymentEnablements = [];
     state.integrationsEnabled = true;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
@@ -904,6 +918,7 @@ describe('Integrations settings', () => {
       'Supabase',
       'Supermemory',
       'Vercel',
+      'Voice',
       'X',
       'Zero',
     ]);
@@ -2183,5 +2198,58 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('button', { name: 'Enable search_events' }),
     ).toBeInTheDocument();
+  });
+
+  it('lets an admin store a voice key from the Voice card', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Voice' }),
+    );
+    const input = await screen.findByLabelText('OpenAI API Key');
+    fireEvent.change(input, { target: { value: '  sk-voice-123  ' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+
+    expect(mutations.saveVoiceConnection).toHaveBeenCalledWith(
+      { apiKey: 'sk-voice-123' },
+      expect.anything(),
+    );
+  });
+
+  it('shows Voice as connected when the environment provides the key', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+    };
+
+    render(<Integrations />);
+
+    const connectedSection = (
+      await screen.findByRole('heading', { name: 'Connected' })
+    ).closest('section');
+    expect(
+      within(connectedSection as HTMLElement).getByRole('heading', {
+        level: 3,
+        name: 'Voice',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Configured by the R_VOICE_OPENAI_API_KEY environment variable.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disconnect Voice' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Configure Voice' }),
+    ).not.toBeInTheDocument();
   });
 });

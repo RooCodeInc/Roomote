@@ -2882,9 +2882,12 @@ export const telegramUserMappingsRelations = relations(
 /**
  * agentmail_user_mappings
  *
- * Email address → Roomote user, for senders whose address is not a verified
- * auth_users email. Provenance records whether the row came from an automatic
- * verified-email match or an explicit link-code pairing.
+ * N-1 rollback: the email-link flow (claiming an extra sender address by
+ * proving mailbox possession) was removed; senders are now recognized only
+ * by their verified auth_users email. Nothing reads or writes this table any
+ * more, but the previous release still selects and inserts into it, so keep
+ * it until that release is no longer the supported rollback target, then
+ * drop it.
  */
 export const agentmailUserMappings = pgTable(
   'agentmail_user_mappings',
@@ -2938,6 +2941,8 @@ export const agentmailConversations = pgTable(
     ownerUserId: text('owner_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** Server-issued identity used by outbound-initiated conversations. */
+    outboundIdentityId: text('outbound_identity_id'),
     subject: text('subject'),
     latestInboundMessageId: text('latest_inbound_message_id'),
     latestInboundAt: timestamp('latest_inbound_at'),
@@ -2987,6 +2992,8 @@ export const agentmailConversationParticipants = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     role: text('role').notNull().$type<'owner' | 'participant'>(),
+    // 'link_code' is retained for N-1 rollback only (the email-link flow was
+    // removed); new rows never use it.
     source: text('source')
       .notNull()
       .$type<'initiator' | 'cc' | 'link_code' | 'outbound'>(),

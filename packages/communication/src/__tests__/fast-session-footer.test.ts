@@ -5,6 +5,10 @@ import {
   buildFastSessionUrl,
   buildSelectedTaskSessionUrl,
 } from '../fast-session-footer';
+import {
+  buildAgentMailEmailBody,
+  escapeAgentMailHtml,
+} from '../agentmail-format';
 
 describe('buildSelectedTaskSessionUrl', () => {
   it.each(['slack', 'discord'] as const)(
@@ -129,6 +133,24 @@ describe('buildFastSessionReplyFooterText', () => {
       }),
     ).toBe(
       `<sub>Reply anytime · [PR #123](https://github.com/roomote/roomote/pull/123) · [Open in Roomote](${buildFastSessionUrl('github', sessionId)})</sub>`,
+    );
+  });
+
+  it('applies email-only footer styling while preserving its link', () => {
+    const sessionId = '11111111-1111-4111-8111-111111111111';
+    const markdown = buildFastSessionReplyFooterText({
+      provider: 'agentmail',
+      sessionId,
+    });
+    const body = buildAgentMailEmailBody(`Body text\n\n${markdown}`);
+
+    expect(body.html).toContain(
+      `<p style="font-size:0.875em">Reply anytime · <a href="${escapeAgentMailHtml(buildFastSessionUrl('agentmail', sessionId))}">Open in Roomote</a></p>`,
+    );
+    expect(body.html).not.toContain('<hr');
+    expect(body.html).not.toContain('--');
+    expect(body.text).toContain(
+      `\n\n--\nReply anytime · Open in Roomote (${buildFastSessionUrl('agentmail', sessionId)})`,
     );
   });
 

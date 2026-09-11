@@ -31,6 +31,12 @@ export type FastAgentReplyChunk = {
   /** OpenCode session and assistant message ids, as task chunks carry. */
   sessionId: string | null;
   turnId: string | null;
+  /**
+   * The Fast turn this reply answers (the client message id for web turns),
+   * so a client can attribute streamed text to the request that started it
+   * before the persisted row exists.
+   */
+  fastTurnId?: string;
   ts: number;
   /** Text appended since the previous chunk of the same reply. */
   text: string;
@@ -62,7 +68,11 @@ export function buildFastAgentReplyChunkEvent(
     eventType,
     role: 'assistant',
     contentBlocks: [{ type: 'text', text: chunk.text }],
-    metadata: { ...identity, replyEventId: chunk.eventId },
+    metadata: {
+      ...identity,
+      replyEventId: chunk.eventId,
+      ...(chunk.fastTurnId ? { fastTurnId: chunk.fastTurnId } : {}),
+    },
     payload: { ...identity, text: chunk.text },
     ...(logicalEventId ? { logicalEventId } : {}),
     text: chunk.text,

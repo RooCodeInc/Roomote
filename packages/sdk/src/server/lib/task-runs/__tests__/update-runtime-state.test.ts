@@ -8,6 +8,12 @@ const mockDbUpdateSet = vi.fn().mockReturnValue({
 const mockDbUpdate = vi.fn().mockReturnValue({
   set: (...args: unknown[]) => mockDbUpdateSet(...args),
 });
+const mockRefreshTaskRunThreadFooter = vi.fn().mockResolvedValue(undefined);
+
+vi.mock('../../thread-footer-refresh', () => ({
+  notifyTaskRunThreadFooterRefresh: (...args: unknown[]) =>
+    mockRefreshTaskRunThreadFooter(...args),
+}));
 
 vi.mock('@roomote/db/server', async () => {
   const actual =
@@ -91,6 +97,26 @@ describe('updateTaskRunRuntimeState', () => {
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
       taskPhase: 'running',
       sleepAt: nextSleepAt,
+    });
+    await vi.waitFor(() => {
+      expect(mockRefreshTaskRunThreadFooter).toHaveBeenCalledWith(85);
+    });
+  });
+
+  it('refreshes the footer when a live run settles between turns', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      status: RunStatus.Idle,
+      taskPhase: 'running',
+      sleepAt: new Date('2026-03-20T06:14:38.766Z'),
+    });
+
+    await updateTaskRunRuntimeState(85, {
+      taskPhase: 'waiting_for_prompt',
+      sleepAt: new Date('2026-03-20T06:18:08.000Z'),
+    });
+
+    await vi.waitFor(() => {
+      expect(mockRefreshTaskRunThreadFooter).toHaveBeenCalledWith(85);
     });
   });
 

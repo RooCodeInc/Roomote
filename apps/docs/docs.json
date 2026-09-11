@@ -58,7 +58,8 @@
           "goal-mode",
           "fast-sessions",
           "memory",
-          "file-attachments"
+          "file-attachments",
+          "voice"
         ]
       },
       {
@@ -172,6 +173,7 @@
           "integrations/supabase",
           "integrations/supermemory",
           "integrations/vercel",
+          "integrations/voice",
           "integrations/x",
           "integrations/zero"
         ]

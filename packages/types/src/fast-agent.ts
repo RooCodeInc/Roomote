@@ -302,6 +302,12 @@ export const fastAgentHumanFollowUpEventSchema = z.object({
   platformEventKind: fastAgentPlatformEventKindSchema.optional(),
   platformEventVisibility: fastAgentPlatformEventVisibilitySchema.optional(),
   setupSession: z.boolean().optional(),
+  /**
+   * Set when the message was spoken on a voice call. The reply is returned
+   * to the call for the voice to report rather than shown as a chat reply,
+   * so a resumed run must keep that framing.
+   */
+  voiceMode: z.boolean().optional(),
 });
 
 export type FastAgentHumanFollowUpEvent = z.infer<

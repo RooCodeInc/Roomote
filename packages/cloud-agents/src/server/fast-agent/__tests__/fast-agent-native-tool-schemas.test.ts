@@ -430,7 +430,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     ).toEqual(request);
   });
 
-  it('keeps internal wakeup visibility out of model-controlled arguments', async () => {
+  it('forwards explicit internal wakeup visibility', async () => {
     const wakeupsTool = tools.find(
       (tool) => tool.name === FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups,
     )!;
@@ -451,8 +451,8 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
     ) => Promise<{ name: string; args: unknown }>;
     const forwarded = await execute(parsed, {});
 
-    expect(parsed).not.toHaveProperty('internal');
-    expect(wakeupsTool.args).not.toHaveProperty('internal');
+    expect(parsed).toHaveProperty('internal', true);
+    expect(wakeupsTool.args).toHaveProperty('internal');
     expect(forwarded.name).toBe(FAST_AGENT_NATIVE_TOOL_NAMES.manageWakeups);
     expect(
       z.object(MANAGE_WAKEUPS_TOOL.inputSchema).parse(forwarded.args),
@@ -462,6 +462,7 @@ describe('Fast native tool schemas as OpenAI receives them', () => {
       prompt: request.prompt,
       schedule: request.schedule,
       reportPolicy: request.reportPolicy,
+      internal: true,
     });
   });
 

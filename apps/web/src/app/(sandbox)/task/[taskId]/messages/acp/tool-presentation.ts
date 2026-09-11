@@ -169,7 +169,12 @@ export function resolveToolPresentation(
     providerKind === 'mcp' && serverName
       ? getMcpIntegration(serverName)
       : undefined;
-  const displayName = toolName ? formatToolIdentifier(toolName) : 'Tool';
+  const displayName =
+    toolName === 'manage_wakeups'
+      ? 'Timer'
+      : toolName
+        ? formatToolIdentifier(toolName)
+        : 'Tool';
   const providerLabel =
     serverName === 'roomote' || serverName === 'gbrain'
       ? undefined
@@ -365,6 +370,11 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Receiving', 'Received', 'Failed to Receive'),
       object: 'task report',
+    };
+  if (toolName === 'report_to_voice')
+    return {
+      verb: byPhase('Reporting', 'Reported', 'Failed to Report'),
+      object: 'result to voice',
     };
   if (toolName === 'post_to_channel')
     return {

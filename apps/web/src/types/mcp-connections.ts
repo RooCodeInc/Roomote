@@ -70,6 +70,14 @@ export type SaveElevenLabsConnectionInput = z.infer<
   typeof saveElevenLabsConnectionSchema
 >;
 
+export const saveVoiceConnectionSchema = z.object({
+  apiKey: z.string().transform((value) => value.trim()),
+});
+
+export type SaveVoiceConnectionInput = z.infer<
+  typeof saveVoiceConnectionSchema
+>;
+
 export const saveVercelConnectionSchema = z.object({
   accessToken: z.string().transform((value) => value.trim()),
   defaultTeamIdOrSlug: z

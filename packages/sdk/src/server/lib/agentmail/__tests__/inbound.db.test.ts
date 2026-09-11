@@ -12,9 +12,9 @@ import {
   agentmailConversations,
   agentmailInboundTurns,
   agentmailSuppressions,
-  agentmailUserMappings,
   agentmailWebhookEvents,
   asc,
+  authUsers,
   db,
   eq,
   userFactory,
@@ -60,6 +60,19 @@ function messageReceivedPayload(input: {
       message_count: 1,
     },
   };
+}
+
+// Senders are recognized only by a verified account email.
+async function createVerifiedSender() {
+  const senderEmail = `${randomUUID()}@example.com`;
+  const user = await userFactory.create({ email: senderEmail });
+  await db.insert(authUsers).values({
+    id: user.id,
+    name: user.name ?? 'Test User',
+    email: senderEmail,
+    emailVerified: true,
+  });
+  return { user, senderEmail };
 }
 
 describe('agentmail webhook event outbox (real database)', () => {
@@ -142,13 +155,7 @@ describe('agentmail webhook event outbox (real database)', () => {
   });
 
   it('admits a known sender as a durable inbound turn before marking the event processed', async () => {
-    const user = await userFactory.create();
-    const senderEmail = `${randomUUID()}@example.com`;
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: senderEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
+    const { user, senderEmail } = await createVerifiedSender();
 
     const deliveryId = `msg_${randomUUID()}`;
     const threadId = `thread-${randomUUID()}`;
@@ -196,13 +203,7 @@ describe('agentmail webhook event outbox (real database)', () => {
   });
 
   it('drops auto-generated mail without admitting a turn', async () => {
-    const user = await userFactory.create();
-    const senderEmail = `${randomUUID()}@example.com`;
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: senderEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
+    const { senderEmail } = await createVerifiedSender();
 
     const deliveryId = `msg_${randomUUID()}`;
     const threadId = `thread-${randomUUID()}`;
@@ -459,13 +460,7 @@ describe('agentmail inbound turn drain (real database)', () => {
   });
 
   async function seedConversation(turnTexts: string[]) {
-    const user = await userFactory.create();
-    const senderEmail = `${randomUUID()}@example.com`;
-    await db.insert(agentmailUserMappings).values({
-      emailAddress: senderEmail,
-      userId: user.id,
-      source: 'link_code',
-    });
+    const { user, senderEmail } = await createVerifiedSender();
     const threadId = `thread-${randomUUID()}`;
     const messageIds: string[] = [];
     const base = Date.now() - 60_000;

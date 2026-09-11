@@ -1600,6 +1600,7 @@ export async function answerFastAgentQuestion({
   currentDurableHumanFollowUpEventId,
   setupSnapshot,
   setupSession = false,
+  voiceMode = false,
   durableAdmission,
   resumedAfterInterruption = false,
   resumedAfterInferenceRetry = false,
@@ -1649,6 +1650,12 @@ export async function answerFastAgentQuestion({
   /** True only for the active conversational setup session; enables
    * setup-only native tools. */
   setupSession?: boolean;
+  /**
+   * The human message was spoken on a voice call. The reply is returned to
+   * the call as commentary for the voice to report, so it is written for
+   * the ear and marked as voice commentary in the transcript.
+   */
+  voiceMode?: boolean;
   /**
    * The inline-admitted parent-event row this turn is executing. While the
    * turn stays replay-safe the row remains pending under this owner's claim,
@@ -2119,6 +2126,7 @@ export async function answerFastAgentQuestion({
       eventId: streamedReply.eventId,
       sessionId: activeOpenCodeSessionId,
       turnId: update.messageId,
+      fastTurnId: turnId,
       ts: Date.now(),
       text: delta,
     });
@@ -2496,6 +2504,9 @@ export async function answerFastAgentQuestion({
         metadata: {
           visibleInTranscript,
           purpose: reply.purpose,
+          // The voice reports this result aloud; the transcript shows the
+          // spoken words and keeps this as the collapsed source.
+          ...(voiceMode ? { voiceCommentary: true } : {}),
           ...(inferenceRetryNotice
             ? {
                 inferenceRetryNotice: true,
@@ -3092,6 +3103,7 @@ export async function answerFastAgentQuestion({
           // transcript or title seeds.
           visibleInTranscript: substantiveHumanInput,
           turnSource,
+          ...(voiceMode ? { voiceTurn: 'spoken_request' } : {}),
           ...(reactionInput
             ? { inputKind: FAST_AGENT_REACTION_INPUT_TYPE }
             : {}),
@@ -3192,6 +3204,7 @@ export async function answerFastAgentQuestion({
       appEnv: Env.R_APP_ENV,
       ...(setupSnapshot ? { setupSnapshot } : {}),
       setupSession,
+      voiceMode,
       therapistModeEnabled,
       personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,

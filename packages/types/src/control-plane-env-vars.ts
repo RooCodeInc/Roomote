@@ -71,7 +71,6 @@ export const PROVIDER_IDENTIFIER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'GITEA_CLIENT_ID',
   'SLACK_APP_ID',
   'R_AGENTMAIL_INBOX_ID',
-  'R_AGENTMAIL_POD_ID',
   'ADO_CLIENT_ID',
   'ADO_TENANT_ID',
   'ADO_AUTH_MODE',
@@ -115,6 +114,7 @@ export const INSTANCE_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 export const MEDIA_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
+  'R_VOICE_OPENAI_API_KEY',
 ]);
 
 /**

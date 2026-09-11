@@ -8,6 +8,7 @@ export function IntegrationName({ href, icon, name }) {
     granola: '/logo/integrations/granola.svg',
     monday: '/logo/integrations/monday.svg',
     rippling: '/logo/integrations/rippling.svg',
+    voice: '/logo/integrations/voice.svg',
   };
   const iconSrc =
     manualIcons[icon] ??

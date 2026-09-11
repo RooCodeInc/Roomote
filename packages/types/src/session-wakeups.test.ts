@@ -45,14 +45,14 @@ describe('manage wakeups tool contract', () => {
     }
   });
 
-  it('does not expose internal visibility as model input', () => {
+  it('accepts optional internal visibility and defaults it to absent', () => {
     expect(manageWakeupsInputSchema.parse({ action: 'create' })).toEqual({
       action: 'create',
     });
     expect(
       manageWakeupsInputSchema.parse({ action: 'create', internal: true }),
-    ).toEqual({ action: 'create' });
-    expect(MANAGE_WAKEUPS_TOOL.inputSchema).not.toHaveProperty('internal');
+    ).toEqual({ action: 'create', internal: true });
+    expect(MANAGE_WAKEUPS_TOOL.inputSchema.internal).toBeDefined();
   });
 
   it('publishes the canonical descriptor and is a Fast native tool', () => {
@@ -67,6 +67,9 @@ describe('manage wakeups tool contract', () => {
       '"every 30s x3"',
     );
     expect(MANAGE_WAKEUPS_TOOL.description).toContain('There is no pause.');
+    expect(MANAGE_WAKEUPS_TOOL.description).toContain(
+      'same prompt, schedule, and internal value',
+    );
     expect(MANAGE_WAKEUPS_TOOL.description).toContain(
       'Never poll, sleep, or wait',
     );
@@ -111,6 +114,7 @@ describe('manage wakeups tool contract', () => {
   it('takes the schedule as one string and nothing else schedule-shaped', () => {
     expect(Object.keys(MANAGE_WAKEUPS_TOOL.inputSchema).sort()).toEqual([
       'action',
+      'internal',
       'name',
       'prompt',
       'reportPolicy',

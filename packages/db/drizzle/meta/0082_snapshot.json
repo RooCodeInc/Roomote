@@ -1,5 +1,5 @@
 {
-  "id": "0cf5f2d9-ba97-4542-b90a-f64b50c6068a",
+  "id": "4ec88f44-95c7-41b0-b8ae-0ac16ba1d666",
   "prevId": "a30619c6-848d-45e0-a02f-3f9e02000864",
   "version": "7",
   "dialect": "postgresql",
@@ -150,6 +150,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "outbound_identity_id": {
+          "name": "outbound_identity_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "subject": {
           "name": "subject",
@@ -14558,87 +14564,6 @@
         "user_api_keys_user_id_users_id_fk": {
           "name": "user_api_keys_user_id_users_id_fk",
           "tableFrom": "user_api_keys",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.user_personalizations": {
-      "name": "user_personalizations",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "manual_instructions": {
-          "name": "manual_instructions",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "explicit_conversation_instructions": {
-          "name": "explicit_conversation_instructions",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "inferred_instructions": {
-          "name": "inferred_instructions",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "learn_from_conversations": {
-          "name": "learn_from_conversations",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "reset_at": {
-          "name": "reset_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "user_personalizations_user_id_users_id_fk": {
-          "name": "user_personalizations_user_id_users_id_fk",
-          "tableFrom": "user_personalizations",
           "tableTo": "users",
           "columnsFrom": ["user_id"],
           "columnsTo": ["id"],

@@ -172,6 +172,21 @@ export interface McpConnectionElevenLabsConfig {
 }
 
 /**
+ * Deployment-scoped Voice connection config stored in
+ * mcpConnections.authConfig.
+ *
+ * Credential-only: an OpenAI API key with GPT-Live access, consumed by the
+ * control plane to open voice calls on Fast Sessions and to clean spoken
+ * transcripts. Excluded from agent MCP config delivery so the key never
+ * reaches a task sandbox. The `R_VOICE_OPENAI_API_KEY` environment variable,
+ * when set, takes precedence over this connection.
+ */
+export interface McpConnectionVoiceConfig {
+  type: 'voice';
+  encryptedApiKey: string;
+}
+
+/**
  * Deployment-scoped X connection config stored in mcpConnections.authConfig.
  *
  * Holds an X API app-only bearer token that the integration proxy forwards to
@@ -252,6 +267,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionRipplingConfig
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
+  | McpConnectionVoiceConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
   | McpConnectionGbrainConfig
@@ -639,6 +655,15 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     name: 'ElevenLabs',
     description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice`,
     icon: 'elevenlabs',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
+  },
+  {
+    id: 'voice',
+    name: 'Voice',
+    description: `Add an OpenAI key with GPT-Live access so your team can talk to ${PRODUCT_NAME} on a call`,
+    icon: 'voice',
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
     serverMode: 'credential_only',
@@ -1032,6 +1057,20 @@ export function isMcpConnectionElevenLabsConfig(
     typeof authConfig.encryptedApiKey === 'string' &&
     'voiceId' in authConfig &&
     typeof authConfig.voiceId === 'string',
+  );
+}
+
+export function isMcpConnectionVoiceConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionVoiceConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'voice' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string' &&
+    authConfig.encryptedApiKey.length > 0,
   );
 }
 

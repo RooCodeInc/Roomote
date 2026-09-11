@@ -203,6 +203,41 @@ describe('stopTaskRun', () => {
     });
   });
 
+  it('soft-stops when the sandbox attaches during the pre-stop refresh', async () => {
+    const run = {
+      id: 7,
+      status: RunStatus.Processing,
+      sandboxServerUrl: null,
+      actingUserId: 'user-1',
+    };
+    const attached = { ...run, sandboxServerUrl: 'https://sandbox.example' };
+    const cancelMutate = vi.fn().mockResolvedValue({ success: true });
+    mockFindFirstTaskRun.mockResolvedValueOnce(attached);
+    mockWithSandboxServerRpcClient.mockImplementationOnce(
+      async (options: {
+        call: (client: {
+          commands: { cancelTask: { mutate: typeof cancelMutate } };
+        }) => Promise<unknown>;
+      }) =>
+        options.call({
+          commands: { cancelTask: { mutate: cancelMutate } },
+        }),
+    );
+
+    await expect(
+      stopTaskRun({
+        run,
+        authUserId: 'user-1',
+        cancelledBy: { source: 'web' },
+      }),
+    ).resolves.toEqual({ success: true, mode: 'sandbox_stop' });
+    expect(cancelMutate).toHaveBeenCalledExactlyOnceWith({
+      cancelledBy: { source: 'web' },
+    });
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
+    expect(mockCancelTaskRunDirect).not.toHaveBeenCalled();
+  });
+
   it('persists cancel intent even when the sandbox stop RPC fails', async () => {
     const run = {
       id: 7,

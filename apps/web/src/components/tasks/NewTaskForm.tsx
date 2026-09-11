@@ -14,12 +14,14 @@ import {
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import { getTaskLaunchDisabledReason } from '@/lib/managed-access';
 import { stagePendingFastSessionLaunch } from '@/lib/pending-fast-session-launch';
+import { sessionPathWithVoiceAutostart } from '@/lib/voice-autostart';
 
 import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { useStartFastSession } from '@/hooks/task-runs';
+import { useVoiceEnabled } from '@/hooks/useVoiceEnabled';
 
-import type { PromptInputMessage } from '@/components/ai-elements';
+import { type PromptInputMessage } from '@/components/ai-elements';
 import { SessionModelSwitcher, TaskPromptInput } from '@/components/tasks';
 import { useTaskLaunchConfig } from '@/components/tasks/TaskLaunchConfig';
 
@@ -37,6 +39,8 @@ type FastSessionSubmission = {
   attachmentTexts?: string[];
   model?: string | null;
   reasoningEffort?: ReasoningEffort | null;
+  /** Open the Session for a voice call; it may start with nothing typed. */
+  voiceCall?: boolean;
 };
 
 type NewTaskFormProps = {
@@ -82,7 +86,10 @@ export function NewTaskForm({
   } | null>(null);
 
   const startFastSession = useCallback(
-    async (payload: FastSessionSubmission): Promise<void> => {
+    async (
+      payload: FastSessionSubmission,
+      options: { voice?: boolean } = {},
+    ): Promise<void> => {
       // A second submit while the first is in flight would mint a second
       // session and orphan one of them.
       if (startFastSessionMutation.isPending) {
@@ -100,14 +107,20 @@ export function NewTaskForm({
             ...payload,
             conversationId,
           });
-        stagePendingFastSessionLaunch(sessionId, {
-          fastConversationId: fastConversationId ?? conversationId,
-          text: payload.text,
-          images: payload.images,
-        });
+        if (payload.text || payload.images?.length) {
+          stagePendingFastSessionLaunch(sessionId, {
+            fastConversationId: fastConversationId ?? conversationId,
+            text: payload.text,
+            images: payload.images,
+          });
+        }
         fastConversationRetryRef.current = null;
         onTaskStarted?.();
-        router.push(`/sessions/${sessionId}`);
+        router.push(
+          options.voice
+            ? sessionPathWithVoiceAutostart(sessionId)
+            : `/sessions/${sessionId}`,
+        );
       } catch (error) {
         toast.error(
           error instanceof Error
@@ -185,6 +198,44 @@ export function NewTaskForm({
 
   const submitDisabledReason = getTaskLaunchDisabledReason(managedAccess);
 
+  // --- Voice-started sessions ----------------------------------------------
+  // A session needs content to exist, so the composer listens for the first
+  // utterance here, starts the session with it, and hands the conversation
+  // to the session page (which resumes voice and speaks the reply).
+  const voiceEnabled = useVoiceEnabled();
+  const startFastSessionRef = useRef(startFastSession);
+  startFastSessionRef.current = startFastSession;
+  // A voice call lives inside a Session, so the button opens one (sending
+  // anything already typed as the first message) and the Session page starts
+  // the call. Matches the flow of a call button beside the composer.
+  const [openingVoiceSession, setOpeningVoiceSession] = useState(false);
+  const handleVoiceToggle = useCallback(() => {
+    if (openingVoiceSession) return;
+    setOpeningVoiceSession(true);
+    void startFastSessionRef
+      .current(
+        {
+          text: promptText.trim(),
+          model: selectedModelOverrideId,
+          ...(selectedReasoningEffort !== undefined
+            ? { reasoningEffort: selectedReasoningEffort }
+            : {}),
+          voiceCall: true,
+        },
+        { voice: true },
+      )
+      .finally(() => setOpeningVoiceSession(false));
+  }, [
+    openingVoiceSession,
+    promptText,
+    selectedModelOverrideId,
+    selectedReasoningEffort,
+  ]);
+  const voiceActive = openingVoiceSession;
+
+  // Voice only applies to Fast sessions; an environment launch is a task.
+  const showVoice = voiceEnabled && !environmentIdParam;
+
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       const text = message.text.trim();
@@ -259,6 +310,11 @@ export function NewTaskForm({
         animateContainer={false}
         submitWithMetaKey={false}
         submitDisabledReason={submitDisabledReason}
+        voice={
+          showVoice
+            ? { active: voiceActive, onToggle: handleVoiceToggle }
+            : undefined
+        }
         tools={
           <SessionModelSwitcher
             model={selectedModelOverrideId ?? ''}

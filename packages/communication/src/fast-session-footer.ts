@@ -16,6 +16,7 @@ import {
   type ThreadReplyLinkedPr,
   type ThreadReplyRunningTasks,
 } from './chat-messages';
+import { formatAgentMailFooterMarkdown } from './agentmail-format';
 import { chunkDiscordMessage } from './discord-provider';
 import {
   resolveSessionRunningTasks,
@@ -179,7 +180,12 @@ export function buildFastSessionReplyFooterText(params: {
               formatLink: formatMarkdownLink,
               formatFooterText: (text: string) => `<sub>${text}</sub>`,
             }
-          : { formatLink: formatMarkdownLink }),
+          : params.provider === 'agentmail'
+            ? {
+                formatLink: formatMarkdownLink,
+                formatFooterText: formatAgentMailFooterMarkdown,
+              }
+            : { formatLink: formatMarkdownLink }),
   });
 }
 

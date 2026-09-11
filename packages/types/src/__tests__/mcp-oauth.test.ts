@@ -9,6 +9,7 @@ import {
   isMcpConnectionNotionConfig,
   isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
+  isMcpConnectionVoiceConfig,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
@@ -261,5 +262,35 @@ describe('Resend OAuth', () => {
     expect(getMcpIntegrationDefaultDisabledTools('resend')).not.toContain(
       'list-contacts',
     );
+  });
+});
+
+describe('Voice credential-only integration', () => {
+  it('is a deployment-scoped credential_only entry with no MCP url', () => {
+    expect(getMcpIntegration('voice')).toMatchObject({
+      name: 'Voice',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'credential_only',
+    });
+    expect(getMcpIntegration('voice')?.url).toBeUndefined();
+    expect(getMcpIntegrationDefaultDisabledTools('voice')).toEqual([]);
+  });
+
+  it('recognizes a valid stored Voice config and rejects others', () => {
+    expect(
+      isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: 'enc' }),
+    ).toBe(true);
+    expect(
+      isMcpConnectionVoiceConfig({ type: 'voice', encryptedApiKey: '' }),
+    ).toBe(false);
+    expect(
+      isMcpConnectionVoiceConfig({
+        type: 'elevenlabs',
+        encryptedApiKey: 'enc',
+        voiceId: 'v1',
+      }),
+    ).toBe(false);
+    expect(isMcpConnectionVoiceConfig(null)).toBe(false);
   });
 });

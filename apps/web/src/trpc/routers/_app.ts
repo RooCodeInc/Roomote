@@ -49,6 +49,13 @@ import {
   updateFastSessionModelSelectionInputSchema,
 } from '../commands/fast-sessions/input';
 import {
+  cleanVoiceTranscriptCommand,
+  createVoiceLiveSessionCommand,
+  getVoiceStatusCommand,
+  recordVoiceCallEventCommand,
+  recordVoiceTurnCommand,
+} from '../commands/voice';
+import {
   getSessionByIdCommand,
   getSessionForTask,
   getSessions,
@@ -79,6 +86,7 @@ import {
   saveRipplingConnectionSchema,
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
+  saveVoiceConnectionSchema,
   saveGrafanaConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
@@ -184,8 +192,8 @@ import {
   createDiscordLinkCodeCommand,
   unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
-  previewEmailLinkCommand,
-  linkEmailAddressCommand,
+  getLinkedEmailAccountsCommand,
+  resendPrimaryEmailVerificationCommand,
 } from '../commands/linked-accounts';
 import {
   getPersonalAccountCapabilitiesCommand,
@@ -255,6 +263,7 @@ import {
   getRipplingConnectionCommand,
   getGranolaConnectionCommand,
   getElevenLabsConnectionCommand,
+  getVoiceConnectionCommand,
   getGrafanaConnectionCommand,
   getSnowflakeConnectionCommand,
   getVercelConnectionCommand,
@@ -265,6 +274,7 @@ import {
   saveRipplingConnectionCommand,
   saveGranolaConnectionCommand,
   saveElevenLabsConnectionCommand,
+  saveVoiceConnectionCommand,
   saveGrafanaConnectionCommand,
   saveSnowflakeConnectionCommand,
   saveVercelConnectionCommand,
@@ -360,7 +370,6 @@ import {
   saveCommsAuthConfigCommand,
   clearCommsAuthConfigCommand,
   diagnoseDiscordPermissionsCommand,
-  listAgentMailInboxesCommand,
   listDiscordChannelsCommand,
   listDiscordGuildsCommand,
   registerDiscordCommandsCommand,
@@ -855,9 +864,11 @@ const automationsRouter = createRouter({
     listCustomAutomationsCommand(auth),
   ),
 
-  getCustomAutomationOptions: protectedProcedure.query(({ ctx: { auth } }) =>
-    getCustomAutomationOptionsCommand(auth),
-  ),
+  getCustomAutomationOptions: protectedProcedure
+    .input(z.object({ automationId: z.string().uuid().optional() }).optional())
+    .query(({ ctx: { auth }, input }) =>
+      getCustomAutomationOptionsCommand(auth, input ?? {}),
+    ),
 
   createCustomAutomation: protectedProcedure
     .input(
@@ -890,7 +901,7 @@ const automationsRouter = createRouter({
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -932,7 +943,7 @@ const automationsRouter = createRouter({
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -1168,6 +1179,7 @@ export const appRouter = createRouter({
         z.object({
           taskId: z.string(),
           runId: z.number().int().optional(),
+          terminate: z.boolean().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -1501,6 +1513,14 @@ export const appRouter = createRouter({
   }),
 
   linkedAccounts: createRouter({
+    email: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedEmailAccountsCommand(auth),
+    ),
+
+    resendEmailVerification: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      resendPrimaryEmailVerificationCommand(auth),
+    ),
+
     github: protectedProcedure.query(({ ctx: { auth } }) =>
       getLinkedGitHubAccountCommand(auth),
     ),
@@ -1568,18 +1588,6 @@ export const appRouter = createRouter({
     unlinkDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
       unlinkLinkedDiscordAccountCommand(auth),
     ),
-
-    previewEmailLink: protectedProcedure
-      .input(z.object({ token: z.string().min(1) }))
-      .query(({ ctx: { auth }, input }) =>
-        previewEmailLinkCommand(auth, input.token),
-      ),
-
-    linkEmailAddress: protectedProcedure
-      .input(z.object({ token: z.string().min(1) }))
-      .mutation(({ ctx: { auth }, input }) =>
-        linkEmailAddressCommand(auth, input.token),
-      ),
   }),
 
   preferences: createRouter({
@@ -1970,6 +1978,10 @@ export const appRouter = createRouter({
       getElevenLabsConnectionCommand(auth),
     ),
 
+    voiceConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getVoiceConnectionCommand(auth),
+    ),
+
     grafanaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getGrafanaConnectionCommand(auth),
     ),
@@ -2060,6 +2072,12 @@ export const appRouter = createRouter({
         saveElevenLabsConnectionCommand(auth, input),
       ),
 
+    saveVoiceConnection: protectedProcedure
+      .input(saveVoiceConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveVoiceConnectionCommand(auth, input),
+      ),
+
     saveGrafanaConnection: protectedProcedure
       .input(saveGrafanaConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
@@ -2147,20 +2165,6 @@ export const appRouter = createRouter({
     repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       repairTelegramWebhookCommand(auth),
     ),
-
-    // A mutation, not a query: the input can carry a freshly typed API key,
-    // and query inputs serialize into the GET URL (browser history, proxy
-    // and access logs, tracing). Mutations POST the input in the body.
-    listAgentMailInboxes: protectedProcedure
-      .input(
-        z.object({
-          apiKey: z.string().trim().optional(),
-          podId: z.string().trim().optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        listAgentMailInboxesCommand(auth, input),
-      ),
 
     listDiscordGuilds: protectedProcedure.query(({ ctx: { auth } }) =>
       listDiscordGuildsCommand(auth),
@@ -3043,6 +3047,44 @@ export const appRouter = createRouter({
         getFastSessionComposerSuggestionCommand(auth, {
           sessionId: input.sessionId,
         }),
+      ),
+  }),
+
+  voice: createRouter({
+    status: protectedProcedure.query(() => getVoiceStatusCommand()),
+    createLiveSession: protectedProcedure
+      // Never trim the SDP: it must keep its trailing CRLF or GPT-Live
+      // rejects the offer with "failed to unmarshal SDP: EOF".
+      .input(z.object({ sdp: z.string().min(1).max(65_536) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createVoiceLiveSessionCommand(auth, input),
+      ),
+    cleanTranscript: protectedProcedure
+      .input(z.object({ text: z.string().trim().min(1).max(8_000) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        cleanVoiceTranscriptCommand(auth, input),
+      ),
+    recordTurn: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          role: z.enum(['user', 'assistant']),
+          text: z.string().trim().min(1).max(20_000),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        recordVoiceTurnCommand(auth, input),
+      ),
+    recordCallEvent: protectedProcedure
+      .input(
+        z.object({
+          sessionId: z.string().uuid(),
+          phase: z.enum(['started', 'ended']),
+          durationMs: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        recordVoiceCallEventCommand(auth, input),
       ),
   }),
 
