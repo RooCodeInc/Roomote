@@ -2551,6 +2551,15 @@ describe('resolveOpenCodeSmallModel', () => {
         provider: {
           openrouter: {
             options: { apiKey: '{env:OPENROUTER_API_KEY}' },
+            models: {
+              'google/gemini-3.6-flash': {
+                name: 'Gemini audio',
+                options: {
+                  reasoning: { effort: 'high' },
+                  temperature: 0.2,
+                },
+              },
+            },
           },
         },
       }),
@@ -2640,7 +2649,11 @@ describe('resolveOpenCodeSmallModel', () => {
         openrouter: {
           models: {
             'google/gemini-3.6-flash': {
-              options: { reasoning: { effort: 'low' } },
+              name: 'Gemini audio',
+              options: {
+                reasoning: { effort: 'low' },
+                temperature: 0.2,
+              },
             },
           },
         },

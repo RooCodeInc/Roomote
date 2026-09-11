@@ -476,6 +476,7 @@ function mergeReasoningIntoConfigContent(
         provider,
         model,
         reasoningEffort,
+        { overrideExisting: true },
       );
     }
     provider = mergeOpenRouterVariantAliasModels(provider, variantAliases);
