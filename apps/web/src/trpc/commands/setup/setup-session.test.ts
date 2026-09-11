@@ -332,6 +332,27 @@ describe('optional setup integration discovery', () => {
       .from(fastAgentMessages)
       .where(eq(fastAgentMessages.eventId, 'event:integrations:response'));
     expect(response?.metadata).toMatchObject({ userId: auth.userId });
+    const messages = await db
+      .select({ payload: fastAgentMessages.payload })
+      .from(fastAgentMessages)
+      .where(eq(fastAgentMessages.conversationId, conversationId));
+    expect(
+      messages.find(
+        ({ payload }) =>
+          (
+            payload as {
+              setupReceipt?: { kind?: string };
+            } | null
+          )?.setupReceipt?.kind === 'integration_discovery',
+      )?.payload,
+    ).toMatchObject({
+      setupReceipt: {
+        presentation: {
+          label: 'Asked about integrations',
+          iconKey: 'plug',
+        },
+      },
+    });
   });
 
   it('rejects setup replies from a collaborator instead of dropping setup guards', async () => {

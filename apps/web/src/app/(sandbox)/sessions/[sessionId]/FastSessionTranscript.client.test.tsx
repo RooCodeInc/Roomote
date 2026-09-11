@@ -1201,6 +1201,42 @@ describe('FastSessionTranscript', () => {
     expect(document.querySelector('.lucide-git-branch')).toBeInTheDocument();
   });
 
+  it('renders integration discovery with the requested status copy and plug icon', () => {
+    const receipt = textMessage({
+      id: 'integration-receipt',
+      role: 'user',
+      text: 'Asked about integrations.',
+      ts: 1,
+      inputKind: SETUP_RECEIPT_INPUT_KIND,
+      userId: 'user-1',
+    });
+    receipt.payload = {
+      setupReceipt: {
+        kind: 'integration_discovery',
+        presentation: {
+          label: 'Asked about integrations',
+          iconKey: 'plug',
+        },
+      },
+    };
+
+    render(
+      <FastSessionTranscript
+        sessionId="session-1"
+        initialMessages={[receipt]}
+        owner={{
+          userId: 'user-1',
+          name: 'Test User',
+          email: 'test@example.com',
+          imageUrl: 'https://example.com/avatar.png',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Asked about integrations')).toBeInTheDocument();
+    expect(document.querySelector('.lucide-plug')).toBeInTheDocument();
+  });
+
   it('removes the running task indicator when the count returns to zero', () => {
     const { rerender } = render(
       <SessionRunningTaskCountContext.Provider value={1}>

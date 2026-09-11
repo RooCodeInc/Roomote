@@ -143,7 +143,10 @@ beforeEach(() => {
 });
 
 it('shows only eligible option IDs in catalog order without badges or unmentioned defaults', () => {
-  render(<SetupIntegrationsCard sessionId="s" request={request} />);
+  const { container } = render(
+    <SetupIntegrationsCard sessionId="s" request={request} />,
+  );
+  expect(container.querySelector('.lucide-plug')).toBeInTheDocument();
   const rows = within(
     screen.getByRole('list', { name: 'Available integrations' }),
   ).getAllByRole('listitem');

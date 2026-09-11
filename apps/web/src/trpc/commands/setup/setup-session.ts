@@ -1145,10 +1145,10 @@ async function persistSetupPresetResponse(input: {
             fingerprint: input.request.payload.requestId,
             requestId: input.request.payload.requestId,
             presentation: {
-              label: 'Suggested integrations',
+              label: 'Asked about integrations',
               iconKey: 'plug',
             },
-            text: 'Suggested integrations.',
+            text: 'Asked about integrations.',
             payload: {},
             ts: now.getTime(),
           }),
