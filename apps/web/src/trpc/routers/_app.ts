@@ -24,6 +24,7 @@ import {
   isSetupModelProviderId,
   isOpenAiCompatibleProviderId,
   customMcpServerInputSchema,
+  isOpenAiRealtimeVoiceId,
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
@@ -52,6 +53,7 @@ import {
   cleanVoiceTranscriptCommand,
   createVoiceLiveSessionCommand,
   getVoiceStatusCommand,
+  previewVoiceCommand,
   recordVoiceCallEventCommand,
   recordVoiceTurnCommand,
 } from '../commands/voice';
@@ -3030,6 +3032,14 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         createVoiceLiveSessionCommand(auth, input),
       ),
+    preview: protectedProcedure
+      .input(
+        z.object({
+          apiKey: z.string().transform((value) => value.trim()),
+          voiceId: z.string().refine(isOpenAiRealtimeVoiceId),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) => previewVoiceCommand(auth, input)),
     cleanTranscript: protectedProcedure
       .input(z.object({ text: z.string().trim().min(1).max(8_000) }))
       .mutation(({ ctx: { auth }, input }) =>

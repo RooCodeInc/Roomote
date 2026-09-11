@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ManagerChannelEditor } from './ManagerChannelEditor';
@@ -26,6 +33,18 @@ const baseProps = {
   onSave: vi.fn(),
   onReset: vi.fn(),
 };
+
+beforeAll(() => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  HTMLElement.prototype.getClientRects = () =>
+    [new DOMRect(0, 0, 100, 20)] as unknown as DOMRectList;
+});
+
+async function flushCloseAutoFocus() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 describe('ManagerChannelEditor', () => {
   it('keeps refresh available when the channel catalog fails to load', () => {
@@ -60,5 +79,36 @@ describe('ManagerChannelEditor', () => {
         screen.queryByLabelText('Select manager channel'),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it('focuses manual channel entry after that option is committed', async () => {
+    function Example() {
+      const [value, setValue] = useState({
+        slackChannel: '',
+        discordChannel: '',
+      });
+      return (
+        <ManagerChannelEditor
+          {...baseProps}
+          value={value}
+          savedSlackChannel=""
+          savedSlackChannelId={null}
+          onChange={setValue}
+        />
+      );
+    }
+
+    render(<Example />);
+    fireEvent.click(screen.getByLabelText('Select manager channel'));
+    fireEvent.click(
+      screen.getByRole('option', { name: 'Private or manual channel' }),
+    );
+    await flushCloseAutoFocus();
+
+    expect(
+      screen.getByPlaceholderText(
+        'Enter a private channel name or Slack channel ID',
+      ),
+    ).toHaveFocus();
   });
 });

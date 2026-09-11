@@ -11,12 +11,14 @@ import {
 } from '@roomote/db/server';
 import {
   filterMcpToolDefinitions,
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
   getDefaultMcpConnectionRole,
   getAllowedIntegrationMcpToolNames,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
   getMcpIntegrationDefaultDisabledTools,
   type McpConnectionRole,
+  type OpenAiRealtimeVoiceId,
   isMcpConnectionAsanaConfig,
   isMcpConnectionNotionConfig,
   isMcpConnectionRipplingConfig,
@@ -902,12 +904,17 @@ export async function getVoiceConnectionCommand(
 ): Promise<{
   authStatus: 'pending' | 'authenticated' | 'error' | null;
   source: 'environment' | 'connection';
+  voiceId?: OpenAiRealtimeVoiceId;
 } | null> {
   assertAdmin(auth);
 
   const envKey = await resolveModelProviderEnvValue(['R_VOICE_OPENAI_API_KEY']);
   if (envKey?.trim()) {
-    return { authStatus: 'authenticated', source: 'environment' };
+    return {
+      authStatus: 'authenticated',
+      source: 'environment',
+      voiceId: DEFAULT_OPENAI_REALTIME_VOICE_ID,
+    };
   }
 
   const connection = await db.query.mcpConnections.findFirst({
@@ -928,6 +935,7 @@ export async function getVoiceConnectionCommand(
   return {
     authStatus: connection.authStatus,
     source: 'connection',
+    voiceId: connection.authConfig.voiceId ?? DEFAULT_OPENAI_REALTIME_VOICE_ID,
   };
 }
 
@@ -1658,6 +1666,7 @@ export async function saveVoiceConnectionCommand(
   const authConfig = {
     type: 'voice' as const,
     encryptedApiKey: nextEncryptedApiKey,
+    voiceId: input.voiceId,
   };
 
   await db

@@ -273,6 +273,57 @@ export type StartAgentMailConversationResult =
       } | null;
     };
 
+/** Reserve a replyable conversation without sending its first email yet. */
+export async function prepareAgentMailConversation(input: {
+  userId: string;
+  identityId: string;
+  subject: string;
+  conversationKey: string;
+}): Promise<{
+  conversationId: string;
+  inboxId: string;
+  messageId: null;
+} | null> {
+  if (!isEmailChannelEnabled()) return null;
+  const credentials = await resolveAgentMailRuntimeCredentials();
+  if (!credentials.apiKey || !credentials.inboxId) return null;
+  const resolution = await resolveAgentMailOutboundIdentity(
+    input.userId,
+    input.identityId,
+  );
+  if (!resolution.ok) return null;
+
+  const inboxId = normalizeEmailAddress(credentials.inboxId);
+  const providerThreadId = `pending:${createHash('sha256')
+    .update(input.conversationKey)
+    .digest('hex')}`;
+  const existing = await db.query.agentmailConversations.findFirst({
+    where: and(
+      eq(agentmailConversations.inboxId, inboxId),
+      eq(agentmailConversations.providerThreadId, providerThreadId),
+      eq(agentmailConversations.ownerUserId, input.userId),
+    ),
+    columns: { id: true },
+  });
+  if (existing) {
+    return { conversationId: existing.id, inboxId, messageId: null };
+  }
+
+  const [conversation] = await db
+    .insert(agentmailConversations)
+    .values({
+      inboxId,
+      providerThreadId,
+      ownerUserId: input.userId,
+      outboundIdentityId: input.identityId,
+      subject: input.subject,
+    })
+    .returning({ id: agentmailConversations.id });
+  return conversation
+    ? { conversationId: conversation.id, inboxId, messageId: null }
+    : null;
+}
+
 export async function startAgentMailConversationWithResult(input: {
   userId: string;
   subject: string;

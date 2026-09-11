@@ -1865,6 +1865,7 @@ export function ModelSettingsSection({
                 <div className="flex flex-row items-center gap-2">
                   <Select
                     value={activeNewModelProvider.id}
+                    handoffTargetOnSelect={inputRef}
                     onValueChange={(value) =>
                       setNewModelProvider(value as SetupModelProviderId)
                     }
