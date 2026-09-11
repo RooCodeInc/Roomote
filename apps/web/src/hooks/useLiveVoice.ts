@@ -92,10 +92,26 @@ interface UseLiveVoiceReturn {
 type LiveServerEvent = {
   type?: string;
   delta?: string;
+  /** Session clock position at which GPT-Live emitted the event. */
   offset_ms?: number;
+  /** Session clock range of a transcript fragment. */
+  start_ms?: number;
+  end_ms?: number;
   delegation?: { id?: string; target?: string };
   error?: { message?: string };
 };
+
+interface PendingDelegation {
+  id: string;
+  /** When GPT-Live delegated, on the same clock as transcript fragments. */
+  offsetMs: number | undefined;
+  /**
+   * Set while nothing has been transcribed since the delegation arrived. It
+   * discards the delegation if speech never follows, so a late delegation for
+   * speech already flushed as small talk cannot attach to a later request.
+   */
+  expiryTimer: number | null;
+}
 
 async function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
   if (peer.iceGatheringState === 'complete') return;
@@ -168,10 +184,9 @@ export function useLiveVoice({
   onUtteranceRef.current = onUtterance;
 
   const inputTranscriptRef = useRef('');
-  const pendingDelegationsRef = useRef<string[]>([]);
+  const pendingDelegationsRef = useRef<PendingDelegation[]>([]);
   const delegationTimerRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<number | null>(null);
-  const unspokenDelegationTimersRef = useRef(new Map<string, number>());
   const speakingTimerRef = useRef<number | null>(null);
   const deliveryChainRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -233,18 +248,61 @@ export function useLiveVoice({
 
   const flushDelegation = useCallback(() => {
     delegationTimerRef.current = null;
-    const delegationId = pendingDelegationsRef.current[0];
+    const delegation = pendingDelegationsRef.current[0];
     const utterance = inputTranscriptRef.current.trim();
 
     // GPT-Live may delegate before the last transcript delta arrives. Retain
     // the delegation and let the next delta schedule another flush.
-    if (!delegationId || !utterance) return;
+    if (!delegation || !utterance) return;
 
     pendingDelegationsRef.current.shift();
     inputTranscriptRef.current = '';
     clearSilenceTimer();
-    deliverUtterance(utterance, delegationId);
+    deliverUtterance(utterance, delegation.id);
   }, [clearSilenceTimer, deliverUtterance]);
+
+  const removePendingDelegation = useCallback(
+    (delegation: PendingDelegation) => {
+      if (delegation.expiryTimer !== null) {
+        window.clearTimeout(delegation.expiryTimer);
+        delegation.expiryTimer = null;
+      }
+      pendingDelegationsRef.current = pendingDelegationsRef.current.filter(
+        (pending) => pending !== delegation,
+      );
+    },
+    [],
+  );
+
+  /**
+   * Speech has started after delegations arrived with nothing transcribed.
+   * A delegation answers what GPT-Live was hearing when it delegated, so one
+   * made before this speech started belongs to earlier speech (already
+   * flushed as small talk) and must not carry this utterance to Fast. A
+   * delegation made while this speech was under way is this utterance's: its
+   * transcript merely lagged.
+   */
+  const settleEarlyDelegations = useCallback(
+    (speechStartMs: number | undefined) => {
+      for (const delegation of [...pendingDelegationsRef.current]) {
+        if (delegation.expiryTimer === null) continue;
+        const madeBeforeSpeech =
+          speechStartMs !== undefined &&
+          delegation.offsetMs !== undefined &&
+          delegation.offsetMs <= speechStartMs;
+        if (madeBeforeSpeech) {
+          console.info(
+            `[voice] Ignoring delegation ${delegation.id}: made before this speech started`,
+          );
+          removePendingDelegation(delegation);
+        } else {
+          window.clearTimeout(delegation.expiryTimer);
+          delegation.expiryTimer = null;
+        }
+      }
+    },
+    [removePendingDelegation],
+  );
 
   const scheduleDelegationFlush = useCallback(() => {
     if (delegationTimerRef.current !== null) {
@@ -284,12 +342,9 @@ export function useLiveVoice({
           if (event.delta) {
             // The person is talking again: whatever GPT-Live said is done.
             if (outputTranscriptRef.current) flushSpokenTurn();
+            const speechStarting = !inputTranscriptRef.current.trim();
             inputTranscriptRef.current += event.delta;
-            // Speech arriving settles any delegation that came in ahead of it.
-            for (const timer of unspokenDelegationTimersRef.current.values()) {
-              window.clearTimeout(timer);
-            }
-            unspokenDelegationTimersRef.current.clear();
+            if (speechStarting) settleEarlyDelegations(event.start_ms);
             onHeardTurnDeltaRef.current?.(
               stripVoiceAnnotations(inputTranscriptRef.current),
             );
@@ -325,24 +380,22 @@ export function useLiveVoice({
           break;
         case 'session.delegation.created':
           if (event.delegation?.target === 'client' && event.delegation.id) {
-            const delegationId = event.delegation.id;
-            pendingDelegationsRef.current.push(delegationId);
+            const delegation: PendingDelegation = {
+              id: event.delegation.id,
+              offsetMs: event.offset_ms,
+              expiryTimer: null,
+            };
             if (!inputTranscriptRef.current.trim()) {
               // Nothing transcribed yet: either a late delegation for speech
               // already flushed as small talk, or one for a request whose
-              // transcript is still arriving. Wait for speech to decide.
-              unspokenDelegationTimersRef.current.set(
-                delegationId,
-                window.setTimeout(() => {
-                  unspokenDelegationTimersRef.current.delete(delegationId);
-                  if (inputTranscriptRef.current.trim()) return;
-                  pendingDelegationsRef.current =
-                    pendingDelegationsRef.current.filter(
-                      (id) => id !== delegationId,
-                    );
-                }, UNSPOKEN_DELEGATION_EXPIRY_MS),
-              );
+              // transcript is still arriving. Speech starting decides by
+              // timestamp; silence for the whole window discards it.
+              delegation.expiryTimer = window.setTimeout(() => {
+                delegation.expiryTimer = null;
+                removePendingDelegation(delegation);
+              }, UNSPOKEN_DELEGATION_EXPIRY_MS);
             }
+            pendingDelegationsRef.current.push(delegation);
             scheduleDelegationFlush();
           }
           break;
@@ -354,7 +407,13 @@ export function useLiveVoice({
           break;
       }
     },
-    [flushSpokenTurn, scheduleDelegationFlush, scheduleSilenceFlush],
+    [
+      flushSpokenTurn,
+      removePendingDelegation,
+      scheduleDelegationFlush,
+      scheduleSilenceFlush,
+      settleEarlyDelegations,
+    ],
   );
 
   const release = useCallback(
@@ -411,11 +470,12 @@ export function useLiveVoice({
       release(peer, channel, mic, audio);
 
       inputTranscriptRef.current = '';
-      pendingDelegationsRef.current = [];
-      for (const timer of unspokenDelegationTimersRef.current.values()) {
-        window.clearTimeout(timer);
+      for (const delegation of pendingDelegationsRef.current) {
+        if (delegation.expiryTimer !== null) {
+          window.clearTimeout(delegation.expiryTimer);
+        }
       }
-      unspokenDelegationTimersRef.current.clear();
+      pendingDelegationsRef.current = [];
       setActive(false);
       setStatus('idle');
       setStartedAt(null);
