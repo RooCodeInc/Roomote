@@ -1,5 +1,6 @@
 import {
   and,
+  automationResults,
   db,
   eq,
   environmentFactory,
@@ -64,6 +65,18 @@ describe('Fast automation suggestions', () => {
       brief: suggestion.brief,
       status: 'open',
       sourceTaskId: null,
+    });
+    const [result] = await db
+      .select()
+      .from(automationResults)
+      .where(eq(automationResults.sourceWorkItemId, workItem!.id));
+    expect(result).toMatchObject({
+      kind: 'suggestion',
+      userId: user.id,
+      automationName: 'Custom automation',
+      title: suggestion.title,
+      content: suggestion.brief,
+      priority: 'normal',
     });
 
     const [tracked] = await db

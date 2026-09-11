@@ -1,5 +1,6 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
+  type BackgroundAutomationKey,
   type AutomationResultPriority,
 } from '@roomote/types';
 import { eq } from 'drizzle-orm';
@@ -126,4 +127,43 @@ export async function recordBackgroundAutomationResult(
     .onConflictDoNothing({ target: automationResults.dedupeKey })
     .returning();
   return result ?? null;
+}
+
+export async function recordSuggestionResults(
+  suggestions: Array<{
+    workItemId: string;
+    automationKey: BackgroundAutomationKey | null;
+    customAutomationId?: string | null;
+    sourceTaskId?: string | null;
+    userId: string | null;
+    automationName: string;
+    title: string;
+    content: string;
+    priority: AutomationResultPriority;
+    createdAt?: Date;
+  }>,
+  client: DatabaseOrTransaction = db,
+) {
+  if (suggestions.length === 0) return [];
+
+  return client
+    .insert(automationResults)
+    .values(
+      suggestions.map((suggestion) => ({
+        automationKey: suggestion.automationKey,
+        customAutomationId: suggestion.customAutomationId ?? null,
+        sourceTaskId: suggestion.sourceTaskId ?? null,
+        sourceWorkItemId: suggestion.workItemId,
+        userId: suggestion.userId,
+        kind: 'suggestion' as const,
+        automationName: suggestion.automationName,
+        title: suggestion.title,
+        content: suggestion.content,
+        priority: suggestion.priority,
+        dedupeKey: `work-item:${suggestion.workItemId}`,
+        ...(suggestion.createdAt ? { createdAt: suggestion.createdAt } : {}),
+      })),
+    )
+    .onConflictDoNothing({ target: automationResults.sourceWorkItemId })
+    .returning();
 }

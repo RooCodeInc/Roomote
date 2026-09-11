@@ -47,6 +47,7 @@ import {
   findTrackedSuggestionWorkItemIds,
   inArray,
   registerTrackedSuggestionCards,
+  recordSuggestionResults,
   repositories,
   resolveRepositorySelectionByIds,
   slackInstallations,
@@ -1332,6 +1333,16 @@ export async function submitTaskSuggestions(
           task.initiatorAutomation,
         )
       : null;
+    const resultAutomationName =
+      customAutomation?.name ??
+      task?.actorDisplayName ??
+      automationDescriptor?.label ??
+      null;
+    const resultPriority =
+      customAutomation?.resultPriority ??
+      (automationDescriptor && 'resultPriority' in automationDescriptor
+        ? automationDescriptor.resultPriority
+        : 'normal');
     const isOnboardingTrigger =
       run.payloadKind === TaskPayloadKind.Scan &&
       !isCurrentThreadTask &&
@@ -1597,18 +1608,6 @@ export async function submitTaskSuggestions(
                 ? `${submissionPrefix}${index}:${contentHash}`
                 : contentHash,
               status: 'open',
-              resultAutomationName:
-                customAutomation?.name ??
-                task?.actorDisplayName ??
-                automationDescriptor?.label ??
-                null,
-              resultPriority:
-                customAutomation?.resultPriority ??
-                (automationDescriptor &&
-                'resultPriority' in automationDescriptor
-                  ? automationDescriptor.resultPriority
-                  : 'normal'),
-              resultUserId: createdByUserId,
               targetEnvironmentId: suggestion.targetEnvironmentId,
               workspaceReadiness: suggestion.workspaceReadiness,
               readinessMessage: suggestion.readinessMessage,
@@ -1617,6 +1616,23 @@ export async function submitTaskSuggestions(
           }),
         )
         .returning(workItemColumns);
+
+      if (resultAutomationName) {
+        await recordSuggestionResults(
+          insertedSuggestions.map((suggestion) => ({
+            workItemId: suggestion.id,
+            automationKey: task?.initiatorAutomation ?? null,
+            customAutomationId: customAutomation?.id,
+            sourceTaskId: taskId,
+            userId: createdByUserId,
+            automationName: resultAutomationName,
+            title: suggestion.title,
+            content: suggestion.brief ?? '',
+            priority: resultPriority,
+          })),
+          tx,
+        );
+      }
 
       return insertedSuggestions.map(toPersistedTaskSuggestion);
     });

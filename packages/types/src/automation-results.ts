@@ -7,6 +7,10 @@ export const AUTOMATION_RESULT_PRIORITIES = [
 export type AutomationResultPriority =
   (typeof AUTOMATION_RESULT_PRIORITIES)[number];
 
+export const AUTOMATION_RESULT_KINDS = ['report', 'suggestion'] as const;
+
+export type AutomationResultKind = (typeof AUTOMATION_RESULT_KINDS)[number];
+
 export const AUTOMATION_RESULT_PRIORITY_LABELS: Record<
   AutomationResultPriority,
   string

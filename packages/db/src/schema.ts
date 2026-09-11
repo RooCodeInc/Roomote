@@ -87,6 +87,7 @@ import type {
   SessionWakeupReportPolicy,
   SessionWakeupSchedule,
   SessionWakeupStatus,
+  AutomationResultKind,
   AutomationResultPriority,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
@@ -634,6 +635,8 @@ export const workItems = pgTable(
     failedAt: timestamp('failed_at'),
     launchError: text('launch_error'),
     dismissedAt: timestamp('dismissed_at'),
+    // N-1 rollback bridge for releases that still use work_items as the
+    // suggestion-result inbox. Canonical state now lives in automation_results.
     resultAcceptedAt: timestamp('result_accepted_at'),
     resultIgnoredAt: timestamp('result_ignored_at'),
     resultAutomationName: text('result_automation_name'),
@@ -4466,10 +4469,19 @@ export const automationResults = pgTable(
     sourceTaskId: text('source_task_id').references(() => tasks.id, {
       onDelete: 'set null',
     }),
+    sourceWorkItemId: uuid('source_work_item_id').references(
+      () => workItems.id,
+      { onDelete: 'set null' },
+    ),
     userId: text('user_id').references(() => users.id, {
       onDelete: 'set null',
     }),
+    kind: text('kind')
+      .notNull()
+      .default('report')
+      .$type<AutomationResultKind>(),
     automationName: text('automation_name').notNull(),
+    title: text('title'),
     content: text('content').notNull(),
     priority: text('priority')
       .notNull()
@@ -4486,6 +4498,9 @@ export const automationResults = pgTable(
     index('automation_results_inbox_idx').on(table.priority, table.createdAt),
     index('automation_results_user_id_idx').on(table.userId),
     index('automation_results_source_task_id_idx').on(table.sourceTaskId),
+    uniqueIndex('automation_results_source_work_item_id_unique_idx').on(
+      table.sourceWorkItemId,
+    ),
   ],
 );
 

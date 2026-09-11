@@ -26,6 +26,7 @@ const {
   mockGetSessionForTask,
   mockGetOrCreate,
   insertedWorkItemValues,
+  insertedResultValues,
   insertedTrackedMessageValues,
   automationThreadReceipts,
 } = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ const {
   mockGetSessionForTask: vi.fn(),
   mockGetOrCreate: vi.fn(),
   insertedWorkItemValues: [] as Record<string, unknown>[],
+  insertedResultValues: [] as Record<string, unknown>[],
   insertedTrackedMessageValues: [] as Record<string, unknown>[],
   automationThreadReceipts: [] as Record<string, unknown>[],
 }));
@@ -313,6 +315,10 @@ vi.mock('@roomote/db/server', () => ({
       );
     },
   ),
+  recordSuggestionResults: vi.fn(async (results: Record<string, unknown>[]) => {
+    insertedResultValues.push(...results);
+    return results;
+  }),
   resolveRepositorySelectionByIds: vi.fn(),
   upsertBackgroundAutomationSlackThread: vi.fn(async (_tx, params) => {
     expect(transactionActive).toBe(true);
@@ -455,6 +461,7 @@ describe('submitTaskSuggestions', () => {
     mockGetSessionForTask.mockReset().mockResolvedValue(null);
     mockGetOrCreate.mockReset();
     insertedWorkItemValues.length = 0;
+    insertedResultValues.length = 0;
     insertedTrackedMessageValues.length = 0;
     automationThreadReceipts.length = 0;
     slackInstallationChannelRows = [{ channelId: 'C-FALLBACK' }];
@@ -543,6 +550,10 @@ describe('submitTaskSuggestions', () => {
       workspaceReadiness: null,
       readinessMessage: null,
     });
+    expect(insertedWorkItemValues[0]).not.toHaveProperty(
+      'resultAutomationName',
+    );
+    expect(insertedResultValues).toHaveLength(0);
   });
 
   it('allows Slack app mention replies to attach suggestions', async () => {
@@ -585,6 +596,7 @@ describe('submitTaskSuggestions', () => {
     mockTaskFindFirst.mockResolvedValue({
       initiatorUserId: 'user-1',
       initiatorAutomation: 'suggest_ideas',
+      actorDisplayName: 'Suggest Ideas',
       slackChannelId: 'C123',
       slackThreadTs: '111.222',
     });
@@ -629,6 +641,13 @@ describe('submitTaskSuggestions', () => {
     expect(insertedTrackedMessageValues[0]?.metadata).not.toHaveProperty(
       'launchRouting',
     );
+    expect(insertedResultValues[0]).toMatchObject({
+      workItemId: 'wi-0',
+      userId: 'user-1',
+      automationName: 'Suggest Ideas',
+      title: 'Fix the parser',
+      content: 'Nil access is crashing the parser.',
+    });
   });
 
   it('resolves standard task repositories from the selected environment', async () => {
