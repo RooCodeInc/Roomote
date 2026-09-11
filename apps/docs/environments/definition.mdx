@@ -242,8 +242,107 @@ A service name cannot collide with a port name in the same environment.
 
 `docker_projects` runs Docker Compose or Dockerfile definitions already owned
 by a configured repository. Roomote validates the Compose model, builds images,
-starts services with `docker compose up --wait`, and treats startup as required
-unless `required: false` is set.
+starts services through Docker Compose, and treats startup as required unless
+`required: false` is set.
+
+### Configure a project
+
+In **Settings > Environments**, create or edit an environment, then:
+
+1. Add the repository that contains the Compose file or Dockerfile.
+2. Open **Docker Compose & Dockerfile** and select **Add Docker project**.
+3. Choose **Docker Compose** or **Dockerfile**, select the repository, and enter
+   paths relative to that repository. For Compose, you can also select profiles
+   or limit startup to specific services.
+4. Add any human-facing ports under **Exposed Ports**, then map each named port
+   to its container port. A Compose mapping must also name the service that owns
+   the port.
+5. Leave **Fail environment startup if this project cannot start** enabled for
+   anything the workspace requires.
+
+The **YAML** view represents the same configuration and supports the full schema
+below. Roomote validates the definition when you save it.
+
+### Use images from Compose
+
+For an existing image, put a normal Compose `image:` reference in a Compose file
+in the selected repository. `docker_projects` does not have an `image` field.
+Use `type: dockerfile` instead when Roomote should build an image from a
+repository Dockerfile.
+
+Image references follow Docker Compose conventions, so Docker Hub names such as
+`nginx:1.27-alpine` and fully qualified registry names are valid. Pin a specific
+tag or digest when reproducibility matters. The sandbox must be able to pull the
+image without an interactive login: the environment schema has no registry
+credential field, and Roomote does not run `docker login` for a project. Do not
+put registry credentials in the image URL, Compose file, or environment YAML.
+
+For example, commit this `compose.yaml` to `acme/web`:
+
+```yaml
+services:
+  web:
+    image: nginx:1.27-alpine
+    healthcheck:
+      test: [CMD, wget, --spider, http://127.0.0.1/]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+```
+
+Then configure Roomote to start it and publish container port 80 as the named
+`WEB` preview:
+
+```yaml
+name: Acme web container
+repositories:
+  - repository: acme/web
+
+docker_projects:
+  - type: compose
+    name: web
+    repository: acme/web
+    files:
+      - compose.yaml
+    services:
+      - web
+    ports:
+      - named_port: WEB
+        service: web
+        container_port: 80
+
+ports:
+  - name: WEB
+    port: 8080
+    primary: true
+```
+
+The optional Compose `services` list selects which services Roomote starts; it
+is different from the top-level `services` field, which provisions
+Roomote-managed dependencies such as PostgreSQL or Redis. Do not configure the
+same dependency both ways.
+
+### Startup and readiness
+
+Roomote automatically builds and starts configured Docker projects after their
+repositories are prepared and before repository setup commands run. Do not add
+`docker compose up` as a setup command or tell an agent to start Docker again.
+Agents receive setup status and Docker-project log locations so they can observe
+builds and health checks without creating duplicate containers.
+
+On sandbox providers that support Docker health checks, Compose waits until the
+selected services are running or healthy. Add a Compose `healthcheck` when
+"container started" is not enough to show that a dependency is ready. Blaxel
+does not support Docker health checks, so Roomote continues after Compose starts
+the services there. The startup timeout defaults to 600 seconds and can be set
+to at most 3600 seconds. A required project fails environment setup when it
+cannot become ready; an optional project records a warning and setup continues.
+
+If a task begins while setup is still running, the agent should wait for the
+top-level state in `.roomote/setup-status.json` to settle and follow the Docker
+project log path included in its environment instructions. An empty
+`docker compose ls` during that window can simply mean the image is still being
+built or pulled.
 
 Common fields:
 
