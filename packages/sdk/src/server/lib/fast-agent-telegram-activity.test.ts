@@ -76,7 +76,11 @@ describe('Fast Telegram activity', () => {
     const stream = activity.createReplyStream(deliver);
     await stream.append('Partial ');
     await stream.append('answer');
-    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS);
+    await vi.advanceTimersByTimeAsync(
+      FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS - 1,
+    );
+    expect(sendMessageDraft).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
     expect(sendMessageDraft).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: 'Partial answer' }),
     );

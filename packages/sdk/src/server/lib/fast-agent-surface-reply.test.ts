@@ -271,7 +271,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       await vi.advanceTimersByTimeAsync(0);
       const stream = adapter.createReplyStream!();
       await stream.append('Partial answer');
-      await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(800);
       expect(mocks.telegramTyping).toHaveBeenLastCalledWith(
         expect.objectContaining({ threadId: '77', text: 'Partial answer' }),
       );

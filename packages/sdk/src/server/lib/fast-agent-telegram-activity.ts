@@ -16,7 +16,8 @@ import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 export const FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS = 25_000;
 export const FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS = 4_000;
 export const FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS = 500;
-export const FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS = 1_000;
+// Telegram allows 40 draft updates per 30 seconds; stay just above its 750ms floor.
+export const FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS = 800;
 
 function isTelegramPrivateChatId(channelId: string): boolean {
   const parsed = Number(channelId);
