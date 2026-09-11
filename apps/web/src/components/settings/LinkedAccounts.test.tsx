@@ -794,6 +794,31 @@ describe('LinkedAccounts settings', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('directs an unverified member to an admin when verification delivery is unavailable', () => {
+    state.user.isAdmin = false;
+    state.emailAccounts = {
+      emailEnabled: true,
+      verificationDeliveryAvailable: false,
+      primaryEmail: { emailAddress: 'login@example.com', verified: false },
+      canViewInboxAddress: false,
+      inboxEmail: null,
+    };
+
+    render(<LinkedAccounts />);
+
+    expect(
+      screen.getByText(
+        'Email verification delivery is unavailable. Ask an admin to configure Email before you can verify your address and start work by email.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/ask an admin for the inbox address/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resend verification email' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('renders an enabled MCP linked account with unlink actions when authenticated', () => {
     state.deploymentEnablements = [
       ...createMcpEnablements(new Set([linkedIntegration.id])),

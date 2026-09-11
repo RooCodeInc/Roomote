@@ -428,10 +428,14 @@ function EmailChannelGuidance({
   canViewInboxAddress,
   emailEnabled,
   inboxEmail,
+  primaryEmailVerified,
+  verificationDeliveryAvailable,
 }: {
   canViewInboxAddress: boolean;
   emailEnabled: boolean;
   inboxEmail: string | null;
+  primaryEmailVerified: boolean | null;
+  verificationDeliveryAvailable: boolean;
 }) {
   if (!emailEnabled) {
     return (
@@ -447,6 +451,19 @@ function EmailChannelGuidance({
       <p className="text-sm text-muted-foreground">
         Email <span className="font-mono ph-no-capture">{inboxEmail}</span> from
         your verified address to start work by email.
+      </p>
+    );
+  }
+
+  if (
+    !canViewInboxAddress &&
+    primaryEmailVerified === false &&
+    !verificationDeliveryAvailable
+  ) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Email verification delivery is unavailable. Ask an admin to configure
+        Email before you can verify your address and start work by email.
       </p>
     );
   }
@@ -965,6 +982,12 @@ export function LinkedAccounts() {
           canViewInboxAddress={emailAccounts.data.canViewInboxAddress}
           emailEnabled={emailAccounts.data.emailEnabled}
           inboxEmail={emailAccounts.data.inboxEmail}
+          primaryEmailVerified={
+            emailAccounts.data.primaryEmail?.verified ?? null
+          }
+          verificationDeliveryAvailable={
+            emailAccounts.data.verificationDeliveryAvailable
+          }
         />
       ) : null}
 
