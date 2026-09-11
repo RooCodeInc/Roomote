@@ -864,9 +864,11 @@ const automationsRouter = createRouter({
     listCustomAutomationsCommand(auth),
   ),
 
-  getCustomAutomationOptions: protectedProcedure.query(({ ctx: { auth } }) =>
-    getCustomAutomationOptionsCommand(auth),
-  ),
+  getCustomAutomationOptions: protectedProcedure
+    .input(z.object({ automationId: z.string().uuid().optional() }).optional())
+    .query(({ ctx: { auth }, input }) =>
+      getCustomAutomationOptionsCommand(auth, input ?? {}),
+    ),
 
   createCustomAutomation: protectedProcedure
     .input(
@@ -899,7 +901,7 @@ const automationsRouter = createRouter({
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -941,7 +943,7 @@ const automationsRouter = createRouter({
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),

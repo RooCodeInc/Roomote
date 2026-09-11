@@ -44,7 +44,6 @@ import {
 } from './fast-agent-parent-event';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
-import { isAgentMailConversationParticipant } from './agentmail/conversation-store';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
@@ -212,19 +211,10 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   if (!session) {
     return null;
   }
-  const canAccess =
-    (await canUserAccessFastAgentSession({
-      sessionId: session.id,
-      userId: params.userId,
-    })) ||
-    // Email conversations are owned by their initiator but deliberately
-    // admit cc'd verified users as participants; the participant table is
-    // the authorization source for their turns.
-    (session.conversation.surface === 'agentmail' &&
-      (await isAgentMailConversationParticipant({
-        conversationId: session.conversation.conversationId,
-        userId: params.userId,
-      })));
+  const canAccess = await canUserAccessFastAgentSession({
+    sessionId: session.id,
+    userId: params.userId,
+  });
   if (!canAccess) {
     return null;
   }

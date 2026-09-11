@@ -19,6 +19,9 @@ export type AgentMailReplyRouteData = {
   replyToMessageId: string | null;
   recipientEmail: string | null;
   subject: string | null;
+  ownerUserId: string;
+  latestOutboundMessageId: string | null;
+  outboundIdentityId: string | null;
 };
 
 export function normalizeEmailAddress(value: string): string {
@@ -61,26 +64,6 @@ export async function resolveAgentMailSenderUserId(
   return mapping?.userId ?? null;
 }
 
-/** Authorization check: is this user a member of the conversation? */
-export async function isAgentMailConversationParticipant(input: {
-  conversationId: string;
-  userId: string;
-}): Promise<boolean> {
-  const membership = await db.query.agentmailConversationParticipants.findFirst(
-    {
-      where: and(
-        eq(
-          agentmailConversationParticipants.conversationId,
-          input.conversationId,
-        ),
-        eq(agentmailConversationParticipants.userId, input.userId),
-      ),
-      columns: { id: true },
-    },
-  );
-  return Boolean(membership);
-}
-
 /**
  * The durable reply route for a conversation. Replies target the latest
  * inbound message and address the latest authorized sender only; the adapter
@@ -95,6 +78,9 @@ export async function resolveAgentMailReplyRoute(
       inboxId: true,
       latestInboundMessageId: true,
       latestInboundSenderEmail: true,
+      latestOutboundMessageId: true,
+      ownerUserId: true,
+      outboundIdentityId: true,
       subject: true,
     },
   });
@@ -108,6 +94,9 @@ export async function resolveAgentMailReplyRoute(
     replyToMessageId: conversation.latestInboundMessageId,
     recipientEmail: conversation.latestInboundSenderEmail,
     subject: conversation.subject,
+    ownerUserId: conversation.ownerUserId,
+    latestOutboundMessageId: conversation.latestOutboundMessageId,
+    outboundIdentityId: conversation.outboundIdentityId,
   };
 }
 
@@ -359,7 +348,7 @@ async function findSingleCcJoinCandidate(input: {
   return conversation ?? null;
 }
 
-function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown): boolean {
   const code = (error as { code?: string; cause?: { code?: string } }).code;
   const causeCode = (error as { cause?: { code?: string } }).cause?.code;
   return code === '23505' || causeCode === '23505';

@@ -1,0 +1,1 @@
+ALTER TABLE "agentmail_conversations" ADD COLUMN "outbound_identity_id" text;

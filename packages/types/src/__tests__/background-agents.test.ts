@@ -1,7 +1,9 @@
 import {
   getBackgroundAgentFrequencyValues,
+  getAutomationTargetKind,
   getCommunicationAutomationTargetKind,
   hasEnabledBackgroundAgents,
+  isAutomationDestinationTarget,
   isCommunicationAutomationTarget,
   isProviderUsageLimitThreshold,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
@@ -116,4 +118,25 @@ describe('background agent helpers', () => {
       ).toBe(true);
     },
   );
+
+  it('supports verified Email as a direct-message-only automation target', () => {
+    expect(getAutomationTargetKind('email', 'direct_message')).toBe(
+      'email_user',
+    );
+    expect(() => getAutomationTargetKind('email', 'channel')).toThrow(
+      'Email automation destinations must use direct message mode.',
+    );
+    expect(
+      isAutomationDestinationTarget({
+        provider: 'email',
+        targetKind: 'email_user',
+      }),
+    ).toBe(true);
+    expect(
+      isCommunicationAutomationTarget({
+        provider: 'email',
+        targetKind: 'email_user',
+      }),
+    ).toBe(false);
+  });
 });

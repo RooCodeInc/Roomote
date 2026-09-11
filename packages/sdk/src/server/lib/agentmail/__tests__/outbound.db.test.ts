@@ -12,12 +12,16 @@ import {
 } from '@roomote/db/server';
 
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from '../../agentmail-communication';
+import { advanceAgentMailInboundAnchor } from '../conversation-store';
 import {
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
+  listAgentMailOutboundIdentities,
   resolveAgentMailOutboundAddress,
+  resolveAgentMailOutboundIdentity,
   sendAgentMailSystemEmail,
   startAgentMailConversation,
+  startAgentMailConversationWithResult,
   suppressAgentMailAddress,
 } from '../outbound';
 
@@ -123,6 +127,50 @@ describe('resolveAgentMailOutboundAddress (real database)', () => {
       ok: false,
       reason: 'no_permitted_address',
     });
+  });
+
+  it('lists only explicitly verified account identities for automation selection', async () => {
+    const accountEmail = uniqueEmail('verified');
+    const linkedEmail = uniqueEmail('linked');
+    const user = await createVerifiedUser(accountEmail);
+    await db.insert(agentmailUserMappings).values({
+      emailAddress: linkedEmail,
+      userId: user.id,
+      source: 'link_code',
+    });
+
+    const identities = await listAgentMailOutboundIdentities(user.id);
+
+    expect(identities).toEqual([
+      {
+        id: expect.stringMatching(`^verified:${user.id}:`),
+        emailAddress: accountEmail.toLowerCase(),
+        kind: 'verified',
+      },
+    ]);
+    expect(
+      await resolveAgentMailOutboundIdentity(user.id, identities[0]!.id),
+    ).toEqual({ ok: true, emailAddress: accountEmail.toLowerCase() });
+  });
+
+  it('revokes an exact identity instead of substituting another address', async () => {
+    const accountEmail = uniqueEmail('selected');
+    const linkedEmail = uniqueEmail('linked');
+    const user = await createVerifiedUser(accountEmail);
+    await db.insert(agentmailUserMappings).values({
+      emailAddress: linkedEmail,
+      userId: user.id,
+      source: 'link_code',
+    });
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    await db
+      .update(authUsers)
+      .set({ emailVerified: false })
+      .where(eq(authUsers.id, user.id));
+
+    expect(
+      await resolveAgentMailOutboundIdentity(user.id, identity!.id),
+    ).toEqual({ ok: false, reason: 'no_permitted_address' });
   });
 });
 
@@ -274,6 +322,166 @@ describe('startAgentMailConversation (real database, stubbed AgentMail API)', ()
 
     expect(sent).toBe(false);
     expect(called).toBe(false);
+  });
+
+  it('refuses later delivery after the selected identity is revoked', async () => {
+    const accountEmail = uniqueEmail('automation');
+    const changedEmail = uniqueEmail('changed');
+    const user = await createVerifiedUser(accountEmail);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    const requests: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return new Response(
+        JSON.stringify({
+          message_id: `<${randomUUID()}@agentmail.to>`,
+          thread_id: `thread_${randomUUID()}`,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const started = await startAgentMailConversationWithResult({
+      userId: user.id,
+      identityId: identity!.id,
+      subject: 'Automation report',
+      text: 'The automation is running.',
+      logContext: 'automation-test',
+      clientSendId: 'automation-run-1',
+    });
+    expect(started).toMatchObject({ sent: true, conversation: {} });
+    await db
+      .update(authUsers)
+      .set({ email: changedEmail, emailVerified: true })
+      .where(eq(authUsers.id, user.id));
+
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    await expect(
+      provider!.postMessage({
+        channelId: INBOX,
+        threadId: started.sent
+          ? started.conversation?.conversationId
+          : undefined,
+        text: 'Final report',
+        textFormat: 'markdown',
+        idempotencyKey: 'automation-report-1',
+      }),
+    ).rejects.toThrow('recipient identity is no longer eligible');
+    expect(requests).toHaveLength(1);
+  });
+
+  it('threads the report on its own root message until someone replies', async () => {
+    const accountEmail = uniqueEmail('automation');
+    const user = await createVerifiedUser(accountEmail);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    const rootMessageId = `<${randomUUID()}@agentmail.to>`;
+    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          message_id:
+            requests.length === 1
+              ? rootMessageId
+              : `<${randomUUID()}@agentmail.to>`,
+          thread_id: `thread_${randomUUID()}`,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const started = await startAgentMailConversationWithResult({
+      userId: user.id,
+      identityId: identity!.id,
+      subject: 'Automation report',
+      text: 'The automation is running.',
+      logContext: 'automation-test',
+      clientSendId: 'automation-run-2',
+    });
+    if (!started.sent || !started.conversation) {
+      throw new Error('expected the root email to be recorded');
+    }
+
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    await provider!.postMessage({
+      channelId: INBOX,
+      threadId: started.conversation.conversationId,
+      text: 'Final report',
+      textFormat: 'markdown',
+      idempotencyKey: 'automation-report-2',
+    });
+    expect(requests[1]!.url).toContain(
+      `/messages/${encodeURIComponent(rootMessageId)}/reply`,
+    );
+    expect(requests[1]!.body.to).toEqual([accountEmail.toLowerCase()]);
+  });
+
+  it('answers whoever last wrote in, even on an outbound-initiated thread', async () => {
+    const accountEmail = uniqueEmail('owner');
+    const colleagueEmail = uniqueEmail('colleague');
+    const user = await createVerifiedUser(accountEmail);
+    const [identity] = await listAgentMailOutboundIdentities(user.id);
+    const requests: { url: string; body: Record<string, unknown> }[] = [];
+    globalThis.fetch = (async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          message_id: `<${randomUUID()}@agentmail.to>`,
+          thread_id: `thread_${randomUUID()}`,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+
+    const started = await startAgentMailConversationWithResult({
+      userId: user.id,
+      identityId: identity!.id,
+      subject: 'Automation report',
+      text: 'The automation is running.',
+      logContext: 'automation-test',
+      clientSendId: 'automation-run-3',
+    });
+    if (!started.sent || !started.conversation) {
+      throw new Error('expected the root email to be recorded');
+    }
+    const colleagueMessageId = `<${randomUUID()}@example.com>`;
+    expect(
+      await advanceAgentMailInboundAnchor({
+        conversationId: started.conversation.conversationId,
+        messageId: colleagueMessageId,
+        providerTimestamp: new Date(),
+        senderEmail: colleagueEmail,
+        senderUserId: null,
+      }),
+    ).toBe(true);
+
+    const provider =
+      await createAgentMailCommunicationProviderFromRuntimeCredentials();
+    await provider!.postMessage({
+      channelId: INBOX,
+      threadId: started.conversation.conversationId,
+      text: 'Answer',
+      textFormat: 'markdown',
+      idempotencyKey: 'automation-report-3',
+    });
+    expect(requests[1]!.url).toContain(
+      `/messages/${encodeURIComponent(colleagueMessageId)}/reply`,
+    );
+    expect(requests[1]!.body.to).toEqual([colleagueEmail.toLowerCase()]);
   });
 });
 

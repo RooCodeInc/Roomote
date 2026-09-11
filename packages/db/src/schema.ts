@@ -2908,6 +2908,8 @@ export const agentmailConversations = pgTable(
     ownerUserId: text('owner_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** Server-issued identity used by outbound-initiated conversations. */
+    outboundIdentityId: text('outbound_identity_id'),
     subject: text('subject'),
     latestInboundMessageId: text('latest_inbound_message_id'),
     latestInboundAt: timestamp('latest_inbound_at'),

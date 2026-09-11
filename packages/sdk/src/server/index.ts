@@ -285,14 +285,21 @@ export {
 } from './lib/agentmail/email-link-tokens';
 
 export {
+  AgentMailRecipientUnavailableError,
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
+  listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
   resolveAgentMailOutboundAddress,
+  resolveAgentMailOutboundIdentity,
   sendAgentMailSystemEmail,
   startAgentMailConversation,
+  startAgentMailConversationWithResult,
   suppressAgentMailAddress,
   type AgentMailOutboundAddressResolution,
+  type AgentMailOutboundIdentity,
   type AgentMailSystemEmailResult,
+  type StartAgentMailConversationResult,
   type AgentMailSuppressionReason,
 } from './lib/agentmail/outbound';
 
