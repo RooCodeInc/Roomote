@@ -618,46 +618,16 @@ export function FastSessionTranscript({
               (message.payload as { taskNavigation?: unknown } | null)
                 ?.taskNavigation === true
             ) &&
+            !(
+              message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+              (message.metadata as { voiceCommentary?: unknown } | null)
+                ?.voiceCommentary === true
+            ) &&
             message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput &&
             message.eventType !==
               ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
         )
         .map((message) => {
-          // A reply written for the voice is reported aloud; the transcript
-          // keeps it as a collapsed source next to the spoken words, so the
-          // exact result is still there if the call dropped before it was
-          // spoken.
-          if (
-            message.role === 'assistant' &&
-            message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-            (message.metadata as { voiceCommentary?: unknown } | null)
-              ?.voiceCommentary === true
-          ) {
-            const text = getTranscriptMessageText(message) ?? '';
-            return toAcpUiMessage({
-              id: `assistant:${message.eventId}`,
-              ts: message.ts,
-              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult as AcpEventType,
-              role: 'tool',
-              kind: 'tool_result',
-              contentBlocks: [{ type: 'text', text }],
-              metadata: {
-                visibleInTranscript: true,
-                toolCallId: message.eventId,
-              },
-              payload: {
-                toolName: 'report_to_voice',
-                toolCallId: message.eventId,
-                status: 'completed',
-                rawInput: {},
-                output: text,
-              },
-              text,
-              userName: null,
-              userEmail: null,
-              userImageUrl: null,
-            });
-          }
           const uiMessage = toAcpUiMessage({
             // A reply keeps the id its streamed chunks rendered under, so the
             // persisted row reconciles in place instead of remounting.

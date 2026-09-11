@@ -2349,8 +2349,8 @@ describe('FastSessionTranscript', () => {
       );
 
       // The persisted row shares the stream's id, so only the unread tail is
-      // spoken; nothing is read twice. It renders as a collapsed report, not
-      // a chat bubble: the spoken words are the reply.
+      // spoken; nothing is read twice. The internal result remains available
+      // to voice delivery without rendering in the web transcript.
       act(() => {
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
@@ -2372,7 +2372,10 @@ describe('FastSessionTranscript', () => {
         'Second part is here.',
         'item_1',
       );
-      expect(screen.getByText(/result to voice/i)).toBeInTheDocument();
+      expect(screen.queryByText(/result to voice/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('First sentence. Second part is here.'),
+      ).not.toBeInTheDocument();
 
       // A typed message's written reply stays on screen and is not spoken,
       // streamed or persisted.
