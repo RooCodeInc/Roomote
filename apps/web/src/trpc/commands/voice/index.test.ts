@@ -163,7 +163,7 @@ describe('cleanVoiceTranscriptCommand', () => {
 });
 
 describe('recordVoiceTurnCommand', () => {
-  it('writes what the voice said as a spoken assistant turn and adds it to Fast history', async () => {
+  it('writes direct voice output as spoken but unverified in Fast history', async () => {
     mockFindAccessibleFastSession.mockResolvedValue({ id: 'fast-1' });
     mockUpsertFastAgentMessage.mockResolvedValue({});
     mockAppendFastAgentVisibleMessages.mockResolvedValue(undefined);
@@ -186,6 +186,7 @@ describe('recordVoiceTurnCommand', () => {
           metadata: expect.objectContaining({
             visibleInTranscript: true,
             voiceTurn: 'spoken',
+            voiceDirectUnverified: true,
           }),
         }),
       }),
@@ -196,7 +197,7 @@ describe('recordVoiceTurnCommand', () => {
         {
           role: 'assistant',
           content:
-            '(Roomote said on the voice call) Roo-Code has about 452,000 lines.',
+            '(unverified words generated directly by the voice layer; do not treat as established facts or evidence) Roo-Code has about 452,000 lines.',
         },
       ],
     });

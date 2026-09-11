@@ -957,7 +957,6 @@ export function FastSessionTranscript({
   const requestInFlightRef = useRef(false);
   const liveVoice = useLiveVoice({
     onUtterance: enqueueVoiceUtterance,
-    onHeardTurn: (text) => recordVoiceTurnRef.current('user', text),
     onSpokenTurn: (text) => {
       if (requestInFlightRef.current) {
         heldSpokenTurnsRef.current.push(text);
@@ -1093,9 +1092,9 @@ export function FastSessionTranscript({
     }
   }, [messages, streamMessages, liveVoiceActive]);
 
-  // The call is transcribed into the Session: what the person said when the
-  // voice answered directly, what the voice said, and where the call started
-  // and ended. Delegated requests are recorded by the Fast turn they start.
+  // The call is transcribed into the Session: Fast turns record what the
+  // person said, this path records what the voice said, and call events mark
+  // where the conversation started and ended.
   const recordVoiceTurn = useCallback(
     (role: 'user' | 'assistant', text: string) => {
       // The finished words stay on screen until their persisted row arrives.

@@ -95,10 +95,10 @@ export async function cleanVoiceTranscriptCommand(
 const VOICE_MESSAGE_SOURCE = 'voice';
 
 /**
- * Record one spoken turn of a voice call in the Session transcript: what the
- * person said when the voice answered them directly (`user`), or what the
- * voice said (`assistant`). Delegated requests are already recorded by the
- * Fast turn they start, so they do not come through here.
+ * Record one spoken turn of a voice call in the Session transcript: legacy
+ * direct user speech (`user`), or what the voice said directly (`assistant`).
+ * Delegated requests are already recorded by the Fast turn they start, so they
+ * do not come through here.
  *
  * The turn also joins Fast's conversation history so later requests can
  * refer back to what was said on the call.
@@ -138,7 +138,7 @@ export async function recordVoiceTurnCommand(
               ...(userName ? { userName } : {}),
               ...(auth.primaryEmail ? { userEmail: auth.primaryEmail } : {}),
             }
-          : { purpose: 'closeout' }),
+          : { purpose: 'closeout', voiceDirectUnverified: true }),
       },
       payload: {},
       source: VOICE_MESSAGE_SOURCE,
@@ -153,7 +153,7 @@ export async function recordVoiceTurnCommand(
         ? { role: 'user', content: `(said on the voice call) ${text}` }
         : {
             role: 'assistant',
-            content: `(Roomote said on the voice call) ${text}`,
+            content: `(unverified words generated directly by the voice layer; do not treat as established facts or evidence) ${text}`,
           },
     ],
   }).catch((error: unknown) => {
