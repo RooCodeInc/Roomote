@@ -766,6 +766,15 @@ export function FastSessionTranscript({
       requestUserInputTurnIds: turnIds,
     };
   }, [messages]);
+  const hasStarterSelectionReceipt = useMemo(
+    () =>
+      messages.some(
+        (message) =>
+          message.metadata?.inputKind === SETUP_RECEIPT_INPUT_KIND &&
+          message.metadata.setupReceiptKind === 'starter_selection',
+      ),
+    [messages],
+  );
   const { persistedBeforeInput, persistedAfterInput } = useMemo(() => {
     const before: AcpUiMessage[] = [];
     const after: AcpUiMessage[] = [];
@@ -819,6 +828,15 @@ export function FastSessionTranscript({
         const request = requestId
           ? (requestUserInputById.get(requestId) ?? null)
           : null;
+        // Setup submission also writes a canonical selection receipt. Keep
+        // that deterministic confirmation as the single visible record rather
+        // than rendering the same selection again as a generic response.
+        if (
+          request?.preset === 'setup_starter_tasks' &&
+          hasStarterSelectionReceipt
+        ) {
+          continue;
+        }
         uiMessage = {
           ...uiMessage,
           role: 'user',
@@ -864,6 +882,7 @@ export function FastSessionTranscript({
   }, [
     messages,
     owner,
+    hasStarterSelectionReceipt,
     pendingInputRequestOrder,
     requestUserInputById,
     requestUserInputTurnIds,

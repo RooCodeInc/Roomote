@@ -611,6 +611,22 @@ describe('FastSessionTranscript', () => {
           resolution: 'submitted',
         },
       };
+      const starterReceipt = {
+        ...textMessage({
+          id: 'starter-receipt',
+          role: 'user',
+          text: 'Selected Speed up CI.',
+          ts: 2,
+          inputKind: SETUP_RECEIPT_INPUT_KIND,
+          userId: 'user-1',
+        }),
+        metadata: {
+          visibleInTranscript: true,
+          inputKind: SETUP_RECEIPT_INPUT_KIND,
+          setupReceiptKind: 'starter_selection',
+          userId: 'user-1',
+        },
+      };
 
       const { unmount } = render(
         <FastSessionTranscript
@@ -627,7 +643,11 @@ describe('FastSessionTranscript', () => {
       render(
         <FastSessionTranscript
           sessionId="session-1"
-          initialMessages={[request, response]}
+          initialMessages={
+            preset === 'setup_starter_tasks'
+              ? [request, response, starterReceipt]
+              : [request, response]
+          }
           owner={{
             userId: 'user-1',
             name: 'Test User',
@@ -638,7 +658,12 @@ describe('FastSessionTranscript', () => {
       );
 
       expect(screen.queryByText('Structured input request')).toBeNull();
-      expect(screen.getByText('Structured response')).toBeInTheDocument();
+      if (preset === 'setup_starter_tasks') {
+        expect(screen.queryByText('Structured response')).toBeNull();
+        expect(screen.getByText('Selected Speed up CI.')).toBeInTheDocument();
+      } else {
+        expect(screen.getByText('Structured response')).toBeInTheDocument();
+      }
       expect(screen.getByLabelText('Test User')).toBeInTheDocument();
       expect(screen.queryByText(cardLabel)).toBeNull();
     },
