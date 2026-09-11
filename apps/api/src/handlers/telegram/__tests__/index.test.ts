@@ -42,6 +42,7 @@ const {
   findFastReplySessionMock,
   getFastSessionMock,
   isFastProviderMessageMock,
+  recordFastConversationMessageMock,
 } = vi.hoisted(() => ({
   addReactionMock: vi.fn(),
   answerCallbackQueryMock: vi.fn(),
@@ -88,6 +89,7 @@ const {
   findFastReplySessionMock: vi.fn(),
   getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
+  recordFastConversationMessageMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -277,6 +279,8 @@ vi.mock('@roomote/sdk/server', () => ({
   findFastAgentSessionForProviderReply: findFastReplySessionMock,
   isFastAgentProviderMessage: isFastProviderMessageMock,
   queueFastAgentSurfaceReply: queueFastReplyMock,
+  recordFastAgentConversationMessageBestEffort:
+    recordFastConversationMessageMock,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME: 'TELEGRAM_PRIMARY_CHAT_ID',
   claimPendingPrReviewAction: vi.fn(async () => null),
   claimPendingPrReviewActionsForThread: vi.fn(async () => []),
@@ -573,6 +577,37 @@ describe('Telegram webhook handler', () => {
       60 * 60,
     );
     expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('durably marks the first Fast session in an implicit New Chat topic', async () => {
+    mockTelegramLinkedSender('mapped-user-1');
+    redisGetdelMock.mockResolvedValueOnce('1');
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: 'Investigate the failing deployment',
+          message_thread_id: 77,
+          is_topic_message: true,
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(recordFastConversationMessageMock).toHaveBeenCalledWith({
+      sessionId: 'fast-session-default',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:mapped-user-1',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+      messageId: '77',
+    });
   });
 
   it('uses Fast for a linked Telegram direct message without an automatic reaction', async () => {
@@ -1591,6 +1626,26 @@ describe('Telegram webhook handler', () => {
         currentMessageId: 'telegram-response',
       }),
     );
+    expect(recordFastConversationMessageMock).toHaveBeenNthCalledWith(1, {
+      sessionId: 'fast-session-default',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:launch-owner-5',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+      messageId: '77',
+    });
+    expect(recordFastConversationMessageMock).toHaveBeenNthCalledWith(2, {
+      sessionId: 'fast-session-default',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: '222',
+        conversationId: '77:user:launch-owner-5',
+        replyTarget: { channelId: '222', threadId: '77' },
+      },
+      messageId: 'telegram-response',
+    });
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
