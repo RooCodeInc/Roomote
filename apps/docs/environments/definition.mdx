@@ -251,9 +251,10 @@ In **Settings > Environments**, create or edit an environment, then:
 
 1. Add the repository that contains the Compose file or Dockerfile.
 2. Open **Docker Compose & Dockerfile** and select **Add Docker project**.
-3. Choose **Docker Compose** or **Dockerfile**, select the repository, and enter
-   paths relative to that repository. For Compose, you can also select profiles
-   or limit startup to specific services.
+3. Choose **Docker Compose** or **Dockerfile**, select the repository, and set
+   **Working directory** relative to the repository. Compose file paths and
+   Dockerfile build paths are relative to that working directory. For Compose,
+   you can also select profiles or limit startup to specific services.
 4. Add any human-facing ports under **Exposed Ports**, then map each named port
    to its container port. A Compose mapping must also name the service that owns
    the port.

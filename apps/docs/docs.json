@@ -41,7 +41,7 @@
   "navigation": {
     "groups": [
       {
-        "group": "Getting Started",
+        "group": "Getting started",
         "pages": [
           "index",
           "self-hosting",
@@ -67,10 +67,10 @@
         "pages": ["cookbook/index", "cookbook/template"]
       },
       {
-        "group": "Provider Configuration",
+        "group": "Provider configuration",
         "pages": [
           {
-            "group": "Models and Inference",
+            "group": "Models and inference",
             "root": "models",
             "expanded": false,
             "pages": [
@@ -117,7 +117,7 @@
             ]
           },
           {
-            "group": "Source Control",
+            "group": "Source control",
             "root": "source-control",
             "expanded": false,
             "pages": [
@@ -179,7 +179,7 @@
         ]
       },
       {
-        "group": "Roomote Configuration",
+        "group": "Roomote configuration",
         "pages": [
           "agent-guidance",
           "anonymous-analytics",
