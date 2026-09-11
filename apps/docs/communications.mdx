@@ -11,9 +11,10 @@ already coordinate work.
 
 Roomote can run from the web dashboard alone, but a communications provider
 turns it into something you can reach from wherever work is happening. You can
-start tasks from chat, continue an existing task thread, receive updates while
-the agent works, and get proactive summaries when background work needs
-attention.
+start Sessions from chat, continue an existing conversation, receive updates
+while the agent works, and get proactive summaries when background work needs
+attention. When a Session delegates execution, its task workspace keeps the
+logs, diffs, previews, and artifacts.
 
 ## Supported providers
 
@@ -36,18 +37,18 @@ Before connecting a communications provider, make sure your deployment has:
 3. at least one Roomote user who can sign in
 4. an environment that tasks can run against
 
-After connecting the provider, run a small task from chat and confirm that:
+After connecting the provider, start a small Session from chat and confirm that:
 
 - Roomote acknowledges the request in the same conversation
-- the task appears in the dashboard
-- replies in the thread continue the same task
+- the Session appears in the dashboard
+- replies in the thread continue the same Session
 - final summaries and links are posted back to chat
 
 ## Start suggested tasks
 
-When a task or automation report identifies independent follow-up work, Roomote
-can post each action as a suggested task in the originating conversation. Start
-the exact suggestion you want by reacting to its message:
+When a Session or automation report identifies independent follow-up work,
+Roomote can post each action as a suggested task in the originating
+conversation. Start the exact suggestion you want by reacting to its message:
 
 - on Slack, add a thumbs-up reaction
 - on Discord, add a 👍 reaction
