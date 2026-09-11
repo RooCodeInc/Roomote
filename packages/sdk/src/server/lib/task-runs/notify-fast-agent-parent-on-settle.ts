@@ -79,25 +79,25 @@ export async function notifyFastAgentParentOnSettle(
       })
       .where(eq(taskRuns.id, run.id));
   };
-  const claimRows = await db
-    .update(taskRuns)
-    .set({
-      result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${NOTIFIED_RESULT_KEY}::text, ${buildFastAgentDeliveringMarker()}::text)`,
-    })
-    .where(
-      and(
-        eq(taskRuns.id, run.id),
-        buildFastAgentDeliveryClaimPredicate(NOTIFIED_RESULT_KEY),
-      ),
-    )
-    .returning({ id: taskRuns.id });
-
-  if (claimRows.length === 0) {
-    return 'already_notified';
-  }
-
   let admitted = false;
   try {
+    const claimRows = await db
+      .update(taskRuns)
+      .set({
+        result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${NOTIFIED_RESULT_KEY}::text, ${buildFastAgentDeliveringMarker()}::text)`,
+      })
+      .where(
+        and(
+          eq(taskRuns.id, run.id),
+          buildFastAgentDeliveryClaimPredicate(NOTIFIED_RESULT_KEY),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (claimRows.length === 0) {
+      return 'already_notified';
+    }
+
     const pullRequests = await listFastAgentPullRequestContexts(run.taskId);
     const customAutomationId = getCustomAutomationId(run.payload);
     let retryTaskStartRunId: number | undefined;

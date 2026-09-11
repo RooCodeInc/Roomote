@@ -306,6 +306,18 @@ describe('notifyFastAgentParentOnSettle', () => {
     ).toBe(true);
   });
 
+  it('reports claim acquisition errors as admission failures', async () => {
+    mocks.claimReturning.mockRejectedValueOnce(new Error('database down'));
+
+    const result = await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Failed,
+    );
+
+    expect(result).toBe('failed');
+    expect(mocks.enqueueParentEvent).not.toHaveBeenCalled();
+  });
+
   it('reports durable admission even when later bookkeeping fails', async () => {
     mocks.recordLifecycle.mockRejectedValueOnce(new Error('database down'));
 
