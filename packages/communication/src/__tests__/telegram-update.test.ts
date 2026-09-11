@@ -174,6 +174,33 @@ describe('Telegram update helpers', () => {
     });
   });
 
+  it('includes compact replied-to message context', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 1002,
+      message: {
+        message_id: 43,
+        text: 'What does this mean?',
+        from: { id: 123, first_name: 'Ada' },
+        chat: { id: 456, type: 'private' },
+        reply_to_message: {
+          message_id: 42,
+          text: 'Use the existing provider-neutral envelope.\nDo not copy the whole update.',
+          from: { id: 999, is_bot: true, first_name: 'Roomote' },
+          chat: { id: 456, type: 'private' },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({
+      text: 'What does this mean?',
+      agentContext:
+        'The person is replying to this Telegram message:\n{"message_id":"42","author":"Roomote","content":"Use the existing provider-neutral envelope. Do not copy the whole update."}',
+    });
+  });
+
   it('accepts native voice notes as task entry messages', () => {
     const parsed = parseTelegramUpdate({
       update_id: 1008,

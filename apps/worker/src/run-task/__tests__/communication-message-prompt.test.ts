@@ -30,6 +30,29 @@ describe('wrapCommunicationMessage', () => {
     );
   });
 
+  it('includes provider context before the current message', () => {
+    expect(
+      wrapCommunicationMessage('telegram', {
+        ts: 'update-2',
+        user: 'Ada',
+        text: 'What does this mean?',
+        agentContext:
+          'The person is replying to this Telegram message:\n{"message_id":"41","author":"Roomote","content":"Use <main> & retry"}',
+      }),
+    ).toBe(
+      [
+        '<current_message_context>',
+        'The person is replying to this Telegram message:',
+        '{"message_id":"41","author":"Roomote","content":"Use &lt;main&gt; &amp; retry"}',
+        '</current_message_context>',
+        '',
+        '<communication_message provider="telegram" ts="update-2" author="Ada">',
+        'What does this mean?',
+        '</communication_message>',
+      ].join('\n'),
+    );
+  });
+
   it('escapes markup in attributes and content', () => {
     expect(
       wrapCommunicationMessage('teams', {

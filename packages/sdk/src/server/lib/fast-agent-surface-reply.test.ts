@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
+  telegramEditForumTopic: vi.fn(),
   telegramTyping: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordTyping: vi.fn(),
@@ -175,6 +176,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       provider: 'telegram',
       postMessage: mocks.telegramPostMessage,
       editMessageText: mocks.telegramEditMessage,
+      editForumTopic: mocks.telegramEditForumTopic,
       sendChatAction: mocks.telegramTyping,
       sendThinkingDraft: mocks.telegramTyping,
     });
@@ -242,6 +244,62 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       }
     },
   );
+
+  it('syncs generated titles to a managed Telegram Fast topic', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      title: 'Generated Fast title',
+      replyTarget: { channelId: 'telegram-chat', threadId: '77' },
+    });
+    await db.insert(fastAgentProviderMessages).values({
+      conversationId: conversation.id,
+      provider: 'telegram',
+      workspaceId: conversation.workspaceId,
+      channelId: 'telegram-chat',
+      threadId: '77',
+      messageId: '77',
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Start here',
+      currentMessageId: '78',
+    });
+    delivery!.adapter.activity?.updateTitle?.('Generated Fast title');
+    await delivery!.adapter.activity?.dispose();
+
+    expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({
+      channelId: 'telegram-chat',
+      threadId: '77',
+      name: 'Generated Fast title',
+    });
+  });
+
+  it('does not rename a user-owned Telegram topic', async () => {
+    const user = await userFactory.create();
+    const conversation = await createConversation({
+      userId: user.id,
+      surface: 'telegram',
+      title: 'Generated Fast title',
+      replyTarget: { channelId: 'telegram-chat', threadId: '77' },
+    });
+
+    const delivery = await buildFastAgentSurfaceReplyDelivery({
+      sessionId: conversation.id,
+      userId: user.id,
+      senderDisplayName: 'Matt',
+      question: 'Continue here',
+      currentMessageId: '78',
+    });
+    delivery!.adapter.activity?.updateTitle?.('Generated Fast title');
+    await delivery!.adapter.activity?.dispose();
+
+    expect(mocks.telegramEditForumTopic).not.toHaveBeenCalled();
+  });
 
   it.each(['discord', 'telegram'] as const)(
     'reasserts %s after successful posts and replacements but not after a late post',
