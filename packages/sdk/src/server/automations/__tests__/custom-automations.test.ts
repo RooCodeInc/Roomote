@@ -14,7 +14,7 @@ const fastMocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   canStartAgentMailConversation: vi.fn(),
-  startAgentMailConversation: vi.fn(),
+  prepareAgentMailConversation: vi.fn(),
   createAgentMailProvider: vi.fn(),
   agentMailPostMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
@@ -62,7 +62,7 @@ vi.mock('../../lib/telegram-communication', () => ({
 vi.mock('../../lib/agentmail/outbound', () => ({
   canStartAgentMailConversationWithUser:
     fastMocks.canStartAgentMailConversation,
-  startAgentMailConversationWithResult: fastMocks.startAgentMailConversation,
+  prepareAgentMailConversation: fastMocks.prepareAgentMailConversation,
 }));
 
 vi.mock('../../lib/agentmail-communication', () => ({
@@ -250,13 +250,10 @@ describe('customAutomationsJob', () => {
       postMessage: fastMocks.telegramPostMessage,
     });
     fastMocks.canStartAgentMailConversation.mockResolvedValue(true);
-    fastMocks.startAgentMailConversation.mockResolvedValue({
-      sent: true,
-      conversation: {
-        conversationId: 'agentmail-conversation-1',
-        inboxId: 'roomote@agentmail.test',
-        messageId: 'agentmail-message-1',
-      },
+    fastMocks.prepareAgentMailConversation.mockResolvedValue({
+      conversationId: 'agentmail-conversation-1',
+      inboxId: 'roomote@agentmail.test',
+      messageId: null,
     });
     fastMocks.agentMailPostMessage.mockResolvedValue({
       provider: 'agentmail',
@@ -641,7 +638,7 @@ describe('customAutomationsJob', () => {
     );
   });
 
-  it('starts an Email automation with the exact verified identity', async () => {
+  it('prepares an Email automation without sending a running email', async () => {
     const claimAt = new Date('2026-09-11T10:00:00.000Z');
     vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
@@ -663,13 +660,11 @@ describe('customAutomationsJob', () => {
       'user-1',
       'verified:user-1:digest',
     );
-    expect(fastMocks.startAgentMailConversation).toHaveBeenCalledWith({
+    expect(fastMocks.prepareAgentMailConversation).toHaveBeenCalledWith({
       userId: 'user-1',
       identityId: 'verified:user-1:digest',
       subject: 'Flaky tests',
-      text: 'Flaky tests is running.',
-      logContext: `custom-automation:${automation.id}`,
-      clientSendId: `custom-automation:${automation.id}:${claimAt.toISOString()}:root`,
+      conversationKey: `custom-automation:${automation.id}:${claimAt.toISOString()}`,
     });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
       userId: 'user-1',
@@ -701,7 +696,7 @@ describe('customAutomationsJob', () => {
     expect(result.errors).toEqual([
       'Flaky tests: The automation owner no longer has an active verified Email destination.',
     ]);
-    expect(fastMocks.startAgentMailConversation).not.toHaveBeenCalled();
+    expect(fastMocks.prepareAgentMailConversation).not.toHaveBeenCalled();
     expect(fastMocks.getSession).not.toHaveBeenCalled();
   });
 

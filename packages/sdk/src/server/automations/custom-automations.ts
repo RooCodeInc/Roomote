@@ -58,7 +58,7 @@ import { enqueueFastAgentParentEvent } from '../lib/fast-agent-parent-event-queu
 import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
 import {
   canStartAgentMailConversationWithUser,
-  startAgentMailConversationWithResult,
+  prepareAgentMailConversation,
 } from '../lib/agentmail/outbound';
 
 const LOG_PREFIX = '[custom-automations]';
@@ -224,33 +224,23 @@ async function buildFastAutomationConversation(params: {
   }
 
   if (destination.provider === 'email') {
-    const started = await startAgentMailConversationWithResult({
+    const prepared = await prepareAgentMailConversation({
       userId: destination.userId,
       subject: automation.name,
-      text: `${automation.name} is running.`,
-      logContext: `custom-automation:${automation.id}`,
-      clientSendId: `custom-automation:${eventId}:root`,
+      conversationKey: `custom-automation:${eventId}`,
       identityId: destination.identityId,
     });
-    if (!started.sent) {
+    if (!prepared) {
       throw new Error(
         'Email is no longer available for this automation owner.',
       );
     }
-    if (!started.conversation) {
-      throw new Error(
-        'The automation email was sent, but its replyable conversation could not be recorded.',
-      );
-    }
     return {
-      ...(started.conversation.messageId
-        ? { rootMessageId: started.conversation.messageId }
-        : {}),
       conversation: {
         surface: 'agentmail',
-        workspaceId: started.conversation.inboxId,
-        conversationId: started.conversation.conversationId,
-        replyTarget: { channelId: started.conversation.inboxId },
+        workspaceId: prepared.inboxId,
+        conversationId: prepared.conversationId,
+        replyTarget: { channelId: prepared.inboxId },
       },
     };
   }

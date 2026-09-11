@@ -67,6 +67,12 @@ export type AgentMailReplyRoute = {
   replyToMessageId: string | null;
   recipientEmail: string | null;
   subject?: string | null;
+  /** Consent-checked metadata for the first send of a prepared conversation. */
+  outboundStart?: {
+    textFooter: string;
+    htmlFooter: string;
+    headers: Record<string, string>;
+  };
 };
 
 export type AgentMailCommunicationProviderOptions = {
@@ -141,7 +147,7 @@ export class AgentMailCommunicationProvider implements CommunicationProviderAdap
     const conversationId = input.threadId;
     const route = await this.options.resolveRoute(conversationId);
 
-    if (!route || !route.replyToMessageId) {
+    if (!route) {
       // A reply without a durable route is a bug upstream, not a fallback.
       throw new Error(
         `AgentMail conversation ${conversationId} has no stored reply route; refusing to send without a reply anchor.`,
@@ -170,22 +176,49 @@ export class AgentMailCommunicationProvider implements CommunicationProviderAdap
       body.text = `${body.text}\n\n${buttonSections.text}`;
     }
 
-    const response = await this.request<AgentMailSendResponse>(
-      'POST',
-      `/v0/inboxes/${encodeURIComponent(route.inboxId)}/messages/${encodeURIComponent(route.replyToMessageId)}/reply`,
-      {
-        text: body.text,
-        html: body.html,
-        // Reply only to the recorded correspondent — never reply-all, never
-        // cc. Omitting `to` lets AgentMail default to the original sender.
-        ...(route.recipientEmail ? { to: [route.recipientEmail] } : {}),
-      },
-      {
-        ...(input.idempotencyKey
-          ? { idempotencyKey: input.idempotencyKey }
-          : {}),
-      },
-    );
+    let response: AgentMailSendResponse;
+    if (route.replyToMessageId) {
+      response = await this.request<AgentMailSendResponse>(
+        'POST',
+        `/v0/inboxes/${encodeURIComponent(route.inboxId)}/messages/${encodeURIComponent(route.replyToMessageId)}/reply`,
+        {
+          text: body.text,
+          html: body.html,
+          // Reply only to the recorded correspondent — never reply-all, never
+          // cc. Omitting `to` lets AgentMail default to the original sender.
+          ...(route.recipientEmail ? { to: [route.recipientEmail] } : {}),
+        },
+        {
+          ...(input.idempotencyKey
+            ? { idempotencyKey: input.idempotencyKey }
+            : {}),
+        },
+      );
+    } else if (route.recipientEmail && route.subject && route.outboundStart) {
+      response = await this.request<AgentMailSendResponse>(
+        'POST',
+        `/v0/inboxes/${encodeURIComponent(route.inboxId)}/messages/send`,
+        {
+          to: [route.recipientEmail],
+          subject: route.subject,
+          text: `${body.text}${route.outboundStart.textFooter}`,
+          html: `${body.html}${route.outboundStart.htmlFooter}`,
+          headers: route.outboundStart.headers,
+        },
+        {
+          ...(input.idempotencyKey
+            ? { idempotencyKey: input.idempotencyKey }
+            : {}),
+        },
+      );
+      if (!response.thread_id) {
+        throw new Error('AgentMail initial send returned no thread_id.');
+      }
+    } else {
+      throw new Error(
+        `AgentMail conversation ${conversationId} has no stored reply route; refusing to send without a reply anchor.`,
+      );
+    }
     const messageId = response.message_id;
 
     if (!messageId) {
