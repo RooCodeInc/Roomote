@@ -98,46 +98,6 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
   });
 
-  it('enables only the direct OpenCode Code Mode experiment when configured', async () => {
-    mockDeploymentSettingsFindFirst.mockResolvedValue({
-      metadata: { opencode_code_mode: true },
-      runtimeModelConfig: {},
-      taskModelSettings: {},
-    });
-
-    const [controlPlaneEnv, sandboxEnv] = await Promise.all([
-      resolveEffectiveModelRuntimeEnv({
-        runtimeEnv: {},
-        deploymentEnvVars: {},
-      }),
-      resolveSandboxModelRuntimeEnv({
-        runtimeEnv: {},
-        deploymentEnvVars: {},
-      }),
-    ]);
-
-    for (const env of [controlPlaneEnv, sandboxEnv]) {
-      expect(env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBe('1');
-      expect(env.OPENCODE_EXPERIMENTAL).toBeUndefined();
-    }
-  });
-
-  it('leaves OpenCode Code Mode disabled by default', async () => {
-    mockDeploymentSettingsFindFirst.mockResolvedValue({
-      metadata: {},
-      runtimeModelConfig: {},
-      taskModelSettings: {},
-    });
-
-    const env = await resolveSandboxModelRuntimeEnv({
-      runtimeEnv: {},
-      deploymentEnvVars: {},
-    });
-
-    expect(env.OPENCODE_EXPERIMENTAL_CODE_MODE).toBeUndefined();
-    expect(env.OPENCODE_EXPERIMENTAL).toBeUndefined();
-  });
-
   it('prefers real runtime env values over persisted deployment config', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {

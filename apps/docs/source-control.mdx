@@ -40,6 +40,20 @@ After setup, verify that Roomote can:
 - clone the repository inside a task sandbox
 - push a branch or open a reviewable change when the task finishes
 
+## Manage existing pull requests
+
+Roomote can act on an existing pull request or merge request when you identify
+it by repository and number. Across supported providers, an agent can update its
+title or description, retarget its base branch, close it without merging, and
+reopen it later. These actions update the identified pull request; they do not
+create a replacement or delete its source branch.
+
+Draft-state changes depend on what the provider exposes. GitHub supports moving
+between draft and ready states, while another provider may apply the supported
+fields and report that the draft transition was unavailable. Roomote reports
+these provider gaps and partial results instead of claiming the whole update
+failed or silently creating a new pull request.
+
 ## Attribution on pull requests and commits
 
 Roomote keeps human-readable attribution inside private repositories. For

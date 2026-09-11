@@ -2,6 +2,51 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.7.0 (2026-09-11)
+
+Roomote 1.7 adds natural voice and email conversations, smarter follow-through for delegated work, richer automation controls, and clearer usage insights.
+
+### Highlights
+
+- Talk with Fast Sessions through GPT-Live voice calls, or start and continue Roomote work over email with AgentMail.
+- Let Fast quietly follow delegated coding tasks, surface meaningful developments, and correct work that drifts from the request.
+- Add natural-language routing rules to built-in automations and manage existing pull requests across supported providers.
+- Track token usage alongside spend in Cost Analytics, with daily trends and detailed provider and model breakdowns.
+
+### Minor changes
+
+- Use Email through AgentMail as a replyable Roomote communications channel, with inbox-scoped setup, durable threaded delivery, signed answers, and verified-address safeguards.
+- Built-in automations can use natural-language Additional rules for repository scope, per-repository routing, and report guidance.
+- Track token usage alongside spend in Cost Analytics with a total-token trend line, provider and model totals and averages, and token-aware drilldowns.
+- DeepSeek V4.1 Flash replaces the dated Flash recommendation across OpenRouter, Vercel AI Gateway, and OpenCode Go.
+- Fast Sessions quietly follow launched coding tasks, report meaningful developments, and apply evidence-backed corrections until the work settles.
+- Agents can close, reopen, retarget, and edit existing pull requests across supported source-control providers without creating replacements.
+- Weekly Manager Stats includes a daily created-versus-merged pull request chart and starts enabled on new deployments once a destination is configured.
+- Unify shared and environment-specific skills in one searchable Settings catalog with availability filters and a marketplace dialog.
+- Talk naturally with Roomote from Fast Sessions using GPT-Live, with full-duplex audio, live transcription, interruptions, and deployment-wide Voice setup in Settings.
+
+### Patch changes
+
+- Custom automation task models can be changed only by the automation owner or an administrator.
+- Saved automation cards show cadence in the deployment scheduling timezone used for execution.
+- Fast Sessions can manage reminders and automations directly again without a scheduling-discovery step.
+- Fast Sessions can use deployment-wide custom remote MCP integrations without exposing upstream credentials.
+- Fast Sessions honor saved Routing Rules when selecting an environment or delegated coding-task model.
+- Source-control and Linear webhook redeliveries no longer risk repeating actions when the original audit outcome was not finalized.
+- Blank slate tasks no longer expose internal repository sentinels in task headers and filters.
+- Independent Slack suggested tasks start in separate execution threads and Sessions instead of sharing task context.
+- Communication replies use compact live footers that keep running-task counts, pull request links, and Session links current as work starts and finishes.
+- Preview Markdown artifacts directly in task and Session galleries before opening them.
+- Coding tasks recover from exhausted transient OpenCode connection resets instead of stopping without a useful Session handoff.
+- Preview status and failure pages provide consistent responsive branding, explanations, and recovery actions across desktop and mobile.
+- Keep pull request metadata refreshes state-neutral and distinguish later opt-in clean-review promotion from the refresh itself.
+- Custom automation cards refresh persisted results after Run now without requiring a page reload.
+- Slack requests no longer receive a redundant eyes reaction while Roomote is working.
+- Connected Sentry integrations expose the full admin-approved tool catalog instead of a stale static allowlist.
+- Open a user's Sessions directly from their avatar in Session viewers and task messages.
+- Automatic task follow-through timers stay out of the Session reminder list while user-created timer receipts clearly describe each action and reused schedule.
+- The Automations list combines built-in and custom entries with consistent search, columns, responsive text, and alphabetical ordering.
+
 ## 1.6.0 (2026-09-09)
 
 Roomote 1.6 adds flexible sandbox and public-repository work, native conversation charts, leaner scheduling discovery, and more reliable Sessions and skill management.

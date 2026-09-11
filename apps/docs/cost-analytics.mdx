@@ -5,9 +5,9 @@ description: Review Roomote inference spend by type, source, environment, provid
 ---
 
 Cost Analytics helps deployment teams understand how Roomote uses inference
-across tasks, Fast sessions, and automations. It reports the cost of
-recorded model usage in US dollars, so you can spot the environments, models,
-and work types that drive spend.
+across tasks, Fast sessions, and automations. It reports cost in US dollars and
+token usage, so you can spot the environments, models, and work types that drive
+spend or high-volume inference.
 
 Any signed-in deployment user can open **Analytics** from the dashboard. The
 page opens to **Costs** by default.
@@ -23,6 +23,7 @@ recorded inference usage. Use it to answer questions such as:
 - whether a particular environment or model is driving costs
 - how usage differs between people and automations
 - how a provider's cost changes over time
+- how token volume changes even when a request has no recorded price
 
 The view starts grouped by **Type**. It distinguishes manual and automated
 tasks, **Session** orchestration, **Memories** synthesis, and other **Non-task
@@ -33,6 +34,11 @@ generation, and the main agent runtime even when those requests use the same
 model and provider. The source also appears in the detail drilldown. Choose a
 time range before comparing periods so the chart and breakdown use the same
 window.
+
+The chart overlays a **Total tokens** trend line on the cost bars. Its tooltip
+shows token and cost totals for the same day and grouping. The breakdown table
+includes **Total tokens** and **Avg tokens / task** alongside cost, and selecting
+a chart segment or table value opens the matching token-aware detail rows.
 
 Analytics date presets and daily chart buckets use the web server's timezone,
 including daylight-saving transitions. Costs, Tasks, and PR analytics use the
@@ -52,6 +58,8 @@ providers. It is separate from [Anonymous Analytics](/anonymous-analytics):
 cost data stays inside your deployment for your team to review, while anonymous
 analytics is optional product telemetry sent to the Roomote team.
 
-If a provider does not report pricing or usage for a request, that request
-cannot contribute a cost to the view. Use provider and model filters to narrow
-an investigation when totals do not match an external provider invoice.
+If a provider reports tokens but no price for a request, that activity appears
+in token totals even though it contributes no cost. A request with neither
+pricing nor token usage cannot contribute to those metrics. Use provider and
+model filters to narrow an investigation when totals do not match an external
+provider invoice.

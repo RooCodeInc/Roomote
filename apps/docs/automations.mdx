@@ -148,9 +148,7 @@ Each automation card summarizes its cadence, workspace target, report destinatio
 creator, and most recent run. Blank slate runs do not clone repositories or require
 source-control credentials.
 
-Use **View previous runs** on an automation card to open the task list
-filtered to that automation's runs. For a custom automation, the history is
-scoped to that specific automation rather than all custom automations.
+Use the Sessions list and its automation filters when you need run history.
 
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that
@@ -166,9 +164,10 @@ the automation only needs a specific repository set.
 
 Suggestions can accompany the Session's report after a delegated task finishes,
 not just its initial response. Accepting one keeps the follow-up in the
-originating Session, so earlier findings remain in context. In Slack, launches
-reuse that Session's report thread when it is available. Thread or topic
-placement on other providers depends on the provider and execution target.
+report context through a link without sharing execution context with another
+suggestion. In Slack, each accepted suggestion starts a separate top-level
+execution thread and Session. Thread or topic placement on other providers
+depends on the provider and execution target.
 
 For a custom automation you manage, choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
