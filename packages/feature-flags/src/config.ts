@@ -20,10 +20,4 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
     description:
       'Share anonymous usage analytics (instance and user activity identified only by random IDs) with the Roomote team. Enabled by default; absent means enabled.',
   },
-  opencode_code_mode: {
-    kind: 'experimental',
-    group: 'Code Mode',
-    description:
-      'Defer eligible tools and discover them when needed, reducing the tool definitions sent with each request.',
-  },
 };
