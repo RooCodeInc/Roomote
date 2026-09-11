@@ -50,7 +50,6 @@ const state = vi.hoisted(() => ({
     emailEnabled: boolean;
     verificationDeliveryAvailable: boolean;
     primaryEmail: { emailAddress: string; verified: boolean } | null;
-    senderAddresses: string[];
     canViewInboxAddress: boolean;
     inboxEmail: string | null;
   } | null,
@@ -705,12 +704,11 @@ describe('LinkedAccounts settings', () => {
     }
   });
 
-  it('shows a verified login email separately from linked sender addresses', () => {
+  it('shows the verified login email with the inbox to write to', () => {
     state.emailAccounts = {
       emailEnabled: true,
       verificationDeliveryAvailable: true,
       primaryEmail: { emailAddress: 'login@example.com', verified: true },
-      senderAddresses: ['sender@example.com'],
       canViewInboxAddress: true,
       inboxEmail: 'roomote@example.com',
     };
@@ -720,12 +718,10 @@ describe('LinkedAccounts settings', () => {
     expect(screen.getByText('Email')).toBeInTheDocument();
     expect(screen.getByText('login@example.com')).toBeInTheDocument();
     expect(screen.getByText('Verified')).toBeInTheDocument();
-    expect(screen.getByText('Email sender')).toBeInTheDocument();
-    expect(screen.getByText('sender@example.com')).toBeInTheDocument();
-    expect(screen.getByText('Linked')).toBeInTheDocument();
+    expect(screen.queryByText('Email sender')).not.toBeInTheDocument();
     expect(screen.getByText('roomote@example.com')).toBeInTheDocument();
     expect(
-      screen.getByText(/to link another sender address/i),
+      screen.getByText(/from your verified address to start work by email/i),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Resend verification email' }),
@@ -737,7 +733,6 @@ describe('LinkedAccounts settings', () => {
       emailEnabled: true,
       verificationDeliveryAvailable: true,
       primaryEmail: { emailAddress: 'login@example.com', verified: false },
-      senderAddresses: ['login@example.com'],
       canViewInboxAddress: false,
       inboxEmail: null,
     };
@@ -745,7 +740,6 @@ describe('LinkedAccounts settings', () => {
     render(<LinkedAccounts />);
 
     expect(screen.getByText('Not verified')).toBeInTheDocument();
-    expect(screen.getByText('Linked')).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole('button', { name: 'Resend verification email' }),
     );
@@ -767,7 +761,6 @@ describe('LinkedAccounts settings', () => {
       emailEnabled: false,
       verificationDeliveryAvailable: false,
       primaryEmail: { emailAddress: 'login@example.com', verified: false },
-      senderAddresses: ['sender@example.com'],
       canViewInboxAddress: true,
       inboxEmail: null,
     };
@@ -777,7 +770,6 @@ describe('LinkedAccounts settings', () => {
     expect(
       screen.getByText(/email is disabled for this deployment/i),
     ).toBeInTheDocument();
-    expect(screen.getByText('Linked')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Resend verification email' }),
     ).not.toBeInTheDocument();
@@ -788,7 +780,6 @@ describe('LinkedAccounts settings', () => {
       emailEnabled: true,
       verificationDeliveryAvailable: false,
       primaryEmail: { emailAddress: 'login@example.com', verified: false },
-      senderAddresses: [],
       canViewInboxAddress: true,
       inboxEmail: null,
     };

@@ -232,11 +232,8 @@ schedule, model, estimated inference cost, and elapsed time.
 
 Direct-message destinations require the automation owner to link an account for
 the selected communications provider and make the bot reachable there.
-Email destinations use one exact account email whose verification status is
-explicitly recorded by Roomote. Sender addresses shown as **Linked** under
-Personal settings are not eligible: that flow proves mailbox possession for
-starting work by email but does not mark another account email as verified.
-The current account model records verification for one account email. If that
+Email destinations use the owner's one account email, and only once Roomote
+records it as verified. If that
 address changes, loses verification, is suppressed, the owner is removed, or
 AgentMail becomes unavailable, delivery stops rather than switching to another
 address or communications provider.

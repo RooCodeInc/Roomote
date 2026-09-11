@@ -1131,8 +1131,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
           // Verification is offered, never required: a new password sign-up
           // gets a verification email so its address can be recognized on
           // the email channel, and signs in right away regardless. Accounts
-          // from before the channel was enabled connect their address through
-          // the email-link flow instead (the refusal email carries the link).
+          // from before the channel was enabled verify from Personal settings
+          // > Linked Accounts (Resend).
           emailVerification: {
             sendOnSignUp: true,
             autoSignInAfterVerification: true,

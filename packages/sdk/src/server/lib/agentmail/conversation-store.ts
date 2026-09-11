@@ -1,7 +1,6 @@
 import {
   agentmailConversationParticipants,
   agentmailConversations,
-  agentmailUserMappings,
   and,
   authUsers,
   db,
@@ -29,8 +28,9 @@ export function normalizeEmailAddress(value: string): string {
 }
 
 /**
- * Resolve a sender address to a user id: verified auth_users emails first,
- * then explicit link-code mappings. Unverified account emails never match.
+ * Resolve a sender address to a user id by its verified auth_users email.
+ * Unverified account emails never match; there is no other way to claim an
+ * address.
  */
 export async function resolveAgentMailSenderUserId(
   senderEmail: string,
@@ -46,22 +46,14 @@ export async function resolveAgentMailSenderUserId(
     ),
     columns: { id: true },
   });
-  if (verifiedAuthUser) {
-    const appUser = await db.query.users.findFirst({
-      where: eq(users.id, verifiedAuthUser.id),
-      columns: { id: true },
-    });
-    if (appUser) {
-      return appUser.id;
-    }
+  if (!verifiedAuthUser) {
+    return null;
   }
-
-  const mapping = await db.query.agentmailUserMappings.findFirst({
-    where: eq(agentmailUserMappings.emailAddress, normalized),
-    columns: { userId: true },
+  const appUser = await db.query.users.findFirst({
+    where: eq(users.id, verifiedAuthUser.id),
+    columns: { id: true },
   });
-
-  return mapping?.userId ?? null;
+  return appUser?.id ?? null;
 }
 
 /**
@@ -304,14 +296,7 @@ async function findSingleCcJoinCandidate(input: {
     ),
     columns: { id: true },
   });
-  const mappedUsers = await db.query.agentmailUserMappings.findMany({
-    where: inArray(agentmailUserMappings.emailAddress, addresses),
-    columns: { userId: true },
-  });
-  const recipientUserIds = new Set([
-    ...recipientUsers.map((user) => user.id),
-    ...mappedUsers.map((mapping) => mapping.userId),
-  ]);
+  const recipientUserIds = new Set(recipientUsers.map((user) => user.id));
 
   if (recipientUserIds.size === 0) {
     return null;

@@ -3,7 +3,6 @@ import { Queue } from 'bullmq';
 import {
   AgentMailApiClient,
   AgentMailApiError,
-  buildAgentMailButtonSections,
   escapeAgentMailHtml,
   getAgentMailDeliveryFailureRecipients,
   getAgentMailMessageBodyText,
@@ -49,7 +48,6 @@ import {
   type FastAgentConversation,
 } from '@roomote/types';
 
-import { buildAgentMailEmailLinkUrl } from './email-link-tokens';
 import {
   isAgentMailAddressSuppressed,
   suppressAgentMailAddress,
@@ -68,8 +66,8 @@ export const AGENTMAIL_WEBHOOK_EVENT_QUEUE_NAME = 'agentmail-webhook-events';
 
 const LOG_PREFIX = '[agentmail]';
 const STRANGER_REFUSAL_TTL_SECONDS = 30 * 24 * 60 * 60;
-// Beyond the per-thread claim: one refusal per unknown sender per day (the
-// link in it covers every thread they wrote to), and a global daily ceiling so
+// Beyond the per-thread claim: one refusal per unknown sender per day (its
+// guidance covers every thread they wrote to), and a global daily ceiling so
 // a spam wave of fresh threads cannot burn the deployment's send quota.
 const STRANGER_REFUSAL_SENDER_TTL_SECONDS = 24 * 60 * 60;
 const STRANGER_REFUSAL_DAILY_CAP = 25;
@@ -347,8 +345,8 @@ async function maybeSendStrangerRefusal(input: {
     await redis.expire(dailyKey, 2 * STRANGER_REFUSAL_SENDER_TTL_SECONDS);
   }
   if (dailyCount > STRANGER_REFUSAL_DAILY_CAP) {
-    // Release both claims so the sender still gets a refusal (and the link
-    // in it) for this thread tomorrow, once the ceiling resets.
+    // Release both claims so the sender still gets a refusal for this thread
+    // tomorrow, once the ceiling resets.
     await redis.del(key, senderKey).catch(() => undefined);
     console.warn(
       `${LOG_PREFIX} Stranger refusal daily cap (${STRANGER_REFUSAL_DAILY_CAP}) reached; not replying to ${input.senderAddress} on thread ${input.message.thread_id}`,
@@ -357,17 +355,13 @@ async function maybeSendStrangerRefusal(input: {
   }
 
   try {
-    const linkUrl = buildAgentMailEmailLinkUrl(input.senderAddress);
-    const refusalText = `This address isn't linked to a Roomote account, so I can't act on this email yet. If you have a Roomote account, link this address and this email will be processed automatically — no need to resend.`;
-    const buttonSections = buildAgentMailButtonSections([
-      [{ text: 'Link this address to my Roomote account', url: linkUrl }],
-    ]);
+    const refusalText = `This address isn't the verified email on a Roomote account, so I can't act on this email. Send it again from your account's verified email address, or verify this address under Settings > Personal > Linked Accounts first.`;
     await input.client.replyToMessage(
       input.inboxId,
       input.message.message_id,
       {
-        text: `${refusalText}\n\n${buttonSections.text}`,
-        html: `<div><p>${escapeAgentMailHtml(refusalText)}</p>${buttonSections.html}</div>`,
+        text: refusalText,
+        html: `<div><p>${escapeAgentMailHtml(refusalText)}</p></div>`,
       },
       {
         idempotencyKey: `agentmail:refusal:${input.message.message_id}`,
@@ -990,61 +984,4 @@ export async function recoverPendingAgentMailWork(): Promise<number> {
   }
 
   return staleEvents.length + pendingTurnConversations.length;
-}
-
-const REDISPATCH_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
-const REDISPATCH_MAX_EVENTS = 10;
-
-/**
- * After an address is linked to an account, reprocess the sender's recent
- * refused emails so the original request is handled without a resend. A
- * refused event is one that reached `processed` without admitting a turn;
- * resetting it to `received` and re-dispatching runs the normal pipeline,
- * which now resolves the sender. Idempotent: the unique turn-per-event
- * constraint makes double dispatch harmless.
- */
-export async function redispatchAgentMailEventsForSender(
-  emailAddress: string,
-): Promise<number> {
-  const normalized = normalizeEmailAddress(emailAddress);
-  const since = new Date(Date.now() - REDISPATCH_LOOKBACK_MS);
-
-  const candidates = await db
-    .select({
-      id: agentmailWebhookEvents.id,
-      deliveryId: agentmailWebhookEvents.deliveryId,
-      payload: agentmailWebhookEvents.payload,
-    })
-    .from(agentmailWebhookEvents)
-    .where(
-      and(
-        eq(agentmailWebhookEvents.state, 'processed'),
-        sql`${agentmailWebhookEvents.receivedAt} > ${since.toISOString()}::timestamp`,
-        sql`not exists (
-          select 1 from ${agentmailInboundTurns}
-          where ${agentmailInboundTurns.webhookEventId} = ${agentmailWebhookEvents.id}
-        )`,
-      ),
-    )
-    .orderBy(asc(agentmailWebhookEvents.receivedAt));
-
-  let redispatched = 0;
-  for (const candidate of candidates) {
-    if (redispatched >= REDISPATCH_MAX_EVENTS) break;
-    const event = parseAgentMailWebhookEvent(candidate.payload);
-    const message = event?.message;
-    if (!message) continue;
-    const sender = getAgentMailSenderAddress(message);
-    if (!sender || normalizeEmailAddress(sender) !== normalized) continue;
-    if (isAgentMailAutoGeneratedMessage(message)) continue;
-
-    await db
-      .update(agentmailWebhookEvents)
-      .set({ state: 'received', lastError: null, updatedAt: new Date() })
-      .where(eq(agentmailWebhookEvents.id, candidate.id));
-    await addProcessJob(candidate.deliveryId);
-    redispatched += 1;
-  }
-
-  return redispatched;
 }
