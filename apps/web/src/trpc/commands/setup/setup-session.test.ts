@@ -369,6 +369,30 @@ describe('optional setup integration discovery', () => {
   });
 
   it('allows an admin collaborator to resolve a pending setup card after completion', async () => {
+    const pendingRequest = await request({
+      requestId: 'pending-after-completion',
+      sessionId: conversationId,
+      turnId: 'pending-after-completion',
+      callId: 'pending-after-completion',
+      status: 'pending',
+      preset: 'setup_integrations',
+      questions: [
+        {
+          id: 'setup-integrations',
+          header: 'Your tools',
+          question: 'Continue setup?',
+          isOther: false,
+          isSecret: false,
+          options: [
+            {
+              id: 'continue',
+              label: 'Continue',
+              description: 'Continue without connections',
+            },
+          ],
+        },
+      ],
+    });
     const collaborator = await userFactory.create({ role: 'admin' });
     const collaboratorAuth = {
       userId: collaborator.id,
@@ -378,13 +402,20 @@ describe('optional setup integration discovery', () => {
       .update(deploymentSettings)
       .set({ setupCompletedAt: new Date() })
       .where(eq(deploymentSettings.id, 'default'));
-    mocks.submit.mockResolvedValueOnce({ success: true });
+    mocks.submit.mockImplementationOnce(async (_auth, input, options) => {
+      await options.persistSetupPresetResponse({
+        fastConversationId: conversationId,
+        request: pendingRequest,
+        answers: input.answers,
+      });
+      return { success: true };
+    });
     try {
       await expect(
         submitSetupSessionUserInputCommand(collaboratorAuth, {
           sessionId,
           requestId: 'pending-after-completion',
-          answers: {},
+          answers: { 'setup-integrations': { answers: ['continue'] } },
         }),
       ).resolves.toEqual({ success: true });
       expect(mocks.submit).toHaveBeenCalledWith(
@@ -392,6 +423,7 @@ describe('optional setup integration discovery', () => {
         expect.objectContaining({ requestId: 'pending-after-completion' }),
         expect.objectContaining({ setupSession: true }),
       );
+      expect(mocks.schedule).toHaveBeenCalled();
     } finally {
       await db.delete(users).where(eq(users.id, collaborator.id));
     }

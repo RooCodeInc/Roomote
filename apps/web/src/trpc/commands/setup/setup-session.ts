@@ -245,18 +245,26 @@ function buildSetupSnapshot(input: {
   });
 }
 
-async function resolveSetupSnapshot(auth: UserAuthSuccess): Promise<string> {
+async function resolveSetupSnapshot(
+  auth: UserAuthSuccess,
+  conversation?: SetupSessionConversation,
+): Promise<string> {
   const status = await getSetupNewStatusCommand(auth);
   const setupSession = normalizeSetupNewSetupSession(
     status.setupNewState.setupSession,
   );
   return buildSetupSnapshot({
     status,
-    integrationDiscovery: await readSetupIntegrationDiscovery(auth),
+    integrationDiscovery: await readSetupIntegrationDiscovery(
+      auth,
+      {},
+      conversation,
+    ),
     hasSuccessfulStarterLaunch: setupSession?.starterTaskSelection
       ? await hasSuccessfulSetupSessionTaskLaunch(
           auth,
           setupSession.starterTaskSelection.selectedAt,
+          conversation,
         )
       : false,
   });
@@ -281,10 +289,12 @@ function buildSetupTurnContext(
 async function readSetupIntegrationDiscovery(
   auth: UserAuthSuccess,
   suppliedAnswers: AcpRequestUserInputAnswers = {},
+  conversationOverride?: SetupSessionConversation,
 ) {
   const state = await readSetupNewState();
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
-  const conversation = await findSetupSessionConversation(auth);
+  const conversation =
+    conversationOverride ?? (await findSetupSessionConversation(auth));
   const messages = conversation
     ? await db
         .select({
@@ -384,8 +394,10 @@ async function readSetupIntegrationDiscovery(
 async function hasSuccessfulSetupSessionTaskLaunch(
   auth: UserAuthSuccess,
   selectedAt: string,
+  conversationOverride?: SetupSessionConversation,
 ): Promise<boolean> {
-  const conversation = await findSetupSessionConversation(auth);
+  const conversation =
+    conversationOverride ?? (await findSetupSessionConversation(auth));
   if (!conversation) return false;
   const [run] = await db
     .select({ id: taskRuns.id })
@@ -528,13 +540,15 @@ async function buildSetupPlatformEventTurn(
  */
 export async function reconcileSetupPlatformEvents(
   auth: UserAuthSuccess,
+  options: { conversation?: SetupSessionConversation } = {},
 ): Promise<boolean> {
   assertAdmin(auth);
   const status = await getSetupNewStatusCommand(auth);
   const state = normalizeSetupNewState(status.setupNewState);
   const setupSession = normalizeSetupNewSetupSession(state.setupSession);
   if (!setupSession) return status.setupCompletedAt != null;
-  const conversation = await findSetupSessionConversation(auth);
+  const conversation =
+    options.conversation ?? (await findSetupSessionConversation(auth));
   if (!conversation) return status.setupCompletedAt != null;
   const setupCompleted =
     status.setupCompletedAt != null ||
@@ -543,9 +557,14 @@ export async function reconcileSetupPlatformEvents(
     ? await hasSuccessfulSetupSessionTaskLaunch(
         auth,
         setupSession.starterTaskSelection.selectedAt,
+        conversation,
       )
     : false;
-  const integrationDiscovery = await readSetupIntegrationDiscovery(auth);
+  const integrationDiscovery = await readSetupIntegrationDiscovery(
+    auth,
+    {},
+    conversation,
+  );
   const setupSnapshot = buildSetupSnapshot({
     status,
     hasSuccessfulStarterLaunch,
@@ -1126,13 +1145,15 @@ export async function submitSetupSessionUserInputCommand(
   ) {
     throw new Error('This input request does not belong to the setup Session.');
   }
-  const setupSnapshot = await resolveSetupSnapshot(auth);
+  const setupSnapshot = await resolveSetupSnapshot(auth, setupConversation);
   return submitFastSessionUserInputCommand(auth, input, {
     setupContext: buildSetupTurnContext(setupConversation, setupSnapshot),
     setupSession: true,
     persistSetupPresetResponse: async (details) => {
       const result = await persistSetupPresetResponse({ auth, ...details });
-      await reconcileSetupPlatformEvents(auth);
+      await reconcileSetupPlatformEvents(auth, {
+        conversation: setupConversation,
+      });
       return result;
     },
   });
