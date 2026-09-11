@@ -45,6 +45,7 @@ import {
   isTelegramLinkCode,
   isFastAgentProviderMessage,
   queueFastAgentSurfaceReply,
+  recordFastAgentConversationMessageBestEffort,
   restoreTelegramLinkCode,
 } from '@roomote/sdk/server';
 import {
@@ -102,6 +103,7 @@ import { attachTelegramMediaToQueuedMessage } from './attachments.js';
 import {
   claimTelegramLinkNudge,
   claimTelegramUpdate,
+  consumeTelegramImplicitTopic,
   releaseTelegramUpdateClaim,
   rememberTelegramImplicitTopic,
   verifyTelegramWebhookSecret,
@@ -856,6 +858,8 @@ telegram.post('/', async (c) => {
       ? metadata.communicationChannelId
       : queuedMessage.ts);
   let currentMessageId = metadata.communicationMessageId ?? queuedMessage.ts;
+  let createdTopicThreadId: string | undefined;
+  let topicRootMessageId: string | undefined;
 
   if (newTaskCommand) {
     // `/new` opens a fresh conversation. Where Telegram supports topics it
@@ -904,9 +908,11 @@ telegram.post('/', async (c) => {
         channelId: metadata.communicationChannelId,
         threadId: topic.threadId,
       };
+      createdTopicThreadId = topic.threadId;
       providerConversationId = topic.threadId;
       if (topicRootMessage?.messageId) {
         currentMessageId = topicRootMessage.messageId;
+        topicRootMessageId = topicRootMessage.messageId;
       }
     } else if (!isTelegramPrivateChat(message)) {
       // No topic support in this group: the command message anchors a
@@ -941,6 +947,33 @@ telegram.post('/', async (c) => {
       text: TELEGRAM_FAST_UNAVAILABLE_MESSAGE,
     });
     return c.json({ ok: true, queued: false, fastUnavailable: true });
+  }
+
+  const managedTopicThreadId =
+    createdTopicThreadId ??
+    (metadata.communicationThreadId &&
+    (await consumeTelegramImplicitTopic({
+      chatId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+    }))
+      ? metadata.communicationThreadId
+      : undefined);
+  if (managedTopicThreadId) {
+    // A forum topic's service-message id is also its thread id. Persisting it
+    // distinguishes Roomote-created/implicit topics from user-owned topics on
+    // every later Fast turn without adding provider-specific session state.
+    await recordFastAgentConversationMessageBestEffort({
+      sessionId: session.id,
+      conversation: fastConversation,
+      messageId: managedTopicThreadId,
+    });
+    if (topicRootMessageId && topicRootMessageId !== managedTopicThreadId) {
+      await recordFastAgentConversationMessageBestEffort({
+        sessionId: session.id,
+        conversation: fastConversation,
+        messageId: topicRootMessageId,
+      });
+    }
   }
 
   void continueFastAgentSurfaceReply({
