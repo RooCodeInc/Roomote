@@ -1159,7 +1159,10 @@ export function CustomAutomationsSection({
     ) : null;
 
   return (
-    <section className="space-y-3" aria-label="Automations">
+    <section
+      className="space-y-3 md:flex md:min-h-0 md:flex-1 md:flex-col md:gap-3 md:space-y-0"
+      aria-label="Automations"
+    >
       <AutomationListToolbar
         filter={filter}
         search={search}
@@ -1179,7 +1182,10 @@ export function CustomAutomationsSection({
         {isCreating || editingId ? renderEditor() : null}
       </Dialog>
 
-      <Card variant="snug" className="gap-0 p-0">
+      <Card
+        variant="snug"
+        className="gap-0 p-0 md:min-h-0 md:flex-1 md:overflow-y-auto"
+      >
         <CardContent className="p-0!">
           <div role="table" aria-label="Automations">
             <AutomationListHeader />

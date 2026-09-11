@@ -2655,7 +2655,7 @@ export function AutomationsSettings({
     ]),
   ) as Record<ScheduleOnlyBackgroundAutomationId, string | null>;
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 md:flex md:min-h-0 md:flex-1 md:flex-col md:gap-6 md:space-y-0">
       {!settingsQuery.isPending &&
       capabilities?.requiresSlackReconnect &&
       capabilities.missingScopes.length > 0 ? (
