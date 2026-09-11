@@ -42,6 +42,7 @@ const {
     prUrl: 'prUrl',
     detectedAt: 'detectedAt',
     updatedAt: 'updatedAt',
+    createdByRoomote: 'createdByRoomote',
     status: 'status',
     taskId: 'taskId',
   },
@@ -211,6 +212,7 @@ const MERGED_PR_ROWS = [
     prUrl: 'https://github.com/acme/app/pull/1',
     mergedAt: new Date('2026-07-12T00:00:00Z'),
     attributionBody: null,
+    createdByRoomote: false,
   },
   {
     repo: 'acme/app',
@@ -222,6 +224,7 @@ const MERGED_PR_ROWS = [
     prUrl: 'https://github.com/acme/app/pull/2',
     mergedAt: new Date('2026-07-12T01:00:00Z'),
     attributionBody: null,
+    createdByRoomote: false,
   },
 ];
 
@@ -299,11 +302,13 @@ describe('announcerJob non-Slack posting', () => {
     mockMergedPullRequestRows.mockResolvedValue([
       {
         ...MERGED_PR_ROWS[0],
+        createdByRoomote: true,
         attributionBody:
           '> <!-- roomote:pr-attribution:start -->Opened on behalf of @daniel-lxs.<!-- roomote:pr-attribution:end -->',
       },
       {
         ...MERGED_PR_ROWS[1],
+        createdByRoomote: true,
         attributionBody:
           '> <!-- roomote:pr-attribution:start -->Opened on behalf of Daniel Riccio.<!-- roomote:pr-attribution:end -->',
       },
@@ -534,14 +539,34 @@ describe('announcerJob non-Slack posting', () => {
 describe('getRoomotePullRequestAttribution', () => {
   it.each([
     [
-      '<!-- roomote:pr-attribution:start -->Opened on behalf of @daniel-lxs.<!-- roomote:pr-attribution:end -->',
+      {
+        body: '> <!-- roomote:pr-attribution:start -->Opened on behalf of @daniel-lxs.<!-- roomote:pr-attribution:end -->',
+        createdByRoomote: true,
+      },
       { login: 'daniel-lxs', displayName: null },
     ],
     [
-      '<!-- roomote:pr-attribution:start -->Opened on behalf of Daniel Riccio.<!-- roomote:pr-attribution:end -->',
+      {
+        body: '> <!-- roomote:pr-attribution:start -->Opened on behalf of Daniel Riccio.<!-- roomote:pr-attribution:end -->',
+        createdByRoomote: true,
+      },
       { login: null, displayName: 'Daniel Riccio' },
     ],
-  ])('parses %s', (body, expected) => {
-    expect(getRoomotePullRequestAttribution(body)).toEqual(expected);
+    [
+      {
+        body: '<!-- roomote:pr-attribution:start -->Opened on behalf of @daniel-lxs.<!-- roomote:pr-attribution:end -->',
+        createdByRoomote: true,
+      },
+      null,
+    ],
+    [
+      {
+        body: '> <!-- roomote:pr-attribution:start -->Opened on behalf of @daniel-lxs.<!-- roomote:pr-attribution:end -->',
+        createdByRoomote: false,
+      },
+      null,
+    ],
+  ])('parses %o', (params, expected) => {
+    expect(getRoomotePullRequestAttribution(params)).toEqual(expected);
   });
 });

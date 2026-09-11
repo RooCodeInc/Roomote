@@ -22,6 +22,7 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
+  findPrBodyAttributionMarkers,
   getAutomationAdditionalRules,
   TaskPayloadKind,
   type SourceControlProvider,
@@ -73,16 +74,22 @@ const WINDOW_DAYS: Record<AnnouncerFrequency, number> = {
 };
 const MAX_DETAIL_MESSAGE_CHARS = 3_000;
 
-const ROOMOTE_PR_ATTRIBUTION_PATTERN =
-  /<!-- roomote:pr-attribution:start -->Opened on behalf of (?<value>.+?)\.<!-- roomote:pr-attribution:end -->/u;
-
-export function getRoomotePullRequestAttribution(body: string | null): {
+export function getRoomotePullRequestAttribution(params: {
+  body: string | null;
+  createdByRoomote: boolean;
+}): {
   login: string | null;
   displayName: string | null;
 } | null {
-  const value = ROOMOTE_PR_ATTRIBUTION_PATTERN.exec(
-    body ?? '',
-  )?.groups?.value?.trim();
+  if (!params.createdByRoomote || !params.body) return null;
+
+  const markers = findPrBodyAttributionMarkers(params.body);
+  const match = markers
+    ? /^Opened on behalf of (?<value>.+)\.$/u.exec(
+        params.body.slice(markers.start, markers.end),
+      )
+    : null;
+  const value = match?.groups?.value?.trim();
   if (!value) return null;
 
   return value.startsWith('@')
@@ -145,6 +152,7 @@ async function getMergedPullRequests(
       prUrl: taskPullRequests.prUrl,
       mergedAt,
       attributionBody: pullRequestFacts.body,
+      createdByRoomote: taskPullRequests.createdByRoomote,
     })
     .from(taskPullRequests)
     .leftJoin(
@@ -244,7 +252,10 @@ async function getMergedPullRequests(
       prTitle: row.prTitle ?? `${row.repo}#${row.prNumber}`,
       prUrl: row.prUrl,
       mergedAt: row.mergedAt,
-      attribution: getRoomotePullRequestAttribution(row.attributionBody),
+      attribution: getRoomotePullRequestAttribution({
+        body: row.attributionBody,
+        createdByRoomote: row.createdByRoomote,
+      }),
     });
   }
 
