@@ -23,6 +23,7 @@ import {
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
   isTelegramStartCommand,
+  isTelegramHelpCommand,
   isTelegramTaskEntryUpdate,
   isNewTelegramThumbsUpReaction,
   parseTelegramUpdate,
@@ -73,6 +74,7 @@ import {
 const TELEGRAM_COMMAND_HELP = [
   '*Available commands*',
   '`/start` — show this welcome message.',
+  '`/help` — show command help.',
   '`/new <request>` — start a fresh conversation instead of continuing the current one; when topics are available, it opens a new topic.',
 ].join('\n');
 
@@ -407,7 +409,7 @@ telegram.post('/', async (c) => {
   // A bare /start is Telegram's "open the bot" gesture, so greet the sender
   // even before they have linked an account — unlinked senders still need the
   // welcome and account-linking guidance.
-  if (isTelegramStartCommand(update)) {
+  if (isTelegramStartCommand(update) || isTelegramHelpCommand(update)) {
     if (senderUserId) {
       await captureTelegramPrimaryChatBestEffort({
         chatId: String(message.chat.id),

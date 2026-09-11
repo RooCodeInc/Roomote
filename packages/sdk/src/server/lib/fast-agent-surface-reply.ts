@@ -78,6 +78,7 @@ import {
 } from './source-control-fast-delivery';
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
+import { createFastAgentTelegramActivity } from './fast-agent-telegram-activity';
 import { addFastAgentTelegramTopicTitleSync } from './fast-agent-telegram-title-sync';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
@@ -602,9 +603,9 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const replyToMessageId = params.replyToMessageId ?? params.currentMessageId;
-    let activity = createFastAgentTypingActivity({
-      sendTyping: () => provider.sendChatAction(conversation.replyTarget),
-      intervalMs: 4_000,
+    let activity = createFastAgentTelegramActivity({
+      provider,
+      replyTarget: conversation.replyTarget,
     });
     const threadId = conversation.replyTarget.threadId;
     if (
