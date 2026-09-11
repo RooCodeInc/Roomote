@@ -13,6 +13,10 @@ const fastMocks = vi.hoisted(() => ({
   teamsUpdateMessage: vi.fn(),
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
+  canStartAgentMailConversation: vi.fn(),
+  startAgentMailConversation: vi.fn(),
+  createAgentMailProvider: vi.fn(),
+  agentMailPostMessage: vi.fn(),
   recordProviderMessage: vi.fn(),
 }));
 
@@ -53,6 +57,17 @@ vi.mock('../../lib/teams-communication', () => ({
 vi.mock('../../lib/telegram-communication', () => ({
   createTelegramCommunicationProviderFromRuntimeCredentials:
     fastMocks.createTelegramProvider,
+}));
+
+vi.mock('../../lib/agentmail/outbound', () => ({
+  canStartAgentMailConversationWithUser:
+    fastMocks.canStartAgentMailConversation,
+  startAgentMailConversationWithResult: fastMocks.startAgentMailConversation,
+}));
+
+vi.mock('../../lib/agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials:
+    fastMocks.createAgentMailProvider,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -233,6 +248,23 @@ describe('customAutomationsJob', () => {
     });
     fastMocks.createTelegramProvider.mockResolvedValue({
       postMessage: fastMocks.telegramPostMessage,
+    });
+    fastMocks.canStartAgentMailConversation.mockResolvedValue(true);
+    fastMocks.startAgentMailConversation.mockResolvedValue({
+      sent: true,
+      conversation: {
+        conversationId: 'agentmail-conversation-1',
+        inboxId: 'roomote@agentmail.test',
+        messageId: 'agentmail-message-1',
+      },
+    });
+    fastMocks.agentMailPostMessage.mockResolvedValue({
+      provider: 'agentmail',
+      channelId: 'roomote@agentmail.test',
+      messageId: 'agentmail-failure-1',
+    });
+    fastMocks.createAgentMailProvider.mockResolvedValue({
+      postMessage: fastMocks.agentMailPostMessage,
     });
   });
 
@@ -607,6 +639,68 @@ describe('customAutomationsJob', () => {
         status: 'succeeded',
       }),
     );
+  });
+
+  it('starts an Email automation with the exact verified identity', async () => {
+    const claimAt = new Date('2026-09-11T10:00:00.000Z');
+    vi.mocked(tryClaimCustomAutomationLaunch).mockResolvedValue(claimAt);
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: 'verified:user-1:digest',
+        },
+      } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result).toMatchObject({ queued: true, errors: [] });
+    expect(fastMocks.canStartAgentMailConversation).toHaveBeenCalledWith(
+      'user-1',
+      'verified:user-1:digest',
+    );
+    expect(fastMocks.startAgentMailConversation).toHaveBeenCalledWith({
+      userId: 'user-1',
+      identityId: 'verified:user-1:digest',
+      subject: 'Flaky tests',
+      text: 'Flaky tests is running.',
+      logContext: `custom-automation:${automation.id}`,
+      clientSendId: `custom-automation:${automation.id}:${claimAt.toISOString()}:root`,
+    });
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'agentmail',
+        workspaceId: 'roomote@agentmail.test',
+        conversationId: 'agentmail-conversation-1',
+        replyTarget: { channelId: 'roomote@agentmail.test' },
+      },
+    });
+  });
+
+  it('fails closed when the selected Email identity is no longer verified', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: 'verified:user-1:revoked',
+        },
+      } as never,
+    ]);
+    fastMocks.canStartAgentMailConversation.mockResolvedValue(false);
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual([
+      'Flaky tests: The automation owner no longer has an active verified Email destination.',
+    ]);
+    expect(fastMocks.startAgentMailConversation).not.toHaveBeenCalled();
+    expect(fastMocks.getSession).not.toHaveBeenCalled();
   });
 
   it('marks a Fast Slack DM run failed when the destination cannot be resolved', async () => {
@@ -1101,7 +1195,7 @@ describe('customAutomationsJob', () => {
 
     expect(result.queued).toBe(false);
     expect(result.errors).toEqual([
-      'Flaky tests: Fast automation run-as user is not configured.',
+      'Flaky tests: Automation owner is not configured.',
     ]);
     expect(fastMocks.getSession).not.toHaveBeenCalled();
     expect(fastMocks.enqueueParentEvent).not.toHaveBeenCalled();
@@ -1109,7 +1203,7 @@ describe('customAutomationsJob', () => {
       db,
       expect.objectContaining({
         status: 'failed',
-        error: 'Fast automation run-as user is not configured.',
+        error: 'Automation owner is not configured.',
       }),
     );
   });

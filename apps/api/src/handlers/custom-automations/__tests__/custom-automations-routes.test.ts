@@ -30,6 +30,8 @@ const {
   mockGetDeploymentTaskModelOptions,
   mockDeleteCustomAutomation,
   mockListConnectedCommunicationProviders,
+  mockCanStartAgentMailConversationWithUser,
+  mockListAgentMailOutboundIdentities,
   mockResolveCustomAutomationSchedule,
   mockRunCustomAutomationNow,
   mockCaptureActivationCustomAutomationChanged,
@@ -43,6 +45,8 @@ const {
   mockGetDeploymentTaskModelOptions: vi.fn(),
   mockDeleteCustomAutomation: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
+  mockCanStartAgentMailConversationWithUser: vi.fn(),
+  mockListAgentMailOutboundIdentities: vi.fn(),
   mockResolveCustomAutomationSchedule: vi.fn(),
   mockRunCustomAutomationNow: vi.fn(),
   mockCaptureActivationCustomAutomationChanged: vi.fn(),
@@ -64,6 +68,9 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
+  canStartAgentMailConversationWithUser:
+    mockCanStartAgentMailConversationWithUser,
+  listAgentMailOutboundIdentities: mockListAgentMailOutboundIdentities,
   resolveCustomAutomationSchedule: mockResolveCustomAutomationSchedule,
   runCustomAutomationNow: mockRunCustomAutomationNow,
 }));
@@ -173,6 +180,14 @@ describe('custom-automations MCP routes', () => {
     mockResolveActingUserIdOrNull.mockResolvedValue('admin-1');
     mockUsersFindFirst.mockResolvedValue({ id: 'admin-1', role: 'admin' });
     mockListConnectedCommunicationProviders.mockResolvedValue(['slack']);
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
+    mockListAgentMailOutboundIdentities.mockResolvedValue([
+      {
+        id: 'verified:admin-1:digest',
+        emailAddress: 'admin@example.com',
+        kind: 'verified',
+      },
+    ]);
     mockGetDeploymentTaskModelOptions.mockResolvedValue({
       models: ENABLED_MODELS,
       defaultModelId: 'openai/gpt-5.6-luna',
@@ -787,6 +802,77 @@ describe('custom-automations MCP routes', () => {
           },
         }),
       );
+    });
+
+    it('lists and stores only a server-verified Email identity', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const destinations = await app.request(
+        '/custom-automations/destinations',
+      );
+      await expect(destinations.json()).resolves.toEqual({
+        emailIdentities: [
+          {
+            id: 'verified:admin-1:digest',
+            emailAddress: 'admin@example.com',
+            kind: 'verified',
+          },
+        ],
+      });
+      const res = await postCreate(
+        app,
+        createBody({
+          targetProvider: 'email',
+          targetMode: 'direct_message',
+          targetChannelId: 'verified:admin-1:digest',
+        }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCanStartAgentMailConversationWithUser).toHaveBeenCalledWith(
+        'admin-1',
+        'verified:admin-1:digest',
+      );
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdByUserId: 'admin-1',
+          target: {
+            provider: 'email',
+            targetKind: 'email_user',
+            externalRef: 'verified:admin-1:digest',
+          },
+        }),
+      );
+    });
+
+    it('rejects a raw or otherwise unverified Email identity', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+
+      const res = await postCreate(
+        app,
+        createBody({
+          targetProvider: 'email',
+          targetMode: 'direct_message',
+          targetChannelId: 'victim@example.com',
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
     });
 
     it.each([

@@ -168,6 +168,7 @@ export type BackgroundAutomationProvider =
   | 'teams'
   | 'telegram'
   | 'discord'
+  | 'email'
   | 'sentry';
 
 export type BackgroundAutomationTargetKind =
@@ -179,27 +180,36 @@ export type BackgroundAutomationTargetKind =
   | 'telegram_user'
   | 'discord_channel'
   | 'discord_user'
+  | 'email_user'
   | 'sentry_project';
 
 export function isBackgroundAutomationUserTargetKind(
   value: unknown,
-): value is 'slack_user' | 'teams_user' | 'telegram_user' | 'discord_user' {
+): value is
+  | 'slack_user'
+  | 'teams_user'
+  | 'telegram_user'
+  | 'discord_user'
+  | 'email_user' {
   return (
     value === 'slack_user' ||
     value === 'teams_user' ||
     value === 'telegram_user' ||
-    value === 'discord_user'
+    value === 'discord_user' ||
+    value === 'email_user'
   );
 }
 
-/**
- * Communication providers that can act as automation destinations. Email
- * (agentmail) is inbound-initiated only and never receives automation posts.
- */
+/** Chat providers that can act as automation destinations. */
 export type AutomationCapableCommunicationProvider = Exclude<
   CommunicationProvider,
   'agentmail'
 >;
+
+/** User-facing providers supported by shared automation destination controls. */
+export type AutomationDestinationProvider =
+  | AutomationCapableCommunicationProvider
+  | 'email';
 
 export const communicationAutomationTargetKinds = {
   slack: { channel: 'slack_channel', direct_message: 'slack_user' },
@@ -210,6 +220,21 @@ export const communicationAutomationTargetKinds = {
   AutomationCapableCommunicationProvider,
   Record<'channel' | 'direct_message', BackgroundAutomationTargetKind>
 >;
+
+export function getAutomationTargetKind(
+  provider: AutomationDestinationProvider,
+  mode: 'channel' | 'direct_message',
+): BackgroundAutomationTargetKind {
+  if (provider === 'email') {
+    if (mode !== 'direct_message') {
+      throw new Error(
+        'Email automation destinations must use direct message mode.',
+      );
+    }
+    return 'email_user';
+  }
+  return getCommunicationAutomationTargetKind(provider, mode);
+}
 
 export function getCommunicationAutomationTargetKind(
   provider: AutomationCapableCommunicationProvider,
@@ -233,6 +258,15 @@ export function isCommunicationAutomationTarget(
   return (
     target.targetKind === kinds.channel ||
     target.targetKind === kinds.direct_message
+  );
+}
+
+export function isAutomationDestinationTarget(
+  target: Pick<AutomationTarget, 'provider' | 'targetKind'>,
+): boolean {
+  return (
+    isCommunicationAutomationTarget(target) ||
+    (target.provider === 'email' && target.targetKind === 'email_user')
   );
 }
 

@@ -19,6 +19,9 @@ export type AgentMailReplyRouteData = {
   replyToMessageId: string | null;
   recipientEmail: string | null;
   subject: string | null;
+  ownerUserId: string;
+  latestOutboundMessageId: string | null;
+  outboundIdentityId: string | null;
 };
 
 export function normalizeEmailAddress(value: string): string {
@@ -95,6 +98,9 @@ export async function resolveAgentMailReplyRoute(
       inboxId: true,
       latestInboundMessageId: true,
       latestInboundSenderEmail: true,
+      latestOutboundMessageId: true,
+      ownerUserId: true,
+      outboundIdentityId: true,
       subject: true,
     },
   });
@@ -108,6 +114,9 @@ export async function resolveAgentMailReplyRoute(
     replyToMessageId: conversation.latestInboundMessageId,
     recipientEmail: conversation.latestInboundSenderEmail,
     subject: conversation.subject,
+    ownerUserId: conversation.ownerUserId,
+    latestOutboundMessageId: conversation.latestOutboundMessageId,
+    outboundIdentityId: conversation.outboundIdentityId,
   };
 }
 

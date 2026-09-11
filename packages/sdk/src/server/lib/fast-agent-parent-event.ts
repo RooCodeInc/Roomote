@@ -1233,12 +1233,15 @@ export function createFastAgentCommunicationTaskLauncher(params: {
         ...automationPayload,
         communicationProvider: params.conversation.surface,
         communicationChannelId: params.conversation.replyTarget.channelId,
-        ...(params.conversation.replyTarget.threadId
-          ? {
-              communicationThreadId: params.conversation.replyTarget.threadId,
-              communicationMessageId: params.conversation.replyTarget.threadId,
-            }
-          : {}),
+        ...(params.conversation.surface === 'agentmail'
+          ? { communicationThreadId: params.conversation.conversationId }
+          : params.conversation.replyTarget.threadId
+            ? {
+                communicationThreadId: params.conversation.replyTarget.threadId,
+                communicationMessageId:
+                  params.conversation.replyTarget.threadId,
+              }
+            : {}),
         ...(params.serviceUrl
           ? { communicationServiceUrl: params.serviceUrl }
           : {}),
@@ -1762,6 +1765,10 @@ async function createAgentMailFastAgentParentTurn(
       launchTask: createFastAgentCommunicationTaskLauncher({
         userId: actorUserId,
         conversation,
+        automation: await resolveFastAutomationLaunchContext({
+          event: params.event,
+          conversation,
+        }),
       }),
       // Email is a low-frequency surface: one coalesced reply per event, no
       // suggestion buttons or reactions. The adapter resolves the reply

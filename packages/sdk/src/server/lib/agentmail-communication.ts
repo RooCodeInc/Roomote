@@ -6,6 +6,10 @@ import {
   recordAgentMailOutboundMessage,
   resolveAgentMailReplyRoute,
 } from './agentmail/conversation-store';
+import {
+  resolveAgentMailOutboundAddress,
+  resolveAgentMailOutboundIdentity,
+} from './agentmail/outbound';
 
 type AgentMailCommunicationProviderRuntimeOptions = {
   /** Custom fetch, e.g. a base-URL-rewriting fetch for the mock harness. */
@@ -38,8 +42,40 @@ export async function createAgentMailCommunicationProviderFromRuntimeCredentials
 
   return new AgentMailCommunicationProvider({
     apiKey,
-    resolveRoute: async (conversationId) =>
-      resolveAgentMailReplyRoute(conversationId),
+    resolveRoute: async (conversationId) => {
+      const route = await resolveAgentMailReplyRoute(conversationId);
+      if (!route) {
+        return route;
+      }
+      if (!route.outboundIdentityId && route.replyToMessageId) {
+        return route;
+      }
+
+      const recipient = route.outboundIdentityId
+        ? await resolveAgentMailOutboundIdentity(
+            route.ownerUserId,
+            route.outboundIdentityId,
+          )
+        : await resolveAgentMailOutboundAddress(route.ownerUserId);
+      if (!recipient.ok) {
+        return {
+          ...route,
+          replyToMessageId: null,
+          recipientEmail: null,
+        };
+      }
+      if (route.replyToMessageId) {
+        return { ...route, recipientEmail: recipient.emailAddress };
+      }
+      if (!route.latestOutboundMessageId) {
+        return route;
+      }
+      return {
+        ...route,
+        replyToMessageId: route.latestOutboundMessageId,
+        recipientEmail: recipient.emailAddress,
+      };
+    },
     onMessageSent: async ({ conversationId, messageId }) => {
       await recordAgentMailOutboundMessage({ conversationId, messageId });
     },

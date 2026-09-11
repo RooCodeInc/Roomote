@@ -11,6 +11,7 @@ export const MANAGE_CUSTOM_AUTOMATIONS_ACTIONS = [
   'list',
   'inspect',
   'list_models',
+  'list_destinations',
   'resolve_schedule',
   'create',
   'update',
@@ -59,7 +60,7 @@ export const manageCustomAutomationsFieldSchemas = {
     )
     .optional(),
   targetProvider: z
-    .enum(['slack', 'discord', 'teams', 'telegram'])
+    .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
     .nullable()
     .describe(
       'Destination provider. Pass null on update to clear the report destination.',
@@ -68,10 +69,15 @@ export const manageCustomAutomationsFieldSchemas = {
   targetMode: z
     .enum(['channel', 'direct_message'])
     .describe(
-      'Destination mode. Use direct_message to send reports privately to the automation owner through the selected connected provider.',
+      'Destination mode. Use direct_message to send reports privately to the automation owner through the selected connected provider. Email only supports direct_message.',
     )
     .optional(),
-  targetChannelId: z.string().optional(),
+  targetChannelId: z
+    .string()
+    .describe(
+      'Channel identifier for channel destinations, or the opaque identity id returned by list_destinations for Email. Never pass a raw email address.',
+    )
+    .optional(),
 } satisfies z.ZodRawShape;
 
 export const manageCustomAutomationsInputSchema = z.object(
@@ -228,6 +234,17 @@ export function compactManageCustomAutomationsResult(
           : [],
         ...pickDefined(result, ['defaultModelId']),
       };
+    case 'list_destinations':
+      return {
+        emailIdentities: Array.isArray(result.emailIdentities)
+          ? result.emailIdentities.map((identity) => {
+              const record = asRecord(identity);
+              return record
+                ? pickDefined(record, ['id', 'emailAddress', 'kind'])
+                : {};
+            })
+          : [],
+      };
     case 'resolve_schedule':
       return compactScheduleResolution(result);
     case 'create':
@@ -274,6 +291,8 @@ export function buildManageCustomAutomationsRequest(
       };
     case 'list_models':
       return { ok: true, request: { path: '/models', method: 'GET' } };
+    case 'list_destinations':
+      return { ok: true, request: { path: '/destinations', method: 'GET' } };
     case 'resolve_schedule':
       if (!params.schedule) {
         return { ok: false, error: 'schedule is required' };
@@ -301,6 +320,21 @@ export function buildManageCustomAutomationsRequest(
         }
       } else if (!params.automationId) {
         return { ok: false, error: 'automationId is required for update' };
+      }
+      if (params.targetProvider === 'email') {
+        if (params.targetMode === 'channel') {
+          return {
+            ok: false,
+            error: 'Email destinations must use direct_message mode',
+          };
+        }
+        if (!params.targetChannelId) {
+          return {
+            ok: false,
+            error:
+              'Email destinations require an identity id from list_destinations',
+          };
+        }
       }
       const body = Object.fromEntries(
         Object.entries({

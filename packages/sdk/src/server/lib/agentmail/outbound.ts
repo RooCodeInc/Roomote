@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   AgentMailApiClient,
@@ -15,6 +15,7 @@ import {
   db,
   desc,
   eq,
+  isNull,
   resolveAgentMailRuntimeCredentials,
   users,
 } from '@roomote/db/server';
@@ -77,7 +78,63 @@ export async function suppressAgentMailAddress(input: {
 
 export type AgentMailOutboundAddressResolution =
   | { ok: true; emailAddress: string }
-  | { ok: false; reason: 'no_permitted_address' | 'suppressed' };
+  | {
+      ok: false;
+      reason: 'no_active_member' | 'no_permitted_address' | 'suppressed';
+    };
+
+export type AgentMailOutboundIdentity = {
+  id: string;
+  emailAddress: string;
+  kind: 'verified';
+};
+
+function buildVerifiedEmailIdentityId(userId: string, emailAddress: string) {
+  const digest = createHash('sha256')
+    .update(normalizeEmailAddress(emailAddress))
+    .digest('hex')
+    .slice(0, 24);
+  return `verified:${userId}:${digest}`;
+}
+
+export async function listAgentMailOutboundIdentities(
+  userId: string,
+): Promise<AgentMailOutboundIdentity[]> {
+  const member = await db.query.users.findFirst({
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+    columns: { id: true },
+  });
+  if (!member) return [];
+
+  const authUser = await db.query.authUsers.findFirst({
+    where: and(eq(authUsers.id, userId), eq(authUsers.emailVerified, true)),
+    columns: { email: true },
+  });
+  const identities: AgentMailOutboundIdentity[] = [];
+  if (authUser?.email) {
+    const emailAddress = normalizeEmailAddress(authUser.email);
+    if (!(await isAgentMailAddressSuppressed(emailAddress))) {
+      identities.push({
+        id: buildVerifiedEmailIdentityId(userId, emailAddress),
+        emailAddress,
+        kind: 'verified',
+      });
+    }
+  }
+  return identities;
+}
+
+export async function resolveAgentMailOutboundIdentity(
+  userId: string,
+  identityId: string,
+): Promise<AgentMailOutboundAddressResolution> {
+  const identity = (await listAgentMailOutboundIdentities(userId)).find(
+    (candidate) => candidate.id === identityId,
+  );
+  return identity
+    ? { ok: true, emailAddress: identity.emailAddress }
+    : { ok: false, reason: 'no_permitted_address' };
+}
 
 /**
  * The address Roomote may initiate email to for this user: their verified
@@ -87,6 +144,14 @@ export type AgentMailOutboundAddressResolution =
 export async function resolveAgentMailOutboundAddress(
   userId: string,
 ): Promise<AgentMailOutboundAddressResolution> {
+  const member = await db.query.users.findFirst({
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+    columns: { id: true },
+  });
+  if (!member) {
+    return { ok: false, reason: 'no_active_member' };
+  }
+
   const candidates: string[] = [];
 
   const authUser = await db.query.authUsers.findFirst({
@@ -98,7 +163,10 @@ export async function resolveAgentMailOutboundAddress(
   }
 
   const mapping = await db.query.agentmailUserMappings.findFirst({
-    where: eq(agentmailUserMappings.userId, userId),
+    where: and(
+      eq(agentmailUserMappings.userId, userId),
+      eq(agentmailUserMappings.source, 'link_code'),
+    ),
     orderBy: [desc(agentmailUserMappings.createdAt)],
     columns: { emailAddress: true },
   });
@@ -122,6 +190,7 @@ export async function resolveAgentMailOutboundAddress(
 /** Whether an outbound-initiated email to this user could be sent right now. */
 export async function canStartAgentMailConversationWithUser(
   userId: string,
+  identityId?: string,
 ): Promise<boolean> {
   if (!isEmailChannelEnabled()) {
     return false;
@@ -130,7 +199,9 @@ export async function canStartAgentMailConversationWithUser(
   if (!credentials.apiKey || !credentials.inboxId) {
     return false;
   }
-  const resolution = await resolveAgentMailOutboundAddress(userId);
+  const resolution = identityId
+    ? await resolveAgentMailOutboundIdentity(userId, identityId)
+    : await resolveAgentMailOutboundAddress(userId);
   return resolution.ok;
 }
 
@@ -141,7 +212,18 @@ export async function canStartAgentMailConversationWithUser(
  * straight back into the normal inbound pipeline — every transactional email
  * is answerable.
  */
-export async function startAgentMailConversation(input: {
+export type StartAgentMailConversationResult =
+  | { sent: false }
+  | {
+      sent: true;
+      conversation: {
+        conversationId: string;
+        inboxId: string;
+        messageId: string;
+      } | null;
+    };
+
+export async function startAgentMailConversationWithResult(input: {
   userId: string;
   subject: string;
   text: string;
@@ -154,23 +236,27 @@ export async function startAgentMailConversation(input: {
    * internal retries (5xx / lost response) exactly-once.
    */
   clientSendId?: string;
-}): Promise<boolean> {
+  /** A specific server-issued verified identity; never a raw address. */
+  identityId?: string;
+}): Promise<StartAgentMailConversationResult> {
   if (!isEmailChannelEnabled()) {
-    return false;
+    return { sent: false };
   }
   const credentials = await resolveAgentMailRuntimeCredentials();
   if (!credentials.apiKey || !credentials.inboxId) {
-    return false;
+    return { sent: false };
   }
 
-  const resolution = await resolveAgentMailOutboundAddress(input.userId);
+  const resolution = input.identityId
+    ? await resolveAgentMailOutboundIdentity(input.userId, input.identityId)
+    : await resolveAgentMailOutboundAddress(input.userId);
   if (!resolution.ok) {
     if (resolution.reason === 'suppressed') {
       console.warn(
         `${LOG_PREFIX} [${input.logContext}] Not emailing user ${input.userId}: address is suppressed.`,
       );
     }
-    return false;
+    return { sent: false };
   }
 
   const inboxId = normalizeEmailAddress(credentials.inboxId);
@@ -205,18 +291,19 @@ export async function startAgentMailConversation(input: {
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return false;
+    return { sent: false };
   }
 
-  // The email is out; conversation bookkeeping failures must not report the
-  // send as failed (a retry would email the user twice).
+  let conversation: Awaited<ReturnType<typeof recordOutboundConversation>> =
+    null;
   try {
-    await recordOutboundConversation({
+    conversation = await recordOutboundConversation({
       inboxId,
       userId: input.userId,
       subject: input.subject,
       messageId: response.message_id ?? null,
       providerThreadId: response.thread_id ?? null,
+      outboundIdentityId: input.identityId ?? null,
     });
   } catch (error) {
     console.warn(
@@ -226,7 +313,13 @@ export async function startAgentMailConversation(input: {
     );
   }
 
-  return true;
+  return { sent: true, conversation };
+}
+
+export async function startAgentMailConversation(
+  input: Parameters<typeof startAgentMailConversationWithResult>[0],
+): Promise<boolean> {
+  return (await startAgentMailConversationWithResult(input)).sent;
 }
 
 async function recordOutboundConversation(input: {
@@ -235,9 +328,14 @@ async function recordOutboundConversation(input: {
   subject: string;
   messageId: string | null;
   providerThreadId: string | null;
-}): Promise<void> {
-  if (!input.providerThreadId) {
-    return;
+  outboundIdentityId: string | null;
+}): Promise<{
+  conversationId: string;
+  inboxId: string;
+  messageId: string;
+} | null> {
+  if (!input.providerThreadId || !input.messageId) {
+    return null;
   }
 
   // The recipient must exist as an app user for the participant FK; the
@@ -248,39 +346,64 @@ async function recordOutboundConversation(input: {
     columns: { id: true },
   });
   if (!appUser) {
-    return;
+    return null;
   }
 
-  const conversation = await db.transaction(async (tx) => {
-    const [created] = await tx
-      .insert(agentmailConversations)
-      .values({
+  let conversation: { id: string } | undefined;
+  try {
+    conversation = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(agentmailConversations)
+        .values({
+          inboxId: input.inboxId,
+          providerThreadId: input.providerThreadId!,
+          ownerUserId: input.userId,
+          outboundIdentityId: input.outboundIdentityId,
+          subject: input.subject,
+        })
+        .returning({ id: agentmailConversations.id });
+      if (!created) {
+        throw new Error('agentmail conversation insert returned no row');
+      }
+      await tx.insert(agentmailConversationParticipants).values({
+        conversationId: created.id,
         inboxId: input.inboxId,
         providerThreadId: input.providerThreadId!,
-        ownerUserId: input.userId,
-        subject: input.subject,
-      })
-      .returning();
-    if (!created) {
-      throw new Error('agentmail conversation insert returned no row');
+        userId: input.userId,
+        role: 'owner',
+        source: 'outbound',
+      });
+      return created;
+    });
+  } catch (error) {
+    const existing = await db.query.agentmailConversationParticipants.findFirst(
+      {
+        where: and(
+          eq(agentmailConversationParticipants.inboxId, input.inboxId),
+          eq(
+            agentmailConversationParticipants.providerThreadId,
+            input.providerThreadId,
+          ),
+          eq(agentmailConversationParticipants.userId, input.userId),
+        ),
+        columns: { conversationId: true },
+      },
+    );
+    if (!existing) {
+      throw error;
     }
-    await tx.insert(agentmailConversationParticipants).values({
-      conversationId: created.id,
-      inboxId: input.inboxId,
-      providerThreadId: input.providerThreadId!,
-      userId: input.userId,
-      role: 'owner',
-      source: 'outbound',
-    });
-    return created;
-  });
-
-  if (input.messageId) {
-    await recordAgentMailOutboundMessage({
-      conversationId: conversation.id,
-      messageId: input.messageId,
-    });
+    conversation = { id: existing.conversationId };
   }
+
+  await recordAgentMailOutboundMessage({
+    conversationId: conversation.id,
+    messageId: input.messageId,
+  });
+  return {
+    conversationId: conversation.id,
+    inboxId: input.inboxId,
+    messageId: input.messageId,
+  };
 }
 
 export type AgentMailSystemEmailResult =

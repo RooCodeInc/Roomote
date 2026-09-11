@@ -186,7 +186,16 @@ export async function canUserAccessFastAgentSession(params: {
   const conversation = await fastAgentConversationRepository.findById({
     id: params.sessionId,
   });
-  return conversation !== null;
+  if (!conversation) {
+    return false;
+  }
+  if (conversation.conversation.surface !== 'agentmail') {
+    return true;
+  }
+  return isAgentMailConversationParticipant({
+    conversationId: conversation.conversation.conversationId,
+    userId: params.userId,
+  });
 }
 
 /**
@@ -212,19 +221,10 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
   if (!session) {
     return null;
   }
-  const canAccess =
-    (await canUserAccessFastAgentSession({
-      sessionId: session.id,
-      userId: params.userId,
-    })) ||
-    // Email conversations are owned by their initiator but deliberately
-    // admit cc'd verified users as participants; the participant table is
-    // the authorization source for their turns.
-    (session.conversation.surface === 'agentmail' &&
-      (await isAgentMailConversationParticipant({
-        conversationId: session.conversation.conversationId,
-        userId: params.userId,
-      })));
+  const canAccess = await canUserAccessFastAgentSession({
+    sessionId: session.id,
+    userId: params.userId,
+  });
   if (!canAccess) {
     return null;
   }

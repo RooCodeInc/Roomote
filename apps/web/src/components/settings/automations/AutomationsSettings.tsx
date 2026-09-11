@@ -3408,7 +3408,7 @@ export function AutomationsSettings({
                             noneDescription="Uses the Manager Channel or primary conversation fallback."
                             onChange={(destination) =>
                               setFormState((previous) =>
-                                previous
+                                previous && destination.provider !== 'email'
                                   ? {
                                       ...previous,
                                       mergeAnnouncerTargetProvider:

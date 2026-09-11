@@ -358,4 +358,74 @@ describe('manage custom automations tool contract', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts Email only as an owner-resolved direct message', () => {
+    expect(
+      buildManageCustomAutomationsRequest({ action: 'list_destinations' }),
+    ).toEqual({
+      ok: true,
+      request: { path: '/destinations', method: 'GET' },
+    });
+    expect(
+      compactManageCustomAutomationsResult('list_destinations', {
+        emailIdentities: [
+          {
+            id: 'verified:user-1:abc',
+            emailAddress: 'owner@example.com',
+            kind: 'verified',
+            ignored: 'private',
+          },
+        ],
+      }),
+    ).toEqual({
+      emailIdentities: [
+        {
+          id: 'verified:user-1:abc',
+          emailAddress: 'owner@example.com',
+          kind: 'verified',
+        },
+      ],
+    });
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'update',
+        automationId: 'automation-1',
+        targetProvider: 'email',
+        targetMode: 'direct_message',
+        targetChannelId: 'verified:user-1:abc',
+      }),
+    ).toEqual({
+      ok: true,
+      request: {
+        path: '/automation-1',
+        method: 'PATCH',
+        body: {
+          targetProvider: 'email',
+          targetMode: 'direct_message',
+          targetChannelId: 'verified:user-1:abc',
+        },
+      },
+    });
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'update',
+        automationId: 'automation-1',
+        targetProvider: 'email',
+        targetMode: 'channel',
+      }),
+    ).toEqual({
+      ok: false,
+      error: 'Email destinations must use direct_message mode',
+    });
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'update',
+        automationId: 'automation-1',
+        targetProvider: 'email',
+      }),
+    ).toEqual({
+      ok: false,
+      error: 'Email destinations require an identity id from list_destinations',
+    });
+  });
 });

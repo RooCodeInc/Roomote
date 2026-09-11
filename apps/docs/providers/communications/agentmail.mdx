@@ -114,6 +114,15 @@ integration linked. Strict consent rules are enforced in code:
   Discord), broadcast-style notices go there instead of email — email is the
   fallback reach, not another copy.
 
+Custom automations can explicitly select **Email** as their report destination.
+This is opt-in, never a fallback. The picker offers only the automation owner's
+account email when Roomote records it as verified; addresses listed only as
+**Linked** senders are not eligible. Each run uses that exact selected identity
+for its initial message and threaded report. If verification or membership is
+removed, the address changes, delivery is suppressed, or AgentMail is disabled
+or unconfigured, Roomote records a delivery failure and does not substitute
+another address or provider.
+
 Replying to a Roomote-initiated email works like any other thread: the reply
 routes back into the same conversation.
 
@@ -151,9 +160,12 @@ never emailed.
 
 ## Limitations
 
-In this first version:
+Current limitations:
 
-- automation reports and channel-style posting are not delivered over email
+- Email automation destinations are private; channel-style posting is not
+  supported
+- the current account model stores explicit verification for one account email;
+  additional **Linked** sender addresses are not automation destinations
 - reactions are not supported
 - attachments from inbound email are not yet processed
 - each deployment has one inbox
