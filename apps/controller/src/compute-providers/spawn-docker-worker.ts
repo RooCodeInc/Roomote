@@ -48,15 +48,13 @@ import type {
   SessionEgressRegistrationOutcome,
 } from '../session-egress/lifecycle';
 import { admitBootstrappedSessionEgress } from '../session-egress/lifecycle';
-import {
-  installDockerSessionEgressBoundary,
-  removeDockerSessionEgressBoundary,
-} from '@roomote/compute-providers';
+import { installDockerSessionEgressBoundary } from '@roomote/compute-providers';
 import {
   buildDockerSessionEgressWorkerEnv,
   collectNoProxyHosts,
   installDockerSessionEgressCaBundle,
   startDockerSessionEgressConnector,
+  resetDockerSessionEgressForResume,
 } from './docker-session-egress';
 import {
   attachDockerEgressPolicy,
@@ -405,34 +403,24 @@ export async function spawnDockerWorker(
       // call after Docker has begun starting the retained snapshot, catch must
       // still take the non-destructive resume path and never delete it.
       containerId = containerName;
-      if (sessionEgressRequired) {
-        const sourceRun = await db.query.taskRuns.findFirst({
-          where: eq(taskRuns.id, sourceRunId),
-          columns: { taskId: true },
-        });
-        if (sourceRun?.taskId !== taskRun.taskId)
-          throw new Error(
-            'Retained Session egress container is not bound to this task',
-          );
-        await terminateSessionEgressWorkloadsForRun(sourceRunId, 'resumed');
-      }
-      // The standby path removed the previous connector; a resumed run is a
-      // new workload generation with a new connector certificate.
-      await runDocker(
-        [
-          'rm',
-          '-f',
-          getDockerSessionEgressConnectorContainerName(containerName),
-        ],
-        { allowFailure: true },
+      await resetDockerSessionEgressForResume(
+        {
+          workerContainerName: containerName,
+          taskNetwork: dockerNetwork,
+          retireSource: async () => {
+            const sourceRun = await db.query.taskRuns.findFirst({
+              where: eq(taskRuns.id, sourceRunId),
+              columns: { taskId: true },
+            });
+            if (sourceRun?.taskId !== taskRun.taskId)
+              throw new Error(
+                'Retained Session egress container is not bound to this task',
+              );
+            await terminateSessionEgressWorkloadsForRun(sourceRunId, 'resumed');
+          },
+        },
+        runDocker,
       );
-      if (sessionEgressRequired) {
-        const [network] = JSON.parse(
-          await runDocker(['network', 'inspect', dockerNetwork]),
-        );
-        if (network)
-          await removeDockerSessionEgressBoundary(network, runDocker);
-      }
       await runDocker(['start', containerName]);
       await restoreDockerStandbyNetworking(
         {

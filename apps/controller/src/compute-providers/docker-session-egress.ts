@@ -4,6 +4,7 @@ import {
   SESSION_EGRESS_WORKLOAD_ENV,
   type SessionEgressWorkloadRegistration,
 } from '@roomote/types';
+import { removeDockerSessionEgressBoundary } from '@roomote/compute-providers';
 
 import {
   buildDockerWorkerLabels,
@@ -44,6 +45,29 @@ const DOCKER_WORKER_SESSION_EGRESS_CA_BUNDLE_FILE = `${DOCKER_WORKER_SESSION_EGR
 
 function getDockerSessionEgressProxyUrl(): string {
   return `http://${DOCKER_SESSION_EGRESS_CONNECTOR_ALIAS}:${SESSION_EGRESS_CONNECTOR_PORT}`;
+}
+
+/** Retained resource cleanup is independent of the new run's grant eligibility. */
+export async function resetDockerSessionEgressForResume(
+  input: {
+    workerContainerName: string;
+    taskNetwork: string;
+    retireSource: () => Promise<void>;
+  },
+  runDocker: DockerCommand = docker,
+): Promise<void> {
+  await input.retireSource();
+  await runDocker(
+    [
+      'rm',
+      '-f',
+      getDockerSessionEgressConnectorContainerName(input.workerContainerName),
+    ],
+    { allowFailure: true },
+  );
+  const raw = await runDocker(['network', 'inspect', input.taskNetwork]);
+  const [network] = raw.trim() ? JSON.parse(raw) : [];
+  if (network) await removeDockerSessionEgressBoundary(network, runDocker);
 }
 
 export async function startDockerSessionEgressConnector(

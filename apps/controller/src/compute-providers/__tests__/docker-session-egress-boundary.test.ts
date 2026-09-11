@@ -7,7 +7,10 @@ import {
   SESSION_EGRESS_POLICY_IMAGE_LABEL,
   SESSION_EGRESS_POLICY_PLATFORM_LABEL,
 } from '@roomote/compute-providers';
-import { startDockerSessionEgressConnector } from '../docker-session-egress';
+import {
+  startDockerSessionEgressConnector,
+  resetDockerSessionEgressForResume,
+} from '../docker-session-egress';
 import {
   prepareDockerTaskNetwork,
   type DockerCommand,
@@ -273,6 +276,53 @@ describe('host-enforced Session egress', () => {
 });
 
 describe('actual Iron connector provisioning', () => {
+  it('removes the retained host boundary even when the new run has no Session grants', async () => {
+    const order: string[] = [];
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      order.push(args[0]!);
+      if (args[0] === 'network')
+        return JSON.stringify([
+          {
+            Id: networkId,
+            Labels: {
+              [SESSION_EGRESS_POLICY_IMAGE_LABEL]: 'trusted-helper',
+              [SESSION_EGRESS_POLICY_PLATFORM_LABEL]: 'linux/amd64',
+            },
+          },
+        ]);
+      return '';
+    });
+    await resetDockerSessionEgressForResume(
+      {
+        workerContainerName: 'retained-worker',
+        taskNetwork: 'retained-network',
+        retireSource: async () => {
+          order.push('retire');
+        },
+      },
+      runDocker,
+    );
+    expect(order).toEqual(['retire', 'rm', 'network', 'run']);
+    expect(runDocker.mock.calls.at(-1)![0].at(-1)).toContain('-D DOCKER-USER');
+  });
+
+  it('does not reopen a retained network if source retirement fails', async () => {
+    const runDocker = vi.fn<DockerCommand>();
+    await expect(
+      resetDockerSessionEgressForResume(
+        {
+          workerContainerName: 'retained-worker',
+          taskNetwork: 'retained-network',
+          retireSource: async () => {
+            throw new Error('retire failed');
+          },
+        },
+        runDocker,
+      ),
+    ).rejects.toThrow('retire failed');
+    expect(runDocker).not.toHaveBeenCalled();
+  });
+
   const input = {
     workerContainerName: 'roomote-worker-1',
     taskRunId: 1,
