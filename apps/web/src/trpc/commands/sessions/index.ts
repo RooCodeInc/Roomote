@@ -3,12 +3,17 @@ import { TRPCError } from '@trpc/server';
 import {
   acquireFastAgentTurnLock,
   fastAgentConversationRepository,
+  getOrCreateFastAgentSession,
 } from '@roomote/cloud-agents/server';
 import { SESSION_STATUSES } from '@roomote/types';
 import {
   advanceSessionReadCursor,
+  and,
   cancelSessionWakeupsForConversation,
   db,
+  ensureSessionForFastConversation,
+  eq,
+  sessions,
 } from '@roomote/db/server';
 import { captureEvent } from '@roomote/telemetry/server';
 
@@ -24,6 +29,7 @@ import {
   setSessionPinned,
   updateSessionMetadata,
 } from '@/lib/server/sessions';
+import { getFastSessionById } from '@/lib/server/fast-sessions';
 import {
   currentEpochSeconds,
   signArtifactId,
@@ -56,6 +62,60 @@ export const sessionsListInputSchema = z.object({
   before: z.string().nullish(),
   limit: z.number().int().min(1).max(200).optional(),
 });
+
+export async function getOrCreateSideChatCommand(
+  auth: UserAuthSuccess,
+  parentSessionId: string,
+) {
+  const parent = await findAccessibleSession(auth, parentSessionId);
+  if (!parent || parent.parentSessionId) return null;
+
+  let [sideChat] = await db
+    .select()
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.parentSessionId, parent.id),
+        eq(sessions.ownerUserId, auth.userId),
+      ),
+    )
+    .limit(1);
+
+  if (!sideChat) {
+    const conversation = await getOrCreateFastAgentSession({
+      userId: auth.userId,
+      conversation: {
+        surface: 'web',
+        workspaceId: auth.userId,
+        conversationId: `side-chat:${parent.id}`,
+      },
+      initialTitle: `Side chat: ${parent.title}`,
+    });
+    const ensured = await ensureSessionForFastConversation(db, conversation.id);
+    [sideChat] = await db
+      .update(sessions)
+      .set({
+        parentSessionId: parent.id,
+        updatedAt: new Date(),
+      })
+      .where(eq(sessions.id, ensured.id))
+      .returning();
+  }
+
+  if (!sideChat?.fastConversationId) return null;
+  const detail = await getFastSessionById(auth, sideChat.fastConversationId);
+  if (!detail) return null;
+
+  return {
+    sessionId: sideChat.id,
+    fastConversationId: sideChat.fastConversationId,
+    title: detail.title,
+    model: detail.model,
+    reasoningEffort: detail.reasoningEffort,
+    messages: detail.messages,
+    hasOlderMessages: detail.hasOlderMessages,
+  };
+}
 
 export async function markSessionReadCommand(
   auth: UserAuthSuccess,

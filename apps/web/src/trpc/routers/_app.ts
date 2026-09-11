@@ -59,6 +59,7 @@ import {
 } from '../commands/voice';
 import {
   getSessionByIdCommand,
+  getOrCreateSideChatCommand,
   getSessionForTask,
   getSessions,
   getSessionTimeline,
@@ -3095,6 +3096,11 @@ export const appRouter = createRouter({
   }),
 
   sessions: createRouter({
+    sideChat: protectedProcedure
+      .input(sessionIdInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        getOrCreateSideChatCommand(auth, input.sessionId),
+      ),
     wakeups: protectedProcedure
       .input(sessionIdInputSchema)
       .query(({ ctx: { auth }, input }) =>

@@ -176,6 +176,7 @@ export function buildFastAgentSystemPrompt({
   personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
+  sideChat,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableTaskModels?: TaskModelOption[];
@@ -212,6 +213,9 @@ export function buildFastAgentSystemPrompt({
   } | null;
   globalAgentInstructions?: string | null;
   workspaceRoutingRules?: WorkspaceRoutingSettings['rules'];
+  sideChat?: {
+    parentSessionId: string;
+  } | null;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -573,6 +577,17 @@ ${
 - \`retry_task_start\` is invalid for a human-authored turn.
 `
         : '- `ignore_event` and `retry_task_start` are invalid for this human-authored turn.\n'
+}
+
+${
+  sideChat
+    ? `## Side Chat Boundary (Highest Priority)
+- This is a secondary conversation about parent Session \`${sideChat.parentSessionId}\`, not the parent conversation and not a coding task.
+- Use the parent Session's summary, messages, updates, and linked task inspection as evidence when needed. Do not imply that this conversation's messages were sent to the parent Session or its tasks.
+- You have the initiating user's normal capabilities in this side chat. Keep discussion here distinct from messages or actions sent to the parent Session or its tasks, and describe any such action clearly.
+
+`
+    : ''
 }
 
 ## Tone of Voice

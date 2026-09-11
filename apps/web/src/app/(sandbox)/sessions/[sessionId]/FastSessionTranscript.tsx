@@ -330,6 +330,10 @@ export function FastSessionTranscript({
   headerActions,
   timelineExtras,
   autoStartVoice = false,
+  showHeader = true,
+  updatePageTitle = true,
+  allowVoice = true,
+  showInitialThinking = true,
 }: {
   sessionId: string;
   initialMessages: FastSessionMessage[];
@@ -351,6 +355,10 @@ export function FastSessionTranscript({
    * so the first reply is spoken rather than read.
    */
   autoStartVoice?: boolean;
+  showHeader?: boolean;
+  updatePageTitle?: boolean;
+  allowVoice?: boolean;
+  showInitialThinking?: boolean;
 }) {
   const trpcClient = useTRPCClient();
   const openTaskPanel = useOpenSessionTaskPanel();
@@ -383,22 +391,28 @@ export function FastSessionTranscript({
     initialOptimisticMessage
       ? [...initialMessages, initialOptimisticMessage]
       : initialMessages,
-    (messages) =>
-      pendingResponseReducer(
-        {
-          pendingAfter: null,
-          latestVisibleResponse: null,
-          optimisticRollback: null,
-        },
-        { type: 'hydrate', messages },
-      ),
+    (messages) => {
+      const initialState: PendingResponseState = {
+        pendingAfter: null,
+        latestVisibleResponse: null,
+        optimisticRollback: null,
+      };
+      return messages.length === 0 && !showInitialThinking
+        ? initialState
+        : pendingResponseReducer(initialState, {
+            type: 'hydrate',
+            messages,
+          });
+    },
   );
   const [replyError, setReplyError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(initialTitle);
   const [conversationResponding, setConversationResponding] = useState<
     boolean | null
   >(null);
-  usePageTitle(truncatePageTitle(title ?? fallbackTitle));
+  usePageTitle(
+    updatePageTitle ? truncatePageTitle(title ?? fallbackTitle) : null,
+  );
   const streamServiceRef = useRef<AcpProtocolService | null>(null);
   const getStreamService = useCallback(
     () => (streamServiceRef.current ??= new AcpProtocolService()),
@@ -1239,33 +1253,37 @@ export function FastSessionTranscript({
       value={{ displayMode, hidePrReviewActions: true }}
     >
       <SlackMentionProvider scope={slackMentionScope}>
-        <WorkspaceHeader
-          className="py-3.25"
-          contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
-          actions={headerActions}
-        >
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <h1
-              className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
-              title={title ?? fallbackTitle}
-            >
-              {title ?? fallbackTitle}
-            </h1>
-            {(effectiveSessionModel || headerExtras) && (
-              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-                {effectiveSessionModel ? (
-                  <ModelBadge
-                    model={effectiveSessionModel}
-                    displayName={getTaskModelDisplayName(effectiveSessionModel)}
-                    showIcon={false}
-                    iconClassName="text-muted-foreground"
-                  />
-                ) : null}
-                {headerExtras}
-              </div>
-            )}
-          </div>
-        </WorkspaceHeader>
+        {showHeader ? (
+          <WorkspaceHeader
+            className="py-3.25"
+            contentClassName={`${SESSION_HEADER_CONTENT_CLASS_NAME} !flex-row !flex-nowrap`}
+            actions={headerActions}
+          >
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <h1
+                className="ph-no-capture min-w-0 truncate cursor-default text-sm font-medium"
+                title={title ?? fallbackTitle}
+              >
+                {title ?? fallbackTitle}
+              </h1>
+              {(effectiveSessionModel || headerExtras) && (
+                <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                  {effectiveSessionModel ? (
+                    <ModelBadge
+                      model={effectiveSessionModel}
+                      displayName={getTaskModelDisplayName(
+                        effectiveSessionModel,
+                      )}
+                      showIcon={false}
+                      iconClassName="text-muted-foreground"
+                    />
+                  ) : null}
+                  {headerExtras}
+                </div>
+              )}
+            </div>
+          </WorkspaceHeader>
+        ) : null}
         <Conversation className="min-h-0 flex-1" initial="instant">
           <ConversationContent className="ph-no-capture mx-auto w-full max-w-4xl p-4 pt-0">
             {hasOlderMessages ? (
@@ -1340,7 +1358,7 @@ export function FastSessionTranscript({
               defaultModelId={defaultModelId}
               defaultReasoningEffort={defaultReasoningEffort}
               voice={
-                voiceEnabled
+                voiceEnabled && allowVoice
                   ? {
                       enabled: true,
                       active:

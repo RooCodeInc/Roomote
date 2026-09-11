@@ -412,6 +412,7 @@ function listConditions(
     input.ownedOnly ? sessionOwnerScope(auth) : undefined,
     eq(sessions.visibility, 'visible'),
     isNull(sessions.archivedAt),
+    isNull(sessions.parentSessionId),
     input.ids ? inArray(sessions.id, input.ids) : undefined,
     input.status ? eq(sessions.cachedStatus, input.status) : undefined,
     input.user ? sessionCreatorCondition(input.user) : undefined,
@@ -491,6 +492,7 @@ const baseSelection = {
   sourceSurface: sessions.sourceSurface,
   sourceTrigger: sessions.sourceTrigger,
   fastConversationId: sessions.fastConversationId,
+  parentSessionId: sessions.parentSessionId,
   visibility: sessions.visibility,
   activityAt: sessions.activityAt,
   cachedStatus: sessions.cachedStatus,
@@ -781,6 +783,7 @@ export async function getSessionSources(auth: SessionAuth) {
         sessionListScope(auth),
         eq(sessions.visibility, 'visible'),
         isNull(sessions.archivedAt),
+        isNull(sessions.parentSessionId),
       ),
     )
     .orderBy(asc(sessions.sourceSurface));

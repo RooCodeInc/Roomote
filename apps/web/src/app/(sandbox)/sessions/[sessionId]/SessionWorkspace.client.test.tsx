@@ -57,6 +57,17 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(searchParamsState.value),
 }));
 
+vi.mock('./SessionSideChatPanel', () => ({
+  SessionSideChatPanel: ({ onClose }: { onClose: () => void }) => (
+    <div>
+      <p>Side chat conversation</p>
+      <button type="button" onClick={onClose}>
+        Close side chat
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
   useLaunchTaskModels: () => ({
     data: { models: [{ id: 'model-1', displayName: 'Model One' }] },
@@ -437,17 +448,21 @@ describe('SessionWorkspace', () => {
     };
   });
 
-  it('orders panel controls as tasks, preview, artifacts, then session info', () => {
+  it('orders side chat before task and utility panel controls', () => {
     renderWorkspace({
       isMobile: false,
       sessionOverride: { tasks: [singleTask] },
     });
 
+    const sideChat = screen.getByRole('button', { name: 'Side chat' });
     const tasks = screen.getByRole('button', { name: 'Tasks' });
     const preview = screen.getByRole('button', { name: 'Live Preview' });
     const artifacts = screen.getByRole('button', { name: 'Artifacts' });
     const sessionInfo = screen.getByRole('button', { name: 'Session info' });
 
+    expect(sideChat.compareDocumentPosition(tasks)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     expect(tasks.compareDocumentPosition(preview)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
@@ -636,6 +651,32 @@ describe('SessionWorkspace', () => {
       screen.getByRole('button', { name: 'Close session info' }),
     ).toBeInTheDocument();
   });
+
+  it.each([
+    ['desktop', false],
+    ['mobile', true],
+  ])(
+    'opens side chat with the established %s panel behavior',
+    (_, isMobile) => {
+      renderWorkspace({ isMobile });
+      if (isMobile) {
+        fireEvent.click(screen.getByRole('button', { name: 'Show sidebar' }));
+      }
+
+      fireEvent.click(screen.getByRole('button', { name: 'Side chat' }));
+
+      const transcriptPanel = screen
+        .getByText('Session transcript')
+        .closest('[data-slot=resizable-panel]');
+      expect(screen.getByText('Side chat conversation')).toBeInTheDocument();
+      if (isMobile) {
+        expect(transcriptPanel).toHaveAttribute('inert');
+        expect(transcriptPanel).toHaveAttribute('aria-hidden', 'true');
+      } else {
+        expect(transcriptPanel).not.toHaveAttribute('inert');
+      }
+    },
+  );
 
   it('shows direct and per-task inference costs, including zero-cost tasks', () => {
     renderWorkspace({

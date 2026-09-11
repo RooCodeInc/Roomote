@@ -59,6 +59,7 @@ import {
   Loader2Icon,
   LocalDateTime,
   Mail,
+  MessagesSquare,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -81,6 +82,7 @@ import {
   useSandboxLayout,
 } from '../../use-sandbox-layout';
 import { NestedTaskSidePanel } from './NestedTaskSidePanel';
+import { SessionSideChatPanel } from './SessionSideChatPanel';
 import {
   OpenSessionArtifactViewerContext,
   OpenSessionTaskPanelContext,
@@ -891,7 +893,12 @@ export function SessionWorkspace({
   };
 
   const utilityPanelContent =
-    utilityPanel?.kind === 'tasks' ? (
+    utilityPanel?.kind === 'side-chat' ? (
+      <SessionSideChatPanel
+        parentSessionId={session.id}
+        onClose={closeUtilityPanel}
+      />
+    ) : utilityPanel?.kind === 'tasks' ? (
       <SessionTasksPanel
         tasks={taskCards}
         onOpenTask={openTaskPanel}
@@ -1008,6 +1015,15 @@ export function SessionWorkspace({
           sideActions={
             <>
               <SandboxSideActions isPanelOpen={panelOpen} onShowMain={showMain}>
+                <SideNavItem
+                  side="right"
+                  label="Side chat"
+                  tooltip="Side chat"
+                  description="Discuss this work without interrupting it"
+                  active={utilityPanel?.kind === 'side-chat'}
+                  icon={MessagesSquare}
+                  onClick={() => togglePanel('side-chat')}
+                />
                 <SideNavItem
                   side="right"
                   label="Tasks"

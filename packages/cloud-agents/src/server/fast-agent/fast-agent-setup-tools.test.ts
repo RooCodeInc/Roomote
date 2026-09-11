@@ -149,3 +149,19 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(inputResponseEvent).toContain('submitted structured answers');
   });
 });
+
+describe('side chat prompt boundary', () => {
+  it('identifies the parent Session without conflating the conversations', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      sideChat: {
+        parentSessionId: 'parent-session-id',
+      },
+    });
+
+    expect(prompt).toContain('## Side Chat Boundary (Highest Priority)');
+    expect(prompt).toContain('parent Session `parent-session-id`');
+    expect(prompt).toContain("initiating user's normal capabilities");
+    expect(prompt).toContain('Keep discussion here distinct');
+  });
+});
