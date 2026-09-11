@@ -575,7 +575,7 @@ describe('Telegram webhook handler', () => {
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('uses Fast for a linked Telegram direct message', async () => {
+  it('uses Fast for a linked Telegram direct message without an automatic reaction', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     getFastSessionMock.mockResolvedValueOnce({
       id: '11111111-1111-4111-8111-111111111111',
@@ -604,10 +604,11 @@ describe('Telegram webhook handler', () => {
       question: 'continue the task',
       currentMessageId: '456',
     });
+    expect(addReactionMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
-  it('continues a Telegram Fast reply before ordinary task routing', async () => {
+  it('continues a Telegram Fast reply without an automatic reaction', async () => {
     mockTelegramLinkedSender('mapped-user-1');
     findFastReplySessionMock.mockResolvedValueOnce({
       id: '22222222-2222-4222-8222-222222222222',
@@ -652,6 +653,7 @@ describe('Telegram webhook handler', () => {
         question: 'continue the task',
       }),
     );
+    expect(addReactionMock).not.toHaveBeenCalled();
     expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
     expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
@@ -1308,6 +1310,11 @@ describe('Telegram webhook handler', () => {
         text: expect.stringContaining('Reconnected this Telegram chat'),
       }),
     );
+    expect(addReactionMock).toHaveBeenCalledExactlyOnceWith({
+      channelId: '222',
+      messageId: '456',
+      name: 'eyes',
+    });
   });
 
   it('does not silently resume a completed task from a user-owned forum topic', async () => {
