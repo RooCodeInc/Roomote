@@ -123,7 +123,11 @@ export function DelegatedTaskCard({
                 event.stopPropagation();
                 if (!data?.taskRun || !canStop || cancel.isPending) return;
                 setCancelError(null);
-                cancel.mutate({ taskId, runId: data.taskRun.id });
+                cancel.mutate({
+                  taskId,
+                  runId: data.taskRun.id,
+                  terminate: false,
+                });
               }}
             >
               <SquareIcon

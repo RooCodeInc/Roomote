@@ -92,7 +92,7 @@ export async function startTaskGoalCommand(
 
 export async function cancelTaskRunCommand(
   auth: UserAuthSuccess,
-  input: { taskId: string; runId?: number },
+  input: { taskId: string; runId?: number; terminate?: boolean },
 ): Promise<{ success: true } | { success: false; error: string }> {
   try {
     await requireTaskAccess(auth, input.taskId);
@@ -121,17 +121,19 @@ export async function cancelTaskRunCommand(
 
     if (!isExitedRunStatus(job.status)) {
       if (input.runId !== undefined) {
+        const terminate = input.terminate !== false;
         const result = await stopTaskRun({
           run: job,
           authUserId: auth.userId,
-          terminate: true,
-          allowDirectCancelWithoutSandbox: true,
+          ...(terminate
+            ? { terminate: true, allowDirectCancelWithoutSandbox: true }
+            : {}),
           cancelledBy: { name: auth.name ?? undefined, source: 'web' },
         });
         if (!result.success) {
           return { success: false, error: result.error };
         }
-        if (result.mode === 'direct_cancel') {
+        if (terminate && result.mode === 'direct_cancel') {
           void settleSlackLiveTaskCardForRun({
             taskId: job.taskId,
             payload: job.payload,

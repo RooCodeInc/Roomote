@@ -150,6 +150,40 @@ describe('cancelTaskRunCommand', () => {
     },
   );
 
+  it.each([RunStatus.Running, RunStatus.Idle])(
+    'soft-stops an attached Session-card %s run without terminal markers',
+    async (status) => {
+      const selected = await runFactory.create({
+        status,
+        sandboxServerUrl: 'https://sandbox.example',
+      });
+      const cancelTask = vi.fn().mockResolvedValue({ success: true });
+      vi.mocked(withSandboxServerRpcClient).mockImplementationOnce((options) =>
+        options.call({
+          commands: { cancelTask: { mutate: cancelTask } },
+        } as unknown as Parameters<typeof options.call>[0]),
+      );
+
+      await expect(
+        cancelTaskRunCommand(auth, {
+          taskId: selected.taskId,
+          runId: selected.id,
+          terminate: false,
+        }),
+      ).resolves.toEqual({ success: true });
+      expect(cancelTask).toHaveBeenCalledExactlyOnceWith({
+        cancelledBy: { name: auth.name, source: 'web' },
+      });
+      expect(await readRun(selected.id)).toMatchObject({
+        status,
+        cancelRequestedAt: null,
+        canceledAt: null,
+      });
+      expect(captureTaskSettled).not.toHaveBeenCalled();
+      expect(settleSlackLiveTaskCardForRun).not.toHaveBeenCalled();
+    },
+  );
+
   it('reports RPC failure while retaining the earliest recovery marker on only the selected run', async () => {
     const selected = await runFactory.create({
       status: RunStatus.Idle,

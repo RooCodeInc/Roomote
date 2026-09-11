@@ -1177,6 +1177,7 @@ export const appRouter = createRouter({
         z.object({
           taskId: z.string(),
           runId: z.number().int().optional(),
+          terminate: z.boolean().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>

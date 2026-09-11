@@ -195,7 +195,11 @@ describe('DelegatedTaskCard', () => {
     const stop = screen.getByRole('button', { name: 'Stop coding task' });
     expect(stop.parentElement?.closest('button')).toBeNull();
     fireEvent.click(stop);
-    expect(mutateMock).toHaveBeenCalledWith({ taskId: 'child-1', runId: 42 });
+    expect(mutateMock).toHaveBeenCalledWith({
+      taskId: 'child-1',
+      runId: 42,
+      terminate: false,
+    });
     expect(onOpen).not.toHaveBeenCalled();
     expect(onClick).not.toHaveBeenCalled();
   });
