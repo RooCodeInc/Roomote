@@ -32,6 +32,7 @@ Roomote 1.8 adds a durable automation results inbox, private personalization, mo
 - Recent Sessions show the current user's genuinely latest work, reveal full truncated titles on hover, and keep the shared rail responsive while a selected Session loads. Thanks to @stea9499 for contributing the title improvement.
 - Coding agents wait for Roomote-managed Docker startup instead of launching duplicate services and can install a necessary system dependency inside the disposable sandbox when authorized work requires it.
 - Sandbox tasks can no longer launch nested Roomote tasks through run-scoped credentials, while authenticated users and Fast retain their supported launch paths.
+- Fast-delegated tasks keep user interaction in their parent Session while retaining task workspaces for execution details, steering, previews, artifacts, and resumption.
 - Task controls show actionable feedback when a stop attempt fails and remain available for a retry instead of failing only in the browser console.
 - Voice conversations start with the selected GPT-Live voice, survive phone rotation, release call resources after terminal connection failures, show the Call ended marker, and keep internal delivery rows out of web transcripts.
 - Voice previews now say when the OpenAI key lacks the Audio model permission instead of a generic failure.
