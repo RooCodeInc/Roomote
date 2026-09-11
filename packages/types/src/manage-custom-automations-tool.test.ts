@@ -358,4 +358,119 @@ describe('manage custom automations tool contract', () => {
       }),
     ).toThrow();
   });
+
+  it('surfaces the pinned Email identity as the channel id on list results', () => {
+    expect(
+      compactManageCustomAutomationsResult('list', {
+        automations: [
+          {
+            id: 'automation-1',
+            name: 'Digest',
+            enabled: true,
+            scheduleMode: 'daily',
+            target: {
+              provider: 'email',
+              targetKind: 'email_user',
+              externalRef: 'user-1',
+              metadata: { emailIdentityId: 'verified:user-1:abc' },
+            },
+          },
+        ],
+      }),
+    ).toEqual({
+      automations: [
+        {
+          id: 'automation-1',
+          name: 'Digest',
+          enabled: true,
+          schedule: 'daily',
+          targetProvider: 'email',
+          targetMode: 'direct_message',
+          targetChannelId: 'verified:user-1:abc',
+        },
+      ],
+    });
+  });
+
+  it('accepts Email only as an owner-resolved direct message', () => {
+    expect(
+      buildManageCustomAutomationsRequest({ action: 'list_destinations' }),
+    ).toEqual({
+      ok: true,
+      request: { path: '/destinations', method: 'GET' },
+    });
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'list_destinations',
+        automationId: 'automation 1',
+      }),
+    ).toEqual({
+      ok: true,
+      request: {
+        path: '/destinations?automationId=automation%201',
+        method: 'GET',
+      },
+    });
+    expect(
+      compactManageCustomAutomationsResult('list_destinations', {
+        emailIdentities: [
+          {
+            id: 'verified:user-1:abc',
+            emailAddress: 'owner@example.com',
+            kind: 'verified',
+            ignored: 'private',
+          },
+        ],
+      }),
+    ).toEqual({
+      emailIdentities: [
+        {
+          id: 'verified:user-1:abc',
+          emailAddress: 'owner@example.com',
+          kind: 'verified',
+        },
+      ],
+    });
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'update',
+        automationId: 'automation-1',
+        targetProvider: 'email',
+        targetMode: 'direct_message',
+        targetChannelId: 'verified:user-1:abc',
+      }),
+    ).toEqual({
+      ok: true,
+      request: {
+        path: '/automation-1',
+        method: 'PATCH',
+        body: {
+          targetProvider: 'email',
+          targetMode: 'direct_message',
+          targetChannelId: 'verified:user-1:abc',
+        },
+      },
+    });
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'update',
+        automationId: 'automation-1',
+        targetProvider: 'email',
+        targetMode: 'channel',
+      }),
+    ).toEqual({
+      ok: false,
+      error: 'Email destinations must use direct_message mode',
+    });
+    expect(
+      buildManageCustomAutomationsRequest({
+        action: 'update',
+        automationId: 'automation-1',
+        targetProvider: 'email',
+      }),
+    ).toEqual({
+      ok: false,
+      error: 'Email destinations require an identity id from list_destinations',
+    });
+  });
 });

@@ -76,13 +76,17 @@ thread, and follow-up emails in that thread continue the same conversation; a
 running delegated task receives them as follow-ups. Start a new request with a
 new email so it opens a new thread.
 
-Only verified account email addresses are recognized automatically. Mail from
-an unknown address receives one polite refusal per thread and is otherwise
-ignored — the refusal includes a link to connect the address to your
-Roomote account, and once linked, the emails you already sent are
-processed automatically. Forwarding a Roomote email thread to someone
-else does not give them access to the original conversation or task;
-their message starts a separate conversation of their own.
+Only verified account email addresses are recognized. Mail from any other
+address may receive a polite refusal explaining that it must come from the
+verified email on a Roomote account; resend from that address once it is
+verified. Refusals are limited to one per thread and one per sender each day,
+with a deployment-wide limit of 25 per day. Forwarding a Roomote email thread
+to someone else does not give them access to the original conversation or
+task; their message starts a separate conversation of their own.
+
+Roomote silently ignores auto-submitted or auto-generated messages and mail
+marked as bulk, list, or junk traffic. This prevents vacation responders,
+mailing lists, and similar automated senders from creating reply loops.
 
 Email is deliberately low-frequency: expect roughly two emails per task, an
 acknowledgment and the result, plus questions when the agent genuinely needs
@@ -101,9 +105,8 @@ Roomote can also initiate email — for example, notifying you that a GitHub
 App installation you requested was approved when you have no chat
 integration linked. Strict consent rules are enforced in code:
 
-- Roomote only initiates email to your own verified account address, or to
-  an address you explicitly linked to your account through the email-link
-  flow. It never emails an address just because someone typed it in.
+- Roomote only initiates email to your own verified account address. It
+  never emails an address just because someone typed it in.
 - Every Roomote-initiated email carries a one-click unsubscribe link
   (RFC 8058 `List-Unsubscribe`). Unsubscribing stops Roomote from initiating
   new email to that address; replies to email you send Roomote are
@@ -114,13 +117,20 @@ integration linked. Strict consent rules are enforced in code:
   Discord), broadcast-style notices go there instead of email — email is the
   fallback reach, not another copy.
 
+Custom automations can explicitly select **Email** as their report destination.
+This is opt-in, never a fallback. The picker offers the automation owner's
+account email once Roomote records it as verified. Each run uses that exact
+selected identity for its initial message and threaded report. If verification or membership is
+removed, the address changes, delivery is suppressed, or AgentMail is disabled
+or unconfigured, Roomote records a delivery failure and does not substitute
+another address or provider.
+
 Replying to a Roomote-initiated email works like any other thread: the reply
 routes back into the same conversation.
 
 ## Account email verification
 
-Roomote only initiates email to an address it has verified, or to an
-address explicitly linked through the email-link flow. With the email
+Roomote only initiates email to an address it has verified. With the email
 channel enabled:
 
 - New email-and-password sign-ups receive a verification email. Confirming
@@ -129,9 +139,11 @@ channel enabled:
   AgentMail key is not configured yet, or the address is suppressed) never
   blocks the account.
 - Existing password accounts that never verified (sign-ups from before the
-  channel was enabled) connect their address the first time they email
-  Roomote: the refusal email carries a link that ties the address to their
-  account.
+  channel was enabled) verify from **Personal settings > Linked Accounts**.
+- **Personal settings > Linked Accounts** shows the Email row's verification
+  status. When the login email is not verified and AgentMail is ready to
+  deliver, use **Resend** to request another verification message. A delivery
+  failure is shown instead of reporting success.
 - Sign-ins through Slack, Microsoft, GitHub, and the other OAuth providers
   are unaffected; those providers assert a verified email.
 - Password reset links are emailed to the user as well as shown to the
@@ -144,9 +156,12 @@ never emailed.
 
 ## Limitations
 
-In this first version:
+Current limitations:
 
-- automation reports and channel-style posting are not delivered over email
+- Email automation destinations are private; channel-style posting is not
+  supported
+- each account has one email address for the channel, its verified login
+  email; there is no way to add other sender addresses
 - reactions are not supported
 - attachments from inbound email are not yet processed
 - each deployment has one inbox

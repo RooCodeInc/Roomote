@@ -13,13 +13,10 @@ import {
 
 const DELEGATION_TRANSCRIPT_SETTLE_MS = 250;
 /**
- * Speech GPT-Live answers itself never produces a delegation. After this much
- * silence with no delegation the utterance is recorded as a heard turn so the
- * Session transcript still has it.
+ * Backstop a GPT-Live delegation that never arrives. After this much silence,
+ * the utterance is sent through Fast without a delegation id.
  */
 const UTTERANCE_SILENCE_FLUSH_MS = 1_500;
-/** A delegation this soon after a silence flush belongs to that utterance. */
-const STALE_DELEGATION_WINDOW_MS = 3_000;
 /** GPT-Live has finished a spoken turn once its transcript stops growing. */
 const SPOKEN_TURN_SETTLE_MS = 1_200;
 const SESSION_START_TIMEOUT_MS = 15_000;
@@ -43,12 +40,6 @@ interface UseLiveVoiceOptions {
    * speaking a turn. This is the spoken record the Session persists.
    */
   onSpokenTurn?: (text: string) => void;
-  /**
-   * Called with the raw transcript of what the person said each time GPT-Live
-   * handles it without delegating (small talk), so the Session still records
-   * it. Delegated utterances reach the Session through `onUtterance`.
-   */
-  onHeardTurn?: (text: string) => void;
   /** Called with GPT-Live's words so far while it is speaking a turn. */
   onSpokenTurnDelta?: (text: string) => void;
   /** Called with the person's words so far while they are speaking. */
@@ -119,7 +110,6 @@ async function waitForIceGathering(peer: RTCPeerConnection): Promise<void> {
 export function useLiveVoice({
   onUtterance,
   onSpokenTurn,
-  onHeardTurn,
   onSpokenTurnDelta,
   onHeardTurnDelta,
   disabled = false,
@@ -134,8 +124,6 @@ export function useLiveVoice({
   const [deliveringUtterances, setDeliveringUtterances] = useState(0);
   const onSpokenTurnRef = useRef(onSpokenTurn);
   onSpokenTurnRef.current = onSpokenTurn;
-  const onHeardTurnRef = useRef(onHeardTurn);
-  onHeardTurnRef.current = onHeardTurn;
   const onSpokenTurnDeltaRef = useRef(onSpokenTurnDelta);
   onSpokenTurnDeltaRef.current = onSpokenTurnDelta;
   const onHeardTurnDeltaRef = useRef(onHeardTurnDelta);
@@ -164,7 +152,10 @@ export function useLiveVoice({
   const pendingDelegationsRef = useRef<string[]>([]);
   const delegationTimerRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<number | null>(null);
-  const lastSilenceFlushAtRef = useRef(0);
+  // Delegations have no utterance identifier. After one is missed, accepting
+  // any later delegation could attach it to the wrong transcript, so the rest
+  // of this call uses the ordered silence fallback instead.
+  const fallbackOnlyRef = useRef(false);
   const speakingTimerRef = useRef<number | null>(null);
   const deliveryChainRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -242,9 +233,10 @@ export function useLiveVoice({
     );
   }, [flushDelegation]);
 
-  // Speech GPT-Live handles itself (small talk) never produces a delegation.
-  // Once the person has been quiet for a moment, record what they said so the
-  // Session transcript stays the complete record of the call.
+  // A missed or delayed GPT-Live delegation must not bypass Fast. Once the
+  // person has been quiet, submit the utterance without a delegation id. The
+  // call then stays in fallback-only mode because later delegation events
+  // cannot be correlated safely with a specific utterance.
   const scheduleSilenceFlush = useCallback(() => {
     clearSilenceTimer();
     silenceTimerRef.current = window.setTimeout(() => {
@@ -252,10 +244,11 @@ export function useLiveVoice({
       const utterance = stripVoiceAnnotations(inputTranscriptRef.current);
       if (pendingDelegationsRef.current.length > 0) return;
       inputTranscriptRef.current = '';
-      lastSilenceFlushAtRef.current = Date.now();
-      if (utterance) onHeardTurnRef.current?.(utterance);
+      if (!utterance) return;
+      fallbackOnlyRef.current = true;
+      deliverUtterance(utterance, null);
     }, UTTERANCE_SILENCE_FLUSH_MS);
-  }, [clearSilenceTimer]);
+  }, [clearSilenceTimer, deliverUtterance]);
 
   const handleServerEvent = useCallback(
     (raw: string) => {
@@ -307,15 +300,7 @@ export function useLiveVoice({
           break;
         case 'session.delegation.created':
           if (event.delegation?.target === 'client' && event.delegation.id) {
-            // A delegation arriving just after the silence flush already sent
-            // that utterance; attaching it to the next one would skew replies.
-            if (
-              !inputTranscriptRef.current.trim() &&
-              Date.now() - lastSilenceFlushAtRef.current <
-                STALE_DELEGATION_WINDOW_MS
-            ) {
-              break;
-            }
+            if (fallbackOnlyRef.current) break;
             pendingDelegationsRef.current.push(event.delegation.id);
             scheduleDelegationFlush();
           }
@@ -385,6 +370,7 @@ export function useLiveVoice({
 
       inputTranscriptRef.current = '';
       pendingDelegationsRef.current = [];
+      fallbackOnlyRef.current = false;
       setActive(false);
       setStatus('idle');
       setStartedAt(null);

@@ -40,19 +40,19 @@ After setup, verify that Roomote can:
 - clone the repository inside a task sandbox
 - push a branch or open a reviewable change when the task finishes
 
-## Manage existing pull requests
+## Manage pull requests from tasks
 
-Roomote can act on an existing pull request or merge request when you identify
-it by repository and number. Across supported providers, an agent can update its
-title or description, retarget its base branch, close it without merging, and
-reopen it later. These actions update the identified pull request; they do not
-create a replacement or delete its source branch.
+During an environment-backed task, Roomote can update, close, or reopen pull
+requests and merge requests on GitHub, GitLab, Gitea, Bitbucket Cloud, and Azure
+DevOps. Updates can change the target branch, title, description, or draft state
+when the provider exposes that capability. Gitea cannot clear a native draft
+state through this interface; Bitbucket and Azure DevOps draft updates are
+skipped when the provider does not return the current draft state.
 
-Draft-state changes depend on what the provider exposes. GitHub supports moving
-between draft and ready states, while another provider may apply the supported
-fields and report that the draft transition was unavailable. Roomote reports
-these provider gaps and partial results instead of claiming the whole update
-failed or silently creating a new pull request.
+Closing does not merge the change or delete its source branch. The provider may
+describe the resulting state as closed, declined, or abandoned. Roomote reports
+when a requested provider operation was unsupported instead of treating it as
+applied.
 
 ## Attribution on pull requests and commits
 

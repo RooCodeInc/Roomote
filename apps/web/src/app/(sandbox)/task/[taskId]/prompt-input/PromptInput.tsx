@@ -479,6 +479,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         const result = await trpcClient.taskRuns.cancel.mutate({
           taskId,
           runId,
+          terminate: false,
         });
 
         if (!result.success) {

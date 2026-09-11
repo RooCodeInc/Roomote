@@ -40,6 +40,8 @@ const mocks = vi.hoisted(() => ({
   teamsUpdateMessage: vi.fn(),
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
+  createAgentMailProvider: vi.fn(),
+  agentMailPostMessage: vi.fn(),
   findTeamsConversationRoute: vi.fn(),
   recordProviderMessage: vi.fn(),
   enqueueTask: vi.fn(),
@@ -255,6 +257,11 @@ vi.mock('./telegram-communication', () => ({
     mocks.createTelegramProvider,
 }));
 
+vi.mock('./agentmail-communication', () => ({
+  createAgentMailCommunicationProviderFromRuntimeCredentials:
+    mocks.createAgentMailProvider,
+}));
+
 vi.mock('../automations/destination', () => ({
   findTeamsConversationRoute: mocks.findTeamsConversationRoute,
 }));
@@ -439,6 +446,15 @@ describe('deliverFastAgentParentEvent', () => {
       postMessage: mocks.telegramPostMessage,
       sendChatAction: mocks.telegramTyping,
       editMessageText: mocks.telegramEditMessage,
+    });
+    mocks.agentMailPostMessage.mockResolvedValue({
+      provider: 'agentmail',
+      channelId: 'roomote@agentmail.test',
+      messageId: 'agentmail-message-1',
+    });
+    mocks.createAgentMailProvider.mockResolvedValue({
+      provider: 'agentmail',
+      postMessage: mocks.agentMailPostMessage,
     });
     mocks.findTeamsConversationRoute.mockResolvedValue({
       serviceUrl: 'https://smba.example.com/amer/',
@@ -2741,6 +2757,13 @@ describe('deliverFastAgentParentEvent', () => {
       serviceUrl: undefined,
     },
     {
+      surface: 'agentmail' as const,
+      workspaceId: 'roomote@agentmail.test',
+      channelId: 'roomote@agentmail.test',
+      threadId: undefined,
+      serviceUrl: undefined,
+    },
+    {
       surface: 'teams' as const,
       workspaceId: 'tenant-1',
       channelId: 'teams-channel-1',
@@ -2933,6 +2956,13 @@ describe('deliverFastAgentParentEvent', () => {
       threadId: undefined,
       serviceUrl: undefined,
     },
+    {
+      surface: 'agentmail' as const,
+      workspaceId: 'roomote@agentmail.test',
+      channelId: 'roomote@agentmail.test',
+      threadId: undefined,
+      serviceUrl: undefined,
+    },
   ])(
     'keeps launch_task provider-neutral during a $surface parent event',
     async ({ surface, workspaceId, channelId, threadId, serviceUrl }) => {
@@ -2974,12 +3004,14 @@ describe('deliverFastAgentParentEvent', () => {
             payload: expect.objectContaining({
               communicationProvider: surface,
               communicationChannelId: channelId,
-              ...(threadId
-                ? {
-                    communicationThreadId: threadId,
-                    communicationMessageId: threadId,
-                  }
-                : {}),
+              ...(surface === 'agentmail'
+                ? { communicationThreadId: 'agentmail-conversation-1' }
+                : threadId
+                  ? {
+                      communicationThreadId: threadId,
+                      communicationMessageId: threadId,
+                    }
+                  : {}),
               ...(serviceUrl ? { communicationServiceUrl: serviceUrl } : {}),
               communicationContextInherited: true,
               fastAgentSessionId: parent.sessionId,

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENTMAIL_MAX_TEXT_LENGTH,
   buildAgentMailEmailBody,
+  formatAgentMailFooterMarkdown,
   renderAgentMailHtml,
   renderAgentMailPlainText,
 } from '../agentmail-format';
@@ -119,5 +120,16 @@ describe('buildAgentMailEmailBody', () => {
     expect(body.text.endsWith('[message truncated]')).toBe(true);
     expect(body.text.length).toBeLessThanOrEqual(AGENTMAIL_MAX_TEXT_LENGTH);
     expect(body.html.endsWith('[message truncated]</p></div>')).toBe(true);
+  });
+
+  it('renders the reply footer smaller in html and separates it with -- in plain text', () => {
+    const footer = formatAgentMailFooterMarkdown(
+      'Reply anytime · [Open in Roomote](https://roomote.example/sessions/1)',
+    );
+
+    expect(buildAgentMailEmailBody(`Body text\n\n${footer}`)).toEqual({
+      html: '<div><p>Body text</p><p style="font-size:0.875em">Reply anytime · <a href="https://roomote.example/sessions/1">Open in Roomote</a></p></div>',
+      text: `Body text\n\n--\nReply anytime · Open in Roomote (https://roomote.example/sessions/1)`,
+    });
   });
 });

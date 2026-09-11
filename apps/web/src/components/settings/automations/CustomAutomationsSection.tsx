@@ -16,6 +16,7 @@ import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   NO_REPOSITORIES,
+  getAutomationTargetEmailIdentityId,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
@@ -85,7 +86,7 @@ type CustomAutomationFormState = {
   /** Provider/model launch override; empty string means deployment default. */
   model: string;
   reasoningEffort: ReasoningEffort | null;
-  targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
+  targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram' | 'email';
   targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
 };
@@ -123,12 +124,14 @@ const DESTINATION_OPTIONS: Array<{
     | 'slackConnected'
     | 'discordConnected'
     | 'teamsConnected'
-    | 'telegramConnected';
+    | 'telegramConnected'
+    | 'emailConnected';
 }> = [
   { value: 'slack', label: 'Slack', capability: 'slackConnected' },
   { value: 'discord', label: 'Discord', capability: 'discordConnected' },
   { value: 'teams', label: 'Teams', capability: 'teamsConnected' },
   { value: 'telegram', label: 'Telegram', capability: 'telegramConnected' },
+  { value: 'email', label: 'Email', capability: 'emailConnected' },
 ];
 
 function scheduleLabel(mode: CustomAutomationScheduleMode): string {
@@ -273,7 +276,8 @@ function targetFromRow(row: CustomAutomationListItem): {
   const provider =
     row.target.provider === 'discord' ||
     row.target.provider === 'teams' ||
-    row.target.provider === 'telegram'
+    row.target.provider === 'telegram' ||
+    row.target.provider === 'email'
       ? row.target.provider
       : 'slack';
   return {
@@ -281,9 +285,12 @@ function targetFromRow(row: CustomAutomationListItem): {
     mode: isBackgroundAutomationUserTargetKind(row.target.targetKind)
       ? 'direct_message'
       : 'channel',
-    channelId: isBackgroundAutomationUserTargetKind(row.target.targetKind)
-      ? ''
-      : (row.target.externalRef ?? ''),
+    channelId:
+      row.target.provider === 'email'
+        ? (getAutomationTargetEmailIdentityId(row.target) ?? '')
+        : isBackgroundAutomationUserTargetKind(row.target.targetKind)
+          ? ''
+          : (row.target.externalRef ?? ''),
   };
 }
 
@@ -295,6 +302,7 @@ function formFromRow(
   const targetIsConnected =
     connectedProviders === null ||
     target.provider === 'none' ||
+    target.provider === 'email' ||
     connectedProviders.includes(target.provider);
   return {
     name: row.name,
@@ -327,7 +335,7 @@ function writeInputFromRow(row: CustomAutomationListItem) {
       ? {
           targetProvider: target.provider,
           targetMode: target.mode,
-          ...(target.mode === 'channel'
+          ...(target.mode === 'channel' || target.provider === 'email'
             ? { targetChannelId: target.channelId }
             : {}),
         }
@@ -427,6 +435,15 @@ export function CustomAutomationsSection({
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Email identities belong to the automation owner (runs execute as the
+  // creator), so editing an existing automation lists the owner's identities
+  // rather than the viewer's. Same shape as the base options query.
+  const ownerOptionsQuery = useQuery(
+    trpc.automations.getCustomAutomationOptions.queryOptions(
+      { automationId: editingId ?? undefined },
+      { enabled: Boolean(editingId) },
+    ),
+  );
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
@@ -496,6 +513,41 @@ export function CustomAutomationsSection({
         label: channel.label ?? channel.name,
       })),
     [discordChannelsQuery.data?.channels],
+  );
+  const emailIdentities = editingId
+    ? ownerOptionsQuery.data?.emailIdentities
+    : optionsQuery.data?.emailIdentities;
+  const emailOptions = useMemo(
+    () =>
+      (emailIdentities ?? []).map((identity) => ({
+        id: identity.id,
+        name: identity.emailAddress,
+        label: `${identity.emailAddress} · Verified`,
+      })),
+    [emailIdentities],
+  );
+  const visibleEmailOptions = useMemo(
+    () =>
+      form.targetProvider === 'email' &&
+      form.targetChannelId &&
+      !(editingId && ownerOptionsQuery.isPending) &&
+      !emailOptions.some((identity) => identity.id === form.targetChannelId)
+        ? [
+            ...emailOptions,
+            {
+              id: form.targetChannelId,
+              name: 'Email',
+              label: 'Email · No longer available',
+            },
+          ]
+        : emailOptions,
+    [
+      editingId,
+      emailOptions,
+      form.targetChannelId,
+      form.targetProvider,
+      ownerOptionsQuery.isPending,
+    ],
   );
 
   const invalidate = async () => {
@@ -739,6 +791,7 @@ export function CustomAutomationsSection({
 
     setForm((current) =>
       current.targetProvider === 'none' ||
+      current.targetProvider === 'email' ||
       connectedDestinationProviders.includes(current.targetProvider)
         ? current
         : {
@@ -765,11 +818,13 @@ export function CustomAutomationsSection({
     }
     if (
       form.targetProvider !== 'none' &&
-      form.targetMode === 'channel' &&
+      (form.targetMode === 'channel' || form.targetProvider === 'email') &&
       !form.targetChannelId.trim()
     ) {
       toast.error(
-        'Choose a destination channel, or set the destination to None.',
+        form.targetProvider === 'email'
+          ? 'Choose an Email identity, or set the destination to None.'
+          : 'Choose a destination channel, or set the destination to None.',
       );
       return;
     }
@@ -788,7 +843,7 @@ export function CustomAutomationsSection({
         ? {
             targetProvider: form.targetProvider,
             targetMode: form.targetMode,
-            ...(form.targetMode === 'channel'
+            ...(form.targetMode === 'channel' || form.targetProvider === 'email'
               ? { targetChannelId: form.targetChannelId }
               : {}),
           }
@@ -1006,8 +1061,10 @@ export function CustomAutomationsSection({
             availableProviders={connectedDestinationProviders}
             slackOptions={slackOptions}
             discordOptions={discordOptions}
+            emailOptions={visibleEmailOptions}
             defaultSlackChannelId={managerSlackChannelId}
             defaultDiscordChannelId={managerDiscordChannelId}
+            defaultEmailIdentityId={emailOptions[0]?.id ?? ''}
             disabled={busy}
             onChange={(destination) =>
               setForm((current) => ({
@@ -1020,7 +1077,7 @@ export function CustomAutomationsSection({
           />
           <p className="text-sm text-muted-foreground">
             {form.targetProvider === 'none'
-              ? 'Each run is a Session in the web app and does not post to chat.'
+              ? 'Each run is a Session in the web app and does not send a report.'
               : 'Each run is a Session that reports findings and failures here, and replies continue it.'}
           </p>
         </div>
@@ -1078,12 +1135,16 @@ export function CustomAutomationsSection({
           setForm({
             ...EMPTY_FORM,
             targetProvider,
+            targetMode:
+              targetProvider === 'email' ? 'direct_message' : 'channel',
             targetChannelId:
               targetProvider === 'slack'
                 ? managerSlackChannelId
                 : targetProvider === 'discord'
                   ? managerDiscordChannelId
-                  : '',
+                  : targetProvider === 'email'
+                    ? (emailOptions[0]?.id ?? '')
+                    : '',
           });
           setResolvedCron(null);
           setScheduleSummary(null);

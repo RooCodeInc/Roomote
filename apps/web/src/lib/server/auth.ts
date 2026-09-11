@@ -59,6 +59,10 @@ type RoomoteAuth = {
       headers: Headers;
       query?: { disableRefresh?: boolean };
     }): Promise<AuthSessionResult>;
+    sendVerificationEmail(input: {
+      body: { callbackURL: string; email: string };
+      headers: Headers;
+    }): Promise<unknown>;
     requestPasswordReset(input: {
       body: {
         email: string;
@@ -82,6 +86,7 @@ let authSignature: string | null = null;
 const resetPasswordLinkCapture = new AsyncLocalStorage<{
   url?: string;
 }>();
+const verificationEmailDeliveryRequired = new AsyncLocalStorage<boolean>();
 export const PASSWORD_RESET_TOKEN_EXPIRES_IN_SECONDS = 60 * 60;
 
 export async function capturePasswordResetLink(
@@ -90,6 +95,20 @@ export async function capturePasswordResetLink(
   const capture: { url?: string } = {};
   await resetPasswordLinkCapture.run(capture, callback);
   return capture.url ?? null;
+}
+
+export async function sendAuthenticatedVerificationEmail(input: {
+  callbackURL: string;
+  email: string;
+  headers: Headers;
+}): Promise<void> {
+  const roomoteAuth = await getAuth();
+  await verificationEmailDeliveryRequired.run(true, () =>
+    roomoteAuth.api.sendVerificationEmail({
+      body: { email: input.email, callbackURL: input.callbackURL },
+      headers: input.headers,
+    }),
+  );
 }
 type MicrosoftAuthAccountHookRow = {
   id?: unknown;
@@ -1112,8 +1131,8 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
           // Verification is offered, never required: a new password sign-up
           // gets a verification email so its address can be recognized on
           // the email channel, and signs in right away regardless. Accounts
-          // from before the channel was enabled connect their address through
-          // the email-link flow instead (the refusal email carries the link).
+          // from before the channel was enabled verify from Personal settings
+          // > Linked Accounts (Resend).
           emailVerification: {
             sendOnSignUp: true,
             autoSignInAfterVerification: true,
@@ -1136,6 +1155,11 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
                 console.warn(
                   `[auth] Could not send the verification email to ${user.email} (${result.reason}).`,
                 );
+                if (verificationEmailDeliveryRequired.getStore()) {
+                  throw new Error(
+                    'Verification email could not be delivered. Check the address or ask an admin to check the email configuration.',
+                  );
+                }
               }
             },
           },

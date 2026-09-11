@@ -63,3 +63,8 @@ in token totals even though it contributes no cost. A request with neither
 pricing nor token usage cannot contribute to those metrics. Use provider and
 model filters to narrow an investigation when totals do not match an external
 provider invoice.
+
+Deleting a task does not remove its recorded inference usage from Cost
+Analytics. The historical usage still contributes to totals, task counts, and
+averages, but its detail row becomes **Deleted task** and no longer exposes the
+task title, user, task type, pull request, or task link.

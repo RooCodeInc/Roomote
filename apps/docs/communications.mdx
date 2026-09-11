@@ -56,18 +56,18 @@ the exact suggestion you want by reacting to its message:
 
 The person starting the suggestion must have a linked Roomote account. Roomote
 also needs an environment that can run the suggestion's target repository.
-Each accepted Slack suggestion starts in its own top-level execution thread and
-Session, so independent follow-ups do not share task context with each other.
 Configured **Call Roomote via emoji** automations are separate from these
 suggestion reactions.
 
 When the suggestion is not pinned to an execution target, Fast-capable chat
 surfaces start it in Fast so Roomote can answer or delegate as needed. A pinned
 environment, repository-only surface, or provider without Fast support starts
-the coding task directly. The launch links back to the originating report for
-context, while its execution and follow-up conversation remain isolated. Thread
-or topic placement on providers other than Slack depends on the provider and
-execution target.
+the coding task directly. On Slack, each accepted suggestion starts in its own
+top-level execution thread and Session, while retaining its connection to the
+report that proposed it. Separate suggestions therefore do not share execution
+conversation state, and retrying the same accepted suggestion reuses its
+execution thread. Thread or topic placement on other providers depends on the
+provider and execution target.
 
 ## React to Roomote replies
 

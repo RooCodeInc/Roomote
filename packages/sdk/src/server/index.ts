@@ -276,23 +276,27 @@ export {
 } from './lib/agentmail/rui-answer-links';
 
 export {
-  buildAgentMailEmailLinkToken,
-  buildAgentMailEmailLinkUrl,
   buildAgentMailUnsubscribeToken,
   buildAgentMailUnsubscribeUrl,
-  verifyAgentMailEmailLinkToken,
   verifyAgentMailUnsubscribeToken,
-} from './lib/agentmail/email-link-tokens';
+} from './lib/agentmail/unsubscribe-tokens';
 
 export {
+  AgentMailRecipientUnavailableError,
   canStartAgentMailConversationWithUser,
   isAgentMailAddressSuppressed,
+  listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
   resolveAgentMailOutboundAddress,
+  resolveAgentMailOutboundIdentity,
   sendAgentMailSystemEmail,
   startAgentMailConversation,
+  startAgentMailConversationWithResult,
   suppressAgentMailAddress,
   type AgentMailOutboundAddressResolution,
+  type AgentMailOutboundIdentity,
   type AgentMailSystemEmailResult,
+  type StartAgentMailConversationResult,
   type AgentMailSuppressionReason,
 } from './lib/agentmail/outbound';
 
@@ -303,7 +307,6 @@ export {
   processAgentMailWebhookEvent,
   recordAgentMailWebhookEvent,
   recoverPendingAgentMailWork,
-  redispatchAgentMailEventsForSender,
   type AgentMailWebhookEventJob,
 } from './lib/agentmail/inbound';
 

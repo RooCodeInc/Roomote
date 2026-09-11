@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   agentmailConversationParticipants,
   agentmailConversations,
-  agentmailUserMappings,
+  authUsers,
   db,
   eq,
   userFactory,
@@ -18,12 +18,13 @@ import {
 const INBOX = 'roomote-test@agentmail.to';
 
 async function mappedUser() {
-  const user = await userFactory.create();
   const email = `${randomUUID()}@example.com`;
-  await db.insert(agentmailUserMappings).values({
-    emailAddress: email,
-    userId: user.id,
-    source: 'link_code',
+  const user = await userFactory.create({ email });
+  await db.insert(authUsers).values({
+    id: user.id,
+    name: user.name ?? 'Test User',
+    email,
+    emailVerified: true,
   });
   return { user, email };
 }

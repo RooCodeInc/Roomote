@@ -93,7 +93,7 @@ function WakeupRow({
         <BasicTooltip
           content={
             canCancel
-              ? 'Cancel wakeup'
+              ? 'Cancel timer'
               : 'Only the Session owner or an admin can cancel'
           }
         >
@@ -161,7 +161,7 @@ export function SessionWakeupList({
 
   if (!hasWakeups) return null;
   return (
-    <ul aria-label="Scheduled wakeups" className="border-b border-border/50">
+    <ul aria-label="Scheduled timers" className="border-b border-border/50">
       {active.map((wakeup) => (
         <WakeupRow
           key={wakeup.id}

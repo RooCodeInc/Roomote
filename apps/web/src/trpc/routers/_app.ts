@@ -192,8 +192,8 @@ import {
   createDiscordLinkCodeCommand,
   unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
-  previewEmailLinkCommand,
-  linkEmailAddressCommand,
+  getLinkedEmailAccountsCommand,
+  resendPrimaryEmailVerificationCommand,
 } from '../commands/linked-accounts';
 import {
   getPersonalAccountCapabilitiesCommand,
@@ -858,9 +858,11 @@ const automationsRouter = createRouter({
     listCustomAutomationsCommand(auth),
   ),
 
-  getCustomAutomationOptions: protectedProcedure.query(({ ctx: { auth } }) =>
-    getCustomAutomationOptionsCommand(auth),
-  ),
+  getCustomAutomationOptions: protectedProcedure
+    .input(z.object({ automationId: z.string().uuid().optional() }).optional())
+    .query(({ ctx: { auth }, input }) =>
+      getCustomAutomationOptionsCommand(auth, input ?? {}),
+    ),
 
   createCustomAutomation: protectedProcedure
     .input(
@@ -893,7 +895,7 @@ const automationsRouter = createRouter({
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -935,7 +937,7 @@ const automationsRouter = createRouter({
           z.literal(FAST_EXECUTION),
         ]),
         targetProvider: z
-          .enum(['slack', 'discord', 'teams', 'telegram'])
+          .enum(['slack', 'discord', 'teams', 'telegram', 'email'])
           .optional(),
         targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -1171,6 +1173,7 @@ export const appRouter = createRouter({
         z.object({
           taskId: z.string(),
           runId: z.number().int().optional(),
+          terminate: z.boolean().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>
@@ -1504,6 +1507,14 @@ export const appRouter = createRouter({
   }),
 
   linkedAccounts: createRouter({
+    email: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedEmailAccountsCommand(auth),
+    ),
+
+    resendEmailVerification: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      resendPrimaryEmailVerificationCommand(auth),
+    ),
+
     github: protectedProcedure.query(({ ctx: { auth } }) =>
       getLinkedGitHubAccountCommand(auth),
     ),
@@ -1571,18 +1582,6 @@ export const appRouter = createRouter({
     unlinkDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
       unlinkLinkedDiscordAccountCommand(auth),
     ),
-
-    previewEmailLink: protectedProcedure
-      .input(z.object({ token: z.string().min(1) }))
-      .query(({ ctx: { auth }, input }) =>
-        previewEmailLinkCommand(auth, input.token),
-      ),
-
-    linkEmailAddress: protectedProcedure
-      .input(z.object({ token: z.string().min(1) }))
-      .mutation(({ ctx: { auth }, input }) =>
-        linkEmailAddressCommand(auth, input.token),
-      ),
   }),
 
   preferences: createRouter({
