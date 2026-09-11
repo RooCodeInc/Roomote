@@ -83,7 +83,7 @@ const PROVIDER_LABELS: Record<
 };
 
 type CustomAutomationDestination =
-  | ResolvedAutomationDestination
+  | (ResolvedAutomationDestination & { isDirectMessage?: boolean })
   | {
       provider: 'email';
       userId: string;
@@ -209,6 +209,7 @@ async function resolveOwnerFallbackDestination(
           provider,
           ...destination,
           source: 'automation_target',
+          isDirectMessage: true,
         };
       }
     } catch (error) {
@@ -315,7 +316,7 @@ async function buildFastAutomationConversation(params: {
     if (!provider) {
       throw new Error('Discord is not connected.');
     }
-    if (target?.targetKind === 'discord_user') {
+    if (target?.targetKind === 'discord_user' || destination.isDirectMessage) {
       const posted = await provider.postMessage({
         channelId: destination.channelId,
         text: `${automation.name} is running.`,

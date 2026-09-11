@@ -1309,6 +1309,37 @@ describe('customAutomationsJob', () => {
     });
   });
 
+  it('treats a destinationless Discord fallback as a direct message', async () => {
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'discord',
+    ]);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
+      channelId: 'discord-dm-1',
+    });
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      { ...automation, target: {} } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result).toMatchObject({ queued: true, errors: [] });
+    expect(
+      db.query.discordInstallationChannels.findFirst,
+    ).not.toHaveBeenCalled();
+    expect(fastMocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: 'discord-dm-1' }),
+    );
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: expect.stringContaining(`${automation.id}:`),
+        replyTarget: { channelId: 'discord-dm-1' },
+      },
+    });
+  });
+
   it('fails an ownerless environment automation until a run-as user exists', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, createdByUserId: null } as never,
