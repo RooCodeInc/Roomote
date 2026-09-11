@@ -295,12 +295,9 @@ describe('useLiveVoice', () => {
     expect(playVoiceCue).not.toHaveBeenCalled();
   });
 
-  it('falls back to Fast once and ignores a late delegation for that utterance', async () => {
+  it('stays in fallback-only mode after a missed delegation', async () => {
     const onUtterance = vi.fn();
-    const onSpokenTurn = vi.fn();
-    const { result } = renderHook(() =>
-      useLiveVoice({ onUtterance, onSpokenTurn }),
-    );
+    const { result } = renderHook(() => useLiveVoice({ onUtterance }));
 
     await act(async () => result.current.start());
     act(() => {
@@ -332,23 +329,11 @@ describe('useLiveVoice', () => {
       null,
     );
 
-    // Direct Live output is still recorded, but it is not a second request.
+    // Neither A's late delegation nor B's own delegation can be correlated
+    // after fallback, even well beyond the old three-second window. Both are
+    // ignored and B uses the same safe path.
     act(() => {
-      FakePeer.instance.channel.emit({
-        type: 'session.output_transcript.delta',
-        delta: 'Glad to ',
-      });
-      FakePeer.instance.channel.emit({
-        type: 'session.output_transcript.delta',
-        delta: 'hear it.',
-      });
-      vi.advanceTimersByTime(1_200);
-    });
-    expect(onSpokenTurn).toHaveBeenCalledWith('Glad to hear it.');
-
-    // A delegation that arrives after fallback must not submit the utterance
-    // again or get attached to the next one.
-    act(() => {
+      vi.advanceTimersByTime(10_000);
       FakePeer.instance.channel.emit({
         type: 'session.delegation.created',
         delegation: { id: 'item_late', target: 'client' },
@@ -368,13 +353,70 @@ describe('useLiveVoice', () => {
         type: 'session.delegation.created',
         delegation: { id: 'item_next', target: 'client' },
       });
+      vi.advanceTimersByTime(1_500);
+    });
+    await act(async () => {});
+    expect(onUtterance).toHaveBeenLastCalledWith('Now check the build.', null);
+    expect(onUtterance).toHaveBeenCalledTimes(2);
+
+    act(() => result.current.stop());
+    await act(async () => result.current.start());
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        delegation: { id: 'item_new_call', target: 'client' },
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Fresh call',
+      });
       vi.advanceTimersByTime(250);
     });
     await act(async () => {});
     expect(onUtterance).toHaveBeenLastCalledWith(
-      'Now check the build.',
-      'item_next',
+      'Fresh call.',
+      'item_new_call',
     );
+    expect(onUtterance).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not attach A late delegation after utterance B has started', async () => {
+    const onUtterance = vi.fn();
+    const { result } = renderHook(() => useLiveVoice({ onUtterance }));
+
+    await act(async () => result.current.start());
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'First request',
+      });
+      vi.advanceTimersByTime(1_500);
+    });
+    await act(async () => {});
+    expect(onUtterance).toHaveBeenCalledWith('First request.', null);
+
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Second ',
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        delegation: { id: 'item_first_late', target: 'client' },
+      });
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'request',
+      });
+      vi.advanceTimersByTime(250);
+    });
+    expect(onUtterance).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(1_250);
+    });
+    await act(async () => {});
+    expect(onUtterance).toHaveBeenLastCalledWith('Second request.', null);
     expect(onUtterance).toHaveBeenCalledTimes(2);
   });
 
