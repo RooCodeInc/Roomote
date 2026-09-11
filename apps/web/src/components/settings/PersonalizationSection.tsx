@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 
 import {
   Button,
+  Check,
   Label,
   RotateCcw,
   Sparkles,
@@ -57,7 +58,8 @@ export function PersonalizationSection() {
       <div className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="personalization-instructions">
-            Personal instructions
+            Things Roomote should always know about you to be more useful. Not
+            shared with others.
           </Label>
           <Textarea
             id="personalization-instructions"
@@ -65,15 +67,11 @@ export function PersonalizationSection() {
             disabled={isBusy}
             maxLength={8_000}
             rows={7}
+            className="md:min-h-64"
             placeholder="For example: Keep answers concise, lead with a recommendation, and use examples when explaining unfamiliar concepts."
             onChange={(event) => setInstructions(event.target.value)}
           />
-          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <p>
-              Used privately to tailor your conversations and tasks. It is not
-              shared with other members or admins through Roomote&apos;s normal
-              UI or API.
-            </p>
+          <div className="flex justify-end text-xs text-muted-foreground">
             <span className="shrink-0">{instructions.length}/8,000</span>
           </div>
         </div>
@@ -96,22 +94,17 @@ export function PersonalizationSection() {
               Learn from conversations
             </p>
             <p className="text-sm text-foreground">
-              Save durable preferences you state and modest, revisable style
-              patterns. Turning this off keeps your saved instructions active.
+              Disable if you don&apos;t want Roomote to learn automatically. Any
+              content here will still be used.
             </p>
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground">
-          Personalization remains subject to your deployment&apos;s
-          infrastructure access, backups, and retention policies. Roomote does
-          not enrich it from public profiles or the web.
-        </p>
-
-        <div className="flex flex-wrap justify-between gap-2">
+        <div className="flex flex-wrap justify-start gap-2">
           <Button
             type="button"
             variant="outline"
+            size="sm"
             disabled={isBusy || !settings}
             onClick={() => {
               if (!settings) return;
@@ -125,17 +118,22 @@ export function PersonalizationSection() {
           </Button>
           <Button
             type="button"
+            size="sm"
             disabled={isBusy || !settings || !hasChanges}
             onClick={() => {
               if (!settings) return;
               update.mutate(
                 { expectedVersion: settings.version, instructions },
                 {
-                  onSuccess: () => toast.success('Personal instructions saved'),
+                  onSuccess: () =>
+                    toast.success(
+                      "Personal instructions saved. They'll apply in your next new session.",
+                    ),
                 },
               );
             }}
           >
+            <Check />
             Save
           </Button>
         </div>

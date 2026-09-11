@@ -45,9 +45,14 @@ describe('PersonalizationSection', () => {
   it('saves an edited blob with its concurrency version', () => {
     render(<PersonalizationSection />);
 
-    fireEvent.change(screen.getByLabelText('Personal instructions'), {
-      target: { value: 'Lead with a recommendation.' },
-    });
+    fireEvent.change(
+      screen.getByLabelText(
+        'Things Roomote should always know about you to be more useful. Not shared with others.',
+      ),
+      {
+        target: { value: 'Lead with a recommendation.' },
+      },
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(mocks.mutate).toHaveBeenCalledWith(
