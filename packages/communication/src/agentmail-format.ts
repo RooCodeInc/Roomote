@@ -25,6 +25,24 @@ function truncateAgentMailMarkdown(markdown: string): string {
     return markdown;
   }
 
+  const finalLineStart = markdown.lastIndexOf('\n') + 1;
+  const footer = markdown.slice(finalLineStart);
+
+  if (footer.startsWith(AGENTMAIL_FOOTER_PREFIX)) {
+    const separator = '\n\n';
+    const bodyLength =
+      AGENTMAIL_MAX_TEXT_LENGTH -
+      TRUNCATION_SUFFIX.length -
+      separator.length -
+      footer.length;
+
+    if (bodyLength >= 0) {
+      return (
+        markdown.slice(0, bodyLength) + TRUNCATION_SUFFIX + separator + footer
+      );
+    }
+  }
+
   return (
     markdown.slice(0, AGENTMAIL_MAX_TEXT_LENGTH - TRUNCATION_SUFFIX.length) +
     TRUNCATION_SUFFIX
@@ -125,9 +143,13 @@ const UNORDERED_ITEM_PATTERN = /^[-*+]\s+(.*)$/;
 const ORDERED_ITEM_PATTERN = /^\d+[.)]\s+(.*)$/;
 const BLOCKQUOTE_PATTERN = /^>\s?(.*)$/;
 
-function splitBlocks(text: string): MarkdownBlock[] {
+function splitBlocks(
+  text: string,
+  recognizeFinalFooter = false,
+): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
   let current: MarkdownBlock | null = null;
+  const lines = text.split('\n');
 
   const flush = () => {
     if (current) {
@@ -136,7 +158,7 @@ function splitBlocks(text: string): MarkdownBlock[] {
     }
   };
 
-  for (const line of text.split('\n')) {
+  for (const [index, line] of lines.entries()) {
     if (!line.trim()) {
       flush();
       continue;
@@ -144,7 +166,11 @@ function splitBlocks(text: string): MarkdownBlock[] {
 
     const heading = HEADING_PATTERN.exec(line);
 
-    if (line.startsWith(AGENTMAIL_FOOTER_PREFIX)) {
+    if (
+      recognizeFinalFooter &&
+      index === lines.length - 1 &&
+      line.startsWith(AGENTMAIL_FOOTER_PREFIX)
+    ) {
       flush();
       blocks.push({
         kind: 'footer',
@@ -253,8 +279,10 @@ function renderBlock(block: MarkdownBlock): string {
  * escaped text.
  */
 export function renderAgentMailHtml(markdown: string): string {
-  return splitCodeFences(truncateAgentMailMarkdown(markdown))
-    .map((segment) => {
+  const segments = splitCodeFences(truncateAgentMailMarkdown(markdown));
+
+  return segments
+    .map((segment, index) => {
       if (segment.kind === 'code') {
         const escaped = escapeAgentMailHtml(segment.content.replace(/\n$/, ''));
 
@@ -263,7 +291,9 @@ export function renderAgentMailHtml(markdown: string): string {
           : `<pre><code>${escaped}</code></pre>`;
       }
 
-      return splitBlocks(segment.content).map(renderBlock).join('');
+      return splitBlocks(segment.content, index === segments.length - 1)
+        .map(renderBlock)
+        .join('');
     })
     .join('');
 }
@@ -284,16 +314,22 @@ function stripInlineMarkdown(text: string): string {
  * text stay readable as-is.
  */
 export function renderAgentMailPlainText(markdown: string): string {
-  return splitCodeFences(truncateAgentMailMarkdown(markdown))
-    .map((segment) => {
+  const segments = splitCodeFences(truncateAgentMailMarkdown(markdown));
+
+  return segments
+    .map((segment, index) => {
       if (segment.kind === 'code') {
         return segment.content.replace(/\n$/, '');
       }
 
       return segment.content
         .split('\n')
-        .map((line) => {
-          if (line.startsWith(AGENTMAIL_FOOTER_PREFIX)) {
+        .map((line, lineIndex, lines) => {
+          if (
+            index === segments.length - 1 &&
+            lineIndex === lines.length - 1 &&
+            line.startsWith(AGENTMAIL_FOOTER_PREFIX)
+          ) {
             return `--\n${stripInlineMarkdown(line.slice(AGENTMAIL_FOOTER_PREFIX.length))}`;
           }
 
