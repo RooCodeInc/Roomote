@@ -1386,7 +1386,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByLabelText('Slack Sender')).toHaveTextContent('SS');
   });
 
-  it('updates one canonical tool row from in-progress to completed via the stream', () => {
+  it('hides voice delivery while updating an ordinary tool row via the stream', () => {
     const baseMessage = {
       id: 'tool-1',
       eventId: 'turn-1:tool:0',
@@ -1432,13 +1432,25 @@ describe('FastSessionTranscript', () => {
       createdAt: '2026-01-01T00:00:01.000Z',
     };
 
+    const voiceCommentary = {
+      ...textMessage({
+        id: 'voice-result-1',
+        role: 'assistant' as const,
+        text: 'Internal voice result',
+        ts: 1,
+      }),
+      metadata: { visibleInTranscript: true, voiceCommentary: true },
+    };
+
     render(
       <FastSessionTranscript
         sessionId="session-1"
-        initialMessages={[toolCall]}
+        initialMessages={[voiceCommentary, toolCall]}
       />,
     );
 
+    expect(screen.queryByText(/result to voice/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Internal voice result')).not.toBeInTheDocument();
     expect(screen.getByText('Starting')).toBeInTheDocument();
     expect(screen.getByText('coding task')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
@@ -2349,8 +2361,7 @@ describe('FastSessionTranscript', () => {
       );
 
       // The persisted row shares the stream's id, so only the unread tail is
-      // spoken; nothing is read twice. It renders as a collapsed report, not
-      // a chat bubble: the spoken words are the reply.
+      // spoken; nothing is read twice. Its internal delivery row stays hidden.
       act(() => {
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
@@ -2372,7 +2383,7 @@ describe('FastSessionTranscript', () => {
         'Second part is here.',
         'item_1',
       );
-      expect(screen.getByText(/result to voice/i)).toBeInTheDocument();
+      expect(screen.queryByText(/result to voice/i)).not.toBeInTheDocument();
 
       // A typed message's written reply stays on screen and is not spoken,
       // streamed or persisted.

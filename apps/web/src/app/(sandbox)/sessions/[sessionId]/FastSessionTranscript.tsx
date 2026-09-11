@@ -623,10 +623,8 @@ export function FastSessionTranscript({
               ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
         )
         .map((message) => {
-          // A reply written for the voice is reported aloud; the transcript
-          // keeps it as a collapsed source next to the spoken words, so the
-          // exact result is still there if the call dropped before it was
-          // spoken.
+          // Keep the persisted source in the UI pipeline so it reconciles the
+          // streamed reply in place, but hide this internal voice delivery.
           if (
             message.role === 'assistant' &&
             message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
@@ -642,7 +640,7 @@ export function FastSessionTranscript({
               kind: 'tool_result',
               contentBlocks: [{ type: 'text', text }],
               metadata: {
-                visibleInTranscript: true,
+                visibleInTranscript: false,
                 toolCallId: message.eventId,
               },
               payload: {
