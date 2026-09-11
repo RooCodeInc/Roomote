@@ -58,7 +58,6 @@ describe('custom automation schedule helpers', () => {
       timeZone: 'America/New_York',
       timeZoneUpdatedAt: null,
       lastRunAt: null,
-      createdAt: new Date('2026-09-10T00:00:00Z'),
       now: new Date('2026-09-10T06:55:00Z'),
     };
     expect(
@@ -86,7 +85,6 @@ describe('custom automation schedule helpers', () => {
         timeZone: 'America/New_York',
         timeZoneUpdatedAt: new Date('2026-09-10T06:30:00Z'),
         lastRunAt: new Date('2026-09-09T07:00:00Z'),
-        createdAt: new Date('2026-09-01T00:00:00Z'),
         now: new Date('2026-09-10T06:55:00Z'),
       })?.toISOString(),
     ).toBe('2026-09-11T07:00:00.000Z');
@@ -99,15 +97,14 @@ describe('custom automation schedule helpers', () => {
       timeZone: 'America/Los_Angeles',
       timeZoneUpdatedAt: new Date('2026-09-10T10:30:00Z'),
       lastRunAt: new Date('2026-09-10T08:00:00Z'),
-      createdAt: new Date('2026-09-01T00:00:00Z'),
-      now: new Date('2026-09-10T12:00:00Z'),
+      now: new Date('2026-09-10T11:00:00Z'),
     };
     expect(
       getCustomAutomationNextRunAt({
         ...common,
         scheduleMode: 'every_hour',
       })?.toISOString(),
-    ).toBe('2026-09-10T12:30:00.000Z');
+    ).toBe('2026-09-10T11:30:00.000Z');
     expect(
       getCustomAutomationNextRunAt({
         ...common,
@@ -122,6 +119,42 @@ describe('custom automation schedule helpers', () => {
     ).toBe('2026-09-17T10:30:00.000Z');
   });
 
+  it.each(['every_hour', 'every_6_hours', 'daily', 'weekly'] as const)(
+    'shows a new %s preset as due now after its local boundary',
+    (scheduleMode) => {
+      const now = new Date('2026-09-10T12:00:00Z');
+      expect(
+        getCustomAutomationNextRunAt({
+          enabled: true,
+          scheduleMode,
+          cronExpression: null,
+          timeZone: 'UTC',
+          timeZoneUpdatedAt: null,
+          lastRunAt: null,
+          now,
+        }),
+      ).toEqual(now);
+    },
+  );
+
+  it.each(['every_hour', 'every_6_hours', 'daily', 'weekly'] as const)(
+    'shows an overdue %s preset as due now',
+    (scheduleMode) => {
+      const now = new Date('2026-09-10T12:00:00Z');
+      expect(
+        getCustomAutomationNextRunAt({
+          enabled: true,
+          scheduleMode,
+          cronExpression: null,
+          timeZone: 'UTC',
+          timeZoneUpdatedAt: null,
+          lastRunAt: new Date('2026-08-01T03:00:00Z'),
+          now,
+        }),
+      ).toEqual(now);
+    },
+  );
+
   it.each([
     { enabled: false, scheduleMode: 'daily' as const },
     { enabled: true, scheduleMode: 'off' as const },
@@ -133,7 +166,6 @@ describe('custom automation schedule helpers', () => {
         timeZone: 'UTC',
         timeZoneUpdatedAt: null,
         lastRunAt: null,
-        createdAt: new Date('2026-09-10T00:00:00Z'),
         now: new Date('2026-09-10T01:00:00Z'),
       }),
     ).toBeNull();
@@ -148,7 +180,6 @@ describe('custom automation schedule helpers', () => {
         timeZone: 'UTC',
         timeZoneUpdatedAt: null,
         lastRunAt: null,
-        createdAt: new Date('2026-09-10T00:00:00Z'),
         now: new Date('2026-09-10T01:00:00Z'),
       }),
     ).toBeNull();

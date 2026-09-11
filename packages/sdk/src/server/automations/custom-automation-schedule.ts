@@ -18,6 +18,7 @@ import {
 
 import {
   DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL,
+  isRunDue,
   resolveSlackWorkspaceTimezone,
 } from './scheduling-utils';
 
@@ -142,6 +143,12 @@ const PRESET_INTERVAL_MS: Partial<
   every_6_hours: 6 * 60 * 60 * 1000,
   weekly: 7 * 24 * 60 * 60 * 1000,
 };
+const PRESET_WINDOW_DAYS = {
+  every_hour: 1 / 24,
+  every_6_hours: 6 / 24,
+  daily: 1,
+  weekly: 7,
+};
 
 function localDateKey(date: Date, timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', {
@@ -159,7 +166,6 @@ export function getCustomAutomationNextRunAt(params: {
   timeZone: string;
   timeZoneUpdatedAt: Date | null;
   lastRunAt: Date | null;
-  createdAt: Date;
   now?: Date;
 }): Date | null {
   if (!params.enabled || params.scheduleMode === 'off') return null;
@@ -179,13 +185,31 @@ export function getCustomAutomationNextRunAt(params: {
     }
   }
 
+  const presetLastRunAt = params.timeZoneUpdatedAt
+    ? new Date(
+        Math.max(
+          params.lastRunAt?.getTime() ?? 0,
+          params.timeZoneUpdatedAt.getTime(),
+        ),
+      )
+    : params.lastRunAt;
+  if (
+    isRunDue({
+      now,
+      timeZone: params.timeZone,
+      frequency: params.scheduleMode,
+      lastRunAt: presetLastRunAt,
+      scheduleHourLocal:
+        params.scheduleMode === 'daily' || params.scheduleMode === 'weekly'
+          ? DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL
+          : 0,
+      windowDays: PRESET_WINDOW_DAYS,
+    })
+  ) {
+    return now;
+  }
+
   if (params.scheduleMode === 'daily') {
-    const baseline = new Date(
-      Math.max(
-        params.lastRunAt?.getTime() ?? params.createdAt.getTime(),
-        params.timeZoneUpdatedAt?.getTime() ?? 0,
-      ),
-    );
     let nextRunAt = getCronOccurrence(
       `0 ${DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL} * * *`,
       params.timeZone,
@@ -193,8 +217,9 @@ export function getCustomAutomationNextRunAt(params: {
       now,
     );
     if (
+      presetLastRunAt &&
       localDateKey(nextRunAt, params.timeZone) ===
-      localDateKey(baseline, params.timeZone)
+        localDateKey(presetLastRunAt, params.timeZone)
     ) {
       nextRunAt = getCronOccurrence(
         `0 ${DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL} * * *`,
@@ -209,16 +234,21 @@ export function getCustomAutomationNextRunAt(params: {
   const intervalMs = PRESET_INTERVAL_MS[params.scheduleMode];
   if (!intervalMs) return null;
 
-  const baseline = new Date(
-    Math.max(
-      params.lastRunAt?.getTime() ?? params.createdAt.getTime(),
-      params.timeZoneUpdatedAt?.getTime() ?? 0,
-    ),
-  );
+  if (!presetLastRunAt) {
+    return getCronOccurrence(
+      `0 ${DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL} * * *`,
+      params.timeZone,
+      'next',
+      now,
+    );
+  }
+
   const elapsedIntervals = Math.floor(
-    Math.max(0, now.getTime() - baseline.getTime()) / intervalMs,
+    Math.max(0, now.getTime() - presetLastRunAt.getTime()) / intervalMs,
   );
-  return new Date(baseline.getTime() + (elapsedIntervals + 1) * intervalMs);
+  return new Date(
+    presetLastRunAt.getTime() + (elapsedIntervals + 1) * intervalMs,
+  );
 }
 
 const scheduleResolutionSchema = z

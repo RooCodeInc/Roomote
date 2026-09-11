@@ -432,7 +432,7 @@ export function CustomAutomationsSection({
           .filter((value): value is number => Boolean(value));
         if (nextRuns.length === 0) return false;
         return Math.max(
-          1_000,
+          60_000,
           Math.min(
             NEXT_RUN_REFRESH_MAX_DELAY_MS,
             Math.min(...nextRuns) - Date.now() + 1_000,

@@ -171,7 +171,6 @@ function toListItem(
           timeZone: scheduleContext.timeZone,
           timeZoneUpdatedAt: scheduleContext.updatedAt,
           lastRunAt: row.lastRunAt,
-          createdAt: row.createdAt,
         })
       : null,
   };
