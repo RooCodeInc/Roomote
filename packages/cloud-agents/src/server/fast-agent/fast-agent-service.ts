@@ -2169,7 +2169,12 @@ export async function answerFastAgentQuestion({
   // Platform events (automation reports, task settlements) post whole.
   const surfaceReplyStream = createFastAgentSurfaceReplyStreamer({
     ...(adapter.createReplyStream && !platformEvent
-      ? { createStream: adapter.createReplyStream }
+      ? {
+          createStream: adapter.createReplyStream,
+          ...(adapter.replyStreamStartDelayMs !== undefined
+            ? { startDelayMs: adapter.replyStreamStartDelayMs }
+            : {}),
+        }
       : {}),
   });
   const onAssistantTextUpdated = (update: NonTaskOpenCodeAssistantText) => {

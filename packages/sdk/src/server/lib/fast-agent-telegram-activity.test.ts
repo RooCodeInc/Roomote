@@ -63,7 +63,7 @@ describe('Fast Telegram activity', () => {
     expect(sendMessageDraft).toHaveBeenCalledTimes(2);
   });
 
-  it('coalesces partial text into one paced native draft and finalizes normally', async () => {
+  it('writes the first partial immediately, then paces later coalesced drafts before final delivery', async () => {
     const sendMessageDraft = vi.fn().mockResolvedValue(undefined);
     const deliver = vi.fn().mockResolvedValue({ messageId: 'final-1' });
     const activity = createFastAgentTelegramActivity({
@@ -75,15 +75,31 @@ describe('Fast Telegram activity', () => {
     await vi.advanceTimersByTimeAsync(0);
     const stream = activity.createReplyStream(deliver);
     await stream.append('Partial ');
-    await stream.append('answer');
-    await vi.advanceTimersByTimeAsync(
-      FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS - 1,
-    );
-    expect(sendMessageDraft).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(1);
     expect(sendMessageDraft).toHaveBeenLastCalledWith(
-      expect.objectContaining({ text: 'Partial answer' }),
+      expect.objectContaining({ text: 'Partial ' }),
     );
+
+    await vi.advanceTimersByTimeAsync(
+      FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS / 2,
+    );
+    await stream.append('answer');
+    await stream.append(' in progress');
+    expect(
+      sendMessageDraft.mock.calls
+        .filter(([input]) => input.text)
+        .map(([input]) => input.text),
+    ).toEqual(['Partial ']);
+    await vi.advanceTimersByTimeAsync(
+      FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS / 2,
+    );
+    expect(sendMessageDraft).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: 'Partial answer in progress' }),
+    );
+    expect(
+      sendMessageDraft.mock.calls
+        .filter(([input]) => input.text)
+        .map(([input]) => input.text),
+    ).toEqual(['Partial ', 'Partial answer in progress']);
 
     await expect(
       stream.finish({ purpose: 'closeout', message: 'Final answer' }),
@@ -95,7 +111,7 @@ describe('Fast Telegram activity', () => {
     await activity.settle();
   });
 
-  it('drains an issued draft before final delivery and fences late writes', async () => {
+  it('drains the first non-empty draft before finish and fences late writes', async () => {
     let resolveDraft!: () => void;
     const draft = new Promise<void>((resolve) => {
       resolveDraft = resolve;
@@ -113,15 +129,15 @@ describe('Fast Telegram activity', () => {
     activity.start();
     await vi.advanceTimersByTimeAsync(0);
     const stream = activity.createReplyStream(deliver);
-    await stream.append('Partial');
-    await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS);
+    const appending = stream.append('Partial');
+    await vi.advanceTimersByTimeAsync(0);
     const finishing = stream.finish({
       purpose: 'closeout',
       message: 'Final',
     });
     expect(deliver).not.toHaveBeenCalled();
     resolveDraft();
-    await finishing;
+    await Promise.all([appending, finishing]);
     expect(deliver).toHaveBeenCalledOnce();
     await activity.settle();
     await vi.advanceTimersByTimeAsync(FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS);

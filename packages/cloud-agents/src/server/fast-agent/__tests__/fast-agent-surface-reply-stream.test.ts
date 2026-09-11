@@ -80,6 +80,36 @@ describe('createFastAgentSurfaceReplyStreamer', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('admits a zero-delay stream synchronously and drains its first append before finish', async () => {
+    const { stream, calls } = fakeStream();
+    let release!: () => void;
+    vi.mocked(stream.append).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const createStream = vi.fn(() => stream);
+    const streamer = createFastAgentSurfaceReplyStreamer({
+      createStream,
+      startDelayMs: 0,
+    });
+
+    streamer.update('Streaming', true);
+    expect(createStream).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(0);
+    const delivery = streamer.deliver({
+      purpose: 'closeout',
+      message: 'Streaming complete',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(stream.finish).not.toHaveBeenCalled();
+
+    release();
+    await delivery;
+    expect(calls).toEqual(['finish:Streaming complete']);
+  });
+
   it('aborts an unfinished stream and survives surface failures', async () => {
     const { stream, calls } = fakeStream();
     vi.mocked(stream.append).mockRejectedValueOnce(new Error('rate limited'));

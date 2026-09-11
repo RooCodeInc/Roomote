@@ -9,7 +9,7 @@ export function createFastAgentTypingActivity({
 }): FastAgentTurnActivity & {
   reassert: () => void;
   pause: () => Promise<void>;
-  resume: () => void;
+  resume: () => Promise<void>;
 } {
   let started = false;
   let stopped = false;
@@ -70,9 +70,10 @@ export function createFastAgentTypingActivity({
     reassert,
     pause,
     resume: () => {
-      if (!started || stopped) return;
+      if (!started || stopped) return Promise.resolve();
       paused = false;
       reassert();
+      return inFlight ?? Promise.resolve();
     },
     // Durable parking preserves processing state, not this owner's typing.
     settle: stop,

@@ -264,6 +264,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     });
     const adapter = delivery!.adapter;
     expect(adapter.createReplyStream).toBeTypeOf('function');
+    expect(adapter.replyStreamStartDelayMs).toBe(0);
 
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     try {
