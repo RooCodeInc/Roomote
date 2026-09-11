@@ -115,6 +115,11 @@ Other announcements link to the provider's compare view.
 
 ## Custom automations
 
+**Settings > Automations** shows built-in and custom automations together in a
+searchable list. Filter the list to **All**, **Built-in**, or **Custom** when you
+need a narrower view. Each row shows its current configuration and actions;
+select **Configure** to edit an automation.
+
 Members can list, inspect, edit, enable or disable, delete, and run their own
 custom automations. Admins can perform these actions on all custom automations,
 including those without a creator. These ownership rules apply in the dashboard
@@ -144,13 +149,10 @@ Create arbitrary scheduled agent runs with:
 - an optional **report destination**: a direct message to the automation owner,
   or a channel, through Slack, Discord, Teams, or Telegram
 
-Each automation card summarizes its cadence, workspace target, report destination,
-creator, and most recent run. Blank slate runs do not clone repositories or require
-source-control credentials.
-
-Use **View previous runs** on an automation card to open the task list
-filtered to that automation's runs. For a custom automation, the history is
-scoped to that specific automation rather than all custom automations.
+Each custom automation row summarizes its cadence, workspace target, report
+destination, creator, and most recent run. Its runs also appear as Sessions in
+the normal Session history. Blank slate runs do not clone repositories or
+require source-control credentials.
 
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that
@@ -166,9 +168,11 @@ the automation only needs a specific repository set.
 
 Suggestions can accompany the Session's report after a delegated task finishes,
 not just its initial response. Accepting one keeps the follow-up in the
-originating Session, so earlier findings remain in context. In Slack, launches
-reuse that Session's report thread when it is available. Thread or topic
-placement on other providers depends on the provider and execution target.
+originating report's context. In Slack, each accepted suggestion starts a
+separate top-level execution thread and Session instead of reusing the report
+thread; retrying that same suggestion reuses its execution thread. Thread or
+topic placement on other providers depends on the provider and execution
+target.
 
 For a custom automation you manage, choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
@@ -515,10 +519,13 @@ restore the automation's all-repository behavior using the standard
 destination. Existing **Suggestion preferences** and merged-PR **Additional
 instructions** remain separate and keep their current meaning.
 
-Repositories still need an active connection and a configured environment.
-**Run now** starts at most one eligible investigation per click, using that
-repository's configured destination. CI Failure Triage is webhook-driven; scheduled
-checks do not scan repositories.
+Repositories still need an active source-control connection. CI Failure Triage
+also requires a configured environment for the repository it repairs. Security
+and code-quality scans can inspect connected repositories without an
+environment, but launchable remediation still needs a matching environment.
+**Run now** processes the eligible scope and can produce separate runs for
+different providers, hosts, or report destinations. CI Failure Triage is
+webhook-driven; scheduled checks do not scan repositories.
 
 Follow the [CI failure auto-fix recipe](/cookbook/ci-failure-auto-fix) for a
 copyable noise-control configuration.

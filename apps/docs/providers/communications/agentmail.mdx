@@ -77,12 +77,18 @@ running delegated task receives them as follow-ups. Start a new request with a
 new email so it opens a new thread.
 
 Only verified account email addresses are recognized automatically. Mail from
-an unknown address receives one polite refusal per thread and is otherwise
-ignored — the refusal includes a link to connect the address to your
-Roomote account, and once linked, the emails you already sent are
-processed automatically. Forwarding a Roomote email thread to someone
-else does not give them access to the original conversation or task;
+an unknown address may receive a polite refusal with a link to connect the
+address to a Roomote account. Refusals are limited to one per thread and one per
+sender each day, with a deployment-wide limit of 25 per day. After the address
+is linked, Roomote automatically processes up to 10 previously refused emails
+from that sender from the preceding seven days, oldest first. Older or
+additional messages need to be resent. Forwarding a Roomote email thread to
+someone else does not give them access to the original conversation or task;
 their message starts a separate conversation of their own.
+
+Roomote silently ignores auto-submitted or auto-generated messages and mail
+marked as bulk, list, or junk traffic. This prevents vacation responders,
+mailing lists, and similar automated senders from creating reply loops.
 
 Email is deliberately low-frequency: expect roughly two emails per task, an
 acknowledgment and the result, plus questions when the agent genuinely needs

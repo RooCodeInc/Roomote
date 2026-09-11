@@ -55,3 +55,8 @@ analytics is optional product telemetry sent to the Roomote team.
 If a provider does not report pricing or usage for a request, that request
 cannot contribute a cost to the view. Use provider and model filters to narrow
 an investigation when totals do not match an external provider invoice.
+
+Deleting a task does not remove its recorded inference usage from Cost
+Analytics. The historical usage still contributes to totals, task counts, and
+averages, but its detail row becomes **Deleted task** and no longer exposes the
+task title, user, task type, pull request, or task link.
