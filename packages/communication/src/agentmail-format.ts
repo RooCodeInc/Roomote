@@ -14,6 +14,11 @@
 export const AGENTMAIL_MAX_TEXT_LENGTH = 100_000;
 
 const TRUNCATION_SUFFIX = '\n\n[message truncated]';
+const AGENTMAIL_FOOTER_PREFIX = ':::roomote-footer ';
+
+export function formatAgentMailFooterMarkdown(text: string): string {
+  return `${AGENTMAIL_FOOTER_PREFIX}${text}`;
+}
 
 function truncateAgentMailMarkdown(markdown: string): string {
   if (markdown.length <= AGENTMAIL_MAX_TEXT_LENGTH) {
@@ -112,6 +117,7 @@ type MarkdownBlock =
   | { kind: 'blockquote'; lines: string[] }
   | { kind: 'unordered-list'; items: string[] }
   | { kind: 'ordered-list'; items: string[] }
+  | { kind: 'footer'; text: string }
   | { kind: 'paragraph'; lines: string[] };
 
 const HEADING_PATTERN = /^(#{1,6})\s+(.*)$/;
@@ -137,6 +143,15 @@ function splitBlocks(text: string): MarkdownBlock[] {
     }
 
     const heading = HEADING_PATTERN.exec(line);
+
+    if (line.startsWith(AGENTMAIL_FOOTER_PREFIX)) {
+      flush();
+      blocks.push({
+        kind: 'footer',
+        text: line.slice(AGENTMAIL_FOOTER_PREFIX.length),
+      });
+      continue;
+    }
 
     if (heading?.[1] && heading[2] !== undefined) {
       flush();
@@ -221,6 +236,8 @@ function renderBlock(block: MarkdownBlock): string {
       return `<ol>${block.items
         .map((item) => `<li>${convertInlineText(item)}</li>`)
         .join('')}</ol>`;
+    case 'footer':
+      return `<p style="font-size:0.875em">${convertInlineText(block.text)}</p>`;
     case 'paragraph':
       return `<p>${block.lines
         .map((line) => convertInlineText(line))
@@ -276,6 +293,10 @@ export function renderAgentMailPlainText(markdown: string): string {
       return segment.content
         .split('\n')
         .map((line) => {
+          if (line.startsWith(AGENTMAIL_FOOTER_PREFIX)) {
+            return `--\n${stripInlineMarkdown(line.slice(AGENTMAIL_FOOTER_PREFIX.length))}`;
+          }
+
           const heading = HEADING_PATTERN.exec(line);
           const blockquote = BLOCKQUOTE_PATTERN.exec(line);
           const source = heading?.[2] ?? blockquote?.[1] ?? line;
