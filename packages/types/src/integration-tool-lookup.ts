@@ -31,6 +31,8 @@ export const INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE =
   'No tools matched these filters. Retry with only integrationId to list that integration, then use an exact toolName.';
 export const INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE =
   'No integration tools are exposed in this catalog. Check the connection, granted permissions, and disabled tool settings.';
+export const INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE =
+  'Some integrations could not list tools, so this empty result is inconclusive. Retry each unavailable integration by exact integrationId.';
 
 /**
  * Select tools for a lookup. An exact tool name wins; otherwise every query

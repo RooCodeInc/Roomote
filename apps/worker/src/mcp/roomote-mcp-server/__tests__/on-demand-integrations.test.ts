@@ -133,6 +133,30 @@ describe('on-demand integration tools', () => {
     );
   });
 
+  it('treats an empty result as inconclusive when another scoped listing failed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const flaky = vi.fn(async (server: { name: string }) => {
+      if (server.name === 'linear') throw new Error('upstream down');
+      return listTools(server);
+    });
+    const result = parse(
+      await findOnDemandIntegrationTools(
+        catalog,
+        { query: 'incidents' },
+        flaky,
+      ),
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      tools: [],
+      availableToolCount: 2,
+      emptyReason: 'partial_integration_unavailable',
+      unavailableIntegrations: ['linear'],
+      guidance: expect.stringContaining('inconclusive'),
+    });
+  });
+
   it('explains an empty filtered result without logging query content', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const result = parse(
