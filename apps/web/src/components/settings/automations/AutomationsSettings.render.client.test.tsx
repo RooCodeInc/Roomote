@@ -1133,6 +1133,21 @@ describe('AutomationsSettings', () => {
       name: 'Configure Auto-respond to channels enabled state',
     });
     expect(enabledSwitch).toBeChecked();
+    expect(enabledSwitch).toHaveAttribute('data-state', 'checked');
+    const disabledSwitch = screen.getByRole('switch', {
+      name: 'Set up CI Failure Triage enabled state',
+    });
+    expect(disabledSwitch).not.toBeChecked();
+    expect(disabledSwitch).toHaveAttribute('data-state', 'unchecked');
+
+    fireEvent.pointerMove(enabledSwitch.parentElement!, {
+      pointerType: 'mouse',
+    });
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('Configure Auto-respond to channels').length,
+      ).toBeGreaterThan(1);
+    });
     expect(
       screen.queryByRole('link', {
         name: 'View previous runs for Auto-respond to channels',
