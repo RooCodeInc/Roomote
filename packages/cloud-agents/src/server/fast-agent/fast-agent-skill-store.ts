@@ -219,6 +219,26 @@ function packagedSkillId(name: string): string {
   return `packaged:${name}`;
 }
 
+// Packaged and instance skills never depend on the caller's scope, so their
+// failures (missing runtime files, an unauthorized actor) stay hard errors.
+// Settings and repository lookups depend on the scope a model passed, which
+// may be an unknown or filler environment ID, or on remote state, so a failure
+// there degrades to a warning instead of hiding the whole catalog.
+async function collectOptionalSource(
+  label: string,
+  list: () => Promise<FastAgentSkillListResult>,
+): Promise<FastAgentSkillListResult> {
+  try {
+    return await list();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      skills: [],
+      warnings: [`Skipped ${label} skills: ${message}`],
+    };
+  }
+}
+
 export class FastAgentSkillStore {
   private readonly resources = new Map<string, Promise<string[]>>();
   private readonly rootDirectory: Promise<string>;
@@ -270,7 +290,9 @@ export class FastAgentSkillStore {
       !packagedMatchIsAuthoritative &&
       !instanceMatchIsAuthoritative &&
       this.settingsSkills
-        ? await this.settingsSkills.list(query)
+        ? await collectOptionalSource('legacy Settings', () =>
+            this.settingsSkills!.list(query),
+          )
         : { skills: [], warnings: [] };
     const repository =
       !packagedMatchIsAuthoritative &&
@@ -278,7 +300,9 @@ export class FastAgentSkillStore {
       (query.sourceOffset ?? 0) === 0 &&
       scope &&
       this.repositorySkills
-        ? await this.repositorySkills.list(scope)
+        ? await collectOptionalSource('repository', () =>
+            this.repositorySkills!.list(scope),
+          )
         : { skills: [], warnings: [] };
     const filteredPackaged = query.name
       ? packaged.filter((skill) => skill.name === query.name)
