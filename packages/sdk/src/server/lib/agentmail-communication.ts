@@ -10,6 +10,7 @@ import {
   AgentMailRecipientUnavailableError,
   resolveAgentMailOutboundRecipient,
 } from './agentmail/outbound';
+import { buildAgentMailUnsubscribeUrl } from './agentmail/unsubscribe-tokens';
 
 type AgentMailCommunicationProviderRuntimeOptions = {
   /** Custom fetch, e.g. a base-URL-rewriting fetch for the mock harness. */
@@ -46,7 +47,7 @@ export async function createAgentMailCommunicationProviderFromRuntimeCredentials
       const route = await resolveAgentMailReplyRoute(conversationId);
       // An inbound anchor always wins: the reply goes to whoever last wrote
       // in (the owner or a cc'd participant), exactly as recorded.
-      if (!route || route.replyToMessageId || !route.latestOutboundMessageId) {
+      if (!route || route.replyToMessageId) {
         return route;
       }
       // Roomote-initiated conversation nobody has replied to yet: anchor on
@@ -62,14 +63,33 @@ export async function createAgentMailCommunicationProviderFromRuntimeCredentials
           recipient.reason,
         );
       }
+      const unsubscribeUrl = buildAgentMailUnsubscribeUrl(
+        recipient.emailAddress,
+      );
       return {
         ...route,
         replyToMessageId: route.latestOutboundMessageId,
         recipientEmail: recipient.emailAddress,
+        ...(!route.latestOutboundMessageId
+          ? {
+              outboundStart: {
+                textFooter: `\n\nTo stop receiving these emails: ${unsubscribeUrl}`,
+                htmlFooter: `<p style="color:#8a93a3;font-size:12px;margin-top:24px"><a href="${unsubscribeUrl}" style="color:#8a93a3">Stop receiving these emails</a></p>`,
+                headers: {
+                  'List-Unsubscribe': `<${unsubscribeUrl}>`,
+                  'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+                },
+              },
+            }
+          : {}),
       };
     },
-    onMessageSent: async ({ conversationId, messageId }) => {
-      await recordAgentMailOutboundMessage({ conversationId, messageId });
+    onMessageSent: async ({ conversationId, messageId, threadId }) => {
+      await recordAgentMailOutboundMessage({
+        conversationId,
+        messageId,
+        ...(threadId ? { providerThreadId: threadId } : {}),
+      });
     },
     ...(options?.fetch ? { fetch: options.fetch } : {}),
   });
