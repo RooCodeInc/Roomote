@@ -27,6 +27,12 @@ export const INTEGRATION_TOOL_LOOKUP_DEFAULT_LIMIT = 10;
 export const INTEGRATION_TOOL_LOOKUP_MAX_LIMIT = 25;
 export const INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE =
   'More tools matched than were returned. Narrow the query or pass integrationId or toolName.';
+export const INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE =
+  'No tools matched these filters. Retry with only integrationId to list that integration, then use an exact toolName.';
+export const INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE =
+  'No integration tools are exposed in this catalog. Check the connection, granted permissions, and disabled tool settings.';
+export const INTEGRATION_TOOL_LOOKUP_PARTIALLY_UNAVAILABLE_GUIDANCE =
+  'Some integrations could not list tools, so this empty result is inconclusive. Retry each unavailable integration by exact integrationId.';
 
 /**
  * Select tools for a lookup. An exact tool name wins; otherwise every query
@@ -36,17 +42,23 @@ export const INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE =
 export function matchIntegrationTools(
   candidates: IntegrationToolCandidate[],
   params: IntegrationToolLookupParams,
-): { tools: IntegrationToolCandidate[]; truncated: boolean } {
+): {
+  tools: IntegrationToolCandidate[];
+  truncated: boolean;
+  availableToolCount: number;
+} {
   const limit = params.limit ?? INTEGRATION_TOOL_LOOKUP_DEFAULT_LIMIT;
   const terms = (params.query ?? '')
     .toLowerCase()
     .split(/\s+/u)
     .filter((term) => term.length > 0);
   const matches: Array<{ tool: IntegrationToolCandidate; exact: boolean }> = [];
+  let availableToolCount = 0;
   for (const tool of candidates) {
     if (params.integrationId && tool.integrationId !== params.integrationId) {
       continue;
     }
+    availableToolCount += 1;
     if (params.toolName && tool.name !== params.toolName) continue;
     const haystack = `${tool.name} ${tool.description ?? ''}`.toLowerCase();
     if (
@@ -67,6 +79,7 @@ export function matchIntegrationTools(
   return {
     tools: matches.slice(0, limit).map(({ tool }) => tool),
     truncated: matches.length > limit,
+    availableToolCount,
   };
 }
 
@@ -75,7 +88,7 @@ export const FIND_INTEGRATION_TOOLS_ARG_DESCRIPTIONS = {
     "Exact on-demand integration id from the integrations listed in your instructions; lists that integration's tools",
   toolName: "Exact tool name to fetch one tool's input schema",
   query:
-    'Keywords matched against tool names and descriptions; ignored when toolName is provided',
+    'Keywords matched against tool names and descriptions; every whitespace-separated keyword must match one tool; ignored when toolName is provided',
   limit: `Maximum tools to return (default ${INTEGRATION_TOOL_LOOKUP_DEFAULT_LIMIT}, at most ${INTEGRATION_TOOL_LOOKUP_MAX_LIMIT})`,
 } as const;
 
