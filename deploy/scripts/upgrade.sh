@@ -75,7 +75,7 @@ done
 [ -n "$version" ] || die "--version is required"
 validate_slug "$customer"
 validate_tag "$version"
-[ -z "$image_registry" ] || validate_image_part "$image_registry"
+[ -z "$image_registry" ] || validate_image_registry "$image_registry"
 [ -z "$image_namespace" ] || validate_image_part "$image_namespace"
 validate_positive_integer "$image_retention_releases" "--image-retention-releases"
 require_cmd ssh

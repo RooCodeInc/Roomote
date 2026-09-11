@@ -20,6 +20,10 @@ const deployer = read('deploy/scripts/deploy.sh');
 const upgradeCompatibility = read('deploy/ci/upgrade-compatibility.sh');
 const productionEnvExample = read('.env.production.example');
 
+execFileSync('bash', [join(root, 'deploy/scripts/tests/image-registry.sh')], {
+  stdio: 'inherit',
+});
+
 function fail(message) {
   throw new Error(message);
 }
