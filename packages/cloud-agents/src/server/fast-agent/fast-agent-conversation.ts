@@ -199,6 +199,8 @@ export type FastAgentTurnAdapter = {
   postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
   /** Surfaces with a streaming API render the reply as it is written. */
   createReplyStream?: () => FastAgentReplyStream;
+  /** Override the default delay before an incomplete reply opens a stream. */
+  replyStreamStartDelayMs?: number;
   replaceReply?: (
     handle: FastAgentReplyHandle,
     reply: FastAgentReply,

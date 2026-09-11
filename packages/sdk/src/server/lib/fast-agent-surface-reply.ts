@@ -151,6 +151,7 @@ export type FastAgentSurfaceReplyDelivery = {
     | 'activity'
     | 'createArtifact'
     | 'createReplyStream'
+    | 'replyStreamStartDelayMs'
     | 'launchTask'
     | 'postReply'
     | 'replaceReply'
@@ -673,6 +674,7 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
         activity,
         ...(activity.supportsReplyStream
           ? {
+              replyStreamStartDelayMs: 0,
               createReplyStream: () => activity.createReplyStream(postReply),
             }
           : {}),

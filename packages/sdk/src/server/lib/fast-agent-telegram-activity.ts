@@ -134,10 +134,17 @@ export function createFastAgentTelegramActivity({
     supportsReplyStream: nativeThinking,
     createReplyStream: (deliver) => {
       let open = true;
+      let wroteStreamText = false;
       return {
         append: async (text) => {
           if (!open || !text) return;
           draftText += text;
+          if (!wroteStreamText) {
+            wroteStreamText = true;
+            await activity.pause();
+            await activity.resume();
+            return;
+          }
           scheduleStreamWrite();
         },
         finish: async (reply) => {
