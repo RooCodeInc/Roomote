@@ -67,7 +67,7 @@ export function PersonalizationSection() {
             disabled={isBusy}
             maxLength={8_000}
             rows={7}
-            className="md:min-h-64"
+            className="md:min-h-48"
             placeholder="For example: Keep answers concise, lead with a recommendation, and use examples when explaining unfamiliar concepts."
             onChange={(event) => setInstructions(event.target.value)}
           />
