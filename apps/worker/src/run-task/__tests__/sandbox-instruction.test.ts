@@ -288,6 +288,22 @@ describe('buildSandboxInstruction', () => {
     expect(renderedInstruction).not.toContain('agent-browser');
   });
 
+  it('encourages necessary system package installs within sandbox boundaries', () => {
+    const instruction = buildSandboxInstruction(false) ?? '';
+
+    expect(instruction).toContain('passwordless `sudo`');
+    expect(instruction).toContain(
+      'When a missing system dependency blocks authorized work and `apt-get` is available',
+    );
+    expect(instruction).toContain(
+      'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y <package>',
+    );
+    expect(instruction).toContain(
+      'These changes affect only this sandbox, not the host, and do not persist to other tasks or production',
+    );
+    expect(instruction).toContain('avoid unnecessary installs');
+  });
+
   it('only mentions detached background processes when detached commands exist', () => {
     const instruction = buildSandboxInstruction(false, {
       name: 'Sandbox',
