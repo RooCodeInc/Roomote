@@ -176,6 +176,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       postMessage: mocks.telegramPostMessage,
       editMessageText: mocks.telegramEditMessage,
       sendChatAction: mocks.telegramTyping,
+      sendThinkingDraft: mocks.telegramTyping,
     });
     mocks.createDiscordProvider.mockResolvedValue({
       triggerTyping: mocks.discordTyping,
@@ -220,9 +221,16 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       try {
         delivery!.adapter.activity!.start();
         await vi.advanceTimersByTimeAsync(0);
-        expect(typing).toHaveBeenCalledWith(replyTarget);
+        expect(typing).toHaveBeenCalledWith(
+          surface === 'telegram'
+            ? expect.objectContaining({
+                ...replyTarget,
+                draftId: expect.any(Number),
+              })
+            : replyTarget,
+        );
         await vi.advanceTimersByTimeAsync(
-          surface === 'discord' ? 8_000 : 4_000,
+          surface === 'discord' ? 8_000 : 25_000,
         );
         expect(typing).toHaveBeenCalledTimes(2);
         await delivery!.adapter.activity!.settle({ keepProcessing: true });
@@ -267,10 +275,10 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
         adapter.activity!.start();
         await vi.advanceTimersByTimeAsync(0);
         await adapter.postReply(reply);
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
         expect(typing).toHaveBeenCalledTimes(2);
         await adapter.replaceReply!({ messageId: '123' }, reply);
-        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(surface === 'telegram' ? 500 : 0);
         expect(typing).toHaveBeenCalledTimes(3);
         editMessage.mockRejectedValueOnce(new Error('edit failed'));
         await expect(

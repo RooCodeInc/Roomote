@@ -28,6 +28,7 @@ describe('TelegramCommunicationProvider', () => {
     expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
       commands: [
         { command: 'start', description: 'Show welcome and command help' },
+        { command: 'help', description: 'Show command help' },
         { command: 'new', description: 'Start a fresh task' },
       ],
     });
@@ -51,6 +52,48 @@ describe('TelegramCommunicationProvider', () => {
       hasTopicsEnabled: false,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows native Thinking in a private chat topic with a stable draft id', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.sendThinkingDraft({
+      channelId: '123',
+      threadId: '77',
+      draftId: 42,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/sendMessageDraft',
+      expect.objectContaining({
+        body: JSON.stringify({
+          chat_id: '123',
+          draft_id: 42,
+          text: '',
+          message_thread_id: 77,
+        }),
+      }),
+    );
+  });
+
+  it('rejects an invalid native Thinking draft id before calling Telegram', async () => {
+    const fetchMock = vi.fn();
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.sendThinkingDraft({ channelId: '123', draftId: 0 }),
+    ).rejects.toThrow('requires a non-zero draft id');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('does not retry an ambiguous server error for message delivery', async () => {

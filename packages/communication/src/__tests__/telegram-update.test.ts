@@ -7,6 +7,7 @@ import {
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessageReaction,
   isNewTelegramThumbsUpReaction,
+  isTelegramHelpCommand,
   isTelegramStartCommand,
   isTelegramTaskEntryUpdate,
   parseTelegramUpdate,
@@ -43,6 +44,23 @@ describe('Telegram update helpers', () => {
     expect(isTelegramStartCommand(parse(buildUpdate('/start', 'group')))).toBe(
       false,
     );
+  });
+
+  it('recognizes /help commands in private chats only', () => {
+    const parse = (text: string, chatType = 'private') =>
+      parseTelegramUpdate({
+        update_id: 1,
+        message: {
+          message_id: 2,
+          chat: { id: 3, type: chatType },
+          text,
+        },
+      }).data!;
+
+    expect(isTelegramHelpCommand(parse('/help'))).toBe(true);
+    expect(isTelegramHelpCommand(parse('/help@my_bot'))).toBe(true);
+    expect(isTelegramHelpCommand(parse('/help me'))).toBe(false);
+    expect(isTelegramHelpCommand(parse('/help', 'group'))).toBe(false);
   });
 
   it('parses callback_query updates', () => {

@@ -439,6 +439,27 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
   }
 
+  /** Show Telegram's native Thinking placeholder for an in-flight private-chat reply. */
+  async sendThinkingDraft(input: {
+    channelId: string;
+    draftId: number;
+    threadId?: string;
+  }): Promise<void> {
+    if (!Number.isSafeInteger(input.draftId) || input.draftId === 0) {
+      throw new Error(
+        'Telegram sendThinkingDraft requires a non-zero draft id.',
+      );
+    }
+
+    const threadId = parsePositiveInteger(input.threadId);
+    await this.callBotApi('sendMessageDraft', {
+      chat_id: input.channelId,
+      draft_id: input.draftId,
+      text: '',
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    });
+  }
+
   /**
    * Read the bot capability flag Telegram exposes for private-chat Threaded
    * Mode. This avoids probing createForumTopic for bots that have it disabled.
@@ -534,6 +555,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('setMyCommands', {
       commands: [
         { command: 'start', description: 'Show welcome and command help' },
+        { command: 'help', description: 'Show command help' },
         { command: 'new', description: 'Start a fresh task' },
       ],
     });
@@ -640,6 +662,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       'setWebhook',
       'setMyCommands',
       'sendChatAction',
+      'sendMessageDraft',
       'editMessageText',
       'editMessageReplyMarkup',
       'editForumTopic',

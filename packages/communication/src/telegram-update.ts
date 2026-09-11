@@ -520,6 +520,17 @@ export function isTelegramStartCommand(update: TelegramUpdate): boolean {
   return /^\/start(@[A-Za-z0-9_]+)?$/u.test(message.text.trim());
 }
 
+/** A bare `/help` uses the same private-chat help response as `/start`. */
+export function isTelegramHelpCommand(update: TelegramUpdate): boolean {
+  const message = getTelegramUpdateMessage(update);
+
+  if (!message?.text || !isTelegramPrivateChat(message)) {
+    return false;
+  }
+
+  return /^\/help(@[A-Za-z0-9_]+)?$/u.test(message.text.trim());
+}
+
 export function isTelegramTaskEntryUpdate(
   update: TelegramUpdate,
   options: TelegramBotMentionOptions = {},

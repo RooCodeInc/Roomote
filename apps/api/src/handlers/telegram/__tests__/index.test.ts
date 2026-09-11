@@ -1743,8 +1743,36 @@ describe('Telegram webhook handler', () => {
     const welcomeText = postMessageMock.mock.calls[0]?.[0].text as string;
     expect(welcomeText).toContain('*Available commands*');
     expect(welcomeText).toContain('`/start`');
+    expect(welcomeText).toContain('`/help`');
     expect(welcomeText).toContain('`/new <request>`');
     expect(welcomeText).not.toContain('`/start <request>`');
+  });
+
+  it('answers /help without launching a task', async () => {
+    mockTelegramLinkedSender();
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/help',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      welcomed: true,
+    });
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+    expect(queueCommunicationMessageMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '222',
+        text: expect.stringContaining('*Available commands*'),
+        textFormat: 'markdown',
+      }),
+    );
   });
 
   it('welcomes bare /start commands from an unlinked sender', async () => {
