@@ -43,6 +43,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mocks.replace }),
 }));
 
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
+
 vi.mock('@/hooks/useResultsPage', () => ({
   useResultsPage: () => ({ enabled: true, isLoading: false }),
 }));
@@ -133,7 +137,9 @@ describe('ResultsPage', () => {
     ).toBeInTheDocument();
     expect(
       screen.getAllByRole('columnheader').map((header) => header.textContent),
-    ).toEqual(['Priority', 'Date', 'Automation', 'Result', 'Actions']);
+    ).toEqual(['Date', 'Automation', 'Result', 'Actions']);
+    expect(screen.getByLabelText('Critical priority')).toBeInTheDocument();
+    expect(screen.getByLabelText('High priority')).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Clear all' }),
     ).toBeInTheDocument();
@@ -167,14 +173,37 @@ describe('ResultsPage', () => {
     );
   });
 
-  it('clears every row immediately from Clear all', async () => {
+  it('requires confirmation before clearing every row', async () => {
     renderPage();
     fireEvent.click(await screen.findByRole('button', { name: 'Clear all' }));
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('Clear all results?');
+    expect(mocks.clear).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', {
+        name: 'Clear all',
+      }),
+    );
 
     await waitFor(() =>
       expect(screen.getByText('No unread results')).toBeInTheDocument(),
     );
     await waitFor(() => expect(mocks.clear).toHaveBeenCalledOnce());
+  });
+
+  it('shows a toast when a suggestion is ignored', async () => {
+    const { toast } = await import('sonner');
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Clear Simplify the worker/ }),
+    );
+
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        'Simplify the worker was ignored',
+      ),
+    );
   });
 
   it('closes the dialog without changing disposition', async () => {

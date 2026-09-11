@@ -7,12 +7,12 @@ import removeMd from 'remove-markdown';
 import { toast } from 'sonner';
 
 import {
-  Badge,
   BasicTooltip,
   Button,
   Card,
   CardContent,
   Check,
+  CircleAlert,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -32,14 +32,6 @@ import { useResultsPage } from '@/hooks/useResultsPage';
 import { useTRPC } from '@/trpc/client';
 import type { ResultInboxItem } from '@/trpc/commands/results';
 
-function priorityVariant(priority: ResultInboxItem['priority']) {
-  return priority === 'critical'
-    ? ('destructive' as const)
-    : priority === 'high'
-      ? ('warning' as const)
-      : ('secondary' as const);
-}
-
 function resultPreview(result: ResultInboxItem) {
   return (
     result.title ??
@@ -56,6 +48,11 @@ function resultPrompt(result: ResultInboxItem) {
   return result.title
     ? `${result.title}\n\n${result.content}`.trim()
     : result.content;
+}
+
+function ignoredResultToastTitle(result: ResultInboxItem) {
+  const title = result.title ?? resultPreview(result);
+  return title.length > 30 ? `${title.slice(0, 30)}...` : title;
 }
 
 function AutomationAvatar({ result }: { result: ResultInboxItem }) {
@@ -75,6 +72,7 @@ export function ResultsPage() {
   const queryClient = useQueryClient();
   const { enabled, isLoading: isFlagLoading } = useResultsPage();
   const [selected, setSelected] = useState<ResultInboxItem | null>(null);
+  const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
   const listQueryKey = trpc.results.list.queryKey();
   const listQuery = useQuery(
     trpc.results.list.queryOptions(undefined, { enabled }),
@@ -143,8 +141,23 @@ export function ResultsPage() {
   }
 
   const results = listQuery.data ?? [];
-  const actOnResult = (result: ResultInboxItem, action: 'accept' | 'ignore') =>
-    actionMutation.mutate({ id: result.id, kind: result.kind, action });
+  const actOnResult = (
+    result: ResultInboxItem,
+    action: 'accept' | 'ignore',
+  ) => {
+    const ignoredTitle =
+      action === 'ignore' && result.kind === 'suggestion'
+        ? ignoredResultToastTitle(result)
+        : null;
+    actionMutation.mutate(
+      { id: result.id, kind: result.kind, action },
+      {
+        onSuccess: () => {
+          if (ignoredTitle) toast.success(`${ignoredTitle} was ignored`);
+        },
+      },
+    );
+  };
 
   return (
     <div className="min-h-full w-full overflow-auto bg-background px-4 py-8 md:px-8">
@@ -158,7 +171,7 @@ export function ResultsPage() {
               size="sm"
               variant="outline"
               disabled={clearMutation.isPending}
-              onClick={() => clearMutation.mutate()}
+              onClick={() => setIsClearConfirmOpen(true)}
             >
               Clear all
             </Button>
@@ -176,9 +189,9 @@ export function ResultsPage() {
             <CardContent className="p-0!">
               <div
                 role="row"
-                className="hidden grid-cols-[6rem_7rem_minmax(0,4fr)_minmax(0,6fr)_5rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
+                className="mb-0 hidden grid-cols-[3rem_7rem_minmax(0,2fr)_minmax(0,8fr)_5rem] gap-4 border-b border-background px-4 py-2 text-xs font-medium text-muted-foreground md:grid"
               >
-                <span role="columnheader">Priority</span>
+                <span aria-hidden="true" />
                 <span role="columnheader">Date</span>
                 <span role="columnheader">Automation</span>
                 <span role="columnheader">Result</span>
@@ -191,7 +204,7 @@ export function ResultsPage() {
                   <div
                     key={`${result.kind}:${result.id}`}
                     role="row"
-                    className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 md:grid-cols-[6rem_7rem_minmax(0,4fr)_minmax(0,6fr)_5rem] md:items-center md:gap-4 md:px-4 md:py-3"
+                    className="grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] gap-x-2 gap-y-1 px-2 py-1.5 transition-colors hover:bg-accent-foreground/20 md:grid-cols-[3rem_7rem_minmax(0,2fr)_minmax(0,8fr)_5rem] md:items-center md:gap-4 md:px-6 md:py-3"
                     tabIndex={0}
                     onClick={() => setSelected(result)}
                     onKeyDown={(event) => {
@@ -201,10 +214,23 @@ export function ResultsPage() {
                       }
                     }}
                   >
-                    <div role="cell" className="col-start-1 row-start-1">
-                      <Badge variant={priorityVariant(result.priority)}>
-                        {result.priority}
-                      </Badge>
+                    <div
+                      role="cell"
+                      className="col-start-1 row-start-1 flex justify-center"
+                    >
+                      {result.priority === 'critical' ? (
+                        <CircleAlert
+                          aria-label="Critical priority"
+                          className="size-4 text-destructive"
+                          strokeWidth={2.5}
+                        />
+                      ) : result.priority === 'high' ? (
+                        <CircleAlert
+                          aria-label="High priority"
+                          className="size-4 text-warning"
+                          strokeWidth={2.5}
+                        />
+                      ) : null}
                     </div>
                     <div
                       role="cell"
@@ -276,7 +302,7 @@ export function ResultsPage() {
         open={selected !== null}
         onOpenChange={(open) => !open && setSelected(null)}
       >
-        <DialogContent size="4xl">
+        <DialogContent size="4xl" className="[&_textarea]:md:min-h-42">
           {selected ? (
             <>
               <DialogHeader>
@@ -317,6 +343,35 @@ export function ResultsPage() {
               </DialogFooter>
             </>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isClearConfirmOpen} onOpenChange={setIsClearConfirmOpen}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>Clear all results?</DialogTitle>
+            <DialogDescription>
+              This will ignore all unread automation results.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsClearConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={clearMutation.isPending}
+              onClick={() => {
+                setIsClearConfirmOpen(false);
+                clearMutation.mutate();
+              }}
+            >
+              Clear all
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
