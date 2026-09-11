@@ -984,25 +984,25 @@ describe('SessionWorkspace', () => {
     expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus();
   });
 
-  it('opens tasks side-by-side when the Tasks rail item is middle-clicked', async () => {
+  it('opens tasks side-by-side without moving focus from the session prompt', async () => {
     renderWorkspace({
       isMobile: false,
       workspaceWidth: 1280,
+      children: <textarea aria-label="Session prompt" />,
       sessionOverride: { tasks: [singleTask, secondTask] },
     });
 
     expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Close panel task-1' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close panel task-2' }));
-
-    fireEvent(
-      screen.getByRole('button', { name: 'Tasks' }),
-      new MouseEvent('auxclick', { bubbles: true, button: 1 }),
-    );
+    const sessionPrompt = screen.getByLabelText('Session prompt');
+    sessionPrompt.focus();
+    fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open side-by-side' }));
 
     expect(screen.getByLabelText('Full task task-1')).toBeVisible();
     expect(screen.getByLabelText('Full task task-2')).toBeVisible();
-    expect(screen.getByText('Session transcript')).toBeVisible();
+    expect(sessionPrompt).toHaveFocus();
   });
 
   it('moves focus between visible prompt inputs with Alt+Arrow keys', async () => {
@@ -1050,7 +1050,7 @@ describe('SessionWorkspace', () => {
     expect(sessionPrompt).toHaveFocus();
   });
 
-  it('focuses the first task when several task panels open initially', async () => {
+  it('keeps session prompt focus when task panels open initially', async () => {
     const thirdTask = {
       ...singleTask,
       taskId: 'task-3',
@@ -1059,17 +1059,17 @@ describe('SessionWorkspace', () => {
     renderWorkspace({
       isMobile: false,
       workspaceWidth: 1600,
-      children: <textarea aria-label="Session prompt" />,
+      children: <textarea aria-label="Session prompt" autoFocus />,
       sessionOverride: { tasks: [singleTask, secondTask, thirdTask] },
     });
 
     expect(await screen.findByLabelText('Task prompt task-3')).toBeVisible();
     await waitFor(() =>
-      expect(screen.getByLabelText('Task prompt task-1')).toHaveFocus(),
+      expect(screen.getByLabelText('Session prompt')).toHaveFocus(),
     );
   });
 
-  it('opens and focuses the first task when several delegated tasks start', async () => {
+  it('opens new delegated tasks without moving session prompt focus', async () => {
     const thirdTask = {
       ...singleTask,
       taskId: 'task-3',
@@ -1083,6 +1083,8 @@ describe('SessionWorkspace', () => {
     });
 
     expect(await screen.findByLabelText('Full task task-1')).toBeVisible();
+    const sessionPrompt = screen.getByLabelText('Session prompt');
+    sessionPrompt.focus();
     fireEvent.click(screen.getByRole('button', { name: 'Tasks' }));
     expect(screen.getByRole('heading', { name: 'Tasks' })).toBeVisible();
     act(() => {
@@ -1094,9 +1096,7 @@ describe('SessionWorkspace', () => {
 
     expect(await screen.findByLabelText('Full task task-2')).toBeVisible();
     expect(screen.getByLabelText('Full task task-3')).toBeVisible();
-    await waitFor(() =>
-      expect(screen.getByLabelText('Task prompt task-2')).toHaveFocus(),
-    );
+    await waitFor(() => expect(sessionPrompt).toHaveFocus());
   });
 
   it('replaces the URL-selected task when a task card opens at one-panel capacity', () => {

@@ -136,10 +136,6 @@ export function sessionWorkspacePanelReducer(
       return {
         ...state,
         taskPanelIds,
-        promptFocusTaskId:
-          action.selectedTaskId ??
-          action.taskIds.find((taskId) => taskId !== action.selectedTaskId) ??
-          null,
       };
     }
     case 'add-tasks': {
@@ -157,15 +153,12 @@ export function sessionWorkspacePanelReducer(
         );
         insertionIndex += 1;
       }
-      const shouldFocus =
+      const shouldShowTaskPanels =
         state.utilityPanel === null || state.utilityPanel.kind === 'tasks';
       return {
         ...state,
-        utilityPanel: shouldFocus ? null : state.utilityPanel,
+        utilityPanel: shouldShowTaskPanels ? null : state.utilityPanel,
         taskPanelIds,
-        promptFocusTaskId: shouldFocus
-          ? (action.taskIds[0] ?? state.promptFocusTaskId)
-          : state.promptFocusTaskId,
       };
     }
     case 'open-task': {
@@ -216,7 +209,6 @@ export function sessionWorkspacePanelReducer(
           (taskId) => taskId !== action.selectedTaskId,
         ),
         taskArtifacts: {},
-        promptFocusTaskId: action.selectedTaskId ?? action.taskIds[0] ?? null,
       };
     case 'show-main':
       return {
