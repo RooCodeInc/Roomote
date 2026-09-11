@@ -285,8 +285,8 @@ export function SkillsSettingsPage() {
   const [search, setSearch] = useState('');
 
   return (
-    <SettingsShell pageId="skills">
-      <div className="space-y-3">
+    <SettingsShell pageId="skills" boundedContentOnDesktop>
+      <div className="space-y-3 md:flex md:min-h-0 md:flex-1 md:flex-col md:gap-3 md:space-y-0">
         <SkillListToolbar
           filter={filter}
           search={search}
@@ -312,7 +312,10 @@ export function SkillsSettingsPage() {
             </>
           }
         />
-        <Card variant="snug" className="gap-0 p-0">
+        <Card
+          variant="snug"
+          className="gap-0 p-0 md:min-h-0 md:flex-1 md:overflow-y-auto"
+        >
           <CardContent className="p-0!">
             <div role="table" aria-label="Skills">
               <SkillListHeader />
