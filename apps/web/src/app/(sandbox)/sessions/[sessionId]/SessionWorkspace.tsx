@@ -27,6 +27,7 @@ import {
   humanizeFilename,
 } from '@/lib';
 import { type SessionArtifactSelection } from '@/lib/artifact-view-urls';
+import { isMarkdownArtifact } from '@/lib/artifact-types';
 import { getSessionPullRequests } from '@/lib/session-pull-requests';
 import { SessionInferenceCostBreakdown } from '@/components/sessions/SessionInferenceCostBreakdown';
 import { PullRequestBadge } from '@/components/sandbox';
@@ -57,6 +58,7 @@ import {
   LayoutGrid,
   Loader2Icon,
   LocalDateTime,
+  Mail,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -89,7 +91,8 @@ import {
 } from './session-task-panel-context';
 import { DelegatedTaskCard } from '../../task/[taskId]/messages/acp/DelegatedTaskCard';
 import { TaskRobotIconProvider } from '@/components/tasks/TaskRobotIcon';
-import { useArtifactByPath } from '../../task/[taskId]/hooks/use-artifact-by-path';
+import { MarkdownArtifactPreview } from '@/components/tasks/MarkdownArtifactPreview';
+import { useArtifactByPath } from '@/hooks/use-artifact-by-path';
 import { PreviewPaneProvider } from '../../task/[taskId]/hooks/use-preview-pane';
 import { humanizePortName } from '../../task/[taskId]/preview-port-utils';
 import {
@@ -226,10 +229,12 @@ export function SessionHeaderPullRequests() {
 
 function SessionArtifactCard({
   artifact,
+  owner,
   taskTitle,
   onOpen,
 }: {
   artifact: SessionTaskSummary['artifacts'][number];
+  owner: { taskId: string } | { sessionId: string };
   taskTitle?: string;
   onOpen: () => void;
 }) {
@@ -237,6 +242,7 @@ function SessionArtifactCard({
   const label = humanizeFilename(artifact.path);
   const isImage = artifact.contentType.startsWith('image/');
   const isVideo = artifact.contentType.startsWith('video/');
+  const isMarkdown = isMarkdownArtifact(artifact.contentType, artifact.path);
   const thumbnailUrl = artifact.thumbnailUrl;
   const videoPreviewUrl = artifact.previewUrl;
 
@@ -250,43 +256,51 @@ function SessionArtifactCard({
       }
       className="group block w-full min-w-0 cursor-pointer overflow-hidden rounded-lg border bg-card text-left transition-opacity hover:opacity-70"
     >
-      <span className="flex aspect-video w-full items-center justify-center overflow-hidden bg-muted">
-        {isImage && thumbnailUrl && failedPreviewUrl !== thumbnailUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={thumbnailUrl}
-            alt={label}
-            className="size-full object-contain"
-            loading="lazy"
-            onError={() => setFailedPreviewUrl(thumbnailUrl)}
-          />
-        ) : isImage ? (
-          <Image className="size-6 text-muted-foreground" />
-        ) : isVideo &&
-          videoPreviewUrl &&
-          failedPreviewUrl !== videoPreviewUrl ? (
-          <span className="relative block size-full bg-black">
-            <video
-              src={videoPreviewUrl}
-              aria-label={`Video preview: ${label}`}
-              muted
-              playsInline
-              preload="metadata"
-              className="pointer-events-none size-full object-contain"
-              onError={() => setFailedPreviewUrl(videoPreviewUrl)}
+      {isMarkdown ? (
+        <MarkdownArtifactPreview
+          owner={owner}
+          path={artifact.path}
+          version={artifact.version}
+        />
+      ) : (
+        <span className="flex aspect-video w-full items-center justify-center overflow-hidden bg-muted">
+          {isImage && thumbnailUrl && failedPreviewUrl !== thumbnailUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={thumbnailUrl}
+              alt={label}
+              className="size-full object-contain"
+              loading="lazy"
+              onError={() => setFailedPreviewUrl(thumbnailUrl)}
             />
-            <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <span className="flex size-8 items-center justify-center rounded-full bg-black/60 ring-1 ring-white/25">
-                <span className="ml-0.5 h-0 w-0 border-y-[5px] border-y-transparent border-l-[8px] border-l-white" />
+          ) : isImage ? (
+            <Image className="size-6 text-muted-foreground" />
+          ) : isVideo &&
+            videoPreviewUrl &&
+            failedPreviewUrl !== videoPreviewUrl ? (
+            <span className="relative block size-full bg-black">
+              <video
+                src={videoPreviewUrl}
+                aria-label={`Video preview: ${label}`}
+                muted
+                playsInline
+                preload="metadata"
+                className="pointer-events-none size-full object-contain"
+                onError={() => setFailedPreviewUrl(videoPreviewUrl)}
+              />
+              <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <span className="flex size-8 items-center justify-center rounded-full bg-black/60 ring-1 ring-white/25">
+                  <span className="ml-0.5 h-0 w-0 border-y-[5px] border-y-transparent border-l-[8px] border-l-white" />
+                </span>
               </span>
             </span>
-          </span>
-        ) : isVideo ? (
-          <VideoIcon className="size-6 text-muted-foreground" />
-        ) : (
-          <FileText className="size-6 text-muted-foreground" />
-        )}
-      </span>
+          ) : isVideo ? (
+            <VideoIcon className="size-6 text-muted-foreground" />
+          ) : (
+            <FileText className="size-6 text-muted-foreground" />
+          )}
+        </span>
+      )}
       <span className="block border-t px-2 py-1.5 text-center">
         <span className="block truncate text-xs font-medium">{label}</span>
         {taskTitle ? (
@@ -503,6 +517,7 @@ function SessionArtifactsPanel({
                             <SessionArtifactCard
                               key={`${'taskId' in entry.owner ? `task:${entry.owner.taskId}` : `session:${entry.owner.sessionId}`}:${entry.artifact.path}`}
                               artifact={entry.artifact}
+                              owner={entry.owner}
                               taskTitle={entry.taskTitle}
                               onOpen={() =>
                                 setSelectedArtifact({
@@ -732,6 +747,8 @@ function SessionInfoPanel({
             <span className="inline-flex items-center gap-1.5">
               {session.surface === 'slack' ? (
                 <Slack className="size-3.5 shrink-0 text-muted-foreground" />
+              ) : session.surface === 'agentmail' ? (
+                <Mail className="size-3.5 shrink-0 text-muted-foreground" />
               ) : surfaceBrandIcon ? (
                 <BrandIcon
                   icon={surfaceBrandIcon}

@@ -6,8 +6,9 @@ import type {
 import {
   buildFastSessionReplyFooterText,
   getThreadReplyFooterRecord,
-  setThreadReplyFooterRecord,
+  rememberThreadReplyFooterAfterEdit,
   withThreadReplyFooterLock,
+  replaceTextThreadReplyWithFooter,
   type FastSessionReplyFooterContext,
 } from '@roomote/communication';
 import {
@@ -20,6 +21,7 @@ import {
   buildSlackThreadReplyFooterBlock,
   getSlackThreadReplyFooterMessageTs,
   withSlackThreadReplyFooterLock,
+  removeSlackThreadReplyFooter,
   type SlackNotifier,
 } from '@roomote/slack';
 
@@ -50,12 +52,13 @@ export function createSlackFastReplyReplacer(params: {
     const updated = await withSlackThreadReplyFooterLock({
       channel: params.channelId,
       threadTs: params.threadTs,
-      fn: async () => {
+      fn: async (assertLock) => {
         const footerMessageTs = await getSlackThreadReplyFooterMessageTs(
           params.channelId,
           params.threadTs,
         ).catch(() => null);
-        return params.slack.updateMessage({
+        await assertLock();
+        const updated = await params.slack.updateMessage({
           channel: params.channelId,
           ts: handle.messageId,
           message: {
@@ -76,6 +79,22 @@ export function createSlackFastReplyReplacer(params: {
             ],
           },
         });
+        try {
+          await assertLock();
+        } catch {
+          const current = await getSlackThreadReplyFooterMessageTs(
+            params.channelId,
+            params.threadTs,
+          ).catch(() => undefined);
+          if (current !== undefined && current !== handle.messageId)
+            await removeSlackThreadReplyFooter({
+              slack: params.slack,
+              channel: params.channelId,
+              threadTs: params.threadTs,
+              messageTs: handle.messageId,
+            }).catch(() => {});
+        }
+        return updated;
       },
     });
     if (!updated) {
@@ -114,7 +133,7 @@ export function createDiscordFastReplyReplacer(params: {
     // replacement would re-mark the old message as carrier.
     const replaced = await withThreadReplyFooterLock({
       lockKey: `discord:thread_reply_footer_lock:${params.channelId}:${footerStateThreadId}`,
-      fn: async () => {
+      fn: async (assertLock, lock) => {
         const footerRecord = await getThreadReplyFooterRecord(
           'discord',
           params.channelId,
@@ -124,6 +143,7 @@ export function createDiscordFastReplyReplacer(params: {
         const replacementText = isFooterCarrier
           ? `${text}\n\n${footerText}`
           : text;
+        await assertLock();
 
         if (replacementText.length > DISCORD_MAX_MESSAGE_LENGTH) {
           const placeholder = 'Reconnected to the inference provider.';
@@ -138,12 +158,26 @@ export function createDiscordFastReplyReplacer(params: {
             // The relocation that follows rewrites this message to its
             // stored footerless text; keep that text current so the edit
             // does not resurrect the pre-retry notice.
-            await setThreadReplyFooterRecord(
-              'discord',
-              params.channelId,
-              footerStateThreadId,
-              { messageId, textWithoutFooter: placeholder },
-            ).catch(() => {});
+            await rememberThreadReplyFooterAfterEdit({
+              provider: 'discord',
+              channelId: params.channelId,
+              threadId: footerStateThreadId,
+              assertLock,
+              lock,
+              record: {
+                ...footerRecord,
+                messageId,
+                textWithoutFooter: placeholder,
+                refresh: { footerText, channelId: editChannelId },
+              },
+              clearOwnFooter: () =>
+                params.provider.editMessage({
+                  channelId: editChannelId,
+                  messageId,
+                  text: placeholder,
+                  preserveButtons: true,
+                }),
+            }).catch(() => {});
           }
           return false;
         }
@@ -154,12 +188,26 @@ export function createDiscordFastReplyReplacer(params: {
           text: replacementText,
         });
         if (isFooterCarrier) {
-          await setThreadReplyFooterRecord(
-            'discord',
-            params.channelId,
-            footerStateThreadId,
-            { messageId, textWithoutFooter: text },
-          ).catch(() => {});
+          await rememberThreadReplyFooterAfterEdit({
+            provider: 'discord',
+            channelId: params.channelId,
+            threadId: footerStateThreadId,
+            assertLock,
+            lock,
+            record: {
+              ...footerRecord,
+              messageId,
+              textWithoutFooter: text,
+              refresh: { footerText, channelId: editChannelId },
+            },
+            clearOwnFooter: () =>
+              params.provider.editMessage({
+                channelId: editChannelId,
+                messageId,
+                text,
+                preserveButtons: true,
+              }),
+          }).catch(() => {});
         }
         return true;
       },
@@ -189,12 +237,16 @@ export function createTeamsFastReplyReplacer(params: {
   footerContext: FastSessionReplyFooterContext;
 }): FastAgentReplyReplacer {
   return async (handle, { message }) => {
-    await params.provider.updateMessage({
+    await replaceTextThreadReplyWithFooter({
+      provider: params.provider,
       channelId: params.channelId,
+      threadId:
+        'replyTarget' in params.conversation
+          ? params.conversation.replyTarget.threadId
+          : undefined,
       messageId: handle.messageId,
       serviceUrl: params.serviceUrl,
-      text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'teams', sessionId: params.sessionId, ...params.footerContext })}`,
-      textFormat: 'markdown',
+      text: message,
     });
     await recordFastAgentConversationMessageBestEffort({
       sessionId: params.sessionId,
@@ -213,11 +265,15 @@ export function createTelegramFastReplyReplacer(params: {
   footerContext: FastSessionReplyFooterContext;
 }): FastAgentReplyReplacer {
   return async (handle, { message }) => {
-    await params.provider.editMessageText({
+    await replaceTextThreadReplyWithFooter({
+      provider: params.provider,
       channelId: params.channelId,
+      threadId:
+        'replyTarget' in params.conversation
+          ? params.conversation.replyTarget.threadId
+          : undefined,
       messageId: handle.messageId,
-      text: `${message}\n\n${buildFastSessionReplyFooterText({ provider: 'telegram', sessionId: params.sessionId, ...params.footerContext })}`,
-      textFormat: 'markdown',
+      text: message,
     });
     await recordFastAgentConversationMessageBestEffort({
       sessionId: params.sessionId,

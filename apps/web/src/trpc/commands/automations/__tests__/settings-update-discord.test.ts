@@ -5,6 +5,7 @@ import {
   discordInstallationChannels,
   discordInstallations,
   eq,
+  ensureAutomationRows,
   getBackgroundAgentSettingsForDeployment,
   inArray,
   slackInstallations,
@@ -19,6 +20,7 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
+import { registerExclusiveAutomationSettingsDatabaseLock } from '@/testing/exclusive-automation-settings-database-lock';
 
 import { updateBackgroundAgentSettingsCommand } from '../settings-update';
 import { mergeAnnouncerDestinationInputSchema } from '../settings-schema';
@@ -35,14 +37,31 @@ vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
 const mockRunAutomationNow = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ outcome: 'completed' }),
 );
-vi.mock('@roomote/sdk/server', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
-  runAutomationNow: mockRunAutomationNow,
-}));
+const mockResolveAutomationRepositoryDestination = vi.hoisted(() => vi.fn());
+const mockResolveAutomationRuntimeDestination = vi.hoisted(() => vi.fn());
+vi.mock('@roomote/sdk/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
+  mockResolveAutomationRepositoryDestination.mockImplementation(
+    actual.resolveAutomationRepositoryDestination,
+  );
+  mockResolveAutomationRuntimeDestination.mockImplementation(
+    actual.resolveAutomationRuntimeDestination,
+  );
+  return {
+    ...actual,
+    runAutomationNow: mockRunAutomationNow,
+    resolveAutomationRepositoryDestination:
+      mockResolveAutomationRepositoryDestination,
+    resolveAutomationRuntimeDestination:
+      mockResolveAutomationRuntimeDestination,
+  };
+});
 
 vi.mock('@roomote/telemetry/server', () => ({
   captureActivationAutomationChanged: mockCaptureActivationAutomationChanged,
 }));
+
+registerExclusiveAutomationSettingsDatabaseLock();
 
 // Keep the test hermetic: the command constructs a SlackNotifier whenever a
 // Slack installation exists and probes channel membership/names after saving.
@@ -187,7 +206,7 @@ async function insertAvailableDiscordChannel(params: {
   });
 }
 
-async function insertSlackInstallation() {
+async function insertAdminUser() {
   await db.insert(users).values({
     id: 'user-admin',
     name: 'Admin',
@@ -195,7 +214,10 @@ async function insertSlackInstallation() {
     imageUrl: '',
     entity: {},
   });
+}
 
+async function insertSlackInstallation() {
+  await insertAdminUser();
   await db.insert(slackInstallations).values({
     teamId: 'T123',
     teamName: 'Acme',
@@ -231,10 +253,22 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   beforeEach(async () => {
     mockCaptureActivationAutomationChanged.mockClear();
     mockRunAutomationNow.mockClear();
+    mockResolveAutomationRepositoryDestination.mockClear();
+    mockResolveAutomationRuntimeDestination.mockClear();
+    mockResolveRules.mockReset();
     // Internal automation rows are referenced by other suites' task fixtures.
     await db
       .delete(automations)
       .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
+    await ensureAutomationRows();
+    await db
+      .update(automations)
+      .set({ enabled: false, schedule: { mode: 'off' } })
+      .where(inArray(automations.key, USER_FACING_AUTOMATION_KEYS));
+    await upsertAutomation(db, {
+      key: 'platform_issue_alerts',
+      enabled: true,
+    });
     await db.delete(deploymentSettings);
     await db.delete(discordInstallations);
     await db.delete(slackInstallations);
@@ -242,6 +276,11 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   });
 
   it('tracks a built-in automation when its enabled state changes', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     await insertAvailableDiscordChannel({
       guildId: 'guild-1',
       channelId: 'channel-1',
@@ -262,6 +301,106 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
       'enabled',
       'manager_stats',
     );
+  });
+
+  it('persists and preserves Additional rules for a non-CI eligible automation', async () => {
+    await insertSlackInstallation();
+    const repo = await repositoryFactory.create({
+      fullName: 'acme/suggestions',
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: adminAuth.userId,
+    });
+    createdRepositoryIds.push(repo.id);
+    mockResolveRules.mockResolvedValue({
+      object: {
+        status: 'resolved',
+        repositoryIds: [repo.id],
+        destinations: [],
+        instructions: 'Prioritize reliability work.',
+        clarification: null,
+      },
+    });
+    const text = 'Only suggest work for suggestions. Prioritize reliability.';
+
+    const saved = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'suggester',
+        suggesterAdditionalRules: text,
+      }),
+    );
+    expect(saved.success).toBe(true);
+    expect(saved.success && saved.settings.suggesterAdditionalRules).toBe(text);
+
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({ savingAutomation: 'suggester' }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .suggesterAdditionalRules,
+    ).toBe(text);
+
+    await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'suggester',
+        suggesterAdditionalRules: '',
+      }),
+    );
+    expect(
+      (await getBackgroundAgentSettingsForDeployment())
+        .suggesterAdditionalRules,
+    ).toBe('');
+  });
+
+  it('runs an eligible automation with only a rules-based destination', async () => {
+    mockResolveAutomationRuntimeDestination.mockResolvedValueOnce(null);
+    await insertAdminUser();
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-rules',
+      channelId: 'channel-rules',
+      channelName: 'suggestions',
+    });
+    const repo = await repositoryFactory.create({
+      fullName: 'acme/routed-suggestions',
+      sourceControlProvider: 'gitlab',
+      linkedByUserId: adminAuth.userId,
+    });
+    createdRepositoryIds.push(repo.id);
+    const text = 'Send routed-suggestions reports to the suggestions channel.';
+    await upsertAutomation(db, {
+      key: 'suggester',
+      enabled: true,
+      schedule: { mode: 'daily' },
+      settings: {
+        additionalRules: text,
+        compiledRules: {
+          text,
+          repositoryIds: [repo.id],
+          destinations: [
+            {
+              repositoryId: repo.id,
+              target: {
+                provider: 'discord',
+                externalRef: 'channel-rules',
+                workspaceId: 'guild-rules',
+              },
+            },
+          ],
+          instructions: '',
+        },
+      },
+    });
+    mockResolveAutomationRepositoryDestination.mockResolvedValueOnce({
+      provider: 'discord',
+      channelId: 'channel-rules',
+      source: 'automation_target',
+    });
+
+    await triggerAutomationCommand(adminAuth, { automationKey: 'suggester' });
+
+    expect(mockRunAutomationNow).toHaveBeenCalledWith('suggester', {});
   });
 
   it('roundtrips CI rules, preserves unrelated/omitted-field saves, and clears to all explicitly', async () => {
@@ -480,6 +619,11 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   });
 
   it('does not track a built-in automation when its enabled state is unchanged', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     const result = await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({ savingAutomation: 'managerStats' }),
@@ -570,6 +714,11 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   });
 
   it('disables provider usage alerts without requiring a Slack channel', async () => {
+    await upsertAutomation(db, {
+      key: 'provider_usage_limit',
+      enabled: true,
+      schedule: { mode: 'every_hour' },
+    });
     const result = await updateBackgroundAgentSettingsCommand(
       adminAuth,
       buildInput({
@@ -664,6 +813,11 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
   }, 15_000);
 
   it('switches a Discord manager channel to Slack and clears Discord', async () => {
+    await upsertAutomation(db, {
+      key: 'manager_stats',
+      enabled: false,
+      schedule: { mode: 'weekly' },
+    });
     await insertSlackInstallation();
     await db.insert(deploymentSettings).values({
       id: 'default',

@@ -147,6 +147,12 @@ const serverSchema = {
   // feature is off and the endpoint 404s.
   R_ELEVENLABS_API_KEY: z.string().min(1).optional(),
   R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
+  // OpenAI key for the live voice conversation feature (realtime
+  // transcription + spoken replies in the web app). Falls back to the
+  // deployment's general OPENAI_API_KEY when unset. The key stays on the
+  // control plane: the browser only ever receives short-lived ephemeral
+  // realtime tokens and synthesized audio, never the key itself.
+  R_VOICE_OPENAI_API_KEY: z.string().min(1).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -161,9 +167,6 @@ const serverSchema = {
   RELEASE_PRODUCT_VERSION: z.string().min(1).optional(),
   // Kill switch for the low-noise recurring-automation offer in Fast mode.
   R_FAST_AUTOMATION_OFFERS_DISABLED: optInBoolean(),
-  // Opt-in pilot: defer Fast scheduling schemas and detailed instructions
-  // behind capability discovery instead of sending them on every turn.
-  R_FAST_SCHEDULING_PROGRESSIVE_DISCLOSURE_ENABLED: optInBoolean(),
   TRPC_URL: z.string().min(1),
   R_MODEL: z.string().min(1).optional(),
   R_ORCHESTRATION_MODEL: z.string().min(1).optional(),
@@ -223,6 +226,14 @@ const serverSchema = {
   R_TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   R_TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
   TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
+  // Rollout gate for the email (AgentMail) channel: inbound, outbound, and
+  // the settings surface are all inert unless this is set. Read dynamically
+  // via isEmailChannelEnabled() so tests and runtime reads agree.
+  R_EMAIL_CHANNEL_ENABLED: optInBoolean(),
+  R_AGENTMAIL_API_KEY: z.string().min(1).optional(),
+  R_AGENTMAIL_WEBHOOK_SECRET: z.string().min(1).optional(),
+  R_AGENTMAIL_INBOX_ID: z.string().min(1).optional(),
+  AGENTMAIL_API_BASE_URL: z.string().url().default('https://api.agentmail.to'),
   R_DISCORD_BOT_TOKEN: z.string().min(1).optional(),
   R_DISCORD_GATEWAY_SECRET: z.string().min(1).optional(),
   DISCORD_API_BASE_URL: z.string().url().default('https://discord.com/api/v10'),
@@ -549,6 +560,12 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_BRAIN_OPENROUTER_API_KEY',
   'R_BRAIN_OPENAI_API_KEY',
   'R_TRIAL_OPENROUTER_API_KEY',
+  // Cloud clears managed-email variables with empty strings on disable;
+  // an empty enum flag must fall back to its default, not fail boot.
+  'R_EMAIL_CHANNEL_ENABLED',
+  'R_AGENTMAIL_API_KEY',
+  'R_AGENTMAIL_WEBHOOK_SECRET',
+  'R_AGENTMAIL_INBOX_ID',
   'SANDBOX_OPENROUTER_API_KEY',
   'R_BRAIN_EMBEDDINGS_UPSTREAM_URL',
   'R_BRAIN_INFERENCE_UPSTREAM_API_KEY',
@@ -576,6 +593,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
+  'R_VOICE_OPENAI_API_KEY',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
@@ -588,6 +606,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_TEAMS_BOT_OAUTH_SCOPE',
   'R_TELEGRAM_BOT_TOKEN',
   'R_TELEGRAM_WEBHOOK_SECRET',
+  'R_AGENTMAIL_API_KEY',
+  'R_AGENTMAIL_WEBHOOK_SECRET',
+  'R_AGENTMAIL_INBOX_ID',
   'R_DISCORD_BOT_TOKEN',
   'R_DISCORD_GATEWAY_SECRET',
   'DISCORD_API_BASE_URL',
@@ -703,6 +724,18 @@ export type AuthKeypairEnvKey = (typeof AUTH_KEYPAIR_ENV_KEYS)[number];
 export function isEnvFlagEnabled(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
+}
+
+/**
+ * Whether the email (AgentMail) channel is enabled for this deployment.
+ * Reads the process environment at call time — the same way the AgentMail
+ * credential resolver does — so the gate can never disagree with the
+ * credentials it guards.
+ */
+export function isEmailChannelEnabled(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return isEnvFlagEnabled(env.R_EMAIL_CHANNEL_ENABLED);
 }
 
 /** Whether Roomote Cloud-only behavior is enabled for this deployment. */

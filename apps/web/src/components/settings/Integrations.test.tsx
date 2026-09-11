@@ -48,6 +48,11 @@ const state = vi.hoisted(() => ({
     authStatus?: string | null;
     voiceId?: string;
   },
+  voiceConnection: null as null | {
+    authStatus?: string | null;
+    source?: 'environment' | 'connection';
+    voiceId?: string;
+  },
   grafanaConnection: null as null | {
     authStatus?: string | null;
     baseUrl: string;
@@ -110,6 +115,8 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveRipplingConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
+    saveVoiceConnection: vi.fn(),
+    previewVoice: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
@@ -294,6 +301,18 @@ vi.mock('@/hooks/mcp-connections', () => ({
     data: state.elevenLabsConnection,
     isPending: false,
   }),
+  useSaveVoiceConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveVoiceConnection,
+  }),
+  usePreviewVoice: () => ({
+    isPending: false,
+    mutate: mutations.previewVoice,
+  }),
+  useVoiceConnection: () => ({
+    data: state.voiceConnection,
+    isPending: false,
+  }),
   useSaveGrafanaConnection: () => ({
     isPending: false,
     mutate: mutations.saveGrafanaConnection,
@@ -419,6 +438,7 @@ vi.mock('@/components/system', () => ({
   LinearLogo: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
   Plus: () => <svg aria-hidden="true" data-icon="plus" />,
+  Play: () => <svg aria-hidden="true" data-icon="play" />,
   PlugIcon: () => <svg aria-hidden="true" />,
   RefreshCw: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="refresh-cw" />
@@ -505,6 +525,7 @@ describe('Integrations settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.history.replaceState(null, '', '/settings/integrations');
+    state.voiceConnection = null;
     state.deploymentEnablements = [];
     state.integrationsEnabled = true;
     state.oauthReadiness = [{ mcpId: 'linear', status: 'ready' }];
@@ -904,6 +925,7 @@ describe('Integrations settings', () => {
       'Supabase',
       'Supermemory',
       'Vercel',
+      'Voice',
       'X',
       'Zero',
     ]);
@@ -2183,5 +2205,87 @@ describe('Integrations settings', () => {
     expect(
       screen.getByRole('button', { name: 'Enable search_events' }),
     ).toBeInTheDocument();
+  });
+
+  it('lets an admin store a voice key from the Voice card', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Configure Voice' }),
+    );
+    const input = await screen.findByLabelText('OpenAI API Key');
+    fireEvent.change(input, { target: { value: '  sk-voice-123  ' } });
+    fireEvent.submit(input.closest('form') as HTMLFormElement);
+
+    expect(mutations.saveVoiceConnection).toHaveBeenCalledWith(
+      { apiKey: 'sk-voice-123', voiceId: 'marin' },
+      expect.anything(),
+    );
+  });
+
+  it('preserves the saved voice and previews another supported option', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [{ mcpId: 'voice', enabled: true }];
+    state.userConnections = [
+      { id: 'voice-1', mcpId: 'voice', authStatus: 'authenticated' },
+    ];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'connection',
+      voiceId: 'cedar',
+    };
+
+    render(<Integrations />);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit Voice connection' }),
+    );
+
+    expect(screen.getByRole('button', { name: 'Cedar' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Coral' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Preview Coral voice' }),
+    );
+
+    expect(mutations.previewVoice).toHaveBeenCalledWith(
+      { apiKey: '', voiceId: 'coral' },
+      expect.anything(),
+    );
+  });
+
+  it('shows Voice as connected when the environment provides the key', async () => {
+    state.isAdmin = true;
+    state.deploymentEnablements = [];
+    state.userConnections = [];
+    state.voiceConnection = {
+      authStatus: 'authenticated',
+      source: 'environment',
+    };
+
+    render(<Integrations />);
+
+    const connectedSection = (
+      await screen.findByRole('heading', { name: 'Connected' })
+    ).closest('section');
+    expect(
+      within(connectedSection as HTMLElement).getByRole('heading', {
+        level: 3,
+        name: 'Voice',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Configured by the R_VOICE_OPENAI_API_KEY environment variable.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Disconnect Voice' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Configure Voice' }),
+    ).not.toBeInTheDocument();
   });
 });

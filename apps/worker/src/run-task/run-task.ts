@@ -249,6 +249,8 @@ function getInitialSlackTurnMessageTs(taskRun: {
 
   // Non-Slack communication tasks track the launch message so turn-satisfaction
   // machinery (ack/closeout enforcement, current-turn reactions) applies.
+  // AgentMail (email) is deliberately excluded from that machinery: email is
+  // low-frequency and must never get ack/silence heartbeats.
   if (
     (payload.communicationProvider === 'telegram' ||
       payload.communicationProvider === 'teams' ||
@@ -2056,6 +2058,8 @@ export const runTask = async ({
           return;
         }
 
+        // AgentMail (email) is deliberately excluded: email turns never feed
+        // the turn-satisfaction machinery (no ack/silence heartbeats).
         if (
           message.provider === 'slack' ||
           message.provider === 'telegram' ||

@@ -9,6 +9,7 @@ const {
   mockUpdateAutomationScanCursor,
   mockListConnectedCommunicationProviders,
   mockResolveAutomationRuntimeDestination,
+  mockResolveAutomationRepositoryDestination,
   mockLoadAutomationThreadFeedbackReport,
   mockEnqueueTask,
 } = vi.hoisted(() => ({
@@ -23,6 +24,7 @@ const {
   mockUpdateAutomationScanCursor: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveAutomationRuntimeDestination: vi.fn(),
+  mockResolveAutomationRepositoryDestination: vi.fn(),
   mockLoadAutomationThreadFeedbackReport: vi.fn(),
   mockEnqueueTask: vi.fn(),
 }));
@@ -104,6 +106,11 @@ vi.mock('../github-deployment-scope', () => ({
   hasAnyActiveRepository: mockHasAnyActiveRepository,
 }));
 
+vi.mock('../ci-failure-triage-routing', () => ({
+  resolveAutomationRepositoryDestination:
+    mockResolveAutomationRepositoryDestination,
+}));
+
 import {
   buildMergedPullRequestTaskContext,
   createMergedPullRequestAuditJob,
@@ -124,7 +131,11 @@ describe('createMergedPullRequestAuditJob eligibility gate', () => {
       scheduleMode: 'off',
       lastRunAt: null,
       scanCursor: null,
+      settings: {},
     });
+    mockResolveAutomationRepositoryDestination.mockImplementation(
+      async ({ destination }) => destination ?? null,
+    );
   });
 
   it('skips when no active repository exists on any provider', async () => {
@@ -174,6 +185,7 @@ describe('buildMergedPullRequestTaskContext', () => {
       manualTrigger: false,
       mergedPullRequests: [
         {
+          repositoryId: '11111111-1111-4111-8111-111111111111',
           externalPullRequestId: 991,
           repositoryFullName: 'acme/backend',
           sourceControlProvider: 'gitlab',
@@ -261,11 +273,15 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       scheduleMode: 'daily',
       lastRunAt: null,
       scanCursor: null,
+      settings: {},
     });
     mockResolveAutomationRuntimeDestination.mockResolvedValue({
       provider: 'slack',
       channelId: 'C123',
     });
+    mockResolveAutomationRepositoryDestination.mockImplementation(
+      async ({ destination }) => destination ?? null,
+    );
     mockLoadAutomationThreadFeedbackReport.mockResolvedValue({
       promptText: null,
       debugSnippet: undefined,
@@ -325,6 +341,46 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     expect('sourceControlProvider' in payload!).toBe(false);
     expect(payload!.selectedRepositories).toEqual(['acme/a', 'acme/b']);
     expect(mockUpdateAutomationScanCursor).not.toHaveBeenCalled();
+  });
+
+  it('never mixes repositories routed to different destinations', async () => {
+    mockSlackInstallationRows.mockResolvedValueOnce([
+      {
+        ...factRow({
+          index: 0,
+          provider: 'github',
+          repositoryFullName: 'acme/a',
+        }),
+        repositoryId: 'repo-a',
+      },
+      {
+        ...factRow({
+          index: 1,
+          provider: 'github',
+          repositoryFullName: 'acme/b',
+        }),
+        repositoryId: 'repo-b',
+      },
+    ]);
+    mockResolveAutomationRepositoryDestination.mockImplementation(
+      async ({ repositoryId }) => ({
+        provider: 'slack',
+        channelId: repositoryId === 'repo-a' ? 'C-A' : 'C-B',
+      }),
+    );
+
+    await job();
+
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
+    expect(
+      mockEnqueueTask.mock.calls.map(([input]) => ({
+        repositories: input.task.payload.selectedRepositories,
+        channel: input.task.payload.slackChannel,
+      })),
+    ).toEqual([
+      { repositories: ['acme/a'], channel: 'C-A' },
+      { repositories: ['acme/b'], channel: 'C-B' },
+    ]);
   });
 
   it('can silence scan completion while retaining the Slack destination', async () => {

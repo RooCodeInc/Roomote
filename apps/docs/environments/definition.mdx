@@ -381,11 +381,14 @@ repository has a known trap, state it plainly.
 Admins can configure natural-language routing rules from **Settings →
 Environments**. Each rule maps a description, such as “Messages sent in the
 hospital-bugs Slack channel,” to an environment or the broad **All repositories**
-workspace.
+workspace. A rule can also recommend a coding model for work that Fast delegates.
 
 Rules are guidance rather than exact string matchers. An environment explicitly
 named in a request takes precedence, and a specific rule takes precedence over a
-catch-all default.
+catch-all default. Fast evaluates the saved rules when it chooses an environment
+or model for a delegated task; they do not override a model or environment the
+user explicitly requested. Rules that point to a deleted environment are ignored
+until an admin updates or removes them.
 
 ## MCP servers
 

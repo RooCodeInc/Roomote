@@ -261,6 +261,56 @@ When adding internal-only product UI in `apps/web/`:
 
 ## Form Pattern
 
+### Select focus handoff
+
+Use the shared Select's `handoffTargetOnSelect` prop only when committing a
+choice clearly means the user's next action is to edit one specific text field
+or choose from one specific dependent Select:
+
+```tsx
+const detailsRef = useRef<HTMLInputElement>(null);
+
+<Select handoffTargetOnSelect={detailsRef}>
+  {/* trigger, content, and items */}
+</Select>
+<Input ref={detailsRef} />
+```
+
+For a dependent shared Select, expose its handoff handle explicitly:
+
+```tsx
+const channelSelectRef = useRef<SelectHandoffTarget>(null);
+
+<Select handoffTargetOnSelect={channelSelectRef}>{/* provider */}</Select>
+<Select handoffRef={channelSelectRef}>{/* channel */}</Select>
+```
+
+- Always pass an explicit `Input`/`Textarea` ref or shared Select handoff ref.
+  Never infer the next control from DOM order.
+- Opt in for a destination revealed by the choice or an explicit "enter
+  manually" choice. Do not opt in merely because an optional field is nearby.
+- The handoff happens only after an item is committed and the dropdown closes.
+  Browsing, Escape, outside dismissal, and cancelled item events retain normal
+  Radix focus behavior.
+- A text destination must be mounted, visible, enabled, editable, and textual
+  when the source dropdown finishes closing. A Select destination must have a
+  visible enabled trigger; it is focused and opened through its normal
+  controlled or uncontrolled state path. Otherwise focus returns to the source
+  trigger.
+- Do not open a dependent Select when it is loading, has no usable choices, or
+  already holds a valid choice. If options load asynchronously, retain a pending
+  handoff only while focus remains on the source trigger so later user actions
+  are never interrupted.
+- Account for assistive technology and mobile keyboards. The focus move should
+  preserve a logical reading order and opening the software keyboard should be
+  the expected next step, not a surprise.
+- Do not override `SelectContent.onCloseAutoFocus` to recreate this behavior.
+  The shared API coordinates with Radix focus restoration and respects a close
+  handler that deliberately takes focus ownership.
+
+See [the current candidate audit](references/select-focus-handoff-audit.md) for
+the approved adoptions and intentionally skipped flows.
+
 ### Standard form with validation
 
 ```tsx

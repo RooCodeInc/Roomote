@@ -1,0 +1,75 @@
+---
+title: Voice
+icon: openai
+description: Talk naturally with a Fast Session using GPT-Live.
+---
+
+Voice turns a Fast Session into a natural, full-duplex spoken conversation.
+GPT-Live handles listening, speaking, and interruptions while the actual Fast
+Session handles questions and work with its selected model, tools, context, and
+durable transcript. You can move between voice and text without switching to a
+separate voice-only agent.
+
+## Enabling voice
+
+Voice uses OpenAI GPT-Live-1 and needs an OpenAI API key from a project with
+GPT-Live access. A deployment admin can enter one from **Settings >
+Integrations > Voice**, or a self-hosted operator can set
+`R_VOICE_OPENAI_API_KEY`; the environment variable is used when both exist.
+Voice is opt-in: the deployment's general `OPENAI_API_KEY` is not used, so
+enabling OpenAI for task inference does not turn voice on. See the
+[Voice integration](/integrations/voice) page for details.
+
+The Voice integration settings include the GPT-Live voice selection and an
+AI-generated audio preview. Existing selections are preserved. New and unset
+connections default to Marin, one of OpenAI's recommended voices.
+
+When the voice key is not configured the voice button does not appear. The key
+stays on the control plane. The browser sends its WebRTC connection offer to Roomote
+and receives only the negotiated session answer; it never receives the API key.
+
+## Using voice
+
+1. Select the voice button in a composer: in an open Session, or on the home
+   page and the **New Session** dialog. From the home page or dialog a new
+   Session is created and the call starts inside it.
+2. Grant microphone access when the browser asks. A short rising tone
+   confirms the call is open; a falling tone marks the end. A **Call started**
+   marker appears in the Session.
+3. Talk to Roomote the way you would on a phone call. It acknowledges each
+   utterance in a few words, hands it to the Fast Session, and reports the
+   response out loud when it lands. Every utterance is sent to the Fast Session,
+   where the selected model, tools, context, and safeguards handle the response.
+4. Speak at any time to interrupt. Roomote keeps listening while it speaks,
+   and follow-ups go back through the same Fast Session. You can also type in
+   the composer during the call.
+5. Use the in-call controls to mute your microphone, silence Roomote's audio
+   without muting yourself, or end the call. The button stays highlighted
+   while the call is active, and a **Call ended** marker records its length.
+
+Voice input requires a browser with microphone and WebRTC support, which
+includes current Chrome, Edge, Safari, and Firefox.
+
+## How the transcript works
+
+A voice call is transcribed into the Session as the record of what was said.
+Your speech appears as your messages, and what Roomote said out loud appears
+as its replies. The Fast Session's work, such as tool calls, launched tasks,
+and reports, appears between those turns exactly as it does in a typed
+Session, so the timeline shows both the conversation and the work behind it.
+
+During a call the Fast Session returns its results to the voice rather than
+writing them as chat replies; Roomote then reports them in its own words,
+keeping numbers, names, paths, and link labels exact. The exact Fast result stays
+in the transcript as a collapsed **Reported result to voice** row, including when
+the call drops or speech is interrupted. Typed messages sent during a call are
+answered in writing as usual.
+
+Each spoken request is cleaned up (filler words, false starts, and misheard
+terms) by the deployment's helper model before it reaches the Fast Session.
+GPT-Live is told which repositories, environments, and integrations the Fast
+Session can reach, so it recognises their names, and the same names guide the
+cleanup so a misheard repository name is corrected to the real one.
+
+Ending the call stops the microphone; Fast work already started remains
+visible in the Session and follows the normal Session lifecycle.

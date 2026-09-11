@@ -4,6 +4,7 @@ import type { AcpUiMessage } from './types';
 import { AcpCommandOutputMessage } from './AcpCommandOutputMessage';
 import { AcpReasoningMessage } from './AcpReasoningMessage';
 import { AcpTaskCancelledMessage } from './AcpTaskCancelledMessage';
+import { AcpVoiceCallMessage } from './AcpVoiceCallMessage';
 import { AcpTodoSectionMessage } from './AcpTodoSectionMessage';
 import { AcpTextMessage } from './AcpTextMessage';
 import { AcpToolMessage } from './AcpToolMessage';
@@ -69,6 +70,8 @@ function AcpMessageItemBase({
       return null;
     case 'task_cancelled':
       return <AcpTaskCancelledMessage msg={msg} />;
+    case 'voice_call':
+      return <AcpVoiceCallMessage msg={msg} />;
     default:
       return <AcpUnknownMessage msg={msg} />;
   }

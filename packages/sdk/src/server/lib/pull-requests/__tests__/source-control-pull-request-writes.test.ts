@@ -170,6 +170,614 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     mockEnqueuePrReviewNotification.mockResolvedValue({ notifiedTaskCount: 1 });
   });
 
+  it('closes a GitHub pull request with the installation token', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const update = vi.fn().mockResolvedValue({
+      data: { html_url: 'https://github.com/acme/backend/pull/55' },
+    });
+    mockGetOctokit.mockReturnValue({ rest: { pulls: { update } } });
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'close_pull_request',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      state: 'closed',
+    });
+    expect(result).toMatchObject({
+      success: true,
+      action: 'close_pull_request',
+      provider: 'github',
+      number: 55,
+      url: 'https://github.com/acme/backend/pull/55',
+      applied: true,
+      warnings: [],
+    });
+  });
+
+  it('updates an explicitly identified GitHub pull request without creating another', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const get = vi.fn().mockResolvedValue({
+      data: {
+        number: 55,
+        node_id: 'PR_node',
+        html_url: 'https://github.com/acme/backend/pull/55',
+        draft: true,
+      },
+    });
+    const update = vi.fn().mockResolvedValue({
+      data: { html_url: 'https://github.com/acme/backend/pull/55' },
+    });
+    const create = vi.fn();
+    const graphql = vi.fn().mockResolvedValue({
+      markPullRequestReadyForReview: { pullRequest: { isDraft: false } },
+    });
+    mockGetOctokit.mockReturnValue({
+      rest: { pulls: { get, update, create } },
+      graphql,
+    });
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        targetBranch: 'main',
+        title: 'Updated title',
+        body: '',
+        draft: false,
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(mockCreateGitHubToken).toHaveBeenCalledWith({
+      type: 'installationId',
+      installationId: 'installation-1',
+    });
+    expect(get).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+    });
+    expect(update).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      base: 'main',
+      title: 'Updated title',
+      body: '',
+    });
+    expect(graphql).toHaveBeenCalledWith(
+      expect.stringContaining('markPullRequestReadyForReview'),
+      { pullRequestId: 'PR_node' },
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: true,
+      action: 'update_pull_request',
+      provider: 'github',
+      number: 55,
+      applied: true,
+      warnings: [],
+    });
+  });
+
+  it.each([
+    {
+      provider: 'gitlab' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://gitlab.com/acme/backend',
+      },
+      current: { iid: 55, title: 'Old title' },
+      updated: { iid: 55, title: 'Draft: Updated title' },
+      expectedUrl: 'https://gitlab.com/api/v4/projects/101/merge_requests/55',
+      expectedMethod: 'PUT',
+      expectedBody: {
+        target_branch: 'main',
+        title: 'Draft: Updated title',
+        description: 'Updated body',
+      },
+    },
+    {
+      provider: 'gitea' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://git.example.com/acme/backend',
+      },
+      current: { number: 55, title: 'Old title', draft: false },
+      updated: { number: 55, title: 'WIP: Updated title', draft: true },
+      expectedUrl: 'https://git.example.com/api/v1/repos/acme/backend/pulls/55',
+      expectedMethod: 'PATCH',
+      expectedBody: {
+        base: 'main',
+        title: 'WIP: Updated title',
+        body: 'Updated body',
+      },
+    },
+    {
+      provider: 'bitbucket' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://bitbucket.org/acme/backend',
+      },
+      current: { id: 55, draft: false },
+      updated: { id: 55, draft: true },
+      expectedUrl:
+        'https://api.bitbucket.org/2.0/repositories/acme/backend/pullrequests/55',
+      expectedMethod: 'PUT',
+      expectedBody: {
+        destination: { branch: { name: 'main' } },
+        title: 'Updated title',
+        description: 'Updated body',
+        draft: true,
+      },
+    },
+    {
+      provider: 'ado' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: 'repo-uuid',
+        fullName: 'acme/Platform/backend',
+        htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      },
+      current: { pullRequestId: 55, title: 'Old title', isDraft: false },
+      updated: { pullRequestId: 55, title: 'Updated title', isDraft: true },
+      expectedUrl:
+        'https://dev.azure.com/acme/Platform/_apis/git/repositories/repo-uuid/pullrequests/55?api-version=7.1',
+      expectedMethod: 'PATCH',
+      expectedBody: {
+        targetRefName: 'refs/heads/main',
+        title: 'Updated title',
+        description: 'Updated body',
+        isDraft: true,
+      },
+    },
+  ])(
+    'updates an explicitly identified $provider pull request',
+    async ({
+      provider,
+      repository,
+      current,
+      updated,
+      expectedUrl,
+      expectedMethod,
+      expectedBody,
+    }) => {
+      mockRepositoriesFindFirst.mockResolvedValue(repository);
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(current))
+        .mockResolvedValueOnce(jsonResponse(updated));
+
+      const result = await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: repository.fullName,
+          sourceControlProvider: provider,
+        }),
+        input: {
+          action: 'update_pull_request',
+          repositoryFullName: repository.fullName,
+          prNumber: 55,
+          targetBranch: 'main',
+          title: 'Updated title',
+          body: 'Updated body',
+          draft: true,
+          sourceControlProvider: provider,
+        },
+        fetchImpl,
+      });
+
+      expect(fetchImpl).toHaveBeenNthCalledWith(
+        2,
+        expectedUrl,
+        expect.objectContaining({
+          method: expectedMethod,
+          body: JSON.stringify(expectedBody),
+        }),
+      );
+      expect(result).toMatchObject({
+        success: true,
+        action: 'update_pull_request',
+        provider,
+        number: 55,
+        applied: true,
+        warnings: [],
+      });
+    },
+  );
+
+  it('does not report a prefixed Gitea native draft as ready after a title-only transition', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://git.example.com/acme/backend',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ number: 55, title: 'WIP: Existing title', draft: true }),
+      );
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitea',
+      }),
+      input: {
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        title: 'Updated title',
+        draft: false,
+        sourceControlProvider: 'gitea',
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      action: 'update_pull_request',
+      provider: 'gitea',
+      applied: false,
+      warnings: [expect.stringContaining('cannot change native draft state')],
+    });
+  });
+
+  it.each([
+    {
+      provider: 'gitlab' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://gitlab.com/acme/backend',
+      },
+      response: { iid: 55, title: 'Title' },
+      expectedUrl: 'https://gitlab.com/api/v4/projects/101/merge_requests/55',
+      expectedMethod: 'PUT',
+      expectedBody: { state_event: 'reopen' },
+    },
+    {
+      provider: 'gitea' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://git.example.com/acme/backend',
+      },
+      response: { number: 55, title: 'Title' },
+      expectedUrl: 'https://git.example.com/api/v1/repos/acme/backend/pulls/55',
+      expectedMethod: 'PATCH',
+      expectedBody: { state: 'open' },
+    },
+    {
+      provider: 'bitbucket' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://bitbucket.org/acme/backend',
+      },
+      response: { id: 55 },
+      expectedUrl:
+        'https://api.bitbucket.org/2.0/repositories/acme/backend/pullrequests/55/reopen',
+      expectedMethod: 'POST',
+      expectedBody: undefined,
+    },
+    {
+      provider: 'ado' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: 'repo-uuid',
+        fullName: 'acme/Platform/backend',
+        htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      },
+      response: { pullRequestId: 55, title: 'Title' },
+      expectedUrl:
+        'https://dev.azure.com/acme/Platform/_apis/git/repositories/repo-uuid/pullrequests/55?api-version=7.1',
+      expectedMethod: 'PATCH',
+      expectedBody: { status: 'active' },
+    },
+  ])(
+    'uses the $provider reopen operation',
+    async ({
+      provider,
+      repository,
+      response,
+      expectedUrl,
+      expectedMethod,
+      expectedBody,
+    }) => {
+      mockRepositoriesFindFirst.mockResolvedValue(repository);
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse(response));
+
+      const result = await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: repository.fullName,
+          sourceControlProvider: provider,
+        }),
+        input: {
+          action: 'reopen_pull_request',
+          repositoryFullName: repository.fullName,
+          prNumber: 55,
+          sourceControlProvider: provider,
+        },
+        fetchImpl,
+      });
+
+      expect(fetchImpl).toHaveBeenCalledWith(
+        expectedUrl,
+        expect.objectContaining({
+          method: expectedMethod,
+          ...(expectedBody === undefined
+            ? {}
+            : { body: JSON.stringify(expectedBody) }),
+        }),
+      );
+      expect(result).toMatchObject({
+        action: 'reopen_pull_request',
+        provider,
+        applied: true,
+      });
+    },
+  );
+
+  it('reopens an explicitly identified GitHub pull request', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const update = vi.fn().mockResolvedValue({
+      data: { html_url: 'https://github.com/acme/backend/pull/55' },
+    });
+    mockGetOctokit.mockReturnValue({ rest: { pulls: { update } } });
+
+    await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'reopen_pull_request',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      state: 'open',
+    });
+  });
+
+  it('rejects update requests without fields before resolving repository credentials', async () => {
+    await expect(
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'update_pull_request',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          sourceControlProvider: 'github',
+        },
+      }),
+    ).rejects.toThrow(
+      'update_pull_request requires at least one of targetBranch, title, body, or draft.',
+    );
+    expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects an update provider mismatch before resolving repository credentials', async () => {
+    await expect(
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+        }),
+        input: {
+          action: 'update_pull_request',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          title: 'Updated title',
+          sourceControlProvider: 'github',
+        },
+      }),
+    ).rejects.toThrow(
+      'Source control provider mismatch: task uses GitLab, but request specified GitHub.',
+    );
+    expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects an update outside the task repository scope before resolving credentials', async () => {
+    await expect(
+      writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'update_pull_request',
+          repositoryFullName: 'other/backend',
+          prNumber: 55,
+          title: 'Updated title',
+          sourceControlProvider: 'github',
+        },
+      }),
+    ).rejects.toThrow('outside this task');
+    expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects delivery metadata on explicit pull request updates', () => {
+    expect(() =>
+      sourceControlPullRequestWriteInputSchema.parse({
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        title: 'Updated title',
+        labels: ['bug'],
+      }),
+    ).toThrow();
+  });
+
+  it('requires a positive explicit pull request identity', () => {
+    expect(() =>
+      sourceControlPullRequestWriteInputSchema.parse({
+        action: 'update_pull_request',
+        repositoryFullName: 'acme/backend',
+        title: 'Updated title',
+      }),
+    ).toThrow();
+    expect(() =>
+      sourceControlPullRequestWriteInputSchema.parse({
+        action: 'reopen_pull_request',
+        repositoryFullName: 'acme/backend',
+        prNumber: 0,
+      }),
+    ).toThrow();
+  });
+
+  it.each([
+    {
+      provider: 'gitlab' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: '101',
+        fullName: 'acme/backend',
+        htmlUrl: 'https://gitlab.com/acme/backend',
+      },
+      expectedUrl: 'https://gitlab.com/api/v4/projects/101/merge_requests/55',
+      expectedMethod: 'PUT',
+      expectedBody: { state_event: 'close' },
+    },
+    {
+      provider: 'gitea' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://git.example.com/acme/backend',
+      },
+      expectedUrl: 'https://git.example.com/api/v1/repos/acme/backend/pulls/55',
+      expectedMethod: 'PATCH',
+      expectedBody: { state: 'closed' },
+    },
+    {
+      provider: 'bitbucket' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: null,
+        fullName: 'acme/backend',
+        htmlUrl: 'https://bitbucket.org/acme/backend',
+      },
+      expectedUrl:
+        'https://api.bitbucket.org/2.0/repositories/acme/backend/pullrequests/55/decline',
+      expectedMethod: 'POST',
+      expectedBody: undefined,
+    },
+    {
+      provider: 'ado' as const,
+      repository: {
+        installationId: null,
+        externalRepoId: 'repo-uuid',
+        fullName: 'acme/Platform/backend',
+        htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      },
+      expectedUrl:
+        'https://dev.azure.com/acme/Platform/_apis/git/repositories/repo-uuid/pullrequests/55?api-version=7.1',
+      expectedMethod: 'PATCH',
+      expectedBody: { status: 'abandoned' },
+    },
+  ])(
+    'uses the $provider close operation',
+    async ({
+      provider,
+      repository,
+      expectedUrl,
+      expectedMethod,
+      expectedBody,
+    }) => {
+      mockRepositoriesFindFirst.mockResolvedValue(repository);
+      const fetchImpl = vi.fn().mockResolvedValueOnce(jsonResponse({}, 200));
+
+      const result = await writeSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: repository.fullName,
+          sourceControlProvider: provider,
+        }),
+        input: {
+          action: 'close_pull_request',
+          repositoryFullName: repository.fullName,
+          prNumber: 55,
+          sourceControlProvider: provider,
+        },
+        fetchImpl,
+      });
+
+      expect(fetchImpl).toHaveBeenCalledWith(
+        expectedUrl,
+        expect.objectContaining({
+          method: expectedMethod,
+          ...(expectedBody === undefined
+            ? {}
+            : { body: JSON.stringify(expectedBody) }),
+        }),
+      );
+      expect(result).toMatchObject({
+        success: true,
+        action: 'close_pull_request',
+        provider,
+        number: 55,
+        applied: true,
+        warnings: [],
+      });
+    },
+  );
+
   it('requests GitHub user and team reviewers with the installation token', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: 'installation-1',

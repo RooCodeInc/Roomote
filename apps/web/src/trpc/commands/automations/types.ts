@@ -1,5 +1,6 @@
 import type {
   AnnouncerFrequency,
+  AutomationCapableCommunicationProvider,
   BackgroundAutomationKey,
   ChannelAutoStartLaunchMode,
   CommunicationProvider,
@@ -20,6 +21,11 @@ import type {
 export type BackgroundAgentFieldErrorKey =
   | 'general'
   | 'ciFailureTriageAdditionalRules'
+  | 'suggesterAdditionalRules'
+  | 'announcerAdditionalRules'
+  | 'securityAuditorAdditionalRules'
+  | 'codeQualityAuditorAdditionalRules'
+  | 'mergeAnnouncerAdditionalRules'
   | 'reviewerEnvironmentIds'
   | 'reviewerCollaborators'
   | 'reviewerExcludedAuthors'
@@ -268,6 +274,11 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   issueFixerInstructions?: string | null;
   /** Empty or null restores the default; omitted preserves saved rules. */
   ciFailureTriageAdditionalRules?: string | null;
+  suggesterAdditionalRules?: string | null;
+  announcerAdditionalRules?: string | null;
+  securityAuditorAdditionalRules?: string | null;
+  codeQualityAuditorAdditionalRules?: string | null;
+  mergeAnnouncerAdditionalRules?: string | null;
   channelAutoStartSlackChannels?: ChannelAutoStartInputRow[];
   /**
    * Optional with no default: older clients never send it, and their saves
@@ -317,7 +328,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   codeQualityAuditorDiscordChannel?: string | null;
   ciFailureTriageSlackChannel?: string | null;
   ciFailureTriageDiscordChannel?: string | null;
-  mergeAnnouncerTargetProvider?: CommunicationProvider | null;
+  mergeAnnouncerTargetProvider?: AutomationCapableCommunicationProvider | null;
   mergeAnnouncerTargetMode?: 'channel' | 'direct_message';
   mergeAnnouncerTargetChannelId?: string | null;
 }

@@ -69,6 +69,39 @@ const SIMPLE_ICONS: Record<string, SimpleIcon> = {
   x: siX,
 };
 
+function VoiceIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M2 10v3" />
+      <path d="M6 6v11" />
+      <path d="M10 3v18" />
+      <path d="M14 8v7" />
+      <path d="M18 5v13" />
+      <path d="M22 10v3" />
+    </svg>
+  );
+}
+
 function NeonIcon({
   name,
   className,
@@ -566,6 +599,16 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
   if (icon === 'neon') {
     return (
       <NeonIcon name={name} className={className} isDecorative={isDecorative} />
+    );
+  }
+
+  if (icon === 'voice') {
+    return (
+      <VoiceIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
     );
   }
 

@@ -21,6 +21,7 @@ vi.mock('@roomote/github', () => ({
   },
   resolveConfiguredGitHubAppSlug: vi.fn(),
   getPullRequestsForAnalytics: vi.fn(),
+  getUpdatedPullRequestsForAnalytics: vi.fn(),
   getPullRequest: vi.fn(),
 }));
 
@@ -31,9 +32,11 @@ vi.mock('../pull-requests/source-control-pull-request-reads', () => ({
 
 import {
   buildRoomotePullRequestMetadata,
+  computeDailyPullRequestActivity,
   computeMostActiveRepo,
   computeTopUsers,
   getSourceControlAnalyticsPullRequests,
+  getManagerStatsWindowStart,
   summarizeRoomotePullRequests,
   toAnalyticsPullRequests,
   type AnalyticsPullRequest,
@@ -193,6 +196,8 @@ function analyticsPr(
     number: 1,
     state: 'open',
     authorLogin: 'human-dev',
+    createdAt: '2026-07-10T09:00:00.000Z',
+    mergedAt: null,
     ...overrides,
   };
 }
@@ -412,6 +417,8 @@ describe('toAnalyticsPullRequests', () => {
         number: 1,
         state: 'open',
         authorLogin: 'human-dev',
+        createdAt: '2026-07-10T09:00:00.000Z',
+        mergedAt: null,
       },
       {
         sourceControlProvider: 'gitlab',
@@ -419,6 +426,8 @@ describe('toAnalyticsPullRequests', () => {
         number: 2,
         state: 'merged',
         authorLogin: 'human-dev',
+        createdAt: '2026-07-09T09:00:00.000Z',
+        mergedAt: '2026-07-10T09:00:00.000Z',
       },
     ]);
   });
@@ -480,6 +489,8 @@ describe('toAnalyticsPullRequests', () => {
         number: 7,
         state: 'merged',
         authorLogin: null,
+        createdAt: '2026-07-12T09:00:00.000Z',
+        mergedAt: '2026-07-13T09:00:00.000Z',
       },
     ]);
   });
@@ -556,6 +567,66 @@ describe('toAnalyticsPullRequests', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0]?.state).toBe('merged');
+  });
+
+  it('keeps a PR created before the window when it merged inside the window', () => {
+    const results = toAnalyticsPullRequests({
+      provider: 'gitlab',
+      repoFullName: 'group/app',
+      summaries: [
+        summary({
+          number: 11,
+          state: 'merged',
+          createdAt: '2026-07-01T09:00:00.000Z',
+          mergedAt: '2026-07-10T09:00:00.000Z',
+        }),
+      ],
+      since: WINDOW_START,
+    });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        number: 11,
+        createdAt: '2026-07-01T09:00:00.000Z',
+        mergedAt: '2026-07-10T09:00:00.000Z',
+      }),
+    ]);
+  });
+});
+
+describe('daily pull request activity', () => {
+  it('uses seven chronological local days and fills days without activity', () => {
+    const until = new Date('2026-03-13T20:00:00.000Z');
+
+    expect(getManagerStatsWindowStart(until, 'America/New_York')).toEqual(
+      new Date('2026-03-07T05:00:00.000Z'),
+    );
+    expect(
+      computeDailyPullRequestActivity({
+        pullRequests: [
+          analyticsPr({
+            number: 1,
+            createdAt: '2026-03-08T04:30:00.000Z',
+            mergedAt: '2026-03-08T07:30:00.000Z',
+          }),
+          analyticsPr({
+            number: 2,
+            createdAt: '2026-03-13T15:00:00.000Z',
+            mergedAt: null,
+          }),
+        ],
+        until,
+        timeZone: 'America/New_York',
+      }),
+    ).toEqual([
+      { label: 'Mar 7', createdPullRequests: 1, mergedPullRequests: 0 },
+      { label: 'Mar 8', createdPullRequests: 0, mergedPullRequests: 1 },
+      { label: 'Mar 9', createdPullRequests: 0, mergedPullRequests: 0 },
+      { label: 'Mar 10', createdPullRequests: 0, mergedPullRequests: 0 },
+      { label: 'Mar 11', createdPullRequests: 0, mergedPullRequests: 0 },
+      { label: 'Mar 12', createdPullRequests: 0, mergedPullRequests: 0 },
+      { label: 'Mar 13', createdPullRequests: 1, mergedPullRequests: 0 },
+    ]);
   });
 });
 

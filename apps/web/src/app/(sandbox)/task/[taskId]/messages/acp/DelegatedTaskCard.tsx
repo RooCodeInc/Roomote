@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
-import { activeRunStatuses, isExitedRunStatus } from '@roomote/types';
+import { isExitedRunStatus, runningRunStatuses } from '@roomote/types';
 
 import {
   BasicTooltip,
@@ -65,7 +65,7 @@ export function DelegatedTaskCard({
   // byTaskId only returns a run to callers with execution access.
   const canStop =
     !!data?.taskRun &&
-    activeRunStatuses.some((status) => status === data.taskRun.status);
+    runningRunStatuses.some((status) => status === data.taskRun.status);
 
   return (
     <div className="my-2">
@@ -123,7 +123,11 @@ export function DelegatedTaskCard({
                 event.stopPropagation();
                 if (!data?.taskRun || !canStop || cancel.isPending) return;
                 setCancelError(null);
-                cancel.mutate({ taskId, runId: data.taskRun.id });
+                cancel.mutate({
+                  taskId,
+                  runId: data.taskRun.id,
+                  terminate: false,
+                });
               }}
             >
               <SquareIcon

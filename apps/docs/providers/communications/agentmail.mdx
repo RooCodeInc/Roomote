@@ -1,0 +1,167 @@
+---
+title: Email (AgentMail)
+icon: '/logo/integrations/agentmail.svg'
+description: Connect an AgentMail inbox so Roomote can receive tasks and reply over email.
+---
+
+Email is a deployment-owned communications provider backed by
+[AgentMail](https://agentmail.to), an email API. It is not a Roomote sign-in
+provider.
+
+Roomote can receive email sent to a dedicated deployment inbox, start tasks
+from those messages, and reply in the same email thread. AgentMail delivers
+inbound mail through a `message.received` webhook, so Roomote must be reachable
+at a stable public HTTPS URL. Each deployment brings its own AgentMail account
+and API key.
+
+## Enable the email channel
+
+Email is off by default. Set `R_EMAIL_CHANNEL_ENABLED=true` in the
+deployment's environment and restart. Until then the provider does not
+appear in settings, inbound webhook deliveries are acknowledged and dropped,
+and Roomote never sends email. On Roomote Cloud this is enabled per
+deployment by the Roomote team.
+
+Enabling the channel gives the deployment an email sender for the first
+time, so new password sign-ups also receive a verification email (see
+[Account email verification](#account-email-verification) below). Sign-in
+is never blocked on verification.
+
+## Connect an AgentMail inbox
+
+Create an AgentMail account at [console.agentmail.to](https://console.agentmail.to),
+then:
+
+1. **Create the inbox** Roomote should receive mail at (or pick an existing
+   one). AgentMail's free tier includes 3 inboxes and 100 emails per day and
+   adds a "Sent via AgentMail" footer to outbound mail; custom domains, with
+   AgentMail-managed SPF/DKIM/DMARC, need a paid plan and are recommended for
+   production.
+2. **Create an API key from inside that inbox**, so the key is scoped to it.
+   Give it these permissions (or full access): `inbox_read`, `inbox_update`,
+   `webhook_read`, `webhook_create`, `webhook_update`, `webhook_delete`,
+   `message_read`, and `message_send`.
+3. In the Roomote UI (**Settings > Communications > Email (AgentMail)**),
+   paste the key and save.
+
+Roomote uses the inbox the key is scoped to; there is nothing else to enter.
+On save it validates the key, registers a webhook on the inbox for
+`message.received`, `message.bounced`, and `message.complained` events, and
+shows the connected address and webhook URL in settings. Missing permissions
+fail at save time with an error naming the refused request, except
+`message_send`, which has no side-effect-free check and is exercised on the
+first reply.
+
+An inbox-scoped key is the intended shape: it cannot read other inboxes or
+create new ones, so a leaked key exposes one mailbox rather than the
+account. An organization-level key is accepted only while the account has
+exactly one inbox, since Roomote would otherwise have no way to tell which
+inbox is for this deployment.
+
+For self-hosted env-var configuration instead of the UI, all values are
+optional overrides of the settings UI:
+
+```sh
+# Optional — configure email entirely from settings when unset:
+# R_AGENTMAIL_API_KEY=<inbox-scoped-agentmail-api-key>
+# R_AGENTMAIL_WEBHOOK_SECRET=<webhook-secret>
+# R_AGENTMAIL_INBOX_ID=<inbox-address>
+```
+
+## Email Roomote
+
+Send an email to the deployment inbox from an email address on your Roomote
+account. The address must be verified. Roomote replies in the same email
+thread, and follow-up emails in that thread continue the same conversation; a
+running delegated task receives them as follow-ups. Start a new request with a
+new email so it opens a new thread.
+
+Only verified account email addresses are recognized. Mail from any other
+address may receive a polite refusal explaining that it must come from the
+verified email on a Roomote account; resend from that address once it is
+verified. Refusals are limited to one per thread and one per sender each day,
+with a deployment-wide limit of 25 per day. Forwarding a Roomote email thread
+to someone else does not give them access to the original conversation or
+task; their message starts a separate conversation of their own.
+
+Roomote silently ignores auto-submitted or auto-generated messages and mail
+marked as bulk, list, or junk traffic. This prevents vacation responders,
+mailing lists, and similar automated senders from creating reply loops.
+
+Email is deliberately low-frequency: expect roughly two emails per task, an
+acknowledgment and the result, plus questions when the agent genuinely needs
+input. Roomote does not send play-by-play progress messages over email.
+
+When the agent asks a structured question, the question email includes a
+button for each option. Clicking a button opens a one-tap confirmation
+page; confirming records your answer and the agent continues. (The extra
+tap exists so corporate mail link scanners cannot answer on your behalf.)
+You can always answer by replying to the email instead. Multi-question
+prompts are answered by reply, one answer per line.
+
+## Roomote-initiated email
+
+Roomote can also initiate email — for example, notifying you that a GitHub
+App installation you requested was approved when you have no chat
+integration linked. Strict consent rules are enforced in code:
+
+- Roomote only initiates email to your own verified account address. It
+  never emails an address just because someone typed it in.
+- Every Roomote-initiated email carries a one-click unsubscribe link
+  (RFC 8058 `List-Unsubscribe`). Unsubscribing stops Roomote from initiating
+  new email to that address; replies to email you send Roomote are
+  unaffected.
+- Addresses that bounce permanently or file a spam complaint are suppressed
+  automatically and never emailed again.
+- If you also have a chat integration linked (Slack, Teams, Telegram, or
+  Discord), broadcast-style notices go there instead of email — email is the
+  fallback reach, not another copy.
+
+Custom automations can explicitly select **Email** as their report destination.
+This is opt-in, never a fallback. The picker offers the automation owner's
+account email once Roomote records it as verified. Each run uses that exact
+selected identity for its initial message and threaded report. If verification or membership is
+removed, the address changes, delivery is suppressed, or AgentMail is disabled
+or unconfigured, Roomote records a delivery failure and does not substitute
+another address or provider.
+
+Replying to a Roomote-initiated email works like any other thread: the reply
+routes back into the same conversation.
+
+## Account email verification
+
+Roomote only initiates email to an address it has verified. With the email
+channel enabled:
+
+- New email-and-password sign-ups receive a verification email. Confirming
+  it lets Roomote recognize the address on the email channel; signing in
+  does not wait for it, and a verification email that cannot be sent (the
+  AgentMail key is not configured yet, or the address is suppressed) never
+  blocks the account.
+- Existing password accounts that never verified (sign-ups from before the
+  channel was enabled) verify from **Personal settings > Linked Accounts**.
+- **Personal settings > Linked Accounts** shows the Email row's verification
+  status. When the login email is not verified and AgentMail is ready to
+  deliver, use **Resend** to request another verification message. A delivery
+  failure is shown instead of reporting success.
+- Sign-ins through Slack, Microsoft, GitHub, and the other OAuth providers
+  are unaffected; those providers assert a verified email.
+- Password reset links are emailed to the user as well as shown to the
+  admin who requested them.
+
+Verification and password-reset emails carry no unsubscribe link (the user
+asked for them) and are sent even to an address that unsubscribed from
+Roomote notifications. Addresses that bounced or filed a spam complaint are
+never emailed.
+
+## Limitations
+
+Current limitations:
+
+- Email automation destinations are private; channel-style posting is not
+  supported
+- each account has one email address for the channel, its verified login
+  email; there is no way to add other sender addresses
+- reactions are not supported
+- attachments from inbound email are not yet processed
+- each deployment has one inbox

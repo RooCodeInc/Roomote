@@ -93,6 +93,7 @@ import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
   isOpenCodeContextOverflowError,
+  isOpenCodeRetryableTransportError,
   isOpenCodeTerminalProviderError,
   resolveOpenCodeProviderErrorRetryDelayMs,
   summarizeOpenCodeProviderError,
@@ -3995,6 +3996,7 @@ export class OpenCodeServerHarness
             (isTerminalProviderError
               ? 'Provider request failed with a non-retryable error.'
               : 'Provider retry limit exceeded.'),
+          !isTerminalProviderError && isOpenCodeRetryableTransportError(status),
         );
         return;
       }
@@ -4073,6 +4075,7 @@ export class OpenCodeServerHarness
   private async terminateOpenCodeProviderRetry(
     sessionId: string,
     message: string,
+    retryable: boolean,
   ): Promise<void> {
     this.logger.error(
       `OpenCode reported a terminal provider error as retryable sessionId=${sessionId}: ${message}`,
@@ -4100,7 +4103,7 @@ export class OpenCodeServerHarness
         sessionID: sessionId,
         error: {
           name: 'APIError',
-          data: { message, isRetryable: false },
+          data: { message, isRetryable: retryable },
         },
       },
     });

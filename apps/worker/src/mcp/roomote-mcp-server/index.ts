@@ -517,11 +517,19 @@ function hasDiscordChatContext(): boolean {
   );
 }
 
+function hasAgentMailChatContext(): boolean {
+  return (
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim() === 'agentmail' &&
+    Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim())
+  );
+}
+
 function getChatReplySurfaceLabel():
   | 'Slack'
   | 'Teams'
   | 'Telegram'
   | 'Discord'
+  | 'email thread'
   | 'chat' {
   const provider = process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim();
 
@@ -535,6 +543,10 @@ function getChatReplySurfaceLabel():
 
   if (provider === 'discord') {
     return 'Discord';
+  }
+
+  if (provider === 'agentmail') {
+    return 'email thread';
   }
 
   return process.env.ROOMOTE_SLACK_CHANNEL?.trim() ? 'Slack' : 'chat';
@@ -862,10 +874,12 @@ roomoteMcpServer.registerTool(
       'Provider-neutral issue and pull request/merge request operations for the current task. ' +
       'Use "get_issue", "list_issue_comments", and "create_issue_comment" for plain issues. ' +
       'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
-      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
+      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. The metadata refresh preserves its current draft or ready state; later human changes and opt-in clean-review promotion are separate transitions. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
       '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
       '"list_pull_request_comments" to read review threads, top-level reviews, and issue comments. ' +
+      'Use "update_pull_request" with an explicit prNumber to update an existing PR/MR base branch, title, body, or draft state without ever creating a replacement. ' +
+      'Use "close_pull_request" and "reopen_pull_request" to change an existing PR/MR state without merging it or deleting its branch. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"create_pull_request_review_comment" for a new inline comment anchored to a file and line of the current diff, ' +
       '"resolve_pull_request_thread" to resolve or reopen a thread, "request_pull_request_reviewers" to request user or team reviewers after PR creation, "submit_pull_request_review" to approve, request changes, or leave a review comment, and "dismiss_pull_request_review" to dismiss a GitHub review. ' +
@@ -879,6 +893,9 @@ roomoteMcpServer.registerTool(
           'get_pull_request',
           'list_pull_requests',
           'list_pull_request_comments',
+          'close_pull_request',
+          'update_pull_request',
+          'reopen_pull_request',
           'reply_to_pull_request_comment',
           'create_pull_request_comment',
           'create_pull_request_review_comment',
@@ -892,7 +909,7 @@ roomoteMcpServer.registerTool(
           'create_issue_comment',
         ])
         .describe(
-          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline comment anchored to a file and line of the current diff; resolve_pull_request_thread resolves or reopens a thread; request_pull_request_reviewers requests user or team reviewers after PR creation; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
+          'get_issue reads a plain issue; list_issue_comments reads its comments; create_issue_comment posts a top-level issue comment. create_or_update_pull_request creates or refreshes the PR/MR for a branch; update_pull_request updates an existing PR/MR by explicit prNumber and never creates one; close_pull_request and reopen_pull_request change an existing PR/MR state without merging or deleting its branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads, top-level reviews, and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level PR comment; create_pull_request_review_comment posts one new inline comment anchored to a file and line of the current diff; resolve_pull_request_thread resolves or reopens a thread; request_pull_request_reviewers requests user or team reviewers after PR creation; submit_pull_request_review approves, requests changes, or leaves a review comment; dismiss_pull_request_review dismisses a GitHub review; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -1023,19 +1040,25 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'The base branch the PR/MR should target. Required only when create_or_update_pull_request creates a new PR/MR; omit it when an open PR/MR already exists for sourceBranch to keep its current base.',
+          'The base branch the PR/MR should target. Required only when create_or_update_pull_request creates a new PR/MR; for update_pull_request, pass it only when retargeting the explicitly identified PR/MR.',
         ),
       title: z
         .string()
         .optional()
         .describe(
-          'Required for create_or_update_pull_request. The PR/MR title.',
+          'Required for create_or_update_pull_request; optional new title for update_pull_request.',
         ),
       body: z
         .string()
         .optional()
         .describe(
-          'The text content: the PR/MR description for create_or_update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
+          'The text content: the PR/MR description for create_or_update_pull_request or update_pull_request, the comment text for issue/PR reply or create actions, the optional review body for submit_pull_request_review, or the required dismissal reason for dismiss_pull_request_review.',
+        ),
+      draft: z
+        .boolean()
+        .optional()
+        .describe(
+          'Optional draft state for update_pull_request. Provider gaps are returned explicitly instead of silently ignoring this field.',
         ),
       prAttribution: z
         .string()
@@ -1101,6 +1124,7 @@ roomoteMcpServer.registerTool(
         targetBranch: params.targetBranch,
         title: params.title,
         body: params.body,
+        draft: params.draft,
         prAttribution: params.prAttribution,
         labels: params.labels,
         assignees: params.assignees,
@@ -1551,12 +1575,17 @@ if (
       : 'Use Markdown when it makes the reply clearer.';
   const supportsDataVisualizations =
     reportsToParentSession || chatReplySurfaceLabel === 'Slack';
+  // Email is a low-frequency surface: no play-by-play progress posting.
+  const chatReplyEmailCadenceGuidance =
+    chatReplySurfaceLabel === 'email thread'
+      ? 'Email is a low-frequency surface: batch updates instead of posting play-by-play progress, and aim for roughly two emails per task — an initial ack and the final result. '
+      : '';
   const chatReplySuggestionGuidance = supportsChatReplySuggestions
     ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
   const chatReplyDescription = reportsToParentSession
     ? 'Session-internal: reports lifecycle information privately to the parent Session, which owns any user-visible reply. The report may be a complete engineering handoff and is never posted directly to the user. The kickoff already acknowledged the request, so do not send another generic ack. Use progress to pass concrete findings, blockers, meaningful work milestones, required input, or a brief note after roughly 10 minutes of silence. Describe the work itself without labeling the message as a progress update or using policy vocabulary such as phase transition, checkpoint, lifecycle, or user-facing. Use closeout for the final result or blocker and clarification when user input is needed. Ack and progress keep the coding task active.'
-    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
+    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplyEmailCadenceGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
   roomoteMcpServer.registerTool(
     lifecycleToolName,
     {
@@ -1905,7 +1934,10 @@ if (shouldRegisterChannelPostTool()) {
     (hasSlackChatContext() ||
       hasTelegramChatContext() ||
       hasTeamsChatContext() ||
-      hasDiscordChatContext())
+      hasDiscordChatContext() ||
+      // Registered for email tasks too so a call gets the structured
+      // "email has no reactions" result instead of an unknown-tool error.
+      hasAgentMailChatContext())
   ) {
     const reactionSurface = getChatReplySurfaceLabel();
 
@@ -1925,6 +1957,11 @@ if (shouldRegisterChannelPostTool()) {
           ...(reactionSurface === 'Teams'
             ? [
                 'Teams reactions post a plain Teams message containing only the emoji and support a limited set; prefer common names like eyes, thumbsup, heart, laugh, or tada.',
+              ]
+            : []),
+          ...(reactionSurface === 'email thread'
+            ? [
+                'Email has no reactions, so this tool always reports unsupported for email tasks; reply with send_chat_reply when a response is needed.',
               ]
             : []),
         ].join(' '),

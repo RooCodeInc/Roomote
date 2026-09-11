@@ -6,15 +6,12 @@ import {
   resolveThreadReplyLivePreviewUrl,
   type ThreadReplyFooterContext,
   type ThreadReplyLinkedPr,
+  type ThreadReplyRunningTasks,
 } from '@roomote/communication';
-
-import { isSlackThreadExplicitMentionRequired } from './slack-messages';
 
 export type SlackThreadLinkedPr = ThreadReplyLinkedPr;
 
-export interface SlackThreadFooterContext extends ThreadReplyFooterContext {
-  explicitMentionRequired: boolean;
-}
+export type SlackThreadFooterContext = ThreadReplyFooterContext;
 
 export {
   buildThreadReplyPrUrl as buildSlackThreadReplyPrUrl,
@@ -29,28 +26,22 @@ export async function resolveSlackThreadFooterContext(params: {
   channelId: string;
   threadTs: string;
 }): Promise<SlackThreadFooterContext> {
-  const [context, explicitMentionRequired] = await Promise.all([
-    resolveThreadReplyFooterContext(params),
-    isSlackThreadExplicitMentionRequired(params.channelId, params.threadTs),
-  ]);
-
-  return {
-    ...context,
-    explicitMentionRequired,
-  };
+  return resolveThreadReplyFooterContext(params);
 }
 
 export function buildSlackThreadFooterText(params: {
   taskUrl: string;
   linkedPrs?: SlackThreadLinkedPr[];
   livePreviewUrl?: string | null;
-  explicitMentionRequired: boolean;
+  runningTasks?: ThreadReplyRunningTasks | null;
+  webAppUrl?: string | null;
 }): string {
   return buildThreadReplyFooterText({
     taskUrl: params.taskUrl,
     linkedPrs: params.linkedPrs,
     livePreviewUrl: params.livePreviewUrl,
-    explicitMentionRequired: params.explicitMentionRequired,
+    runningTasks: params.runningTasks,
+    webAppUrl: params.webAppUrl,
     formatLink: (label, url) => `<${url}|${label}>`,
   });
 }
@@ -70,6 +61,7 @@ export async function getSlackThreadFooterText(params: {
     taskUrl: params.taskUrl,
     linkedPrs: params.linkedPrs ?? context.linkedPrs,
     livePreviewUrl: context.livePreviewUrl,
-    explicitMentionRequired: context.explicitMentionRequired,
+    runningTasks: context.runningTasks,
+    webAppUrl: context.webAppUrl,
   });
 }

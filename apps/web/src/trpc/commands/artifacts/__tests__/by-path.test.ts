@@ -118,6 +118,28 @@ describe('getArtifactByPathCommand', () => {
     expect(result?.content).toBe('small text');
   });
 
+  it('loads only a bounded prefix for gallery previews', async () => {
+    mockGetArtifactByPath.mockResolvedValue(
+      createArtifact({
+        path: 'plans/large.md',
+        contentType: 'text/markdown',
+        size: 2 * 1024 * 1024,
+      }),
+    );
+    mockFetch.mockResolvedValue(new Response('a'.repeat(32 * 1024)));
+
+    const result = await getArtifactByPathCommand(auth, {
+      taskId: 'task-1',
+      path: 'plans/large.md',
+      preview: true,
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith('https://example.test/download', {
+      headers: { Range: 'bytes=0-1023' },
+    });
+    expect(result?.content).toHaveLength(1024);
+  });
+
   it('loads readable Session-owned artifacts from the Session storage namespace', async () => {
     mockGetArtifactBySessionPath.mockResolvedValue(
       createArtifact({

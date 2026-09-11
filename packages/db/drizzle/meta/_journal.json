@@ -561,6 +561,27 @@
       "when": 1788983310654,
       "tag": "0079_tan_amazoness",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789052095386,
+      "tag": "0080_natural_ma_gnuci",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1789059502690,
+      "tag": "0081_agentmail_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1789097339420,
+      "tag": "0082_public_purifiers",
+      "breakpoints": true
     }
   ]
 }

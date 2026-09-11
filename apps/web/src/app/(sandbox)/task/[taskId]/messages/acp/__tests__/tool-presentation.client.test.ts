@@ -61,6 +61,7 @@ describe('tool presentation resolver', () => {
 
   it.each([
     ['manage_custom_automations', 'task'],
+    ['manage_wakeups', 'stopwatch'],
     ['get_about_me', 'roomote'],
     ['describe_video', 'video'],
     ['manage_goal', 'target'],
@@ -164,6 +165,72 @@ describe('tool presentation resolver', () => {
     });
   });
 
+  it.each([
+    ['create', 'in_progress', 'Creating', 'timer'],
+    ['create', 'completed', 'Created', 'timer'],
+    ['create', 'failed', 'Failed to Create', 'timer'],
+    ['list', 'in_progress', 'Listing', 'timers'],
+    ['list', 'completed', 'Listed', 'timers'],
+    ['list', 'failed', 'Failed to List', 'timers'],
+    ['get', 'in_progress', 'Fetching', 'timer'],
+    ['get', 'completed', 'Fetched', 'timer'],
+    ['get', 'failed', 'Failed to Fetch', 'timer'],
+    ['cancel', 'in_progress', 'Canceling', 'timer'],
+    ['cancel', 'completed', 'Canceled', 'timer'],
+    ['cancel', 'failed', 'Failed to Cancel', 'timer'],
+  ] as const)(
+    'humanizes manage_wakeups %s calls while %s',
+    (action, status, verb, object) => {
+      expect(
+        resolveToolPresentation(
+          toolData({
+            isMcp: true,
+            serverName: 'roomote',
+            toolName: 'manage_wakeups',
+            status,
+            rawInput: { arguments: { action } },
+          } as never),
+        ),
+      ).toMatchObject({
+        verb,
+        object,
+        displayName: 'Timer',
+        iconKey: 'stopwatch',
+        providerLabel: undefined,
+      });
+    },
+  );
+
+  it.each([undefined, 'unknown'])(
+    'uses generic manage_wakeups wording for %s actions',
+    (action) => {
+      const rawInput = action ? { arguments: { action } } : undefined;
+      for (const [status, verb] of [
+        ['in_progress', 'Updating'],
+        ['completed', 'Updated'],
+        ['failed', 'Failed to Update'],
+      ] as const) {
+        expect(
+          resolveToolPresentation(
+            toolData({ toolName: 'manage_wakeups', status, rawInput } as never),
+          ),
+        ).toMatchObject({ verb, object: 'timers', iconKey: 'stopwatch' });
+      }
+    },
+  );
+
+  it('does not report a reused wakeup as newly created', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          toolName: 'manage_wakeups',
+          rawInput: { arguments: { action: 'create' } },
+          output: JSON.stringify({ success: true, duplicate: true }),
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Reused', object: 'timer' });
+  });
+
   it('describes saved memories with an optional subject', () => {
     expect(
       resolveToolPresentation(
@@ -203,7 +270,7 @@ describe('tool presentation resolver', () => {
     ['start', 'Started', 'session'],
     ['search', 'Searched', 'sessions'],
     ['get_summary', 'Heard back from', 'task'],
-    ['get_messages', 'Received', 'message from task'],
+    ['get_messages', 'Checked', 'recent task messages'],
     ['send_message', 'Sent', 'message to task'],
     ['search_tasks', 'Searched', 'tasks'],
     ['get_compute_logs', 'Received', 'logs from task'],
@@ -227,6 +294,30 @@ describe('tool presentation resolver', () => {
       ).toMatchObject({ verb, object, providerLabel: undefined });
     },
   );
+
+  it('distinguishes task history checks from incoming task reports', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_tasks',
+          rawInput: {
+            arguments: { action: 'get_messages', taskId: 'task-1' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Checked', object: 'recent task messages' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'receive_task_report',
+        }),
+      ),
+    ).toMatchObject({ verb: 'Received', object: 'task report' });
+  });
 
   it('suppresses only first-party Roomote attribution', () => {
     expect(
@@ -606,6 +697,10 @@ describe('tool presentation resolver', () => {
           .displayName,
       ),
     ).toEqual({ action: 'Used', objectSummary: '2 tool calls' });
+    expect(summarizeToolGroup('generic', 2, 'Timer')).toEqual({
+      action: 'Used',
+      objectSummary: '2 timer calls',
+    });
   });
 });
 

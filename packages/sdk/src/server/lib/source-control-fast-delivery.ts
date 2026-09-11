@@ -5,7 +5,16 @@ import {
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { and, db, eq, repositories } from '@roomote/db/server';
-import { buildFastSessionReplyFooterText } from '@roomote/communication';
+import {
+  buildFastSessionReplyFooterText,
+  classifyThreadFooterActivity,
+  resolveFastSessionReplyFooterContext,
+  withThreadReplyFooterLock,
+  forgetThreadFooterRefresh,
+  scheduleThreadFooterRefresh,
+  type ThreadReplyFooterLock,
+} from '@roomote/communication';
+import { refreshThreadFooterCarrier } from '@roomote/communication/thread-footer-carrier-lifecycle';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -20,6 +29,11 @@ import {
 import {
   getSourceControlThreadCommentRecord,
   setSourceControlThreadCommentRecord,
+  sourceControlFooterTarget,
+  getSourceControlFooterRecord,
+  setSourceControlFooterRecord,
+  clearSourceControlFooterRecord,
+  type SourceControlFooterRecord,
 } from './source-control-thread-comment-state';
 
 export type SourceControlDiscussionKind = 'pull' | 'issues';
@@ -874,6 +888,97 @@ function isCommentGoneError(error: unknown): boolean {
 }
 
 /**
+ * After a fenced pointer write loses its lease, put the carrier back the way
+ * its current owner recorded it. The competitor may have relocated the footer
+ * to another comment (then this comment keeps only its body) or rewritten
+ * this same comment with newer content (then that content comes back).
+ *
+ * The restoration runs under the destination lock (the caller's lease when it
+ * still holds it, otherwise a fresh one) and re-reads the record under it, so
+ * a further owner cannot persist newer content between the read and the edit.
+ * A provider edit can still outlive the lease, and only a lease still held
+ * after the edit proves nothing newer landed meanwhile. When that proof is
+ * missing, the recovery does not guess again: it marks the record's footer
+ * as unknown under a fenced write and schedules a refresh, so the next pass
+ * rewrites the comment from the record (the newest owner's body) with its own
+ * fenced post-edit write. The record, not a stale response, always wins.
+ */
+async function restoreCompetingCarrier(params: {
+  channelId: string;
+  threadId: string;
+  mine: { messageId: string; body: string; footerText: string };
+  /** The caller's lease; used directly while it still holds the lock. */
+  assertLock: () => Promise<void>;
+  update: (body: string) => Promise<void>;
+}): Promise<void> {
+  const lockKey = `source_control:thread_reply_footer_lock:${params.channelId}:${params.threadId}`;
+  const restore = async (
+    assertLock: () => Promise<void>,
+  ): Promise<'done' | 'unproven'> => {
+    const current = await getSourceControlFooterRecord(
+      params.channelId,
+      params.threadId,
+    );
+    const desired =
+      !current || current.messageId !== params.mine.messageId
+        ? { body: params.mine.body, footerText: '' }
+        : { body: current.body, footerText: current.footerText };
+    if (
+      desired.body === params.mine.body &&
+      desired.footerText === params.mine.footerText
+    )
+      return 'done';
+    await assertLock();
+    await params.update(
+      desired.footerText
+        ? `${desired.body}\n\n${desired.footerText}`
+        : desired.body,
+    );
+    try {
+      await assertLock();
+      return 'done';
+    } catch {
+      return 'unproven';
+    }
+  };
+  const reconcileLater = async () => {
+    await withThreadReplyFooterLock({
+      lockKey,
+      fn: async (_assertLock, lock) => {
+        const current = await getSourceControlFooterRecord(
+          params.channelId,
+          params.threadId,
+        );
+        if (!current) return;
+        await setSourceControlFooterRecord(
+          { ...current, footerText: '' },
+          { keepTtl: true, lock },
+        );
+      },
+    });
+    await scheduleThreadFooterRefresh({
+      provider: 'source-control',
+      channelId: params.channelId,
+      threadId: params.threadId,
+    });
+  };
+  try {
+    let heldLease = true;
+    await params.assertLock().catch(() => {
+      heldLease = false;
+    });
+    const outcome = heldLease
+      ? await restore(params.assertLock)
+      : await withThreadReplyFooterLock({ lockKey, fn: restore });
+    if (outcome === 'unproven') await reconcileLater();
+  } catch (error) {
+    console.warn(
+      `[Fast Agent] Could not restore the comment a lost footer lease edited: ${formatErrorForLog(error)}`,
+    );
+  }
+}
+
+/**
  * The reply surface a Session uses in a discussion: replies post as comments
  * with the Session footer, and tasks launch against the discussion's target.
  *
@@ -917,19 +1022,31 @@ export function buildSourceControlFastAdapter(params: {
   const discussion = parseSourceControlFastConversation(params.conversation);
   const threadId = params.conversation.replyTarget.threadId;
   const threaded = Boolean(discussion?.reviewCommentId && threadId);
-  const footer = discussion
-    ? buildFastSessionReplyFooterText({
-        provider: discussion.provider,
-        sessionId: params.sessionId,
-      })
-    : '';
+  const target = sourceControlFooterTarget(params.conversation);
+  const lockKey = `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`;
+  let footer = '';
   const quote = threaded ? null : params.quote;
   let turnComment: SourceControlPostedComment | null = null;
   let turnBody = '';
   // True while the turn is editing a comment it adopted from the thread's
   // record rather than one it posted itself.
   let adoptedThreadComment = false;
-  const renderBody = () => `${turnBody}\n\n${footer}`;
+  const renderBody = async () => {
+    const current = await getSourceControlFooterRecord(
+      target.channelId,
+      target.threadId,
+    );
+    if (turnComment && current && current.messageId !== turnComment.messageId)
+      return turnBody;
+    footer = buildFastSessionReplyFooterText({
+      provider: params.conversation.surface,
+      sessionId: params.sessionId,
+      ...(await resolveFastSessionReplyFooterContext({
+        sessionId: params.sessionId,
+      })),
+    });
+    return `${turnBody}\n\n${footer}`;
+  };
   const editorFor = (messageId: string): SourceControlPostedComment => ({
     messageId,
     ...(params.delivery.updateCommentById && discussion
@@ -943,20 +1060,94 @@ export function buildSourceControlFastAdapter(params: {
         }
       : {}),
   });
+  // The footer moved to a newer comment: the old carrier must not keep a
+  // status that will never update again. Best effort, like the chat surfaces.
+  const stripPreviousFooter = async (
+    previous: SourceControlFooterRecord,
+    assertLock: () => Promise<void>,
+  ) => {
+    if (!params.delivery.updateCommentById || !discussion) return;
+    try {
+      await assertLock();
+      await params.delivery.updateCommentById({
+        discussion,
+        messageId: previous.messageId,
+        body: previous.body,
+      });
+    } catch (error) {
+      if (isCommentGoneError(error)) return;
+      console.warn(
+        `[Fast Agent] Failed to remove the footer from the previous comment ${previous.messageId}: ${formatErrorForLog(error)}`,
+      );
+    }
+  };
   // The thread's comment record is a best-effort nicety: losing it costs one
   // extra comment, never the reply.
-  const rememberThreadComment = async () => {
-    if (!threaded || !threadId || !turnComment) {
-      return;
-    }
-    await setSourceControlThreadCommentRecord(params.sessionId, threadId, {
-      messageId: turnComment.messageId,
-      body: turnBody,
-    }).catch((error) => {
-      console.warn(
-        `[Fast Agent] Failed to remember the review thread comment: ${formatErrorForLog(error)}`,
+  const rememberThreadComment = async (
+    assertLock: () => Promise<void>,
+    lock: ThreadReplyFooterLock | undefined,
+    relocate = false,
+  ) => {
+    const comment = turnComment;
+    if (!comment) return;
+    const body = turnBody;
+    const footerText = footer;
+    let current: SourceControlFooterRecord | null = null;
+    try {
+      await assertLock();
+      current = await getSourceControlFooterRecord(
+        target.channelId,
+        target.threadId,
       );
-    });
+      await assertLock();
+      if (!relocate && current && current.messageId !== comment.messageId)
+        return;
+      const written = await setSourceControlFooterRecord(
+        {
+          conversation: params.conversation,
+          sessionId: params.sessionId,
+          messageId: comment.messageId,
+          body,
+          footerText,
+        },
+        { lock },
+      );
+      if (!written) throw new Error('Thread reply footer lock lease lost');
+      if (relocate && current && current.messageId !== comment.messageId)
+        await stripPreviousFooter(current, assertLock);
+      if (!threaded || !threadId) return;
+      await assertLock();
+      await setSourceControlThreadCommentRecord(params.sessionId, threadId, {
+        messageId: comment.messageId,
+        body,
+      });
+    } catch (error) {
+      // A successful provider write is not permission to mutate a pointer
+      // after losing its lease. Even persistence-failure cleanup is fenced.
+      try {
+        await assertLock();
+        if (current)
+          await clearSourceControlFooterRecord(
+            target.channelId,
+            target.threadId,
+            current,
+          );
+      } catch {
+        /* The current pointer may belong to another delivery. */
+      }
+      const update = comment.update ?? editorFor(comment.messageId).update;
+      if (update)
+        await restoreCompetingCarrier({
+          channelId: target.channelId,
+          threadId: target.threadId,
+          mine: { messageId: comment.messageId, body, footerText },
+          assertLock,
+          update,
+        });
+      console.warn(
+        `[Fast Agent] Failed to remember the current comment footer: ${formatErrorForLog(error)}`,
+      );
+    }
   };
   const adoptThreadComment = async (): Promise<boolean> => {
     if (
@@ -987,14 +1178,19 @@ export function buildSourceControlFastAdapter(params: {
   const postTurnComment = async (
     discussion: SourceControlFastDiscussion,
     message: string,
+    assertLock: () => Promise<void>,
+    lock: ThreadReplyFooterLock | undefined,
   ) => {
     turnBody = quote ? `${quote}\n\n${message}` : message;
+    turnComment = null;
+    const body = await renderBody();
+    await assertLock();
     turnComment = await params.delivery.postComment({
       discussion,
-      body: renderBody(),
+      body,
     });
     adoptedThreadComment = false;
-    await rememberThreadComment();
+    await rememberThreadComment(assertLock, lock, true);
     params.onReplyPosted?.();
     return { messageId: turnComment.messageId };
   };
@@ -1007,57 +1203,163 @@ export function buildSourceControlFastAdapter(params: {
         : {}),
       resolveTarget: params.delivery.resolveTarget,
     }),
-    postReply: async ({ message }) => {
-      if (!discussion) {
-        throw new Error(
-          'The discussion for this Session could not be resolved.',
-        );
-      }
-      if (!turnComment) {
-        await adoptThreadComment();
-      }
-      if (turnComment?.update) {
-        const previousBody = turnBody;
-        turnBody = `${turnBody}\n\n${message}`;
-        try {
-          await turnComment.update(renderBody());
-        } catch (error) {
-          // The remembered comment can be gone (deleted by its author or a
-          // maintainer). Treat that as a miss on the thread record and post
-          // this turn's own comment, which replaces the stale record so
-          // later turns stop adopting it. Any other failure rethrows so the
-          // normal retry path keeps one comment per human turn.
-          if (!adoptedThreadComment || !isCommentGoneError(error)) {
-            throw error;
+    postReply: async ({ message }) =>
+      withThreadReplyFooterLock({
+        lockKey,
+        fn: async (assertLock, lock) => {
+          if (!discussion) {
+            throw new Error(
+              'The discussion for this Session could not be resolved.',
+            );
           }
-          console.warn(
-            `[Fast Agent] The remembered review thread comment could not be updated; posting a new comment: ${formatErrorForLog(error)}`,
-          );
-          turnBody = previousBody;
-          turnComment = null;
-          return postTurnComment(discussion, message);
-        }
-        await rememberThreadComment();
-        params.onReplyPosted?.();
-        return { messageId: turnComment.messageId };
-      }
-      return postTurnComment(discussion, message);
-    },
+          if (!turnComment) {
+            await adoptThreadComment();
+          }
+          if (turnComment?.update) {
+            // Another resumed turn may have appended to this same comment
+            // since this adapter last used it. The locked pointer owns the body.
+            const current = await getSourceControlFooterRecord(
+              target.channelId,
+              target.threadId,
+            );
+            if (current?.messageId === turnComment.messageId)
+              turnBody = current.body;
+            const previousBody = turnBody;
+            turnBody = `${turnBody}\n\n${message}`;
+            try {
+              const body = await renderBody();
+              await assertLock();
+              await turnComment.update(body);
+            } catch (error) {
+              // The remembered comment can be gone (deleted by its author or a
+              // maintainer). Treat that as a miss on the thread record and post
+              // this turn's own comment, which replaces the stale record so
+              // later turns stop adopting it. Any other failure rethrows so the
+              // normal retry path keeps one comment per human turn.
+              if (!adoptedThreadComment || !isCommentGoneError(error)) {
+                turnBody = previousBody;
+                throw error;
+              }
+              console.warn(
+                `[Fast Agent] The remembered review thread comment could not be updated; posting a new comment: ${formatErrorForLog(error)}`,
+              );
+              turnBody = previousBody;
+              turnComment = null;
+              return postTurnComment(discussion, message, assertLock, lock);
+            }
+            await rememberThreadComment(assertLock, lock);
+            params.onReplyPosted?.();
+            return { messageId: turnComment.messageId };
+          }
+          return postTurnComment(discussion, message, assertLock, lock);
+        },
+      }),
     ...(params.delivery.updateCommentById && discussion
       ? {
           // A resumed turn only carries the prior comment's id: rebuild the
           // editor from it, replace the comment's body, and adopt it as the
           // turn's comment so later replies keep appending in place.
-          replaceReply: async ({ messageId }, { message }) => {
-            turnComment = editorFor(messageId);
-            adoptedThreadComment = false;
-            turnBody = message;
-            await turnComment.update!(renderBody());
-            await rememberThreadComment();
-            params.onReplyPosted?.();
-            return { messageId };
-          },
+          replaceReply: async ({ messageId }, { message }) =>
+            withThreadReplyFooterLock({
+              lockKey,
+              fn: async (assertLock, lock) => {
+                turnComment = editorFor(messageId);
+                adoptedThreadComment = false;
+                turnBody = message;
+                const body = await renderBody();
+                await assertLock();
+                await turnComment.update!(body);
+                await rememberThreadComment(assertLock, lock);
+                params.onReplyPosted?.();
+                return { messageId };
+              },
+            }),
         }
       : {}),
   };
+}
+
+/**
+ * Refresh only the recorded carrier; missing comments never trigger a post.
+ * Resolution happens outside the destination lock; the lock is held only for
+ * the comment edit and the pointer write, so a reply is never starved.
+ */
+export async function refreshSourceControlThreadFooter(target: {
+  channelId: string;
+  threadId: string;
+}) {
+  const read = () =>
+    getSourceControlFooterRecord(target.channelId, target.threadId);
+  return refreshThreadFooterCarrier({
+    lockKey: `source_control:thread_reply_footer_lock:${target.channelId}:${target.threadId}`,
+    read,
+    sameVersion: (current, seen) =>
+      current?.messageId === seen?.messageId &&
+      current?.footerText === seen?.footerText,
+    forget: () =>
+      forgetThreadFooterRefresh({ provider: 'source-control', ...target }),
+    resolve: async (record) => {
+      const context = await resolveFastSessionReplyFooterContext({
+        sessionId: record.sessionId,
+      });
+      const footerText = buildFastSessionReplyFooterText({
+        provider: record.conversation.surface,
+        sessionId: record.sessionId,
+        ...context,
+      });
+      const { active, settled } = classifyThreadFooterActivity(context);
+      if (footerText === record.footerText) {
+        return {
+          outcome: active ? 'active' : 'idle',
+          settled,
+          changed: false,
+          edit: async () => {},
+        };
+      }
+      const delivery = await buildSourceControlFastDelivery(
+        record.conversation,
+      );
+      const discussion = parseSourceControlFastConversation(
+        record.conversation,
+      );
+      if (!delivery?.updateCommentById || !discussion) return null;
+      return {
+        outcome: active ? 'active' : 'idle',
+        settled,
+        changed: true,
+        edit: (latest: SourceControlFooterRecord) =>
+          delivery.updateCommentById!({
+            discussion,
+            messageId: latest.messageId,
+            body: `${latest.body}\n\n${footerText}`,
+          }),
+        remember: (latest: SourceControlFooterRecord, lock) =>
+          setSourceControlFooterRecord(
+            { ...latest, footerText },
+            { keepTtl: true, lock },
+          ),
+        recoverAfterLostLease: (
+          latest: SourceControlFooterRecord,
+          assertLock,
+        ) =>
+          restoreCompetingCarrier({
+            channelId: target.channelId,
+            threadId: target.threadId,
+            mine: {
+              messageId: latest.messageId,
+              body: latest.body,
+              footerText,
+            },
+            assertLock,
+            update: (body) =>
+              delivery.updateCommentById!({
+                discussion,
+                messageId: latest.messageId,
+                body,
+              }),
+          }),
+      };
+    },
+    isGoneError: isCommentGoneError,
+  });
 }

@@ -86,12 +86,12 @@ function getDetailsDisplayValue(
     return truncateTitleLabel(value, TASK_TITLE_CELL_MAX_LENGTH);
   }
 
-  if (object === 'tasks' && columnKey === 'tokens') {
+  if ((object === 'tasks' || object === 'costs') && columnKey === 'tokens') {
     const tokens = Number(value);
     return Number.isFinite(tokens) ? formatTokens(tokens) : value;
   }
 
-  if (object === 'tasks' && columnKey === 'cost') {
+  if ((object === 'tasks' || object === 'costs') && columnKey === 'cost') {
     const costUsd = Number(value);
     return Number.isFinite(costUsd)
       ? `$${formatInferenceCost(costUsd * 1_000_000)}`

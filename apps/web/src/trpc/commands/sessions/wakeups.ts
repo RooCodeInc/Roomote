@@ -73,7 +73,7 @@ export async function cancelSessionWakeupCommand(
   if (!session.canCancel) {
     throw new TRPCError({
       code: 'FORBIDDEN',
-      message: 'Only the Session owner or an admin can cancel wakeups',
+      message: 'Only the Session owner or an admin can cancel timers',
     });
   }
   if (!session.conversationId) return { outcome: 'not_found' as const };

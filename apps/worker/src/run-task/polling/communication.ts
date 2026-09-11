@@ -79,10 +79,14 @@ export function createCommunicationMessageInterval({
     }
 
     try {
+      // AgentMail (email) answers arrive from one-click answer links or
+      // parsed reply emails; they queue through the same pending-input state
+      // as the chat providers.
       if (
         provider === 'discord' ||
         provider === 'telegram' ||
-        provider === 'teams'
+        provider === 'teams' ||
+        provider === 'agentmail'
       ) {
         const queuedAnswers = await runPollingSdkCall({
           execute: () =>
@@ -286,7 +290,9 @@ export function createCommunicationMessageInterval({
         ) {
           // Telegram, Teams, and Discord turns feed the same satisfaction
           // machinery as Slack so ack/closeout enforcement and current-turn
-          // reactions work.
+          // reactions work. AgentMail (email) is deliberately excluded:
+          // email must never get the ack/silence heartbeats that machinery
+          // enforces, and it has no reactions.
           recordChatTurnStart({
             turnMessageTs: message.ts,
             allowReaction: message.turnPolicy?.reactionsAllowed,

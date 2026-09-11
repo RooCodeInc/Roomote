@@ -138,6 +138,34 @@ describe('AcpGroupedToolMessage', () => {
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });
 
+  it('renders natural timer wording in the group and expanded item headings', () => {
+    const group = buildGroup();
+    group.action = 'Used';
+    group.objectSummary = '2 timer calls';
+    group.groupKey = 'mcp:roomote:manage_wakeups';
+    group.displayKind = 'generic';
+    group.items.forEach((item) => {
+      item.objectLabel = 'manage_wakeups';
+      item.groupKey = 'mcp:roomote:manage_wakeups';
+      item.displayKind = 'generic';
+      item.stepKind = null;
+      Object.assign(item.msg.data, {
+        kind: 'mcp',
+        title: 'manage_wakeups',
+        toolName: 'manage_wakeups',
+        mcpToolName: 'manage_wakeups',
+        rawInput: { arguments: { action: 'list' } },
+        output: JSON.stringify({ success: true, count: 0, wakeups: [] }),
+      });
+    });
+
+    render(<AcpGroupedToolMessage group={group} />);
+
+    expect(screen.getByText('Used 2 timer calls')).toBeInTheDocument();
+    expect(screen.getAllByText('Listed timers')).toHaveLength(2);
+    expect(screen.queryByText('manage_wakeups')).not.toBeInTheDocument();
+  });
+
   it('keeps the resolved group icon while the header renders running progress', () => {
     const group = buildGroup();
     group.items[0]!.msg.data.status = 'in_progress';

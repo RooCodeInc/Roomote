@@ -1,12 +1,14 @@
 'use client';
 
-import type { CommunicationProvider } from '@roomote/types';
+import { useRef } from 'react';
+import type { AutomationDestinationProvider as DestinationProvider } from '@roomote/types';
 
 import {
   Input,
   Label,
   Select,
   SelectContent,
+  type SelectHandoffTarget,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -14,7 +16,7 @@ import {
 
 import { SlackChannelSelect } from './SlackChannelSelect';
 
-export type AutomationDestinationProvider = 'none' | CommunicationProvider;
+export type AutomationDestinationProvider = 'none' | DestinationProvider;
 type AutomationDestinationMode = 'channel' | 'direct_message';
 type AutomationDestinationValue = {
   provider: AutomationDestinationProvider;
@@ -33,7 +35,8 @@ const PROVIDER_LABELS = {
   discord: 'Discord',
   teams: 'Teams',
   telegram: 'Telegram',
-} as const satisfies Record<CommunicationProvider, string>;
+  email: 'Email',
+} as const satisfies Record<DestinationProvider, string>;
 
 export function AutomationDestinationPicker({
   id,
@@ -42,9 +45,11 @@ export function AutomationDestinationPicker({
   availableProviders,
   slackOptions,
   discordOptions,
+  emailOptions = [],
   channelCatalogAvailable = true,
   defaultSlackChannelId = '',
   defaultDiscordChannelId = '',
+  defaultEmailIdentityId = '',
   noneLabel = 'None',
   noneDescription = 'Results appear only in the task view.',
   disabled = false,
@@ -55,12 +60,14 @@ export function AutomationDestinationPicker({
   id: string;
   label?: string;
   value: AutomationDestinationValue;
-  availableProviders: readonly CommunicationProvider[];
+  availableProviders: readonly DestinationProvider[];
   slackOptions: DestinationOption[];
   discordOptions: DestinationOption[];
+  emailOptions?: DestinationOption[];
   channelCatalogAvailable?: boolean;
   defaultSlackChannelId?: string;
   defaultDiscordChannelId?: string;
+  defaultEmailIdentityId?: string;
   noneLabel?: string;
   noneDescription?: string;
   disabled?: boolean;
@@ -68,8 +75,11 @@ export function AutomationDestinationPicker({
   allowDirectMessage?: boolean;
   onChange: (value: AutomationDestinationValue) => void;
 }) {
+  const nextDestinationRef = useRef<
+    HTMLInputElement | SelectHandoffTarget | null
+  >(null);
   const visibleProviders = availableProviders.includes(
-    value.provider as CommunicationProvider,
+    value.provider as DestinationProvider,
   )
     ? availableProviders
     : value.provider === 'none'
@@ -82,7 +92,9 @@ export function AutomationDestinationPicker({
       ? defaultSlackChannelId
       : provider === 'discord'
         ? defaultDiscordChannelId
-        : '';
+        : provider === 'email'
+          ? defaultEmailIdentityId
+          : '';
 
   return (
     <div className="space-y-2">
@@ -91,10 +103,11 @@ export function AutomationDestinationPicker({
         <Select
           value={value.provider}
           disabled={disabled}
+          handoffTargetOnSelect={nextDestinationRef}
           onValueChange={(provider) =>
             onChange({
               provider: provider as AutomationDestinationProvider,
-              mode: 'channel',
+              mode: provider === 'email' ? 'direct_message' : 'channel',
               channelId: defaultChannelId(
                 provider as AutomationDestinationProvider,
               ),
@@ -127,15 +140,16 @@ export function AutomationDestinationPicker({
         ) : (
           <div
             className={
-              allowDirectMessage
+              allowDirectMessage && value.provider !== 'email'
                 ? 'grid min-w-0 gap-2 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-center'
                 : 'grid min-w-0 gap-2'
             }
           >
-            {allowDirectMessage ? (
+            {allowDirectMessage && value.provider !== 'email' ? (
               <Select
                 value={value.mode}
                 disabled={disabled}
+                handoffTargetOnSelect={nextDestinationRef}
                 onValueChange={(mode) =>
                   onChange({
                     ...value,
@@ -160,7 +174,42 @@ export function AutomationDestinationPicker({
               </Select>
             ) : null}
 
-            {value.mode === 'direct_message' ? (
+            {value.provider === 'email' ? (
+              <div className="grid gap-2">
+                <Select
+                  handoffRef={
+                    value.channelId || emailOptions.length === 0
+                      ? undefined
+                      : (target) => {
+                          nextDestinationRef.current = target;
+                        }
+                  }
+                  value={value.channelId}
+                  disabled={disabled}
+                  onValueChange={(identityId) =>
+                    onChange({ ...value, channelId: identityId })
+                  }
+                >
+                  <SelectTrigger
+                    aria-label="Email address"
+                    className="min-w-0 w-full sm:max-w-96"
+                  >
+                    <SelectValue placeholder="Select Email address" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {emailOptions.map((identity) => (
+                      <SelectItem key={identity.id} value={identity.id}>
+                        {identity.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Reports use only this selected identity and stop if it is no
+                  longer eligible.
+                </p>
+              </div>
+            ) : value.mode === 'direct_message' ? (
               <p className="self-center text-sm text-muted-foreground">
                 Results are sent privately to your linked {providerLabel}{' '}
                 account.
@@ -178,6 +227,13 @@ export function AutomationDestinationPicker({
               />
             ) : value.provider === 'discord' && channelCatalogAvailable ? (
               <Select
+                handoffRef={
+                  value.channelId || discordOptions.length === 0
+                    ? undefined
+                    : (target) => {
+                        nextDestinationRef.current = target;
+                      }
+                }
                 value={value.channelId}
                 disabled={disabled}
                 onValueChange={(channelId) => onChange({ ...value, channelId })}
@@ -198,6 +254,13 @@ export function AutomationDestinationPicker({
               </Select>
             ) : (
               <Input
+                ref={
+                  value.channelId
+                    ? undefined
+                    : (target) => {
+                        nextDestinationRef.current = target;
+                      }
+                }
                 aria-label="Destination channel"
                 className="min-w-0 w-full"
                 value={value.channelId}

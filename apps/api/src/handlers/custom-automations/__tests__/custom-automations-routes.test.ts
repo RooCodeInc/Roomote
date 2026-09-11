@@ -30,6 +30,8 @@ const {
   mockGetDeploymentTaskModelOptions,
   mockDeleteCustomAutomation,
   mockListConnectedCommunicationProviders,
+  mockCanStartAgentMailConversationWithUser,
+  mockListAvailableAgentMailOutboundIdentities,
   mockResolveCustomAutomationSchedule,
   mockRunCustomAutomationNow,
   mockCaptureActivationCustomAutomationChanged,
@@ -43,6 +45,8 @@ const {
   mockGetDeploymentTaskModelOptions: vi.fn(),
   mockDeleteCustomAutomation: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
+  mockCanStartAgentMailConversationWithUser: vi.fn(),
+  mockListAvailableAgentMailOutboundIdentities: vi.fn(),
   mockResolveCustomAutomationSchedule: vi.fn(),
   mockRunCustomAutomationNow: vi.fn(),
   mockCaptureActivationCustomAutomationChanged: vi.fn(),
@@ -64,6 +68,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   listConnectedCommunicationProviders: mockListConnectedCommunicationProviders,
+  canStartAgentMailConversationWithUser:
+    mockCanStartAgentMailConversationWithUser,
+  listAvailableAgentMailOutboundIdentities:
+    mockListAvailableAgentMailOutboundIdentities,
   resolveCustomAutomationSchedule: mockResolveCustomAutomationSchedule,
   runCustomAutomationNow: mockRunCustomAutomationNow,
 }));
@@ -173,6 +181,14 @@ describe('custom-automations MCP routes', () => {
     mockResolveActingUserIdOrNull.mockResolvedValue('admin-1');
     mockUsersFindFirst.mockResolvedValue({ id: 'admin-1', role: 'admin' });
     mockListConnectedCommunicationProviders.mockResolvedValue(['slack']);
+    mockCanStartAgentMailConversationWithUser.mockResolvedValue(true);
+    mockListAvailableAgentMailOutboundIdentities.mockResolvedValue([
+      {
+        id: 'verified:admin-1:digest',
+        emailAddress: 'admin@example.com',
+        kind: 'verified',
+      },
+    ]);
     mockGetDeploymentTaskModelOptions.mockResolvedValue({
       models: ENABLED_MODELS,
       defaultModelId: 'openai/gpt-5.6-luna',
@@ -213,6 +229,50 @@ describe('custom-automations MCP routes', () => {
       );
       expect(result).toMatchObject({
         structuredContent: { automations: [] },
+      });
+    });
+
+    it("lists the owner's Email identities when the tool scopes list_destinations to an automation", async () => {
+      const authContext: AuthTokenContext = {
+        userId: 'admin-1',
+        tokenType: 'auth',
+        version: 1,
+      };
+      const { handler } = registerApiHostedTool({
+        userId: 'admin-1',
+        authContext,
+      });
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'automation-1',
+        createdByUserId: 'member-2',
+        target: {},
+      });
+      mockListAvailableAgentMailOutboundIdentities.mockResolvedValue([
+        {
+          id: 'verified:member-2:digest',
+          emailAddress: 'member@example.com',
+          kind: 'verified',
+        },
+      ]);
+
+      const result = await handler({
+        action: 'list_destinations',
+        automationId: 'automation-1',
+      });
+
+      expect(mockListAvailableAgentMailOutboundIdentities).toHaveBeenCalledWith(
+        'member-2',
+      );
+      expect(result).toMatchObject({
+        structuredContent: {
+          emailIdentities: [
+            {
+              id: 'verified:member-2:digest',
+              emailAddress: 'member@example.com',
+              kind: 'verified',
+            },
+          ],
+        },
       });
     });
 
@@ -789,6 +849,96 @@ describe('custom-automations MCP routes', () => {
       );
     });
 
+    it('lists and stores only a server-verified Email identity', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const destinations = await app.request(
+        '/custom-automations/destinations',
+      );
+      await expect(destinations.json()).resolves.toEqual({
+        emailIdentities: [
+          {
+            id: 'verified:admin-1:digest',
+            emailAddress: 'admin@example.com',
+            kind: 'verified',
+          },
+        ],
+      });
+      const res = await postCreate(
+        app,
+        createBody({
+          targetProvider: 'email',
+          targetMode: 'direct_message',
+          targetChannelId: 'verified:admin-1:digest',
+        }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCanStartAgentMailConversationWithUser).toHaveBeenCalledWith(
+        'admin-1',
+        'verified:admin-1:digest',
+      );
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdByUserId: 'admin-1',
+          target: {
+            provider: 'email',
+            targetKind: 'email_user',
+            externalRef: 'admin-1',
+            metadata: { emailIdentityId: 'verified:admin-1:digest' },
+          },
+        }),
+      );
+    });
+
+    it("lists the automation owner's Email identities when editing on their behalf", async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        id: 'automation-1',
+        createdByUserId: 'member-2',
+        target: {},
+      });
+
+      const res = await app.request(
+        '/custom-automations/destinations?automationId=automation-1',
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockListAvailableAgentMailOutboundIdentities).toHaveBeenCalledWith(
+        'member-2',
+      );
+    });
+
+    it('rejects a raw or otherwise unverified Email identity', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+
+      const res = await postCreate(
+        app,
+        createBody({
+          targetProvider: 'email',
+          targetMode: 'direct_message',
+          targetChannelId: 'victim@example.com',
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+    });
+
     it.each([
       ['discord', 'discord_user'],
       ['teams', 'teams_user'],
@@ -1082,6 +1232,119 @@ describe('custom-automations MCP routes', () => {
           },
         }),
       );
+    });
+
+    const emailTarget = {
+      provider: 'email',
+      targetKind: 'email_user',
+      externalRef: 'admin-1',
+      metadata: { emailIdentityId: 'verified:admin-1:digest' },
+    };
+
+    it('switches to Email without an explicit mode, like create does', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        createdByUserId: 'admin-1',
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C123',
+        },
+      });
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          targetProvider: 'email',
+          targetChannelId: 'verified:admin-1:digest',
+        }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockCanStartAgentMailConversationWithUser).toHaveBeenCalledWith(
+        'admin-1',
+        'verified:admin-1:digest',
+      );
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({ target: emailTarget }),
+      );
+    });
+
+    it('keeps the pinned Email identity when the request omits it', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        createdByUserId: 'admin-1',
+        target: emailTarget,
+      });
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetProvider: 'email' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockCanStartAgentMailConversationWithUser).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(mockCanStartAgentMailConversationWithUser).toHaveBeenCalledWith(
+        'admin-1',
+        'verified:admin-1:digest',
+      );
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({ target: emailTarget }),
+      );
+    });
+
+    it('does not re-validate a stale Email destination on unrelated edits', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        createdByUserId: 'admin-1',
+        target: emailTarget,
+      });
+      mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockCanStartAgentMailConversationWithUser).not.toHaveBeenCalled();
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({ enabled: false, target: emailTarget }),
+      );
+    });
+
+    it('rejects re-pointing at an Email identity that is no longer eligible', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        createdByUserId: 'admin-1',
+        target: emailTarget,
+      });
+      mockCanStartAgentMailConversationWithUser.mockResolvedValue(false);
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetChannelId: 'verified:admin-1:other' }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'email is not connected.' });
+      expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
     });
 
     it('rejects switching a DM target to channel mode without a channel', async () => {

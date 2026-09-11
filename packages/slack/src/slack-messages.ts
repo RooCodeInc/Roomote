@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getRedis } from '@roomote/redis';
+import type { ThreadReplyFooterLock } from '@roomote/communication/thread-reply-footer-state';
 import {
   clearLatestUserMessageForReplyQuote,
   getCommunicationMessages,
@@ -224,14 +225,27 @@ export async function setSlackThreadReplyFooterMessageTs(
   channel: string,
   threadTs: string,
   messageTs: string,
-): Promise<void> {
+  options: { lock?: ThreadReplyFooterLock } = {},
+): Promise<boolean> {
   const redis = getRedis();
-  await redis.set(
-    getSlackThreadReplyFooterKey(channel, threadTs),
-    messageTs,
-    'EX',
-    SLACK_THREAD_REPLY_FOOTER_TTL_SECONDS,
-  );
+  const key = getSlackThreadReplyFooterKey(channel, threadTs);
+  if (options.lock) {
+    return (
+      (await redis.eval(
+        `if redis.call('get', KEYS[1]) ~= ARGV[1] then return 0 end
+         redis.call('set', KEYS[2], ARGV[2], 'EX', ARGV[3])
+         return 1`,
+        2,
+        options.lock.key,
+        key,
+        options.lock.ownerId,
+        messageTs,
+        SLACK_THREAD_REPLY_FOOTER_TTL_SECONDS,
+      )) === 1
+    );
+  }
+  await redis.set(key, messageTs, 'EX', SLACK_THREAD_REPLY_FOOTER_TTL_SECONDS);
+  return true;
 }
 
 export async function clearSlackThreadReplyFooterMessageTs(

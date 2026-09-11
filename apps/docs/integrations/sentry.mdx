@@ -15,13 +15,30 @@ performance context from production.
 
 ## How setup works
 
-Admins connect Sentry once from **Settings > Integrations**.
+Admins connect Sentry once from **Settings > Integrations**. Sentry's consent
+screen lists four access groups, all selected by default:
+
+- **Inspect Issues & Events** is read-only: issues, events, traces, replays,
+  releases, monitors, profiles, documentation, and project metadata.
+- **Seer**, **Triage Issues**, and **Manage Projects & Teams** grant write
+  access: AI analysis runs, resolving and assigning issues, and creating or
+  editing projects, teams, DSNs, and uptime monitors.
+
+Roomote does not restrict the connection beyond what you approve there. For a
+read-only connection, leave only **Inspect Issues & Events** selected. You can
+also disable individual tools afterwards from the integration's tool settings.
+Most Sentry operations run through the `execute_sentry_tool` gateway, so
+disabling that tool removes the whole catalog rather than a single operation.
 
 ## What to expect
 
 Sentry gives Roomote incident and performance context during a task. It can also
-support scheduled read-only Sentry triage. The final decision, code change, and
-review still happen in the normal task and repository flow.
+support scheduled Sentry triage. The final decision, code change, and review
+still happen in the normal task and repository flow.
+
+Roomote agents are instructed to treat Sentry as read-only unless a request
+explicitly asks them to change Sentry state. That instruction is not enforced
+by Roomote; the access you approve on Sentry's consent screen is the boundary.
 
 ## Scope a triage request
 
