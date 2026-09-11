@@ -20,6 +20,7 @@ const UTTERANCE_SILENCE_FLUSH_MS = 1_500;
 /** GPT-Live has finished a spoken turn once its transcript stops growing. */
 const SPOKEN_TURN_SETTLE_MS = 1_200;
 const SESSION_START_TIMEOUT_MS = 15_000;
+const PEER_DISCONNECT_GRACE_MS = 3_000;
 
 type LiveVoiceStatus =
   | 'idle'
@@ -132,6 +133,7 @@ export function useLiveVoice({
   // Session once it goes quiet or the person speaks again.
   const outputTranscriptRef = useRef('');
   const outputSettleTimerRef = useRef<number | null>(null);
+  const peerDisconnectTimerRef = useRef<number | null>(null);
 
   // The composer has no status strip, so failures surface as a toast.
   useEffect(() => {
@@ -195,6 +197,13 @@ export function useLiveVoice({
     if (silenceTimerRef.current !== null) {
       window.clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
+    }
+  }, []);
+
+  const clearPeerDisconnectTimer = useCallback(() => {
+    if (peerDisconnectTimerRef.current !== null) {
+      window.clearTimeout(peerDisconnectTimerRef.current);
+      peerDisconnectTimerRef.current = null;
     }
   }, []);
 
@@ -342,6 +351,7 @@ export function useLiveVoice({
       startGenerationRef.current += 1;
       connectingRef.current = false;
       activeRef.current = false;
+      clearPeerDisconnectTimer();
 
       if (delegationTimerRef.current !== null) {
         window.clearTimeout(delegationTimerRef.current);
@@ -378,7 +388,7 @@ export function useLiveVoice({
       setOutputMutedState(false);
       if (wasActive && !options?.silent) playVoiceCue('stop');
     },
-    [clearSilenceTimer, flushSpokenTurn, release],
+    [clearPeerDisconnectTimer, clearSilenceTimer, flushSpokenTurn, release],
   );
 
   const start = useCallback(async () => {
@@ -454,12 +464,19 @@ export function useLiveVoice({
       peer.addEventListener('connectionstatechange', () => {
         const connectionState = peer?.connectionState;
         console.info(`[voice] Peer connection ${connectionState}`);
-        if (
-          startGenerationRef.current === generation &&
-          (connectionState === 'disconnected' ||
-            connectionState === 'failed' ||
-            connectionState === 'closed')
-        ) {
+        if (isStale()) return;
+
+        if (connectionState === 'disconnected') {
+          clearPeerDisconnectTimer();
+          peerDisconnectTimerRef.current = window.setTimeout(() => {
+            peerDisconnectTimerRef.current = null;
+            if (!isStale() && peer?.connectionState === 'disconnected') stop();
+          }, PEER_DISCONNECT_GRACE_MS);
+          return;
+        }
+
+        clearPeerDisconnectTimer();
+        if (connectionState === 'failed' || connectionState === 'closed') {
           stop();
         }
       });
@@ -534,7 +551,14 @@ export function useLiveVoice({
           : 'Could not start the voice conversation',
       );
     }
-  }, [disabled, handleServerEvent, release, stop, trpcClient]);
+  }, [
+    clearPeerDisconnectTimer,
+    disabled,
+    handleServerEvent,
+    release,
+    stop,
+    trpcClient,
+  ]);
 
   const speak = useCallback((markdown: string, delegationId: string | null) => {
     const channel = dataChannelRef.current;
