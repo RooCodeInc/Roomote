@@ -425,12 +425,12 @@ describe('useLiveVoice', () => {
     });
     expect(onSpokenTurn).toHaveBeenCalledWith('Glad to hear it.');
 
-    // A delegation that shows up right after a silence flush belongs to that
-    // utterance and must not be held for the next one.
+    // A delegation that arrives before the next request's transcript is
+    // that request's delegation: the request must reach Fast.
     act(() => {
       FakePeer.instance.channel.emit({
         type: 'session.delegation.created',
-        delegation: { id: 'item_late', target: 'client' },
+        delegation: { id: 'item_next', target: 'client' },
       });
     });
     act(() => {
@@ -440,9 +440,46 @@ describe('useLiveVoice', () => {
         start_ms: 5_000,
         end_ms: 5_400,
       });
+      vi.advanceTimersByTime(250);
+    });
+    await act(async () => {});
+    expect(onUtterance).toHaveBeenCalledWith(
+      'Now check the build.',
+      'item_next',
+    );
+    expect(onHeardTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a delegation that is never followed by speech, so it cannot attach to a later request', async () => {
+    const onUtterance = vi.fn();
+    const onHeardTurn = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveVoice({ onUtterance, onHeardTurn }),
+    );
+
+    await act(async () => result.current.start());
+    // A late delegation for speech that was already flushed as small talk.
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.delegation.created',
+        delegation: { id: 'item_stale', target: 'client' },
+      });
+      vi.advanceTimersByTime(3_000);
+    });
+
+    // The next thing said is small talk again: it is recorded as heard, not
+    // sent to Fast under the stale delegation.
+    act(() => {
+      FakePeer.instance.channel.emit({
+        type: 'session.input_transcript.delta',
+        delta: 'Cool, thanks',
+        start_ms: 8_000,
+        end_ms: 8_400,
+      });
       vi.advanceTimersByTime(1_500);
     });
-    expect(onHeardTurn).toHaveBeenLastCalledWith('Now check the build');
+    await act(async () => {});
+    expect(onHeardTurn).toHaveBeenCalledWith('Cool, thanks');
     expect(onUtterance).not.toHaveBeenCalled();
   });
 

@@ -18,8 +18,13 @@ const DELEGATION_TRANSCRIPT_SETTLE_MS = 250;
  * Session transcript still has it.
  */
 const UTTERANCE_SILENCE_FLUSH_MS = 1_500;
-/** A delegation this soon after a silence flush belongs to that utterance. */
-const STALE_DELEGATION_WINDOW_MS = 3_000;
+/**
+ * A delegation that arrives with nothing transcribed belongs either to an
+ * utterance already flushed as small talk or to a request whose transcript is
+ * still on its way. Transcript arriving within this window settles it as the
+ * latter; otherwise it is dropped so it cannot attach to a later request.
+ */
+const UNSPOKEN_DELEGATION_EXPIRY_MS = 3_000;
 /** GPT-Live has finished a spoken turn once its transcript stops growing. */
 const SPOKEN_TURN_SETTLE_MS = 1_200;
 const SESSION_START_TIMEOUT_MS = 15_000;
@@ -166,7 +171,7 @@ export function useLiveVoice({
   const pendingDelegationsRef = useRef<string[]>([]);
   const delegationTimerRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<number | null>(null);
-  const lastSilenceFlushAtRef = useRef(0);
+  const unspokenDelegationTimersRef = useRef(new Map<string, number>());
   const speakingTimerRef = useRef<number | null>(null);
   const deliveryChainRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -261,7 +266,6 @@ export function useLiveVoice({
       const utterance = stripVoiceAnnotations(inputTranscriptRef.current);
       if (pendingDelegationsRef.current.length > 0) return;
       inputTranscriptRef.current = '';
-      lastSilenceFlushAtRef.current = Date.now();
       if (utterance) onHeardTurnRef.current?.(utterance);
     }, UTTERANCE_SILENCE_FLUSH_MS);
   }, [clearSilenceTimer]);
@@ -281,6 +285,11 @@ export function useLiveVoice({
             // The person is talking again: whatever GPT-Live said is done.
             if (outputTranscriptRef.current) flushSpokenTurn();
             inputTranscriptRef.current += event.delta;
+            // Speech arriving settles any delegation that came in ahead of it.
+            for (const timer of unspokenDelegationTimersRef.current.values()) {
+              window.clearTimeout(timer);
+            }
+            unspokenDelegationTimersRef.current.clear();
             onHeardTurnDeltaRef.current?.(
               stripVoiceAnnotations(inputTranscriptRef.current),
             );
@@ -316,16 +325,24 @@ export function useLiveVoice({
           break;
         case 'session.delegation.created':
           if (event.delegation?.target === 'client' && event.delegation.id) {
-            // A delegation arriving just after the silence flush already sent
-            // that utterance; attaching it to the next one would skew replies.
-            if (
-              !inputTranscriptRef.current.trim() &&
-              Date.now() - lastSilenceFlushAtRef.current <
-                STALE_DELEGATION_WINDOW_MS
-            ) {
-              break;
+            const delegationId = event.delegation.id;
+            pendingDelegationsRef.current.push(delegationId);
+            if (!inputTranscriptRef.current.trim()) {
+              // Nothing transcribed yet: either a late delegation for speech
+              // already flushed as small talk, or one for a request whose
+              // transcript is still arriving. Wait for speech to decide.
+              unspokenDelegationTimersRef.current.set(
+                delegationId,
+                window.setTimeout(() => {
+                  unspokenDelegationTimersRef.current.delete(delegationId);
+                  if (inputTranscriptRef.current.trim()) return;
+                  pendingDelegationsRef.current =
+                    pendingDelegationsRef.current.filter(
+                      (id) => id !== delegationId,
+                    );
+                }, UNSPOKEN_DELEGATION_EXPIRY_MS),
+              );
             }
-            pendingDelegationsRef.current.push(event.delegation.id);
             scheduleDelegationFlush();
           }
           break;
@@ -395,6 +412,10 @@ export function useLiveVoice({
 
       inputTranscriptRef.current = '';
       pendingDelegationsRef.current = [];
+      for (const timer of unspokenDelegationTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      unspokenDelegationTimersRef.current.clear();
       setActive(false);
       setStatus('idle');
       setStartedAt(null);
