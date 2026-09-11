@@ -39,7 +39,6 @@ import {
 import {
   and,
   appendFastAgentMemory,
-  appendLearnedUserPreference,
   asc,
   db,
   eq,
@@ -88,8 +87,8 @@ import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
+  enqueueUserPersonalizationUpdate,
   resolveUserPersonalizationContext,
-  resolveUserPersonalizationUpdate,
 } from '../user-personalization';
 import {
   appendFastAgentVisibleMessages,
@@ -4445,22 +4444,11 @@ export async function answerFastAgentQuestion({
               };
             }
             const args = updatePersonalizationArgsSchema.parse(call.args);
-            const decision = await resolveUserPersonalizationUpdate({
+            enqueueUserPersonalizationUpdate({
               userId,
               ...args,
             });
-            if (decision.action === 'ignore' || !decision.preference) {
-              return { success: false, saved: false, reason: 'no_change' };
-            }
-            const result = await appendLearnedUserPreference({
-              userId,
-              preference: decision.preference,
-              confidence: args.confidence,
-              supersedes: decision.supersedes,
-            });
-            return result.saved
-              ? { success: true, saved: true }
-              : { success: false, saved: false, reason: result.reason };
+            return { success: true, saved: true, queued: true };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {

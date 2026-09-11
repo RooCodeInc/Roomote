@@ -652,6 +652,18 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
+    await vi.waitFor(() =>
+      expect(
+        mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter(
+            (message) =>
+              message.payload?.toolName === 'update_personalization' ||
+              message.payload?.title === 'update_personalization',
+          ),
+      ).toHaveLength(2),
+    );
+
     const personalizationWrites = mocks.upsertMessage.mock.calls
       .map(([input]) => input.message)
       .filter(
@@ -670,7 +682,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     ).toEqual([true, true]);
     expect(
       personalizationWrites.map((message) => message.payload?.output),
-    ).toEqual(['Personalization updated', 'Personalization updated']);
+    ).toEqual([undefined, 'Personalization updated']);
   });
 
   it('refreshes shared agent guidance for each subsequent turn', async () => {
