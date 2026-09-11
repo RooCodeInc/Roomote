@@ -503,6 +503,98 @@ describe('sendMessageToTask', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['missing token', 'Linked review handoff requires a PR review run token.'],
+    [
+      'missing review run',
+      'Linked review handoff requires an active PR review run.',
+    ],
+    [
+      'non-review run',
+      'Linked review handoff requires an active PR review run.',
+    ],
+    [
+      'missing PR metadata',
+      'Linked review handoff requires PR metadata on the review run.',
+    ],
+    [
+      'missing PR owner',
+      'Linked review handoff requires a reusable PR owner task for the PR.',
+    ],
+    [
+      'unrelated target',
+      'Linked review handoff target must match the reusable PR owner task for the PR.',
+    ],
+  ])(
+    'rejects linked review handoffs with %s before any delivery or actor change',
+    async (invalidCase, error) => {
+      mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+      mockTaskRunFindFirst.mockResolvedValue(
+        invalidCase === 'missing review run'
+          ? null
+          : {
+              id: 200,
+              taskId: 'review-task',
+              payloadKind:
+                invalidCase === 'non-review run'
+                  ? 'standard'
+                  : 'github_pr_review',
+              payload:
+                invalidCase === 'missing PR metadata'
+                  ? {}
+                  : {
+                      repo: 'acme/app',
+                      prNumber: 42,
+                      prUrl: 'https://github.com/acme/app/pull/42',
+                    },
+            },
+      );
+      mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(
+        invalidCase === 'missing PR owner'
+          ? null
+          : {
+              taskId:
+                invalidCase === 'unrelated target' ? 'other-task' : 'task-1',
+            },
+      );
+
+      const result = await sendMessageToTask({
+        taskId: 'task-1',
+        userId: 'reviewer-user',
+        authContext:
+          invalidCase === 'missing token'
+            ? undefined
+            : {
+                tokenType: 'run',
+                runId: 200,
+                userId: null,
+                principal: 'deployment',
+                version: 1,
+              },
+        senderMode: 'linked_review_handoff',
+        message: `<review_result>
+<review_kind>initial</review_kind>
+<outcome>clean</outcome>
+<finding_count>0</finding_count>
+<repository>acme/app</repository>
+<pull_request_number>42</pull_request_number>
+</review_result>`,
+      });
+
+      expect(result).toEqual({
+        success: false,
+        status: 500,
+        error,
+      });
+      expect(mockSendPromptMutate).not.toHaveBeenCalled();
+      expect(mockSteerTaskMutate).not.toHaveBeenCalled();
+      expect(mockEnqueueTask).not.toHaveBeenCalled();
+      expect(mockNotifyFastAgentParentOnPrFeedback).not.toHaveBeenCalled();
+      expect(mockUpdateActingUserIdIfNeeded).not.toHaveBeenCalled();
+      expect(mockTouchTaskActivity).not.toHaveBeenCalled();
+    },
+  );
+
   it('uses the review run as stable feedback identity when no head SHA is available', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({

@@ -142,19 +142,51 @@ describe('send_message / steer_message user context', () => {
     );
   });
 
-  it('still rejects when no user can be resolved for the run', async () => {
-    mockTaskRunsFindFirst.mockResolvedValue({
-      actingUserId: null,
-      taskId: 'task-review',
-    });
+  it.each(['send_message', 'steer_message'])(
+    '%s ignores stale token attribution after the acting user changes',
+    async (route) => {
+      mockTaskRunsFindFirst.mockResolvedValue({
+        actingUserId: 'user-current',
+        taskId: 'task-review',
+      });
+      const response = await post(
+        createApp({
+          ...userlessRunAuth,
+          userId: 'user-old',
+          principal: 'user',
+        }),
+        `/tasks/task-impl/${route}`,
+      );
 
-    const response = await post(
-      createApp(userlessRunAuth),
-      '/tasks/task-impl/send_message',
-    );
+      expect(response.status).toBe(200);
+      const deliver =
+        route === 'send_message'
+          ? mockSendMessageToTask
+          : mockSteerMessageToTask;
+      expect(deliver).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'user-current' }),
+      );
+      expect(mockGetTaskHumanOwnerUserIds).not.toHaveBeenCalled();
+    },
+  );
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: 'User context required' });
-    expect(mockSendMessageToTask).not.toHaveBeenCalled();
-  });
+  it.each(['send_message', 'steer_message'])(
+    'still rejects %s when no user can be resolved for the run',
+    async (route) => {
+      mockTaskRunsFindFirst.mockResolvedValue({
+        actingUserId: null,
+        taskId: 'task-review',
+      });
+
+      const response = await post(
+        createApp(userlessRunAuth),
+        `/tasks/task-impl/${route}`,
+      );
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: 'User context required' });
+      expect(mockSendMessageToTask).not.toHaveBeenCalled();
+      expect(mockSteerMessageToTask).not.toHaveBeenCalled();
+    },
+  );
 });
