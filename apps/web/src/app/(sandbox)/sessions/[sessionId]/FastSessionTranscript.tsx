@@ -405,11 +405,6 @@ export function FastSessionTranscript({
     [],
   );
   const [streamMessages, setStreamMessages] = useState<AcpUiMessage[]>([]);
-  // Voice-result chunks remain available to the speech effect but never enter
-  // the transcript projection, including before their persisted row arrives.
-  const [voiceStreamMessageIds, setVoiceStreamMessageIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
   const streamMessagesRef = useRef(streamMessages);
   const replaceStreamMessages = useCallback((next: AcpUiMessage[]) => {
     streamMessagesRef.current = next;
@@ -419,7 +414,6 @@ export function FastSessionTranscript({
     if (streamMessagesRef.current.length === 0) return;
     getStreamService().reset();
     replaceStreamMessages([]);
-    setVoiceStreamMessageIds(new Set());
   }, [getStreamService, replaceStreamMessages]);
 
   useEffect(() => {
@@ -472,11 +466,6 @@ export function FastSessionTranscript({
           const remaining = streamed.filter(
             (message) => !persistedStreamIds.has(message.id),
           );
-          setVoiceStreamMessageIds((current) => {
-            const next = new Set(current);
-            for (const id of persistedStreamIds) next.delete(id);
-            return next.size === current.size ? current : next;
-          });
           if (remaining.length === 0) {
             getStreamService().reset();
           } else {
@@ -552,12 +541,13 @@ export function FastSessionTranscript({
         const service = getStreamService();
         const fastTurnId = (chunk.metadata as { fastTurnId?: unknown } | null)
           ?.fastTurnId;
-        const streamMessageId = `assistant:${chunk.id}`;
         if (typeof fastTurnId === 'string' && fastTurnId) {
-          streamTurnIdsRef.current.set(streamMessageId, fastTurnId);
+          streamTurnIdsRef.current.set(`assistant:${chunk.id}`, fastTurnId);
         }
         let current = streamMessagesRef.current;
-        if (!current.some((message) => message.id === streamMessageId)) {
+        if (
+          !current.some((message) => message.id === `assistant:${chunk.id}`)
+        ) {
           // A new reply begins: the previous one is complete and only waits
           // for its persisted row.
           const sessionId = chunk.metadata?.sessionId;
@@ -571,19 +561,7 @@ export function FastSessionTranscript({
           }
         }
         const result = service.applyOutputEvent(current, chunk);
-        if (result) {
-          if (
-            typeof fastTurnId === 'string' &&
-            voiceDelegationByTurnIdRef.current.has(fastTurnId)
-          ) {
-            setVoiceStreamMessageIds((current) =>
-              current.has(streamMessageId)
-                ? current
-                : new Set(current).add(streamMessageId),
-            );
-          }
-          replaceStreamMessages(result.acpMessages);
-        }
+        if (result) replaceStreamMessages(result.acpMessages);
       } catch {
         // Ignore malformed frames; the persisted row still arrives.
       }
@@ -640,16 +618,44 @@ export function FastSessionTranscript({
               (message.payload as { taskNavigation?: unknown } | null)
                 ?.taskNavigation === true
             ) &&
-            !(
-              message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-              (message.metadata as { voiceCommentary?: unknown } | null)
-                ?.voiceCommentary === true
-            ) &&
             message.eventType !== ACP_ENVELOPE_EVENT_TYPES.RequestUserInput &&
             message.eventType !==
               ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse,
         )
         .map((message) => {
+          // Keep the persisted source in the UI pipeline so it reconciles the
+          // streamed reply in place, but hide this internal voice delivery.
+          if (
+            message.role === 'assistant' &&
+            message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            (message.metadata as { voiceCommentary?: unknown } | null)
+              ?.voiceCommentary === true
+          ) {
+            const text = getTranscriptMessageText(message) ?? '';
+            return toAcpUiMessage({
+              id: `assistant:${message.eventId}`,
+              ts: message.ts,
+              eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult as AcpEventType,
+              role: 'tool',
+              kind: 'tool_result',
+              contentBlocks: [{ type: 'text', text }],
+              metadata: {
+                visibleInTranscript: false,
+                toolCallId: message.eventId,
+              },
+              payload: {
+                toolName: 'report_to_voice',
+                toolCallId: message.eventId,
+                status: 'completed',
+                rawInput: {},
+                output: text,
+              },
+              text,
+              userName: null,
+              userEmail: null,
+              userImageUrl: null,
+            });
+          }
           const uiMessage = toAcpUiMessage({
             // A reply keeps the id its streamed chunks rendered under, so the
             // persisted row reconciles in place instead of remounting.
@@ -775,19 +781,8 @@ export function FastSessionTranscript({
     return turns;
   }, [liveVoiceTurns, owner]);
   const uiMessages = useMemo(
-    () => [
-      ...persistedUiMessages,
-      ...streamMessages.filter(
-        (message) => !voiceStreamMessageIds.has(message.id),
-      ),
-      ...liveVoiceUiMessages,
-    ],
-    [
-      persistedUiMessages,
-      streamMessages,
-      voiceStreamMessageIds,
-      liveVoiceUiMessages,
-    ],
+    () => [...persistedUiMessages, ...streamMessages, ...liveVoiceUiMessages],
+    [persistedUiMessages, streamMessages, liveVoiceUiMessages],
   );
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
@@ -805,8 +800,7 @@ export function FastSessionTranscript({
   // message id), with the GPT-Live delegation it answers (null for a turn
   // the voice did not delegate, such as a typed kickoff). Both streamed
   // chunks and persisted rows carry the turn id, so each piece of a reply is
-  // attributed to exactly the delegation that asked for it. Entries survive
-  // call restarts until the turn's terminal persisted reply is processed.
+  // attributed to exactly the delegation that asked for it.
   const voiceDelegationByTurnIdRef = useRef(new Map<string, string | null>());
   // Fast turn id of each streamed reply, from the chunk envelope.
   const streamTurnIdsRef = useRef(new Map<string, string>());
@@ -1032,20 +1026,13 @@ export function FastSessionTranscript({
       partial: boolean;
       delegationId: string | null;
     }> = [];
-    const settledVoiceTurnIds: string[] = [];
     for (const message of messages) {
-      const metadata = message.metadata as {
-        voiceCommentary?: unknown;
-        purpose?: unknown;
-      } | null;
       if (
         message.role === 'assistant' &&
         message.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-        metadata?.voiceCommentary === true
+        (message.metadata as { voiceCommentary?: unknown } | null)
+          ?.voiceCommentary === true
       ) {
-        if (metadata.purpose !== 'progress') {
-          settledVoiceTurnIds.push(message.turnId);
-        }
         const text = getTranscriptMessageText(message);
         if (text) {
           commentary.push({
@@ -1100,9 +1087,6 @@ export function FastSessionTranscript({
         sentences.slice(spokenCount, readyCount).join(' '),
         message.delegationId,
       );
-    }
-    for (const turnId of settledVoiceTurnIds) {
-      voiceDelegationByTurnIdRef.current.delete(turnId);
     }
   }, [messages, streamMessages, liveVoiceActive]);
 
@@ -1192,8 +1176,8 @@ export function FastSessionTranscript({
     for (const message of serverMessages.values()) {
       voiceCutoffTsRef.current = Math.max(voiceCutoffTsRef.current, message.ts);
     }
-    // Message IDs are unique across calls, so retaining cursors prevents an
-    // in-flight reply from the previous call from replaying after a restart.
+    spokenSentenceCountsRef.current.clear();
+    voiceDelegationByTurnIdRef.current.clear();
     pendingUtterancesRef.current = [];
     void liveVoice.start();
   }, [liveVoice, serverMessages]);
@@ -1217,6 +1201,7 @@ export function FastSessionTranscript({
 
     voiceCutoffTsRef.current = 0;
     spokenSentenceCountsRef.current.clear();
+    voiceDelegationByTurnIdRef.current.clear();
     // The Session was opened for this call, so a kickoff already in it (text
     // typed before the call) is the voice's turn too, with no delegation.
     for (const message of serverMessagesRef.current.values()) {

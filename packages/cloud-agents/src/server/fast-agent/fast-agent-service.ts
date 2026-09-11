@@ -2506,8 +2506,8 @@ export async function answerFastAgentQuestion({
         metadata: {
           visibleInTranscript,
           purpose: reply.purpose,
-          // The voice reports this result aloud. Keep the canonical row for
-          // delivery and history; the web transcript hides it from view.
+          // The voice reports this result aloud; the transcript shows the
+          // spoken words and keeps this as the collapsed source.
           ...(voiceMode ? { voiceCommentary: true } : {}),
           ...(inferenceRetryNotice
             ? {

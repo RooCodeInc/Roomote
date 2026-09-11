@@ -1386,7 +1386,7 @@ describe('FastSessionTranscript', () => {
     expect(screen.getByLabelText('Slack Sender')).toHaveTextContent('SS');
   });
 
-  it('updates one canonical tool row from in-progress to completed via the stream', () => {
+  it('hides voice delivery while updating an ordinary tool row via the stream', () => {
     const baseMessage = {
       id: 'tool-1',
       eventId: 'turn-1:tool:0',
@@ -1432,13 +1432,25 @@ describe('FastSessionTranscript', () => {
       createdAt: '2026-01-01T00:00:01.000Z',
     };
 
+    const voiceCommentary = {
+      ...textMessage({
+        id: 'voice-result-1',
+        role: 'assistant' as const,
+        text: 'Internal voice result',
+        ts: 1,
+      }),
+      metadata: { visibleInTranscript: true, voiceCommentary: true },
+    };
+
     render(
       <FastSessionTranscript
         sessionId="session-1"
-        initialMessages={[toolCall]}
+        initialMessages={[voiceCommentary, toolCall]}
       />,
     );
 
+    expect(screen.queryByText(/result to voice/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Internal voice result')).not.toBeInTheDocument();
     expect(screen.getByText('Starting')).toBeInTheDocument();
     expect(screen.getByText('coding task')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
@@ -2347,13 +2359,9 @@ describe('FastSessionTranscript', () => {
         'First sentence.',
         'item_1',
       );
-      expect(
-        screen.queryByText('First sentence. Second'),
-      ).not.toBeInTheDocument();
 
       // The persisted row shares the stream's id, so only the unread tail is
-      // spoken; nothing is read twice. The internal result remains available
-      // to voice delivery without rendering in the web transcript.
+      // spoken; nothing is read twice. Its internal delivery row stays hidden.
       act(() => {
         FakeEventSource.instances[0]!.emit('messages', {
           messages: [
@@ -2376,9 +2384,6 @@ describe('FastSessionTranscript', () => {
         'item_1',
       );
       expect(screen.queryByText(/result to voice/i)).not.toBeInTheDocument();
-      expect(
-        screen.queryByText('First sentence. Second part is here.'),
-      ).not.toBeInTheDocument();
 
       // A typed message's written reply stays on screen and is not spoken,
       // streamed or persisted.
@@ -2407,111 +2412,6 @@ describe('FastSessionTranscript', () => {
       expect(
         screen.getByText('Typed answer stays written.'),
       ).toBeInTheDocument();
-    });
-
-    it('keeps an earlier voice reply hidden when the call restarts before it streams', async () => {
-      voiceStatusQuery.mockResolvedValue({ enabled: true });
-      liveVoiceState.active = true;
-      liveVoiceState.status = 'listening';
-      const transcript = () => (
-        <FastSessionTranscript
-          sessionId="session-1"
-          initialMessages={[]}
-          canReply
-        />
-      );
-      const { rerender } = render(transcript());
-      replyMutate.mockResolvedValue({ success: true });
-      await screen.findAllByRole('button', { name: /end voice conversation/i });
-
-      act(() => {
-        liveVoiceState.onUtterance?.('Check the build', 'item_1');
-      });
-      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
-      const turnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
-
-      fireEvent.click(
-        screen.getByRole('button', { name: /^end voice conversation$/i }),
-      );
-      liveVoiceState.active = false;
-      liveVoiceState.status = 'idle';
-      rerender(transcript());
-      fireEvent.click(
-        await screen.findByRole('button', { name: /^voice conversation$/i }),
-      );
-      liveVoiceState.active = true;
-      liveVoiceState.status = 'listening';
-      rerender(transcript());
-
-      act(() => {
-        FakeEventSource.instances[0]!.emit(
-          'chunk',
-          chunkEvent('assistant-1:event', 'Build passed. More', 11, turnId),
-        );
-      });
-      expect(screen.queryByText('Build passed. More')).not.toBeInTheDocument();
-      expect(liveVoiceState.speak).toHaveBeenCalledWith(
-        'Build passed.',
-        'item_1',
-      );
-    });
-
-    it('does not replay an earlier voice sentence when the call restarts before persistence', async () => {
-      voiceStatusQuery.mockResolvedValue({ enabled: true });
-      liveVoiceState.active = true;
-      liveVoiceState.status = 'listening';
-      const transcript = () => (
-        <FastSessionTranscript
-          sessionId="session-1"
-          initialMessages={[]}
-          canReply
-        />
-      );
-      const { rerender } = render(transcript());
-      replyMutate.mockResolvedValue({ success: true });
-      await screen.findAllByRole('button', { name: /end voice conversation/i });
-
-      act(() => {
-        liveVoiceState.onUtterance?.('Check the build', 'item_1');
-      });
-      await waitFor(() => expect(replyMutate).toHaveBeenCalledTimes(1));
-      const turnId = replyMutate.mock.calls[0]?.[0].clientMessageId;
-      act(() => {
-        FakeEventSource.instances[0]!.emit(
-          'chunk',
-          chunkEvent('assistant-1:event', 'Build passed. More', 11, turnId),
-        );
-      });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
-
-      fireEvent.click(
-        screen.getByRole('button', { name: /^end voice conversation$/i }),
-      );
-      liveVoiceState.active = false;
-      liveVoiceState.status = 'idle';
-      rerender(transcript());
-      fireEvent.click(
-        await screen.findByRole('button', { name: /^voice conversation$/i }),
-      );
-      liveVoiceState.active = true;
-      liveVoiceState.status = 'listening';
-      rerender(transcript());
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(1);
-
-      act(() => {
-        FakeEventSource.instances[0]!.emit(
-          'chunk',
-          chunkEvent('assistant-1:event', ' details. Tail', 11, turnId),
-        );
-      });
-      expect(liveVoiceState.speak).toHaveBeenCalledTimes(2);
-      expect(liveVoiceState.speak).toHaveBeenLastCalledWith(
-        'More details.',
-        'item_1',
-      );
-      expect(
-        screen.queryByText('Build passed. More details. Tail'),
-      ).not.toBeInTheDocument();
     });
 
     it('shows what is being said on the call as it is spoken, then hands over to the persisted row', async () => {
