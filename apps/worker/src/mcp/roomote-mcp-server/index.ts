@@ -1379,14 +1379,15 @@ if (shouldRegisterPlatformIssueTool()) {
     {
       title: 'Report Platform Issue',
       description:
-        `Report an admin-fixable ${PRODUCT_NAME} platform, configuration, or access blocker. ` +
-        'Use this only for blockers that require an admin or platform fix, not for ordinary code bugs or repo-level failures. ' +
-        'Report once when the blocker is clear.',
+        `Report an admin-fixable ${PRODUCT_NAME} platform, configuration, or access defect. ` +
+        'Use this only for defects that require an admin or platform fix, not for ordinary code bugs or repo-level failures. ' +
+        'When productive fallback work remains, describe the defect as degraded capability rather than a blocker, continue that fallback work, and do not treat this report as task completion. ' +
+        'Report once when the defect is clear.',
       inputSchema: {
-        title: z.string().describe('Short title for the platform blocker'),
+        title: z.string().describe('Short title for the platform defect'),
         summary: z
           .string()
-          .describe('Concise summary of the blocker and what is failing'),
+          .describe('Concise summary of the defect and what is failing'),
       },
       annotations: {
         readOnlyHint: false,

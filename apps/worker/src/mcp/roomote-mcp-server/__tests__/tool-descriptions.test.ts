@@ -530,6 +530,24 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('keeps platform issue reporting from replacing productive fallback work', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const tool = getRegisteredTool(registeredTools, 'report_platform_issue');
+
+    expect(tool.config.description).toContain(
+      'Report an admin-fixable Roomote platform, configuration, or access defect.',
+    );
+    expect(tool.config.description).toContain(
+      'When productive fallback work remains, describe the defect as degraded capability rather than a blocker',
+    );
+    expect(tool.config.description).toContain('continue that fallback work');
+    expect(tool.config.description).toContain(
+      'do not treat this report as task completion',
+    );
+  });
+
   it('documents the artifact list action on manage_artifacts', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const artifactsTool = getRegisteredTool(
