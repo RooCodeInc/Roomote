@@ -31,6 +31,7 @@ import packageJson from '../../../../package.json';
 import { validateToken } from '@roomote/auth/client';
 import {
   buildRoomoteSystemPrompt,
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
   resolveRoomoteReleaseVersion,
   stripLeadingSlackProductMention,
   wrapSlackMessage,
@@ -941,7 +942,10 @@ export const runTask = async ({
       manualSkills: environmentConfig?.manualSkills,
       instanceSkills: runtimeInstanceSkills,
       repoLocalSkills,
-      excludeSkillNames: zeroIntegrationEnabled ? undefined : ['zero'],
+      excludeSkillNames: [
+        ...FAST_ONLY_PACKAGED_SKILL_INVOCATIONS,
+        ...(zeroIntegrationEnabled ? [] : ['zero']),
+      ],
     });
 
     if (skillsActivated) {
