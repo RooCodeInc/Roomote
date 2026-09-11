@@ -152,7 +152,12 @@ function compactAutomation(
       target.targetKind,
     );
     result.targetMode = directMessage ? 'direct_message' : 'channel';
-    if (!directMessage && target.externalRef !== undefined) {
+    if (target.provider === 'email') {
+      // The pinned identity is an input on update, so surface it the way a
+      // channel id is surfaced for channel destinations.
+      const identityId = asRecord(target.metadata)?.emailIdentityId;
+      if (typeof identityId === 'string') result.targetChannelId = identityId;
+    } else if (!directMessage && target.externalRef !== undefined) {
       result.targetChannelId = target.externalRef;
     }
   }

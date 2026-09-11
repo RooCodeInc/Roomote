@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   runCustomAutomationNow: vi.fn(),
   listConnectedCommunicationProviders: vi.fn(),
   canStartAgentMailConversationWithUser: vi.fn(),
-  listAgentMailOutboundIdentities: vi.fn(),
+  listAvailableAgentMailOutboundIdentities: vi.fn(),
   captureActivationCustomAutomationChanged: vi.fn(),
 }));
 
@@ -43,7 +43,8 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
     mocks.listConnectedCommunicationProviders,
   canStartAgentMailConversationWithUser:
     mocks.canStartAgentMailConversationWithUser,
-  listAgentMailOutboundIdentities: mocks.listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities:
+    mocks.listAvailableAgentMailOutboundIdentities,
   runCustomAutomationNow: mocks.runCustomAutomationNow,
   resolveDeploymentTimeZone: mocks.resolveDeploymentTimeZone,
 }));
@@ -101,7 +102,7 @@ describe('custom automation activation telemetry', () => {
     vi.clearAllMocks();
     mocks.listConnectedCommunicationProviders.mockResolvedValue(['slack']);
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
-    mocks.listAgentMailOutboundIdentities.mockResolvedValue([]);
+    mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
   });
 
   it('tracks creation with only the destination provider classification', async () => {
@@ -187,10 +188,59 @@ describe('custom automation activation telemetry', () => {
         target: {
           provider: 'email',
           targetKind: 'email_user',
-          externalRef: 'verified:user-admin:digest',
+          externalRef: 'user-admin',
+          metadata: { emailIdentityId: 'verified:user-admin:digest' },
         },
       }),
     );
+  });
+
+  it('re-validates the destination only when the update changes it', async () => {
+    const emailTarget = {
+      provider: 'email',
+      targetKind: 'email_user',
+      externalRef: 'user-admin',
+      metadata: { emailIdentityId: 'verified:user-admin:digest' },
+    };
+    mocks.getCustomAutomationById.mockResolvedValue({
+      ...customAutomation(emailTarget),
+      createdByUserId: 'user-admin',
+    });
+    mocks.updateCustomAutomation.mockResolvedValue(
+      customAutomation(emailTarget),
+    );
+    // The identity is stale, e.g. AgentMail was disabled since.
+    mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
+
+    const base = {
+      id: 'automation-id',
+      name: 'Private automation name',
+      prompt: 'Private prompt',
+      scheduleMode: 'daily',
+      environmentId: 'environment-id',
+      targetProvider: 'email' as const,
+      targetMode: 'direct_message' as const,
+    };
+    await expect(
+      updateCustomAutomationCommand(adminAuth, {
+        ...base,
+        enabled: false,
+        targetChannelId: 'verified:user-admin:digest',
+      }),
+    ).resolves.toMatchObject({ id: 'automation-id' });
+    expect(mocks.canStartAgentMailConversationWithUser).not.toHaveBeenCalled();
+    expect(mocks.updateCustomAutomation).toHaveBeenCalledWith(
+      'automation-id',
+      expect.objectContaining({ enabled: false, target: emailTarget }),
+    );
+
+    await expect(
+      updateCustomAutomationCommand(adminAuth, {
+        ...base,
+        enabled: true,
+        targetChannelId: 'verified:user-admin:other',
+      }),
+    ).rejects.toThrow('Verify your Email address');
   });
 
   it('tracks deletion with only the persisted destination provider classification', async () => {
@@ -221,7 +271,7 @@ describe('custom automation ownership', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
-    mocks.listAgentMailOutboundIdentities.mockResolvedValue([]);
+    mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
   });
 
   it('returns only member-safe connection flags and timezone without reading admin settings', async () => {
@@ -252,11 +302,33 @@ describe('custom automation ownership', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("lists the automation owner's Email identities when an admin edits on their behalf", async () => {
+    mocks.listConnectedCommunicationProviders.mockResolvedValue([]);
+    mocks.resolveDeploymentTimeZone.mockResolvedValue({ timeZone: 'UTC' });
+    mocks.getCustomAutomationById.mockResolvedValue({
+      ...customAutomation(),
+      createdByUserId: 'member-2',
+    });
+    mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
+
+    await getCustomAutomationOptionsCommand(adminAuth, {
+      automationId: 'automation-id',
+    });
+    expect(mocks.listAvailableAgentMailOutboundIdentities).toHaveBeenCalledWith(
+      'member-2',
+    );
+
+    await expect(
+      getCustomAutomationOptionsCommand(memberAuth, {
+        automationId: 'automation-id',
+      }),
+    ).rejects.toThrow('Custom automation was not found.');
+  });
+
   it('offers only currently usable verified Email identities', async () => {
     mocks.listConnectedCommunicationProviders.mockResolvedValue([]);
     mocks.resolveDeploymentTimeZone.mockResolvedValue({ timeZone: 'UTC' });
-    mocks.canStartAgentMailConversationWithUser.mockResolvedValue(true);
-    mocks.listAgentMailOutboundIdentities.mockResolvedValue([
+    mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([
       {
         id: 'verified:member-1:digest',
         emailAddress: 'member@example.com',

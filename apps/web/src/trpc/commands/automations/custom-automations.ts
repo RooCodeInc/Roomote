@@ -16,7 +16,7 @@ import {
 } from '@roomote/db/server';
 import {
   listConnectedCommunicationProviders,
-  listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
   resolveCustomAutomationSchedule,
   resolveDeploymentTimeZone,
   runCustomAutomationNow,
@@ -26,8 +26,10 @@ import {
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
   FAST_EXECUTION,
   NO_REPOSITORIES,
+  getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
@@ -168,18 +170,26 @@ function buildTarget(
   if (!input.targetProvider) {
     return {};
   }
-  if (input.targetProvider === 'email' && input.targetMode === 'channel') {
-    throw new Error('Email destinations must use direct message mode.');
+  if (input.targetProvider === 'email') {
+    if (input.targetMode === 'channel') {
+      throw new Error('Email destinations must use direct message mode.');
+    }
+    const identityId = input.targetChannelId?.trim();
+    if (!identityId) {
+      throw new Error('Choose a verified Email identity.');
+    }
+    // Email keeps the direct-message shape (externalRef = owner) and pins the
+    // selected identity in metadata.
+    return {
+      provider: 'email',
+      targetKind: getAutomationTargetKind('email', 'direct_message'),
+      externalRef: ownerUserId,
+      metadata: { [AUTOMATION_TARGET_EMAIL_IDENTITY_KEY]: identityId },
+    };
   }
-  if (input.targetProvider === 'email' && !input.targetChannelId) {
-    throw new Error('Choose a verified Email identity.');
-  }
-  const directMessage =
-    input.targetProvider === 'email' || input.targetMode === 'direct_message';
+  const directMessage = input.targetMode === 'direct_message';
   const externalRef = directMessage
-    ? input.targetProvider === 'email'
-      ? input.targetChannelId!.trim()
-      : ownerUserId
+    ? ownerUserId
     : (input.targetChannelId?.trim() ?? '');
   if (!externalRef) {
     throw new Error(
@@ -198,6 +208,19 @@ function buildTarget(
   };
 
   return target;
+}
+
+function isSameDestination(
+  left: OptionalAutomationTarget,
+  right: OptionalAutomationTarget,
+): boolean {
+  return (
+    left.provider === right.provider &&
+    left.targetKind === right.targetKind &&
+    left.externalRef === right.externalRef &&
+    getAutomationTargetEmailIdentityId(left) ===
+      getAutomationTargetEmailIdentityId(right)
+  );
 }
 
 function assertScheduleMode(
@@ -297,12 +320,21 @@ export async function listCustomAutomationsCommand(
   );
 }
 
-export async function getCustomAutomationOptionsCommand(auth: UserAuthSuccess) {
-  const [providers, emailIdentities, emailAvailable, { timeZone }, settings] =
+export async function getCustomAutomationOptionsCommand(
+  auth: UserAuthSuccess,
+  input: { automationId?: string } = {},
+) {
+  // Email identities belong to the automation owner (runs execute as the
+  // creator), so editing someone else's automation lists the owner's
+  // identities rather than the viewer's.
+  const ownerUserId = input.automationId
+    ? ((await getOwnedAutomation(auth, input.automationId)).createdByUserId ??
+      auth.userId)
+    : auth.userId;
+  const [providers, emailIdentities, { timeZone }, settings] =
     await Promise.all([
       listConnectedCommunicationProviders(),
-      listAgentMailOutboundIdentities(auth.userId),
-      canStartAgentMailConversationWithUser(auth.userId),
+      listAvailableAgentMailOutboundIdentities(ownerUserId),
       resolveDeploymentTimeZone(),
       auth.isAdmin ? getBackgroundAgentSettingsForDeployment() : null,
     ]);
@@ -313,9 +345,9 @@ export async function getCustomAutomationOptionsCommand(auth: UserAuthSuccess) {
       discordConnected: providers.includes('discord'),
       telegramConnected: providers.includes('telegram'),
       teamsConnected: providers.includes('teams'),
-      emailConnected: emailAvailable && emailIdentities.length > 0,
+      emailConnected: emailIdentities.length > 0,
     },
-    emailIdentities: emailAvailable ? emailIdentities : [],
+    emailIdentities,
     // Channel catalogs are bot-scoped, not evidence of a member's access.
     managerSlackChannelId: settings?.managerSlackChannelId ?? null,
     managerDiscordChannelId: settings?.managerDiscordChannelId ?? null,
@@ -378,13 +410,18 @@ export async function updateCustomAutomationCommand(
           (await resolveDeploymentTimeZone()).timeZone,
         )
       : null;
-  if (input.targetProvider) {
+  const ownerUserId = existing.createdByUserId ?? auth.userId;
+  const target = buildTarget(input, ownerUserId);
+  // The form and the list-row toggle resend the whole record, so a stale
+  // destination is re-validated only when the destination actually changes;
+  // otherwise disabling or renaming an automation would be blocked.
+  if (input.targetProvider && !isSameDestination(target, existing.target)) {
     if (input.targetProvider === 'email' && !existing.createdByUserId) {
       throw new Error('Automation owner is not configured.');
     }
     await assertDestinationConnected(
       input.targetProvider,
-      existing.createdByUserId ?? auth.userId,
+      ownerUserId,
       input.targetChannelId,
     );
   }
@@ -399,7 +436,7 @@ export async function updateCustomAutomationCommand(
     model: input.model ?? null,
     reasoningEffort: input.reasoningEffort ?? null,
     environmentId: input.environmentId,
-    target: buildTarget(input, existing.createdByUserId ?? auth.userId),
+    target,
   });
 
   return toListItem(updated);

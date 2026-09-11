@@ -864,9 +864,11 @@ const automationsRouter = createRouter({
     listCustomAutomationsCommand(auth),
   ),
 
-  getCustomAutomationOptions: protectedProcedure.query(({ ctx: { auth } }) =>
-    getCustomAutomationOptionsCommand(auth),
-  ),
+  getCustomAutomationOptions: protectedProcedure
+    .input(z.object({ automationId: z.string().uuid().optional() }).optional())
+    .query(({ ctx: { auth }, input }) =>
+      getCustomAutomationOptionsCommand(auth, input ?? {}),
+    ),
 
   createCustomAutomation: protectedProcedure
     .input(

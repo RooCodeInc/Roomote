@@ -2008,7 +2008,8 @@ describe('AutomationsSettings', () => {
         target: {
           provider: 'email',
           targetKind: 'email_user',
-          externalRef: 'verified:user-1:address-digest',
+          externalRef: 'user-1',
+          metadata: { emailIdentityId: 'verified:user-1:address-digest' },
         },
         lastRunAt: null,
         lastSucceededAt: null,

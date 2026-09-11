@@ -16,6 +16,7 @@ import {
   ALL_REPOSITORIES,
   FAST_EXECUTION,
   NO_REPOSITORIES,
+  getAutomationTargetEmailIdentityId,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
@@ -285,10 +286,11 @@ function targetFromRow(row: CustomAutomationListItem): {
       ? 'direct_message'
       : 'channel',
     channelId:
-      row.target.provider === 'email' ||
-      !isBackgroundAutomationUserTargetKind(row.target.targetKind)
-        ? (row.target.externalRef ?? '')
-        : '',
+      row.target.provider === 'email'
+        ? (getAutomationTargetEmailIdentityId(row.target) ?? '')
+        : isBackgroundAutomationUserTargetKind(row.target.targetKind)
+          ? ''
+          : (row.target.externalRef ?? ''),
   };
 }
 
@@ -433,6 +435,15 @@ export function CustomAutomationsSection({
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Email identities belong to the automation owner (runs execute as the
+  // creator), so editing an existing automation lists the owner's identities
+  // rather than the viewer's. Same shape as the base options query.
+  const ownerOptionsQuery = useQuery(
+    trpc.automations.getCustomAutomationOptions.queryOptions(
+      { automationId: editingId ?? undefined },
+      { enabled: Boolean(editingId) },
+    ),
+  );
   const [isCreating, setIsCreating] = useState(false);
   const [form, setForm] = useState<CustomAutomationFormState>(EMPTY_FORM);
   const [resolvedCron, setResolvedCron] = useState<string | null>(null);
@@ -503,19 +514,23 @@ export function CustomAutomationsSection({
       })),
     [discordChannelsQuery.data?.channels],
   );
+  const emailIdentities = editingId
+    ? ownerOptionsQuery.data?.emailIdentities
+    : optionsQuery.data?.emailIdentities;
   const emailOptions = useMemo(
     () =>
-      (optionsQuery.data?.emailIdentities ?? []).map((identity) => ({
+      (emailIdentities ?? []).map((identity) => ({
         id: identity.id,
         name: identity.emailAddress,
         label: `${identity.emailAddress} · Verified`,
       })),
-    [optionsQuery.data?.emailIdentities],
+    [emailIdentities],
   );
   const visibleEmailOptions = useMemo(
     () =>
       form.targetProvider === 'email' &&
       form.targetChannelId &&
+      !(editingId && ownerOptionsQuery.isPending) &&
       !emailOptions.some((identity) => identity.id === form.targetChannelId)
         ? [
             ...emailOptions,
@@ -526,7 +541,13 @@ export function CustomAutomationsSection({
             },
           ]
         : emailOptions,
-    [emailOptions, form.targetChannelId, form.targetProvider],
+    [
+      editingId,
+      emailOptions,
+      form.targetChannelId,
+      form.targetProvider,
+      ownerOptionsQuery.isPending,
+    ],
   );
 
   const invalidate = async () => {

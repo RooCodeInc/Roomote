@@ -650,7 +650,8 @@ describe('customAutomationsJob', () => {
         target: {
           provider: 'email',
           targetKind: 'email_user',
-          externalRef: 'verified:user-1:digest',
+          externalRef: 'user-1',
+          metadata: { emailIdentityId: 'verified:user-1:digest' },
         },
       } as never,
     ]);
@@ -688,7 +689,8 @@ describe('customAutomationsJob', () => {
         target: {
           provider: 'email',
           targetKind: 'email_user',
-          externalRef: 'verified:user-1:revoked',
+          externalRef: 'user-1',
+          metadata: { emailIdentityId: 'verified:user-1:revoked' },
         },
       } as never,
     ]);

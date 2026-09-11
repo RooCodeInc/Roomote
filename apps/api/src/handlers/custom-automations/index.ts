@@ -17,15 +17,17 @@ import {
 } from '@roomote/db/server';
 import {
   listConnectedCommunicationProviders,
-  listAgentMailOutboundIdentities,
+  listAvailableAgentMailOutboundIdentities,
   canStartAgentMailConversationWithUser,
   resolveCustomAutomationSchedule,
   runCustomAutomationNow,
 } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  AUTOMATION_TARGET_EMAIL_IDENTITY_KEY,
   FAST_EXECUTION,
   REASONING_EFFORT_VALUES,
+  getAutomationTargetEmailIdentityId,
   getAutomationTargetKind,
   type BackgroundAutomationProvider,
   type CustomAutomationScheduleMode,
@@ -230,14 +232,25 @@ function buildTarget(
   ownerUserId: string,
 ): OptionalAutomationTarget {
   if (!input.targetProvider) return {};
-  if (input.targetProvider === 'email' && input.targetMode === 'channel') {
-    throw new Error('Email destinations must use direct_message mode.');
+  if (input.targetProvider === 'email') {
+    if (input.targetMode === 'channel') {
+      throw new Error('Email destinations must use direct_message mode.');
+    }
+    if (!input.targetChannelId) {
+      throw new Error('Choose a verified Email identity.');
+    }
+    // Email keeps the direct-message shape (externalRef = owner) and pins the
+    // selected identity in metadata.
+    return {
+      provider: 'email',
+      targetKind: getAutomationTargetKind('email', 'direct_message'),
+      externalRef: ownerUserId,
+      metadata: {
+        [AUTOMATION_TARGET_EMAIL_IDENTITY_KEY]: input.targetChannelId,
+      },
+    };
   }
-  if (input.targetProvider === 'email' && !input.targetChannelId) {
-    throw new Error('Choose a verified Email identity.');
-  }
-  const directMessage =
-    input.targetProvider === 'email' || input.targetMode === 'direct_message';
+  const directMessage = input.targetMode === 'direct_message';
   if (!directMessage && !input.targetChannelId) {
     throw new Error('targetChannelId is required when targetProvider is set.');
   }
@@ -248,11 +261,7 @@ function buildTarget(
       input.targetProvider,
       directMessage ? 'direct_message' : 'channel',
     ),
-    externalRef: directMessage
-      ? input.targetProvider === 'email'
-        ? input.targetChannelId!
-        : ownerUserId
-      : input.targetChannelId!,
+    externalRef: directMessage ? ownerUserId : input.targetChannelId!,
   };
 }
 
@@ -382,13 +391,23 @@ customAutomationsRouter.get('/models', async (c) =>
   c.json(await getDeploymentTaskModelOptions()),
 );
 
+// Identities belong to the automation owner (runs execute as the creator),
+// so an admin editing someone else's automation passes its id to list the
+// owner's identities rather than their own.
 customAutomationsRouter.get('/destinations', async (c) => {
-  const userId = actorId(c);
-  const [available, emailIdentities] = await Promise.all([
-    canStartAgentMailConversationWithUser(userId),
-    listAgentMailOutboundIdentities(userId),
-  ]);
-  return c.json({ emailIdentities: available ? emailIdentities : [] });
+  const automationId = c.req.query('automationId');
+  let ownerUserId = actorId(c);
+  if (automationId) {
+    const automation = await getCustomAutomationById(automationId);
+    if (!automation || !canManage(c, automation)) {
+      return c.json({ error: 'Custom automation was not found.' }, 404);
+    }
+    ownerUserId = automation.createdByUserId ?? ownerUserId;
+  }
+  return c.json({
+    emailIdentities:
+      await listAvailableAgentMailOutboundIdentities(ownerUserId),
+  });
 });
 
 customAutomationsRouter.get('/:id', async (c) => {
@@ -504,23 +523,6 @@ customAutomationsRouter.patch('/:id', async (c) => {
           resolution: null,
         };
     if (schedule.status === 'ambiguous') return c.json(schedule, 409);
-    if (parsed.data.targetProvider) {
-      if (parsed.data.targetProvider === 'email' && !existing.createdByUserId) {
-        throw new Error('Automation owner is not configured.');
-      }
-      if (
-        !(await isDestinationConnected(
-          parsed.data.targetProvider,
-          existing.createdByUserId ?? actorId(c),
-          parsed.data.targetChannelId,
-        ))
-      ) {
-        return c.json(
-          { error: `${parsed.data.targetProvider} is not connected.` },
-          400,
-        );
-      }
-    }
     const existingTarget = existing.target;
     const clearTarget = parsed.data.targetProvider === null;
     const providerChanged =
@@ -536,52 +538,57 @@ customAutomationsRouter.patch('/:id', async (c) => {
       existingTarget.provider === 'email'
         ? existingTarget.provider
         : undefined);
+    // Email is direct-message only, so an omitted mode never falls back to
+    // 'channel' the way a provider switch does for chat providers.
     const targetMode =
       parsed.data.targetMode ??
+      (targetProvider === 'email' ||
       (!providerChanged &&
-      isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
+        isBackgroundAutomationUserTargetKind(existingTarget.targetKind))
         ? 'direct_message'
         : 'channel');
+    // The "channel id" carried over from the stored target: the channel ref
+    // for channel destinations, the pinned identity for email.
     const targetChannelId =
       parsed.data.targetChannelId ??
-      ((targetProvider === 'email' || targetMode === 'channel') &&
-      !providerChanged &&
-      (targetProvider === 'email' ||
-        !isBackgroundAutomationUserTargetKind(existingTarget.targetKind))
-        ? existingTarget.externalRef
-        : undefined);
+      (providerChanged
+        ? undefined
+        : targetProvider === 'email'
+          ? (getAutomationTargetEmailIdentityId(existingTarget) ?? undefined)
+          : targetMode === 'channel' &&
+              !isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
+            ? existingTarget.externalRef
+            : undefined);
     const destinationChanged =
       parsed.data.targetProvider !== undefined ||
       parsed.data.targetMode !== undefined ||
       parsed.data.targetChannelId !== undefined;
-    if (
-      !clearTarget &&
-      destinationChanged &&
-      targetProvider &&
-      targetMode === 'channel' &&
-      !targetChannelId
-    ) {
-      throw new Error(
-        'targetChannelId is required when targetProvider is set.',
-      );
-    }
-    if (
-      !clearTarget &&
-      targetProvider === 'email' &&
-      !existing.createdByUserId
-    ) {
-      throw new Error('Automation owner is not configured.');
-    }
-    if (
-      !clearTarget &&
-      targetProvider === 'email' &&
-      !(await isDestinationConnected(
-        targetProvider,
-        existing.createdByUserId!,
-        targetChannelId,
-      ))
-    ) {
-      return c.json({ error: 'Email is not connected.' }, 400);
+    // Destination validation runs once, on the effective destination, and
+    // only when the request touches it: a stale destination must not block
+    // unrelated edits such as disabling or renaming the automation.
+    if (!clearTarget && destinationChanged && targetProvider) {
+      if (targetMode === 'channel' && !targetChannelId) {
+        throw new Error(
+          'targetChannelId is required when targetProvider is set.',
+        );
+      }
+      if (targetProvider === 'email') {
+        if (!targetChannelId) {
+          throw new Error('Choose a verified Email identity.');
+        }
+        if (!existing.createdByUserId) {
+          throw new Error('Automation owner is not configured.');
+        }
+      }
+      if (
+        !(await isDestinationConnected(
+          targetProvider,
+          existing.createdByUserId ?? actorId(c),
+          targetChannelId,
+        ))
+      ) {
+        return c.json({ error: `${targetProvider} is not connected.` }, 400);
+      }
     }
     const automation = await updateCustomAutomation(c.req.param('id'), {
       name: parsed.data.name ?? existing.name,

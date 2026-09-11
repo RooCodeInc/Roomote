@@ -359,6 +359,39 @@ describe('manage custom automations tool contract', () => {
     ).toThrow();
   });
 
+  it('surfaces the pinned Email identity as the channel id on list results', () => {
+    expect(
+      compactManageCustomAutomationsResult('list', {
+        automations: [
+          {
+            id: 'automation-1',
+            name: 'Digest',
+            enabled: true,
+            scheduleMode: 'daily',
+            target: {
+              provider: 'email',
+              targetKind: 'email_user',
+              externalRef: 'user-1',
+              metadata: { emailIdentityId: 'verified:user-1:abc' },
+            },
+          },
+        ],
+      }),
+    ).toEqual({
+      automations: [
+        {
+          id: 'automation-1',
+          name: 'Digest',
+          enabled: true,
+          schedule: 'daily',
+          targetProvider: 'email',
+          targetMode: 'direct_message',
+          targetChannelId: 'verified:user-1:abc',
+        },
+      ],
+    });
+  });
+
   it('accepts Email only as an owner-resolved direct message', () => {
     expect(
       buildManageCustomAutomationsRequest({ action: 'list_destinations' }),

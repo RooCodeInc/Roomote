@@ -19,6 +19,7 @@ import {
 import {
   ALL_REPOSITORIES,
   NO_REPOSITORIES,
+  getAutomationTargetEmailIdentityId,
   isAutomationDestinationTarget,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
@@ -115,15 +116,14 @@ async function resolveDestination(
   }
 
   if (target.provider === 'email') {
+    const identityId = getAutomationTargetEmailIdentityId(target);
     return target.targetKind === 'email_user' &&
-      (await canStartAgentMailConversationWithUser(
-        ownerUserId,
-        target.externalRef,
-      ))
+      identityId &&
+      (await canStartAgentMailConversationWithUser(ownerUserId, identityId))
       ? {
           provider: 'email',
           userId: ownerUserId,
-          identityId: target.externalRef,
+          identityId,
           source: 'automation_target',
         }
       : null;
@@ -243,7 +243,9 @@ async function buildFastAutomationConversation(params: {
       );
     }
     return {
-      rootMessageId: started.conversation.messageId,
+      ...(started.conversation.messageId
+        ? { rootMessageId: started.conversation.messageId }
+        : {}),
       conversation: {
         surface: 'agentmail',
         workspaceId: started.conversation.inboxId,
@@ -680,10 +682,13 @@ async function launchCustomAutomationRow(
       return result;
     }
 
-    const connected = await listConnectedCommunicationProviders();
+    // Email eligibility was just checked against the pinned identity; the
+    // chat-provider catalog is only consulted for chat destinations.
     if (
       destination.provider !== 'email' &&
-      !connected.includes(destination.provider)
+      !(await listConnectedCommunicationProviders()).includes(
+        destination.provider,
+      )
     ) {
       const message = `${destination.provider} is not connected.`;
       result.skippedReason = message;

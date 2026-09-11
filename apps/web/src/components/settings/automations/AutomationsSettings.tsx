@@ -369,8 +369,9 @@ function getAutomationCapabilityBadges(
 
   const comms: readonly CommunicationProvider[] =
     descriptor.supportedCommunicationProviders;
-  // Email (agentmail) never receives automation posts, so full coverage is
-  // measured against the automation-capable providers only.
+  // Built-in automations post broadcast-style to chat only (Email is a
+  // custom-automation destination), so full coverage is measured against
+  // the automation-capable chat providers.
   const automationCapableProviderCount = communicationProviders.filter(
     (provider) => provider !== 'agentmail',
   ).length;
@@ -3387,8 +3388,8 @@ export function AutomationsSettings({
                               (
                                 provider,
                               ): provider is AutomationCapableCommunicationProvider =>
-                                // Email (agentmail) never receives automation
-                                // posts, so it is not offered as a destination.
+                                // Built-in automations post to chat only;
+                                // Email is a custom-automation destination.
                                 provider !== 'agentmail' &&
                                 settingsQuery.data?.capabilities[
                                   `${provider}Connected` as keyof typeof settingsQuery.data.capabilities

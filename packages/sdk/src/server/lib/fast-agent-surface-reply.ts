@@ -44,7 +44,6 @@ import {
 } from './fast-agent-parent-event';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
-import { isAgentMailConversationParticipant } from './agentmail/conversation-store';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
 import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
@@ -186,16 +185,7 @@ export async function canUserAccessFastAgentSession(params: {
   const conversation = await fastAgentConversationRepository.findById({
     id: params.sessionId,
   });
-  if (!conversation) {
-    return false;
-  }
-  if (conversation.conversation.surface !== 'agentmail') {
-    return true;
-  }
-  return isAgentMailConversationParticipant({
-    conversationId: conversation.conversation.conversationId,
-    userId: params.userId,
-  });
+  return conversation !== null;
 }
 
 /**

@@ -7,8 +7,8 @@ import {
   resolveAgentMailReplyRoute,
 } from './agentmail/conversation-store';
 import {
-  resolveAgentMailOutboundAddress,
-  resolveAgentMailOutboundIdentity,
+  AgentMailRecipientUnavailableError,
+  resolveAgentMailOutboundRecipient,
 } from './agentmail/outbound';
 
 type AgentMailCommunicationProviderRuntimeOptions = {
@@ -44,31 +44,23 @@ export async function createAgentMailCommunicationProviderFromRuntimeCredentials
     apiKey,
     resolveRoute: async (conversationId) => {
       const route = await resolveAgentMailReplyRoute(conversationId);
-      if (!route) {
+      // An inbound anchor always wins: the reply goes to whoever last wrote
+      // in (the owner or a cc'd participant), exactly as recorded.
+      if (!route || route.replyToMessageId || !route.latestOutboundMessageId) {
         return route;
       }
-      if (!route.outboundIdentityId && route.replyToMessageId) {
-        return route;
-      }
-
-      const recipient = route.outboundIdentityId
-        ? await resolveAgentMailOutboundIdentity(
-            route.ownerUserId,
-            route.outboundIdentityId,
-          )
-        : await resolveAgentMailOutboundAddress(route.ownerUserId);
+      // Roomote-initiated conversation nobody has replied to yet: anchor on
+      // our own latest message and re-check the consented recipient, since
+      // the pinned identity may have been revoked since the first send.
+      const recipient = await resolveAgentMailOutboundRecipient(
+        route.ownerUserId,
+        route.outboundIdentityId,
+      );
       if (!recipient.ok) {
-        return {
-          ...route,
-          replyToMessageId: null,
-          recipientEmail: null,
-        };
-      }
-      if (route.replyToMessageId) {
-        return { ...route, recipientEmail: recipient.emailAddress };
-      }
-      if (!route.latestOutboundMessageId) {
-        return route;
+        throw new AgentMailRecipientUnavailableError(
+          conversationId,
+          recipient.reason,
+        );
       }
       return {
         ...route,

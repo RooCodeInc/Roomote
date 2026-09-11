@@ -271,6 +271,24 @@ export function isAutomationDestinationTarget(
 }
 
 /**
+ * Email destinations keep the direct-message invariant (`externalRef` is the
+ * owner user id) and pin the server-issued identity in target metadata, so
+ * every consumer that treats user-kind targets as owner refs stays correct.
+ */
+export const AUTOMATION_TARGET_EMAIL_IDENTITY_KEY = 'emailIdentityId';
+
+export function getAutomationTargetEmailIdentityId(
+  target:
+    | Partial<Pick<AutomationTarget, 'provider' | 'metadata'>>
+    | null
+    | undefined,
+): string | null {
+  if (target?.provider !== 'email') return null;
+  const identityId = target.metadata?.[AUTOMATION_TARGET_EMAIL_IDENTITY_KEY];
+  return typeof identityId === 'string' && identityId ? identityId : null;
+}
+
+/**
  * A single automation target stored in automations.targets (jsonb array).
  */
 export type AutomationTarget = {
