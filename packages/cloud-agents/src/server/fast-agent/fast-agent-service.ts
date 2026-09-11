@@ -3029,6 +3029,10 @@ export async function answerFastAgentQuestion({
     if (model === undefined) model = session.model;
     if (reasoningEffort === undefined)
       reasoningEffort = session.reasoningEffort;
+    const unifiedSession = await getSessionForFastConversation(db, session.id);
+    const sideChat = unifiedSession?.parentSessionId
+      ? { parentSessionId: unifiedSession.parentSessionId }
+      : null;
     const availableIntegrations = selectFastRoomoteChannelTools({
       integrations: discoveredIntegrations,
       conversation,
@@ -3275,6 +3279,7 @@ export async function answerFastAgentQuestion({
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
         agentBehaviorSettings?.workspaceRoutingSettings?.rules,
+      sideChat,
     });
     diagnostics.recordPromptContext({
       systemPromptChars: system.length,

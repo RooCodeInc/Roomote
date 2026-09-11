@@ -9,6 +9,7 @@ import type { SessionArtifactViewerSelection } from './session-task-panel-contex
 export type UtilityWorkspacePanelKind =
   | 'info'
   | 'tasks'
+  | 'side-chat'
   | 'artifacts'
   | 'previews';
 

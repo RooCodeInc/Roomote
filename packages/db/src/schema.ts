@@ -4147,6 +4147,10 @@ export const sessions = pgTable(
       () => fastAgentConversations.id,
       { onDelete: 'set null' },
     ),
+    parentSessionId: uuid('parent_session_id').references(
+      (): AnyPgColumn => sessions.id,
+      { onDelete: 'cascade' },
+    ),
     visibility: text('visibility')
       .notNull()
       .default('visible')
@@ -4171,6 +4175,10 @@ export const sessions = pgTable(
     uniqueIndex('sessions_fast_conversation_id_unique')
       .on(table.fastConversationId)
       .where(sql`${table.fastConversationId} IS NOT NULL`),
+    uniqueIndex('sessions_parent_owner_side_chat_unique')
+      .on(table.parentSessionId, table.ownerUserId)
+      .where(sql`${table.parentSessionId} IS NOT NULL`),
+    index('sessions_parent_session_id_idx').on(table.parentSessionId),
     check(
       'sessions_owner_shape_check',
       // Owner FKs use ON DELETE SET NULL so retained Sessions can outlive
@@ -4334,6 +4342,12 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
     fields: [sessions.fastConversationId],
     references: [fastAgentConversations.id],
   }),
+  parentSession: one(sessions, {
+    fields: [sessions.parentSessionId],
+    references: [sessions.id],
+    relationName: 'sessionSideChats',
+  }),
+  sideChats: many(sessions, { relationName: 'sessionSideChats' }),
   tasks: many(sessionTasks),
   participants: many(sessionParticipants),
   pins: many(sessionPins),

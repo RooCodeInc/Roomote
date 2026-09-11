@@ -21,6 +21,9 @@ vi.mock('@/lib/server/sessions', () => ({
   setSessionPinned: vi.fn(),
   updateSessionMetadata: vi.fn(),
 }));
+vi.mock('@/lib/server/fast-sessions', () => ({
+  getFastSessionById: vi.fn(),
+}));
 vi.mock('@roomote/db/server', () => ({
   advanceSessionReadCursor: vi.fn(),
   db: {},

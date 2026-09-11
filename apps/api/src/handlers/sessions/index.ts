@@ -321,6 +321,7 @@ async function searchSessions(c: SessionContext): Promise<Response> {
     const conditions: Array<SQL | undefined> = [
       eq(sessions.visibility, 'visible'),
       isNull(sessions.archivedAt),
+      isNull(sessions.parentSessionId),
       customAutomationHistoryAccess(c.get('mcpAuth'), 'session'),
     ];
     if (sessionStatus) {
