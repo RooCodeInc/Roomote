@@ -51,6 +51,7 @@ Roomote 1.7 adds natural voice and email conversations, smarter follow-through f
 - Open a user's Sessions directly from their avatar in Session viewers and task messages.
 - Session timer activity uses user-facing labels instead of exposing internal wakeup tool names.
 - Automatic task follow-through timers stay out of the Session reminder list while user-created timer receipts clearly describe each action and reused schedule.
+- Automations and Skills page controls stay visible on desktop while long settings lists scroll independently.
 - The Automations list combines built-in and custom entries with consistent search, columns, responsive text, and alphabetical ordering.
 - Voice transcripts no longer show pending spoken acknowledgements after a call ends when the associated request was never sent.
 
