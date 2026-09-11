@@ -257,6 +257,9 @@ export function compactManageCustomAutomationsResult(
                 : {};
             })
           : [],
+        defaultTarget: asRecord(result.defaultTarget)
+          ? compactAutomation({ target: result.defaultTarget })
+          : null,
       };
     case 'resolve_schedule':
       return compactScheduleResolution(result);

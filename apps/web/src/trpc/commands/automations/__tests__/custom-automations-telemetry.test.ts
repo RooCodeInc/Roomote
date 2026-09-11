@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   listConnectedCommunicationProviders: vi.fn(),
   canStartAgentMailConversationWithUser: vi.fn(),
   listAvailableAgentMailOutboundIdentities: vi.fn(),
+  resolveDefaultAutomationTarget: vi.fn(),
   captureActivationCustomAutomationChanged: vi.fn(),
 }));
 
@@ -45,6 +46,7 @@ vi.mock('@roomote/sdk/server', async (importOriginal) => ({
     mocks.canStartAgentMailConversationWithUser,
   listAvailableAgentMailOutboundIdentities:
     mocks.listAvailableAgentMailOutboundIdentities,
+  resolveDefaultAutomationTarget: mocks.resolveDefaultAutomationTarget,
   runCustomAutomationNow: mocks.runCustomAutomationNow,
   resolveDeploymentTimeZone: mocks.resolveDeploymentTimeZone,
 }));
@@ -103,6 +105,7 @@ describe('custom automation activation telemetry', () => {
     mocks.listConnectedCommunicationProviders.mockResolvedValue(['slack']);
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
+    mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
   });
 
   it('tracks creation with only the destination provider classification', async () => {
@@ -272,6 +275,7 @@ describe('custom automation ownership', () => {
     vi.clearAllMocks();
     mocks.canStartAgentMailConversationWithUser.mockResolvedValue(false);
     mocks.listAvailableAgentMailOutboundIdentities.mockResolvedValue([]);
+    mocks.resolveDefaultAutomationTarget.mockResolvedValue(null);
   });
 
   it('returns only member-safe connection flags and timezone without reading admin settings', async () => {
@@ -294,12 +298,19 @@ describe('custom automation ownership', () => {
       },
       managerSlackChannelId: null,
       managerDiscordChannelId: null,
+      defaultTarget: null,
       emailIdentities: [],
       effectiveTimeZone: 'America/New_York',
     });
     expect(
       mocks.getBackgroundAgentSettingsForDeployment,
     ).not.toHaveBeenCalled();
+    expect(mocks.resolveDefaultAutomationTarget).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownerUserId: 'member-1',
+        includeSharedChannels: false,
+      }),
+    );
   });
 
   it("lists the automation owner's Email identities when an admin edits on their behalf", async () => {
@@ -355,6 +366,7 @@ describe('custom automation ownership', () => {
       ],
       managerSlackChannelId: null,
       managerDiscordChannelId: null,
+      defaultTarget: null,
       effectiveTimeZone: 'UTC',
     });
   });
@@ -381,6 +393,7 @@ describe('custom automation ownership', () => {
         },
         managerSlackChannelId: 'private-slack',
         managerDiscordChannelId: 'private-discord',
+        defaultTarget: null,
         emailIdentities: [],
         effectiveTimeZone: 'UTC',
       },
