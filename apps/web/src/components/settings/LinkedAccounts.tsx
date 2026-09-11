@@ -462,8 +462,8 @@ function EmailChannelGuidance({
   ) {
     return (
       <p className="text-sm text-muted-foreground">
-        Email verification delivery is unavailable. Ask an admin to configure
-        Email before you can verify your address and start work by email.
+        Email verification isn’t available yet. Ask an admin to configure Email
+        so you can verify your address and start Sessions.
       </p>
     );
   }
