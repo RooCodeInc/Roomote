@@ -2347,6 +2347,9 @@ describe('FastSessionTranscript', () => {
         'First sentence.',
         'item_1',
       );
+      expect(
+        screen.queryByText('First sentence. Second'),
+      ).not.toBeInTheDocument();
 
       // The persisted row shares the stream's id, so only the unread tail is
       // spoken; nothing is read twice. The internal result remains available

@@ -405,6 +405,11 @@ export function FastSessionTranscript({
     [],
   );
   const [streamMessages, setStreamMessages] = useState<AcpUiMessage[]>([]);
+  // Voice-result chunks remain available to the speech effect but never enter
+  // the transcript projection, including before their persisted row arrives.
+  const [voiceStreamMessageIds, setVoiceStreamMessageIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const streamMessagesRef = useRef(streamMessages);
   const replaceStreamMessages = useCallback((next: AcpUiMessage[]) => {
     streamMessagesRef.current = next;
@@ -414,6 +419,7 @@ export function FastSessionTranscript({
     if (streamMessagesRef.current.length === 0) return;
     getStreamService().reset();
     replaceStreamMessages([]);
+    setVoiceStreamMessageIds(new Set());
   }, [getStreamService, replaceStreamMessages]);
 
   useEffect(() => {
@@ -466,6 +472,11 @@ export function FastSessionTranscript({
           const remaining = streamed.filter(
             (message) => !persistedStreamIds.has(message.id),
           );
+          setVoiceStreamMessageIds((current) => {
+            const next = new Set(current);
+            for (const id of persistedStreamIds) next.delete(id);
+            return next.size === current.size ? current : next;
+          });
           if (remaining.length === 0) {
             getStreamService().reset();
           } else {
@@ -541,13 +552,12 @@ export function FastSessionTranscript({
         const service = getStreamService();
         const fastTurnId = (chunk.metadata as { fastTurnId?: unknown } | null)
           ?.fastTurnId;
+        const streamMessageId = `assistant:${chunk.id}`;
         if (typeof fastTurnId === 'string' && fastTurnId) {
-          streamTurnIdsRef.current.set(`assistant:${chunk.id}`, fastTurnId);
+          streamTurnIdsRef.current.set(streamMessageId, fastTurnId);
         }
         let current = streamMessagesRef.current;
-        if (
-          !current.some((message) => message.id === `assistant:${chunk.id}`)
-        ) {
+        if (!current.some((message) => message.id === streamMessageId)) {
           // A new reply begins: the previous one is complete and only waits
           // for its persisted row.
           const sessionId = chunk.metadata?.sessionId;
@@ -561,7 +571,19 @@ export function FastSessionTranscript({
           }
         }
         const result = service.applyOutputEvent(current, chunk);
-        if (result) replaceStreamMessages(result.acpMessages);
+        if (result) {
+          if (
+            typeof fastTurnId === 'string' &&
+            voiceDelegationByTurnIdRef.current.has(fastTurnId)
+          ) {
+            setVoiceStreamMessageIds((current) =>
+              current.has(streamMessageId)
+                ? current
+                : new Set(current).add(streamMessageId),
+            );
+          }
+          replaceStreamMessages(result.acpMessages);
+        }
       } catch {
         // Ignore malformed frames; the persisted row still arrives.
       }
@@ -753,8 +775,19 @@ export function FastSessionTranscript({
     return turns;
   }, [liveVoiceTurns, owner]);
   const uiMessages = useMemo(
-    () => [...persistedUiMessages, ...streamMessages, ...liveVoiceUiMessages],
-    [persistedUiMessages, streamMessages, liveVoiceUiMessages],
+    () => [
+      ...persistedUiMessages,
+      ...streamMessages.filter(
+        (message) => !voiceStreamMessageIds.has(message.id),
+      ),
+      ...liveVoiceUiMessages,
+    ],
+    [
+      persistedUiMessages,
+      streamMessages,
+      voiceStreamMessageIds,
+      liveVoiceUiMessages,
+    ],
   );
   const { renderBlocks, suppressMessage } = useAcpTranscriptBlocks({
     messages: uiMessages,
