@@ -8,20 +8,18 @@ import {
   authorizeSlackRunReplyTarget,
   clearLatestUserMessage,
   clearPendingSlackRequestUserInput,
+  deliverPendingSlackRequestUserInputQuestion,
   buildSlackAnsweredRequestUserInputBlocks,
-  buildSlackRequestUserInputBlocks,
   collectAndProcessThreadImages,
   getPromptReadyThreadMessages,
   getLatestSlackBotReply,
   getPendingSlackRequestUserInput,
   getSlackRequestUserInputCurrentQuestion,
-  getSlackThreadFooterText,
   queueSlackMessage,
   resolveCurrentSlackMessageFiles,
   type SlackThreadMessage,
   type SlackEvent,
   type SlackNotifier,
-  setPendingSlackRequestUserInputPromptMessageTs,
   SlackThreadDeliveryTracker,
   submitPendingSlackRequestUserInputAnswer,
   advancePendingSlackRequestUserInputQuestion,
@@ -276,46 +274,19 @@ async function handlePendingRequestUserInputReply(params: {
       return 'handled';
     }
 
-    if (pendingRequest.promptMessageTs && selectedAnswer) {
-      await slack.updateMessage({
-        channel: event.channel,
-        ts: pendingRequest.promptMessageTs,
-        message: {
-          blocks: buildSlackAnsweredRequestUserInputBlocks({
-            question: currentQuestion.question,
-            answer: selectedAnswer,
-          }),
-        },
-      });
-    }
-
-    const nextPromptMessageTs = await slack.postMessage({
+    await deliverPendingSlackRequestUserInputQuestion({
+      slack,
       channel: event.channel,
-      thread_ts: threadId,
-      blocks: buildSlackRequestUserInputBlocks({
-        requestId: pendingRequest.requestId,
-        questions: pendingRequest.questions,
+      threadId,
+      request: {
+        ...pendingRequest,
         currentQuestionIndex: nextQuestionIndex,
         answers: nextAnswers,
-        footerText: await getSlackThreadFooterText({
-          taskUrl: buildSlackRequestUserInputTaskUrl(activeRun),
-          taskId: activeRun.taskId,
-          prRepo: null,
-          prNumber: null,
-          channelId: event.channel,
-          threadTs: threadId,
-        }),
-      }),
+      },
+      previousQuestion: currentQuestion.question,
+      previousAnswer: selectedAnswer,
+      taskUrl: buildSlackRequestUserInputTaskUrl(activeRun),
     });
-
-    if (nextPromptMessageTs) {
-      await setPendingSlackRequestUserInputPromptMessageTs(
-        threadId,
-        pendingRequest.requestId,
-        nextQuestionIndex,
-        nextPromptMessageTs,
-      );
-    }
     deliveryTracker.track(event.ts);
 
     return 'handled';

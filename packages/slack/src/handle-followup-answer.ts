@@ -1,8 +1,11 @@
+import { createHash } from 'node:crypto';
+
 import {
   PRODUCT_NAME,
   activeRunStatuses,
   getFastAgentParentFromPayload,
   type AcpRequestUserInputAnswers,
+  type AcpRequestUserInputQuestion,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
@@ -40,6 +43,7 @@ import {
   getPendingSlackRequestUserInput,
   setPendingSlackRequestUserInputPromptMessageTs,
   submitPendingSlackRequestUserInputAnswer,
+  type PendingSlackRequestUserInput,
 } from './request-user-input';
 import { getSlackThreadFooterText } from './thread-footer';
 
@@ -53,6 +57,7 @@ interface StructuredRequestUserInputButtonValue {
 
 const REQUEST_USER_INPUT_ALREADY_RECEIVED_TEXT =
   'I already received your answer. Please wait for the agent to continue.';
+const REQUEST_USER_INPUT_PROMPT_DELIVERY_ATTEMPTS = 2;
 
 function buildSlackRequestUserInputTaskUrl(params: {
   taskId: string | null | undefined;
@@ -192,6 +197,98 @@ function mergeRequestUserInputAnswers(
     ...existing,
     ...next,
   };
+}
+
+function buildRequestUserInputPromptClientMessageId(
+  requestId: string,
+  questionIndex: number,
+): string {
+  const digest = createHash('sha256')
+    .update(`${requestId}:${questionIndex}`)
+    .digest('hex');
+
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-${((parseInt(digest[16]!, 16) & 0x3) | 0x8).toString(16)}${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+}
+
+export async function deliverPendingSlackRequestUserInputQuestion(params: {
+  slack: SlackNotifier;
+  channel: string;
+  threadId: string;
+  request: PendingSlackRequestUserInput;
+  previousQuestion?: AcpRequestUserInputQuestion;
+  previousAnswer?: string;
+  taskUrl: string;
+}): Promise<void> {
+  const nextPromptMessage = {
+    channel: params.channel,
+    thread_ts: params.threadId,
+    client_msg_id: buildRequestUserInputPromptClientMessageId(
+      params.request.requestId,
+      params.request.currentQuestionIndex,
+    ),
+    blocks: buildSlackRequestUserInputBlocks({
+      requestId: params.request.requestId,
+      questions: params.request.questions,
+      currentQuestionIndex: params.request.currentQuestionIndex,
+      answers: params.request.answers,
+      footerText: await getSlackThreadFooterText({
+        taskUrl: params.taskUrl,
+        taskId: params.request.taskId,
+        prRepo: null,
+        prNumber: null,
+        channelId: params.channel,
+        threadTs: params.threadId,
+      }),
+    }),
+  };
+  let nextPromptMessageTs: string | undefined;
+
+  for (
+    let attempt = 0;
+    attempt < REQUEST_USER_INPUT_PROMPT_DELIVERY_ATTEMPTS;
+    attempt += 1
+  ) {
+    nextPromptMessageTs = await params.slack.postMessage(nextPromptMessage);
+    if (nextPromptMessageTs) {
+      break;
+    }
+  }
+
+  if (!nextPromptMessageTs) {
+    throw new Error(
+      'Your answer was saved, but I could not deliver the next question.',
+    );
+  }
+
+  if (
+    params.request.promptMessageTs &&
+    params.previousQuestion &&
+    params.previousAnswer
+  ) {
+    await params.slack
+      .updateMessage({
+        channel: params.channel,
+        ts: params.request.promptMessageTs,
+        message: {
+          blocks: buildSlackAnsweredRequestUserInputBlocks({
+            question: params.previousQuestion,
+            answer: params.previousAnswer,
+          }),
+        },
+      })
+      .catch((error) => {
+        console.error(
+          `Failed to update answered Slack request_user_input prompt: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+  }
+
+  await setPendingSlackRequestUserInputPromptMessageTs(
+    params.threadId,
+    params.request.requestId,
+    params.request.currentQuestionIndex,
+    nextPromptMessageTs,
+  );
 }
 
 async function getSlackTeamContext(teamId: string): Promise<{
@@ -336,6 +433,44 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
         );
       }
 
+      const previousQuestionIndex = currentQuestion.questionIndex - 1;
+      const previousQuestion = pendingRequest.questions[previousQuestionIndex];
+      const previousAnswers = structuredAnswer.questionId
+        ? pendingRequest.answers[structuredAnswer.questionId]?.answers
+        : undefined;
+      const isPendingDeliveryRetry =
+        previousQuestionIndex >= 0 &&
+        structuredAnswer.questionIndex === previousQuestionIndex &&
+        structuredAnswer.questionId === previousQuestion?.id &&
+        previousAnswers?.length === 1 &&
+        previousAnswers[0] === structuredAnswer.answer;
+
+      if (isPendingDeliveryRetry) {
+        if (
+          pendingRequest.promptMessageTs &&
+          pendingRequest.promptMessageTs !== payload.message.ts
+        ) {
+          await postRequestUserInputAlreadyReceivedResponse(
+            payload.response_url,
+          );
+          return;
+        }
+
+        await deliverPendingSlackRequestUserInputQuestion({
+          slack,
+          channel: payload.channel.id,
+          threadId,
+          request: pendingRequest,
+          previousQuestion: previousQuestion!,
+          previousAnswer: structuredAnswer.answer!,
+          taskUrl: buildSlackRequestUserInputTaskUrl({
+            taskId: activeRun.taskId,
+            payload: activeRun.payload,
+          }),
+        });
+        return;
+      }
+
       if (
         structuredAnswer.questionIndex !== undefined &&
         structuredAnswer.questionIndex !== currentQuestion.questionIndex
@@ -448,51 +583,22 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
         return;
       }
 
-      if (pendingRequest.promptMessageTs) {
-        await slack.updateMessage({
-          channel: payload.channel.id,
-          ts: pendingRequest.promptMessageTs,
-          message: {
-            blocks: buildSlackAnsweredRequestUserInputBlocks({
-              question: currentQuestion.question,
-              answer: structuredAnswer.answer!,
-            }),
-          },
-        });
-      }
-
-      const nextPromptMessageTs = await slack.postMessage({
+      await deliverPendingSlackRequestUserInputQuestion({
+        slack,
         channel: payload.channel.id,
-        thread_ts: threadId,
-        blocks: buildSlackRequestUserInputBlocks({
-          requestId: pendingRequest.requestId,
-          questions: pendingRequest.questions,
+        threadId,
+        request: {
+          ...pendingRequest,
           currentQuestionIndex: nextQuestionIndex,
           answers: nextAnswers,
-          footerText: await getSlackThreadFooterText({
-            taskUrl: buildSlackRequestUserInputTaskUrl({
-              taskId: activeRun.taskId,
-              payload: activeRun.payload,
-            }),
-            taskId: activeRun.taskId,
-            // PR linkage lives on task_pull_requests now; the footer context
-            // resolves it from the taskId, so no run-level fallback remains.
-            prRepo: null,
-            prNumber: null,
-            channelId: payload.channel.id,
-            threadTs: threadId,
-          }),
+        },
+        previousQuestion: currentQuestion.question,
+        previousAnswer: structuredAnswer.answer!,
+        taskUrl: buildSlackRequestUserInputTaskUrl({
+          taskId: activeRun.taskId,
+          payload: activeRun.payload,
         }),
       });
-
-      if (nextPromptMessageTs) {
-        await setPendingSlackRequestUserInputPromptMessageTs(
-          threadId,
-          pendingRequest.requestId,
-          nextQuestionIndex,
-          nextPromptMessageTs,
-        );
-      }
 
       return;
     }
