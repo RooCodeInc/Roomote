@@ -292,16 +292,28 @@ describe('notifyFastAgentParentOnSettle', () => {
 
   it('releases the source claim only when durable admission fails', async () => {
     mocks.enqueueParentEvent.mockRejectedValueOnce(new Error('database down'));
-    await notifyFastAgentParentOnSettle(
+    const result = await notifyFastAgentParentOnSettle(
       makeRun({ fastAgentParent: fastParent }),
       RunStatus.Completed,
     );
 
+    expect(result).toBe('failed');
     expect(
       mocks.updateSet.mock.calls.some(([values]) => {
         const result = (values as { result?: { strings?: string[] } }).result;
         return result?.strings?.join('').includes(' - ') === true;
       }),
     ).toBe(true);
+  });
+
+  it('reports durable admission even when later bookkeeping fails', async () => {
+    mocks.recordLifecycle.mockRejectedValueOnce(new Error('database down'));
+
+    const result = await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Failed,
+    );
+
+    expect(result).toBe('admitted');
   });
 });

@@ -409,10 +409,8 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
-  // Detached: this can hold the parent's turn lock through a full
-  // orchestrator turn, and settle callers (tRPC finish, controller, queue
-  // jobs) must not block on it. The delivery claim keeps it idempotent.
-  void notifyFastAgentParentOnSettle(
+  const fastAgentParent = getFastAgentParentFromPayload(run.payload);
+  const parentSettleNotification = notifyFastAgentParentOnSettle(
     {
       ...run,
       error: sanitizedError ?? run.error,
@@ -421,6 +419,19 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
+  const awaitAgentMailFailureAdmission =
+    status === RunStatus.Failed &&
+    getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail' &&
+    Boolean(fastAgentParent);
+  // Most settles remain detached because parent processing must not block the
+  // child. Email failures await only durable event admission so the child can
+  // provide the existing idempotent fallback if that database write fails.
+  const agentMailParentAdmissionFailed = awaitAgentMailFailureAdmission
+    ? (await parentSettleNotification) === 'failed'
+    : false;
+  if (!awaitAgentMailFailureAdmission) {
+    void parentSettleNotification;
+  }
   // The worker settles its own card on exit; this covers runs finalized
   // here without one (reaper, failed bootstrap). Never throws.
   void settleSlackLiveTaskCardOnExit(run, status, run.task.title);
@@ -562,7 +573,7 @@ export const finishRun = async ({
     status === RunStatus.Failed &&
     !task.slackThreadTs &&
     getCommunicationProviderFromTaskPayload(run.payload) === 'agentmail' &&
-    !getFastAgentParentFromPayload(run.payload)
+    (!fastAgentParent || agentMailParentAdmissionFailed)
   ) {
     try {
       await sendAgentMailFailureNotification(run, channelProviderError);

@@ -427,6 +427,7 @@ describe('finishRun', () => {
     mockDbExecute.mockResolvedValue([]);
     mockResolveDefaultComputeProvider.mockResolvedValue('modal');
     mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
+    mockNotifyFastAgentParentOnSettle.mockResolvedValue('admitted');
     syncRunRows = [];
     mockDbTransaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
@@ -1967,6 +1968,35 @@ describe('finishRun', () => {
         RunStatus.Failed,
         job.task.title,
       );
+    });
+
+    it('uses the child Email fallback when Fast parent admission fails', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Run the automation',
+          communicationProvider: 'agentmail',
+          communicationChannelId: 'roomote@agentmail.test',
+          communicationThreadId: emailConversation.conversationId,
+          fastAgentParent: {
+            sessionId: '22222222-2222-4222-8222-222222222222',
+            conversation: emailConversation,
+          },
+          customAutomationId: 'automation-1',
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+      mockNotifyFastAgentParentOnSettle.mockResolvedValueOnce('failed');
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockAgentMailPostMessage).toHaveBeenCalledOnce();
     });
 
     it('keeps direct Email task failures on the child finalizer path', async () => {
