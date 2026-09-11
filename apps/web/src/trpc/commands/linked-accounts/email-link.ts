@@ -7,6 +7,7 @@ import {
   eq,
   resolveAgentMailRuntimeCredentials,
 } from '@roomote/db/server';
+import { AgentMailApiClient } from '@roomote/communication';
 import {
   redispatchAgentMailEventsForSender,
   verifyAgentMailEmailLinkToken,
@@ -47,13 +48,27 @@ export async function getLinkedEmailAccountsCommand(auth: UserAuthSuccess) {
       orderBy: [asc(agentmailUserMappings.createdAt)],
       columns: { emailAddress: true },
     }),
-    auth.isAdmin && emailEnabled
-      ? resolveAgentMailRuntimeCredentials()
-      : Promise.resolve(null),
+    emailEnabled ? resolveAgentMailRuntimeCredentials() : Promise.resolve(null),
   ]);
+  const verificationDeliveryAvailable = Boolean(
+    emailEnabled && credentials?.apiKey && credentials.inboxId,
+  );
+  let inboxEmail: string | null = null;
+
+  if (auth.isAdmin && credentials?.apiKey && credentials.inboxId) {
+    try {
+      const inbox = await new AgentMailApiClient({
+        apiKey: credentials.apiKey,
+      }).getInbox(credentials.inboxId);
+      inboxEmail = inbox.email?.trim().toLowerCase() || null;
+    } catch {
+      inboxEmail = null;
+    }
+  }
 
   return {
     emailEnabled,
+    verificationDeliveryAvailable,
     primaryEmail: authUser
       ? {
           emailAddress: authUser.email,
@@ -62,7 +77,7 @@ export async function getLinkedEmailAccountsCommand(auth: UserAuthSuccess) {
       : null,
     senderAddresses: senderMappings.map(({ emailAddress }) => emailAddress),
     canViewInboxAddress: auth.isAdmin,
-    inboxAddress: credentials?.inboxId ?? null,
+    inboxEmail,
   };
 }
 

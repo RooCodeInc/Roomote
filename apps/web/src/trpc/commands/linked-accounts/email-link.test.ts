@@ -7,6 +7,7 @@ const {
   mockFindMany,
   mockAuthUserFindFirst,
   mockIsEmailChannelEnabled,
+  mockAgentMailGetInbox,
   mockInsert,
   mockValues,
   mockOnConflictDoNothing,
@@ -26,6 +27,7 @@ const {
     mockFindMany: vi.fn(),
     mockAuthUserFindFirst: vi.fn(),
     mockIsEmailChannelEnabled: vi.fn(),
+    mockAgentMailGetInbox: vi.fn(),
     mockInsert,
     mockValues,
     mockOnConflictDoNothing,
@@ -62,6 +64,12 @@ vi.mock('@roomote/db/server', () => ({
   })),
 }));
 
+vi.mock('@roomote/communication', () => ({
+  AgentMailApiClient: class {
+    getInbox = mockAgentMailGetInbox;
+  },
+}));
+
 vi.mock('@/lib/server/env', () => ({
   isEmailChannelEnabled: mockIsEmailChannelEnabled,
 }));
@@ -88,6 +96,10 @@ describe('getLinkedEmailAccountsCommand', () => {
       emailVerified: false,
     });
     mockFindMany.mockResolvedValue([{ emailAddress: 'sender@example.com' }]);
+    mockAgentMailGetInbox.mockResolvedValue({
+      inbox_id: 'routing-id',
+      email: 'Deliverable@Example.com',
+    });
   });
 
   it('keeps login verification and explicit sender links distinct', async () => {
@@ -98,13 +110,14 @@ describe('getLinkedEmailAccountsCommand', () => {
       }),
     ).resolves.toEqual({
       emailEnabled: true,
+      verificationDeliveryAvailable: true,
       primaryEmail: {
         emailAddress: 'login@example.com',
         verified: false,
       },
       senderAddresses: ['sender@example.com'],
       canViewInboxAddress: true,
-      inboxAddress: 'roomote@example.com',
+      inboxEmail: 'deliverable@example.com',
     });
   });
 
@@ -116,7 +129,8 @@ describe('getLinkedEmailAccountsCommand', () => {
       }),
     ).resolves.toMatchObject({
       canViewInboxAddress: false,
-      inboxAddress: null,
+      inboxEmail: null,
+      verificationDeliveryAvailable: true,
     });
   });
 
@@ -130,8 +144,23 @@ describe('getLinkedEmailAccountsCommand', () => {
       }),
     ).resolves.toMatchObject({
       emailEnabled: false,
+      verificationDeliveryAvailable: false,
       canViewInboxAddress: true,
-      inboxAddress: null,
+      inboxEmail: null,
+    });
+  });
+
+  it('omits the inbox address when AgentMail cannot resolve a deliverable email', async () => {
+    mockAgentMailGetInbox.mockResolvedValue({ inbox_id: 'routing-id' });
+
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: true,
+      }),
+    ).resolves.toMatchObject({
+      verificationDeliveryAvailable: true,
+      inboxEmail: null,
     });
   });
 });

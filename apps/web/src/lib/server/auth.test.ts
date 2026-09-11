@@ -5,6 +5,8 @@ const {
   mockResolveAuthProviderConfig,
   mockSourceControlMappingValues,
   mockSourceControlMappingUpsert,
+  mockIsEmailChannelEnabled,
+  mockSendAgentMailSystemEmail,
 } = vi.hoisted(() => {
   const calls: Array<{
     config: Array<{
@@ -29,6 +31,8 @@ const {
     mockResolveAuthProviderConfig: vi.fn(),
     mockSourceControlMappingValues: vi.fn(),
     mockSourceControlMappingUpsert: vi.fn(),
+    mockIsEmailChannelEnabled: vi.fn(),
+    mockSendAgentMailSystemEmail: vi.fn(),
   };
 });
 
@@ -54,6 +58,10 @@ vi.mock('better-auth/plugins', () => ({
 
 vi.mock('@better-auth/drizzle-adapter', () => ({
   drizzleAdapter: vi.fn(() => ({ id: 'drizzle-adapter' })),
+}));
+
+vi.mock('@roomote/sdk/server/agentmail-outbound', () => ({
+  sendAgentMailSystemEmail: mockSendAgentMailSystemEmail,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -99,7 +107,7 @@ vi.mock('./env', () => ({
     R_ALLOWED_EMAILS: undefined,
     R_APP_URL: 'http://localhost:3000',
   },
-  isEmailChannelEnabled: () => false,
+  isEmailChannelEnabled: mockIsEmailChannelEnabled,
   getEncryptionKey: () => 'test-encryption-key',
   getBetterAuthSecret: () => 'test-better-auth-secret',
 }));
@@ -157,6 +165,8 @@ describe('getAuth', () => {
       slackClientId: undefined,
       slackClientSecret: undefined,
     });
+    mockIsEmailChannelEnabled.mockReturnValue(false);
+    mockSendAgentMailSystemEmail.mockResolvedValue({ sent: true });
   });
 
   afterEach(() => {
@@ -184,6 +194,43 @@ describe('getAuth', () => {
       freshAge: 0,
     });
     expect(options.emailAndPassword.revokeSessionsOnPasswordReset).toBe(true);
+  });
+
+  it('reports explicit verification resend delivery failures without blocking signup', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    mockSendAgentMailSystemEmail.mockResolvedValue({
+      sent: false,
+      reason: 'send_failed',
+    });
+    await getAuth();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      emailVerification?: {
+        sendVerificationEmail?: (
+          input: { user: { email: string }; url: string },
+          request?: Request,
+        ) => Promise<void>;
+      };
+    };
+    const sendVerificationEmail =
+      options.emailVerification?.sendVerificationEmail;
+    const input = {
+      user: { email: 'person@example.com' },
+      url: 'http://localhost:3000/api/auth/verify-email?token=token',
+    };
+
+    await expect(
+      sendVerificationEmail?.(
+        input,
+        new Request('http://localhost:3000/api/auth/send-verification-email'),
+      ),
+    ).rejects.toThrow('Verification email could not be delivered');
+    await expect(
+      sendVerificationEmail?.(
+        input,
+        new Request('http://localhost:3000/api/auth/sign-up/email'),
+      ),
+    ).resolves.toBeUndefined();
   });
 
   it('keys the Entra linked-account identity on the normalized uniqueName', async () => {

@@ -1117,7 +1117,7 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
           emailVerification: {
             sendOnSignUp: true,
             autoSignInAfterVerification: true,
-            sendVerificationEmail: async ({ user, url }) => {
+            sendVerificationEmail: async ({ user, url }, request) => {
               const result = await sendAgentMailSystemEmail({
                 to: user.email,
                 subject: 'Verify your email for Roomote',
@@ -1136,6 +1136,16 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
                 console.warn(
                   `[auth] Could not send the verification email to ${user.email} (${result.reason}).`,
                 );
+                if (
+                  request &&
+                  new URL(request.url).pathname.endsWith(
+                    '/send-verification-email',
+                  )
+                ) {
+                  throw new Error(
+                    'Verification email could not be delivered. Check the address or ask an admin to check the email configuration.',
+                  );
+                }
               }
             },
           },

@@ -427,11 +427,11 @@ function EmailAccountDetails({
 function EmailLinkingGuidance({
   canViewInboxAddress,
   emailEnabled,
-  inboxAddress,
+  inboxEmail,
 }: {
   canViewInboxAddress: boolean;
   emailEnabled: boolean;
-  inboxAddress: string | null;
+  inboxEmail: string | null;
 }) {
   if (!emailEnabled) {
     return (
@@ -442,12 +442,12 @@ function EmailLinkingGuidance({
     );
   }
 
-  if (inboxAddress) {
+  if (inboxEmail) {
     return (
       <p className="text-sm text-muted-foreground">
         To link another sender address, email{' '}
-        <span className="font-mono ph-no-capture">{inboxAddress}</span> from
-        that address, then use the link in Roomote&apos;s reply.
+        <span className="font-mono ph-no-capture">{inboxEmail}</span> from that
+        address, then use the link in Roomote&apos;s reply.
       </p>
     );
   }
@@ -926,7 +926,8 @@ export function LinkedAccounts() {
             />
           }
           actions={
-            !primaryEmail.verified && emailAccounts.data?.emailEnabled ? (
+            !primaryEmail.verified &&
+            emailAccounts.data?.verificationDeliveryAvailable ? (
               <Button
                 type="button"
                 size="sm"
@@ -981,7 +982,7 @@ export function LinkedAccounts() {
         <EmailLinkingGuidance
           canViewInboxAddress={emailAccounts.data.canViewInboxAddress}
           emailEnabled={emailAccounts.data.emailEnabled}
-          inboxAddress={emailAccounts.data.inboxAddress}
+          inboxEmail={emailAccounts.data.inboxEmail}
         />
       ) : null}
 

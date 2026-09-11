@@ -48,10 +48,11 @@ const state = vi.hoisted(() => ({
   userConnectionsIsPending: false,
   emailAccounts: null as {
     emailEnabled: boolean;
+    verificationDeliveryAvailable: boolean;
     primaryEmail: { emailAddress: string; verified: boolean } | null;
     senderAddresses: string[];
     canViewInboxAddress: boolean;
-    inboxAddress: string | null;
+    inboxEmail: string | null;
   } | null,
   emailAccountsIsPending: false,
   emailAccountsIsError: false,
@@ -707,10 +708,11 @@ describe('LinkedAccounts settings', () => {
   it('shows a verified login email separately from linked sender addresses', () => {
     state.emailAccounts = {
       emailEnabled: true,
+      verificationDeliveryAvailable: true,
       primaryEmail: { emailAddress: 'login@example.com', verified: true },
       senderAddresses: ['sender@example.com'],
       canViewInboxAddress: true,
-      inboxAddress: 'roomote@example.com',
+      inboxEmail: 'roomote@example.com',
     };
 
     render(<LinkedAccounts />);
@@ -733,10 +735,11 @@ describe('LinkedAccounts settings', () => {
   it('resends verification for the unverified login email through the existing auth flow', () => {
     state.emailAccounts = {
       emailEnabled: true,
+      verificationDeliveryAvailable: true,
       primaryEmail: { emailAddress: 'login@example.com', verified: false },
       senderAddresses: ['login@example.com'],
       canViewInboxAddress: false,
-      inboxAddress: null,
+      inboxEmail: null,
     };
 
     render(<LinkedAccounts />);
@@ -762,10 +765,11 @@ describe('LinkedAccounts settings', () => {
   it('truthfully disables email actions when the email channel is disabled', () => {
     state.emailAccounts = {
       emailEnabled: false,
+      verificationDeliveryAvailable: false,
       primaryEmail: { emailAddress: 'login@example.com', verified: false },
       senderAddresses: ['sender@example.com'],
       canViewInboxAddress: true,
-      inboxAddress: null,
+      inboxEmail: null,
     };
 
     render(<LinkedAccounts />);
@@ -774,6 +778,26 @@ describe('LinkedAccounts settings', () => {
       screen.getByText(/email is disabled for this deployment/i),
     ).toBeInTheDocument();
     expect(screen.getByText('Linked')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resend verification email' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not offer resend before AgentMail delivery is configured', () => {
+    state.emailAccounts = {
+      emailEnabled: true,
+      verificationDeliveryAvailable: false,
+      primaryEmail: { emailAddress: 'login@example.com', verified: false },
+      senderAddresses: [],
+      canViewInboxAddress: true,
+      inboxEmail: null,
+    };
+
+    render(<LinkedAccounts />);
+
+    expect(
+      screen.getByText(/no AgentMail inbox is configured/i),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Resend verification email' }),
     ).not.toBeInTheDocument();
