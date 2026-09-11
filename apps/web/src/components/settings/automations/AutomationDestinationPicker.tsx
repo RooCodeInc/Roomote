@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef } from 'react';
 import type { AutomationDestinationProvider as DestinationProvider } from '@roomote/types';
 
 import {
@@ -7,6 +8,7 @@ import {
   Label,
   Select,
   SelectContent,
+  type SelectHandoffTarget,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -73,6 +75,9 @@ export function AutomationDestinationPicker({
   allowDirectMessage?: boolean;
   onChange: (value: AutomationDestinationValue) => void;
 }) {
+  const nextDestinationRef = useRef<
+    HTMLInputElement | SelectHandoffTarget | null
+  >(null);
   const visibleProviders = availableProviders.includes(
     value.provider as DestinationProvider,
   )
@@ -98,6 +103,7 @@ export function AutomationDestinationPicker({
         <Select
           value={value.provider}
           disabled={disabled}
+          handoffTargetOnSelect={nextDestinationRef}
           onValueChange={(provider) =>
             onChange({
               provider: provider as AutomationDestinationProvider,
@@ -143,6 +149,7 @@ export function AutomationDestinationPicker({
               <Select
                 value={value.mode}
                 disabled={disabled}
+                handoffTargetOnSelect={nextDestinationRef}
                 onValueChange={(mode) =>
                   onChange({
                     ...value,
@@ -170,6 +177,13 @@ export function AutomationDestinationPicker({
             {value.provider === 'email' ? (
               <div className="grid gap-2">
                 <Select
+                  handoffRef={
+                    value.channelId || emailOptions.length === 0
+                      ? undefined
+                      : (target) => {
+                          nextDestinationRef.current = target;
+                        }
+                  }
                   value={value.channelId}
                   disabled={disabled}
                   onValueChange={(identityId) =>
@@ -213,6 +227,13 @@ export function AutomationDestinationPicker({
               />
             ) : value.provider === 'discord' && channelCatalogAvailable ? (
               <Select
+                handoffRef={
+                  value.channelId || discordOptions.length === 0
+                    ? undefined
+                    : (target) => {
+                        nextDestinationRef.current = target;
+                      }
+                }
                 value={value.channelId}
                 disabled={disabled}
                 onValueChange={(channelId) => onChange({ ...value, channelId })}
@@ -233,6 +254,13 @@ export function AutomationDestinationPicker({
               </Select>
             ) : (
               <Input
+                ref={
+                  value.channelId
+                    ? undefined
+                    : (target) => {
+                        nextDestinationRef.current = target;
+                      }
+                }
                 aria-label="Destination channel"
                 className="min-w-0 w-full"
                 value={value.channelId}

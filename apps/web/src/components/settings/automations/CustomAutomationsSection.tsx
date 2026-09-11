@@ -435,6 +435,7 @@ export function CustomAutomationsSection({
   const taskModelsQuery = useLaunchTaskModels();
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const cronExpressionRef = useRef<HTMLInputElement>(null);
   // Email identities belong to the automation owner (runs execute as the
   // creator), so editing an existing automation lists the owner's identities
   // rather than the viewer's. Same shape as the base options query.
@@ -904,6 +905,7 @@ export function CustomAutomationsSection({
             <Select
               value={form.scheduleMode}
               disabled={busy}
+              handoffTargetOnSelect={cronExpressionRef}
               onValueChange={(value) => {
                 setResolvedCron(null);
                 setScheduleSummary(null);
@@ -930,6 +932,7 @@ export function CustomAutomationsSection({
 
             {form.scheduleMode === 'cron' ? (
               <Input
+                ref={cronExpressionRef}
                 id="custom-automation-cron"
                 aria-label="Custom schedule"
                 className="flex-1"
