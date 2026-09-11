@@ -347,13 +347,15 @@ export const PromptInput = ({
       const incoming = Array.from(fileList);
       const accepted = incoming.filter((f) => matchesAccept(f));
 
-      if (incoming.length && accepted.length === 0) {
+      if (incoming.length > accepted.length) {
         onError?.({
           code: 'accept',
-          message: 'No files match the accepted types.',
+          message: accepted.length
+            ? 'Some files were not added because their types are not supported.'
+            : 'No files match the accepted types.',
         });
 
-        return;
+        if (accepted.length === 0) return;
       }
 
       const withinSize = (f: File) =>
@@ -424,13 +426,15 @@ export const PromptInput = ({
       const incoming = Array.from(fileList);
       const accepted = incoming.filter((f) => matchesAccept(f));
 
-      if (incoming.length && accepted.length === 0) {
+      if (incoming.length > accepted.length) {
         onError?.({
           code: 'accept',
-          message: 'No files match the accepted types.',
+          message: accepted.length
+            ? 'Some files were not added because their types are not supported.'
+            : 'No files match the accepted types.',
         });
 
-        return;
+        if (accepted.length === 0) return;
       }
 
       const withinSize = (f: File) =>
