@@ -127,6 +127,7 @@ export async function getCostAnalyticsRows(
       modelId: llmUsageEvents.modelId,
       environmentName: environments.name,
       taskTitle: tasks.title,
+      taskDeletedAt: tasks.deletedAt,
       initiatorKind: tasks.initiatorKind,
       initiatorAutomation: tasks.initiatorAutomation,
       actorDisplayName: tasks.actorDisplayName,
@@ -148,7 +149,7 @@ export async function getCostAnalyticsRows(
     )
     .leftJoin(taskRuns, eq(taskRuns.id, llmUsageEvents.runId))
     .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
-    .where(and(isNull(tasks.deletedAt), usageCutoffCondition));
+    .where(usageCutoffCondition);
 
   const fallbackEnvironmentIds = [
     ...new Set(
@@ -249,23 +250,30 @@ export async function getCostAnalyticsRows(
 
   return usageRows.map((row) => {
     const isTask = Boolean(row.taskId);
+    const isDeletedTask = isTask && Boolean(row.taskDeletedAt);
     const isMemory = !isTask && row.source === 'brain_synthesis';
     const isSession =
       !isTask &&
       !isMemory &&
       fastNativeSessionIds.has(row.harnessSessionId ?? '');
-    const taskType = isTask
-      ? getTaskTypeDimensionValue({
-          initiatorKind: row.initiatorKind,
-          initiatorAutomation: row.initiatorAutomation,
-          actorDisplayName: row.actorDisplayName,
-        })
-      : createLabelBackedDimensionValue(
-          isMemory ? 'Memories' : isSession ? 'Session' : 'Non-task inference',
-        );
+    const taskType = isDeletedTask
+      ? createLabelBackedDimensionValue('Deleted task')
+      : isTask
+        ? getTaskTypeDimensionValue({
+            initiatorKind: row.initiatorKind,
+            initiatorAutomation: row.initiatorAutomation,
+            actorDisplayName: row.actorDisplayName,
+          })
+        : createLabelBackedDimensionValue(
+            isMemory
+              ? 'Memories'
+              : isSession
+                ? 'Session'
+                : 'Non-task inference',
+          );
     const attributedUserId = row.userId ?? row.taskUserId;
     const userDimension =
-      isTask && row.initiatorKind === 'automation'
+      isDeletedTask || (isTask && row.initiatorKind === 'automation')
         ? createLabelBackedDimensionValue(NO_VALUE_LABEL)
         : attributedUserId
           ? getCanonicalUserDimensionValue({
@@ -309,9 +317,14 @@ export async function getCostAnalyticsRows(
           model,
           cost: cost.toFixed(2),
           tokens: String(tokens),
-          taskTitle: row.taskTitle ?? taskType.label,
+          taskTitle: isDeletedTask
+            ? taskType.label
+            : (row.taskTitle ?? taskType.label),
         },
-        links: row.taskId ? { task: `/task/${row.taskId}` } : undefined,
+        links:
+          row.taskId && !isDeletedTask
+            ? { task: `/task/${row.taskId}` }
+            : undefined,
       },
       meta: {
         canonicalTaskId: row.taskId,

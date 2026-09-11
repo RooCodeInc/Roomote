@@ -2,6 +2,7 @@ import {
   db,
   environmentFactory,
   environments,
+  eq,
   fastAgentConversations,
   fastAgentMessages,
   inArray,
@@ -247,6 +248,89 @@ describe('getCostAnalyticsRows', () => {
     });
     expect(row?.details.values.source).toBe('task_title_generation');
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);
+  });
+
+  it('retains deleted-task spend without exposing task attribution', async () => {
+    const user = await userFactory.create();
+    userIds.push(user.id);
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      title: 'Private deleted task title',
+    });
+    taskIds.push(task.id);
+    await db.insert(taskPullRequests).values({
+      taskId: task.id,
+      prUrl: 'https://github.com/roomote/private/pull/99',
+      prNumber: 99,
+      repository: 'roomote/private',
+      sourceControlProvider: 'github',
+      host: 'github.com',
+    });
+    const [usageEvent] = await db
+      .insert(llmUsageEvents)
+      .values({
+        eventKey: `deleted-task-cost-analytics-${crypto.randomUUID()}`,
+        taskId: task.id,
+        userId: user.id,
+        costSource: 'opencode_message',
+        costMicroUsd: 40_000_000,
+        totalTokens: 12_345,
+        messageCompletedAt: new Date('2026-07-15T12:00:00.000Z'),
+      })
+      .returning({ id: llmUsageEvents.id });
+    usageEventIds.push(usageEvent!.id);
+    await db
+      .update(tasks)
+      .set({ deletedAt: new Date('2026-07-16T12:00:00.000Z') })
+      .where(eq(tasks.id, task.id));
+
+    const rows = await getCostAnalyticsRows(
+      {} as UserAuthSuccess,
+      'all',
+      new Date('2026-07-17T12:00:00.000Z'),
+    );
+    const row = rows.find((candidate) => candidate.id === usageEvent!.id)!;
+    const chart = buildChartData(
+      [row],
+      'costs',
+      'taskType',
+      'cost',
+      'all',
+      'day',
+      new Date('2026-07-17T12:00:00.000Z'),
+    );
+
+    expect(row).toMatchObject({
+      value: 40,
+      tokens: 12_345,
+      dimensions: {
+        taskType: { key: 'Deleted task', label: 'Deleted task' },
+        user: { key: '—', label: '—' },
+      },
+      details: {
+        values: {
+          user: '—',
+          taskType: 'Deleted task',
+          taskTitle: 'Deleted task',
+          cost: '40.00',
+          tokens: '12345',
+        },
+      },
+      meta: {
+        canonicalTaskId: task.id,
+        prKeys: [],
+      },
+    });
+    expect(row.details.links).toBeUndefined();
+    expect(JSON.stringify(row)).not.toContain('Private deleted task title');
+    expect(JSON.stringify(row)).not.toContain('roomote/private');
+    expect(chart.total).toBe(40);
+    expect(chart.tokenTotal).toBe(12_345);
+    expect(chart.costSummary).toMatchObject({
+      totalInferenceCost: 40,
+      taskCount: 1,
+      prCount: 0,
+    });
   });
 
   it('includes Fast parent and advisor/judge usage in Costs', async () => {
