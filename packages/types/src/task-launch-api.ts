@@ -130,11 +130,8 @@ export const taskLaunchRequestSchema = z.object({
   trigger: z.enum(['onboarding', 'scheduled']).optional(),
   notifySlack: z.boolean().optional(),
   /**
-   * When true and the launch is authenticated as a task run, the platform
-   * delivers a message into that launching run's session when the spawned
-   * task's run settles (completes, fails, is canceled, or goes idle). Lets a
-   * parent task consume a spawned task's outcome deterministically instead of
-   * polling. Standard launches only.
+   * Deprecated compatibility input. Task-run-authenticated launches are
+   * rejected, and top-level user launches ignore this value.
    */
   notifyOnSettle: z.boolean().optional(),
   /** Pull request number for `pr-review` launches; `repo` names its repository. */

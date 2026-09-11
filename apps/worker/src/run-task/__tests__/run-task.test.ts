@@ -150,6 +150,7 @@ vi.mock('../../monitoring/worker-release-metadata', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
+  FAST_ONLY_PACKAGED_SKILL_INVOCATIONS: ['doctor'],
   PACKAGED_WORKFLOW_PHASE_SKILL_INVOCATIONS: [
     'capture-visual-proof',
     'create-draft-pr',
@@ -4346,7 +4347,7 @@ describe('runTask', () => {
       expect.objectContaining({
         homeDir: '/tmp/workspace/.roomote-runtime-home',
         sourceHomeDir: '/tmp/home',
-        excludeSkillNames: ['zero'],
+        excludeSkillNames: ['doctor', 'zero'],
       }),
     );
     expect(createHarnessMock).toHaveBeenCalledWith(

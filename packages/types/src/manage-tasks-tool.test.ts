@@ -1,5 +1,6 @@
 import {
   ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION,
+  ROOMOTE_MEMBER_MANAGEMENT_TOOL_DESCRIPTION,
   ROOMOTE_MEMBER_MANAGEMENT_ACTIONS,
   ROOMOTE_SESSION_DEFAULT_ACTIONS,
   getRoomoteSearchStatusError,
@@ -14,6 +15,10 @@ describe('Roomote MCP management contract', () => {
       ROOMOTE_SESSION_DEFAULT_ACTIONS,
     );
     expect(ROOMOTE_MEMBER_MANAGEMENT_ACTIONS).toContain('launch');
+    expect(ROOMOTE_MEMBER_MANAGEMENT_TOOL_DESCRIPTION).toContain(
+      'Use list_environments immediately before launch',
+    );
+    expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).not.toContain('launch');
     expect(ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION).toContain(
       'Use start to begin new work in a Session',
     );

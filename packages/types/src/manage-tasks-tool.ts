@@ -28,7 +28,18 @@ export const ROOMOTE_MEMBER_MANAGEMENT_ACTIONS = [
 ] as const;
 
 export const ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION =
-  'The Session or task action to perform. Call list_environments immediately before launch.';
+  'The Session or task action to perform.';
+
+export const ROOMOTE_MEMBER_MANAGEMENT_ACTION_DESCRIPTION = `${ROOMOTE_MANAGEMENT_ACTION_DESCRIPTION} Call list_environments immediately before launch.`;
+
+export const ROOMOTE_TASK_RUNTIME_MANAGEMENT_ACTIONS = [
+  ...ROOMOTE_SESSION_DEFAULT_ACTIONS,
+  'search_tasks',
+  'get_compute_logs',
+  'cancel',
+  'list_models',
+  'update_models',
+] as const;
 
 export const ROOMOTE_TASK_ID_PATTERN = /^[0-9a-z]{13}$/;
 
@@ -130,7 +141,11 @@ export const ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION =
   'Use get_summary, get_messages, get_updates, or send_message with sessionId to continue an existing Session. ' +
   'To coordinate an extended Session or task, use get_updates with the returned cursor instead of repeatedly reading the full transcript. Summarize substantive outbound messages as “Codex → Roomote” and substantive new Roomote replies as “Roomote → Codex”; relay questions and input needs promptly, do not narrate unchanged polls, and keep the final answer self-contained. Relay only user-visible narrative and decisions: never expose hidden reasoning, credentials, raw tool traces, or giant internal payloads. ' +
   'To communicate with a specific coding task instead, pass its concrete taskId to get_summary, get_messages, get_updates, or send_message; taskId takes precedence when both IDs are present. ' +
-  'Use search_tasks, get_compute_logs, launch, cancel, list_models, or update_models only for explicit task-level inspection and control.';
+  'Use search_tasks, get_compute_logs, cancel, list_models, or update_models only for explicit task-level inspection and control.';
+
+export const ROOMOTE_MEMBER_MANAGEMENT_TOOL_DESCRIPTION =
+  ROOMOTE_MANAGEMENT_TOOL_DESCRIPTION +
+  ' Use list_environments immediately before launch. Use launch only for an explicit request to start a coding task.';
 
 export interface RoomoteSessionChildTask {
   taskId: string;

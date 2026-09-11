@@ -381,12 +381,11 @@ describe('roomote MCP tool descriptions', () => {
       'send_message',
       'search_tasks',
       'get_compute_logs',
-      'launch',
       'cancel',
-      'list_environments',
       'list_models',
       'update_models',
     ]);
+    expect(manageTasksTool.config.description).not.toContain('launch');
     expect(taskIdField.description).toBe(
       'Optional concrete task ID. When provided to get_summary, get_messages, get_updates, or send_message, targets that task instead of a Session. Required for task-only controls such as get_compute_logs and cancel.',
     );
@@ -397,6 +396,14 @@ describe('roomote MCP tool descriptions', () => {
       'targetTasks',
     );
     expect(manageTasksTool.config.inputSchema).not.toHaveProperty('targetType');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('prompt');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'environmentId',
+    );
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty('branch');
+    expect(manageTasksTool.config.inputSchema).not.toHaveProperty(
+      'notifyOnSettle',
+    );
   });
 
   it('keeps task model discovery beside task model switching', async () => {

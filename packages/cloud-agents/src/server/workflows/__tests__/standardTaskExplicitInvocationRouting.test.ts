@@ -27,6 +27,18 @@ describe('Standard Task explicit invocation routing', () => {
     );
   });
 
+  it('does not preserve Fast-only Doctor as an authoritative sandbox invocation', () => {
+    const { prompt } = standardTask({
+      description: '$doctor\nCheck the configured environment.',
+      repo: 'Roomote/example-app',
+      requestFormat: 'structured',
+    });
+
+    expect(prompt).toBe(
+      '<request>$doctor\nCheck the configured environment.</request>',
+    );
+  });
+
   it('separates general non-repository work from repository explanation', () => {
     const { harnessInstructions } = standardTask({
       description: 'Check the logs and tell me whether the retries stopped',
