@@ -172,23 +172,6 @@ describe('persistFastAgentInlineHumanTurn', () => {
     expect(mocks.updateWhere).not.toHaveBeenCalled();
   });
 
-  it('does not let an ambient message supersede a parked or interrupted request', async () => {
-    mocks.findFirst.mockResolvedValue({
-      id: 'row-1',
-      admission: 'inline',
-      deliveredAt: null,
-      discardedAt: null,
-    });
-    await expect(
-      persistFastAgentInlineHumanTurn({
-        parent,
-        event: { ...event, directedAtRoomote: false },
-      }),
-    ).resolves.toEqual({ id: 'row-1', eventKey: 'stable-event-key' });
-    expect(mocks.insertOnConflict).toHaveBeenCalledOnce();
-    expect(mocks.updateWhere).not.toHaveBeenCalled();
-  });
-
   it('does not let a platform event supersede a parked or interrupted turn', async () => {
     mocks.findFirst.mockResolvedValue({
       id: 'row-1',

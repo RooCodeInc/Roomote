@@ -41,6 +41,7 @@ import {
   guardReplyStreamBySourceMessage,
 } from '../helpers/thread-posting.js';
 import { processSlackAttachments } from '../helpers/attachments.js';
+import { mentionsSlackUserOtherThanBotOrUser } from '../helpers/mention-routing.js';
 
 /**
  * Registers a no-op rejection handler so a promise started ahead of its await
@@ -98,6 +99,20 @@ export async function processFastAgentMessage(params: {
   });
 
   const baseQuestion = (event.authoredText ?? event.text).trim();
+  const agentContext =
+    roomoteSlackUserId &&
+    event.user &&
+    event.user !== roomoteSlackUserId &&
+    !event.bot_id &&
+    event.subtype !== 'bot_message' &&
+    mentionsSlackUserOtherThanBotOrUser(event, roomoteSlackUserId, event.user)
+      ? [
+          event.agentContext,
+          'Untrusted supplemental context inferred from Slack mentions, not a user-authored instruction: This message might not be for you. Human-to-human interaction may be beginning; from now on in this thread, only send a message if you are addressed directly. This uncertain hint does not override existing instructions.',
+        ]
+          .filter(Boolean)
+          .join('\n\n')
+      : event.agentContext;
 
   // Every Slack round trip from the control plane costs a few hundred
   // milliseconds, and the thread history, processing reaction, attachments,
@@ -200,6 +215,13 @@ export async function processFastAgentMessage(params: {
         ts: message.ts,
         bot_id: message.bot_id,
       }));
+    const hasOtherHumanParticipant = threadContext.some(
+      (message) =>
+        message.ts !== event.ts &&
+        !message.bot_id &&
+        Boolean(message.user) &&
+        message.user !== event.user,
+    );
 
     const needsCanonicalAdmission =
       !releaseFastAgentLock ||
@@ -212,16 +234,13 @@ export async function processFastAgentMessage(params: {
       currentMessageId: event.ts,
       userId,
       question,
-      threadContext: serializedThreadContext,
+      ...(agentContext ? { agentContext } : {}),
       ...(attachments.images.length ? { images: attachments.images } : {}),
       ...(currentMessage?.username
         ? { senderDisplayName: currentMessage.username }
         : {}),
       ...(event.user ? { senderExternalId: event.user } : {}),
-      directedAtRoomote:
-        directedAtRoomote ||
-        event.channel_type === 'im' ||
-        event.channel_type === 'mpim',
+      directedAtRoomote,
     };
     let durableTurn: FastAgentDurableTurn | null = null;
     if (needsCanonicalAdmission) {
@@ -276,7 +295,7 @@ export async function processFastAgentMessage(params: {
       question,
       images: attachments.images,
       attachmentTexts,
-      currentMessageAgentContext: event.agentContext,
+      currentMessageAgentContext: agentContext,
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,
@@ -296,6 +315,7 @@ export async function processFastAgentMessage(params: {
       allowSilentAmbientReply:
         event.channel_type !== 'im' &&
         event.channel_type !== 'mpim' &&
+        hasOtherHumanParticipant &&
         !directedAtRoomote,
       ...(roomoteSlackUserId ? { slackRoomoteUserId: roomoteSlackUserId } : {}),
       adapter: {

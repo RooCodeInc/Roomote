@@ -67,12 +67,7 @@ export type FastAgentHumanFollowUpAdmission =
  * waiting to resume.
  */
 function supersedesPendingTurns(event: FastAgentHumanFollowUpEvent): boolean {
-  // An ambient aside can end silently without answering the parked request.
-  return (
-    event.directedAtRoomote !== false &&
-    !event.input &&
-    event.turnSource !== 'platform_event'
-  );
+  return !event.input && event.turnSource !== 'platform_event';
 }
 
 export async function persistFastAgentInlineHumanTurn(params: {

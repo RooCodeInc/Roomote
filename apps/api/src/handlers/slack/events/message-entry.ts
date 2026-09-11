@@ -143,7 +143,7 @@ type UnmentionedSlackThreadReplyRoutingDecision =
   | { shouldRoute: false }
   | {
       shouldRoute: true;
-      threadMessages?: SlackThreadMessage[];
+      threadMessages: SlackThreadMessage[];
       taskId?: string;
     };
 
@@ -281,20 +281,8 @@ async function markHumanMentionedSlackThread(params: {
   event: SlackEvent;
   slack: SlackNotifier;
   botUserId: string | null | undefined;
-  teamId: string;
 }): Promise<void> {
   if (!mentionsSlackUserOtherThanBot(params.event, params.botUserId)) {
-    return;
-  }
-
-  if (
-    params.event.thread_ts &&
-    (await hasBoundSlackFastAgentSession({
-      teamId: params.teamId,
-      channelId: params.event.channel,
-      threadId: params.event.thread_ts,
-    }))
-  ) {
     return;
   }
 
@@ -333,19 +321,6 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  // Established Fast conversations observe human discussion too. Fast decides
-  // whether to engage under its quiet-participation rules; legacy task threads
-  // retain their explicit-mention/interjection gate below.
-  if (
-    await hasBoundSlackFastAgentSession({
-      teamId,
-      channelId: event.channel,
-      threadId: event.thread_ts,
-    })
-  ) {
-    return { shouldRoute: true };
-  }
-
   if (
     mentionsSlackUserOtherThanBotWithoutMentioningBot(
       event,
@@ -358,25 +333,36 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
   > | null = null;
+  let isFastAgentThread = false;
 
   let eligibilityReason: 'roomote-owned-thread' | null = null;
 
   {
-    roomoteThreadMatch = await findRoomoteOwnedSlackThread({
+    isFastAgentThread = await hasBoundSlackFastAgentSession({
       teamId,
       channelId: event.channel,
-      threadTs: event.thread_ts,
+      threadId: event.thread_ts,
     });
 
-    const taskThreadRoute = roomoteThreadMatch
+    roomoteThreadMatch = isFastAgentThread
       ? null
-      : await resolveSlackThreadFollowUpRoute({
-          threadId: event.thread_ts,
+      : await findRoomoteOwnedSlackThread({
+          teamId,
           channelId: event.channel,
-          slackTeamId: teamId,
+          threadTs: event.thread_ts,
         });
 
+    const taskThreadRoute =
+      isFastAgentThread || roomoteThreadMatch
+        ? null
+        : await resolveSlackThreadFollowUpRoute({
+            threadId: event.thread_ts,
+            channelId: event.channel,
+            slackTeamId: teamId,
+          });
+
     if (
+      isFastAgentThread ||
       roomoteThreadMatch ||
       (taskThreadRoute && taskThreadRoute.kind !== 'fresh')
     ) {
@@ -445,6 +431,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     isAutomationReportThread: Boolean(
       roomoteThreadMatch?.isAutomationReportThread,
     ),
+    isOpenConversationThread: isFastAgentThread,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -1390,7 +1377,6 @@ export async function handleMessageOrAppMentionEvent(params: {
     event,
     slack: context.slack,
     botUserId: context.slackInstallation.botUserId,
-    teamId: context.teamId,
   });
 
   const mentionedThreadAliasTaskId =

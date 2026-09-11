@@ -430,14 +430,6 @@ describe('deliverFastAgentParentEvent', () => {
 
   it('delivers a human follow-up queued at response finalization as the next turn', async () => {
     mocks.answerQuestion.mockResolvedValueOnce('Updated response');
-    const threadContext = [
-      {
-        ts: '100.002',
-        user: 'U456',
-        username: 'Peer',
-        text: 'Keep this context.',
-      },
-    ];
 
     await deliverFastAgentParentEventWithLock(
       {
@@ -448,7 +440,6 @@ describe('deliverFastAgentParentEvent', () => {
           currentMessageId: '100.003',
           userId: 'user-2',
           question: 'Use the corrected requirement.',
-          threadContext,
           images: ['data:image/png;base64,aGVsbG8='],
           senderDisplayName: 'Matt',
           senderExternalId: 'U123',
@@ -460,7 +451,6 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'Use the corrected requirement.',
-        threadContext,
         images: ['data:image/png;base64,aGVsbG8='],
         userId: 'user-2',
         currentMessageId: '100.003',
@@ -480,39 +470,6 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({ userId: 'user-2' }),
     );
   });
-
-  it.each([
-    ['slack', false, true],
-    ['slack', true, undefined],
-    ['slack', undefined, undefined],
-    ['discord', false, undefined],
-  ] as const)(
-    'preserves queued silent eligibility on %s with directedness %s',
-    async (surface, directedAtRoomote, expected) => {
-      mocks.answerQuestion.mockResolvedValueOnce('');
-      await deliverFastAgentParentEventWithLock(
-        {
-          parent: {
-            ...parent,
-            conversation: { ...parent.conversation, surface },
-          },
-          event: {
-            type: 'human_follow_up',
-            eventId: '100.005',
-            currentMessageId: '100.005',
-            userId: 'user-2',
-            question: 'A discussion between participants.',
-            directedAtRoomote,
-          },
-        },
-        mocks.releaseTurnLock,
-      );
-      expect(mocks.answerQuestion).toHaveBeenCalledOnce();
-      expect(
-        mocks.answerQuestion.mock.calls[0]![0].allowSilentAmbientReply,
-      ).toBe(expected);
-    },
-  );
 
   it.each(['', '[View video](https://roomote.example/video)'])(
     'delivers selected videos from queued follow-ups with fallback %j',

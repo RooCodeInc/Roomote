@@ -2,7 +2,6 @@ import {
   type TaskPayload,
   TaskPayloadKind,
   PRODUCT_NAME,
-  type FastAgentThreadMessage,
 } from '@roomote/types';
 
 /**
@@ -50,7 +49,13 @@ export function getSlackThreadDisplayName({
   return username?.trim() || user;
 }
 
-export type SlackThreadPromptMessage = FastAgentThreadMessage;
+export interface SlackThreadPromptMessage {
+  ts: string;
+  user: string;
+  username?: string;
+  text: string;
+  bot_id?: string;
+}
 
 export function findLatestSlackBotReply<
   T extends Pick<SlackThreadPromptMessage, 'ts' | 'user' | 'bot_id'>,

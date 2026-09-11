@@ -1046,7 +1046,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
-  it('prioritizes quiet participation and plain-name directedness before tools', () => {
+  it('prioritizes directedness for eligible multi-human turns', () => {
     const ambientPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       allowSilentAmbientReply: true,
@@ -1056,10 +1056,10 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(ambientPrompt).toContain(
-      'Before applying Turn Startup or Evidence-Driven Workflow or calling tools',
+      'decide from the current message and recent thread whether this unmentioned multi-human turn is specifically directed at Roomote',
     );
     expect(ambientPrompt).toContain(
-      'direct plain-name address, direct replies or answers to Roomote',
+      "Respond to explicit platform mentions or commands, direct replies or answers to Roomote, requests about Roomote's work, and contextually clear follow-ups",
     );
     expect(ambientPrompt).toContain(
       'Messages to another person or to the whole group default to ambient, even when actionable',
@@ -1071,7 +1071,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'This bar is higher than for an ordinary response-required message',
     );
     expect(ambientPrompt).toContain(
-      'Normally call `ignore_event` with no reply, no reaction, and no other tools or work',
+      'Use `send_chat_reaction` only when acknowledgement itself is useful; otherwise call `ignore_event`',
     );
     expect(ambientPrompt).toContain(
       'A first-time participant is not ambient when the context shows they are addressing Roomote',
@@ -1080,17 +1080,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'An eligible ambient message or optional human reaction may use `ignore_event` under its narrow rule below',
     );
     expect(directedPrompt).toContain(
-      'The initial human message requires a response; do not ignore it',
-    );
-    expect(ambientPrompt).toContain('"Roomote I hope you are taking notes"');
-    expect(ambientPrompt).toContain(
-      'prefer silence for plausible human-to-human discussion, not a reaction',
-    );
-    expect(ambientPrompt).toContain(
-      'A batch containing a directed request still needs a response',
-    );
-    expect(directedPrompt).toContain(
-      'Later Slack follow-ups may be ambient once outstanding directed requests have been answered',
+      '`ignore_event` and `retry_task_start` are invalid for this human-authored turn',
     );
   });
 
