@@ -474,7 +474,7 @@ describe('Environments', () => {
     expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
   });
 
-  it('represents repository-free environments in the list', () => {
+  it('omits repository labels when an environment has none', () => {
     state.environments = [
       {
         ...state.environments[0]!,
@@ -487,7 +487,7 @@ describe('Environments', () => {
 
     render(<Environments />);
 
-    expect(screen.getByText('No repositories')).toBeInTheDocument();
+    expect(screen.queryByText(/no repositories/i)).not.toBeInTheDocument();
     expect(screen.queryByText('acme/api')).not.toBeInTheDocument();
   });
 

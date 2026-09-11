@@ -101,12 +101,12 @@ For each empty repository, follow the skill's empty-repository bootstrap: push e
 
   const setupTarget =
     orderedRepositories.length > 0
-      ? `this repository set:\n${repositoryLines}${emptyRepositorySection}`
-      : `a repository-free workspace. Do not look for or create a repository. Omit \`repositories\` and configure only repository-independent tools, services, environment variables, ports, MCP servers, skills, or agent instructions supported by the user's guidance.`;
+      ? ` for this repository set:\n${repositoryLines}${emptyRepositorySection}`
+      : '';
 
   return `$environment-setup
 
-Set up a ${PRODUCT_NAME} environment for ${setupTarget}
+Set up a ${PRODUCT_NAME} environment${setupTarget}
 
 Focus on the smallest correct environment that gets this setup target running locally.
 Use a plain, stable environment name based on the product or repository name. Do not append qualifiers like "Localhost", "Minimal", or similar unless the user explicitly asked for that distinction.

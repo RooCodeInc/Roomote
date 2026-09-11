@@ -6,6 +6,15 @@ import {
 } from '../sandbox-instruction';
 
 describe('sanitizeEnvironmentConfigForPrompt', () => {
+  it('omits repository details when the environment has none', () => {
+    expect(
+      sanitizeEnvironmentConfigForPrompt({
+        name: 'Tools',
+        repositories: [],
+      }),
+    ).toEqual({ name: 'Tools' });
+  });
+
   it('keeps only whitelisted prompt-safe fields', () => {
     const environmentConfig: EnvironmentConfig = {
       name: 'Sandbox',

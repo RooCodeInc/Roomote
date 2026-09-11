@@ -81,21 +81,18 @@ export function EnvironmentPreviewContent({
         </PreviewSection>
       ) : null}
 
-      <PreviewSection icon={GitBranch} title="Repositories">
-        <div className="space-y-3">
-          {config.repositories.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No repositories configured.
-            </p>
-          ) : null}
-          {config.repositories.map((repo, index) => (
-            <RepositoryPreview
-              key={`${repo.repository}-${index}`}
-              repo={repo}
-            />
-          ))}
-        </div>
-      </PreviewSection>
+      {config.repositories.length > 0 ? (
+        <PreviewSection icon={GitBranch} title="Repositories">
+          <div className="space-y-3">
+            {config.repositories.map((repo, index) => (
+              <RepositoryPreview
+                key={`${repo.repository}-${index}`}
+                repo={repo}
+              />
+            ))}
+          </div>
+        </PreviewSection>
+      ) : null}
 
       {config.docker_projects?.length ? (
         <PreviewSection icon={Container} title="Docker Compose & Dockerfile">

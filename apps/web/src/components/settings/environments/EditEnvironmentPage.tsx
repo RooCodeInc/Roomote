@@ -686,10 +686,7 @@ function AgentRepositorySelectionSubview({
           The Onboarding Agent can help make changes to your YAML environment
           definition.
         </p>
-        <p>
-          Optionally select the repositories the agent should inspect. Leave the
-          selection empty to work without repositories.
-        </p>
+        <p>Select the repositories the agent should inspect for this change.</p>
       </div>
 
       {!environment ? (
@@ -706,14 +703,7 @@ function AgentRepositorySelectionSubview({
                 <div className="flex items-center justify-center py-12 text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
                 </div>
-              ) : repositories.length === 0 ? (
-                <Alert>
-                  <AlertDescription>
-                    No repositories are connected. The agent can still update
-                    this repository-free environment.
-                  </AlertDescription>
-                </Alert>
-              ) : (
+              ) : repositories.length > 0 ? (
                 <div className="min-h-0 flex-1 overflow-auto">
                   <EnvironmentRepositorySelector
                     repositories={repositories}
@@ -723,7 +713,7 @@ function AgentRepositorySelectionSubview({
                     heightClassName="h-full overflow-auto"
                   />
                 </div>
-              )}
+              ) : null}
 
               {!repositoriesLoading ? <UpdateGitHubReposHint /> : null}
 

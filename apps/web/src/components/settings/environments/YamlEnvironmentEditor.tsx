@@ -68,23 +68,6 @@ ${repositoryYaml}
 #   node: "22.14.0"
 #   python: "3.12.1"
 #
-# Optional: You can specify repo-local fallback tool versions and commands
-# to run in each repository.
-# repositories:
-#   - repository: owner/repo-name
-#     branch: main
-#     tool_versions:
-#       node: "20.11.0"
-#       python: "3.12.1"
-#     commands:
-#       - name: Install dependencies
-#         run: pnpm install
-#         timeout: 120
-#       - name: Start web server
-#         run: pnpm dev
-#         detached: true
-#         logfile: /tmp/dev-server.log
-
 # Optional: Services to start (redis, postgres, etc.)
 # services:
 #   - redis7

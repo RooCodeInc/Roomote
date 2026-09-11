@@ -383,7 +383,7 @@ describe('CreateEnvironmentPage', () => {
     expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
   });
 
-  it('starts a repository-free environment definition task', async () => {
+  it('starts an environment definition task without rendering repository empty-state copy', async () => {
     mockRepositoriesState.data = [];
     const queryClient = new QueryClient();
 
@@ -393,9 +393,8 @@ describe('CreateEnvironmentPage', () => {
       </QueryClientProvider>,
     );
 
-    expect(
-      screen.getByText(/create a repository-free environment/i),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/no repositories/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/repository-free/i)).not.toBeInTheDocument();
     const startButton = screen.getByRole('button', { name: 'Start Agent' });
     expect(startButton).toBeEnabled();
     fireEvent.click(startButton);

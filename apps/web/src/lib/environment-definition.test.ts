@@ -61,26 +61,26 @@ describe('environment definition helpers', () => {
     );
   });
 
-  it('builds a repository-free create prompt and blank-slate workspace', () => {
+  it('omits repository context from a blank-slate create prompt', () => {
     const prompt = buildCreateEnvironmentDefinitionPrompt([]);
 
-    expect(prompt).toContain('a repository-free workspace');
-    expect(prompt).toContain('Omit `repositories`');
+    expect(prompt).toContain('Set up a Roomote environment');
+    expect(prompt).not.toContain('repository-free');
+    expect(prompt).not.toContain('for this repository set:');
     expect(buildEnvironmentDefinitionWorkspacePayload([])).toEqual({
       repo: '__no_repositories__',
     });
   });
 
-  it('routes repository-free environment-definition launches to blank slate', () => {
-    expect(
-      buildTaskTypePromptAndWorkspacePayload({
-        type: 'environment-definition',
-        setupGuidance: 'Install database tools.',
-      }),
-    ).toMatchObject({
-      workspacePayload: { repo: '__no_repositories__' },
-      taskPrompt: expect.stringContaining('a repository-free workspace'),
+  it('routes environment-definition launches without repository context to blank slate', () => {
+    const result = buildTaskTypePromptAndWorkspacePayload({
+      type: 'environment-definition',
+      setupGuidance: 'Install database tools.',
     });
+
+    expect(result.workspacePayload).toEqual({ repo: '__no_repositories__' });
+    expect(result.taskPrompt).not.toContain('repository-free');
+    expect(result.taskPrompt).not.toContain('for this repository set:');
   });
 
   it('preserves a scalar repository for environment-definition launches', () => {
@@ -194,7 +194,7 @@ describe('environment definition helpers', () => {
     expect(prompt).toContain('name: Roomote App');
   });
 
-  it('builds an intentional repository-free update prompt', () => {
+  it('omits repository context from an update prompt when the config has none', () => {
     const prompt = buildUpdateEnvironmentDefinitionPrompt({
       environmentId: 'env-blank',
       environmentName: 'Service tools',
@@ -202,11 +202,12 @@ describe('environment definition helpers', () => {
       config: { name: 'Service tools', repositories: [] },
     });
 
-    expect(prompt).toContain('This is a repository-free environment.');
-    expect(prompt).not.toContain('repositories:');
+    expect(prompt).not.toContain('repository-free');
+    expect(prompt).not.toContain('Repositories to inspect:');
+    expect(prompt).not.toContain('not selected for inspection');
   });
 
-  it('distinguishes an empty inspection selection from a repository-free environment', () => {
+  it('protects persisted repositories when none were selected for inspection', () => {
     const prompt = buildUpdateEnvironmentDefinitionPrompt({
       environmentId: 'env-existing',
       environmentName: 'Existing app',
@@ -218,9 +219,11 @@ describe('environment definition helpers', () => {
     });
 
     expect(prompt).toContain(
-      'No repositories were selected for inspection in this task.',
+      "The environment's repositories are listed in the YAML below but were not selected for inspection in this task.",
     );
-    expect(prompt).not.toContain('This is a repository-free environment.');
+    expect(prompt).toContain(
+      'Do not change repository configuration unless the user explicitly requested it.',
+    );
     expect(prompt).toContain('repository: acme/api');
   });
 

@@ -131,18 +131,16 @@ describe('environment-setup guidance', () => {
     );
   });
 
-  it('supports environments with no repositories', () => {
+  it('treats repositories as optional without adding empty-state guidance', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'When the task explicitly has no repositories, treat that as a supported repository-free environment',
-    );
-    expect(skillContent).toContain(
-      'omit `repositories` from the environment definition',
+      'Only perform repository-specific inspection and validation when repository identifiers are provided.',
     );
     expect(skillContent).toContain(
       '<field name="repositories" required="false" type="RepositoryConfig[]" />',
     );
+    expect(skillContent).not.toContain('repository-free');
   });
 
   it('allows revising an existing environment instead of always creating a new one', () => {

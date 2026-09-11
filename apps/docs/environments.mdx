@@ -5,9 +5,8 @@ description: Give Roomote the repositories, services, secrets, and guidance it n
 ---
 
 An environment is the workspace configuration Roomote uses when it runs a
-task. It tells Roomote which repositories, if any, to clone, what services to
-start, what environment variables are available, and what guidance it should
-follow.
+task. It can specify repositories to clone, services to start, environment
+variables, and guidance to follow.
 
 This is what turns a Roomote agent from a generic coding tool into something
 grounded in your actual product.
@@ -33,12 +32,11 @@ A good first environment usually makes at least one of these possible:
 
 ## How the first environment is created
 
-Open **Settings > Environments > New** and optionally choose the repositories
-for the environment. Leave the selection empty when the workspace only needs
-services, tools, variables, integrations, skills, or agent guidance. Add any
-setup guidance you already know, then select **Start Agent** so Roomote can
-define a reusable workspace configuration. If you already know the
-configuration you need, select **Enter YAML directly** instead.
+Open **Settings > Environments > New** and choose repositories when the
+workspace needs source code. Add any setup guidance you already know, then
+select **Start Agent** so Roomote can define a reusable workspace
+configuration. If you already know the configuration you need, select **Enter
+YAML directly** instead.
 
 An environment can combine repositories from different source-control
 providers, such as GitHub and GitLab. Each provider must have working

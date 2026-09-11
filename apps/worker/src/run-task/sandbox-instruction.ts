@@ -117,9 +117,10 @@ export function sanitizeEnvironmentConfigForPrompt(
     initialUrl: environmentConfig.initialUrl,
     ports: environmentConfig.ports?.map(sanitizeNamedPortForPrompt),
     tool_versions: environmentConfig.tool_versions,
-    repositories: environmentConfig.repositories.map(
-      sanitizeRepositoryForPrompt,
-    ),
+    repositories:
+      environmentConfig.repositories.length > 0
+        ? environmentConfig.repositories.map(sanitizeRepositoryForPrompt)
+        : undefined,
     services: environmentConfig.services?.map(sanitizeServiceForPrompt),
     docker_projects: environmentConfig.docker_projects?.map(
       sanitizeDockerProjectForPrompt,

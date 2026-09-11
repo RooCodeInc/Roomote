@@ -354,8 +354,7 @@ function AgentRepositorySelectionSubview({
   return (
     <>
       <p className="text-sm text-muted-foreground">
-        Optionally pick the repositories needed for this environment. Leave the
-        selection empty for a repository-free workspace.
+        Select repositories when this environment needs source code.
       </p>
 
       <Card>
@@ -364,25 +363,6 @@ function AgentRepositorySelectionSubview({
             {repositoriesLoading ? (
               <div className="flex items-center justify-center py-12 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
-              </div>
-            ) : repositories.length === 0 ? (
-              <div className="space-y-4">
-                <Alert>
-                  <AlertDescription>
-                    No repositories are connected. You can start the agent to
-                    create a repository-free environment, or connect source
-                    control to add repositories.
-                  </AlertDescription>
-                </Alert>
-                <UpdateGitHubReposHint />
-                <EnvironmentRepositorySelector
-                  repositories={repositories}
-                  selectedRepositoryIds={selectedRepositoryIds}
-                  onToggleRepository={onToggleRepository}
-                  onCreateRepository={onOpenCreateRepo}
-                  inputPrefix="create-environment-repository"
-                  heightClassName="max-h-[calc(var(--effective-viewport-height)-17rem)] overflow-auto"
-                />
               </div>
             ) : (
               <div className="space-y-4">
