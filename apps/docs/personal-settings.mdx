@@ -65,6 +65,8 @@ Personal Settings also include app preferences such as:
   you can still collapse or expand individual thought messages
 - **Narration Mode** for a more streamlined task conversation view
 - **Therapist Mode** to explain which remembered fact informed a Session or task
+- **How to work with me** for private personal instructions and conversational
+  learning
 
 Most teammates only need profile, linked accounts, and theme settings.
 
@@ -75,6 +77,41 @@ by [Memory](/memory) materially informs Roomote's answer or work, Roomote names
 that remembered fact in human terms and explains how it was used. It does not
 narrate unrelated retrievals or expose internal memory identifiers, storage
 paths, metadata, or provenance fields.
+
+## Personalize how Roomote works with you
+
+Use **How to work with me** for durable preferences such as your preferred
+name, language, formality, answer length, use of examples, directness, update
+frequency, or accessibility and presentation preferences you choose to share.
+These instructions apply to conversations with you; they do not silently
+rewrite code or customer-facing deliverables.
+
+**Learn from conversations** is on by default. Roomote may save a preference
+you state explicitly and may form modest, revisable style preferences from
+repeated behavior. Turning learning off stops new automatic updates but keeps
+the instructions already shown in the text box active. **Reset** clears both
+edited and learned instructions. A reset does not rebuild them from older
+conversation history.
+
+Fast captures each participant's personalization when they first speak in a
+conversation and keeps that private snapshot for their later turns in the same
+conversation. New preferences stated in a message still guide that request and
+are saved for future conversations, but they do not rewrite the current
+conversation's snapshot. Edits and resets in Personal Settings likewise apply
+to new conversations, or to a participant who has not spoken in the current
+conversation yet.
+
+Personalization follows the trusted account associated with the current
+speaker on supported chat surfaces and with the person who requested a task.
+In a shared thread, Roomote adapts its conversation to the current speaker
+while preserving the original requester's task requirements when they conflict.
+
+Personalization is encrypted at rest and is not available to other members or
+admins through Roomote's normal UI or API. It is excluded from shared task
+transcripts, summaries, memory, and ordinary tool output. It remains subject to
+the deployment operator's infrastructure access, backups, and retention
+policies. Roomote does not use public-web or LinkedIn enrichment for this
+feature.
 
 ## Common issues
 

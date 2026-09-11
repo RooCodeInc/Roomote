@@ -452,7 +452,16 @@ export function useLiveVoice({
         }
       });
       peer.addEventListener('connectionstatechange', () => {
-        console.info(`[voice] Peer connection ${peer?.connectionState}`);
+        const connectionState = peer?.connectionState;
+        console.info(`[voice] Peer connection ${connectionState}`);
+        if (
+          startGenerationRef.current === generation &&
+          (connectionState === 'disconnected' ||
+            connectionState === 'failed' ||
+            connectionState === 'closed')
+        ) {
+          stop();
+        }
       });
 
       const offer = await peer.createOffer();

@@ -69,6 +69,7 @@ describe('tool presentation resolver', () => {
     ['manage_source_control', 'pull-request'],
     ['manage_environments', 'environment'],
     ['save_task_memory', 'memory'],
+    ['update_personalization', 'book-heart'],
     ['request_environment_variables', 'terminal'],
     ['report_platform_issue', 'alert'],
     ['submit_automation_work_items', 'task'],
@@ -270,7 +271,7 @@ describe('tool presentation resolver', () => {
     ['start', 'Started', 'session'],
     ['search', 'Searched', 'sessions'],
     ['get_summary', 'Heard back from', 'task'],
-    ['get_messages', 'Received', 'message from task'],
+    ['get_messages', 'Checked', 'recent task messages'],
     ['send_message', 'Sent', 'message to task'],
     ['search_tasks', 'Searched', 'tasks'],
     ['get_compute_logs', 'Received', 'logs from task'],
@@ -294,6 +295,30 @@ describe('tool presentation resolver', () => {
       ).toMatchObject({ verb, object, providerLabel: undefined });
     },
   );
+
+  it('distinguishes task history checks from incoming task reports', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'manage_tasks',
+          rawInput: {
+            arguments: { action: 'get_messages', taskId: 'task-1' },
+          },
+        } as never),
+      ),
+    ).toMatchObject({ verb: 'Checked', object: 'recent task messages' });
+    expect(
+      resolveToolPresentation(
+        toolData({
+          isMcp: true,
+          serverName: 'roomote',
+          toolName: 'receive_task_report',
+        }),
+      ),
+    ).toMatchObject({ verb: 'Received', object: 'task report' });
+  });
 
   it('suppresses only first-party Roomote attribution', () => {
     expect(
@@ -700,6 +725,28 @@ describe('tool presentation policy', () => {
         groupingMode: 'standalone',
       });
     }
+  });
+
+  it('renders personalization updates as a standalone non-expandable receipt', () => {
+    expect(
+      resolveToolPresentation(
+        toolData({ toolName: 'update_personalization', status: 'completed' }),
+      ),
+    ).toMatchObject({
+      verb: 'Personalization',
+      object: 'updated',
+      iconKey: 'book-heart',
+    });
+    expect(
+      resolveToolPresentationPolicy(
+        toolMessage({ toolName: 'update_personalization' }),
+      ),
+    ).toMatchObject({
+      rowVisibility: 'visible',
+      detailMode: 'none',
+      activityMode: 'keep-visible',
+      groupingMode: 'standalone',
+    });
   });
 
   it.each([

@@ -582,6 +582,20 @@
       "when": 1789097339420,
       "tag": "0082_public_purifiers",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1789114124326,
+      "tag": "0083_nifty_sir_ram",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1789133820571,
+      "tag": "0084_confused_frightful_four",
+      "breakpoints": true
     }
   ]
 }

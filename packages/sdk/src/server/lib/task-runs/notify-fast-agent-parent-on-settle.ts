@@ -27,6 +27,11 @@ type SettledStatus =
   | RunStatus.Failed
   | RunStatus.Canceled
   | RunStatus.Idle;
+type FastAgentParentSettleNotificationResult =
+  | 'admitted'
+  | 'already_notified'
+  | 'failed'
+  | 'not_applicable';
 
 function getCustomAutomationId(payload: unknown): string | undefined {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
@@ -51,10 +56,10 @@ export async function notifyFastAgentParentOnSettle(
   run: TaskRun,
   status: SettledStatus,
   taskTitle?: string | null,
-): Promise<void> {
+): Promise<FastAgentParentSettleNotificationResult> {
   const parent = getFastAgentParentFromPayload(run.payload);
   if (!parent) {
-    return;
+    return 'not_applicable';
   }
 
   // A review child's outcome reaches the session through exactly one pipe,
@@ -63,7 +68,7 @@ export async function notifyFastAgentParentOnSettle(
   // requested itself, so a successful settle never announces here; only
   // failures do, because a failed review never posts a summary.
   if (isPrReviewRun(run) && status !== RunStatus.Failed) {
-    return;
+    return 'not_applicable';
   }
 
   const markSettled = async () => {
@@ -74,24 +79,25 @@ export async function notifyFastAgentParentOnSettle(
       })
       .where(eq(taskRuns.id, run.id));
   };
-  const claimRows = await db
-    .update(taskRuns)
-    .set({
-      result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${NOTIFIED_RESULT_KEY}::text, ${buildFastAgentDeliveringMarker()}::text)`,
-    })
-    .where(
-      and(
-        eq(taskRuns.id, run.id),
-        buildFastAgentDeliveryClaimPredicate(NOTIFIED_RESULT_KEY),
-      ),
-    )
-    .returning({ id: taskRuns.id });
-
-  if (claimRows.length === 0) {
-    return;
-  }
-
+  let admitted = false;
   try {
+    const claimRows = await db
+      .update(taskRuns)
+      .set({
+        result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${NOTIFIED_RESULT_KEY}::text, ${buildFastAgentDeliveringMarker()}::text)`,
+      })
+      .where(
+        and(
+          eq(taskRuns.id, run.id),
+          buildFastAgentDeliveryClaimPredicate(NOTIFIED_RESULT_KEY),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (claimRows.length === 0) {
+      return 'already_notified';
+    }
+
     const pullRequests = await listFastAgentPullRequestContexts(run.taskId);
     const customAutomationId = getCustomAutomationId(run.payload);
     let retryTaskStartRunId: number | undefined;
@@ -134,6 +140,7 @@ export async function notifyFastAgentParentOnSettle(
         pullRequests,
       },
     });
+    admitted = true;
     await markSettled();
 
     await recordTaskRunLifecycleEvent(db, {
@@ -147,6 +154,7 @@ export async function notifyFastAgentParentOnSettle(
         status,
       },
     });
+    return 'admitted';
   } catch (error) {
     console.error(
       `[notifyFastAgentParentOnSettle] Failed for run ${run.id}: ${
@@ -163,5 +171,6 @@ export async function notifyFastAgentParentOnSettle(
     } catch {
       // Best-effort claim release for retry.
     }
+    return admitted ? 'admitted' : 'failed';
   }
 }

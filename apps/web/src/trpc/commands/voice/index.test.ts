@@ -4,17 +4,23 @@ import { TRPCError } from '@trpc/server';
 const {
   mockResolveVoiceOpenAiKey,
   mockCreateVoiceLiveSession,
+  mockCreateVoicePreview,
   mockCleanVoiceTranscript,
+  mockResolveVoiceId,
 } = vi.hoisted(() => ({
   mockResolveVoiceOpenAiKey: vi.fn(),
   mockCreateVoiceLiveSession: vi.fn(),
+  mockCreateVoicePreview: vi.fn(),
   mockCleanVoiceTranscript: vi.fn(),
+  mockResolveVoiceId: vi.fn(),
 }));
 
 vi.mock('@/lib/server/voice', () => ({
   resolveVoiceOpenAiKey: mockResolveVoiceOpenAiKey,
   createVoiceLiveSession: mockCreateVoiceLiveSession,
+  createVoicePreview: mockCreateVoicePreview,
   cleanVoiceTranscript: mockCleanVoiceTranscript,
+  resolveVoiceId: mockResolveVoiceId,
 }));
 
 const voiceContext = {
@@ -47,18 +53,21 @@ const auth = {
   userId: 'user-1',
   name: 'Matt',
   primaryEmail: 'matt@example.com',
+  isAdmin: true,
 } as unknown as import('@/types').UserAuthSuccess;
 
 import {
   cleanVoiceTranscriptCommand,
   createVoiceLiveSessionCommand,
   getVoiceStatusCommand,
+  previewVoiceCommand,
   recordVoiceCallEventCommand,
   recordVoiceTurnCommand,
 } from '.';
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockResolveVoiceId.mockResolvedValue('marin');
 });
 
 describe('getVoiceStatusCommand', () => {
@@ -95,6 +104,7 @@ describe('createVoiceLiveSessionCommand', () => {
       apiKey: 'sk-test',
       sdp: 'offer-sdp',
       context: voiceContext,
+      voiceId: 'marin',
     });
   });
 
@@ -122,6 +132,39 @@ describe('createVoiceLiveSessionCommand', () => {
     expect((error as TRPCError).message).toBe(
       'Failed to start a voice session',
     );
+  });
+});
+
+describe('previewVoiceCommand', () => {
+  it('previews the selected voice with the unsaved key without returning it', async () => {
+    mockCreateVoicePreview.mockResolvedValue({
+      audioBase64: 'AQID',
+      mimeType: 'audio/mpeg',
+    });
+
+    await expect(
+      previewVoiceCommand(auth, { apiKey: ' sk-new ', voiceId: 'cedar' }),
+    ).resolves.toEqual({ audioBase64: 'AQID', mimeType: 'audio/mpeg' });
+    expect(mockCreateVoicePreview).toHaveBeenCalledWith({
+      apiKey: 'sk-new',
+      voiceId: 'cedar',
+    });
+    expect(mockResolveVoiceOpenAiKey).not.toHaveBeenCalled();
+  });
+
+  it('uses the stored key when editing with a blank key', async () => {
+    mockResolveVoiceOpenAiKey.mockResolvedValue('sk-stored');
+    mockCreateVoicePreview.mockResolvedValue({
+      audioBase64: 'AQID',
+      mimeType: 'audio/mpeg',
+    });
+
+    await previewVoiceCommand(auth, { apiKey: '', voiceId: 'marin' });
+
+    expect(mockCreateVoicePreview).toHaveBeenCalledWith({
+      apiKey: 'sk-stored',
+      voiceId: 'marin',
+    });
   });
 });
 

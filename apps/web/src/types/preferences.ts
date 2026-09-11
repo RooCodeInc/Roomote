@@ -27,3 +27,9 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   narrationMode: false,
   therapistMode: false,
 };
+
+export interface UserPersonalizationSettings {
+  instructions: string;
+  learnFromConversations: boolean;
+  version: number;
+}

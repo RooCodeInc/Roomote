@@ -6,9 +6,9 @@ export function IntegrationName({ href, icon, name }) {
     box: '/logo/integrations/box.svg',
     azure: '/logo/integrations/azure.svg',
     granola: '/logo/integrations/granola.svg',
+    agentmail: '/logo/integrations/agentmail.svg',
     monday: '/logo/integrations/monday.svg',
     rippling: '/logo/integrations/rippling.svg',
-    voice: '/logo/integrations/voice.svg',
   };
   const iconSrc =
     manualIcons[icon] ??

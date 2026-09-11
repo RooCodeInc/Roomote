@@ -764,3 +764,20 @@ export async function saveTaskMemory(
     'Failed to save task memory',
   );
 }
+
+export async function updatePersonalization(
+  config: RoomoteConfig,
+  runId: number,
+  params: { preference: string; confidence: 'explicit' | 'inferred' },
+): Promise<{ saved: boolean; reason?: string }> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/personalization`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to update personalization',
+  );
+}

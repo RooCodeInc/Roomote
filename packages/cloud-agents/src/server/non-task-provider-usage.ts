@@ -211,6 +211,7 @@ export interface GenerateTrackedNonTaskObjectParams<
   TSchema extends z.ZodTypeAny,
 > extends GenerateTrackedNonTaskBaseParams {
   schema: TSchema;
+  structuredOutputRetryCount?: number;
 }
 
 /**
@@ -1876,7 +1877,9 @@ async function generateTrackedNonTaskObjectWithSdk<
           $refStrategy: 'none',
           target: 'jsonSchema7',
         }) as Record<string, unknown>,
-        retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
+        retryCount:
+          params.structuredOutputRetryCount ??
+          DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
       },
       parts: [
         {

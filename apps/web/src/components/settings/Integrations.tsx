@@ -1,15 +1,18 @@
 'use client';
 
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
 import {
   getMcpIntegrationConnectionMode,
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
   isSelfServeMcpIntegration,
   isDeploymentScopedMcpIntegration,
   MCP_INTEGRATIONS,
+  OPENAI_REALTIME_VOICE_OPTIONS,
+  type OpenAiRealtimeVoiceId,
 } from '@roomote/types';
 
 import {
@@ -38,6 +41,7 @@ import {
   useSaveGranolaConnection,
   useSaveElevenLabsConnection,
   useSaveVoiceConnection,
+  usePreviewVoice,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
   useSaveXConnection,
@@ -83,8 +87,13 @@ import {
   LinearLogo,
   Pencil,
   Plus,
+  Play,
   RefreshCw,
   Settings2,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
   Spinner,
   Textarea,
   TriangleAlert,
@@ -216,6 +225,12 @@ type ElevenLabsConnectionData = {
 
 type VoiceFormState = {
   apiKey: string;
+  voiceId: OpenAiRealtimeVoiceId;
+};
+
+type VoiceConnectionData = {
+  authStatus?: 'pending' | 'authenticated' | 'error' | null;
+  voiceId?: OpenAiRealtimeVoiceId;
 };
 
 type GrafanaFormState = {
@@ -273,7 +288,16 @@ function buildEmptyGranolaForm(): GranolaFormState {
 }
 
 function buildEmptyVoiceForm(): VoiceFormState {
-  return { apiKey: '' };
+  return { apiKey: '', voiceId: DEFAULT_OPENAI_REALTIME_VOICE_ID };
+}
+
+function buildVoiceForm(
+  connection: VoiceConnectionData | null | undefined,
+): VoiceFormState {
+  return {
+    apiKey: '',
+    voiceId: connection?.voiceId ?? DEFAULT_OPENAI_REALTIME_VOICE_ID,
+  };
 }
 
 function buildEmptyElevenLabsForm(): ElevenLabsFormState {
@@ -419,7 +443,8 @@ function getVoiceFieldErrors(
     return {};
   }
 
-  return { apiKey: result.error.flatten().fieldErrors.apiKey };
+  const fieldErrors = result.error.flatten().fieldErrors;
+  return { apiKey: fieldErrors.apiKey, voiceId: fieldErrors.voiceId };
 }
 
 function getElevenLabsFieldErrors(
@@ -1172,8 +1197,39 @@ function VoiceConnectionFields({
   allowBlankApiKey: boolean;
   onFieldChange: (field: keyof VoiceFormState, value: string) => void;
 }) {
+  const previewVoice = usePreviewVoice();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const selectedVoice = OPENAI_REALTIME_VOICE_OPTIONS.find(
+    (option) => option.id === form.voiceId,
+  );
   const fieldClassName =
     'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+    },
+    [],
+  );
+
+  const handlePreview = () => {
+    audioRef.current?.pause();
+    setPreviewError(null);
+    previewVoice.mutate(
+      { apiKey: form.apiKey, voiceId: form.voiceId },
+      {
+        onSuccess: ({ audioBase64, mimeType }) => {
+          const audio = new Audio(`data:${mimeType};base64,${audioBase64}`);
+          audioRef.current = audio;
+          void audio.play().catch(() => {
+            setPreviewError('Your browser blocked audio playback. Try again.');
+          });
+        },
+        onError: (error) => setPreviewError(error.message),
+      },
+    );
+  };
 
   return (
     <>
@@ -1199,6 +1255,55 @@ function VoiceConnectionFields({
         ) : null}
         {fieldErrors.apiKey ? (
           <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
+        ) : null}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="voice-selection">Voice</Label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Select
+            value={form.voiceId}
+            onValueChange={(value) =>
+              onFieldChange('voiceId', value as OpenAiRealtimeVoiceId)
+            }
+          >
+            <SelectTrigger id="voice-selection" className="w-full sm:flex-1">
+              <span>{selectedVoice?.label ?? 'Select a voice'}</span>
+            </SelectTrigger>
+            <SelectContent>
+              {OPENAI_REALTIME_VOICE_OPTIONS.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handlePreview}
+            disabled={previewVoice.isPending}
+            aria-label={`Preview ${selectedVoice?.label ?? form.voiceId} voice`}
+            className="w-full sm:w-auto"
+          >
+            {previewVoice.isPending ? <Spinner /> : <Play />}
+            Preview
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Hear an AI-generated sample. OpenAI currently recommends Marin and
+          Cedar for best quality.
+        </p>
+        {fieldErrors.voiceId ? (
+          <p className="text-sm text-destructive">{fieldErrors.voiceId[0]}</p>
+        ) : null}
+        {previewError ? (
+          <p
+            className="text-sm text-destructive"
+            role="status"
+            aria-live="polite"
+          >
+            {previewError}
+          </p>
         ) : null}
       </div>
       {formError ? (
@@ -1775,8 +1880,13 @@ export function Integrations() {
 
     setVoiceFieldErrors({});
     setVoiceFormError(null);
-    setVoiceForm(buildEmptyVoiceForm());
-  }, [voiceConnection.isPending, isVoiceConnected, isVoiceDialogOpen]);
+    setVoiceForm(buildVoiceForm(voiceConnection.data));
+  }, [
+    voiceConnection.data,
+    voiceConnection.isPending,
+    isVoiceConnected,
+    isVoiceDialogOpen,
+  ]);
 
   useEffect(() => {
     if (!isElevenLabsDialogOpen) {
@@ -2921,6 +3031,7 @@ export function Integrations() {
 
     const parsed = saveVoiceConnectionSchema.safeParse({
       apiKey: voiceForm.apiKey,
+      voiceId: voiceForm.voiceId,
     });
     if (!parsed.success) {
       setVoiceFieldErrors(getVoiceFieldErrors(parsed));
