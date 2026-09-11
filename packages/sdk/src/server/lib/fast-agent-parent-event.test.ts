@@ -536,6 +536,34 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it.each([false, true])(
+    'preserves queued Slack caution eligibility (directed=%s)',
+    async (directedAtRoomote) => {
+      await deliverFastAgentParentEventWithLock(
+        {
+          parent,
+          event: {
+            type: 'human_follow_up',
+            eventId: '100.004',
+            currentMessageId: '100.004',
+            userId: 'user-2',
+            question: 'A follow-up',
+            directedAtRoomote,
+            agentContext: 'Human-to-human discussion may be continuing',
+          },
+        },
+        mocks.releaseTurnLock,
+      );
+      const input = mocks.answerQuestion.mock.calls[0]?.[0];
+      expect(input.currentMessageAgentContext).toBe(
+        'Human-to-human discussion may be continuing',
+      );
+      expect(input.allowSilentAmbientReply).toBe(
+        directedAtRoomote ? undefined : true,
+      );
+    },
+  );
+
   it.each(['', '[View video](https://roomote.example/video)'])(
     'delivers selected videos from queued follow-ups with fallback %j',
     async (fallback) => {

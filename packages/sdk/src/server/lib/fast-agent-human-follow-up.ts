@@ -151,7 +151,14 @@ export async function admitFastAgentInlineHumanTurn(params: {
         .where(eq(fastAgentParentEvents.id, row.id));
     }
 
-    if (supersedesPendingTurns(params.event)) {
+    // A Slack aside may be ignored; it cannot replace an unfinished request.
+    if (
+      supersedesPendingTurns(params.event) &&
+      !(
+        params.parent.conversation.surface === 'slack' &&
+        params.event.directedAtRoomote === false
+      )
+    ) {
       await tx
         .update(fastAgentParentEvents)
         .set({

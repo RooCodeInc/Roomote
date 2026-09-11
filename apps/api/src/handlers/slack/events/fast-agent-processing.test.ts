@@ -65,7 +65,10 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
   createFastAgentSlackSessionActivity: mocks.createActivity,
 }));
 
-vi.mock('@roomote/cloud-agents', () => ({
+vi.mock('@roomote/cloud-agents', async (importOriginal) => ({
+  stripLeadingSlackProductMention: (
+    await importOriginal<typeof import('@roomote/cloud-agents')>()
+  ).stripLeadingSlackProductMention,
   appendAttachmentTextsToPromptText: ({
     text,
     attachmentTexts = [],
@@ -361,7 +364,7 @@ describe('processFastAgentMessage', () => {
 
   it.each([
     ['peer mention', '<@U222> what do you think?', true],
-    ['bot and peer mention', '<@UBOT> ask <@U222>', true],
+    ['bot and peer mention', '<@UBOT> ask <@U222>', false],
     ['bot only', '<@UBOT> help', false],
     ['self mention', '<@U123> note to self', false],
     ['quoted peer mention', '> <@U222> quoted message', false],
@@ -397,7 +400,7 @@ describe('processFastAgentMessage', () => {
         'Untrusted supplemental context',
       );
       expect(call.currentMessageAgentContext).toContain(
-        'only send a message if you are addressed directly',
+        'Unless you are addressed directly',
       );
     } else {
       expect(call.currentMessageAgentContext).toBe(
@@ -405,6 +408,62 @@ describe('processFastAgentMessage', () => {
       );
     }
   });
+
+  it.each([
+    ['continuing discussion', 'I agree', [], true, true],
+    ['explicit address', '<@UBOT> please continue', [], false, false],
+    ['plain-name address', 'Roomote, please continue', [], false, false],
+    [
+      'after direct address',
+      'Next detail',
+      [{ user: 'U123', text: '<@UBOT> continue', ts: '100.004' }],
+      false,
+      false,
+    ],
+    [
+      'after bot progress only',
+      'I agree',
+      [{ user: 'UBOT', bot_id: 'B123', text: 'Still working', ts: '100.004' }],
+      true,
+      true,
+    ],
+  ])(
+    'scopes continuing peer caution: %s',
+    async (_name, text, laterHistory, caution, silent) => {
+      const slack = {
+        fetchThreadMessages: vi.fn(async () => [
+          { user: 'U123', text: '<@U222> what do you think?', ts: '100.003' },
+          ...laterHistory,
+        ]),
+      };
+      await processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'C123',
+          user: 'U123',
+          text,
+          ts: '100.005',
+          thread_ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T123',
+        roomoteSlackUserId: 'UBOT',
+      });
+      const call = mocks.answerQuestion.mock.calls[0]?.[0];
+      expect(call.allowSilentAmbientReply).toBe(silent);
+      if (caution) {
+        expect(call.currentMessageAgentContext).toContain(
+          'Human-to-human discussion may be continuing',
+        );
+        expect(call.currentMessageAgentContext).toContain(
+          'When directly addressed, respond normally',
+        );
+      } else {
+        expect(call.currentMessageAgentContext).toBeUndefined();
+      }
+    },
+  );
 
   it('durably steers an active Fast generation instead of waiting for its lock', async () => {
     const abort = vi.fn().mockResolvedValue(undefined);
