@@ -28,7 +28,7 @@ interface TelegramLiveTaskStreamData {
   taskUrl?: string;
 }
 
-export interface TelegramLiveTaskRenderResult {
+interface TelegramLiveTaskRenderResult {
   card: boolean;
   updated: boolean;
 }
