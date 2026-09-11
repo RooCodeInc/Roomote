@@ -259,6 +259,16 @@ export const AUTOMATION_WORK_ITEM_DISPOSITIONS = ['suggest', 'act'] as const;
 export type AutomationWorkItemDisposition =
   (typeof AUTOMATION_WORK_ITEM_DISPOSITIONS)[number];
 
+export function buildAutomationWorkItemDisplayPrompt(item: {
+  title: string;
+  brief?: string | null;
+}): string {
+  const title = item.title.trim();
+  const brief = item.brief?.trim();
+
+  return brief ? `${title}\n\n${brief}` : title;
+}
+
 /**
  * work_items (Stage 4): one table merges the old task_suggestions,
  * automation_work_items, and setup_new_queued_tasks. `kind` selects the flavor
