@@ -457,9 +457,13 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       );
     }
 
+    const chatId = Number(input.channelId);
+    if (!Number.isSafeInteger(chatId) || chatId <= 0) {
+      throw new Error('Telegram sendMessageDraft requires a private-chat id.');
+    }
     const threadId = parsePositiveInteger(input.threadId);
     await this.callBotApi('sendMessageDraft', {
-      chat_id: input.channelId,
+      chat_id: chatId,
       draft_id: input.draftId,
       text: input.text ?? '',
       ...(threadId ? { message_thread_id: threadId } : {}),
