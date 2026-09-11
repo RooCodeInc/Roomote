@@ -686,6 +686,31 @@ it.each([
   },
 );
 
+function isAuditRaceTestDatabase(name: string | undefined): boolean {
+  return name === 'test' || name?.endsWith('_test') === true;
+}
+
+it.each([
+  ['test', true],
+  ['roomote_test', true],
+  ['roomote_session_secrets_test', true],
+  ['_test', true],
+  [undefined, false],
+  ['', false],
+  ['postgres', false],
+  ['roomote_development', false],
+  ['production', false],
+  ['contest', false],
+  ['test_backup', false],
+  ['roomote_test_backup', false],
+  ['roomote-test', false],
+  ['TEST', false],
+  ['test\n', false],
+  ['roomote_test\n', false],
+] as const)('audit race database guard: %j is allowed=%s', (name, allowed) => {
+  expect(isAuditRaceTestDatabase(name)).toBe(allowed);
+});
+
 describe.each(['request', 'response', 'stream'] as const)(
   'audit wait race: %s',
   (phase) => {
@@ -700,8 +725,8 @@ describe.each(['request', 'response', 'stream'] as const)(
         const [database] = await db.execute<{ name: string }>(
           sql`select current_database() as name`,
         );
-        // This test takes a table-wide lock, never run it against a non-test database.
-        expect(database?.name).toMatch(/_test$/);
+        // Check the live DB before locking: CI uses "test", local DBs use "*_test".
+        expect(isAuditRaceTestDatabase(database?.name)).toBe(true);
         const base = await registered();
         const authorizationId = randomUUID();
         let pending: Promise<SessionEgressAuthorization> | undefined;
