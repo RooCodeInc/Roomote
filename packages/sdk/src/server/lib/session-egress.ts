@@ -123,15 +123,7 @@ export async function registerWorkload(
 ): Promise<SessionEgressWorkloadRegistration> {
   const parsed = parse(sessionEgressWorkloadRegisterSchema, input);
   try {
-    const result = await registerSessionEgressWorkload(parsed);
-    // Defense in depth: a grant whose origin no longer passes the public
-    // egress policy is never handed to a workload, even as a substitute.
-    return {
-      ...result,
-      substitutes: result.substitutes.filter((issue) =>
-        isOriginAllowed(issue.origin),
-      ),
-    };
+    return await registerSessionEgressWorkload(parsed, { isOriginAllowed });
   } catch (error) {
     if (error instanceof SessionEgressRegistrationError)
       throw new SessionEgressRequestError(409, error.code);
@@ -143,14 +135,9 @@ export async function issueSubstitutes(
   workloadId: unknown,
 ): Promise<SessionEgressWorkloadRegistration> {
   const id = parse(workloadIdSchema, workloadId);
-  const result = await issueSessionEgressSubstitutes(id);
+  const result = await issueSessionEgressSubstitutes(id, { isOriginAllowed });
   if (!result) throw new SessionEgressRequestError(404, 'workload_not_found');
-  return {
-    ...result,
-    substitutes: result.substitutes.filter((issue) =>
-      isOriginAllowed(issue.origin),
-    ),
-  };
+  return result;
 }
 
 export async function renewLease(workloadId: unknown, input: unknown) {

@@ -156,6 +156,7 @@ async function retireSubstitutes(
 async function mintMissingSubstitutes(
   tx: DatabaseOrTransaction,
   workload: typeof sessionEgressWorkloads.$inferSelect,
+  isOriginAllowed: (origin: string) => boolean,
 ): Promise<SessionEgressSubstituteIssue[]> {
   const grants = await tx
     .select(grantPolicyColumns)
@@ -178,6 +179,8 @@ async function mintMissingSubstitutes(
     .orderBy(asc(sessionSecrets.createdAt));
   const issued: SessionEgressSubstituteIssue[] = [];
   for (const grant of grants) {
+    // Withheld plaintext is unrecoverable, so denied grants must remain mintable.
+    if (!isOriginAllowed(grant.origin)) continue;
     const substitute = mintSubstitute();
     await tx.insert(sessionEgressSubstitutes).values({
       workloadId: workload.id,
@@ -220,6 +223,7 @@ function registration(
  */
 export async function registerSessionEgressWorkload(
   input: SessionEgressWorkloadRegister,
+  options: { isOriginAllowed?: (origin: string) => boolean } = {},
 ): Promise<SessionEgressWorkloadRegistration> {
   return db.transaction(async (tx) => {
     // Serialize concurrent registrations of the same run.
@@ -297,18 +301,33 @@ export async function registerSessionEgressWorkload(
       if (!workload)
         throw new SessionEgressRegistrationError('run_not_eligible');
     }
-    return registration(workload, await mintMissingSubstitutes(tx, workload));
+    return registration(
+      workload,
+      await mintMissingSubstitutes(
+        tx,
+        workload,
+        options.isOriginAllowed ?? (() => true),
+      ),
+    );
   });
 }
 
 /** Substitutes for grants approved after registration, without rotating. */
 export async function issueSessionEgressSubstitutes(
   workloadId: string,
+  options: { isOriginAllowed?: (origin: string) => boolean } = {},
 ): Promise<SessionEgressWorkloadRegistration | null> {
   return db.transaction(async (tx) => {
     const workload = await liveWorkload(tx, workloadId);
     if (!workload) return null;
-    return registration(workload, await mintMissingSubstitutes(tx, workload));
+    return registration(
+      workload,
+      await mintMissingSubstitutes(
+        tx,
+        workload,
+        options.isOriginAllowed ?? (() => true),
+      ),
+    );
   });
 }
 

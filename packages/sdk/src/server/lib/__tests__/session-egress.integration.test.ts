@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 import {
   db,
   eq,
+  hashSessionEgressSubstitute,
   runFactory,
+  sessionEgressSubstitutes,
   sessionFactory,
   sessionTasks,
   sessions,
@@ -116,6 +118,79 @@ it.each([undefined, ['GET'], ['GET', 'HEAD'], ['GET', 'POST', 'DELETE']])(
       (await registerWorkload({ runId, provider: 'docker', connectorIdentity }))
         .substitutes,
     ).toEqual([]);
+  },
+);
+
+it.each(['registration', 'late approval'])(
+  'recovers policy-withheld substitutes after %s without rotating',
+  async (phase) => {
+    const input = { runId, provider: 'docker', connectorIdentity };
+    const early =
+      phase === 'late approval' ? await registerWorkload(input) : null;
+    const pending = await prepareSessionSecret(context, policy);
+    const { secretRef } = await createSessionSecret(context, {
+      pendingRef: pending.pendingRef,
+      secret,
+      allowedMethods: pending.allowedMethods,
+    });
+    const realValidator = safeFetch.assertEgressUrlAllowed;
+    let blocked = true;
+    vi.spyOn(safeFetch, 'assertEgressUrlAllowed').mockImplementation(
+      (origin, ...options) => {
+        if (blocked && origin === policy.origin)
+          throw new Error('Origin policy tightened');
+        return realValidator(origin, ...options);
+      },
+    );
+    const registered = early ?? (await registerWorkload(input));
+    const withheld = await issueSubstitutes(registered.workloadId);
+    expect(registered.substitutes).toEqual([]);
+    expect(withheld.substitutes).toEqual([]);
+    const hidden = await db
+      .select()
+      .from(sessionEgressSubstitutes)
+      .where(eq(sessionEgressSubstitutes.workloadId, registered.workloadId));
+
+    blocked = false;
+    const results = await Promise.all([
+      issueSubstitutes(registered.workloadId),
+      issueSubstitutes(registered.workloadId),
+    ]);
+    for (const result of results)
+      expect(result).toMatchObject({
+        workloadId: registered.workloadId,
+        generation: registered.generation,
+      });
+    const issued = results.flatMap((result) => result.substitutes);
+    expect(issued).toEqual([
+      expect.objectContaining({ secretRef, origin: policy.origin }),
+    ]);
+    expect(hidden).toEqual([]);
+    const rows = await db
+      .select()
+      .from(sessionEgressSubstitutes)
+      .where(eq(sessionEgressSubstitutes.workloadId, registered.workloadId));
+    expect(rows).toEqual([
+      expect.objectContaining({
+        secretId: secretRef,
+        generation: registered.generation,
+        tokenHash: hashSessionEgressSubstitute(issued[0]!.substitute),
+      }),
+    ]);
+    const request = {
+      workloadId: registered.workloadId,
+      connectorIdentity,
+      substitute: issued[0]!.substitute,
+      destination: { host: 'api.example.com', port: 443 },
+      method: 'GET',
+      path: '/',
+    };
+    expect(await authorize(request)).toMatchObject({ allowed: true });
+    blocked = true;
+    expect(await authorize(request)).toEqual({
+      allowed: false,
+      reason: 'destination_mismatch',
+    });
   },
 );
 
