@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"unicode/utf16"
 )
 
 // ErrEcho is returned when a credential encoding is found.
@@ -27,6 +28,7 @@ var ErrEcho = errors.New("echo: credential material detected in upstream respons
 // Scanner matches encodings of one credential value.
 type Scanner struct {
 	patterns [][]byte
+	unicode  []byte
 	maxLen   int
 }
 
@@ -67,24 +69,25 @@ func New(value string) *Scanner {
 	}
 	add(lowerEscapes(url.QueryEscape(value)))
 	add(lowerEscapes(url.PathEscape(value)))
-	var percent, unicode, unicodeUpper strings.Builder
+	var percent, unicode strings.Builder
 	for _, b := range raw {
 		fmt.Fprintf(&percent, "%%%02X", b)
 	}
-	for _, r := range value {
+	for _, r := range utf16.Encode([]rune(value)) {
 		fmt.Fprintf(&unicode, "\\u%04x", r)
-		fmt.Fprintf(&unicodeUpper, "\\u%04X", r)
 	}
 	add(percent.String())
 	add(lowerEscapes(percent.String()))
 	add(unicode.String())
-	add(unicodeUpper.String())
 	add(hex.EncodeToString(raw))
 	add(strings.ToUpper(hex.EncodeToString(raw)))
 	encoded, _ := json.Marshal(value) // A string is always JSON encodable.
 	add(string(encoded[1 : len(encoded)-1]))
 
 	s := &Scanner{}
+	if unicode.Len() >= minPatternLen {
+		s.unicode = []byte(unicode.String())
+	}
 	for p := range seen {
 		if p != value && len(p) < minPatternLen {
 			continue
@@ -108,20 +111,39 @@ func (s *Scanner) Contains(b []byte) bool {
 			return true
 		}
 	}
+	// Fold only hex digits of valid lowercase-\u escapes. Raw credential bytes
+	// remain case-sensitive, and arbitrary per-escape casing needs no enumeration.
+	if len(s.unicode) > 0 && bytes.Contains(b, []byte(`\u`)) {
+		normalized := bytes.Clone(b)
+		for i := 0; i+5 < len(normalized); i++ {
+			if normalized[i] != '\\' || normalized[i+1] != 'u' {
+				continue
+			}
+			valid := true
+			for _, digit := range normalized[i+2 : i+6] {
+				if !((digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f') || (digit >= 'A' && digit <= 'F')) {
+					valid = false
+					break
+				}
+			}
+			if !valid {
+				continue
+			}
+			for j := i + 2; j < i+6; j++ {
+				if normalized[j] >= 'A' && normalized[j] <= 'F' {
+					normalized[j] += 'a' - 'A'
+				}
+			}
+			i += 5
+		}
+		return bytes.Contains(normalized, s.unicode)
+	}
 	return false
 }
 
 // ContainsString is Contains for strings.
 func (s *Scanner) ContainsString(str string) bool {
-	if s == nil {
-		return false
-	}
-	for _, p := range s.patterns {
-		if strings.Contains(str, string(p)) {
-			return true
-		}
-	}
-	return false
+	return s.Contains([]byte(str))
 }
 
 // MaxPatternLen is the longest pattern length (the cross-chunk window size

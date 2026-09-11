@@ -117,9 +117,9 @@ func (p *policy) TransformRequest(ctx context.Context, tc *transform.TransformCo
 		}
 		value := values[0]
 		for _, candidate := range []string{"Bearer ", "Basic ", "Token "} {
-			if strings.HasPrefix(value, candidate) {
+			if len(value) >= len(candidate) && strings.EqualFold(value[:len(candidate)], candidate) {
 				prefix = candidate
-				value = strings.TrimPrefix(value, candidate)
+				value = value[len(candidate):]
 				break
 			}
 		}
@@ -161,7 +161,7 @@ func (p *policy) TransformRequest(ctx context.Context, tc *transform.TransformCo
 	for _, name := range []string{"authorization", "x-api-key", "api-key"} {
 		req.Header.Del(name)
 	}
-	req.Header.Set(slot, prefix+c.Value)
+	req.Header.Set(slot, c.HeaderPrefix+c.Value)
 	req.Header.Set("Accept-Encoding", "identity")
 	return proceed()
 }
@@ -174,11 +174,14 @@ func (s *exchange) check(phase string) error {
 	req := s.request
 	req.Phase = phase
 	grant, err := s.policy.client.authorize(s.ctx, req)
-	if err != nil || grant.Generation != s.grant.Generation || grant.SessionID != s.grant.SessionID || grant.SecretRef != s.grant.SecretRef || !grant.ExpiresAt.Equal(s.grant.ExpiresAt) {
+	if err != nil || grant.Generation != s.grant.Generation || grant.SessionID != s.grant.SessionID || grant.SecretRef != s.grant.SecretRef || grant.ExpiresAt.Before(s.grant.ExpiresAt) {
 		s.failed.Store(true)
 		s.cancel()
 		return errDenied
 	}
+	// Renewals may extend live authorization, but never the exchange's original
+	// context deadline. Remember the latest expiry so any shortening fails closed.
+	s.grant.ExpiresAt = grant.ExpiresAt
 	return nil
 }
 func (s *exchange) watch() {

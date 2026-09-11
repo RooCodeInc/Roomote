@@ -13,6 +13,65 @@ import (
 
 const cred = "sk-live-Qm9vayBvZiBTZWNyZXRz+/=="
 
+func TestMixedCaseUnicodeJSON(t *testing.T) {
+	const key = "JKLMNOJKLMNOJKLMNO"
+	var escaped strings.Builder
+	for i, r := range key {
+		format := "\\u%04x"
+		if i%2 == 1 {
+			format = "\\u%04X"
+		}
+		fmt.Fprintf(&escaped, format, r)
+	}
+	body := []byte(`"` + escaped.String() + `"`)
+	var decoded string
+	if err := json.Unmarshal(body, &decoded); err != nil || decoded != key {
+		t.Fatal("fixture must be valid JSON for the original value")
+	}
+	s := New(key)
+	if !s.Contains(body) || !s.ContainsString(string(body)) {
+		t.Error("missed mixed-case unicode escapes")
+	}
+	st := s.NewStream()
+	var emitted []byte
+	var detected bool
+	for start := 0; start < len(body); start += 5 {
+		end := min(start+5, len(body))
+		out, err := st.Feed(body[start:end])
+		emitted = append(emitted, out...)
+		if errors.Is(err, ErrEcho) {
+			detected = true
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !detected {
+		out, err := st.Flush()
+		emitted = append(emitted, out...)
+		detected = errors.Is(err, ErrEcho)
+	}
+	if !detected || bytes.Contains(emitted, []byte(`\u004`)) {
+		t.Fatal("mixed-case credential was not held and suppressed")
+	}
+	// Flush must apply the same matching rules, even without another chunk.
+	flush := &Stream{s: s, pending: body}
+	if out, err := flush.Flush(); !errors.Is(err, ErrEcho) || len(out) != 0 {
+		t.Fatal("flush missed mixed-case credential")
+	}
+	for _, miss := range []string{
+		strings.ToLower(key),
+		strings.ReplaceAll(escaped.String(), `\u`, `\U`),
+		strings.ReplaceAll(escaped.String(), "004", "006"),
+		strings.ReplaceAll(escaped.String(), "004", "00g"),
+	} {
+		if s.ContainsString(miss) {
+			t.Errorf("changed credential or invalid escape matched: %q", miss)
+		}
+	}
+}
+
 func TestUnicodeJSONEncodings(t *testing.T) {
 	for _, format := range []string{"\\u%04x", "\\u%04X"} {
 		t.Run(format, func(t *testing.T) {

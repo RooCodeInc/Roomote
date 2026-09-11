@@ -99,7 +99,8 @@ type fixture struct {
 	hits            atomic.Int64
 	phaseMu         sync.Mutex
 	phases          []string
-	expiry          time.Time
+	expiry          atomic.Int64
+	grantPrefix     string
 	api             *httptest.Server
 	logs            logBuffer
 }
@@ -139,7 +140,8 @@ func (f *fixture) assertFinal(outcome, authorizationID string) {
 
 func newFixture(t *testing.T, handler http.HandlerFunc) *fixture {
 	t.Helper()
-	f := &fixture{t: t, pki: newPKI(t), expiry: time.Now().Add(time.Minute).Truncate(time.Second)}
+	f := &fixture{t: t, pki: newPKI(t), grantPrefix: "Bearer "}
+	f.expiry.Store(time.Now().Add(time.Minute).Truncate(time.Second).UnixNano())
 	f.connectorCert = f.pki.leaf(t, []string{connectorID, "roomote://workload/" + workload})
 	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { f.hits.Add(1); handler(w, r) }))
 	upstream.TLS = &tls.Config{Certificates: []tls.Certificate{f.pki.leaf(t, nil)}, MinVersion: tls.VersionTLS12}
@@ -169,9 +171,9 @@ func newFixture(t *testing.T, handler http.HandlerFunc) *fixture {
 			_ = json.NewEncoder(w).Encode(map[string]any{"allowed": false, "reason": "workload_mismatch"})
 			return // Fixture writer errors are client disconnects.
 		}
-		grant := authorization{Allowed: true, AuthorizationID: authID, WorkloadID: workload, Generation: 1, SessionID: otherWorkload, SecretRef: otherWorkload, ExpiresAt: f.expiry}
+		grant := authorization{Allowed: true, AuthorizationID: authID, WorkloadID: workload, Generation: 1, SessionID: otherWorkload, SecretRef: otherWorkload, ExpiresAt: time.Unix(0, f.expiry.Load())}
 		if input.Phase == "request" {
-			grant.Credential = &credential{"authorization", "Bearer ", realKey}
+			grant.Credential = &credential{"authorization", f.grantPrefix, realKey}
 		}
 		_ = json.NewEncoder(w).Encode(grant) // Fixture writer errors are client disconnects.
 	}))
@@ -257,6 +259,172 @@ func TestIronPOSTAndNullBody(t *testing.T) {
 		})
 	}
 }
+
+func TestIronAuthenticationSchemeCasing(t *testing.T) {
+	for _, canonical := range []string{"Token ", "Bearer ", "Basic "} {
+		for _, supplied := range []string{canonical, strings.ToLower(canonical), strings.ToUpper(canonical), canonical[:1] + strings.ToUpper(canonical[1:3]) + strings.ToLower(canonical[3:])} {
+			t.Run(canonical+supplied, func(t *testing.T) {
+				observed := make(chan string, 1)
+				f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+					observed <- r.Header.Get("Authorization")
+					w.Header().Set("Content-Length", "2")
+					_, _ = io.WriteString(w, "ok")
+				})
+				f.grantPrefix = canonical
+				req := f.request("POST", "/sdk", strings.NewReader(`{"sdk":"unmodified"}`))
+				req.Header.Set("Authorization", supplied+substitute)
+				resp, err := f.client.Do(req)
+				require.NoError(t, err)
+				defer resp.Body.Close()
+				_, err = io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.Equal(t, 200, resp.StatusCode)
+				if resp.StatusCode == 200 {
+					require.Equal(t, canonical+realKey, <-observed)
+				}
+			})
+		}
+	}
+	for _, mode := range []string{"different scheme", "token case", "wrong slot", "double space", "missing space"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newFixture(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+			req := f.request("GET", "/sdk", nil)
+			switch mode {
+			case "different scheme":
+				req.Header.Set("Authorization", "token "+substitute)
+			case "token case":
+				req.Header.Set("Authorization", "bearer "+strings.Replace(substitute, "a", "A", 1))
+			case "wrong slot":
+				req.Header.Del("Authorization")
+				req.Header.Set("X-API-Key", "bearer "+substitute)
+			case "double space":
+				req.Header.Set("Authorization", "bearer  "+substitute)
+			case "missing space":
+				req.Header.Set("Authorization", "bearer"+substitute)
+			}
+			resp, err := f.client.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, 403, resp.StatusCode)
+			require.Zero(t, f.hits.Load())
+		})
+	}
+}
+
+func TestIronLeaseRenewalDuringRequest(t *testing.T) {
+	for _, mode := range []string{"extend", "shorten", "revoke", "expire"} {
+		t.Run(mode, func(t *testing.T) {
+			entered, release, canceled := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				close(entered)
+				select {
+				case <-release:
+					w.Header().Set("Content-Length", "2")
+					_, _ = io.WriteString(w, "ok")
+				case <-r.Context().Done():
+					close(canceled)
+				}
+			})
+			type result struct {
+				resp *http.Response
+				err  error
+			}
+			done := make(chan result, 1)
+			go func() {
+				resp, err := f.client.Do(f.request("GET", "/renewal", nil))
+				done <- result{resp, err}
+			}()
+			<-entered
+			switch mode {
+			case "extend":
+				f.expiry.Add(int64(time.Minute))
+			case "shorten":
+				f.expiry.Store(time.Now().Add(10 * time.Second).UnixNano())
+			case "revoke":
+				f.revoked.Store(true)
+			case "expire":
+				f.expiry.Store(time.Now().Add(-time.Second).UnixNano())
+			}
+			require.Eventually(t, func() bool {
+				f.phaseMu.Lock()
+				defer f.phaseMu.Unlock()
+				return len(f.phases) > 1
+			}, time.Second, time.Millisecond)
+			if mode != "extend" {
+				select {
+				case <-canceled:
+				case <-time.After(time.Second):
+					t.Fatal("live authorization change did not cancel the waiting upstream")
+				}
+			}
+			close(release)
+			got := <-done
+			if mode == "extend" {
+				require.NoError(t, got.err)
+				require.Equal(t, 200, got.resp.StatusCode)
+				data, err := io.ReadAll(got.resp.Body)
+				require.NoError(t, err)
+				require.Equal(t, "ok", string(data))
+				f.assertFinal("forwarded", authID)
+			} else if got.err == nil {
+				require.GreaterOrEqual(t, got.resp.StatusCode, 400)
+			}
+			if mode != "extend" {
+				f.assertFinal("canceled", authID)
+			}
+			if got.resp != nil {
+				got.resp.Body.Close()
+			}
+		})
+	}
+}
+
+func TestIronLeaseExtensionKeepsOriginalStreamDeadline(t *testing.T) {
+	entered, continued, release, closed := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: initial\n\n")
+		w.(http.Flusher).Flush()
+		close(entered)
+		defer close(closed)
+		select {
+		case <-release:
+			_, _ = io.WriteString(w, "data: renewed\n\n")
+			w.(http.Flusher).Flush()
+			close(continued)
+		case <-r.Context().Done():
+			return
+		}
+		<-r.Context().Done()
+	})
+	originalDeadline := time.Now().Add(1200 * time.Millisecond)
+	f.expiry.Store(originalDeadline.UnixNano())
+	resp, err := f.client.Do(f.request("GET", "/renewed-stream", nil))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	<-entered
+	f.expiry.Add(int64(time.Minute))
+	time.Sleep(150 * time.Millisecond) // Cross several live-check intervals before emitting again.
+	close(release)
+	select {
+	case <-continued:
+	case <-closed:
+		t.Fatal("positive renewal canceled the stream")
+	case <-time.After(time.Second):
+		t.Fatal("stream did not continue after renewal")
+	}
+	data, err := io.ReadAll(resp.Body)
+	require.Error(t, err, "original expiry must still cancel the open stream")
+	require.Contains(t, string(data), "data: renewed")
+	require.WithinDuration(t, originalDeadline, time.Now(), 700*time.Millisecond)
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("original deadline did not cancel upstream")
+	}
+	f.assertFinal("canceled", authID)
+}
+
 func TestIronReflectionDenied(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("prefix:" + realKey + ":suffix"))
 	cases := []struct{ name, value string }{{"literal", realKey}, {"base64", encoded}, {"percent", url.QueryEscape(realKey)}}
@@ -314,7 +482,7 @@ func TestIronIdleRevokeAndOutage(t *testing.T) {
 				close(closed) // Cancellation intentionally interrupts the fixture.
 			})
 			if mode == "expiry" {
-				f.expiry = time.Now().Add(600 * time.Millisecond)
+				f.expiry.Store(time.Now().Add(600 * time.Millisecond).UnixNano())
 			}
 			resp, err := f.client.Do(f.request("GET", "/idle", nil))
 			require.NoError(t, err)

@@ -60,8 +60,10 @@ The gateway uses the existing Roomote
 - Inner TLS is mandatory. CONNECT target, SNI, Host and any absolute request URL
   must agree, including the exact HTTPS port. IP literal origins are refused.
 - Only `authorization`, `x-api-key`, or `api-key` can hold one whole substitute.
-  The returned grant must match both that slot and the exact presented prefix
-  (`Bearer `, `Basic `, `Token `, or empty). A second auth slot or duplicate
+  The returned grant must match that slot and the presented authentication scheme
+  (`Bearer `, `Basic `, `Token `, or empty). Only the scheme is case-insensitive;
+  substitute values remain case-sensitive and spacing remains exact. Injection
+  uses the grant's canonical prefix. A second auth slot or duplicate
   value is denied. Paths, queries, bodies and other headers never supply
   authority or receive credential substitution. Request bodies are not scanned
   or buffered and retain their bytes; absent bodies remain `http.NoBody`.
@@ -77,7 +79,9 @@ The gateway uses the existing Roomote
   guard. TLS certificate validation remains on. No production private-CIDR,
   alternate upstream proxy, extra upstream CA or TLS-disable setting is exposed.
 - Response headers, trailers and bytes are scanned for literal, common
-  percent-encoded, base64-aligned, JSON-escaped and hex echoes. Non-identity
+  percent-encoded, base64-aligned, JSON-escaped and hex echoes. Fully Unicode-escaped
+  JSON may mix hex-digit casing within and between valid lowercase `\u` escapes;
+  matching does not fold raw credential values. Non-identity
   content encodings fail closed. Trailers are scanned but never forwarded.
   Redirects are not followed and Location/Alt-Svc are stripped.
 - Known-length responses up to the configured bound are fully scanned before
@@ -177,7 +181,10 @@ by a malicious approved upstream are outside the guarantee. Ordinary calls
 without substitutes are denied; this is not a general unrestricted internet
 proxy. CONNECT alone does not validate a live grant. The revocation acceleration
 feed is not consumed; correctness uses per-boundary checks, idle polling and
-deadlines. Lease extensions do not prolong an existing exchange: a changed
-expiry fails closed and a fresh request is required. Connector certificate
+deadlines. Positive lease extensions for the same valid workload/generation are
+accepted without changing an existing exchange's original hard deadline. A
+shortening relative to the most recent validated expiry fails closed, as do
+revocation, identity changes and expiry. New requests can use the renewed lease;
+existing requests and streams still end at their original deadline. Connector certificate
 revocation requires removing its workload binding or trust plus connection
 cleanup; the certificate is not itself a live grant.
