@@ -166,6 +166,7 @@ import {
   listFastAgentIntegrations,
   type FastAgentIntegration,
 } from './fast-agent-integration-broker';
+import { McpToolCallError } from '../mcp-tool-client';
 import {
   cancelFastAgentTask,
   launchFastAgentPrReview,
@@ -1555,6 +1556,9 @@ function selectActiveTaskId(
 }
 
 function toolFailure(error: unknown): { success: false; error: string } {
+  if (error instanceof McpToolCallError && error.upstreamText) {
+    return { success: false, error: error.upstreamText };
+  }
   return { success: false, error: formatErrorForLog(error) };
 }
 
