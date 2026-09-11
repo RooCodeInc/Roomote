@@ -2617,6 +2617,25 @@ describe('FastSessionTranscript', () => {
           expect.objectContaining({ sessionId: 'session-1', phase: 'ended' }),
         ),
       );
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'call-2',
+                role: 'assistant',
+                text: 'Call ended',
+                ts: 10,
+              }),
+              eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+              role: 'system',
+              payload: { phase: 'ended', durationMs: 9_000 },
+            },
+          ],
+        });
+      });
+      expect(screen.getByText('Call ended · 9s')).toBeInTheDocument();
     });
 
     it('attributes a streamed first reply to its own delegation even after a second request', async () => {
