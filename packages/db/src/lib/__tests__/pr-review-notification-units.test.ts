@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   and,
   attachCanonicalPrReviewActionMessage,
+  attachCanonicalPrReviewActionMessageWithRetirement,
   claimCanonicalPrReviewAction,
   claimDueCanonicalPrReviewDeliveries,
   completeCanonicalPrReviewActionDispatch,
@@ -31,6 +32,7 @@ import {
   upsertPrReviewAutoPreference,
   userFactory,
   withCanonicalPrReviewAutoDispatchFence,
+  withCanonicalPrReviewSlackThreadActionFence,
 } from '../../server';
 import { RunStatus } from '@roomote/types';
 
@@ -1119,6 +1121,50 @@ describe('canonical PR review notification ownership', () => {
     return claim;
   };
 
+  const setUpSlackTaskDelivery = async (input: {
+    prNumber: number;
+    workspaceId: string;
+    channelId: string;
+    threadId: string;
+  }) => {
+    const task = await taskFactory.create();
+    const repository = `owner/slack-thread-${task.id}`;
+    await associate(task.id, repository, input.prNumber);
+    await persistPrReviewEvent(
+      eventInput({
+        repository,
+        prNumber: input.prNumber,
+        eventKey: `slack-thread-${task.id}`,
+      }),
+    );
+    const claim = (await claimForRepository(repository)).find(
+      ({ repository: claimedRepository }) => claimedRepository === repository,
+    );
+    if (!claim || claim.ownershipVersion !== 'canonical') {
+      throw new Error('expected canonical claim');
+    }
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'claimed',
+      status: 'prepared',
+    });
+    await transitionCanonicalPrReviewDelivery({
+      deliveryId: claim.deliveryId,
+      leaseToken: claim.leaseToken,
+      expected: 'prepared',
+      status: 'prompt_posting',
+      values: {
+        followUpPrompt: `Resolve feedback on ${repository}#${input.prNumber}.`,
+        routeProvider: 'slack',
+        routeWorkspaceId: input.workspaceId,
+        routeChannelId: input.channelId,
+        routeThreadId: input.threadId,
+      },
+    });
+    return { claim, repository, taskId: task.id };
+  };
+
   const postAction = async (repository: string) => {
     const claim = await claimToPromptPosting(repository);
     await expect(
@@ -1203,6 +1249,223 @@ describe('canonical PR review notification ownership', () => {
         prReviewAction: { deliveryId: firstDeliveryId, status: 'dismissed' },
       },
     });
+  });
+
+  it('keeps only the newest Slack action across repositories and isolates workspaces and threads', async () => {
+    const mainRoute = {
+      workspaceId: 'T-thread-wide',
+      channelId: 'C-shared',
+      threadId: '111.222',
+    };
+    const [older, newest, otherWorkspace, otherThread] = await Promise.all([
+      setUpSlackTaskDelivery({ ...mainRoute, prNumber: 41 }),
+      setUpSlackTaskDelivery({ ...mainRoute, prNumber: 42 }),
+      setUpSlackTaskDelivery({
+        ...mainRoute,
+        workspaceId: 'T-other',
+        prNumber: 43,
+      }),
+      setUpSlackTaskDelivery({
+        ...mainRoute,
+        threadId: '333.444',
+        prNumber: 44,
+      }),
+    ]);
+
+    await attachCanonicalPrReviewActionMessage(
+      older.claim.deliveryId,
+      '100.000001',
+      older.claim.leaseToken,
+    );
+    await attachCanonicalPrReviewActionMessage(
+      otherWorkspace.claim.deliveryId,
+      'message-workspace',
+      otherWorkspace.claim.leaseToken,
+    );
+    await attachCanonicalPrReviewActionMessage(
+      otherThread.claim.deliveryId,
+      'message-thread',
+      otherThread.claim.leaseToken,
+    );
+    await expect(
+      attachCanonicalPrReviewActionMessageWithRetirement(
+        newest.claim.deliveryId,
+        '100.000002',
+        newest.claim.leaseToken,
+      ),
+    ).resolves.toEqual({
+      attached: true,
+      superseded: [
+        expect.objectContaining({
+          deliveryId: older.claim.deliveryId,
+          provider: 'slack',
+          slackTeamId: mainRoute.workspaceId,
+          channelId: mainRoute.channelId,
+          threadId: mainRoute.threadId,
+          messageId: '100.000001',
+        }),
+      ],
+    });
+
+    await expect(deliveryStatusOf(older.claim.deliveryId)).resolves.toBe(
+      'dismissed',
+    );
+    await expect(deliveryStatusOf(newest.claim.deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+    await expect(
+      deliveryStatusOf(otherWorkspace.claim.deliveryId),
+    ).resolves.toBe('awaiting_user_action');
+    await expect(deliveryStatusOf(otherThread.claim.deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
+    await expect(
+      claimCanonicalPrReviewAction({
+        deliveryId: newest.claim.deliveryId,
+        choice: 'yes',
+        expectedSlackTeamId: mainRoute.workspaceId,
+      }),
+    ).resolves.toMatchObject({
+      taskId: newest.taskId,
+      repository: newest.repository,
+      prNumber: 42,
+    });
+  });
+
+  it('rolls back a canonical Slack attachment when shared-store arbitration fails', async () => {
+    const delivery = await setUpSlackTaskDelivery({
+      workspaceId: 'T-rollback',
+      channelId: 'C-rollback',
+      threadId: '111.333',
+      prNumber: 45,
+    });
+
+    await expect(
+      attachCanonicalPrReviewActionMessageWithRetirement(
+        delivery.claim.deliveryId,
+        '100.000001',
+        delivery.claim.leaseToken,
+        {
+          arbitrateSlackThread: async () => {
+            throw new Error('Redis unavailable');
+          },
+        },
+      ),
+    ).rejects.toThrow('Redis unavailable');
+    await expect(
+      db.query.prReviewNotificationDeliveries.findFirst({
+        where: eq(prReviewNotificationDeliveries.id, delivery.claim.deliveryId),
+        columns: {
+          status: true,
+          leaseToken: true,
+          providerMessageId: true,
+        },
+      }),
+    ).resolves.toEqual({
+      status: 'prompt_posting',
+      leaseToken: delivery.claim.leaseToken,
+      providerMessageId: null,
+    });
+  });
+
+  it('retires canonical Slack controls when a newer legacy message wins the shared fence', async () => {
+    const canonical = await setUpSlackTaskDelivery({
+      workspaceId: 'T-shared-fence',
+      channelId: 'C-shared-fence',
+      threadId: '222.333',
+      prNumber: 46,
+    });
+    await attachCanonicalPrReviewActionMessage(
+      canonical.claim.deliveryId,
+      '100.000001',
+      canonical.claim.leaseToken,
+    );
+
+    await expect(
+      withCanonicalPrReviewSlackThreadActionFence(
+        {
+          slackTeamId: 'T-shared-fence',
+          channelId: 'C-shared-fence',
+          threadId: '222.333',
+        },
+        async (newestCanonicalMessageId) => ({
+          newestMessageId: '100.000002',
+          result: newestCanonicalMessageId,
+        }),
+      ),
+    ).resolves.toEqual({
+      result: '100.000001',
+      superseded: [
+        expect.objectContaining({
+          deliveryId: canonical.claim.deliveryId,
+          messageId: '100.000001',
+        }),
+      ],
+    });
+    await expect(deliveryStatusOf(canonical.claim.deliveryId)).resolves.toBe(
+      'dismissed',
+    );
+  });
+
+  it('retires a newly attached canonical action when arbitration finds a newer legacy message', async () => {
+    const canonical = await setUpSlackTaskDelivery({
+      workspaceId: 'T-canonical-loses',
+      channelId: 'C-canonical-loses',
+      threadId: '333.444',
+      prNumber: 47,
+    });
+
+    await expect(
+      attachCanonicalPrReviewActionMessageWithRetirement(
+        canonical.claim.deliveryId,
+        '100.000001',
+        canonical.claim.leaseToken,
+        { arbitrateSlackThread: async () => '100.000002' },
+      ),
+    ).resolves.toEqual({
+      attached: true,
+      superseded: [
+        expect.objectContaining({
+          deliveryId: canonical.claim.deliveryId,
+          messageId: '100.000001',
+        }),
+      ],
+    });
+    await expect(deliveryStatusOf(canonical.claim.deliveryId)).resolves.toBe(
+      'dismissed',
+    );
+  });
+
+  it('does not retire canonical actions when a legacy attachment was already claimed', async () => {
+    const canonical = await setUpSlackTaskDelivery({
+      workspaceId: 'T-claimed-legacy',
+      channelId: 'C-claimed-legacy',
+      threadId: '444.555',
+      prNumber: 48,
+    });
+    await attachCanonicalPrReviewActionMessage(
+      canonical.claim.deliveryId,
+      '100.000001',
+      canonical.claim.leaseToken,
+    );
+
+    await expect(
+      withCanonicalPrReviewSlackThreadActionFence(
+        {
+          slackTeamId: 'T-claimed-legacy',
+          channelId: 'C-claimed-legacy',
+          threadId: '444.555',
+        },
+        async (newestCanonicalMessageId) => ({
+          newestMessageId: newestCanonicalMessageId!,
+          retireCanonical: false,
+          result: 'not-attached',
+        }),
+      ),
+    ).resolves.toEqual({ result: 'not-attached', superseded: [] });
+    await expect(deliveryStatusOf(canonical.claim.deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
   });
 
   it('retires only awaiting offers from older PR heads after a new commit', async () => {
@@ -1755,5 +2018,50 @@ describe('canonical PR review notification ownership', () => {
       1,
     );
     expect(statuses.filter((s) => s === 'dismissed')).toHaveLength(1);
+  });
+
+  it('keeps exactly one awaiting Slack offer when different task destinations attach concurrently', async () => {
+    const route = {
+      workspaceId: 'T-race',
+      channelId: 'C-race',
+      threadId: '555.666',
+    };
+    const [first, second] = await Promise.all([
+      setUpSlackTaskDelivery({ ...route, prNumber: 51 }),
+      setUpSlackTaskDelivery({ ...route, prNumber: 52 }),
+    ]);
+
+    const results = await Promise.all([
+      attachCanonicalPrReviewActionMessageWithRetirement(
+        first.claim.deliveryId,
+        '100.000001',
+        first.claim.leaseToken,
+      ),
+      attachCanonicalPrReviewActionMessageWithRetirement(
+        second.claim.deliveryId,
+        '100.000002',
+        second.claim.leaseToken,
+      ),
+    ]);
+    expect(results).toEqual([
+      expect.objectContaining({ attached: true }),
+      expect.objectContaining({ attached: true }),
+    ]);
+    expect(results.flatMap(({ superseded }) => superseded)).toEqual([
+      expect.objectContaining({
+        provider: 'slack',
+        slackTeamId: route.workspaceId,
+        channelId: route.channelId,
+        threadId: route.threadId,
+        messageId: '100.000001',
+      }),
+    ]);
+
+    await expect(deliveryStatusOf(first.claim.deliveryId)).resolves.toBe(
+      'dismissed',
+    );
+    await expect(deliveryStatusOf(second.claim.deliveryId)).resolves.toBe(
+      'awaiting_user_action',
+    );
   });
 });

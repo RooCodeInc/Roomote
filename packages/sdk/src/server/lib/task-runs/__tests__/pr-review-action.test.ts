@@ -11,6 +11,7 @@ const {
   mockRetireCanonical,
   mockRetireCanonicalForPullRequest,
   mockAttachCanonical,
+  mockSlackThreadFence,
   mockGetCommunicationProviderAdapter,
   mockSlackInstallation,
   mockSlackBlocks,
@@ -32,6 +33,7 @@ const {
     mockRetireCanonical: vi.fn(),
     mockRetireCanonicalForPullRequest: vi.fn(),
     mockAttachCanonical: vi.fn(),
+    mockSlackThreadFence: vi.fn(),
     mockGetCommunicationProviderAdapter: vi.fn(),
     mockSlackInstallation: vi.fn(),
     mockSlackBlocks: vi.fn(),
@@ -68,8 +70,10 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
-    attachCanonicalPrReviewActionMessage: (...args: unknown[]) =>
+    attachCanonicalPrReviewActionMessageWithRetirement: (...args: unknown[]) =>
       mockAttachCanonical(...args),
+    withCanonicalPrReviewSlackThreadActionFence: (...args: unknown[]) =>
+      mockSlackThreadFence(...args),
     claimCanonicalPrReviewAction: vi.fn().mockResolvedValue(null),
     retireCanonicalPrReviewActionsForDestination: (...args: unknown[]) =>
       mockRetireCanonical(...args),
@@ -119,7 +123,19 @@ describe('PR review action state', () => {
     mockFindPreference.mockResolvedValue(null);
     mockRetireCanonical.mockResolvedValue([]);
     mockRetireCanonicalForPullRequest.mockResolvedValue([]);
-    mockAttachCanonical.mockResolvedValue(false);
+    mockAttachCanonical.mockResolvedValue({
+      attached: false,
+      superseded: [],
+    });
+    mockSlackThreadFence.mockImplementation(
+      async (
+        _input,
+        arbitrate: (messageId: string | null) => Promise<unknown>,
+      ) => {
+        const arbitration = (await arbitrate(null)) as { result: unknown };
+        return { result: arbitration.result, superseded: [] };
+      },
+    );
     mockGetCommunicationProviderAdapter.mockResolvedValue(null);
   });
 
@@ -244,7 +260,7 @@ describe('PR review action state', () => {
         prNumber: 42,
       }),
     );
-    mockEval.mockResolvedValue([1]);
+    mockEval.mockResolvedValue([1, 'message-1']);
 
     await expect(
       attachPendingPrReviewActionMessageWithRetirement('nonce-1', 'message-1'),
@@ -257,6 +273,7 @@ describe('PR review action state', () => {
       'pr-review-action:thread:discord:channel-1:thread-1',
       'message-1',
       'pr-review-action:',
+      '',
     );
     expect(mockEval.mock.calls[0]?.[0]).toContain("'KEEPTTL'");
     expect(mockEval.mock.calls[0]?.[0]).toContain(
@@ -270,7 +287,7 @@ describe('PR review action state', () => {
     expect(mockEval.mock.calls[0]?.[0]).toContain('prior.retired = true');
   });
 
-  it('returns and de-indexes the prior offer for the same PR context', async () => {
+  it('returns and de-indexes a prior Slack offer for another PR in the same thread', async () => {
     mockGet.mockResolvedValue(
       JSON.stringify({
         nonce: 'nonce-new',
@@ -278,12 +295,13 @@ describe('PR review action state', () => {
         slackTeamId: 'T1',
         channelId: 'C1',
         threadId: '111.222',
-        repository: 'owner/repo',
-        prNumber: 42,
+        repository: 'other/repository',
+        prNumber: 99,
       }),
     );
     mockEval.mockResolvedValue([
       1,
+      '200.000002',
       JSON.stringify({
         nonce: 'nonce-old',
         provider: 'slack',
@@ -292,21 +310,21 @@ describe('PR review action state', () => {
         threadId: '111.222',
         repository: 'owner/repo',
         prNumber: 42,
-        messageId: 'message-old',
+        messageId: '200.000001',
       }),
     ]);
 
     await expect(
       attachPendingPrReviewActionMessageWithRetirement(
         'nonce-new',
-        'message-new',
+        '200.000002',
       ),
     ).resolves.toEqual({
       attached: true,
       superseded: [
         expect.objectContaining({
           nonce: 'nonce-old',
-          messageId: 'message-old',
+          messageId: '200.000001',
         }),
       ],
     });
@@ -315,7 +333,77 @@ describe('PR review action state', () => {
       'pr-review-action:thread:slack:T1:C1:111.222',
     );
     expect(mockEval.mock.calls[0]?.[0]).toContain(
-      'prior.prNumber == pending.prNumber',
+      "if pending.provider == 'slack' then",
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      "return prior.provider == 'slack' and sameSlackTeam",
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      'prior.messageId and prior.messageId > winner',
+    );
+    expect(mockEval.mock.calls[0]?.[0]).toContain(
+      'prior.repository == pending.repository',
+    );
+    expect(mockSlackThreadFence).toHaveBeenCalledWith(
+      {
+        slackTeamId: 'T1',
+        channelId: 'C1',
+        threadId: '111.222',
+      },
+      expect.any(Function),
+    );
+  });
+
+  it('retires older canonical controls when a later-posted legacy offer wins', async () => {
+    const pending = {
+      nonce: 'legacy-newer',
+      provider: 'slack' as const,
+      slackTeamId: 'T1',
+      taskId: 'legacy-task',
+      repository: 'legacy/repository',
+      prNumber: 99,
+      prUrl: 'https://github.com/legacy/repository/pull/99',
+      channelId: 'C1',
+      threadId: '111.222',
+      followUpPrompt: 'Address the newer feedback.',
+    };
+    mockGet.mockResolvedValue(JSON.stringify(pending));
+    mockEval.mockResolvedValue([1, '200.000002']);
+    mockSlackThreadFence.mockImplementation(async (_input, arbitrate) => {
+      const arbitration = await arbitrate('200.000001');
+      return {
+        result: arbitration.result,
+        superseded: [
+          {
+            deliveryId: '00000000-0000-4000-8000-000000000001',
+            provider: 'slack',
+            slackTeamId: 'T1',
+            channelId: 'C1',
+            threadId: '111.222',
+            messageId: '200.000001',
+          },
+        ],
+      };
+    });
+
+    await expect(
+      attachPendingPrReviewActionMessageWithRetirement(
+        pending.nonce,
+        '200.000002',
+      ),
+    ).resolves.toEqual({
+      attached: true,
+      superseded: [expect.objectContaining({ messageId: '200.000001' })],
+    });
+
+    expect(mockEval).toHaveBeenCalledWith(
+      expect.any(String),
+      2,
+      'pr-review-action:legacy-newer',
+      'pr-review-action:thread:slack:T1:C1:111.222',
+      '200.000002',
+      'pr-review-action:',
+      '200.000001',
     );
   });
 
@@ -333,6 +421,7 @@ describe('PR review action state', () => {
     mockGet.mockResolvedValue(JSON.stringify(lateOffer));
     mockEval.mockResolvedValue([
       1,
+      'message-old',
       JSON.stringify({ ...lateOffer, messageId: 'message-old' }),
     ]);
 
@@ -353,11 +442,12 @@ describe('PR review action state', () => {
     });
   });
 
-  it('retires legacy offers after a canonical attachment succeeds', async () => {
+  it('returns canonical and legacy Slack offers from other PRs in the same thread', async () => {
     const context = {
       nonce: '00000000-0000-4000-8000-000000000001',
       canonicalDeliveryId: '00000000-0000-4000-8000-000000000001',
-      provider: 'discord' as const,
+      provider: 'slack' as const,
+      slackTeamId: 'T1',
       taskId: 'task-1',
       repository: 'owner/repo',
       prNumber: 42,
@@ -370,28 +460,102 @@ describe('PR review action state', () => {
       ...context,
       nonce: 'legacy-nonce',
       canonicalDeliveryId: undefined,
+      repository: 'legacy/repository',
+      prNumber: 7,
       messageId: 'legacy-message',
     };
-    mockAttachCanonical.mockResolvedValue(true);
-    mockEval.mockResolvedValue([JSON.stringify(legacy)]);
+    mockAttachCanonical.mockImplementation(
+      async (_nonce, _messageId, _leaseToken, options) => {
+        await options.arbitrateSlackThread('200.000002');
+        return {
+          attached: true,
+          superseded: [
+            {
+              deliveryId: '00000000-0000-4000-8000-000000000002',
+              provider: 'slack',
+              slackTeamId: 'T1',
+              channelId: 'channel-1',
+              threadId: 'thread-1',
+              messageId: '200.000001',
+            },
+          ],
+        };
+      },
+    );
+    mockEval.mockResolvedValue([
+      '200.000002',
+      JSON.stringify({ ...legacy, messageId: '100.000001' }),
+    ]);
 
     await expect(
       attachPendingPrReviewActionMessageWithRetirement(
         context.nonce,
-        'canonical-message',
+        '200.000002',
         { leaseToken: 'lease-token', context },
       ),
     ).resolves.toEqual({
       attached: true,
-      superseded: [expect.objectContaining({ nonce: 'legacy-nonce' })],
+      superseded: [
+        expect.objectContaining({ messageId: '200.000001' }),
+        expect.objectContaining({ nonce: 'legacy-nonce' }),
+      ],
     });
 
     expect(mockEval.mock.calls[0]?.[0]).toContain(
-      'pending.repository == context.repository',
+      'pending.messageId and pending.messageId > winner',
     );
     expect(mockEval.mock.calls[0]?.[2]).toBe(
-      'pr-review-action:thread:discord:channel-1:thread-1',
+      'pr-review-action:thread:slack:T1:channel-1:thread-1',
     );
+  });
+
+  it('visually retires Redis losers when canonical attachment rolls back after arbitration', async () => {
+    const context = {
+      nonce: '00000000-0000-4000-8000-000000000003',
+      canonicalDeliveryId: '00000000-0000-4000-8000-000000000003',
+      provider: 'slack' as const,
+      slackTeamId: 'T1',
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      channelId: 'C1',
+      threadId: '111.222',
+      followUpPrompt: 'Address the feedback.',
+    };
+    const legacy = {
+      ...context,
+      nonce: 'legacy-loser',
+      canonicalDeliveryId: undefined,
+      messageId: '100.000001',
+    };
+    mockEval.mockResolvedValue(['100.000002', JSON.stringify(legacy)]);
+    mockAttachCanonical.mockImplementation(
+      async (_nonce, _messageId, _leaseToken, options) => {
+        await options.arbitrateSlackThread('100.000002');
+        throw new Error('database commit failed');
+      },
+    );
+    mockSlackInstallation.mockResolvedValue({ botAccessToken: 'xoxb-test' });
+    mockSlackBlocks.mockResolvedValue([
+      { type: 'markdown', text: 'Review text remains.' },
+      { type: 'actions', block_id: 'pr_review_action', elements: [] },
+    ]);
+
+    await expect(
+      attachPendingPrReviewActionMessageWithRetirement(
+        context.nonce,
+        '100.000002',
+        { leaseToken: 'lease-token', context },
+      ),
+    ).rejects.toThrow('database commit failed');
+    expect(mockSlackUpdate).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: '100.000001',
+      message: {
+        blocks: [{ type: 'markdown', text: 'Review text remains.' }],
+      },
+    });
   });
 
   it('claims every indexed offer through one atomic script', async () => {
