@@ -32,10 +32,12 @@ import {
   useBitbucketLinkedAccount,
   useGiteaLinkedAccount,
   useGitHubLinkedAccount,
+  useLinkedEmailAccounts,
   useLinearLinkedAccount,
   useMicrosoftTeamsLinkedAccount,
   useSlackLinkedAccount,
   useTelegramLinkedAccount,
+  useResendEmailVerification,
   useUnlinkAdoLinkedAccount,
   useUnlinkGitLabLinkedAccount,
   useUnlinkBitbucketLinkedAccount,
@@ -61,6 +63,7 @@ import { useAuthorizedUser } from '@/hooks/useUser';
 
 import {
   BrandIcon,
+  Badge,
   Button,
   Dialog,
   DialogContent,
@@ -70,6 +73,8 @@ import {
   Github,
   LinearLogo,
   LucideLink,
+  Mail,
+  RefreshCw,
   Skeleton,
   Slack,
   Spinner,
@@ -402,6 +407,60 @@ function LinkedAccountRowSkeleton() {
   );
 }
 
+function EmailAccountDetails({
+  emailAddress,
+  status,
+  variant,
+}: {
+  emailAddress: string;
+  status: 'Linked' | 'Not verified' | 'Verified';
+  variant: 'success' | 'warning';
+}) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="truncate ph-no-capture">{emailAddress}</span>
+      <Badge variant={variant}>{status}</Badge>
+    </span>
+  );
+}
+
+function EmailLinkingGuidance({
+  canViewInboxAddress,
+  emailEnabled,
+  inboxEmail,
+}: {
+  canViewInboxAddress: boolean;
+  emailEnabled: boolean;
+  inboxEmail: string | null;
+}) {
+  if (!emailEnabled) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Email is disabled for this deployment. Verification messages and
+        sender-address linking are unavailable until an admin enables it.
+      </p>
+    );
+  }
+
+  if (inboxEmail) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        To link another sender address, email{' '}
+        <span className="font-mono ph-no-capture">{inboxEmail}</span> from that
+        address, then use the link in Roomote&apos;s reply.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-sm text-muted-foreground">
+      {canViewInboxAddress
+        ? 'Email is enabled, but no AgentMail inbox is configured. Configure it in Communications before linking sender addresses.'
+        : "To link another sender address, email your deployment's Roomote inbox, then use the link in Roomote's reply. Ask an admin for the inbox address."}
+    </p>
+  );
+}
+
 export function LinkedAccounts() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -411,6 +470,8 @@ export function LinkedAccounts() {
   const userConnections = useUserMcpConnections();
   const connectMcp = useConnectMcp();
   const disconnectMcp = useDisconnectMcp();
+  const emailAccounts = useLinkedEmailAccounts();
+  const resendEmailVerification = useResendEmailVerification();
 
   const githubInstallations = useGitHubInstallations();
   const githubAccount = useGitHubLinkedAccount();
@@ -810,8 +871,14 @@ export function LinkedAccounts() {
     }),
   ].filter(isLinkedAccountDescriptor);
 
-  const hasVisibleRows = linkedAccountDescriptors.length > 0;
+  const primaryEmail = emailAccounts.data?.primaryEmail;
+  const hasVisibleEmailRows = Boolean(
+    primaryEmail || emailAccounts.data?.senderAddresses.length,
+  );
+  const hasVisibleRows =
+    hasVisibleEmailRows || linkedAccountDescriptors.length > 0;
   const isLoadingVisibleRows =
+    emailAccounts.isPending ||
     githubInstallations.isPending ||
     gitlabAccount.isPending ||
     giteaAccount.isPending ||
@@ -837,8 +904,86 @@ export function LinkedAccounts() {
         </div>
       ) : null}
 
-      {!showLoadingState && !hasVisibleRows ? (
+      {!showLoadingState && !hasVisibleRows && !emailAccounts.isError ? (
         <p className="text-sm text-muted-foreground">{emptyStateMessage}</p>
+      ) : null}
+
+      {emailAccounts.isError ? (
+        <p className="text-sm text-destructive">
+          Unable to load email account status.
+        </p>
+      ) : null}
+
+      {primaryEmail ? (
+        <LinkedAccountRow
+          icon={<Mail className="size-4" />}
+          name="Email"
+          details={
+            <EmailAccountDetails
+              emailAddress={primaryEmail.emailAddress}
+              status={primaryEmail.verified ? 'Verified' : 'Not verified'}
+              variant={primaryEmail.verified ? 'success' : 'warning'}
+            />
+          }
+          actions={
+            !primaryEmail.verified &&
+            emailAccounts.data?.verificationDeliveryAvailable ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  resendEmailVerification.mutate(undefined, {
+                    onSuccess: () => {
+                      toast.success(
+                        'Verification requested. Check your inbox for the link.',
+                      );
+                    },
+                    onError: (error) => {
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : 'Unable to send a verification email.',
+                      );
+                    },
+                  });
+                }}
+                disabled={resendEmailVerification.isPending}
+                aria-label="Resend verification email"
+              >
+                {resendEmailVerification.isPending ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <RefreshCw />
+                )}
+                Resend
+              </Button>
+            ) : null
+          }
+        />
+      ) : null}
+
+      {emailAccounts.data?.senderAddresses.map((emailAddress) => (
+        <LinkedAccountRow
+          key={`email-sender:${emailAddress}`}
+          icon={<Mail className="size-4" />}
+          name="Email sender"
+          details={
+            <EmailAccountDetails
+              emailAddress={emailAddress}
+              status="Linked"
+              variant="success"
+            />
+          }
+        />
+      ))}
+
+      {emailAccounts.data ? (
+        <EmailLinkingGuidance
+          canViewInboxAddress={emailAccounts.data.canViewInboxAddress}
+          emailEnabled={emailAccounts.data.emailEnabled}
+          inboxEmail={emailAccounts.data.inboxEmail}
+        />
       ) : null}
 
       {[...linkedAccountDescriptors]

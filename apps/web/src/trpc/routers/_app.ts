@@ -192,6 +192,8 @@ import {
   createDiscordLinkCodeCommand,
   unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
+  getLinkedEmailAccountsCommand,
+  resendPrimaryEmailVerificationCommand,
   previewEmailLinkCommand,
   linkEmailAddressCommand,
 } from '../commands/linked-accounts';
@@ -1508,6 +1510,14 @@ export const appRouter = createRouter({
   }),
 
   linkedAccounts: createRouter({
+    email: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedEmailAccountsCommand(auth),
+    ),
+
+    resendEmailVerification: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      resendPrimaryEmailVerificationCommand(auth),
+    ),
+
     github: protectedProcedure.query(({ ctx: { auth } }) =>
       getLinkedGitHubAccountCommand(auth),
     ),

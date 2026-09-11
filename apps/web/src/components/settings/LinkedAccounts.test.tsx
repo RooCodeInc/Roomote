@@ -46,6 +46,16 @@ const state = vi.hoisted(() => ({
   deploymentEnablementsIsPending: false,
   userConnections: [] as Array<{ mcpId: string; authStatus: string }>,
   userConnectionsIsPending: false,
+  emailAccounts: null as {
+    emailEnabled: boolean;
+    verificationDeliveryAvailable: boolean;
+    primaryEmail: { emailAddress: string; verified: boolean } | null;
+    senderAddresses: string[];
+    canViewInboxAddress: boolean;
+    inboxEmail: string | null;
+  } | null,
+  emailAccountsIsPending: false,
+  emailAccountsIsError: false,
   gitHubInstallations: [{ id: 'gh-1' }],
   gitHubInstallationsIsPending: false,
   githubAccount: null,
@@ -161,6 +171,7 @@ const mutations = vi.hoisted(() => ({
   unlinkDiscord: vi.fn(),
   connectMcp: vi.fn(),
   disconnectMcp: vi.fn(),
+  resendEmailVerification: vi.fn(),
 }));
 
 type AuthClientLinkedAccountTestCase = {
@@ -388,6 +399,15 @@ vi.mock('@/hooks/linear', () => ({
 }));
 
 vi.mock('@/hooks/linked-accounts', () => ({
+  useLinkedEmailAccounts: () => ({
+    data: state.emailAccounts,
+    isPending: state.emailAccountsIsPending,
+    isError: state.emailAccountsIsError,
+  }),
+  useResendEmailVerification: () => ({
+    isPending: false,
+    mutate: mutations.resendEmailVerification,
+  }),
   useAuthenticateAdoAccount: () => ({
     isPending: false,
     mutate: mutations.authenticateAdo,
@@ -546,6 +566,8 @@ vi.mock('@/components/system', () => ({
   Github: () => <svg aria-hidden="true" />,
   LinearLogo: () => <svg aria-hidden="true" />,
   LucideLink: () => <svg aria-hidden="true" />,
+  Mail: () => <svg aria-hidden="true" />,
+  RefreshCw: () => <svg aria-hidden="true" />,
   Skeleton: ({ className }: { className?: string }) => (
     <div data-slot="skeleton" className={className}>
       loading
@@ -593,6 +615,9 @@ describe('LinkedAccounts settings', () => {
     state.deploymentEnablementsIsPending = false;
     state.userConnections = [];
     state.userConnectionsIsPending = false;
+    state.emailAccounts = null;
+    state.emailAccountsIsPending = false;
+    state.emailAccountsIsError = false;
     state.gitHubInstallations = [{ id: 'gh-1' }];
     state.gitHubInstallationsIsPending = false;
     state.githubAccount = null;
@@ -678,6 +703,104 @@ describe('LinkedAccounts settings', () => {
         }),
       ).not.toBeInTheDocument();
     }
+  });
+
+  it('shows a verified login email separately from linked sender addresses', () => {
+    state.emailAccounts = {
+      emailEnabled: true,
+      verificationDeliveryAvailable: true,
+      primaryEmail: { emailAddress: 'login@example.com', verified: true },
+      senderAddresses: ['sender@example.com'],
+      canViewInboxAddress: true,
+      inboxEmail: 'roomote@example.com',
+    };
+
+    render(<LinkedAccounts />);
+
+    expect(screen.getByText('Email')).toBeInTheDocument();
+    expect(screen.getByText('login@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(screen.getByText('Email sender')).toBeInTheDocument();
+    expect(screen.getByText('sender@example.com')).toBeInTheDocument();
+    expect(screen.getByText('Linked')).toBeInTheDocument();
+    expect(screen.getByText('roomote@example.com')).toBeInTheDocument();
+    expect(
+      screen.getByText(/to link another sender address/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resend verification email' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('resends verification for the unverified login email through the existing auth flow', () => {
+    state.emailAccounts = {
+      emailEnabled: true,
+      verificationDeliveryAvailable: true,
+      primaryEmail: { emailAddress: 'login@example.com', verified: false },
+      senderAddresses: ['login@example.com'],
+      canViewInboxAddress: false,
+      inboxEmail: null,
+    };
+
+    render(<LinkedAccounts />);
+
+    expect(screen.getByText('Not verified')).toBeInTheDocument();
+    expect(screen.getByText('Linked')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resend verification email' }),
+    );
+
+    expect(mutations.resendEmailVerification).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+    expect(
+      screen.getByText(/ask an admin for the inbox address/i),
+    ).toBeInTheDocument();
+  });
+
+  it('truthfully disables email actions when the email channel is disabled', () => {
+    state.emailAccounts = {
+      emailEnabled: false,
+      verificationDeliveryAvailable: false,
+      primaryEmail: { emailAddress: 'login@example.com', verified: false },
+      senderAddresses: ['sender@example.com'],
+      canViewInboxAddress: true,
+      inboxEmail: null,
+    };
+
+    render(<LinkedAccounts />);
+
+    expect(
+      screen.getByText(/email is disabled for this deployment/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Linked')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resend verification email' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not offer resend before AgentMail delivery is configured', () => {
+    state.emailAccounts = {
+      emailEnabled: true,
+      verificationDeliveryAvailable: false,
+      primaryEmail: { emailAddress: 'login@example.com', verified: false },
+      senderAddresses: [],
+      canViewInboxAddress: true,
+      inboxEmail: null,
+    };
+
+    render(<LinkedAccounts />);
+
+    expect(
+      screen.getByText(/no AgentMail inbox is configured/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Resend verification email' }),
+    ).not.toBeInTheDocument();
   });
 
   it('renders an enabled MCP linked account with unlink actions when authenticated', () => {

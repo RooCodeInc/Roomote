@@ -132,6 +132,13 @@ channel enabled:
   channel was enabled) connect their address the first time they email
   Roomote: the refusal email carries a link that ties the address to their
   account.
+- **Personal settings > Linked Accounts** shows the Email row's verification
+  status separately from sender addresses connected through that refusal link.
+  When the login email is not verified and AgentMail is ready to deliver, use
+  **Resend** to request another verification message. A delivery failure is
+  shown instead of reporting success. To connect another sender address,
+  send from that address to the deployment inbox and use the link in Roomote's
+  reply; this does not verify or change the login email.
 - Sign-ins through Slack, Microsoft, GitHub, and the other OAuth providers
   are unaffected; those providers assert a verified email.
 - Password reset links are emailed to the user as well as shown to the

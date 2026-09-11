@@ -4,6 +4,13 @@ const {
   mockVerifyAgentMailEmailLinkToken,
   mockRedispatchAgentMailEventsForSender,
   mockFindFirst,
+  mockFindMany,
+  mockAuthUserFindFirst,
+  mockIsEmailChannelEnabled,
+  mockAgentMailGetInbox,
+  mockRedisEval,
+  mockHeaders,
+  mockSendAuthenticatedVerificationEmail,
   mockInsert,
   mockValues,
   mockOnConflictDoNothing,
@@ -20,6 +27,13 @@ const {
     mockVerifyAgentMailEmailLinkToken: vi.fn(),
     mockRedispatchAgentMailEventsForSender: vi.fn(),
     mockFindFirst: vi.fn(),
+    mockFindMany: vi.fn(),
+    mockAuthUserFindFirst: vi.fn(),
+    mockIsEmailChannelEnabled: vi.fn(),
+    mockAgentMailGetInbox: vi.fn(),
+    mockRedisEval: vi.fn(),
+    mockHeaders: vi.fn(),
+    mockSendAuthenticatedVerificationEmail: vi.fn(),
     mockInsert,
     mockValues,
     mockOnConflictDoNothing,
@@ -30,13 +44,52 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     insert: mockInsert,
-    query: { agentmailUserMappings: { findFirst: mockFindFirst } },
+    query: {
+      agentmailUserMappings: {
+        findFirst: mockFindFirst,
+        findMany: mockFindMany,
+      },
+      authUsers: { findFirst: mockAuthUserFindFirst },
+    },
   },
   agentmailUserMappings: {
     id: 'agentmail_user_mappings.id',
     emailAddress: 'agentmail_user_mappings.email_address',
+    userId: 'agentmail_user_mappings.user_id',
+    source: 'agentmail_user_mappings.source',
+    createdAt: 'agentmail_user_mappings.created_at',
   },
+  authUsers: { id: 'auth_users.id' },
+  and: vi.fn((...conditions) => conditions),
+  asc: vi.fn((column) => column),
   eq: vi.fn(),
+  resolveAgentMailRuntimeCredentials: vi.fn(async () => ({
+    apiKey: 'api-key',
+    webhookSecret: 'webhook-secret',
+    inboxId: 'roomote@example.com',
+  })),
+}));
+
+vi.mock('@roomote/communication', () => ({
+  AgentMailApiClient: class {
+    getInbox = mockAgentMailGetInbox;
+  },
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ eval: mockRedisEval }),
+}));
+
+vi.mock('next/headers', () => ({
+  headers: mockHeaders,
+}));
+
+vi.mock('@/lib/server/auth', () => ({
+  sendAuthenticatedVerificationEmail: mockSendAuthenticatedVerificationEmail,
+}));
+
+vi.mock('@/lib/server/env', () => ({
+  isEmailChannelEnabled: mockIsEmailChannelEnabled,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -44,9 +97,92 @@ vi.mock('@roomote/sdk/server', () => ({
   redispatchAgentMailEventsForSender: mockRedispatchAgentMailEventsForSender,
 }));
 
-import { linkEmailAddressCommand, previewEmailLinkCommand } from './email-link';
+import {
+  getLinkedEmailAccountsCommand,
+  linkEmailAddressCommand,
+  previewEmailLinkCommand,
+  resendPrimaryEmailVerificationCommand,
+} from './email-link';
 
 const mockAuth = { userId: 'user-1' } as UserAuthSuccess;
+
+describe('getLinkedEmailAccountsCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockIsEmailChannelEnabled.mockReturnValue(true);
+    mockAuthUserFindFirst.mockResolvedValue({
+      email: 'login@example.com',
+      emailVerified: false,
+    });
+    mockFindMany.mockResolvedValue([{ emailAddress: 'sender@example.com' }]);
+    mockAgentMailGetInbox.mockResolvedValue({
+      inbox_id: 'routing-id',
+      email: 'Deliverable@Example.com',
+    });
+  });
+
+  it('keeps login verification and explicit sender links distinct', async () => {
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: true,
+      }),
+    ).resolves.toEqual({
+      emailEnabled: true,
+      verificationDeliveryAvailable: true,
+      primaryEmail: {
+        emailAddress: 'login@example.com',
+        verified: false,
+      },
+      senderAddresses: ['sender@example.com'],
+      canViewInboxAddress: true,
+      inboxEmail: 'deliverable@example.com',
+    });
+  });
+
+  it('does not expose the deployment inbox address to non-admins', async () => {
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: false,
+      }),
+    ).resolves.toMatchObject({
+      canViewInboxAddress: false,
+      inboxEmail: null,
+      verificationDeliveryAvailable: true,
+    });
+  });
+
+  it('reports an email-disabled deployment without inbox information', async () => {
+    mockIsEmailChannelEnabled.mockReturnValue(false);
+
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: true,
+      }),
+    ).resolves.toMatchObject({
+      emailEnabled: false,
+      verificationDeliveryAvailable: false,
+      canViewInboxAddress: true,
+      inboxEmail: null,
+    });
+  });
+
+  it('omits the inbox address when AgentMail cannot resolve a deliverable email', async () => {
+    mockAgentMailGetInbox.mockResolvedValue({ inbox_id: 'routing-id' });
+
+    await expect(
+      getLinkedEmailAccountsCommand({
+        ...mockAuth,
+        isAdmin: true,
+      }),
+    ).resolves.toMatchObject({
+      verificationDeliveryAvailable: true,
+      inboxEmail: null,
+    });
+  });
+});
 
 describe('previewEmailLinkCommand', () => {
   beforeEach(() => {
@@ -71,6 +207,42 @@ describe('previewEmailLinkCommand', () => {
     ).rejects.toThrow(
       'This link is invalid or has expired. Send another email to get a fresh link.',
     );
+  });
+});
+
+describe('resendPrimaryEmailVerificationCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRedisEval.mockResolvedValue(1);
+    mockHeaders.mockResolvedValue(new Headers({ cookie: 'session=valid' }));
+    mockSendAuthenticatedVerificationEmail.mockResolvedValue(undefined);
+  });
+
+  it('resends only the authenticated user login email', async () => {
+    await expect(
+      resendPrimaryEmailVerificationCommand({
+        ...mockAuth,
+        primaryEmail: 'login@example.com',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockSendAuthenticatedVerificationEmail).toHaveBeenCalledWith({
+      email: 'login@example.com',
+      callbackURL: '/settings/personal',
+      headers: expect.any(Headers),
+    });
+  });
+
+  it('limits authenticated resend attempts to three per minute', async () => {
+    mockRedisEval.mockResolvedValue(4);
+
+    await expect(
+      resendPrimaryEmailVerificationCommand({
+        ...mockAuth,
+        primaryEmail: 'login@example.com',
+      }),
+    ).rejects.toThrow('Too many verification requests');
+    expect(mockSendAuthenticatedVerificationEmail).not.toHaveBeenCalled();
   });
 });
 
