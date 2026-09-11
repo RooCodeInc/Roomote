@@ -1,7 +1,7 @@
 import { standardTask } from '../standardTask';
 
 describe('Standard Task task-launch policy', () => {
-  it('forbids child-task launches by default while preserving explicit skill exceptions', () => {
+  it('forbids child-task launches without exceptions', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
@@ -9,7 +9,8 @@ describe('Standard Task task-launch policy', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'Do not call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"` unless the user explicitly asks for a separate task or the active skill explicitly requires that follow-up task handoff. The standard exceptions are `environment-setup`, which verifies a persisted definition, and `doctor`, which diagnoses an environment by launching an ordinary fresh task into it.',
+      'Sandbox tasks cannot launch other Roomote tasks. The task-management tool intentionally does not expose a launch action, and run-scoped tokens are rejected by the task-launch API. Use in-process subagents for bounded assistance; leave any separate top-level Roomote task launch to Fast or an authenticated user.',
     );
+    expect(harnessInstructions).not.toContain('standard exceptions');
   });
 });
