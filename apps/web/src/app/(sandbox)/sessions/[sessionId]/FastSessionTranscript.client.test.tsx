@@ -70,7 +70,6 @@ const {
     onUtterance: undefined as
       | ((text: string, delegationId: string | null) => void)
       | undefined,
-    onHeardTurn: undefined as ((text: string) => void) | undefined,
     onSpokenTurn: undefined as ((text: string) => void) | undefined,
     onHeardTurnDelta: undefined as ((text: string) => void) | undefined,
     onSpokenTurnDelta: undefined as ((text: string) => void) | undefined,
@@ -80,19 +79,16 @@ const {
 vi.mock('@/hooks/useLiveVoice', () => ({
   useLiveVoice: ({
     onUtterance,
-    onHeardTurn,
     onSpokenTurn,
     onHeardTurnDelta,
     onSpokenTurnDelta,
   }: {
     onUtterance: (text: string, delegationId: string | null) => void;
-    onHeardTurn?: (text: string) => void;
     onSpokenTurn?: (text: string) => void;
     onHeardTurnDelta?: (text: string) => void;
     onSpokenTurnDelta?: (text: string) => void;
   }) => {
     liveVoiceState.onUtterance = onUtterance;
-    liveVoiceState.onHeardTurn = onHeardTurn;
     liveVoiceState.onSpokenTurn = onSpokenTurn;
     liveVoiceState.onHeardTurnDelta = onHeardTurnDelta;
     liveVoiceState.onSpokenTurnDelta = onSpokenTurnDelta;
@@ -297,7 +293,6 @@ beforeEach(() => {
   recordVoiceCallEventMutate.mockResolvedValue({ eventId: 'voice-call:1' });
   liveVoiceState.startedAt = null;
   liveVoiceState.deliveringUtterances = 0;
-  liveVoiceState.onHeardTurn = undefined;
   liveVoiceState.onSpokenTurn = undefined;
   liveVoiceState.active = false;
   liveVoiceState.status = 'idle';
@@ -2515,7 +2510,7 @@ describe('FastSessionTranscript', () => {
       );
     });
 
-    it('transcribes the call into the Session: markers, heard turns, and spoken turns', async () => {
+    it('transcribes the call into the Session: markers and spoken turns', async () => {
       voiceStatusQuery.mockResolvedValue({ enabled: true });
       const transcript = () => (
         <FastSessionTranscript
@@ -2540,13 +2535,7 @@ describe('FastSessionTranscript', () => {
       );
 
       act(() => {
-        liveVoiceState.onHeardTurn?.('Hi Roomote, how is it going');
         liveVoiceState.onSpokenTurn?.('Good, thanks. What can I do for you?');
-      });
-      expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
-        sessionId: 'session-1',
-        role: 'user',
-        text: 'Hi Roomote, how is it going',
       });
       expect(recordVoiceTurnMutate).toHaveBeenCalledWith({
         sessionId: 'session-1',
