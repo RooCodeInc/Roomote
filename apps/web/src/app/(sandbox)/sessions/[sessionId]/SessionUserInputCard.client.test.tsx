@@ -65,6 +65,33 @@ describe('SessionUserInputCard', () => {
     mockMutate.mockClear();
   });
 
+  it('allows skipping tool discovery before entering an answer', () => {
+    render(
+      <SessionUserInputCard
+        sessionId="s"
+        request={{
+          requestId: 'tools',
+          questions: [
+            {
+              id: 'setup-tools-documents',
+              header: 'Documents',
+              question: 'What does your team use for documents?',
+              isOther: true,
+              isSecret: false,
+            },
+          ],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Skip tool setup' }));
+    expect(mockMutate).toHaveBeenCalledWith({
+      sessionId: 's',
+      requestId: 'tools',
+      answers: {},
+      resolution: 'cancelled',
+    });
+  });
+
   it('requires the minimum number of selections before submitting', () => {
     render(<SessionUserInputCard sessionId="s" request={multiRequest} />);
 

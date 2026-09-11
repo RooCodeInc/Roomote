@@ -18,6 +18,7 @@ const {
   mockRecordTaskInferenceUsage,
   mockClaimShowWidgetFallbackDelivery,
   mockClearPendingSlackRequestUserInput,
+  mockClearPendingCommunicationRequestUserInput,
   mockReleaseShowWidgetFallbackDelivery,
   mockClaimMissingChatCloseoutFallbackDelivery,
   mockReleaseMissingChatCloseoutFallbackDelivery,
@@ -37,6 +38,7 @@ const {
   mockRecordTaskInferenceUsage: vi.fn(),
   mockClaimShowWidgetFallbackDelivery: vi.fn(),
   mockClearPendingSlackRequestUserInput: vi.fn(),
+  mockClearPendingCommunicationRequestUserInput: vi.fn(),
   mockReleaseShowWidgetFallbackDelivery: vi.fn(),
   mockClaimMissingChatCloseoutFallbackDelivery: vi.fn(),
   mockReleaseMissingChatCloseoutFallbackDelivery: vi.fn(),
@@ -55,6 +57,17 @@ vi.mock('@roomote/communication/messages', () => ({
   getCommunicationMessages: mockGetCommunicationMessages,
   queueCommunicationMessage: mockQueueCommunicationMessage,
 }));
+
+vi.mock(
+  '@roomote/communication/request-user-input',
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import('@roomote/communication/request-user-input')
+    >()),
+    clearPendingCommunicationRequestUserInput:
+      mockClearPendingCommunicationRequestUserInput,
+  }),
+);
 
 vi.mock('@roomote/slack', () => ({
   clearPendingSlackRequestUserInput: mockClearPendingSlackRequestUserInput,
@@ -342,6 +355,24 @@ describe('taskRunsRouter queue message guards', () => {
         requestId: 'rui:session:turn:call',
         runId: 42,
       },
+    );
+  });
+
+  it('clears a communication prompt only for the matching source run', async () => {
+    mockClearPendingCommunicationRequestUserInput.mockResolvedValueOnce(true);
+
+    await expect(
+      createRunCaller().clearPendingCommunicationRequestUserInput({
+        runId: 42,
+        provider: 'discord',
+        conversationId: 'channel-1',
+        requestId: 'rui:session:turn:call',
+      }),
+    ).resolves.toBe(true);
+    expect(mockClearPendingCommunicationRequestUserInput).toHaveBeenCalledWith(
+      'discord',
+      'channel-1',
+      { requestId: 'rui:session:turn:call', runId: 42 },
     );
   });
 

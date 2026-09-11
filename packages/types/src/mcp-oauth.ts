@@ -400,6 +400,38 @@ export type McpIntegrationServerMode =
   | 'native'
   | 'credential_only';
 
+export type EffectiveMcpIntegrationStatus =
+  | 'unavailable'
+  | 'not_enabled'
+  | 'needs_connection'
+  | 'connected';
+
+export type McpIntegrationOauthReadiness =
+  | 'not_required'
+  | 'ready'
+  | 'missing'
+  | 'partial';
+
+/** Public-safe, actor-scoped integration state for product UI. */
+export type EffectiveMcpIntegration = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  connectionScope: 'user' | 'deployment';
+  connectionMode: McpIntegrationConnectionMode;
+  serverMode: McpIntegrationServerMode;
+  available: boolean;
+  enabled: boolean;
+  authStatus: 'pending' | 'authenticated' | 'error' | null;
+  oauthReadiness: McpIntegrationOauthReadiness;
+  status: EffectiveMcpIntegrationStatus;
+  capabilities: {
+    agentTools: boolean;
+    toolManagement: boolean;
+  };
+};
+
 export type McpIntegrationCategory = 'memory';
 
 export type McpIntegrationOAuthClientEnv = {
