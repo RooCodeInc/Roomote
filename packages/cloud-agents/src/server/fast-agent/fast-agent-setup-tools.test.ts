@@ -52,9 +52,14 @@ describe('setup prompt guidance and snapshot injection', () => {
     expect(prompt).toContain(
       "This is often the user's first interaction with Roomote",
     );
-    expect(prompt).toContain("Hi, I'm Roomote");
+    expect(prompt).toContain("Hi, I'm Roomote.");
+    expect(prompt).toContain('What should I call you?');
+    expect(prompt).toContain('What have you been working on?');
+    expect(prompt).toContain('update_personalization');
+    expect(prompt).toContain('Call me <their answer>.');
+    expect(prompt).toContain('Currently working on <their answer>.');
     expect(prompt).toContain(
-      'To get started, I need access to your source code.',
+      'Do not ask about GitHub, source control, tools, or setup capabilities in that first message.',
     );
     expect(prompt).toContain(
       'always refer to Roomote in the first person: use "I", "me", and "my"',
