@@ -4,6 +4,7 @@ import type { FastAgentConversationRecord } from '@roomote/cloud-agents/server';
 
 import {
   addFastAgentTelegramTopicTitleSync,
+  getTelegramTopicIconEmojiPreferences,
   syncFastAgentTelegramTopicTitleBestEffort,
 } from './fast-agent-telegram-title-sync';
 
@@ -29,12 +30,18 @@ function session(title: string): FastAgentConversationRecord {
 describe('Telegram Fast topic title sync', () => {
   it('replaces the provisional topic title with the generated Session title', async () => {
     const editForumTopic = vi.fn().mockResolvedValue(undefined);
+    const resolveForumTopicIconCustomEmojiId = vi
+      .fn()
+      .mockResolvedValue('idea-icon');
     const resolveSession = vi
       .fn()
       .mockResolvedValue(session('Generated title'));
 
     await syncFastAgentTelegramTopicTitleBestEffort({
-      provider: { editForumTopic } as never,
+      provider: {
+        editForumTopic,
+        resolveForumTopicIconCustomEmojiId,
+      } as never,
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
@@ -45,11 +52,29 @@ describe('Telegram Fast topic title sync', () => {
       channelId: 'chat-1',
       threadId: '77',
       name: 'Generated title',
+      iconCustomEmojiId: 'idea-icon',
     });
+    expect(resolveForumTopicIconCustomEmojiId).toHaveBeenCalledWith([
+      '💡',
+      '💬',
+      '📝',
+    ]);
+  });
+
+  it('selects constrained semantic icon preferences from the title', () => {
+    expect(
+      getTelegramTopicIconEmojiPreferences('Fix Telegram login bug'),
+    ).toEqual(['🐞', '🛠', '💡', '💬', '📝']);
+    expect(getTelegramTopicIconEmojiPreferences('Review release plan')).toEqual(
+      ['🚀', '💡', '💬', '📝'],
+    );
   });
 
   it('retries with the latest canonical title when generation races a rename', async () => {
     const editForumTopic = vi.fn().mockResolvedValue(undefined);
+    const resolveForumTopicIconCustomEmojiId = vi
+      .fn()
+      .mockResolvedValue(undefined);
     const resolveSession = vi
       .fn()
       .mockResolvedValueOnce(session('First generated title'))
@@ -57,7 +82,7 @@ describe('Telegram Fast topic title sync', () => {
       .mockResolvedValue(session('Newer generated title'));
 
     await syncFastAgentTelegramTopicTitleBestEffort({
-      provider: { editForumTopic } as never,
+      provider: { editForumTopic, resolveForumTopicIconCustomEmojiId } as never,
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
@@ -86,7 +111,12 @@ describe('Telegram Fast topic title sync', () => {
         dispose,
         reassert: vi.fn(),
       },
-      provider: { editForumTopic } as never,
+      provider: {
+        editForumTopic,
+        resolveForumTopicIconCustomEmojiId: vi
+          .fn()
+          .mockResolvedValue(undefined),
+      } as never,
       sessionId: 'session-1',
       channelId: 'chat-1',
       threadId: '77',
@@ -108,6 +138,9 @@ describe('Telegram Fast topic title sync', () => {
       syncFastAgentTelegramTopicTitleBestEffort({
         provider: {
           editForumTopic: vi.fn().mockRejectedValue(new Error('forbidden')),
+          resolveForumTopicIconCustomEmojiId: vi
+            .fn()
+            .mockResolvedValue(undefined),
         } as never,
         sessionId: 'session-1',
         channelId: 'chat-1',
@@ -119,5 +152,28 @@ describe('Telegram Fast topic title sync', () => {
       expect.stringContaining('Failed to sync Telegram topic title'),
     );
     warn.mockRestore();
+  });
+
+  it('still updates the title when supported icon lookup fails', async () => {
+    const editForumTopic = vi.fn().mockResolvedValue(undefined);
+
+    await syncFastAgentTelegramTopicTitleBestEffort({
+      provider: {
+        editForumTopic,
+        resolveForumTopicIconCustomEmojiId: vi
+          .fn()
+          .mockRejectedValue(new Error('icons unavailable')),
+      } as never,
+      sessionId: 'session-1',
+      channelId: 'chat-1',
+      threadId: '77',
+      resolveSession: vi.fn().mockResolvedValue(session('Generated title')),
+    });
+
+    expect(editForumTopic).toHaveBeenCalledWith({
+      channelId: 'chat-1',
+      threadId: '77',
+      name: 'Generated title',
+    });
   });
 });

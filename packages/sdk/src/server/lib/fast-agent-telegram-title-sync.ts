@@ -7,8 +7,37 @@ import type { TelegramCommunicationProvider } from '@roomote/communication/teleg
 
 type TelegramTopicTitleProvider = Pick<
   TelegramCommunicationProvider,
-  'editForumTopic'
+  'editForumTopic' | 'resolveForumTopicIconCustomEmojiId'
 >;
+
+const DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS = ['💡', '💬', '📝'] as const;
+const TELEGRAM_TOPIC_ICON_RULES: ReadonlyArray<{
+  pattern: RegExp;
+  emojis: readonly string[];
+}> = [
+  { pattern: /\b(security|auth|permission|vulnerab)/iu, emojis: ['🔒'] },
+  { pattern: /\b(bug|fix|error|fail|regression|crash)/iu, emojis: ['🐞', '🛠'] },
+  { pattern: /\b(test|spec|validation|verify|ci)\b/iu, emojis: ['✅', '🧪'] },
+  { pattern: /\b(deploy|release|ship|launch)\b/iu, emojis: ['🚀'] },
+  { pattern: /\b(doc|docs|documentation|guide|readme)\b/iu, emojis: ['📚'] },
+  { pattern: /\b(ui|ux|design|frontend|interface)\b/iu, emojis: ['🎨'] },
+  { pattern: /\b(data|database|analytics|metric|report)\b/iu, emojis: ['📊'] },
+  {
+    pattern: /\b(telegram|slack|discord|teams|email|integration)\b/iu,
+    emojis: ['💬'],
+  },
+];
+
+export function getTelegramTopicIconEmojiPreferences(
+  title: string,
+): readonly string[] {
+  const match = TELEGRAM_TOPIC_ICON_RULES.find(({ pattern }) =>
+    pattern.test(title),
+  );
+  return match
+    ? [...match.emojis, ...DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS]
+    : DEFAULT_TELEGRAM_TOPIC_ICON_EMOJIS;
+}
 
 export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
   provider: TelegramTopicTitleProvider;
@@ -30,10 +59,16 @@ export async function syncFastAgentTelegramTopicTitleBestEffort(input: {
       }
 
       const title = buildCommunicationTaskThreadName(session.title);
+      const iconCustomEmojiId = await input.provider
+        .resolveForumTopicIconCustomEmojiId(
+          getTelegramTopicIconEmojiPreferences(title),
+        )
+        .catch(() => undefined);
       await input.provider.editForumTopic({
         channelId: input.channelId,
         threadId: input.threadId,
         name: title,
+        ...(iconCustomEmojiId ? { iconCustomEmojiId } : {}),
       });
 
       const latest = await input.resolveSession();

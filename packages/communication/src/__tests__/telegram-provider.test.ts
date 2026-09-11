@@ -258,6 +258,48 @@ describe('TelegramCommunicationProvider', () => {
     );
   });
 
+  it('resolves and applies a Telegram-supported topic icon', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ok: true,
+          result: [
+            { emoji: '💡', custom_emoji_id: 'idea-icon' },
+            { emoji: '🐞', custom_emoji_id: 'bug-icon' },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const iconCustomEmojiId = await provider.resolveForumTopicIconCustomEmojiId(
+      ['🐞', '💡'],
+    );
+    await provider.editForumTopic({
+      channelId: '123',
+      threadId: '77',
+      name: 'Fix flaky login tests',
+      iconCustomEmojiId,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://telegram.example.test/botbot-token/getForumTopicIconStickers',
+      expect.objectContaining({ body: '{}' }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[1]![1]!.body as string)).toEqual({
+      chat_id: '123',
+      message_thread_id: 77,
+      name: 'Fix flaky login tests',
+      icon_custom_emoji_id: 'bug-icon',
+    });
+  });
+
   it('honors an explicit reply target on the first topic message', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({

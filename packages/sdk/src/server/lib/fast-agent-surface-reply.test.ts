@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   telegramPostMessage: vi.fn(),
   telegramEditMessage: vi.fn(),
   telegramEditForumTopic: vi.fn(),
+  telegramResolveForumTopicIcon: vi.fn(),
   telegramTyping: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordTyping: vi.fn(),
@@ -156,6 +157,7 @@ async function createConversation(input: {
 describe('buildFastAgentSurfaceReplyDelivery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.telegramResolveForumTopicIcon.mockResolvedValue(undefined);
     mocks.teamsPostMessage.mockResolvedValue({
       provider: 'teams',
       channelId: 'teams-channel-1',
@@ -177,6 +179,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       postMessage: mocks.telegramPostMessage,
       editMessageText: mocks.telegramEditMessage,
       editForumTopic: mocks.telegramEditForumTopic,
+      resolveForumTopicIconCustomEmojiId: mocks.telegramResolveForumTopicIcon,
       sendChatAction: mocks.telegramTyping,
       sendMessageDraft: mocks.telegramTyping,
     });
