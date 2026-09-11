@@ -246,7 +246,23 @@ describe('resolveVoiceOpenAiKey', () => {
 
 describe('resolveVoiceId', () => {
   beforeEach(() => {
+    resolveModelProviderEnvValue.mockReset();
+    resolveModelProviderEnvValue.mockResolvedValue(undefined);
     findConnection.mockReset();
+  });
+
+  it('uses the visible default when the environment manages the Voice key', async () => {
+    resolveModelProviderEnvValue.mockResolvedValue('sk-env');
+    findConnection.mockResolvedValue({
+      authConfig: {
+        type: 'voice',
+        encryptedApiKey: 'enc:key',
+        voiceId: 'cedar',
+      },
+    });
+
+    await expect(resolveVoiceId()).resolves.toBe('marin');
+    expect(findConnection).not.toHaveBeenCalled();
   });
 
   it('preserves a stored voice selection', async () => {

@@ -73,6 +73,11 @@ export async function resolveVoiceId(): Promise<OpenAiRealtimeVoiceId> {
     return DEFAULT_OPENAI_REALTIME_VOICE_ID;
   }
 
+  const envKey = await resolveModelProviderEnvValue(VOICE_OPENAI_ENV_VAR_NAMES);
+  if (envKey?.trim()) {
+    return DEFAULT_OPENAI_REALTIME_VOICE_ID;
+  }
+
   const connection = await db.query.mcpConnections.findFirst({
     where: and(
       eq(mcpConnections.mcpId, 'voice'),
