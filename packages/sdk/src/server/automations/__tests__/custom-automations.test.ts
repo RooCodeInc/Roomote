@@ -663,7 +663,7 @@ describe('customAutomationsJob', () => {
     expect(fastMocks.prepareAgentMailConversation).toHaveBeenCalledWith({
       userId: 'user-1',
       identityId: 'verified:user-1:digest',
-      subject: 'Flaky tests',
+      subject: `Flaky tests - ${claimAt.toISOString()}`,
       conversationKey: `custom-automation:${automation.id}:${claimAt.toISOString()}`,
     });
     expect(fastMocks.getSession).toHaveBeenCalledWith({
@@ -675,6 +675,68 @@ describe('customAutomationsJob', () => {
         replyTarget: { channelId: 'roomote@agentmail.test' },
       },
     });
+  });
+
+  it('starts each Email automation run in a separate email thread', async () => {
+    const firstClaimAt = new Date('2026-09-11T10:00:00.000Z');
+    const secondClaimAt = new Date('2026-09-12T10:00:00.000Z');
+    vi.mocked(tryClaimCustomAutomationLaunch)
+      .mockResolvedValueOnce(firstClaimAt)
+      .mockResolvedValueOnce(secondClaimAt);
+    fastMocks.prepareAgentMailConversation
+      .mockResolvedValueOnce({
+        conversationId: 'agentmail-conversation-1',
+        inboxId: 'roomote@agentmail.test',
+        messageId: null,
+      })
+      .mockResolvedValueOnce({
+        conversationId: 'agentmail-conversation-2',
+        inboxId: 'roomote@agentmail.test',
+        messageId: null,
+      });
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {
+          provider: 'email',
+          targetKind: 'email_user',
+          externalRef: 'user-1',
+          metadata: { emailIdentityId: 'verified:user-1:digest' },
+        },
+      } as never,
+    ]);
+
+    await customAutomationsJob();
+    await customAutomationsJob();
+
+    expect(fastMocks.prepareAgentMailConversation).toHaveBeenNthCalledWith(1, {
+      userId: 'user-1',
+      identityId: 'verified:user-1:digest',
+      subject: `Flaky tests - ${firstClaimAt.toISOString()}`,
+      conversationKey: `custom-automation:${automation.id}:${firstClaimAt.toISOString()}`,
+    });
+    expect(fastMocks.prepareAgentMailConversation).toHaveBeenNthCalledWith(2, {
+      userId: 'user-1',
+      identityId: 'verified:user-1:digest',
+      subject: `Flaky tests - ${secondClaimAt.toISOString()}`,
+      conversationKey: `custom-automation:${automation.id}:${secondClaimAt.toISOString()}`,
+    });
+    expect(fastMocks.getSession).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          conversationId: 'agentmail-conversation-1',
+        }),
+      }),
+    );
+    expect(fastMocks.getSession).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          conversationId: 'agentmail-conversation-2',
+        }),
+      }),
+    );
   });
 
   it('fails closed when the selected Email identity is no longer verified', async () => {

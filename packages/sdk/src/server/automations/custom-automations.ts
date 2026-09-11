@@ -224,9 +224,11 @@ async function buildFastAutomationConversation(params: {
   }
 
   if (destination.provider === 'email') {
+    // Some inboxes group unrelated messages by subject even without reply
+    // headers, so give every run a distinct root subject.
     const prepared = await prepareAgentMailConversation({
       userId: destination.userId,
-      subject: automation.name,
+      subject: `${automation.name} - ${eventId.slice(automation.id.length + 1)}`,
       conversationKey: `custom-automation:${eventId}`,
       identityId: destination.identityId,
     });
