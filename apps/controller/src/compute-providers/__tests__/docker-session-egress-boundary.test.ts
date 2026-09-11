@@ -113,7 +113,10 @@ describe('host-enforced Session egress', () => {
     async (mode) => {
       let workerReads = 0;
       const runDocker = vi.fn<DockerCommand>(async (args) => {
-        if (args[0] === 'run' && args.includes('node')) {
+        if (
+          args[0] === 'run' &&
+          args.includes('/opt/mise/installs/node/22.17.1/bin/node')
+        ) {
           const namespace = {
             name: `roomote-${networkId.slice(0, 12)}`,
             nsid: 7,

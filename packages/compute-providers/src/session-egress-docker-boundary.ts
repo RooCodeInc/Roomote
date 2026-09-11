@@ -193,11 +193,6 @@ export async function installDockerSessionEgressBoundary(
     'SYS_PTRACE',
     '--security-opt',
     'apparmor=unconfined',
-    // The worker image installs Node through mise for the roomote user. Root
-    // helpers must select that image-owned config explicitly, without relying
-    // on root's HOME or any configuration inside the workload filesystem.
-    '--env',
-    'MISE_CONFIG_FILE=/home/roomote/.config/mise/config.toml',
     '--platform',
     input.platform,
     '--entrypoint',
@@ -220,7 +215,13 @@ export async function installDockerSessionEgressBoundary(
     `} finally {execFileSync('ip',['netns','delete',name]);}`,
   ].join('\n');
   const topology = JSON.parse(
-    await runDocker([...host, 'node', input.image, '-e', inspectScript]),
+    await runDocker([
+      ...host,
+      '/opt/mise/installs/node/22.17.1/bin/node',
+      input.image,
+      '-e',
+      inspectScript,
+    ]),
   ) as {
     namespaces: Array<{ name?: string; nsid?: number }>;
     workloadLinks: Array<{
