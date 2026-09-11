@@ -165,5 +165,72 @@ describe('user personalization', () => {
         confidence: 'inferred',
       }),
     ).resolves.toEqual({ saved: false, reason: 'reset_boundary' });
+
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Prefer concise answers.',
+        confidence: 'explicit',
+      }),
+    ).resolves.toEqual({ saved: true });
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Examples appear helpful again.',
+        confidence: 'inferred',
+      }),
+    ).resolves.toEqual({ saved: true });
+    await expect(
+      getUserPersonalizationRuntimeContext(user.id),
+    ).resolves.toMatchObject({ displayName: user.name });
+  });
+
+  it('lets a manual save explicitly restart learning after reset', async () => {
+    const user = await userFactory.create();
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 0,
+      reset: true,
+    });
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 1,
+      instructions: 'Use concrete examples.',
+    });
+
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Prefer short progress updates.',
+        confidence: 'inferred',
+      }),
+    ).resolves.toEqual({ saved: true });
+  });
+
+  it('lets an explicit learning re-enable restart inference after reset', async () => {
+    const user = await userFactory.create();
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 0,
+      reset: true,
+    });
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 1,
+      learnFromConversations: false,
+    });
+    await updateUserPersonalization({
+      userId: user.id,
+      expectedVersion: 2,
+      learnFromConversations: true,
+    });
+
+    await expect(
+      appendLearnedUserPreference({
+        userId: user.id,
+        preference: 'Prefer short progress updates.',
+        confidence: 'inferred',
+      }),
+    ).resolves.toEqual({ saved: true });
   });
 });

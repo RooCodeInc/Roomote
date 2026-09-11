@@ -69,6 +69,10 @@ export async function updateUserPersonalization(input: {
   reset?: boolean;
 }): Promise<UserPersonalization> {
   const now = new Date();
+  const restartLearning =
+    !input.reset &&
+    ((input.instructions?.trim().length ?? 0) > 0 ||
+      input.learnFromConversations === true);
 
   await db.transaction(async (tx) => {
     if (input.expectedVersion === 0) {
@@ -98,6 +102,7 @@ export async function updateUserPersonalization(input: {
         ...(input.learnFromConversations !== undefined
           ? { learnFromConversations: input.learnFromConversations }
           : {}),
+        ...(restartLearning ? { resetAt: null } : {}),
         version: sql`${userPersonalizations.version} + 1`,
         updatedAt: now,
       })
@@ -169,7 +174,7 @@ export async function appendLearnedUserPreference(input: {
       .update(userPersonalizations)
       .set({
         ...(input.confidence === 'explicit'
-          ? { explicitConversationInstructions: next }
+          ? { explicitConversationInstructions: next, resetAt: null }
           : { inferredInstructions: next }),
         version: sql`${userPersonalizations.version} + 1`,
         updatedAt: new Date(),
