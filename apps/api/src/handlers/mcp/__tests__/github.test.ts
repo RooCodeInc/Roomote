@@ -48,6 +48,10 @@ describe('GitHub MCP bounded writes', () => {
   const args = { owner, repo: 'example', pullNumber: 42, state: 'closed' };
   const writeCases = [
     ['update_pull_request', { pullNumber: 42, state: 'closed' }],
+    [
+      'merge_pull_request',
+      { pullNumber: 42, merge_method: 'squash', expectedHeadSha: 'abc123' },
+    ],
     ['add_issue_comment', { issue_number: 42, body: 'Comment' }],
     [
       'add_reply_to_pull_request_comment',
@@ -313,7 +317,6 @@ describe('GitHub MCP bounded writes', () => {
   );
 
   it.each([
-    'merge_pull_request',
     'create_pull_request',
     'issue_write',
     'delete_file',
@@ -380,6 +383,25 @@ describe('GitHub MCP bounded writes', () => {
         },
       },
       {
+        name: 'merge_pull_request',
+        description: 'Merge a pull request in a GitHub repository.',
+        inputSchema: {
+          type: 'object',
+          required: ['owner', 'repo', 'pullNumber'],
+          properties: {
+            ...targetProperties,
+            pullNumber: { type: 'number' },
+            commit_title: { type: 'string' },
+            commit_message: { type: 'string' },
+            merge_method: {
+              type: 'string',
+              enum: ['merge', 'squash', 'rebase'],
+            },
+            expectedHeadSha: { type: 'string' },
+          },
+        },
+      },
+      {
         name: 'add_issue_comment',
         description:
           'Add a comment and/or reaction to a specific issue or issue comment in a GitHub repository. Use this tool with pull requests as well (in this case pass pull request number as issue_number), but only if user is not asking specifically to add or react to review comments. At least one of body or reaction is required.',
@@ -411,7 +433,6 @@ describe('GitHub MCP bounded writes', () => {
           },
         },
       },
-      { name: 'merge_pull_request' },
       { name: 'actions_run_trigger' },
       { name: 'issue_write' },
     ];
@@ -430,7 +451,7 @@ describe('GitHub MCP bounded writes', () => {
         method: 'tools/list',
       });
       const visible = (await response.json()).result.tools;
-      expect(visible).toEqual(tools.slice(0, 4));
+      expect(visible).toEqual(tools.slice(0, 5));
     }
     expect(
       new Headers(mocks.upstream.mock.calls[0]![1].headers).get(
@@ -516,6 +537,7 @@ describe('GitHub MCP bounded writes', () => {
     'get_file_contents',
     'pull_request_read',
     'update_pull_request',
+    'merge_pull_request',
     'add_issue_comment',
     'add_reply_to_pull_request_comment',
   ])(
@@ -934,14 +956,14 @@ describe('GitHub MCP bounded writes', () => {
       .update(users)
       .set({ deletedAt: new Date() })
       .where(eq(users.id, actor.id));
-    expect((await call()).status).toBe(403);
-    expect((await call('update_pull_request', args, app(null))).status).toBe(
+    expect((await call('merge_pull_request')).status).toBe(403);
+    expect((await call('merge_pull_request', args, app(null))).status).toBe(
       401,
     );
     expect(
       (
         await call(
-          'update_pull_request',
+          'merge_pull_request',
           args,
           app({ tokenType: 'auth', version: 1, userId: crypto.randomUUID() }),
         )
@@ -961,9 +983,7 @@ describe('GitHub MCP bounded writes', () => {
         userId: actor.id,
         principal: 'user',
       });
-      expect((await call('update_pull_request', args, target)).status).toBe(
-        403,
-      );
+      expect((await call('merge_pull_request', args, target)).status).toBe(403);
       expect(mocks.mint).not.toHaveBeenCalled();
       expect(mocks.upstream).not.toHaveBeenCalled();
       mocks.upstream.mockResolvedValueOnce(
@@ -974,6 +994,7 @@ describe('GitHub MCP bounded writes', () => {
             tools: [
               { name: 'pull_request_read' },
               { name: 'update_pull_request' },
+              { name: 'merge_pull_request' },
             ],
           },
         }),
@@ -1059,6 +1080,37 @@ describe('GitHub MCP bounded writes', () => {
         'private-comment-text',
       );
       expect(JSON.stringify(log.mock.calls)).not.toContain('scoped-test-token');
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('audits a merge target without logging native merge metadata', async () => {
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const arguments_ = {
+      owner,
+      repo: 'example',
+      pullNumber: 42,
+      merge_method: 'squash',
+      commit_title: 'private merge title',
+      commit_message: 'private merge message',
+      expectedHeadSha: 'private-head-sha',
+    };
+    try {
+      expect((await call('merge_pull_request', arguments_)).status).toBe(200);
+      expect(
+        JSON.parse(mocks.upstream.mock.calls[0]![1].body).params.arguments,
+      ).toEqual(arguments_);
+      const audit = JSON.parse(log.mock.calls[0]![0]);
+      expect(audit).toMatchObject({
+        userId: actor.id,
+        repositoryId: repository.id,
+        installationId: installation.installationId,
+        tool: 'merge_pull_request',
+        targetNumber: 42,
+      });
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private merge');
+      expect(JSON.stringify(log.mock.calls)).not.toContain('private-head-sha');
     } finally {
       log.mockRestore();
     }

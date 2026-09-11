@@ -507,6 +507,7 @@ describe('fast-agent integration broker', () => {
       { name: 'actions_list', inputSchema: { type: 'object' } },
       { name: 'get_job_logs', inputSchema: { type: 'object' } },
       { name: 'update_pull_request', inputSchema: { type: 'object' } },
+      { name: 'merge_pull_request', inputSchema: { type: 'object' } },
       { name: 'add_issue_comment', inputSchema: { type: 'object' } },
       {
         name: 'add_reply_to_pull_request_comment',
@@ -527,11 +528,12 @@ describe('fast-agent integration broker', () => {
       'actions_list',
       'get_job_logs',
       'update_pull_request',
+      'merge_pull_request',
       'add_issue_comment',
       'add_reply_to_pull_request_comment',
     ]);
     expect(integrations[0]?.description).toContain(
-      'including reviewer requests, draft status, and comment reactions',
+      'including reviewer requests, draft status, merges, and comment reactions',
     );
     expect(integrations[0]?.description).toContain(
       'Follow the discovered native tool descriptions and schemas',
@@ -935,6 +937,16 @@ describe('fast-agent integration broker', () => {
         base: 'develop',
         draft: false,
         maintainer_can_modify: true,
+      },
+    },
+    {
+      name: 'merge_pull_request',
+      args: {
+        owner: 'example',
+        repo: 'repo',
+        pullNumber: 42,
+        merge_method: 'squash',
+        expectedHeadSha: 'abc123',
       },
     },
     {

@@ -241,12 +241,13 @@ connected or public repository when investigating several.
 
 ## Daily GitHub management
 
-Fast can use the native `update_pull_request`, `add_issue_comment`, and
-`add_reply_to_pull_request_comment` tools without starting a coding task.
+Fast can use the native `update_pull_request`, `merge_pull_request`,
+`add_issue_comment`, and `add_reply_to_pull_request_comment` tools without
+starting a coding task.
 Their discovered descriptions and schemas define the supported arguments,
 including title and body changes, closing or reopening an existing pull request,
 reviewer requests, draft status, base retargeting, maintainer edit permission,
-comments, replies, and reactions. These actions use the deployment
+merges, comments, replies, and reactions. These actions use the deployment
 GitHub App, require an active Roomote member and an active connected repository,
 and remain subject to the installation's issue or pull request write permission.
 No personal GitHub OAuth connection is required. Ask for the specific change and
@@ -259,13 +260,19 @@ For example, ask Roomote to:
 
 - mark PR #42 in `example/repo` ready for review
 - request a review from `octocat` on that PR
+- merge PR #42 after its required checks and reviews pass
 - add a thumbs-up reaction to an existing comment, providing its GitHub URL
 
 Retargeting a pull request's base to an existing branch does not write a branch
-or change files. Merging, creating or deleting pull requests, writing branches
-or files, editing or deleting comments, and repository administration are
-not available through this bounded Fast path; those requests still require a
-coding task. [GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
+or change files. A merge requires an explicit request from the current human
+message. Fast reads the pull request immediately before the merge, binds the
+request to the current head SHA when the native schema supports it, leaves
+branch protections and merge permissions to GitHub, and reads the pull request
+again before reporting success or retrying an ambiguous result. Creating or
+deleting pull requests, writing branches or files, editing or deleting comments,
+and repository administration are not available through this bounded Fast path;
+those requests still require a coding task.
+[GitLab](/providers/source-control/gitlab#native-gitlab-api-tools-for-fast)
 and [Bitbucket Cloud](/providers/source-control/bitbucket#api-first-work-in-fast)
 have their own supported Fast operations and limits.
 

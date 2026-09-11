@@ -1186,27 +1186,41 @@ describe('buildFastAgentSystemPrompt', () => {
     },
   );
 
-  it('keeps bounded GitHub updates in Fast without bypassing denied writes', () => {
-    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
-    expect(prompt).toContain(
-      'these bounded actions do not require a coding task',
-    );
-    expect(prompt).toContain(
-      'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
-    );
-    expect(prompt).toContain(
-      "A permission denial is not a reason to bypass the integration's authorization",
-    );
-    for (const guidance of [
-      '`update_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
-      'Follow their discovered descriptions, schemas, and arguments',
-      'Read the target first, send only the requested fields',
-      'report success only after the tool confirms it',
-      'inspect the resulting state before retrying an error',
-    ]) {
-      expect(prompt).toContain(guidance);
-    }
-  });
+  it.each(['human', 'automation', 'scheduled_wakeup'] as const)(
+    'keeps bounded GitHub updates in Fast without bypassing denied writes on %s turns',
+    (turn) => {
+      const prompt = buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        ...(turn === 'human'
+          ? {}
+          : { turnSource: 'platform_event' as const, platformEventKind: turn }),
+      });
+      expect(prompt).toContain(
+        'these bounded actions do not require a coding task',
+      );
+      expect(prompt).toContain(
+        'Writes unsupported by the discovered provider API tools still require a coding task, not an authorization bypass',
+      );
+      expect(prompt).toContain(
+        "A permission denial is not a reason to bypass the integration's authorization",
+      );
+      for (const guidance of [
+        '`update_pull_request`, `merge_pull_request`, `add_issue_comment`, and `add_reply_to_pull_request_comment`',
+        'Follow their discovered descriptions, schemas, and arguments',
+        'Read the target first, send only the requested fields',
+        'report success only after the tool confirms it',
+        'current human message explicitly requests merging that pull request',
+        'approval, passing checks, or discussion about merging is not authorization',
+        'Immediately before merging, read the pull request again',
+        'bind the merge to that fresh head with `expectedHeadSha`',
+        'Let GitHub enforce branch protections, merge methods, and installation permissions',
+        'read the pull request again and confirm its merged state before reporting success or retrying an error, timeout, or other ambiguous result',
+        'inspect the resulting state before retrying an error',
+      ]) {
+        expect(prompt).toContain(guidance);
+      }
+    },
+  );
 
   it('treats replies as continuations of the existing conversation', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
