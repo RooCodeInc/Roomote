@@ -9,7 +9,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { CommsProviderSection } from './CommsProviderSection';
 
 type CommsProviderStatus = {
-  id: 'slack' | 'microsoft' | 'telegram';
+  id: 'slack' | 'microsoft' | 'telegram' | 'agentmail';
   label: string;
   fields: Array<{
     envVarName: string;
@@ -37,9 +37,20 @@ type CommsProviderStatus = {
     lastErrorMessage: string | null;
   } | null;
   telegramBotUsername?: string | null;
+  agentmail?: {
+    inboxAddress: string | null;
+    inboxEmail: string | null;
+    webhook: {
+      status: 'connected' | 'mismatch' | 'unregistered' | 'error';
+      registeredUrl: string | null;
+      expectedUrl: string;
+      errorMessage: string | null;
+    };
+  } | null;
 };
 
 const state = vi.hoisted(() => ({
+  cloudEnabled: false,
   slackInstallation: null as null | { teamName?: string },
   slackInstallationIsPending: false,
   connectSlackIsPending: false,
@@ -89,6 +100,10 @@ const state = vi.hoisted(() => ({
   slackChannelsIsFetching: false,
   updateRouterDebugIsPending: false,
   createSlackAppIsPending: false,
+}));
+
+vi.mock('@/hooks/useUser', () => ({
+  useAuthorizedUser: () => ({ cloudEnabled: state.cloudEnabled }),
 }));
 
 const mutations = vi.hoisted(() => ({
@@ -333,6 +348,7 @@ vi.mock('@/components/system', () => ({
     <input {...props} />
   ),
   Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
+  Mail: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
   Plug: () => <svg aria-hidden="true" />,
   RefreshCw: () => <svg aria-hidden="true" />,
@@ -366,7 +382,9 @@ vi.mock('@/lib/slack-callback-paths', () => ({
   SLACK_SIGN_IN_CALLBACK_PATH: '/api/slack/signin',
 }));
 vi.mock('@/app/(onboarding)/setup/providerSetupCopy', () => ({
-  getProviderSetupCopy: (providerId: 'slack' | 'microsoft' | 'telegram') =>
+  getProviderSetupCopy: (
+    providerId: 'slack' | 'microsoft' | 'telegram' | 'agentmail',
+  ) =>
     ({
       slack: {
         creationHref: 'https://api.slack.com/apps?new_app=1',
@@ -379,6 +397,10 @@ vi.mock('@/app/(onboarding)/setup/providerSetupCopy', () => ({
       telegram: {
         creationHref: 'https://t.me/BotFather',
         setupLabel: 'Telegram bot',
+      },
+      agentmail: {
+        creationHref: 'https://console.agentmail.to/dashboard/inboxes',
+        setupLabel: 'AgentMail API key',
       },
     })[providerId],
 }));
@@ -547,9 +569,44 @@ function buildTelegramProvider(
   };
 }
 
+function buildAgentMailProvider(
+  overrides: Partial<CommsProviderStatus> = {},
+): CommsProviderStatus {
+  return {
+    id: 'agentmail',
+    label: 'Email (AgentMail)',
+    fields: [
+      {
+        envVarName: 'R_AGENTMAIL_API_KEY',
+        acceptedEnvVarNames: ['R_AGENTMAIL_API_KEY'],
+        label: 'AgentMail API Key',
+        secret: true,
+        runtimeSatisfied: true,
+        savedSatisfied: false,
+        satisfiedByEnvVarName: 'R_AGENTMAIL_API_KEY',
+      },
+    ],
+    runtimeSatisfied: true,
+    savedSatisfied: false,
+    setupSatisfied: true,
+    agentmail: {
+      inboxAddress: 'workspace@roomote.me',
+      inboxEmail: 'workspace@roomote.me',
+      webhook: {
+        status: 'connected',
+        registeredUrl: 'https://workspace.example/api/webhooks/agentmail',
+        expectedUrl: 'https://workspace.example/api/webhooks/agentmail',
+        errorMessage: null,
+      },
+    },
+    ...overrides,
+  };
+}
+
 describe('CommsProviderSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    state.cloudEnabled = false;
     state.slackInstallation = null;
     state.slackInstallationIsPending = false;
     state.connectSlackIsPending = false;
@@ -1347,6 +1404,49 @@ describe('CommsProviderSection', () => {
 
       expect(
         screen.queryByText(/doesn't look like an Entra app ID/),
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows Cloud-managed Email status without configuration controls', () => {
+      state.cloudEnabled = true;
+      render(
+        <CommsProviderSection
+          provider={buildAgentMailProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.getByText('Email is managed by Roomote Cloud.'),
+      ).toBeVisible();
+      expect(screen.getByText('workspace@roomote.me')).toBeVisible();
+      expect(screen.getByText(/Webhook connected/)).toBeVisible();
+      expect(screen.queryByText('AgentMail API Key')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Save' }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Remove' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('keeps self-hosted Email configuration visible', () => {
+      render(
+        <CommsProviderSection
+          provider={buildAgentMailProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByText('AgentMail API Key')).toBeVisible();
+      expect(
+        screen.queryByText('Email is managed by Roomote Cloud.'),
       ).not.toBeInTheDocument();
     });
   });
