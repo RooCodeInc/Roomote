@@ -32,6 +32,7 @@ export type ToolIconKey =
   | 'task'
   | 'message'
   | 'memory'
+  | 'book-heart'
   | 'artifact'
   | 'widget'
   | 'roomote'
@@ -117,6 +118,7 @@ const TOOL_ICON_OVERRIDES: Readonly<Partial<Record<string, ToolIconKey>>> = {
   manage_source_control: 'pull-request',
   manage_environments: 'environment',
   save_task_memory: 'memory',
+  update_personalization: 'book-heart',
   request_environment_variables: 'terminal',
   report_platform_issue: 'alert',
   submit_automation_work_items: 'task',
@@ -355,6 +357,11 @@ function resolveReceiptLanguage(
     return {
       verb: byPhase('Sending', 'Sent', 'Failed to Send'),
       object: 'chat reply',
+    };
+  if (toolName === 'update_personalization')
+    return {
+      verb: byPhase('Updating', 'Personalization', 'Failed to update'),
+      object: byPhase('personalization', 'updated', 'personalization'),
     };
   if (toolName === 'request_user_input')
     return {

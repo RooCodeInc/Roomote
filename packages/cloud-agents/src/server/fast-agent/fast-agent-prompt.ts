@@ -23,6 +23,7 @@ import { isFastAgentNativeIntegration } from './fast-agent-tool-policy';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 import { buildRoomoteReleaseIdentifier } from '../../release-version';
 import { buildTherapistModeInstructions } from '../therapist-mode';
+import { buildUserPersonalizationInstructions } from '../user-personalization';
 
 /**
  * The person is on a voice call. A voice layer acknowledged them already and
@@ -172,6 +173,7 @@ export function buildFastAgentSystemPrompt({
   setupSession = false,
   voiceMode = false,
   therapistModeEnabled = false,
+  personalizationContext,
   globalAgentInstructions,
   workspaceRoutingRules = [],
 }: {
@@ -203,6 +205,11 @@ export function buildFastAgentSystemPrompt({
   /** The message was spoken on a voice call and the reply will be spoken. */
   voiceMode?: boolean;
   therapistModeEnabled?: boolean;
+  personalizationContext?: {
+    displayName: string | null;
+    instructions: string;
+    learnFromConversations: boolean;
+  } | null;
   globalAgentInstructions?: string | null;
   workspaceRoutingRules?: WorkspaceRoutingSettings['rules'];
   /** @deprecated GitHub availability is derived from availableIntegrations. */
@@ -276,6 +283,11 @@ ${
 }`;
   const therapistModeInstructions =
     buildTherapistModeInstructions(therapistModeEnabled);
+  const personalizationInstructions = platformEvent
+    ? ''
+    : buildUserPersonalizationInstructions(personalizationContext, {
+        updateToolName: 'update_personalization',
+      });
   const sharedAgentGuidance = globalAgentInstructions?.trim();
   const workspaceRoutingGuidance = formatWorkspaceRoutingRulesForPrompt(
     workspaceRoutingRules,
@@ -318,6 +330,7 @@ ${formatActiveTasksForPrompt(activeTasks)}
 ## Deployment MCP Servers
 ${formatIntegrationsForPrompt(availableIntegrations)}
 ${therapistModeInstructions ? `\n${therapistModeInstructions}\n` : ''}
+${personalizationInstructions ? `\n${personalizationInstructions}\n` : ''}
 ${voiceMode ? `\n${buildVoiceModeInstructions()}\n` : ''}
 ${
   setupSession
