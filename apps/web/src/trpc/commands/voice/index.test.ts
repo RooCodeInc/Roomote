@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TRPCError } from '@trpc/server';
 
+import { VoicePreviewPermissionError } from '@/lib/server/voice';
+
 const {
   mockResolveVoiceOpenAiKey,
   mockCreateVoiceLiveSession,
@@ -15,7 +17,11 @@ const {
   mockResolveVoiceId: vi.fn(),
 }));
 
-vi.mock('@/lib/server/voice', () => ({
+vi.mock('@/lib/server/voice', async (importOriginal) => ({
+  // The real error class so the command's instanceof check works.
+  VoicePreviewPermissionError: (
+    await importOriginal<typeof import('@/lib/server/voice')>()
+  ).VoicePreviewPermissionError,
   resolveVoiceOpenAiKey: mockResolveVoiceOpenAiKey,
   createVoiceLiveSession: mockCreateVoiceLiveSession,
   createVoicePreview: mockCreateVoicePreview,
@@ -150,6 +156,19 @@ describe('previewVoiceCommand', () => {
       voiceId: 'cedar',
     });
     expect(mockResolveVoiceOpenAiKey).not.toHaveBeenCalled();
+  });
+
+  it('tells the admin what permission the key is missing for previews', async () => {
+    mockCreateVoicePreview.mockRejectedValue(new VoicePreviewPermissionError());
+
+    const error = await previewVoiceCommand(auth, {
+      apiKey: 'sk-restricted',
+      voiceId: 'marin',
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TRPCError);
+    expect((error as TRPCError).code).toBe('PRECONDITION_FAILED');
+    expect((error as TRPCError).message).toContain('Audio model permission');
   });
 
   it('uses the stored key when editing with a blank key', async () => {

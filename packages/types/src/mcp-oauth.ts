@@ -178,18 +178,22 @@ export interface OpenAiRealtimeVoiceOption {
   recommended?: boolean;
 }
 
-/** Voice metadata documented for OpenAI Realtime sessions. */
+/**
+ * Voice metadata documented for OpenAI Realtime sessions, alphabetical for
+ * the picker. `recommended` marks OpenAI's recommended voices; the default is
+ * chosen by id below, not by position.
+ */
 export const OPENAI_REALTIME_VOICE_OPTIONS = [
   { id: 'alloy', label: 'Alloy', locale: undefined, recommended: false },
   { id: 'ash', label: 'Ash', locale: undefined, recommended: false },
   { id: 'ballad', label: 'Ballad', locale: undefined, recommended: false },
+  { id: 'cedar', label: 'Cedar', locale: undefined, recommended: true },
   { id: 'coral', label: 'Coral', locale: undefined, recommended: false },
   { id: 'echo', label: 'Echo', locale: undefined, recommended: false },
+  { id: 'marin', label: 'Marin', locale: undefined, recommended: true },
   { id: 'sage', label: 'Sage', locale: undefined, recommended: false },
   { id: 'shimmer', label: 'Shimmer', locale: undefined, recommended: false },
   { id: 'verse', label: 'Verse', locale: undefined, recommended: false },
-  { id: 'marin', label: 'Marin', locale: undefined, recommended: true },
-  { id: 'cedar', label: 'Cedar', locale: undefined, recommended: true },
 ] as const satisfies readonly OpenAiRealtimeVoiceOption[];
 
 export type OpenAiRealtimeVoiceId =
@@ -204,10 +208,11 @@ export function isOpenAiRealtimeVoiceId(
   );
 }
 
-/** Prefer a documented Australian voice, then OpenAI's first recommended voice. */
+/** Prefer a documented Australian voice, then Marin, one of OpenAI's recommended voices. */
 export const DEFAULT_OPENAI_REALTIME_VOICE_ID: OpenAiRealtimeVoiceId =
   OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.locale === 'en-AU')
     ?.id ??
+  OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.id === 'marin')?.id ??
   OPENAI_REALTIME_VOICE_OPTIONS.find((option) => option.recommended)?.id ??
   OPENAI_REALTIME_VOICE_OPTIONS[0]!.id;
 

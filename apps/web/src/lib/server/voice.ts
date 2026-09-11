@@ -237,6 +237,19 @@ export async function createVoiceLiveSession(options: {
   return { sessionId: payload.session.id, sdp: payload.transport.sdp };
 }
 
+/**
+ * The key can open GPT-Live calls but is a restricted OpenAI key without the
+ * Audio model permission that the speech endpoint needs for previews.
+ */
+export class VoicePreviewPermissionError extends Error {
+  constructor() {
+    super(
+      'This OpenAI key cannot generate voice previews. In OpenAI, give the key the Audio model permission (api.model.audio.request) or use an unrestricted key. Voice calls work without it.',
+    );
+    this.name = 'VoicePreviewPermissionError';
+  }
+}
+
 export async function createVoicePreview(options: {
   apiKey: string;
   voiceId: OpenAiRealtimeVoiceId;
@@ -258,6 +271,11 @@ export async function createVoicePreview(options: {
 
   if (!response.ok) {
     const body = (await response.text().catch(() => '')).slice(0, 2_000);
+    // Only the Audio model permission has a known remedy. Any other missing
+    // scope surfaces as the upstream error so the admin sees what OpenAI said.
+    if (response.status === 401 && body.includes('api.model.audio.request')) {
+      throw new VoicePreviewPermissionError();
+    }
     throw new Error(
       `OpenAI voice preview request failed with status ${response.status}: ${body}`,
     );
