@@ -14,6 +14,13 @@ OpenAI API key from a project that has GPT-Live access. We recommend a key
 separate from any key used for task inference, so voice can be billed and
 revoked on its own.
 
+The setup dialog also lets the admin choose any voice supported by GPT-Live and
+play a short AI-generated preview before saving. New and previously unset
+connections use Marin, one of OpenAI's recommended voices. Existing voice
+selections stay unchanged. OpenAI does not publish locale or accent metadata
+for its built-in GPT-Live voices, so Roomote does not infer an accent from a
+voice name.
+
 ## What to expect
 
 Voice is a credential-only integration. Roomote uses the key on the control

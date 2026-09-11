@@ -12,7 +12,11 @@ import {
   resolveModelProviderEnvValue,
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
-import { isMcpConnectionVoiceConfig } from '@roomote/types';
+import {
+  DEFAULT_OPENAI_REALTIME_VOICE_ID,
+  isMcpConnectionVoiceConfig,
+  type OpenAiRealtimeVoiceId,
+} from '@roomote/types';
 
 import { areCuratedIntegrationsDisabled, Env } from './env';
 
@@ -64,9 +68,29 @@ async function resolveStoredVoiceKey(): Promise<string | undefined> {
   return decrypt(connection.authConfig.encryptedApiKey).trim() || undefined;
 }
 
+export async function resolveVoiceId(): Promise<OpenAiRealtimeVoiceId> {
+  if (areCuratedIntegrationsDisabled(Env.R_CURATED_INTEGRATIONS_DISABLED)) {
+    return DEFAULT_OPENAI_REALTIME_VOICE_ID;
+  }
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'voice'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: { authConfig: true },
+  });
+
+  return connection && isMcpConnectionVoiceConfig(connection.authConfig)
+    ? (connection.authConfig.voiceId ?? DEFAULT_OPENAI_REALTIME_VOICE_ID)
+    : DEFAULT_OPENAI_REALTIME_VOICE_ID;
+}
+
 const OPENAI_API_BASE_URL = 'https://api.openai.com';
 const VOICE_LIVE_MODEL = 'gpt-live-1';
 const LIVE_SESSION_TIMEOUT_MS = 30_000;
+const VOICE_PREVIEW_TIMEOUT_MS = 30_000;
+const VOICE_PREVIEW_PHRASE = "Hi, I'm Roomote. Let's build something great.";
 
 /**
  * Small pass that turns raw speech-to-text into the text that enters the
@@ -169,6 +193,7 @@ export async function createVoiceLiveSession(options: {
   apiKey: string;
   sdp: string;
   context: VoiceWorkspaceContext;
+  voiceId: OpenAiRealtimeVoiceId;
 }): Promise<VoiceLiveSession> {
   const response = await fetch(`${OPENAI_API_BASE_URL}/v1/live/sessions`, {
     method: 'POST',
@@ -179,6 +204,7 @@ export async function createVoiceLiveSession(options: {
     body: JSON.stringify({
       session: {
         model: VOICE_LIVE_MODEL,
+        voice: options.voiceId,
         instructions: buildVoiceLiveInstructions(options.context),
         delegation: { type: 'client' },
       },
@@ -204,6 +230,38 @@ export async function createVoiceLiveSession(options: {
   }
 
   return { sessionId: payload.session.id, sdp: payload.transport.sdp };
+}
+
+export async function createVoicePreview(options: {
+  apiKey: string;
+  voiceId: OpenAiRealtimeVoiceId;
+}): Promise<{ audioBase64: string; mimeType: 'audio/mpeg' }> {
+  const response = await fetch(`${OPENAI_API_BASE_URL}/v1/audio/speech`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${options.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini-tts',
+      voice: options.voiceId,
+      input: VOICE_PREVIEW_PHRASE,
+      response_format: 'mp3',
+    }),
+    signal: AbortSignal.timeout(VOICE_PREVIEW_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    const body = (await response.text().catch(() => '')).slice(0, 2_000);
+    throw new Error(
+      `OpenAI voice preview request failed with status ${response.status}: ${body}`,
+    );
+  }
+
+  return {
+    audioBase64: Buffer.from(await response.arrayBuffer()).toString('base64'),
+    mimeType: 'audio/mpeg',
+  };
 }
 
 /** Clean one spoken utterance before it is sent to the Fast session. */
