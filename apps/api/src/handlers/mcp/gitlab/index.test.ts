@@ -76,15 +76,32 @@ function request(
   params: unknown = {},
   auth?: Variables['authContext'],
 ) {
+  const requestParams =
+    method === 'initialize' &&
+    params &&
+    typeof params === 'object' &&
+    Object.keys(params).length === 0
+      ? {
+          protocolVersion: '2025-03-26',
+          capabilities: {},
+          clientInfo: { name: 'gitlab-mcp-test', version: '1.0.0' },
+        }
+      : params;
   return app(auth).request('/gitlab', {
     method: 'POST',
     headers: {
+      accept: 'application/json, text/event-stream',
       'content-type': 'application/json',
       'mcp-session-id': 'attacker-session',
       'X-GitLab-API-URL': 'https://attacker.invalid',
       Authorization: 'Bearer inbound-secret',
     },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method,
+      params: requestParams,
+    }),
   });
 }
 function call(name = 'get_merge_request', args: Record<string, unknown> = {}) {
@@ -110,6 +127,13 @@ function readFile(args: Record<string, unknown> = {}) {
 async function payload(response: Response) {
   expect(response.status).toBe(200);
   return JSON.parse((await response.json()).result.content[0].text);
+}
+async function expectMcpError(response: Response, message?: string) {
+  expect(response.status).toBe(200);
+  const body = await response.clone().json();
+  expect(body.error || body.result?.isError).toBeTruthy();
+  if (message) expect(JSON.stringify(body)).toContain(message);
+  return body;
 }
 beforeEach(async () => {
   previousSecret = (
@@ -214,7 +238,10 @@ describe.each(['/gitlab', '/gitlab/'])('mounted routing %s', (path) => {
       const send = (requestPath = path) =>
         mounted.request(`/api/mcp-routing${requestPath}`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+          },
           body: JSON.stringify({
             jsonrpc: '2.0',
             id: 1,
@@ -336,7 +363,7 @@ it.each([
 ] as const)(
   'rejects forbidden %s arguments %j before HTTP',
   async (name, args) => {
-    expect((await mrCall(name, args)).status).toBe(400);
+    await expectMcpError(await mrCall(name, args));
     expect(traffic).toEqual([]);
   },
 );
@@ -372,11 +399,11 @@ it('uses freshly resolved OAuth and canonical IDs, never caller headers or metad
       await request('tools/call', {
         name: 'get_merge_request',
         arguments: { project_id: externalId, merge_request_iid: '7' },
-        _meta: {},
+        _meta: { source: 'ignored' },
       })
     ).status,
-  ).toBe(400);
-  expect(mocks.token).toHaveBeenCalledTimes(2);
+  ).toBe(200);
+  expect(mocks.token).toHaveBeenCalledTimes(3);
 });
 
 it('refreshes the real encrypted OAuth connection and preserves self-managed API prefixes', async () => {
@@ -440,7 +467,7 @@ it('rejects removed connections and scope loss during refresh', async () => {
       scope: 'read_api',
       expires_in: 7200,
     });
-  expect((await mrCall()).status).toBe(400);
+  await expectMcpError(await mrCall());
   expect(traffic).toHaveLength(1);
   expect(traffic[0]?.url).toBe('https://gitlab.example/oauth/token');
 });
@@ -475,14 +502,12 @@ it.each([
         ...(discussion.notes as unknown[]),
         { noteable_id: 70, noteable_iid: 8, noteable_type: 'MergeRequest' },
       ];
-    expect(
-      (
-        await mrCall('create_merge_request_discussion_note', {
-          discussion_id: 'thread',
-          body: 'hello',
-        })
-      ).status,
-    ).toBe(400);
+    await expectMcpError(
+      await mrCall('create_merge_request_discussion_note', {
+        discussion_id: 'thread',
+        body: 'hello',
+      }),
+    );
     expect(traffic.every((item) => item.init?.method === 'GET')).toBe(true);
   },
 );
@@ -490,14 +515,12 @@ it.each(['update_merge_request', 'create_merge_request_note'])(
   'checks project ownership for %s, not only replies',
   async (name) => {
     mrObject.project_id = 1;
-    expect(
-      (
-        await mrCall(
-          name,
-          name === 'update_merge_request' ? { title: 'new' } : { body: 'new' },
-        )
-      ).status,
-    ).toBe(400);
+    await expectMcpError(
+      await mrCall(
+        name,
+        name === 'update_merge_request' ? { title: 'new' } : { body: 'new' },
+      ),
+    );
     expect(traffic).toHaveLength(1);
     expect(traffic[0]?.init?.method).toBe('GET');
   },
@@ -672,10 +695,9 @@ it('exposes numeric and keyset continuation without following any response URL',
       ),
     ),
   ).toBe(true);
-  expect(
-    (await call('get_repository_tree', { page_token: 'https://evil.invalid' }))
-      .status,
-  ).toBe(400);
+  await expectMcpError(
+    await call('get_repository_tree', { page_token: 'https://evil.invalid' }),
+  );
 });
 it.each([400, 403, 404, 405, 501])(
   'returns a clear unavailable search error (%s), never broadens scope',
@@ -683,7 +705,7 @@ it.each([400, 403, 404, 405, 501])(
     providerResponse = () =>
       new Response('refresh-secret private error', { status });
     const response = await call('search_project_code', { search: 'test' });
-    expect(response.status).toBe(400);
+    await expectMcpError(response, 'Project code search is unavailable');
     const text = await response.text();
     expect(text).toContain('Project code search is unavailable');
     expect(text).not.toContain('refresh-secret');
@@ -694,9 +716,9 @@ it.each([400, 403, 404, 405, 501])(
 it('supports only initialize, notification, list and call RPC methods', async () => {
   expect(
     (await (await request('initialize')).json()).result.capabilities,
-  ).toEqual({ tools: {} });
-  expect((await request('notifications/initialized')).status).toBe(202);
-  expect((await request('resources/list')).status).toBe(400);
+  ).toEqual({ tools: { listChanged: true } });
+  expect((await request('notifications/initialized')).status).toBe(200);
+  await expectMcpError(await request('resources/list'));
   expect(traffic).toEqual([]);
 });
 it('bounds a provider stall to the request deadline and suppresses its error', async () => {
@@ -714,7 +736,7 @@ it('bounds a provider stall to the request deadline and suppresses its error', a
     ),
   );
   const response = await mrCall();
-  expect(response.status).toBe(400);
+  await expectMcpError(response);
   expect(await response.text()).not.toContain('timeout secret');
 }, 30000);
 it.each([301, 302, 307, 308, 401, 500])(
@@ -726,7 +748,7 @@ it.each([301, 302, 307, 308, 401, 500])(
         headers: { location: 'https://evil.invalid' },
       });
     const response = await mrCall();
-    expect(response.status).toBe(400);
+    await expectMcpError(response);
     expect(await response.text()).not.toContain('refreshed-oauth-token');
     expect(traffic).toHaveLength(1);
     expect(traffic[0]?.init?.redirect).toBe('error');
@@ -740,10 +762,10 @@ it('bounds request and serialized response bytes, including JSON escaping', asyn
   expect(traffic).toEqual([]);
   providerResponse = () =>
     Response.json({ ...mrObject, description: 'x'.repeat(MAX_BYTES) });
-  expect((await mrCall()).status).toBe(400);
+  await expectMcpError(await mrCall());
   fileResponse = () => new Response('"'.repeat(300000));
   providerResponse = undefined;
-  expect((await readFile()).status).toBe(400);
+  await expectMcpError(await readFile());
 });
 const MAX_BYTES = 1024 * 1024;
 it.each(['refreshed-oauth-token', 'refresh-secret', 'client-secret'])(
@@ -752,7 +774,7 @@ it.each(['refreshed-oauth-token', 'refresh-secret', 'client-secret'])(
     providerResponse = () =>
       Response.json({ ...mrObject, description: secret });
     const response = await mrCall();
-    expect(response.status).toBe(400);
+    await expectMcpError(response);
     expect(await response.text()).not.toContain(secret);
   },
 );
@@ -762,7 +784,7 @@ it('validates bounded page responses rather than reporting malformed or oversize
     Array.from({ length: 21 }, () => ({})),
   ]) {
     providerResponse = () => Response.json(value);
-    expect((await call('list_commits')).status).toBe(400);
+    await expectMcpError(await call('list_commits'));
   }
 });
 
@@ -771,7 +793,7 @@ it('suppresses JSON-escaped credentials before wrapping the MCP text result', as
   providerResponse = () =>
     Response.json({ ...mrObject, description: connection.clientSecret });
   const response = await mrCall();
-  expect(response.status).toBe(400);
+  await expectMcpError(response);
   expect(await response.text()).not.toContain('quoted-');
 });
 
@@ -810,7 +832,7 @@ it.each([
   { url: 'https://evil.invalid' },
   { headers: {} },
 ])('rejects unsafe file arguments %j without HTTP', async (args) => {
-  expect((await readFile(args)).status).toBe(400);
+  await expectMcpError(await readFile(args));
   expect(traffic).toEqual([]);
 });
 it('returns default truncation and explicit continuation without newline normalization', async () => {
@@ -860,7 +882,7 @@ it('cancels oversized streams even for a one-line window without returning parti
       }),
     );
   const response = await readFile({ limit: 1 });
-  expect(response.status).toBe(400);
+  await expectMcpError(response, '1 MiB');
   expect(await response.text()).toContain('1 MiB');
   expect(cancelled).toBe(true);
   expect(pulled).toBeLessThan(20);
@@ -871,10 +893,10 @@ it('rejects declared oversize and counts UTF-8 bytes, while accepting the exact 
     new Response(new ReadableStream({ cancel }), {
       headers: { 'content-length': String(MAX_BYTES + 1) },
     });
-  expect((await readFile()).status).toBe(400);
+  await expectMcpError(await readFile());
   expect(cancel).toHaveBeenCalled();
   fileResponse = () => new Response('\u00e9'.repeat(524289));
-  expect((await readFile({ limit: 1 })).status).toBe(400);
+  await expectMcpError(await readFile({ limit: 1 }));
   fileResponse = () => new Response('a\n'.repeat(524288));
   expect((await readFile({ limit: 1 })).status).toBe(200);
 });
@@ -883,9 +905,6 @@ it.each([new Uint8Array([0xff, 0xfe]), new Uint8Array([65, 0, 66])])(
   async (bytes) => {
     fileResponse = () => new Response(bytes);
     const response = await readFile();
-    expect(response.status).toBe(400);
-    expect((await response.json()).error.message).toContain(
-      'No file content was returned',
-    );
+    await expectMcpError(response, 'No file content was returned');
   },
 );
