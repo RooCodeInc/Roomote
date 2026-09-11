@@ -602,7 +602,7 @@ async function launchTaskSuggestionTaskFromReaction({
             select 1 from ${workItems}
             where ${workItems.id} = ${workItemId}
               and ${workItems.status} = 'launching'
-              and ${eq(workItems.launchClaimedAt, claimedAt)}
+              and ${workItems.launchClaimedAt} = ${executionClaimToken}
           )`,
         ),
       )
@@ -695,7 +695,7 @@ async function launchTaskSuggestionTaskFromReaction({
               select 1 from ${workItems}
               where ${workItems.id} = ${workItemId}
                 and ${workItems.status} = 'launching'
-                and ${eq(workItems.launchClaimedAt, claimedAt)}
+                and ${workItems.launchClaimedAt} = ${executionClaimToken}
             )`,
           ),
         )

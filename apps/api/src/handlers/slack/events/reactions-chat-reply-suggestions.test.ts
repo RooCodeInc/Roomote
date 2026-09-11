@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   startFastAgentResponse: vi.fn(),
   getConfiguration: vi.fn(),
   routeFastReaction: vi.fn(),
-  eq: vi.fn((...args: unknown[]) => args),
+  sql: vi.fn(),
 }));
 
 const claimedAt = new Date('2026-08-06T00:00:00.000Z');
@@ -88,8 +88,8 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => args),
-  eq: mocks.eq,
-  sql: vi.fn((strings, ...values) => ['sql', strings, values]),
+  eq: vi.fn((...args) => args),
+  sql: mocks.sql,
   trackedMessages: {
     id: 'id',
     surface: 'surface',
@@ -200,6 +200,11 @@ describe('chat reply suggestion reactions', () => {
     workItem.sourceTaskId = 'scan-task-1';
     workItem.targetEnvironmentId = 'environment-1';
     mocks.routeFastReaction.mockResolvedValue(false);
+    mocks.sql.mockImplementation((strings, ...values) => [
+      'sql',
+      strings,
+      values,
+    ]);
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
       workItemId: 'work-item-1',
@@ -485,10 +490,14 @@ describe('chat reply suggestion reactions', () => {
           }),
         }),
       );
-      expect(mocks.eq).toHaveBeenCalledWith('launchClaimedAt', claimedAt);
       expect(updateBuilder.set).toHaveBeenLastCalledWith(
         expect.objectContaining({ threadTs: 'execution-thread-ts' }),
       );
+      const sqlValues = mocks.sql.mock.calls.flatMap(([, ...values]) => values);
+      expect(
+        sqlValues.filter((value) => value === claimedAt.toISOString()),
+      ).toHaveLength(1);
+      expect(sqlValues).not.toContain(claimedAt);
 
       if (launchKind === 'router') {
         expect(mocks.startFastAgentResponse).toHaveBeenCalledWith(
@@ -668,12 +677,6 @@ describe('chat reply suggestion reactions', () => {
     });
 
     expect(updateBuilder.returning).toHaveBeenCalledTimes(2);
-    expect(
-      mocks.eq.mock.calls.filter(([column]) => column === 'launchClaimedAt'),
-    ).toEqual([
-      ['launchClaimedAt', claimedAt],
-      ['launchClaimedAt', claimedAt],
-    ]);
     expect(slack.deleteMessage).not.toHaveBeenCalled();
   });
 
@@ -1026,6 +1029,11 @@ describe('chat reply suggestion reactions', () => {
     expect(slack.postMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({ text: expect.stringContaining('busy') }),
     );
+    const sqlValues = mocks.sql.mock.calls.flatMap(([, ...values]) => values);
+    expect(
+      sqlValues.filter((value) => value === claimedAt.toISOString()),
+    ).toHaveLength(3);
+    expect(sqlValues).not.toContain(claimedAt);
   });
 
   it('releases the claim when Fast startup fails before acceptance', async () => {

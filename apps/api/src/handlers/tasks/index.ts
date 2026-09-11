@@ -20,6 +20,7 @@ import { updateTaskModelSelection } from './updateModelSelection';
 import { listTaskModels } from './listModels';
 import { getGoal, manageGoal } from './manageGoal';
 import { saveTaskMemory } from './saveTaskMemory';
+import { updatePersonalization } from './updatePersonalization';
 
 export const tasksRouter = new Hono<{ Variables: Variables }>();
 
@@ -43,3 +44,4 @@ tasksRouter.post('/:taskId/task_suggestions', submitTaskSuggestions);
 tasksRouter.post('/:taskId/mcp_recommendations', submitMcpRecommendations);
 tasksRouter.post('/runs/:runId/goal', manageGoal);
 tasksRouter.post('/runs/:runId/memory', saveTaskMemory);
+tasksRouter.post('/runs/:runId/personalization', updatePersonalization);

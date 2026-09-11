@@ -87,6 +87,10 @@ import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import { getTherapistModeEnabledForUser } from '../therapist-mode';
 import {
+  enqueueUserPersonalizationUpdate,
+  resolveUserPersonalizationContext,
+} from '../user-personalization';
+import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
   getOrCreateFastAgentSession,
@@ -262,6 +266,10 @@ const chatReplyArgsSchema = z.object({
 const chatReactionArgsSchema = z.object({
   name: z.string().trim().min(1),
   purpose: z.enum(['ack', 'closeout']),
+});
+const updatePersonalizationArgsSchema = z.object({
+  preference: z.string().trim().min(1).max(500),
+  confidence: z.enum(['explicit', 'inferred']),
 });
 const showWidgetArgsSchema = z.object({
   html: z.string(),
@@ -2549,6 +2557,8 @@ export async function answerFastAgentQuestion({
     const visibleInTranscript =
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply &&
       title !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction;
+    const privatePersonalization =
+      title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
     const canonicalEvent = allocateCanonicalEvent(`tool:${ordinal}`);
     await persistCanonicalMessage(
       {
@@ -2573,7 +2583,7 @@ export async function answerFastAgentQuestion({
           serverName: mcpServerName,
           toolName: mcpToolName ?? title,
           command: null,
-          rawInput: { arguments: args },
+          rawInput: { arguments: privatePersonalization ? {} : args },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -2598,12 +2608,21 @@ export async function answerFastAgentQuestion({
     result: unknown,
     nativeSessionId?: string | null,
   ) => {
-    const { output, truncated } = serializeFastAgentToolOutput(result);
     const failed =
       result !== null &&
       typeof result === 'object' &&
       'success' in result &&
       result.success === false;
+    const privatePersonalization =
+      event.title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
+    const { output, truncated } = privatePersonalization
+      ? {
+          output: failed
+            ? 'Personalization was not updated'
+            : 'Personalization updated',
+          truncated: false,
+        }
+      : serializeFastAgentToolOutput(result);
     await persistCanonicalMessage(
       {
         ...event.canonicalEvent,
@@ -2629,7 +2648,7 @@ export async function answerFastAgentQuestion({
           command: null,
           exitCode: null,
           output,
-          rawInput: { arguments: event.args },
+          rawInput: { arguments: privatePersonalization ? {} : event.args },
         },
         source: conversation.surface,
         nativeSessionId: nativeSessionId ?? activeOpenCodeSessionId,
@@ -2884,6 +2903,7 @@ export async function answerFastAgentQuestion({
       discoveredIntegrations,
       currentUser,
       therapistModeEnabled,
+      personalizationContext,
       agentBehaviorSettings,
     ] = await Promise.all([
       getAvailableEnvironments(),
@@ -2924,6 +2944,14 @@ export async function answerFastAgentQuestion({
         );
         return false;
       }),
+      platformEvent
+        ? Promise.resolve(null)
+        : resolveUserPersonalizationContext(userId).catch((error) => {
+            console.warn(
+              `[Fast Agent] User personalization unavailable: ${formatErrorForLog(error)}`,
+            );
+            return null;
+          }),
       db.query.deploymentSettings
         .findFirst({
           columns: {
@@ -3184,6 +3212,7 @@ export async function answerFastAgentQuestion({
       setupSession,
       voiceMode,
       therapistModeEnabled,
+      personalizationContext,
       globalAgentInstructions: agentBehaviorSettings?.globalAgentInstructions,
       workspaceRoutingRules:
         agentBehaviorSettings?.workspaceRoutingSettings?.rules,
@@ -4409,6 +4438,28 @@ export async function answerFastAgentQuestion({
               saved: true,
               note: 'Saved. The memory becomes searchable after the next ingestion pass.',
             };
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization: {
+            if (platformEvent) {
+              return {
+                success: false,
+                error:
+                  'Personalization learning is unavailable for platform events.',
+              };
+            }
+            const args = updatePersonalizationArgsSchema.parse(call.args);
+            const result = await enqueueUserPersonalizationUpdate({
+              userId,
+              ...args,
+            });
+            return result.saved
+              ? { success: true, saved: true }
+              : {
+                  success: false,
+                  saved: false,
+                  reason: result.reason ?? 'unknown',
+                };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {

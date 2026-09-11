@@ -43,6 +43,7 @@ class FakePeer extends EventTarget {
   static instance: FakePeer;
   readonly channel = new FakeDataChannel();
   iceGatheringState: RTCIceGatheringState = 'complete';
+  connectionState: RTCPeerConnectionState = 'new';
   localDescription: RTCSessionDescription | null = null;
 
   constructor() {
@@ -261,6 +262,25 @@ describe('useLiveVoice', () => {
     act(() => result.current.stop());
     expect(playVoiceCue).toHaveBeenCalledWith('stop');
   });
+
+  it.each(['disconnected', 'failed', 'closed'] as const)(
+    'ends the conversation when the peer connection becomes %s',
+    async (connectionState) => {
+      const { result } = renderHook(() =>
+        useLiveVoice({ onUtterance: vi.fn() }),
+      );
+
+      await act(async () => result.current.start());
+      act(() => {
+        FakePeer.instance.connectionState = connectionState;
+        FakePeer.instance.dispatchEvent(new Event('connectionstatechange'));
+      });
+
+      expect(result.current.active).toBe(false);
+      expect(result.current.status).toBe('idle');
+      expect(playVoiceCue).toHaveBeenLastCalledWith('stop');
+    },
+  );
 
   it('stays quiet for a silent stop and for an aborted handshake', async () => {
     let finishHandshake: (value: {

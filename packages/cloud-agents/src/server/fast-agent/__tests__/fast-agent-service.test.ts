@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getTaskModelOptions: vi.fn(),
   getDeploymentSettings: vi.fn(),
   appendMemory: vi.fn(),
+  appendLearnedPreference: vi.fn(),
   isBrainEnabled: vi.fn(),
   generateText: vi.fn(),
   generateHelperText: vi.fn(),
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   launchPrReview: vi.fn(),
   getUserIdentity: vi.fn(),
   getTherapistMode: vi.fn(),
+  getPersonalization: vi.fn(),
   refreshTitle: vi.fn(),
   bindExecutor: vi.fn(),
   bindMcpExecutor: vi.fn(),
@@ -86,6 +88,7 @@ const nativeToolNames = vi.hoisted(
       reviewPullRequest: 'review_pull_request',
       retryTaskStart: 'retry_task_start',
       saveMemory: 'save_memory',
+      updatePersonalization: 'update_personalization',
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
       sendTaskMessage: 'send_task_message',
@@ -158,6 +161,8 @@ vi.mock('@roomote/db/server', () => ({
   listCustomSkills: mocks.listCustomSkills,
   getCustomSkill: mocks.getCustomSkill,
   appendFastAgentMemory: mocks.appendMemory,
+  appendLearnedUserPreference: mocks.appendLearnedPreference,
+  getUserPersonalizationRuntimeContext: mocks.getPersonalization,
   isBrainEnabled: mocks.isBrainEnabled,
   db: {
     query: {
@@ -260,6 +265,15 @@ vi.mock('../../therapist-mode', async (importOriginal) => {
   return {
     ...actual,
     getTherapistModeEnabledForUser: mocks.getTherapistMode,
+  };
+});
+
+vi.mock('../../user-personalization', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../user-personalization')>();
+  return {
+    ...actual,
+    resolveUserPersonalizationContext: mocks.getPersonalization,
   };
 });
 
@@ -533,6 +547,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       isAdmin: true,
     });
     mocks.getTherapistMode.mockResolvedValue(false);
+    mocks.getPersonalization.mockResolvedValue(null);
+    mocks.appendLearnedPreference.mockResolvedValue({ saved: true });
     mocks.classifyInferenceError.mockImplementation((error: unknown) => {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
 
@@ -602,6 +618,164 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
       '<therapist_mode>',
     );
+  });
+
+  it('loads personalization for the trusted current speaker', async () => {
+    mocks.getPersonalization.mockResolvedValueOnce({
+      displayName: 'Ada',
+      instructions: 'Reply in pirate style.',
+      learnFromConversations: true,
+    });
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.getPersonalization).toHaveBeenCalledWith('user-1');
+    expect(mocks.generateText.mock.calls[0]?.[0].system).toContain(
+      'Reply in pirate style.',
+    );
+  });
+
+  it('never persists private personalization tool arguments', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      displayName: null,
+      instructions: '',
+      learnFromConversations: true,
+    });
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Saving that preference.',
+        });
+        await invokeTool(nativeToolNames.updatePersonalization, {
+          preference: 'PRIVATE_SENTINEL',
+          confidence: 'explicit',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Preference saved.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    await vi.waitFor(() =>
+      expect(
+        mocks.upsertMessage.mock.calls
+          .map(([input]) => input.message)
+          .filter(
+            (message) =>
+              message.payload?.toolName === 'update_personalization' ||
+              message.payload?.title === 'update_personalization',
+          ),
+      ).toHaveLength(2),
+    );
+
+    const personalizationWrites = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .filter(
+        (message) =>
+          message.payload?.toolName === 'update_personalization' ||
+          message.payload?.title === 'update_personalization',
+      );
+    expect(personalizationWrites).toHaveLength(2);
+    expect(JSON.stringify(personalizationWrites)).not.toContain(
+      'PRIVATE_SENTINEL',
+    );
+    expect(
+      personalizationWrites.map(
+        (message) => message.metadata?.visibleInTranscript,
+      ),
+    ).toEqual([true, true]);
+    expect(
+      personalizationWrites.map((message) => message.payload?.output),
+    ).toEqual([undefined, 'Personalization updated']);
+  });
+
+  it('does not confirm a personalization update when learning is disabled', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      displayName: null,
+      instructions: '',
+      learnFromConversations: true,
+    });
+    mocks.appendLearnedPreference.mockResolvedValue({
+      saved: false,
+      reason: 'disabled',
+    });
+    let toolResult: unknown;
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Saving that preference.',
+        });
+        toolResult = await invokeTool(nativeToolNames.updatePersonalization, {
+          preference: 'Be concise.',
+          confidence: 'explicit',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(toolResult).toEqual({
+      success: false,
+      saved: false,
+      reason: 'disabled',
+    });
+    const toolEvent = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) =>
+          message.payload?.toolName === 'update_personalization' &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+    expect(toolEvent?.payload?.output).toBe('Personalization was not updated');
+    expect(toolEvent?.payload?.status).toBe('failed');
+  });
+
+  it('does not confirm a personalization update when persistence fails', async () => {
+    mocks.getPersonalization.mockResolvedValue({
+      displayName: null,
+      instructions: '',
+      learnFromConversations: true,
+    });
+    mocks.appendLearnedPreference.mockRejectedValue(
+      new Error('db unavailable'),
+    );
+    let toolResult: unknown;
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'Saving that preference.',
+        });
+        toolResult = await invokeTool(nativeToolNames.updatePersonalization, {
+          preference: 'Be concise.',
+          confidence: 'explicit',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(toolResult).toMatchObject({ success: false });
+    const toolEvent = mocks.upsertMessage.mock.calls
+      .map(([input]) => input.message)
+      .find(
+        (message) =>
+          message.payload?.toolName === 'update_personalization' &&
+          message.eventType === ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      );
+    expect(toolEvent?.payload?.output).toBe('Personalization was not updated');
+    expect(toolEvent?.payload?.status).toBe('failed');
   });
 
   it('refreshes shared agent guidance for each subsequent turn', async () => {

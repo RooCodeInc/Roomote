@@ -2510,6 +2510,49 @@ describe('FastSessionTranscript', () => {
       );
     });
 
+    it('drops a held spoken acknowledgement when the call ends before cleanup finishes', async () => {
+      voiceStatusQuery.mockResolvedValue({ enabled: true });
+      liveVoiceState.active = true;
+      liveVoiceState.status = 'listening';
+      liveVoiceState.startedAt = 1_000;
+      liveVoiceState.deliveringUtterances = 1;
+      const transcript = () => (
+        <FastSessionTranscript
+          sessionId="session-1"
+          initialMessages={[]}
+          canReply
+        />
+      );
+      const { rerender } = render(transcript());
+      await screen.findAllByRole('button', { name: /end voice conversation/i });
+
+      act(() => {
+        liveVoiceState.onHeardTurnDelta?.('check the build');
+        liveVoiceState.onSpokenTurnDelta?.('Sure, checking.');
+        liveVoiceState.onSpokenTurn?.('Sure, checking.');
+      });
+      expect(screen.getByText('check the build')).toBeInTheDocument();
+      expect(screen.getByText('Sure, checking.')).toBeInTheDocument();
+      expect(recordVoiceTurnMutate).not.toHaveBeenCalled();
+
+      liveVoiceState.active = false;
+      liveVoiceState.status = 'idle';
+      liveVoiceState.startedAt = null;
+      rerender(transcript());
+      expect(screen.queryByText('check the build')).not.toBeInTheDocument();
+      expect(screen.queryByText('Sure, checking.')).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(recordVoiceCallEventMutate).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'session-1', phase: 'ended' }),
+        ),
+      );
+
+      liveVoiceState.deliveringUtterances = 0;
+      rerender(transcript());
+      expect(recordVoiceTurnMutate).not.toHaveBeenCalled();
+      expect(replyMutate).not.toHaveBeenCalled();
+    });
+
     it('transcribes the call into the Session: markers and spoken turns', async () => {
       voiceStatusQuery.mockResolvedValue({ enabled: true });
       const transcript = () => (
@@ -2574,6 +2617,25 @@ describe('FastSessionTranscript', () => {
           expect.objectContaining({ sessionId: 'session-1', phase: 'ended' }),
         ),
       );
+
+      act(() => {
+        FakeEventSource.instances[0]!.emit('messages', {
+          messages: [
+            {
+              ...textMessage({
+                id: 'call-2',
+                role: 'assistant',
+                text: 'Call ended',
+                ts: 10,
+              }),
+              eventType: ACP_ENVELOPE_EVENT_TYPES.VoiceCall,
+              role: 'system',
+              payload: { phase: 'ended', durationMs: 9_000 },
+            },
+          ],
+        });
+      });
+      expect(screen.getByText('Call ended · 9s')).toBeInTheDocument();
     });
 
     it('attributes a streamed first reply to its own delegation even after a second request', async () => {
