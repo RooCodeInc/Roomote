@@ -18,6 +18,8 @@ import type { UserPersonalizationSettings } from '@/types/preferences';
 
 import { Section } from './Section';
 
+const MAX_INSTRUCTIONS_LENGTH = 2_000;
+
 export function PersonalizationSection() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -65,15 +67,19 @@ export function PersonalizationSection() {
             id="personalization-instructions"
             value={instructions}
             disabled={isBusy}
-            maxLength={8_000}
+            maxLength={MAX_INSTRUCTIONS_LENGTH}
             rows={7}
             className="md:min-h-48"
             placeholder="For example: Keep answers concise, lead with a recommendation, and use examples when explaining unfamiliar concepts."
             onChange={(event) => setInstructions(event.target.value)}
           />
-          <div className="flex justify-end text-xs text-muted-foreground">
-            <span className="shrink-0">{instructions.length}/8,000</span>
-          </div>
+          {instructions.length > MAX_INSTRUCTIONS_LENGTH * 0.8 && (
+            <div className="flex justify-end text-xs text-muted-foreground">
+              <span className="shrink-0">
+                {instructions.length}/{MAX_INSTRUCTIONS_LENGTH}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-3">
@@ -93,7 +99,7 @@ export function PersonalizationSection() {
             <p className="text-sm font-semibold text-foreground">
               Learn from conversations
             </p>
-            <p className="text-sm text-foreground">
+            <p className="text-xs text-muted-foreground">
               Disable if you don&apos;t want Roomote to learn automatically. Any
               content here will still be used.
             </p>
