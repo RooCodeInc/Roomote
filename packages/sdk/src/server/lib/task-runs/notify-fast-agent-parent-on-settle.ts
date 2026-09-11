@@ -27,7 +27,7 @@ type SettledStatus =
   | RunStatus.Failed
   | RunStatus.Canceled
   | RunStatus.Idle;
-export type FastAgentParentSettleNotificationResult =
+type FastAgentParentSettleNotificationResult =
   | 'admitted'
   | 'already_notified'
   | 'failed'
