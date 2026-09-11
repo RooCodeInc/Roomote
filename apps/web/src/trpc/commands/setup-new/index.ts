@@ -44,6 +44,7 @@ import {
   buildAutomationRecommendationFingerprint,
   enqueueAutomationRecommendationInitialRun,
   enqueueAutomationRecommendations,
+  resolveSetupAutomationReportTarget,
 } from '@roomote/sdk/server';
 import {
   buildRecommendedDeploymentModelConfig,
@@ -106,6 +107,7 @@ import {
   AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
   AUTOMATION_RECOMMENDATION_CATALOG,
   ALL_REPOSITORIES,
+  isConfiguredAutomationTarget,
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -2611,6 +2613,9 @@ async function applySetupRecommendationInTx(
   const existing = recommendation.automationId
     ? await getCustomAutomationById(recommendation.automationId, tx)
     : null;
+  const reportTarget = enabled
+    ? await resolveSetupAutomationReportTarget(auth.userId, tx)
+    : null;
   const automation = existing
     ? await updateCustomAutomation(
         existing.id,
@@ -2620,7 +2625,9 @@ async function applySetupRecommendationInTx(
           enabled,
           scheduleMode: candidate.template.scheduleMode,
           environmentId: ALL_REPOSITORIES,
-          target: {},
+          target: isConfiguredAutomationTarget(existing.target)
+            ? existing.target
+            : (reportTarget ?? {}),
         },
         tx,
       )
@@ -2631,7 +2638,7 @@ async function applySetupRecommendationInTx(
           enabled,
           scheduleMode: candidate.template.scheduleMode,
           environmentId: ALL_REPOSITORIES,
-          target: {},
+          target: reportTarget ?? {},
           createdByUserId: auth.userId,
         },
         tx,
