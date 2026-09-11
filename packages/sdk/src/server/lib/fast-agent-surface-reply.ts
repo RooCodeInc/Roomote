@@ -46,7 +46,10 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-
 import { createAgentMailCommunicationProviderFromRuntimeCredentials } from './agentmail-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsConversationRoute } from '../automations/destination';
-import { recordFastAgentConversationMessageBestEffort } from './fast-agent-provider-message';
+import {
+  isFastAgentManagedTelegramTopic,
+  recordFastAgentConversationMessageBestEffort,
+} from './fast-agent-provider-message';
 import { buildFastAgentSlackReplyBodyBlocks } from './fast-agent-slack-reply-blocks';
 import {
   createDiscordFastReplyReplacer,
@@ -76,6 +79,7 @@ import {
 import { buildFastAgentArtifactCreator } from './artifacts/fast-agent-artifact-creator';
 import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 import { createFastAgentTelegramActivity } from './fast-agent-telegram-activity';
+import { addFastAgentTelegramTopicTitleSync } from './fast-agent-telegram-title-sync';
 
 const SLACK_QUOTE_MAX_LENGTH = 100;
 const DISCORD_QUOTE_MAX_LENGTH = 280;
@@ -604,10 +608,30 @@ export async function buildFastAgentSurfaceReplyDelivery(params: {
       return null;
     }
     const replyToMessageId = params.replyToMessageId ?? params.currentMessageId;
-    const activity = createFastAgentTelegramActivity({
+    let activity = createFastAgentTelegramActivity({
       provider,
       replyTarget: conversation.replyTarget,
     });
+    const threadId = conversation.replyTarget.threadId;
+    if (
+      threadId &&
+      (await isFastAgentManagedTelegramTopic({
+        sessionId: session.id,
+        workspaceId: conversation.workspaceId,
+        channelId: conversation.replyTarget.channelId,
+        threadId,
+      }))
+    ) {
+      activity = addFastAgentTelegramTopicTitleSync({
+        activity,
+        provider,
+        sessionId: session.id,
+        channelId: conversation.replyTarget.channelId,
+        threadId,
+        resolveSession: () =>
+          fastAgentConversationRepository.findById({ id: session.id }),
+      });
+    }
     const replaceReply = createTelegramFastReplyReplacer({
       provider,
       conversation,

@@ -23,6 +23,7 @@ import {
   dataVisualizationInputsSchema,
   fastAgentHumanFollowUpEventSchema,
   formatErrorForLog,
+  formatSingleLineLog,
   manageWakeupsInputSchema,
   resolveInferenceProviderRetryDelayMs,
   isMemoryMcpServer,
@@ -30,6 +31,8 @@ import {
   type ReasoningEffort,
   type RunStatus,
   INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE,
+  INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE,
+  INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE,
   matchIntegrationTools,
   type IntegrationToolCandidate,
   type DataVisualizationInput,
@@ -516,13 +519,19 @@ function findFastAgentIntegrationTools(
 ): {
   tools: IntegrationToolCandidate[];
   truncated: boolean;
+  availableToolCount: number;
   unknownIntegration: boolean;
 } {
   if (
     args.integrationId &&
     !integrations.some((integration) => integration.id === args.integrationId)
   ) {
-    return { tools: [], truncated: false, unknownIntegration: true };
+    return {
+      tools: [],
+      truncated: false,
+      availableToolCount: 0,
+      unknownIntegration: true,
+    };
   }
   const candidates = integrations.flatMap((integration) =>
     integration.tools.map((tool) => ({
@@ -3792,12 +3801,42 @@ export async function answerFastAgentQuestion({
           error: `No on-demand deployment MCP server with id "${args.integrationId}" is available in fast mode.`,
         };
       }
+      const emptyReason =
+        found.tools.length === 0
+          ? found.availableToolCount > 0
+            ? 'no_filter_match'
+            : 'no_exposed_tools'
+          : undefined;
+      if (found.tools.length === 0) {
+        console.warn(
+          formatSingleLineLog(
+            '[Fast Agent] On-demand integration lookup returned no tools.',
+            {
+              workspaceId: conversation.workspaceId,
+              conversationId: conversation.conversationId,
+              messageId: currentMessageId,
+              integrationId: args.integrationId,
+              toolName: args.toolName,
+              queryTermCount: args.query?.trim().split(/\s+/u).length ?? 0,
+              availableIntegrationCount: onDemandIntegrations.length,
+              availableToolCount: found.availableToolCount,
+              emptyReason,
+            },
+          ),
+        );
+      }
       return {
         success: true as const,
         tools: found.tools,
+        availableToolCount: found.availableToolCount,
+        ...(emptyReason ? { emptyReason } : {}),
         ...(found.truncated
           ? { guidance: INTEGRATION_TOOL_LOOKUP_TRUNCATED_GUIDANCE }
-          : {}),
+          : emptyReason === 'no_filter_match'
+            ? { guidance: INTEGRATION_TOOL_LOOKUP_NO_MATCH_GUIDANCE }
+            : emptyReason === 'no_exposed_tools'
+              ? { guidance: INTEGRATION_TOOL_LOOKUP_NO_EXPOSED_TOOLS_GUIDANCE }
+              : {}),
       };
     };
     // Subagents may look up and call on-demand deployment MCP tools; every
