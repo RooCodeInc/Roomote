@@ -24,7 +24,11 @@ type QueuedPersonalizationUpdate = {
   taskId?: string | null;
 };
 
-const personalizationUpdateQueues = new Map<string, Promise<void>>();
+type PersonalizationUpdateResult = Awaited<
+  ReturnType<typeof appendLearnedUserPreference>
+>;
+
+const personalizationUpdateQueues = new Map<string, Promise<unknown>>();
 
 function escapePrivateContext(value: string): string {
   return value
@@ -133,36 +137,26 @@ Use action=replace when the new preference conflicts with one or more existing p
   return object;
 }
 
-/**
- * Resolve and persist a preference after the caller has returned its tool
- * result. Updates for one user are serialized in-process so a pair of quick
- * corrections cannot resolve against the same stale context.
- */
+/** Resolve and persist updates serially so quick corrections see fresh state. */
 export function enqueueUserPersonalizationUpdate(
   input: QueuedPersonalizationUpdate,
-): void {
+): Promise<PersonalizationUpdateResult> {
   const previous =
     personalizationUpdateQueues.get(input.userId) ?? Promise.resolve();
   const queued = previous
     .catch(() => undefined)
     .then(async () => {
       const decision = await resolveUserPersonalizationUpdate(input);
-      if (decision.action === 'ignore' || !decision.preference) return;
+      if (decision.action === 'ignore' || !decision.preference) {
+        return { saved: false, reason: 'no_change' } as const;
+      }
 
-      const result = await appendLearnedUserPreference({
+      return appendLearnedUserPreference({
         userId: input.userId,
         preference: decision.preference,
         confidence: input.confidence,
         supersedes: decision.supersedes,
       });
-      if (!result.saved && result.reason !== 'duplicate') {
-        console.warn(
-          `[Personalization] Background update was not saved: ${result.reason ?? 'unknown'}`,
-        );
-      }
-    })
-    .catch((error) => {
-      console.error('[Personalization] Background update failed.', error);
     })
     .finally(() => {
       if (personalizationUpdateQueues.get(input.userId) === queued) {
@@ -171,4 +165,5 @@ export function enqueueUserPersonalizationUpdate(
     });
 
   personalizationUpdateQueues.set(input.userId, queued);
+  return queued;
 }

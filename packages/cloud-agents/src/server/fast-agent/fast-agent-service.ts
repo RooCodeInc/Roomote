@@ -2608,16 +2608,21 @@ export async function answerFastAgentQuestion({
     result: unknown,
     nativeSessionId?: string | null,
   ) => {
-    const privatePersonalization =
-      event.title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
-    const { output, truncated } = privatePersonalization
-      ? { output: 'Personalization updated', truncated: false }
-      : serializeFastAgentToolOutput(result);
     const failed =
       result !== null &&
       typeof result === 'object' &&
       'success' in result &&
       result.success === false;
+    const privatePersonalization =
+      event.title === FAST_AGENT_NATIVE_TOOL_NAMES.updatePersonalization;
+    const { output, truncated } = privatePersonalization
+      ? {
+          output: failed
+            ? 'Personalization was not updated'
+            : 'Personalization updated',
+          truncated: false,
+        }
+      : serializeFastAgentToolOutput(result);
     await persistCanonicalMessage(
       {
         ...event.canonicalEvent,
@@ -4444,11 +4449,17 @@ export async function answerFastAgentQuestion({
               };
             }
             const args = updatePersonalizationArgsSchema.parse(call.args);
-            enqueueUserPersonalizationUpdate({
+            const result = await enqueueUserPersonalizationUpdate({
               userId,
               ...args,
             });
-            return { success: true, saved: true, queued: true };
+            return result.saved
+              ? { success: true, saved: true }
+              : {
+                  success: false,
+                  saved: false,
+                  reason: result.reason ?? 'unknown',
+                };
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.requestUserInput: {

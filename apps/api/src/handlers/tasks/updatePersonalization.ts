@@ -72,12 +72,12 @@ export async function updatePersonalization(
       return c.json({ saved: false, reason: 'not_human_initiated' }, 200);
     }
 
-    enqueueUserPersonalizationUpdate({
+    const result = await enqueueUserPersonalizationUpdate({
       userId: run.actingUserId,
       ...parsed.data,
       taskId: String(runId),
     });
-    return c.json({ saved: true, queued: true }, 200);
+    return c.json(result, 200);
   } catch (error) {
     logHandlerError('updatePersonalization', error);
     return c.json({ error: 'Failed to update personalization' }, 500);
