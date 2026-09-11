@@ -44,11 +44,10 @@ import { configToYaml } from './yaml-utils';
 import { VisualEnvironmentEditor } from './VisualEnvironmentEditor';
 
 function getDefaultYamlTemplate(repositoryNames: string[] = []) {
-  const repoLines =
+  const repositoryYaml =
     repositoryNames.length > 0
-      ? repositoryNames.map((name) => `  - repository: ${name}`).join('\n')
-      : `  - repository: owner/repo-1
-  - repository: owner/repo-2`;
+      ? `repositories:\n${repositoryNames.map((name) => `  - repository: ${name}`).join('\n')}`
+      : 'repositories: []';
 
   return `# Environment Configuration
 name: My Environment
@@ -60,9 +59,8 @@ description: A brief description of this environment.
 #   This is a monorepo. The frontend is in packages/web and the API is in packages/api.
 #   Always run tests before committing changes.
 
-# Required: Repositories to include in this environment.
-repositories:
-${repoLines}
+# Optional: Repositories to include in this environment. Keep this as [] for a repository-free workspace.
+${repositoryYaml}
 
 # Optional: Shared mise tool versions for the workspace root.
 # Useful for workspace-root commands and as a fallback when a repo

@@ -21,7 +21,7 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
         <title>Confirm target repository context</title>
         <description>Anchor analysis to explicit repository facts provided by the task.</description>
         <actions>
-          <action>Use each provided repository identifier exactly as supplied by the task. Do not shorten, reconstruct, or infer it from the checkout directory. Repository identifiers may have more than two slash-separated segments; Azure DevOps uses `organization/project/repository`.</action>
+          <action>Use each provided repository identifier exactly as supplied by the task. Do not shorten, reconstruct, or infer it from the checkout directory. Repository identifiers may have more than two slash-separated segments; Azure DevOps uses `organization/project/repository`. When the task explicitly has no repositories, treat that as a supported repository-free environment, skip repository-specific inspection and validation steps, and use `repositories: []`.</action>
           <action>If default branch is unknown, infer it from repository metadata; otherwise use the provided value.</action>
           <action>Treat the repositories named in the task or environment as already checked out and available in the current workspace; inspect and validate those existing checkouts instead of re-cloning them.</action>
           <action>Treat repository context as:
@@ -88,7 +88,7 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
         <description>Create the smallest valid Roomote environment YAML from static evidence.</description>
         <actions>
           <action>Produce exactly one initial YAML config.</action>
-          <action>Copy each task-provided repository identifier verbatim into its matching `repositories[].repository` field. In particular, preserve all three `organization/project/repository` segments for Azure DevOps repositories.</action>
+          <action>Copy each task-provided repository identifier verbatim into its matching `repositories[].repository` field. In particular, preserve all three `organization/project/repository` segments for Azure DevOps repositories. When none are provided, keep the array empty and configure only repository-independent capabilities supported by the user's request.</action>
           <action>Use repository default branch unless strong evidence indicates a different branch.</action>
           <action>Assume the repositories listed in the environment already exist in the workspace; do not add repository clone commands or other duplicate checkout steps.</action>
           <action>Include only commands strongly supported by the repository.</action>
@@ -244,7 +244,7 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
 <field name="description" required="false" type="string" />
 <field name="initialUrl" required="false" type="absolute URL | about:blank" />
 <field name="agentInstructions" required="false" type="string" />
-<field name="repositories" required="true" type="RepositoryConfig[]" min_items="1" />
+<field name="repositories" required="true" type="RepositoryConfig[]" min_items="0" />
 <field name="env" required="false" type="Record<string, string>" />
 <field name="ports" required="false" type="NamedPort[]" />
 <field name="services" required="false" type="ServiceConfig[]" />

@@ -167,6 +167,12 @@ export function Environments() {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                           <EnvironmentVerificationBadge env={env} />
+                          {env.config.repositories.length === 0 ? (
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <BookMarked className="size-3 shrink-0" />
+                              <span>No repositories</span>
+                            </div>
+                          ) : null}
                           {env.config.repositories?.map((repo, idx) => (
                             <div
                               key={`${repo.repository}-${idx}`}

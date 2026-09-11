@@ -12,6 +12,7 @@ export function configToYaml(config: EnvironmentConfig): string {
   // Create a clean object for YAML output, omitting undefined/empty values.
   const cleanConfig: Record<string, unknown> = {
     name: config.name,
+    repositories: [],
   };
 
   if (config.description) {
@@ -30,7 +31,7 @@ export function configToYaml(config: EnvironmentConfig): string {
     cleanConfig.tool_versions = config.tool_versions;
   }
 
-  if (config.repositories && config.repositories.length > 0) {
+  if (config.repositories.length > 0) {
     cleanConfig.repositories = config.repositories.map((repo) => {
       const cleanRepo: Record<string, unknown> = {
         repository: repo.repository,

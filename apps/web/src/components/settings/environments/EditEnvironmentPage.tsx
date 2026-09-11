@@ -297,7 +297,7 @@ export function EditEnvironmentPage({
   };
 
   const handleStartAgent = async () => {
-    if (!environment || selectedRepositoryIds.length === 0) {
+    if (!environment) {
       return;
     }
 
@@ -668,11 +668,7 @@ function AgentRepositorySelectionSubview({
   isBusy: boolean;
 }) {
   const canStartAgent =
-    !!environment &&
-    selectedRepositoryIds.length > 0 &&
-    !isStartAgentPending &&
-    !repositoriesLoading &&
-    !isBusy;
+    !!environment && !isStartAgentPending && !repositoriesLoading && !isBusy;
 
   const handleChangeRequestKeyDown = (
     event: React.KeyboardEvent<HTMLTextAreaElement>,
@@ -691,7 +687,8 @@ function AgentRepositorySelectionSubview({
           definition.
         </p>
         <p>
-          Check if this is the right list of repos needed, then start the agent.
+          Optionally select the repositories the agent should inspect. Leave the
+          selection empty to work without repositories.
         </p>
       </div>
 
@@ -704,22 +701,19 @@ function AgentRepositorySelectionSubview({
       ) : (
         <Card>
           <CardContent>
-            {repositoriesLoading ? (
-              <div className="flex items-center justify-center py-12 text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-              </div>
-            ) : repositories.length === 0 ? (
-              <div className="space-y-4">
+            <div className="max-h-[calc(var(--effective-viewport-height)-22rem)] flex flex-col gap-4">
+              {repositoriesLoading ? (
+                <div className="flex items-center justify-center py-12 text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                </div>
+              ) : repositories.length === 0 ? (
                 <Alert>
                   <AlertDescription>
-                    Connect GitHub and make sure the environment repositories
-                    are available before starting the Onboarding Agent.
+                    No repositories are connected. The agent can still update
+                    this repository-free environment.
                   </AlertDescription>
                 </Alert>
-                <UpdateGitHubReposHint />
-              </div>
-            ) : (
-              <div className="max-h-[calc(var(--effective-viewport-height)-22rem)] flex flex-col gap-4">
+              ) : (
                 <div className="min-h-0 flex-1 overflow-auto">
                   <EnvironmentRepositorySelector
                     repositories={repositories}
@@ -729,23 +723,23 @@ function AgentRepositorySelectionSubview({
                     heightClassName="h-full overflow-auto"
                   />
                 </div>
+              )}
 
-                <UpdateGitHubReposHint />
+              {!repositoriesLoading ? <UpdateGitHubReposHint /> : null}
 
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">
-                    What should the agent change?
-                  </p>
-                  <Textarea
-                    value={changeRequest}
-                    onChange={(event) => onChangeRequest(event.target.value)}
-                    onKeyDown={handleChangeRequestKeyDown}
-                    placeholder="Example: Add Redis service, switch backend repo to the release branch, and update setup commands to use pnpm."
-                    className="h-24 min-h-24 resize-none"
-                  />
-                </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">
+                  What should the agent change?
+                </p>
+                <Textarea
+                  value={changeRequest}
+                  onChange={(event) => onChangeRequest(event.target.value)}
+                  onKeyDown={handleChangeRequestKeyDown}
+                  placeholder="Example: Add Redis service, switch backend repo to the release branch, and update setup commands to use pnpm."
+                  className="h-24 min-h-24 resize-none"
+                />
               </div>
-            )}
+            </div>
           </CardContent>
         </Card>
       )}

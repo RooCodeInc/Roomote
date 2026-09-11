@@ -2,6 +2,7 @@ import {
   appendEnvironmentDefinitionGuidance,
   buildEnvironmentDefinitionWorkspacePayload,
   buildCreateEnvironmentDefinitionPrompt,
+  buildTaskTypePromptAndWorkspacePayload,
   RunStatus,
   getEnvironmentDefinitionIdFromPayload,
   normalizeRepositorySelection,
@@ -58,6 +59,40 @@ describe('environment definition helpers', () => {
     expect(prompt).toContain(
       'Create the environment when validation is sufficient.',
     );
+  });
+
+  it('builds a repository-free create prompt and blank-slate workspace', () => {
+    const prompt = buildCreateEnvironmentDefinitionPrompt([]);
+
+    expect(prompt).toContain('a repository-free workspace');
+    expect(prompt).toContain('repositories: []');
+    expect(buildEnvironmentDefinitionWorkspacePayload([])).toEqual({
+      repo: '__no_repositories__',
+    });
+  });
+
+  it('routes repository-free environment-definition launches to blank slate', () => {
+    expect(
+      buildTaskTypePromptAndWorkspacePayload({
+        type: 'environment-definition',
+        setupGuidance: 'Install database tools.',
+      }),
+    ).toMatchObject({
+      workspacePayload: { repo: '__no_repositories__' },
+      taskPrompt: expect.stringContaining('a repository-free workspace'),
+    });
+  });
+
+  it('preserves a scalar repository for environment-definition launches', () => {
+    expect(
+      buildTaskTypePromptAndWorkspacePayload({
+        type: 'environment-definition',
+        repo: 'acme/api',
+      }),
+    ).toMatchObject({
+      workspacePayload: { repo: 'acme/api' },
+      taskPrompt: expect.stringContaining('- acme/api'),
+    });
   });
 
   it('flags empty repositories in the create prompt with bootstrap instructions', () => {
@@ -157,6 +192,18 @@ describe('environment definition helpers', () => {
     );
     expect(prompt).toContain('action "update" and environmentId "env-123"');
     expect(prompt).toContain('name: Roomote App');
+  });
+
+  it('builds an intentional repository-free update prompt', () => {
+    const prompt = buildUpdateEnvironmentDefinitionPrompt({
+      environmentId: 'env-blank',
+      environmentName: 'Service tools',
+      repositoryFullNames: [],
+      config: { name: 'Service tools', repositories: [] },
+    });
+
+    expect(prompt).toContain('This is a repository-free environment.');
+    expect(prompt).toContain('repositories: []');
   });
 
   it('directs preview repair tasks through the public preview URL', () => {

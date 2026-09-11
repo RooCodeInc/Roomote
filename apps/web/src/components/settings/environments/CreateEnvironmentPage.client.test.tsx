@@ -383,6 +383,35 @@ describe('CreateEnvironmentPage', () => {
     expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
   });
 
+  it('starts a repository-free environment definition task', async () => {
+    mockRepositoriesState.data = [];
+    const queryClient = new QueryClient();
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CreateEnvironmentPage />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.getByText(/create a repository-free environment/i),
+    ).toBeInTheDocument();
+    const startButton = screen.getByRole('button', { name: 'Start Agent' });
+    expect(startButton).toBeEnabled();
+    fireEvent.click(startButton);
+
+    await waitFor(() => {
+      expect(mockStartDefinitionTask).toHaveBeenCalledWith(
+        {
+          repositoryIds: [],
+          changeRequest: undefined,
+          selectedModelId: 'openrouter/openai/gpt-5.4',
+        },
+        expect.anything(),
+      );
+    });
+  });
+
   it('clears stale continue-anyway state after yaml edits', async () => {
     mockValidateEnvironmentConfig
       .mockResolvedValueOnce({

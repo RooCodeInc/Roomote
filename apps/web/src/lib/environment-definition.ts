@@ -102,6 +102,10 @@ export function buildUpdateEnvironmentDefinitionPrompt(input: {
   const repositoryLines = orderedRepositories
     .map((repositoryFullName) => `- ${repositoryFullName}`)
     .join('\n');
+  const repositoryContext =
+    orderedRepositories.length > 0
+      ? `Repositories to inspect:\n${repositoryLines}`
+      : 'This is a repository-free environment. Do not look for or add a repository unless the user explicitly requests one.';
 
   return `$environment-setup
 
@@ -111,8 +115,7 @@ Existing environment:
 - ID: ${input.environmentId}
 - Name: ${input.environmentName}
 
-Repositories to inspect:
-${repositoryLines}
+${repositoryContext}
 
 Current environment YAML:
 \`\`\`yaml

@@ -5,9 +5,10 @@ description: 'Understand the environment definition YAML: the schema, how it rel
 ---
 
 An environment definition is the YAML document that describes a Roomote
-[environment](/environments): which repositories to clone, which services to
-start, which tools and environment variables to provide, which ports to
-preview, and what guidance every task in that environment should receive.
+[environment](/environments): which repositories, if any, to clone, which
+services to start, which tools and environment variables to provide, which
+ports to preview, and what guidance every task in that environment should
+receive.
 
 The visual editor and the onboarding setup agent both produce this same YAML.
 This page documents the format directly so you can read, review, and write a
@@ -168,8 +169,10 @@ opens first, so point it at the app entry a reviewer would expect, for example
 
 ## Repositories
 
-`repositories` is a required list with at least one entry. Each repository is
-cloned onto the shared workspace.
+`repositories` is a required list, but it can be empty. Use `repositories: []`
+for an environment that only needs repository-independent services, tools,
+environment variables, integrations, skills, ports, or agent guidance. Each
+listed repository is cloned onto the shared workspace.
 
 | Field           | Type   | Required | Notes                                                             |
 | --------------- | ------ | -------- | ----------------------------------------------------------------- |

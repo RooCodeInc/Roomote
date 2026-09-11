@@ -30,9 +30,6 @@ export type TaskTypePromptAndWorkspacePayloadResult = {
   visibleInTranscript?: boolean;
 };
 
-export const ENVIRONMENT_DEFINITION_REPOSITORY_SELECTION_REQUIRED_ERROR =
-  'environment-definition tasks require at least one selected repository';
-
 export class TaskTypePromptAndWorkspacePayloadError extends Error {
   constructor(message: string) {
     super(message);
@@ -54,26 +51,28 @@ export function buildTaskTypePromptAndWorkspacePayload({
   setupGuidance?: string | null | undefined;
 }): TaskTypePromptAndWorkspacePayloadResult {
   const visibleInTranscript = type === 'standard' ? undefined : false;
-
-  if (
-    type === 'environment-definition' &&
-    (!repositoryFullNames || repositoryFullNames.length === 0) &&
-    (!repo || repo === ALL_REPOSITORIES || repo === NO_REPOSITORIES)
-  ) {
-    throw new TaskTypePromptAndWorkspacePayloadError(
-      ENVIRONMENT_DEFINITION_REPOSITORY_SELECTION_REQUIRED_ERROR,
-    );
-  }
+  const environmentDefinitionRepositories =
+    repositoryFullNames && repositoryFullNames.length > 0
+      ? repositoryFullNames
+      : repo && repo !== ALL_REPOSITORIES && repo !== NO_REPOSITORIES
+        ? [repo]
+        : [];
 
   const workspacePayload =
-    repositoryFullNames && repositoryFullNames.length > 0
-      ? buildEnvironmentDefinitionWorkspacePayload(repositoryFullNames)
-      : { repo: repo ?? '' };
+    type === 'environment-definition'
+      ? buildEnvironmentDefinitionWorkspacePayload(
+          environmentDefinitionRepositories,
+        )
+      : repositoryFullNames && repositoryFullNames.length > 0
+        ? buildEnvironmentDefinitionWorkspacePayload(repositoryFullNames)
+        : { repo: repo ?? '' };
 
   if (type === 'environment-definition') {
     return {
       taskPrompt: appendEnvironmentDefinitionGuidance(
-        buildCreateEnvironmentDefinitionPrompt(repositoryFullNames ?? []),
+        buildCreateEnvironmentDefinitionPrompt(
+          environmentDefinitionRepositories,
+        ),
         [setupGuidance?.trim(), prompt?.trim()]
           .filter((value): value is string => Boolean(value))
           .join('\n\n'),

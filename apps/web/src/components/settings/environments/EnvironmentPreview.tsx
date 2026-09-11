@@ -83,6 +83,11 @@ export function EnvironmentPreviewContent({
 
       <PreviewSection icon={GitBranch} title="Repositories">
         <div className="space-y-3">
+          {config.repositories.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No repositories configured.
+            </p>
+          ) : null}
           {config.repositories.map((repo, index) => (
             <RepositoryPreview
               key={`${repo.repository}-${index}`}

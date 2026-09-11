@@ -5,6 +5,18 @@ import type { EnvironmentConfig } from '@roomote/types';
 import { configToYaml } from './yaml-utils';
 
 describe('configToYaml', () => {
+  it('preserves an explicit empty repository set', () => {
+    const yaml = configToYaml({
+      name: 'Repository-free Env',
+      repositories: [],
+    });
+
+    expect(YAML.parse(yaml)).toEqual({
+      name: 'Repository-free Env',
+      repositories: [],
+    });
+  });
+
   it('omits the deprecated desktop flag when serializing environment config', () => {
     const config: EnvironmentConfig = {
       name: 'Desktop Env',

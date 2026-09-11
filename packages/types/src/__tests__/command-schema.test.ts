@@ -463,6 +463,27 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
+  it('accepts a repository-free environment', () => {
+    expect(
+      environmentConfigSchema.parse({
+        name: 'Service workspace',
+        repositories: [],
+        services: ['postgres16'],
+      }),
+    ).toEqual({
+      name: 'Service workspace',
+      repositories: [],
+      services: ['postgres16'],
+    });
+  });
+
+  it('still requires an explicit repositories array', () => {
+    expect(
+      environmentConfigSchema.safeParse({ name: 'Missing repositories' })
+        .success,
+    ).toBe(false);
+  });
+
   it.each([
     {
       label: 'top-level env',

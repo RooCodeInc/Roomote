@@ -306,15 +306,20 @@ export function VisualEnvironmentEditor({
         }
       >
         <p className="mb-4 text-sm text-muted-foreground">
-          Choose the repositories to clone for this environment, then configure
-          repo-specific setup details.
+          Optionally choose repositories to clone, then configure repo-specific
+          setup details. Leave this empty for a repository-free workspace.
         </p>
         <div className="space-y-3">
+          {config.repositories.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No repositories configured.
+            </p>
+          ) : null}
           {config.repositories.map((repository, index) => (
             <RepositoryEditor
               key={`${repository.repository}-${index}`}
               repository={repository}
-              removable={config.repositories.length > 1}
+              removable
               fieldId={`visual-repository-${index}`}
               repositoryOptions={repositories}
               onChange={(nextRepository) =>

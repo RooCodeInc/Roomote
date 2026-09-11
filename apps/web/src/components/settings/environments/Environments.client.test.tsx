@@ -474,6 +474,23 @@ describe('Environments', () => {
     expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
   });
 
+  it('represents repository-free environments in the list', () => {
+    state.environments = [
+      {
+        ...state.environments[0]!,
+        config: {
+          ...state.environments[0]!.config,
+          repositories: [],
+        },
+      },
+    ];
+
+    render(<Environments />);
+
+    expect(screen.getByText('No repositories')).toBeInTheDocument();
+    expect(screen.queryByText('acme/api')).not.toBeInTheDocument();
+  });
+
   it('does not link verified badges when there is no verification task', () => {
     state.environments = [
       {

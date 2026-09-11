@@ -306,6 +306,34 @@ describe('createEnvironment attribution', () => {
     );
   });
 
+  it('creates an environment without repository mappings', async () => {
+    const app = createApp({
+      userId: 'user-1',
+      tokenType: 'auth',
+      version: 1,
+    });
+
+    const response = await app.request('/environments', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        config: {
+          name: 'Repository-free Environment',
+          repositories: [],
+          services: ['postgres16'],
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRepositoriesFindMany).not.toHaveBeenCalled();
+    expect(mockEnvironmentInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ repositories: [] }),
+      }),
+    );
+  });
+
   it('rejects a truncated Azure DevOps repository identifier', async () => {
     mockRepositoriesFindMany.mockResolvedValueOnce([]);
 
