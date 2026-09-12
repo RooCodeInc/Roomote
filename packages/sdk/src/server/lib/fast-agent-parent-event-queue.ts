@@ -267,10 +267,10 @@ function buildCanonicalEventSemantics(params: {
         kind: 'state_change',
         authority: 'source_control',
         subject: { type: 'pull_request', id: event.pullRequest.url },
-        // A pull request can only move toward a terminal status, so domain
-        // order keeps merged/closed authoritative over an earlier open state
-        // even when the open event is observed or admitted later.
-        version: { scheme: 'domain_order', value: 1 },
+        // Providers expose no monotonic pull-request lifecycle version, and a
+        // pull request can legitimately move backward (reopened, returned to
+        // draft). Leave this unversioned so observation order decides and a
+        // later transition is never suppressed by an earlier state.
         state: event.pullRequest.status ?? 'open',
       };
     case 'pull_request_feedback':
@@ -289,7 +289,6 @@ function buildCanonicalEventSemantics(params: {
         kind: 'current_state_assertion',
         authority: 'source_control',
         subject: { type: 'pull_request', id: event.pullRequest.url },
-        version: { scheme: 'domain_order', value: 2 },
         state: event.status,
       };
     case 'pull_request_conflict_detected':

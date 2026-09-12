@@ -93,6 +93,7 @@ import {
 import { buildFastAgentUserContentBlocks } from './fast-agent-content-blocks';
 import {
   FAST_AGENT_CANONICAL_REDUCER_VERSION,
+  isFastAgentCanonicalEventSuperseded,
   projectFastAgentCanonicalEvents,
   renderFastAgentCanonicalHistory,
 } from './fast-agent-canonical-projection';
@@ -3285,7 +3286,12 @@ export async function answerFastAgentQuestion({
     const currentProjection = canonicalProjection.events.find(
       ({ event }) => event.eventId === currentCanonicalEventId,
     );
-    if (currentProjection?.classification === 'superseded_irrelevant') {
+    if (
+      isFastAgentCanonicalEventSuperseded(
+        canonicalProjection,
+        currentCanonicalEventId,
+      )
+    ) {
       console.info(
         `[Fast Agent] Suppressed superseded canonical event ${currentCanonicalEventId}.`,
       );

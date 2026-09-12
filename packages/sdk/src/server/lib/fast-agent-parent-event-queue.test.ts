@@ -239,6 +239,79 @@ describe('Fast parent event durable queue', () => {
     errorSpy.mockRestore();
   });
 
+  describe('canonical event semantics', () => {
+    function canonicalMetadata() {
+      const call = mocks.insertValues.mock.calls
+        .map(([values]) => values as { metadata?: Record<string, unknown> })
+        .find((values) => values?.metadata);
+      return call?.metadata?.fastAgentEventSemantics as
+        | {
+            kind: string;
+            authority: string;
+            version?: { scheme: string; value: unknown };
+            state?: string;
+          }
+        | undefined;
+    }
+
+    it.each([
+      ['pull_request_opened', pullRequestOpenedEvent],
+      [
+        'pull_request_status_changed',
+        {
+          type: 'pull_request_status_changed' as const,
+          taskId: 'child-task',
+          runId: 42,
+          taskUrl: 'https://roomote.example/task/child-task',
+          pullRequest: {
+            ...pullRequestOpenedEvent.pullRequest,
+            status: 'merged' as const,
+          },
+          status: 'merged' as const,
+          actorLogin: 'maintainer',
+        },
+      ],
+    ])(
+      'leaves %s unversioned so a later provider transition is never pinned',
+      async (_type, prEvent) => {
+        await enqueueFastAgentParentEvent({
+          parent,
+          event: prEvent as FastAgentParentEvent,
+        });
+
+        const semantics = canonicalMetadata();
+        expect(semantics?.authority).toBe('source_control');
+        // Providers expose no monotonic pull-request lifecycle version, so
+        // inventing one here would outrank a genuine reopen or draft return.
+        expect(semantics?.version).toBeUndefined();
+      },
+    );
+
+    it('keeps the monotonic run number a scheduled wakeup genuinely provides', async () => {
+      await enqueueFastAgentParentEvent({
+        parent,
+        event: {
+          type: 'scheduled_wakeup',
+          eventId: 'wakeup-1:3',
+          wakeupId: 'wakeup-1',
+          name: 'CI watch',
+          prompt: 'Check whether CI is green.',
+          runNumber: 3,
+          maxRuns: null,
+          firedAt: '2026-01-01T00:00:03.000Z',
+          nextRunAt: null,
+          reportPolicy: 'only_when_notable',
+          createdByUserId: 'user-1',
+        },
+      });
+
+      expect(canonicalMetadata()?.version).toEqual({
+        scheme: 'monotonic_number',
+        value: 3,
+      });
+    });
+  });
+
   it('acknowledges durable admission without waiting for BullMQ', async () => {
     mocks.queueAdd.mockReturnValueOnce(new Promise(() => {}));
 

@@ -300,34 +300,32 @@ describe('Fast canonical event projection', () => {
     expect(rendered).toContain('Built it');
   });
 
-  it('keeps a terminal pull request status authoritative over a later stale open state', () => {
+  it('keeps an authoritative terminal status current over the earlier open state', () => {
     const pullRequest = { type: 'pull_request', id: 'https://example/pull/1' };
-    const merged = event({
-      id: 'pr-merged',
+    const opened = event({
+      id: 'pr-opened',
       sequence: 1,
-      state: 'merged',
-      semantics: {
-        kind: 'current_state_assertion',
-        authority: 'source_control',
-        observedAt: '2026-01-01T00:00:10.000Z',
-        subject: pullRequest,
-        version: { scheme: 'domain_order', value: 2 },
-      },
-    });
-    const staleOpen = event({
-      id: 'pr-open-late',
-      sequence: 2,
       state: 'open',
       semantics: {
         kind: 'state_change',
         authority: 'source_control',
+        observedAt: '2026-01-01T00:00:10.000Z',
+        subject: pullRequest,
+      },
+    });
+    const merged = event({
+      id: 'pr-merged',
+      sequence: 2,
+      state: 'merged',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'source_control',
         observedAt: '2026-01-01T00:00:20.000Z',
         subject: pullRequest,
-        version: { scheme: 'domain_order', value: 1 },
       },
     });
 
-    const projection = projectFastAgentCanonicalEvents([merged, staleOpen]);
+    const projection = projectFastAgentCanonicalEvents([opened, merged]);
     expect(projection.currentStateEventIds).toEqual(['pr-merged']);
     expect(
       projection.events.map(({ event, classification }) => [
@@ -335,9 +333,122 @@ describe('Fast canonical event projection', () => {
         classification,
       ]),
     ).toEqual([
+      ['pr-opened', 'historical_relevant'],
       ['pr-merged', 'current'],
-      ['pr-open-late', 'historical_relevant'],
     ]);
+  });
+
+  it('keeps a stale lower-authority claim from overriding a provider status it arrives after', () => {
+    const pullRequest = { type: 'pull_request', id: 'https://example/pull/2' };
+    const merged = event({
+      id: 'provider-merged',
+      sequence: 1,
+      state: 'merged',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'source_control',
+        observedAt: '2026-01-01T00:00:10.000Z',
+        subject: pullRequest,
+      },
+    });
+    const staleChildClaim = event({
+      id: 'child-still-draft',
+      sequence: 2,
+      state: 'draft',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'delegated_task',
+        observedAt: '2026-01-01T00:00:30.000Z',
+        subject: pullRequest,
+      },
+    });
+
+    const projection = projectFastAgentCanonicalEvents([
+      merged,
+      staleChildClaim,
+    ]);
+    expect(projection.currentStateEventIds).toEqual(['provider-merged']);
+  });
+
+  it.each([
+    ['reopened after closing', 'closed', 'open'],
+    ['returned to draft after ready', 'open', 'draft'],
+  ])(
+    'does not pin an earlier state when a pull request is %s',
+    (_case, earlier, later) => {
+      // Reverse transitions are legitimate. Nothing may outrank the freshest
+      // provider observation here, because no provider gives a monotonic
+      // pull-request lifecycle version to order these by.
+      const pullRequest = {
+        type: 'pull_request',
+        id: 'https://example/pull/3',
+      };
+      const earlierState = event({
+        id: `pr-${earlier}`,
+        sequence: 1,
+        state: earlier,
+        semantics: {
+          kind: 'current_state_assertion',
+          authority: 'source_control',
+          observedAt: '2026-01-01T00:00:10.000Z',
+          subject: pullRequest,
+        },
+      });
+      const laterState = event({
+        id: `pr-${later}`,
+        sequence: 2,
+        state: later,
+        semantics: {
+          kind: 'current_state_assertion',
+          authority: 'source_control',
+          observedAt: '2026-01-01T00:00:20.000Z',
+          subject: pullRequest,
+        },
+      });
+
+      const projection = projectFastAgentCanonicalEvents([
+        earlierState,
+        laterState,
+      ]);
+      expect(projection.currentStateEventIds).toEqual([`pr-${later}`]);
+      expect(
+        JSON.stringify(renderFastAgentCanonicalHistory(projection)),
+      ).toContain(`pr-${later}`);
+    },
+  );
+
+  it('never lets an opaque revision version outrank a later observation', () => {
+    // A review head SHA identifies a revision; it says nothing about order.
+    const pullRequest = { type: 'pull_request', id: 'https://example/pull/4' };
+    const olderRevision = event({
+      id: 'feedback-older',
+      sequence: 1,
+      state: 'reviewed',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'source_control',
+        observedAt: '2026-01-01T00:00:10.000Z',
+        subject: pullRequest,
+        version: { scheme: 'opaque', value: 'sha-older' },
+      },
+    });
+    const newerRevision = event({
+      id: 'feedback-newer',
+      sequence: 2,
+      state: 'approved',
+      semantics: {
+        kind: 'current_state_assertion',
+        authority: 'source_control',
+        observedAt: '2026-01-01T00:00:20.000Z',
+        subject: pullRequest,
+        version: { scheme: 'opaque', value: 'sha-newer' },
+      },
+    });
+
+    expect(
+      projectFastAgentCanonicalEvents([olderRevision, newerRevision])
+        .currentStateEventIds,
+    ).toEqual(['feedback-newer']);
   });
 
   it('renders a cold rebuild as the warm prefix plus its canonical suffix', () => {

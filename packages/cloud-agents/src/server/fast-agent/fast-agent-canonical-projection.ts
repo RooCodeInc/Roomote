@@ -48,16 +48,20 @@ function readSemantics(
     : null;
 }
 
+/**
+ * Compares two source-provided versions for the same subject. Only versions
+ * that share a scheme are comparable, and only a genuinely monotonic scheme
+ * establishes order; an opaque version can establish identity but never
+ * precedence. Anything else is reported as incomparable so the caller falls
+ * back to real observation order instead of an invented lifecycle.
+ */
 function compareVersion(
   left: FastAgentEventSemantics,
   right: FastAgentEventSemantics,
 ): number | null {
   if (!left.version || !right.version) return null;
   if (left.version.scheme !== right.version.scheme) return null;
-  if (
-    left.version.scheme === 'monotonic_number' ||
-    left.version.scheme === 'domain_order'
-  ) {
+  if (left.version.scheme === 'monotonic_number') {
     return left.version.value - (right.version as typeof left.version).value;
   }
   return left.version.value === right.version.value ? 0 : null;
@@ -74,9 +78,10 @@ function compareCandidate(
     AUTHORITY_RANK[rightSemantics.authority];
   if (authority !== 0) return authority;
 
-  if (leftSemantics.version && !rightSemantics.version) return 1;
-  if (!leftSemantics.version && rightSemantics.version) return -1;
-
+  // A comparable monotonic version is the only signal allowed to outrank a
+  // later observation. Without one, the freshest thing the source actually
+  // told us wins, so a legitimate later transition is never pinned by an
+  // earlier state.
   const version = compareVersion(leftSemantics, rightSemantics);
   if (version !== null && version !== 0) return version;
 
@@ -182,6 +187,22 @@ export function projectFastAgentCanonicalEvents(
     ),
     currentStateEventIds: currentState.map(({ eventId }) => eventId),
   };
+}
+
+/**
+ * Whether a projected event is an obsolete state claim that must not be
+ * announced as current. Consumers use this to skip a queued turn whose state
+ * a newer event already replaced, so the rule lives here rather than being
+ * restated wherever events are consumed.
+ */
+export function isFastAgentCanonicalEventSuperseded(
+  projection: FastAgentCanonicalProjection,
+  eventId: string,
+): boolean {
+  return (
+    projection.events.find(({ event }) => event.eventId === eventId)
+      ?.classification === 'superseded_irrelevant'
+  );
 }
 
 function eventText(event: FastAgentMessage): string {

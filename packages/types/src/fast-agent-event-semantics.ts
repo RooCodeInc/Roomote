@@ -17,9 +17,16 @@ export type FastAgentEventSubject = {
   id: string;
 };
 
+/**
+ * A version the source itself provides. `monotonic_number` is the only scheme
+ * that establishes precedence, and only where the producer genuinely
+ * guarantees monotonicity (a wakeup run number, an artifact version).
+ * `opaque` establishes identity for a specific revision, such as a review
+ * head SHA, without implying an order. Lifecycles without a provider-supplied
+ * version stay unversioned and are ordered by observation time instead.
+ */
 export type FastAgentEventVersion =
   | { scheme: 'monotonic_number'; value: number }
-  | { scheme: 'domain_order'; value: number }
   | { scheme: 'opaque'; value: string };
 
 /**
