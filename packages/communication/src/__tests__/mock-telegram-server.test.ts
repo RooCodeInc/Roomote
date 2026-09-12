@@ -14,6 +14,7 @@ import {
   computeTelegramEntities,
   type MockTelegramState,
 } from '../mock-telegram-server';
+import { TELEGRAM_MAX_RICH_MESSAGE_LENGTH } from '../telegram-format';
 import { TelegramCommunicationProvider } from '../telegram-provider';
 
 const BOT_TOKEN = '7000000001:mock-telegram-token';
@@ -383,6 +384,49 @@ describe('MockTelegramServer', () => {
         '',
         '<footer>Reply anytime · <a href="https://roomote.test/s/1">Open in Roomote</a></footer>',
       ].join('\n'),
+    });
+  });
+
+  it('accepts rich footer HTML above the ordinary message limit', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const provider = providerFor(baseUrl);
+    const posted = await provider.postMessage({
+      channelId: '111000111',
+      text: 'Near-limit live update',
+      htmlText: `<blockquote>${'x'.repeat(4_050)}</blockquote>`,
+      footerText: 'Open in Roomote',
+    });
+
+    const message = (server.getState().messages ?? []).find(
+      (entry) => String(entry.message_id) === posted.messageId,
+    );
+    const richHtml = String(message?.rich_message?.html ?? '');
+    expect(richHtml.length).toBeGreaterThan(4_096);
+    expect(richHtml.length).toBeLessThanOrEqual(32_768);
+    expect(richHtml).toContain('<footer>Open in Roomote</footer>');
+  });
+
+  it('rejects rich messages above the documented rich-message limit', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    const response = await fetch(`${baseUrl}/bot${BOT_TOKEN}/sendRichMessage`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: '111000111',
+        rich_message: {
+          html: 'x'.repeat(TELEGRAM_MAX_RICH_MESSAGE_LENGTH + 1),
+        },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      description: 'Bad Request: rich message is too long',
     });
   });
 

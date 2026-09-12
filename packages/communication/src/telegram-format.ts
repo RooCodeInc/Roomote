@@ -8,6 +8,7 @@
  */
 
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
+export const TELEGRAM_MAX_RICH_MESSAGE_LENGTH = 32768;
 
 /**
  * Chunk raw markdown before HTML conversion so tag pairs never straddle a

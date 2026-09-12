@@ -6,6 +6,8 @@ import {
 } from 'node:http';
 import { AddressInfo } from 'node:net';
 
+import { TELEGRAM_MAX_RICH_MESSAGE_LENGTH } from './telegram-format';
+
 type JsonRecord = Record<string, unknown>;
 
 export type MockTelegramUser = {
@@ -707,6 +709,10 @@ export class MockTelegramServer {
           apiError(response, 400, 'Bad Request: rich message is empty');
           return;
         }
+        if (richMessage.html.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH) {
+          apiError(response, 400, 'Bad Request: rich message is too long');
+          return;
+        }
         const stored = this.storeOutgoingMessage(response, body, {
           rich_message: richMessage,
         });
@@ -760,6 +766,13 @@ export class MockTelegramServer {
 
         if (!messageText && typeof richMessage?.html !== 'string') {
           apiError(response, 400, 'Bad Request: message text is empty');
+          return;
+        }
+        if (
+          typeof richMessage?.html === 'string' &&
+          richMessage.html.length > TELEGRAM_MAX_RICH_MESSAGE_LENGTH
+        ) {
+          apiError(response, 400, 'Bad Request: rich message is too long');
           return;
         }
 

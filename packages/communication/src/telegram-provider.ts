@@ -12,6 +12,7 @@ import { readBoundedResponseBody } from './bounded-response-body';
 import { getTelegramApiBaseUrl } from './telegram-api-base-url';
 import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
+  TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
   chunkTelegramMarkdownAsHtml,
   chunkTelegramText,
   escapeTelegramHtml,
@@ -87,22 +88,23 @@ function splitTelegramFooter(
     : null;
 }
 
-function buildTelegramRichMessageHtml(input: {
+function buildTelegramRichMessage(input: {
   body: string;
   footer: string;
   bodyHtml?: string;
   footerHtml?: string;
   useMarkdown: boolean;
-}): string {
+}): TelegramRichMessage | undefined {
   const bodyHtml =
     input.bodyHtml ??
     (input.useMarkdown
       ? markdownToTelegramHtml(input.body)
       : escapeTelegramHtml(input.body));
   const footerHtml = input.footerHtml ?? markdownToTelegramHtml(input.footer);
-  return [bodyHtml, `<footer>${footerHtml}</footer>`]
+  const html = [bodyHtml, `<footer>${footerHtml}</footer>`]
     .filter(Boolean)
     .join('\n\n');
+  return html.length <= TELEGRAM_MAX_RICH_MESSAGE_LENGTH ? { html } : undefined;
 }
 
 function shouldFallbackFromRichMessage(
@@ -197,15 +199,13 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
               fallbackOnHtmlError: true,
               ...(footerText
                 ? {
-                    richMessage: {
-                      html: buildTelegramRichMessageHtml({
-                        body: text ?? '',
-                        bodyHtml: input.htmlText,
-                        footer: footerText,
-                        footerHtml: input.footerHtmlText,
-                        useMarkdown,
-                      }),
-                    },
+                    richMessage: buildTelegramRichMessage({
+                      body: text ?? '',
+                      bodyHtml: input.htmlText,
+                      footer: footerText,
+                      footerHtml: input.footerHtmlText,
+                      useMarkdown,
+                    }),
                   }
                 : {}),
             },
@@ -219,13 +219,11 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
                 ...chunk,
                 ...(split
                   ? {
-                      richMessage: {
-                        html: buildTelegramRichMessageHtml({
-                          body: split.body,
-                          footer: split.footer,
-                          useMarkdown: true,
-                        }),
-                      },
+                      richMessage: buildTelegramRichMessage({
+                        body: split.body,
+                        footer: split.footer,
+                        useMarkdown: true,
+                      }),
                     }
                   : {}),
               };
@@ -235,12 +233,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
               html: null,
               ...(footerText && splitTelegramFooter(chunk, footerText)
                 ? {
-                    richMessage: {
-                      html: buildTelegramRichMessageHtml({
-                        ...splitTelegramFooter(chunk, footerText)!,
-                        useMarkdown: false,
-                      }),
-                    },
+                    richMessage: buildTelegramRichMessage({
+                      ...splitTelegramFooter(chunk, footerText)!,
+                      useMarkdown: false,
+                    }),
                   }
                 : {}),
             }))
@@ -516,53 +512,54 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         : useMarkdown
           ? markdownToTelegramHtml(input.text)
           : escapeTelegramHtml(input.text);
-      const richResponse = await this.fetchWithRetry(
-        `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/editMessageText`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: input.channelId,
-            message_id: Number.parseInt(input.messageId, 10),
-            rich_message: {
-              html: buildTelegramRichMessageHtml({
-                body: input.text,
-                bodyHtml,
-                footer: input.footerText,
-                footerHtml: input.footerHtmlText,
-                useMarkdown,
-              }),
-            },
-            link_preview_options: { is_disabled: true },
-            reply_markup: buildTelegramReplyMarkup(input.buttons) ?? {
-              inline_keyboard: [],
-            },
-          }),
-        },
-        { method: 'editMessageText', retryNetworkErrors: true },
-      );
-      const richParsed = (await richResponse.json().catch(() => null)) as {
-        ok?: boolean;
-        description?: string;
-      } | null;
-      if (richResponse.ok && richParsed?.ok) return;
-      if (
-        richResponse.status === 400 &&
-        richParsed?.description
-          ?.toLowerCase()
-          .includes('message is not modified')
-      ) {
-        return;
-      }
-      if (
-        !shouldFallbackFromRichMessage(
-          richResponse.status,
-          richParsed?.description,
-        )
-      ) {
-        throw new Error(
-          `Telegram editMessageText failed (${richResponse.status}): ${richParsed?.description ?? richResponse.statusText}`,
+      const richMessage = buildTelegramRichMessage({
+        body: input.text,
+        bodyHtml,
+        footer: input.footerText,
+        footerHtml: input.footerHtmlText,
+        useMarkdown,
+      });
+      if (richMessage) {
+        const richResponse = await this.fetchWithRetry(
+          `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/editMessageText`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: input.channelId,
+              message_id: Number.parseInt(input.messageId, 10),
+              rich_message: richMessage,
+              link_preview_options: { is_disabled: true },
+              reply_markup: buildTelegramReplyMarkup(input.buttons) ?? {
+                inline_keyboard: [],
+              },
+            }),
+          },
+          { method: 'editMessageText', retryNetworkErrors: true },
         );
+        const richParsed = (await richResponse.json().catch(() => null)) as {
+          ok?: boolean;
+          description?: string;
+        } | null;
+        if (richResponse.ok && richParsed?.ok) return;
+        if (
+          richResponse.status === 400 &&
+          richParsed?.description
+            ?.toLowerCase()
+            .includes('message is not modified')
+        ) {
+          return;
+        }
+        if (
+          !shouldFallbackFromRichMessage(
+            richResponse.status,
+            richParsed?.description,
+          )
+        ) {
+          throw new Error(
+            `Telegram editMessageText failed (${richResponse.status}): ${richParsed?.description ?? richResponse.statusText}`,
+          );
+        }
       }
     }
     const firstChunk = useMarkdown
