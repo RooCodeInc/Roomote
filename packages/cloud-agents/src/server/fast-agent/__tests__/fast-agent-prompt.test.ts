@@ -91,7 +91,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'For frontend work, use App and prefer GPT-5.6. -> App [id: env-app]',
     );
     expect(prompt).toContain(
-      'An explicit user request for an environment or model always takes precedence',
+      "An explicit user request for an environment or model takes precedence over these rules only when it satisfies the work's requirements",
+    );
+    expect(prompt).toContain(
+      'A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment',
     );
     expect(prompt).toContain('supplemental routing rules');
     expect(prompt).toContain(
@@ -1321,6 +1324,12 @@ describe('buildFastAgentSystemPrompt', () => {
           repositoryNames: ['RooCodeInc/Roomote'],
         },
       ],
+      workspaceRoutingRules: [
+        {
+          description: 'Roomote repository work requires Roomote.',
+          target: 'env-roomote',
+        },
+      ],
     });
     const environmentlessPrompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
@@ -1349,7 +1358,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'Handle work directly in Fast when it does not require sandbox execution',
     );
     expect(configuredPrompt).toContain(
-      'A Blank slate request never overrides a required repository or environment',
+      'A Blank slate request never overrides a required repository or environment, including one identified by a matching Routing Rule',
+    );
+    expect(configuredPrompt).toContain(
+      'A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment',
     );
     expect(configuredPrompt).not.toContain(
       'Otherwise use null to use the deployment default',
