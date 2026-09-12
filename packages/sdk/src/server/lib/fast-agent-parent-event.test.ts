@@ -3446,6 +3446,98 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('retires a Telegram action message when attachment failure retries the post', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-telegram-retry',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const telegramParent = {
+      ...parent,
+      conversation: {
+        surface: 'telegram' as const,
+        workspaceId: 'telegram-chat-1',
+        conversationId: 'telegram-chat-1:topic-7',
+        replyTarget: { channelId: 'telegram-chat-1', threadId: 'topic-7' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+    mocks.telegramPostMessage
+      .mockResolvedValueOnce({
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        messageId: 'telegram-first',
+        lastTextMessageId: 'telegram-first-actions',
+      })
+      .mockResolvedValueOnce({
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        messageId: 'telegram-second',
+        lastTextMessageId: 'telegram-second-actions',
+      });
+    mocks.attachPendingPrReviewActionMessage
+      .mockRejectedValueOnce(new Error('attachment failed'))
+      .mockResolvedValueOnce({ attached: true, superseded: [] });
+
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: telegramParent,
+        event: feedbackEvent,
+      }),
+    ).rejects.toThrow('attachment failed');
+    await expect(
+      deliverFastAgentParentEvent({
+        parent: telegramParent,
+        event: feedbackEvent,
+      }),
+    ).resolves.toBe('delivered');
+
+    const nonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mocks.setPendingPrReviewAction).toHaveBeenCalledTimes(2);
+    expect(mocks.setPendingPrReviewAction).toHaveBeenLastCalledWith(
+      expect.objectContaining({ nonce }),
+    );
+    expect(mocks.retirePrReviewActionMessagesBestEffort).toHaveBeenCalledWith([
+      {
+        provider: 'telegram',
+        channelId: 'telegram-chat-1',
+        threadId: 'topic-7',
+        messageId: 'telegram-first-actions',
+      },
+    ]);
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenLastCalledWith(
+      nonce,
+      'telegram-second-actions',
+    );
+    expect(
+      mocks.retirePrReviewActionMessagesBestEffort.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.telegramPostMessage.mock.invocationCallOrder[1]!);
+  });
+
   it('preserves Discord action callbacks when attachment failure retries the post', async () => {
     const feedbackEvent = {
       type: 'pull_request_feedback' as const,

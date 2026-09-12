@@ -1999,13 +1999,26 @@ async function createTelegramFastAgentParentTurn(
           messageId: posted.lastTextMessageId ?? posted.messageId,
         });
         if (action) {
-          const { superseded } =
-            await attachPendingPrReviewActionMessageWithRetirement(
-              action.nonce,
-              posted.lastTextMessageId ?? posted.messageId,
-            );
-          if (superseded.length > 0) {
-            await retirePrReviewActionMessagesBestEffort(superseded);
+          const messageId = posted.lastTextMessageId ?? posted.messageId;
+          try {
+            const { superseded } =
+              await attachPendingPrReviewActionMessageWithRetirement(
+                action.nonce,
+                messageId,
+              );
+            if (superseded.length > 0) {
+              await retirePrReviewActionMessagesBestEffort(superseded);
+            }
+          } catch (error) {
+            await retirePrReviewActionMessagesBestEffort([
+              {
+                provider: 'telegram',
+                channelId: conversation.replyTarget.channelId,
+                threadId: conversation.replyTarget.threadId ?? null,
+                messageId,
+              },
+            ]);
+            throw error;
           }
         }
         if (
