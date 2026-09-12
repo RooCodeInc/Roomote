@@ -310,7 +310,7 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
     const conversation = await createConversation({
       userId: user.id,
       surface: 'telegram',
-      title: 'Generated Fast title',
+      title: 'Fix generated Fast title',
       replyTarget: { channelId: 'telegram-chat', threadId: '77' },
     });
     await db.insert(fastAgentProviderMessages).values({
@@ -329,18 +329,22 @@ describe('buildFastAgentSurfaceReplyDelivery', () => {
       question: 'Start here',
       currentMessageId: '78',
     });
-    delivery!.adapter.activity?.updateTitle?.('Generated Fast title', {
-      emoji: '🐞',
-    });
+    delivery!.adapter.activity?.updateTitle?.('Fix generated Fast title');
     await delivery!.adapter.activity?.dispose();
 
     expect(mocks.telegramEditForumTopic).toHaveBeenCalledWith({
       channelId: 'telegram-chat',
       threadId: '77',
-      name: 'Generated Fast title',
+      name: 'Fix generated Fast title',
       iconCustomEmojiId: 'bug-icon',
     });
-    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith(['🐞']);
+    expect(mocks.telegramResolveForumTopicIcon).toHaveBeenCalledWith([
+      '🐞',
+      '🛠',
+      '💡',
+      '💬',
+      '📝',
+    ]);
   });
 
   it('does not rename a user-owned Telegram topic', async () => {

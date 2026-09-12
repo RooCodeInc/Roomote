@@ -155,10 +155,7 @@ export type FastAgentTurnActivity = {
   settle: (options?: { keepProcessing?: boolean }) => Promise<void>;
   /** Synchronously cancel delayed starts and fence new status writes, then drain issued writes. */
   dispose: () => Promise<void>;
-  updateTitle?: (
-    title: string | null,
-    metadata?: { emoji?: string | null },
-  ) => void;
+  updateTitle?: (title: string | null) => void;
 };
 
 export type FastAgentMcpServerConfig = {

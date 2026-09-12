@@ -15,9 +15,7 @@ vi.mock('../non-task-provider-usage', async (importOriginal) => {
 import {
   finalizeGeneratedTaskTitle,
   generateLlmTaskTitle,
-  generateLlmTaskTitleWithEmoji,
   isFallbackTaskTitle,
-  sanitizeGeneratedTaskEmoji,
 } from '../llm-task-title';
 
 describe('llm-task-title', () => {
@@ -51,30 +49,10 @@ describe('llm-task-title', () => {
     expect(isFallbackTaskTitle('Investigate worker boot loops')).toBe(false);
   });
 
-  it('accepts one generated emoji and rejects non-emoji metadata', () => {
-    expect(sanitizeGeneratedTaskEmoji(' 🐞 ')).toBe('🐞');
-    expect(sanitizeGeneratedTaskEmoji('bug')).toBeNull();
-    expect(sanitizeGeneratedTaskEmoji('🐞 bug')).toBeNull();
-    expect(sanitizeGeneratedTaskEmoji('🐞🚀')).toBeNull();
-  });
-
-  it('returns the model-selected emoji with the generated title', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: { title: 'Fix deploy failures', emoji: '🛠️' },
-    });
-
-    await expect(
-      generateLlmTaskTitleWithEmoji({
-        messages: [{ role: 'user', text: 'Fix the failing deployment.' }],
-      }),
-    ).resolves.toEqual({ title: 'Fix deploy failures', emoji: '🛠️' });
-  });
-
   it('falls back to a sanitized default title on malformed model output', async () => {
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: {
         title: '   ""   ',
-        emoji: '📝',
       },
     });
 
@@ -92,7 +70,6 @@ describe('llm-task-title', () => {
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: {
         title: 'Fix deploy title casing',
-        emoji: '✏️',
       },
     });
 
@@ -115,11 +92,6 @@ describe('llm-task-title', () => {
         system: expect.stringContaining(
           'base the title on the full conversation as it evolves',
         ),
-      }),
-    );
-    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
-      expect.objectContaining({
-        system: expect.stringContaining('choose exactly one relevant emoji'),
       }),
     );
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
