@@ -5,7 +5,7 @@ import type {
   ReasoningEffort,
 } from '@roomote/types';
 
-import type { TaskTitleCategory } from '../llm-task-title';
+import type { TelegramTopicIconEmoji } from '../llm-task-title';
 
 export {
   isFastAgentCommunicationConversation,
@@ -159,7 +159,10 @@ export type FastAgentTurnActivity = {
   dispose: () => Promise<void>;
   updateTitle?: (
     title: string | null,
-    metadata?: { category?: TaskTitleCategory | null; titleChanged?: boolean },
+    metadata?: {
+      iconEmoji?: TelegramTopicIconEmoji | null;
+      titleChanged?: boolean;
+    },
   ) => void;
 };
 
