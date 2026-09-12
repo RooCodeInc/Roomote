@@ -478,7 +478,6 @@ ${recurringAutomationGuidance}
 - After task or integration tools, use a closeout or clarification only for additional user-useful outcome or coordination information. The opening acknowledgement is already visible and needs no duplicate launch reply, but it does not suppress later useful updates while work continues.
 - When multiple tasks are listed, route a follow-up only when the intended task is unambiguous. Route cancellation only to an active task. Otherwise ask which task they mean with a clarification reply.
 - If a reliable answer is already available from conversation context, answer directly instead of delegating. Otherwise apply the scope-based exploration rule above; delegate execution, code changes, or testing.
-- Select an environment ID only when the target is clear. Otherwise use null to use the deployment default.
 ${
   platformEvent
     ? `## ${platformEventKind === 'automation' ? 'Automation Platform Event' : platformEventKind === 'setup' ? 'Setup Platform Event' : platformEventKind === 'input_response' ? 'Structured Input Response Event' : platformEventKind === 'scheduled_wakeup' ? 'Scheduled Wakeup Event' : 'Delegated Task Platform Event'}

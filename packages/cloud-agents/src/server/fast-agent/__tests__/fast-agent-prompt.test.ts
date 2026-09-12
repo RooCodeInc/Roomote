@@ -1341,6 +1341,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Preserve normal Fast-only handling for work that needs neither a repository nor sandbox execution',
     );
+    expect(prompt).not.toContain(
+      'Otherwise use null to use the deployment default',
+    );
   });
 
   it('proactively parallelizes only cleanly independent coding scopes', () => {
