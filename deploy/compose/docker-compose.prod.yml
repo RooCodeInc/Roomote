@@ -225,7 +225,7 @@ x-roomote-api-env: &roomote-api-env
   R_MICROSOFT_TENANT_ID: ${R_MICROSOFT_TENANT_ID:-}
 
 x-roomote-controller-env: &roomote-controller-env
-  <<: *roomote-inference-env
+  <<: *roomote-base-env
   SANDBOX_OPENROUTER_API_KEY: ${SANDBOX_OPENROUTER_API_KEY:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}

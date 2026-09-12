@@ -163,7 +163,7 @@ describe('ecosystem.config.js', () => {
       );
     }
     expect(compose).toContain(
-      'x-roomote-controller-env: &roomote-controller-env\n  <<: *roomote-inference-env',
+      'x-roomote-controller-env: &roomote-controller-env\n  <<: *roomote-base-env',
     );
   });
 
