@@ -1312,6 +1312,37 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('requires repository work to use a matching configured environment', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [
+        {
+          id: 'env-roomote',
+          name: 'Roomote',
+          repositoryNames: ['RooCodeInc/Roomote'],
+        },
+      ],
+    });
+
+    expect(prompt).toContain(
+      'For repository work, select the matching configured environment from All Environments and pass its exact ID to "launch_task"',
+    );
+    expect(prompt).toContain(
+      'Never use Blank slate as a default or recovery path',
+    );
+    expect(prompt).toContain(
+      'If no configured environment matches the required repository, or the match is ambiguous, ask the user before launching instead of silently using Blank slate',
+    );
+    expect(prompt).toContain(
+      'Use Blank slate only when the user explicitly requests it, the work clearly requires no repository',
+    );
+    expect(prompt).toContain(
+      'no suitable configured environment exists for work that can legitimately proceed without a repository',
+    );
+    expect(prompt).toContain(
+      'Preserve normal Fast-only handling for work that needs neither a repository nor sandbox execution',
+    );
+  });
+
   it('proactively parallelizes only cleanly independent coding scopes', () => {
     const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
 
