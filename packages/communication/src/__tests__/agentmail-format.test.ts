@@ -102,6 +102,24 @@ describe('renderAgentMailPlainText', () => {
   it('strips blockquote markers', () => {
     expect(renderAgentMailPlainText('> quoted line')).toBe('quoted line');
   });
+
+  it('preserves malformed repeated links without excessive backtracking', () => {
+    const markdown = '[label]('.repeat(12_500);
+
+    expect(renderAgentMailPlainText(markdown)).toBe(markdown);
+  });
+
+  it('parses a heading with a long whitespace prefix in one pass', () => {
+    const markdown = `######${' '.repeat(99_980)}heading`;
+
+    expect(renderAgentMailPlainText(markdown)).toBe('heading');
+  });
+
+  it('keeps unsafe link protocols readable in plain text', () => {
+    expect(renderAgentMailPlainText('[click](javascript:alert)')).toBe(
+      'click (javascript:alert)',
+    );
+  });
 });
 
 describe('buildAgentMailEmailBody', () => {
