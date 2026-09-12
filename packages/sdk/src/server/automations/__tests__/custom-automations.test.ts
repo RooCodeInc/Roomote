@@ -14,6 +14,8 @@ const fastMocks = vi.hoisted(() => ({
   createTelegramProvider: vi.fn(),
   telegramPostMessage: vi.fn(),
   telegramCreateForumTopic: vi.fn(),
+  findFastConversation: vi.fn(),
+  isManagedTelegramTopic: vi.fn(),
   canStartAgentMailConversation: vi.fn(),
   prepareAgentMailConversation: vi.fn(),
   createAgentMailProvider: vi.fn(),
@@ -35,6 +37,7 @@ vi.mock('../../lib/fast-agent-parent-event-queue', () => ({
 
 vi.mock('../../lib/fast-agent-provider-message', () => ({
   recordFastAgentConversationMessage: fastMocks.recordProviderMessage,
+  isFastAgentManagedTelegramTopic: fastMocks.isManagedTelegramTopic,
 }));
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
@@ -79,6 +82,7 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       discordInstallationChannels: { findFirst: vi.fn() },
       environments: { findFirst: vi.fn() },
+      fastAgentConversations: { findFirst: fastMocks.findFastConversation },
       slackInstallationChannels: { findFirst: vi.fn() },
       slackInstallations: { findFirst: vi.fn() },
     },
@@ -91,6 +95,13 @@ vi.mock('@roomote/db/server', () => ({
   discordInstallationChannels: { channelId: 'discord_channels.channel_id' },
   CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS: 10 * 60 * 1_000,
   environments: {},
+  fastAgentConversations: {
+    surface: 'fast_agent_conversations.surface',
+    workspaceId: 'fast_agent_conversations.workspace_id',
+    conversationId: 'fast_agent_conversations.conversation_id',
+    currentReplyChannelId: 'fast_agent_conversations.current_reply_channel_id',
+    userId: 'fast_agent_conversations.user_id',
+  },
   eq: vi.fn((...args: unknown[]) => args),
   getCustomAutomationById: vi.fn(),
   getCustomAutomationFrequency: vi.fn(),
@@ -255,6 +266,8 @@ describe('customAutomationsJob', () => {
       messageThreadId: 'telegram-topic-1',
       name: 'Flaky tests',
     });
+    fastMocks.findFastConversation.mockResolvedValue(null);
+    fastMocks.isManagedTelegramTopic.mockResolvedValue(false);
     fastMocks.canStartAgentMailConversation.mockResolvedValue(true);
     fastMocks.prepareAgentMailConversation.mockResolvedValue({
       conversationId: 'agentmail-conversation-1',
@@ -1474,6 +1487,8 @@ describe('runCustomAutomationNow', () => {
       id: '33333333-3333-4333-8333-333333333333',
       compatibilityMessages: [],
     });
+    fastMocks.findFastConversation.mockResolvedValue(null);
+    fastMocks.isManagedTelegramTopic.mockResolvedValue(false);
   });
 
   it('acknowledges a manual Fast run after durably queueing its event', async () => {
@@ -1580,6 +1595,73 @@ describe('runCustomAutomationNow', () => {
         conversationId: `${automation.id}:${failedClaim.toISOString()}`,
         replyTarget: { channelId: 'D123' },
       },
+    });
+  });
+
+  it('reuses the managed Telegram topic when manually recovering a failed run', async () => {
+    const failedClaim = new Date('2026-09-01T15:15:00.000Z');
+    const conversationId = `${automation.id}:${failedClaim.toISOString()}`;
+    vi.mocked(getCustomAutomationById).mockResolvedValue({
+      ...automation,
+      executionMode: 'fast',
+      environmentId: null,
+      target: {
+        provider: 'telegram',
+        targetKind: 'telegram_user',
+        externalRef: 'user-1',
+      },
+      createdByUserId: 'user-1',
+      lastRunAt: failedClaim,
+      lastFailedAt: new Date('2026-09-01T15:16:27.282Z'),
+      lastError: 'transcript persistence failed',
+    } as never);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
+      channelId: 'telegram-dm-1',
+    });
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'telegram',
+    ]);
+    fastMocks.createTelegramProvider.mockResolvedValue({
+      postMessage: fastMocks.telegramPostMessage,
+      createForumTopic: fastMocks.telegramCreateForumTopic,
+    });
+    fastMocks.findFastConversation.mockResolvedValue({
+      id: '33333333-3333-4333-8333-333333333333',
+      currentReplyThreadId: 'telegram-topic-1',
+    });
+    fastMocks.isManagedTelegramTopic.mockResolvedValue(true);
+
+    const result = await runCustomAutomationNow(automation.id);
+
+    expect(result).toEqual({ outcome: 'queued' });
+    expect(fastMocks.isManagedTelegramTopic).toHaveBeenCalledWith({
+      sessionId: '33333333-3333-4333-8333-333333333333',
+      workspaceId: 'telegram-dm-1',
+      channelId: 'telegram-dm-1',
+      threadId: 'telegram-topic-1',
+    });
+    expect(fastMocks.telegramCreateForumTopic).not.toHaveBeenCalled();
+    expect(fastMocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      conversation: {
+        surface: 'telegram',
+        workspaceId: 'telegram-dm-1',
+        conversationId,
+        replyTarget: {
+          channelId: 'telegram-dm-1',
+          threadId: 'telegram-topic-1',
+        },
+      },
+    });
+    expect(fastMocks.recordProviderMessage).toHaveBeenCalledWith({
+      sessionId: '33333333-3333-4333-8333-333333333333',
+      conversation: expect.objectContaining({
+        conversationId,
+        replyTarget: expect.objectContaining({
+          threadId: 'telegram-topic-1',
+        }),
+      }),
+      messageId: 'telegram-topic-1',
     });
   });
 

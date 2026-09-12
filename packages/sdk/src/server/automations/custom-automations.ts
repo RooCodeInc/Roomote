@@ -6,6 +6,7 @@ import {
   discordInstallationChannels,
   environments,
   eq,
+  fastAgentConversations,
   getCustomAutomationById,
   getCustomAutomationFrequency,
   CUSTOM_AUTOMATION_LAUNCH_STALE_CLAIM_MS,
@@ -56,7 +57,10 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../lib/t
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../lib/telegram-communication';
 import type { FastAgentParentEvent } from '../lib/fast-agent-parent-event';
 import { enqueueFastAgentParentEvent } from '../lib/fast-agent-parent-event-queue';
-import { recordFastAgentConversationMessage } from '../lib/fast-agent-provider-message';
+import {
+  isFastAgentManagedTelegramTopic,
+  recordFastAgentConversationMessage,
+} from '../lib/fast-agent-provider-message';
 import {
   canStartAgentMailConversationWithUser,
   prepareAgentMailConversation,
@@ -208,6 +212,36 @@ function buildAutomationConversation(
     workspaceId: automation.id,
     conversationId: eventId,
   };
+}
+
+async function findManagedTelegramAutomationTopic(input: {
+  channelId: string;
+  eventId: string;
+  userId: string;
+}): Promise<string | null> {
+  const existing = await db.query.fastAgentConversations.findFirst({
+    where: and(
+      eq(fastAgentConversations.surface, 'telegram'),
+      eq(fastAgentConversations.workspaceId, input.channelId),
+      eq(fastAgentConversations.conversationId, input.eventId),
+      eq(fastAgentConversations.currentReplyChannelId, input.channelId),
+      eq(fastAgentConversations.userId, input.userId),
+    ),
+    columns: { id: true, currentReplyThreadId: true },
+  });
+  const threadId = existing?.currentReplyThreadId;
+  if (!threadId) {
+    return null;
+  }
+
+  return (await isFastAgentManagedTelegramTopic({
+    sessionId: existing.id,
+    workspaceId: input.channelId,
+    channelId: input.channelId,
+    threadId,
+  }))
+    ? threadId
+    : null;
 }
 
 async function buildFastAutomationConversation(params: {
@@ -364,22 +398,29 @@ async function buildFastAutomationConversation(params: {
     if (!provider) {
       throw new Error('Telegram is not connected.');
     }
-    const topic =
+    const managedThreadId =
       target?.targetKind === 'telegram_user'
-        ? await provider.createForumTopic({
+        ? ((await findManagedTelegramAutomationTopic({
             channelId: destination.channelId,
-            name: buildCommunicationTaskThreadName(automation.name),
-          })
+            eventId,
+            userId: automation.createdByUserId!,
+          })) ??
+          (
+            await provider.createForumTopic({
+              channelId: destination.channelId,
+              name: buildCommunicationTaskThreadName(automation.name),
+            })
+          ).messageThreadId)
         : null;
     return {
-      ...(topic ? { rootMessageId: topic.messageThreadId } : {}),
+      ...(managedThreadId ? { rootMessageId: managedThreadId } : {}),
       conversation: {
         surface: 'telegram',
         workspaceId: destination.channelId,
         conversationId: eventId,
         replyTarget: {
           channelId: destination.channelId,
-          ...(topic ? { threadId: topic.messageThreadId } : {}),
+          ...(managedThreadId ? { threadId: managedThreadId } : {}),
         },
       },
     };
