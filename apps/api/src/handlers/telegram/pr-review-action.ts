@@ -5,6 +5,7 @@ import {
   completePendingPrReviewActionDispatch,
   dispatchPrReviewFollowUp,
   enableAutoHandlePrReviewFeedback,
+  retirePrReviewActionMessagesBestEffort,
 } from '@roomote/sdk/server';
 import type { PrReviewActionChoice } from '@roomote/types';
 
@@ -12,7 +13,6 @@ import { apiLogger } from '../../logging.js';
 import { resolveTelegramSenderUserId } from './linked-user.js';
 import {
   answerTelegramCallbackQueryBestEffort,
-  clearTelegramMessageButtonsBestEffort,
   postTelegramMessageBestEffort,
 } from './replies.js';
 
@@ -63,19 +63,23 @@ export async function handleTelegramPrReviewActionCallback(params: {
     actingUserId: senderUserId ?? undefined,
   });
 
+  if (chatId && messageId) {
+    await retirePrReviewActionMessagesBestEffort([
+      {
+        provider: 'telegram',
+        channelId: chatId,
+        threadId: threadId ?? null,
+        messageId,
+      },
+    ]);
+  }
+
   if (!pending) {
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: query.id,
       text: 'This offer was already handled or has expired.',
     });
-    if (chatId && messageId) {
-      await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
-    }
     return;
-  }
-
-  if (chatId && messageId) {
-    await clearTelegramMessageButtonsBestEffort({ chatId, messageId });
   }
 
   if (choice === 'dismiss') {
@@ -189,14 +193,7 @@ export function retireTelegramPrReviewOffersBestEffort({
       threadId,
     });
 
-    for (const pending of claimed) {
-      if (pending.messageId) {
-        await clearTelegramMessageButtonsBestEffort({
-          chatId,
-          messageId: pending.messageId,
-        });
-      }
-    }
+    await retirePrReviewActionMessagesBestEffort(claimed);
   })().catch((error: unknown) => {
     apiLogger.warn(
       `[telegram] Failed to retire PR review offers for chat ${chatId}: ${
