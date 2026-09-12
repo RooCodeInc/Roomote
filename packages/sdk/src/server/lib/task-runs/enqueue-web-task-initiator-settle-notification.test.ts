@@ -17,11 +17,13 @@ import {
 it('enqueues retryable deduplicated settlement delivery', async () => {
   mocks.add.mockResolvedValue(undefined);
 
-  await enqueueWebTaskInitiatorSettleNotification({
-    runId: 42,
-    taskId: 'task-1',
-    status: RunStatus.Completed,
-  });
+  await expect(
+    enqueueWebTaskInitiatorSettleNotification({
+      runId: 42,
+      taskId: 'task-1',
+      status: RunStatus.Completed,
+    }),
+  ).resolves.toBe(true);
 
   expect(mocks.add).toHaveBeenCalledWith(
     WEB_TASK_INITIATOR_SETTLE_NOTIFICATION_JOB,
@@ -32,4 +34,21 @@ it('enqueues retryable deduplicated settlement delivery', async () => {
       backoff: { type: 'exponential', delay: 2_000 },
     }),
   );
+});
+
+it('reports queue admission failure without rejecting terminal finalization', async () => {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  mocks.add.mockRejectedValueOnce(new Error('redis unavailable'));
+
+  await expect(
+    enqueueWebTaskInitiatorSettleNotification({
+      runId: 42,
+      taskId: 'task-1',
+      status: RunStatus.Completed,
+    }),
+  ).resolves.toBe(false);
+  expect(error).toHaveBeenCalledWith(
+    '[enqueueWebTaskInitiatorSettleNotification] Failed to enqueue retry for run 42: redis unavailable',
+  );
+  error.mockRestore();
 });

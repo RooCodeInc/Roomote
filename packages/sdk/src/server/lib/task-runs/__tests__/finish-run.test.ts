@@ -34,6 +34,7 @@ const mockNotifyWebTaskInitiatorOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockEnqueueWebTaskInitiatorSettleNotification = vi
   .fn()
   .mockResolvedValue(undefined);
+const mockSettleLiveTaskMessageOnExit = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
@@ -347,6 +348,11 @@ vi.mock('../enqueue-web-task-initiator-settle-notification', () => ({
     mockEnqueueWebTaskInitiatorSettleNotification(...args),
 }));
 
+vi.mock('../settle-live-task-message-on-exit', () => ({
+  settleLiveTaskMessageOnExit: (...args: unknown[]) =>
+    mockSettleLiveTaskMessageOnExit(...args),
+}));
+
 vi.mock('../../automation-result-metadata', () => ({
   resolveAutomationResultSubtitle: (...args: unknown[]) =>
     mockResolveAutomationResultSubtitle(...args),
@@ -592,9 +598,10 @@ describe('finishRun', () => {
     expect(mockNotifyWebTaskInitiatorOnSettle).not.toHaveBeenCalled();
   });
 
-  it('queues a durable retry when immediate personal delivery fails', async () => {
+  it('continues terminal side effects when retry queue admission fails', async () => {
     mockFindFirstRun.mockResolvedValue(makeRun());
     mockNotifyWebTaskInitiatorOnSettle.mockResolvedValue('failed');
+    mockEnqueueWebTaskInitiatorSettleNotification.mockResolvedValue(false);
 
     await finishRun({ id: 1, status: RunStatus.Completed });
 
@@ -603,6 +610,10 @@ describe('finishRun', () => {
       taskId: 'task-1',
       status: RunStatus.Completed,
     });
+    expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledOnce();
+    expect(mockSettleLiveTaskMessageOnExit).toHaveBeenCalledOnce();
+    expect(mockCaptureTaskSettled).toHaveBeenCalledOnce();
+    expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
   });
 
   it('derives tasks.state completed via the shared sync when the job completes', async () => {
