@@ -480,6 +480,26 @@ describe('planTelegramRichMessages', () => {
     );
   });
 
+  it('uses the full body budget for large valid fence markers', () => {
+    const marker = '`'.repeat(14_000);
+    const text = [`${marker}ts`, 'x'.repeat(5_000), marker].join('\n');
+    const chunks = planTelegramRichMessages({
+      text,
+      footerText: '[Open](https://roomote.test)',
+      textFormat: 'markdown',
+    });
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(
+      chunks.every(
+        (chunk) =>
+          chunk.richMessage.markdown!.length <=
+          TELEGRAM_MAX_RICH_MESSAGE_LENGTH,
+      ),
+    ).toBe(true);
+    expect(chunks.at(-1)!.richMessage.markdown).toContain('<footer>');
+  });
+
   it('accounts for escaping expansion when splitting plain text', () => {
     const text = '&<>'.repeat(20_000);
     const chunks = planTelegramRichMessages({ text });

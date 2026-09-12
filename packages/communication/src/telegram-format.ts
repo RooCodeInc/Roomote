@@ -291,35 +291,53 @@ export function chunkTelegramMarkdown(
     return [markdown];
   }
 
-  const decorationOverhead = Math.max(
-    16,
-    getMarkdownCodeFenceDecorationOverhead(markdown),
-  );
-  if (decorationOverhead > maxLength - 2) {
-    throw new Error('Telegram Markdown code fence cannot fit in one chunk.');
-  }
-  const rawChunks = chunkTelegramText(markdown, maxLength - decorationOverhead);
+  const chunks: string[] = [];
+  let remaining = markdown;
   let openFence: MarkdownCodeFence | null = null;
 
-  return rawChunks.map((rawChunk) => {
-    const reopenFence = openFence?.openingLine;
+  while (remaining) {
+    const prefix = openFence ? `${openFence.openingLine}\n` : '';
+    let rawLimit = maxLength - prefix.length;
+    let rawChunk = '';
+    let nextOpenFence: MarkdownCodeFence | null = null;
+    let renderedChunk = '';
 
-    for (const line of rawChunk.split('\n')) {
-      if (openFence) {
-        if (isMarkdownCodeFenceClosing(line, openFence)) openFence = null;
-      } else {
-        openFence = parseMarkdownCodeFenceOpening(line);
-      }
+    while (rawLimit >= 2) {
+      rawChunk = chunkTelegramText(remaining, rawLimit)[0]!;
+      nextOpenFence = advanceMarkdownCodeFence(openFence, rawChunk);
+      const suffix = nextOpenFence
+        ? `${rawChunk.endsWith('\n') ? '' : '\n'}${nextOpenFence.marker.repeat(nextOpenFence.length)}`
+        : '';
+      renderedChunk = `${prefix}${rawChunk}${suffix}`;
+      if (renderedChunk.length <= maxLength) break;
+      rawLimit -= renderedChunk.length - maxLength;
     }
 
-    const renderedChunk = reopenFence
-      ? `${reopenFence}\n${rawChunk}`
-      : rawChunk;
+    if (!rawChunk || renderedChunk.length > maxLength) {
+      throw new Error('Telegram Markdown code fence cannot fit in one chunk.');
+    }
 
-    return openFence
-      ? `${renderedChunk}${renderedChunk.endsWith('\n') ? '' : '\n'}${openFence.marker.repeat(openFence.length)}`
-      : renderedChunk;
-  });
+    chunks.push(renderedChunk);
+    remaining = remaining.slice(rawChunk.length);
+    openFence = nextOpenFence;
+  }
+
+  return chunks;
+}
+
+function advanceMarkdownCodeFence(
+  initialFence: MarkdownCodeFence | null,
+  markdown: string,
+): MarkdownCodeFence | null {
+  let openFence = initialFence;
+  for (const line of markdown.split('\n')) {
+    if (openFence) {
+      if (isMarkdownCodeFenceClosing(line, openFence)) openFence = null;
+    } else {
+      openFence = parseMarkdownCodeFenceOpening(line);
+    }
+  }
+  return openFence;
 }
 
 /**
@@ -442,34 +460,8 @@ function isMarkdownCodeFenceClosing(
   return marker?.[0] === openFence.marker && marker.length >= openFence.length;
 }
 
-function getMarkdownCodeFenceDecorationOverhead(markdown: string): number {
-  let openFence: MarkdownCodeFence | null = null;
-  let maxOverhead = 0;
-  for (const line of markdown.split('\n')) {
-    if (openFence) {
-      if (isMarkdownCodeFenceClosing(line, openFence)) openFence = null;
-      continue;
-    }
-    openFence = parseMarkdownCodeFenceOpening(line);
-    if (openFence) {
-      maxOverhead = Math.max(
-        maxOverhead,
-        openFence.openingLine.length + openFence.length + 2,
-      );
-    }
-  }
-  return maxOverhead;
-}
-
 function closeOpenMarkdownCodeFence(markdown: string): string {
-  let openFence: MarkdownCodeFence | null = null;
-  for (const line of markdown.split('\n')) {
-    if (openFence) {
-      if (isMarkdownCodeFenceClosing(line, openFence)) openFence = null;
-      continue;
-    }
-    openFence = parseMarkdownCodeFenceOpening(line);
-  }
+  const openFence = advanceMarkdownCodeFence(null, markdown);
   return openFence
     ? `${markdown}${markdown.endsWith('\n') ? '' : '\n'}${openFence.marker.repeat(openFence.length)}`
     : markdown;
@@ -511,15 +503,10 @@ export function planTelegramRichMessages(input: {
     const chunks =
       markdownBody.length <= bodyLimit
         ? [{ text: input.text, markdown: markdownBody }]
-        : bodyLimit >= 18
-          ? chunkTelegramMarkdown(
-              input.text,
-              Math.max(18, Math.floor(bodyLimit * 0.85)),
-            ).map((text) => ({ text, markdown: text }))
-          : chunkTelegramText(input.text, bodyLimit).map((text) => ({
-              text,
-              markdown: text,
-            }));
+        : chunkTelegramMarkdown(markdownBody, bodyLimit).map((text) => ({
+            text,
+            markdown: text,
+          }));
     const lastIndex = chunks.length - 1;
     return chunks.map((chunk, index) => {
       const markdown =
