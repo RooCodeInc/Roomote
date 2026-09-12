@@ -3,9 +3,11 @@ import type { FastAgentTurnActivity } from '@roomote/cloud-agents/server';
 export function createFastAgentTypingActivity({
   sendTyping,
   intervalMs,
+  startDelayMs = 0,
 }: {
   sendTyping: () => Promise<void>;
   intervalMs: number | (() => number);
+  startDelayMs?: number;
 }): FastAgentTurnActivity & {
   reassert: () => void;
   pause: () => Promise<void>;
@@ -65,7 +67,12 @@ export function createFastAgentTypingActivity({
     start: () => {
       if (started || stopped) return;
       started = true;
-      reassert();
+      if (startDelayMs > 0) {
+        timer = setTimeout(reassert, startDelayMs);
+        timer.unref();
+      } else {
+        reassert();
+      }
     },
     reassert,
     pause,

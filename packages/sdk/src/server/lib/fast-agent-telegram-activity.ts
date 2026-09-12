@@ -15,7 +15,8 @@ import { createFastAgentTypingActivity } from './fast-agent-typing-activity';
 
 export const FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS = 25_000;
 export const FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS = 4_000;
-export const FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS = 500;
+// Match Slack's turn-level debounce so short Fast turns do not flicker.
+export const FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS = 300;
 // Pace draft updates independently of model token cadence.
 export const FAST_AGENT_TELEGRAM_STREAM_INTERVAL_MS = 800;
 const FAST_AGENT_TELEGRAM_THINKING_TEXT = 'Roomote is working...';
@@ -78,6 +79,7 @@ export function createFastAgentTelegramActivity({
       nativeDraftAvailable
         ? FAST_AGENT_TELEGRAM_DRAFT_REFRESH_MS
         : FAST_AGENT_TELEGRAM_TYPING_REFRESH_MS,
+    startDelayMs: FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS,
   });
   let reassertTimer: ReturnType<typeof setTimeout> | undefined;
   let streamTimer: ReturnType<typeof setTimeout> | undefined;
@@ -120,7 +122,7 @@ export function createFastAgentTelegramActivity({
     reassertTimer = setTimeout(() => {
       reassertTimer = undefined;
       activity.resume();
-    }, FAST_AGENT_TELEGRAM_REASSERT_DELAY_MS);
+    }, FAST_AGENT_TELEGRAM_PROCESSING_DELAY_MS);
     reassertTimer.unref();
   };
 
