@@ -91,7 +91,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'For frontend work, use App and prefer GPT-5.6. -> App [id: env-app]',
     );
     expect(prompt).toContain(
-      'An explicit user request for an environment or model always takes precedence',
+      "An explicit user request for an environment or model takes precedence over these rules only when it satisfies the work's requirements",
+    );
+    expect(prompt).toContain(
+      'A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment',
     );
     expect(prompt).toContain('supplemental routing rules');
     expect(prompt).toContain(
@@ -1309,6 +1312,71 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt.indexOf(conversationStateRule)).toBeLessThan(
       prompt.indexOf(launchRule),
+    );
+  });
+
+  it('selects task environments from work requirements without unsafe fallbacks', () => {
+    const configuredPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [
+        {
+          id: 'env-roomote',
+          name: 'Roomote',
+          repositoryNames: ['RooCodeInc/Roomote'],
+        },
+      ],
+      workspaceRoutingRules: [
+        {
+          description: 'Roomote repository work requires Roomote.',
+          target: 'env-roomote',
+        },
+      ],
+    });
+    const environmentlessPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      availableIntegrations: [],
+    });
+
+    expect(configuredPrompt).toContain(
+      "Choose the task environment from the work's requirements and the instance's available environments",
+    );
+    expect(configuredPrompt).toContain(
+      'When a configured environment clearly matches the required project, repository, or tools, pass its exact ID to `launch_task`',
+    );
+    expect(configuredPrompt).toContain(
+      'If the work depends on a specific repository or environment and no suitable target is available, explain what is missing and ask how to proceed',
+    );
+    expect(configuredPrompt).toContain(
+      'If multiple targets are plausible, ask which to use',
+    );
+    expect(configuredPrompt).toContain(
+      'Never silently substitute Blank slate or All repositories for a required or ambiguous target',
+    );
+    expect(configuredPrompt).toContain(
+      'Do not use Blank slate to work around missing access or an environment failure',
+    );
+    expect(configuredPrompt).toContain(
+      'Handle work directly in Fast when it does not require sandbox execution',
+    );
+    expect(configuredPrompt).toContain(
+      'A Blank slate request never overrides a required repository or environment, including one identified by a matching Routing Rule',
+    );
+    expect(configuredPrompt).toContain(
+      'A Blank slate request never overrides a routing rule indicating that the work requires a repository or configured environment',
+    );
+    expect(configuredPrompt).not.toContain(
+      'Otherwise use null to use the deployment default',
+    );
+    expect(configuredPrompt).not.toContain(
+      'Use Blank slate when the user explicitly requests it, or when the work can be completed',
+    );
+    expect(environmentlessPrompt).toContain(
+      'Use Blank slate only when the work can be completed in a standalone sandbox without a configured environment, including when the user explicitly requests it',
+    );
+    expect(environmentlessPrompt).toContain(
+      'Instances without connected source control or configured environments can still use Blank slate for suitable work',
+    );
+    expect(environmentlessPrompt).toContain(
+      'No configured environments were found for this deployment',
     );
   });
 
