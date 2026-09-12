@@ -90,6 +90,7 @@ import {
   buildFastMemoryPage,
   buildPullRequestFactPage,
   buildMemoryPage,
+  resolveTaskMemoryRequest,
   callBrainWriteTool,
   isBrainUnreachable,
   drainBrainHistoricalIngestion,
@@ -447,6 +448,7 @@ describe('task memory page identity', () => {
     agentSummary: 'Used the durable approach.',
     initiator: { kind: 'user' as const, userId: 'user-1', name: 'Sam Lee' },
     workflow: 'standard' as const,
+    request: null,
     pullRequests: [],
   };
 
@@ -502,6 +504,23 @@ describe('task memory page identity', () => {
     expect(page.content).not.toContain('roomote_user_id');
   });
 
+  it('carries the request the member made, ahead of the outcome', () => {
+    const page = buildMemoryPage({
+      ...base,
+      runId: 101,
+      request: 'Make the flaky upload test deterministic.',
+    });
+
+    const request = page.content.indexOf('## Request');
+    const summary = page.content.indexOf('Used the durable approach.');
+
+    expect(page.content).toContain(
+      '## Request\n\nMake the flaky upload test deterministic.\n',
+    );
+    expect(request).toBeGreaterThan(-1);
+    expect(request).toBeLessThan(summary);
+  });
+
   it('omits the initiator line when nothing is known about them', () => {
     const page = buildMemoryPage({
       ...base,
@@ -551,6 +570,51 @@ describe('task memory page identity', () => {
   });
 });
 
+describe('resolveTaskMemoryRequest', () => {
+  it('reads the visible prompt from the launch payload', () => {
+    expect(
+      resolveTaskMemoryRequest(
+        { description: '  Fix the login redirect loop.  ' },
+        'standard',
+      ),
+    ).toBe('Fix the login redirect loop.');
+    expect(
+      resolveTaskMemoryRequest({ text: 'Ship the banner.' }, 'standard'),
+    ).toBe('Ship the banner.');
+  });
+
+  it('leaves out generated, hidden, and non-standard prompts', () => {
+    expect(
+      resolveTaskMemoryRequest({ description: 'Review this PR.' }, 'pr_review'),
+    ).toBeNull();
+    expect(
+      resolveTaskMemoryRequest(
+        { description: 'Set up.', visibleInTranscript: false },
+        'standard',
+      ),
+    ).toBeNull();
+    expect(
+      resolveTaskMemoryRequest(
+        { description: '<workflow>bootstrap</workflow> go' },
+        'standard',
+      ),
+    ).toBeNull();
+    expect(resolveTaskMemoryRequest({}, 'standard')).toBeNull();
+  });
+
+  it('bounds a long request and says where the rest lives', () => {
+    const request = resolveTaskMemoryRequest(
+      { description: 'x'.repeat(2_000) },
+      'standard',
+    );
+
+    expect(request).toHaveLength(
+      1_500 + '\n\n_Request truncated; open the task for the rest._'.length,
+    );
+    expect(request?.endsWith('open the task for the rest._')).toBe(true);
+  });
+});
+
 describe('task memory pull request outcomes', () => {
   const base = {
     runId: 7,
@@ -561,6 +625,7 @@ describe('task memory pull request outcomes', () => {
     agentSummary: 'Opened a PR with the durable approach.',
     initiator: { kind: 'automation' as const, automation: 'issue_fixer' },
     workflow: 'standard' as const,
+    request: null,
   };
   const pr = {
     repository: 'owner/repo',

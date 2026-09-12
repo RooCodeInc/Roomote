@@ -40,6 +40,9 @@ import {
   type PullRequestStatus,
   RunStatus,
   type TaskWorkflow,
+  ACP_ENVELOPE_EVENT_TYPES,
+  isSystemInjectedAcpPromptText,
+  normalizeTranscriptUserText,
   brainNamespacePrefix,
   getLinkedEnvironmentIdFromPayload,
   renderBrainFrontmatter,
@@ -73,6 +76,12 @@ const SUPERSEDED_TASK_MEMORY_COLLECTOR_IDS = ['task-memory:effective-date-v2'];
  * linked pull request later changes state.
  */
 const LINKABLE_REPLAY_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
+/**
+ * Bound on the request excerpt a task memory carries. The ask is usually a
+ * few sentences; a pasted log or spec should not dominate the page's
+ * embedding, and the task itself remains the place to read the rest.
+ */
+const TASK_REQUEST_CHAR_CAP = 1_500;
 const CLAIM_BATCH_SIZE = 10;
 // Backfill can enqueue a deployment's whole task history at once; drain up
 // to this many batches per tick so the backlog clears in minutes, not hours.
@@ -322,6 +331,52 @@ function describePullRequestOutcome(
 }
 
 /**
+ * The user's own request, as the web transcript would show it: the launch
+ * payload's visible prompt with Roomote's surface wrappers stripped. Only
+ * standard-workflow tasks carry one; a review or conflict-resolution run's
+ * prompt is generated, not asked. Bootstrap prompts the harness injected and
+ * prompts the launch path marked hidden are not the user's words and are
+ * left out. Treated as evidence like every other ingested text, never as
+ * instructions.
+ */
+export function resolveTaskMemoryRequest(
+  payload: Record<string, unknown>,
+  workflow: TaskWorkflow,
+): string | null {
+  if (workflow !== 'standard') {
+    return null;
+  }
+
+  if (payload.visibleInTranscript === false) {
+    return null;
+  }
+
+  const raw =
+    typeof payload.description === 'string'
+      ? payload.description
+      : typeof payload.text === 'string'
+        ? payload.text
+        : null;
+
+  if (!raw?.trim() || isSystemInjectedAcpPromptText(raw)) {
+    return null;
+  }
+
+  const text = normalizeTranscriptUserText(
+    raw,
+    ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+  )?.trim();
+
+  if (!text) {
+    return null;
+  }
+
+  return text.length > TASK_REQUEST_CHAR_CAP
+    ? `${text.slice(0, TASK_REQUEST_CHAR_CAP)}\n\n_Request truncated; open the task for the rest._`
+    : text;
+}
+
+/**
  * Build the memory page for a completed run. Deliberately deterministic and
  * conservative: only structured, known-safe fields (title, repos, PRs,
  * timestamps, provenance). LLM distillation of decisions/rationale layers on
@@ -401,6 +456,8 @@ export function buildMemoryPage(input: {
   agentSummary: string | null;
   initiator: TaskMemoryInitiator;
   workflow: TaskWorkflow;
+  /** Already bounded and workflow-gated; see resolveTaskMemoryRequest. */
+  request: string | null;
   pullRequests: Array<{
     repository: string | null;
     prNumber: number | null;
@@ -456,6 +513,7 @@ export function buildMemoryPage(input: {
     `# ${input.taskTitle}`,
     '',
     ...(initiator.line ? [initiator.line, ''] : []),
+    ...(input.request ? ['## Request', '', input.request, ''] : []),
     // The agent that did the work writes the substance when it can; the
     // deterministic completion line is the floor, not the ceiling.
     ...(input.agentSummary
@@ -785,6 +843,10 @@ async function drainOneBatch(connection: {
           completedAt: run.completedAt,
           initiator,
           workflow: task.workflow,
+          request: resolveTaskMemoryRequest(
+            run.payload as Record<string, unknown>,
+            task.workflow,
+          ),
           pullRequests: prRows.map((pr) => ({
             repository: pr.repository,
             prNumber: pr.prNumber,
