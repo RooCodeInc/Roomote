@@ -1991,6 +1991,8 @@ async function createTelegramFastAgentParentTurn(
                           action.nonce,
                         ),
                       },
+                    ],
+                    [
                       {
                         text: PR_REVIEW_ACTION_LABELS.auto,
                         callbackData: buildPrReviewActionCallbackData(

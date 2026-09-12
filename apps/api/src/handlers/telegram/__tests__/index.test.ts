@@ -43,6 +43,11 @@ const {
   getFastSessionMock,
   isFastProviderMessageMock,
   recordFastConversationMessageMock,
+  claimPendingPrReviewActionMock,
+  completePendingPrReviewActionDispatchMock,
+  dispatchPrReviewFollowUpMock,
+  enableAutoHandlePrReviewFeedbackMock,
+  retirePrReviewActionMessagesBestEffortMock,
 } = vi.hoisted(() => ({
   addReactionMock: vi.fn(),
   answerCallbackQueryMock: vi.fn(),
@@ -90,6 +95,11 @@ const {
   getFastSessionMock: vi.fn(),
   isFastProviderMessageMock: vi.fn(),
   recordFastConversationMessageMock: vi.fn(),
+  claimPendingPrReviewActionMock: vi.fn(),
+  completePendingPrReviewActionDispatchMock: vi.fn(),
+  dispatchPrReviewFollowUpMock: vi.fn(),
+  enableAutoHandlePrReviewFeedbackMock: vi.fn(),
+  retirePrReviewActionMessagesBestEffortMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -282,10 +292,14 @@ vi.mock('@roomote/sdk/server', () => ({
   recordFastAgentConversationMessageBestEffort:
     recordFastConversationMessageMock,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME: 'TELEGRAM_PRIMARY_CHAT_ID',
-  claimPendingPrReviewAction: vi.fn(async () => null),
+  claimPendingPrReviewAction: claimPendingPrReviewActionMock,
   claimPendingPrReviewActionsForThread: vi.fn(async () => []),
-  dispatchPrReviewFollowUp: vi.fn(),
-  enableAutoHandlePrReviewFeedback: vi.fn(),
+  completePendingPrReviewActionDispatch:
+    completePendingPrReviewActionDispatchMock,
+  dispatchPrReviewFollowUp: dispatchPrReviewFollowUpMock,
+  enableAutoHandlePrReviewFeedback: enableAutoHandlePrReviewFeedbackMock,
+  retirePrReviewActionMessagesBestEffort:
+    retirePrReviewActionMessagesBestEffortMock,
 }));
 
 vi.mock('@roomote/communication/telegram-provider', () => ({
@@ -442,6 +456,77 @@ describe('Telegram webhook handler', () => {
       taskId: 'task-new',
     });
     postMessageMock.mockResolvedValue({ messageId: 'telegram-response' });
+    claimPendingPrReviewActionMock.mockResolvedValue(null);
+    completePendingPrReviewActionDispatchMock.mockResolvedValue(undefined);
+    dispatchPrReviewFollowUpMock.mockResolvedValue({
+      outcome: 'queued',
+      runId: 42,
+    });
+    enableAutoHandlePrReviewFeedbackMock.mockResolvedValue(undefined);
+    retirePrReviewActionMessagesBestEffortMock.mockResolvedValue(undefined);
+  });
+
+  it('retires Auto-resolve controls through the managed Telegram footer path', async () => {
+    mockTelegramLinkedSender('linked-user-1');
+    claimPendingPrReviewActionMock.mockResolvedValueOnce({
+      nonce: 'review-action-1',
+      provider: 'telegram',
+      taskId: 'task-1',
+      repository: 'acme/web',
+      prNumber: 42,
+      prUrl: 'https://github.com/acme/web/pull/42',
+      channelId: '222',
+      threadId: '7',
+      followUpPrompt: 'Resolve the review feedback.',
+      messageId: '777',
+    });
+
+    const response = await postTelegramUpdate({
+      update_id: 905,
+      callback_query: {
+        id: 'cb-review-auto',
+        from: { id: 111, first_name: 'Ada' },
+        data: 'prr:a:review-action-1',
+        message: {
+          message_id: 777,
+          message_thread_id: 7,
+          chat: { id: 222, type: 'supergroup' },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(retirePrReviewActionMessagesBestEffortMock).toHaveBeenCalledWith([
+      {
+        provider: 'telegram',
+        channelId: '222',
+        threadId: '7',
+        messageId: '777',
+      },
+    ]);
+    expect(editMessageReplyMarkupMock).not.toHaveBeenCalled();
+    expect(dispatchPrReviewFollowUpMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'telegram',
+        taskId: 'task-1',
+        followUpPrompt: 'Resolve the review feedback.',
+      }),
+    );
+    expect(enableAutoHandlePrReviewFeedbackMock).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      repository: 'acme/web',
+      prNumber: 42,
+      userId: 'linked-user-1',
+    });
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: '222',
+        replyToMessageId: '777',
+        text: expect.stringContaining(
+          'Future review feedback on this PR will get resolved automatically.',
+        ),
+      }),
+    );
   });
 
   it('queues a new reaction on the owner’s bound Fast message', async () => {
